@@ -218,9 +218,12 @@ What the bootstrap had and what changed:
   connection after a query, roll it back, and report it. E-ERROR-015 (§19.10.4) is a best-effort static check over
   SQL text. It cannot be complete: quoting and commenting are dialect-dependent, and `XA …` / `SET autocommit = 0`
   are not recognised (noted gaps).
-- **MED-A (fail closed).** sql.scrml `txControl` keeps the string/comment-aware statement scan. When the text holds a
-  dialect-dependent construct, it ALSO splits plainly on every `;`; either scan finding transaction control fires the
-  code. The constructs are `\`, `$`, `/*!`, `#`, and `--` not followed by whitespace.
+- **MED-A (fail closed; r4 supersedes the r3 gate).** sql.scrml `txControl` keeps the string/comment-aware statement
+  scan, and a PLAIN scan ALWAYS runs beside it. The plain scan splits on every `;` with no string or comment awareness,
+  and treats every character ≤ U+0020 as whitespace. Either scan finding transaction control fires the code.
+  - r3 gated the plain scan on a list of dialect-dependent constructs. r4 dropped that list: SQLite `[ident]`, `\f` /
+    `\v` and a lone `\r` slipped past it, so no list is trusted.
+  - The check stays best-effort. The runtime enforcement owed by U1e (above) is what guarantees the rule.
   - The accepted price is false positives, e.g. a `$$ … BEGIN … END $$` body in a non-`!` function.
   - The message says why, and names the way out: a `!` function.
   - The old comment that a miss was impossible was false; it is corrected.

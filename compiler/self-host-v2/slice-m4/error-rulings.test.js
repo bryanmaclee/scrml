@@ -524,9 +524,10 @@ describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1
     }
   });
 
-  test("r2 MED-1 near-miss: a `;` or a keyword inside a string or a comment is not a statement", () => {
-    for (const sql of ["SELECT ';BEGIN' AS a", "SELECT 1 /* ; COMMIT */", "SELECT 1 -- ; BEGIN", "UPDATE t SET a = 1; SELECT 2"]) {
-      expect([sql, codes(fnWith(sql))]).toEqual([sql, []]);
+  test("r2 MED-1 near-miss (r4: a keyword after a `;` in a string / comment is an ACCEPTED false positive — the plain split always runs)", () => {
+    expect(codes(fnWith("UPDATE t SET a = 1; SELECT 2"))).toEqual([]);
+    for (const sql of ["SELECT ';BEGIN' AS a", "SELECT 1 /* ; COMMIT */", "SELECT 1 -- ; BEGIN"]) {
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
     }
   });
 
@@ -575,7 +576,8 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
 
   test("r3 MED-A: a hit found only by the plain split says why, and names the way out", () => {
     const m = msg(fnWith("'a\\\\''; BEGIN"), "E-ERROR-015");
-    expect(m).toContain("depends on the database dialect");
+    expect(m).toContain("inside a quoted string or a comment");
+    expect(m).toContain("`${…}`");
     expect(m).toContain("function declared '!'");
     // accepted false positive: a `$$ … BEGIN … END $$` body in a non-`!` function
     expect(codes(fnWith("CREATE FUNCTION f() RETURNS int AS $$ BEGIN; RETURN 1; END $$ LANGUAGE plpgsql"))).toEqual(["E-ERROR-015"]);
@@ -583,9 +585,16 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
     expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`'a\\\\''; BEGIN\`}.run()\n    }`))).toEqual([]);
   });
 
-  test("r3 MED-A near-miss: no dialect-dependent construct → the aware scan alone decides", () => {
-    expect(codes(fnWith("SELECT ';BEGIN' AS a"))).toEqual([]);
-    expect(codes(fnWith("SELECT 1 -- ; BEGIN"))).toEqual([]);
+  test("r4 MED-A: the plain split ALWAYS runs — bracketed identifiers, \\f / \\v whitespace, a lone \\r ending a `--` comment", () => {
+    for (const sql of ["SELECT 1 AS [it's]; BEGIN; SELECT 'x'", "SELECT 1 AS [a\"b]; BEGIN; SELECT \"x\"", "SELECT 1;\fBEGIN", "SELECT 1;\vBEGIN", "SELECT 1 -- x\r; BEGIN"]) {
+      expect([JSON.stringify(sql), codes(fnWith(sql))]).toEqual([JSON.stringify(sql), ["E-ERROR-015"]]);
+    }
+  });
+
+  test("r4 MED-A: an accepted false positive — `INSERT … VALUES ('done; commit later')` in a non-`!` function", () => {
+    expect(codes(fnWith("INSERT INTO t VALUES ('done; commit later')"))).toEqual(["E-ERROR-015"]);
+    // the way out: bind the text as a value
+    expect(codes(DBP(`    function plain(note: string) -> int {\n        ${SQ}\`INSERT INTO t VALUES (\${note})\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`))).toEqual([]);
   });
 
   test("r3 MED-B: a bare `return` at ANY depth means the callee may yield no value — E-ERROR-012", () => {
@@ -624,5 +633,6 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
     const src = go(`    function go() {\n        load("x") !{\n            .NotFound(m) | .Timeout :> @n = 1\n        }\n    }`);
     expect(codes(src)).toContain("E-PARSE-ARM");
     expect(msg(src, "E-PARSE-ARM")).toContain("alternation `|` between patterns");
+    expect(codes(src)).not.toContain("E-PARSE-EXPR");   // r4: no follow-on parse error
   });
 });

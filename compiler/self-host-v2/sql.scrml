@@ -253,44 +253,34 @@ ${
     // skipped when looking for `;`; an unterminated comment or string ends the
     // scan.
     //
-    // s452 r3 (MED-A) — this scan is BEST-EFFORT, and it CAN MISS: its quote /
-    // comment model is one reading of three dialects. A Postgres `$$…$$` or
-    // `E'\''` string, a MySQL `'a\''` escape, a MySQL `/*! … */` (executed!) or
-    // `#` comment, or `1--1` (arithmetic on MySQL) can hide a real `BEGIN` from
-    // it. So it FAILS CLOSED: whenever the text holds such a dialect-dependent
-    // construct (txDialectDependent), a second, plain scan splits on EVERY `;`
-    // with no string / comment awareness, and either scan finding transaction
-    // control is enough. The price is false positives (a `$$ … BEGIN … END $$`
-    // function body in a non-`!` function); the way out is a `!` function.
+    // s452 r3/r4 (MED-A) — the aware scan is BEST-EFFORT and CAN MISS: its
+    // quote / comment model is one reading of several dialects (a Postgres
+    // `$$…$$` or `E'\''` string, a MySQL `'a\''` escape or executed `/*! … */`,
+    // a SQLite `[bracketed]` identifier, `\f` / `\v` whitespace, a lone `\r`
+    // ending a `--` comment, …). So the check FAILS CLOSED: a second, PLAIN scan
+    // ALWAYS runs — it splits on EVERY `;` with no string / comment awareness and
+    // treats every character ≤ U+0020 as whitespace — and either scan finding
+    // transaction control is enough. The price is false positives (a `;` and a
+    // keyword inside a string literal or a `$$ … $$` body, in a non-`!`
+    // function); the way out is a `!` function, or binding the text as `${…}`.
     // Text classification cannot prove what a query does — the runtime must
     // enforce it (S451; the binding U1e requirement is DESIGN.md §4).
     export fn txControl(chunks: string[]) -> string {
         const aware: string = txControlAware(chunks)
         if (aware != "") return aware
-        if (!txDialectDependent(chunks)) return ""
         return txControlPlain(chunks.join(" ? "))
     }
 
-    // Does the query text hold a construct whose quoting or commenting depends
-    // on the database dialect — `\`, `$`, `/*!`, `#`, or `--` not followed by
-    // whitespace?
-    export fn txDialectDependent(chunks: string[]) -> boolean {
-        const s: string = chunks.join(" ? ")
-        if (s.indexOf("\\") >= 0 || s.indexOf("$") >= 0 || s.indexOf("/*!") >= 0 || s.indexOf("#") >= 0) return true
-        let i: int = s.indexOf("--")
-        while (i >= 0) {
-            const c: string = ch(s, i + 2)
-            if (!isSpace(c)) return true
-            i = s.indexOf("--", i + 2)
-        }
-        return false
+    // Any control character or space (≤ U+0020) — the plain scan's whitespace.
+    fn isCtlSpace(c: string) -> boolean {
+        return c != "" && c.charCodeAt(0) <= 32
     }
 
     // Every `;`-separated piece, its first word(s) after whitespace only.
     fn txControlPlain(s: string) -> string {
         for (const part of s.split(";")) {
             let i: int = 0
-            while (i < part.length && isSpace(ch(part, i))) { i = i + 1 }
+            while (i < part.length && isCtlSpace(ch(part, i))) { i = i + 1 }
             if (i < part.length) {
                 const kw: string = txWordAt(part, i)
                 if (kw != "") return kw
@@ -343,7 +333,7 @@ ${
         let i: int = i0
         while (i < s.length) {
             const c: string = ch(s, i)
-            if (isSpace(c)) {
+            if (isCtlSpace(c)) {
                 i = i + 1
             } else if (c == "-" && ch(s, i + 1) == "-") {
                 while (i < s.length && ch(s, i) != "\n") { i = i + 1 }

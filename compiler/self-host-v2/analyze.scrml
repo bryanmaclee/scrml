@@ -14223,9 +14223,9 @@ ${
         if (kw == "") return st
         let fix: string = "Move it into a function declared with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
         if (fname != "") fix = "Declare '" + fname + "' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
-        // s452 r3 (MED-A): found only by the fail-closed plain `;` split — say why
+        // s452 r3/r4 (MED-A): found only by the fail-closed plain `;` split — say why
         let why: string = ""
-        if (txControlAware(s.q.chunks) == "") why = " (This query's text holds a construct whose quoting or commenting depends on the database dialect — `\\`, `$`, `/*!`, `#`, or `--` not followed by a space — so every `;` is read as a statement boundary, and one of its statements reads as transaction control. If it is not one — e.g. a `$$ … BEGIN … END $$` function body — move the query into a function declared '!', where manual transaction control is allowed.)"
+        if (txControlAware(s.q.chunks) == "") why = " (Found by reading every `;` in the query text as a statement boundary — quoting and commenting differ between databases, so the check does not trust them. The transaction-control word may be inside a quoted string or a comment; if so, move the query into a function declared '!', where manual transaction control is allowed, or bind the text as a value with `${…}`.)"
         return addDiag(st, file, s.span, "E-ERROR-015", "Manual transaction control '" + kw + "' in " + where + ". A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. " + fix + why)
     }
 

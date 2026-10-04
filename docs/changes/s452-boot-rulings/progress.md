@@ -87,3 +87,21 @@
   - error-rulings.test.js 82 tests;
   - counter PASS 119 · FAIL 48 · UNSUPPORTED 622 · NOT-TWINNED 511 (unchanged; report unchanged; `--check` current);
   - severity `--check` current.
+
+## fix round r4
+
+- 2026-10-04 BRIEF-r4.md archived.
+- MED-A root fix: the plain `;` split ALWAYS runs. The `txDialectDependent` gate is removed. Every character ≤ U+0020
+  is whitespace for the tx scans (`isSpace` stays the read-only scanner's whitelist, unchanged).
+- When only the plain split finds transaction control, the message says the word may be inside a quoted string or a
+  comment, and names the ways out: a `!` function, or `${…}`.
+- Tests:
+  - the four repros fire (bracketed `[it's]` / `[a"b]`, `\f`, `\v`, a lone `\r` after `--`);
+  - the accepted false positive `INSERT … ('done; commit later')` fires;
+  - the r2/r3 "string or comment hides it" near-misses are now accepted false positives (updated).
+- NIT: after the alternation E-PARSE-ARM, the parser now skips through the arm separator, so no follow-on
+  E-PARSE-EXPR is reported. E-TYPE-080 can still follow, because the lone `.A` pattern does not cover the enum.
+- Verification:
+  - slices m1 99, m2 462, m3 60, m4 1093, codec 92, m1-lowered 99, all 0 fail;
+  - counter PASS 119 · FAIL 48 · UNSUPPORTED 622 · NOT-TWINNED 511 (unchanged; report `--check` current);
+  - severity current.

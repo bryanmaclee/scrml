@@ -482,6 +482,10 @@ ${
             } else if (c.cls == TC.Punct && c.text == "|") {
                 // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
                 t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c)
+                // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
+                while (!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line) { t = adv(t) }
+                if (sepAt(t, 0)) t = adv(t)
+                if (isP(t, ">")) t = adv(t)
             } else {
                 t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c)
             }
