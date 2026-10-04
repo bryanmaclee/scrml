@@ -416,7 +416,7 @@ ${
 
     // `subject !{ arms }` — at the `!`.
     fn parseGuard(r: RExpr, start: int) -> RExpr {
-        const arms: RArms = parseArms(adv(r.tp))
+        const arms: RArms = parseArms(adv(r.tp), true)
         return handledExpr(arms.tp, start, r.e, AHow.Guard(arms.arms))
     }
 
@@ -427,7 +427,7 @@ ${
             const d: TP = diagAt(subj.tp, "E-PARSE-EXPECTED", "expected `{` to open the `match` arms, found `" + cur(subj.tp).text + "`", cur(subj.tp))
             return mkE(d, start, AExprK.Recovered)
         }
-        const arms: RArms = parseArms(subj.tp)
+        const arms: RArms = parseArms(subj.tp, false)
         return handledExpr(arms.tp, start, subj.e, AHow.MatchOn(arms.arms))
     }
 
@@ -444,15 +444,20 @@ ${
     type RPat:struct = { pat: APat, tp: TP }
     type RArmBody:struct = { body: AArmBody, tp: TP }
 
-    // At `{`: the arms, through the matching `}`.
-    fn parseArms(tp: TP) -> RArms {
+    // At `{`: the arms, through the matching `}`. ONE arm parser for `!{}`
+    // and `match` (S452 ruling c: "`!{}` handler arms use the SAME grammar as
+    // `match` arms", §18.2). `guard`: the arms of a `!{}` handler — the only
+    // place the legacy paren-free payload binder (`.V m`) is read. The leading
+    // `|` before an arm is the soft-deprecated legacy spelling (S452 ruling c;
+    // its W-lint is not ruled yet, so none is emitted) and parses identically.
+    fn parseArms(tp: TP, guard: boolean) -> RArms {
         let t: TP = expectP(tp, "{")
         let arms: AArm[] = []
         while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
             if (isP(t, "|")) t = adv(t)
             const astart: int = cur(t).start
-            const rp: RPat = parsePattern(t)
+            const rp: RPat = parsePattern(t, guard)
             t = rp.tp
             let legacy = false
             const c: PTok = cur(t)
@@ -483,7 +488,7 @@ ${
     // parenthesis-free payload binder yet, so it stays refused — never read as
     // something else.
     fn binderReason() -> string {
-        return "a payload binder without parentheses (`| .V m :>`) is not in the bootstrap yet — §19.4.3 (S451 ruling 2) makes it the same pattern as `| .V(m) :>` (the variant's payload, §18.7 arity); write `.V(m)`"
+        return "a `match` arm has no parenthesis-free payload binder (§18.2: `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`) — write `.V(m)`"
     }
 
     // An arm separator (`:>`, or the deprecated `=>` / `->`) at token offset `k`.
@@ -497,14 +502,14 @@ ${
     }
 
     // An arm's pattern.
-    fn parsePattern(tp: TP) -> RPat {
+    fn parsePattern(tp: TP, guard: boolean) -> RPat {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
-        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v)
-        if (a.cls == TC.Punct && a.text == "." && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v)
+        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v, guard)
+        if (a.cls == TC.Punct && a.text == "." && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard)
         if (a.cls == TC.Punct && a.text == ":" && b.text == ":" && touching(a, b)) {
             const n: PTok = peekAt(tp, 2)
-            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v)
+            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard)
         }
         if ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else")) {
             const t: TP = adv(tp)
@@ -533,7 +538,7 @@ ${
     }
 
     // After a pattern's variant name (`nameTok`): its `(binders)`, if written.
-    fn patBinds(tp: TP, nameTok: PTok, name: string) -> RPat {
+    fn patBinds(tp: TP, nameTok: PTok, name: string, guard: boolean) -> RPat {
         const o: PTok = cur(tp)
         if (o.cls == TC.Punct && o.text == "(" && touching(nameTok, o)) {
             let t: TP = adv(tp)
@@ -550,9 +555,19 @@ ${
             }
             return { pat: APat.PName(name, binds, true), tp: expectP(t, ")") }
         }
-        if (o.cls == TC.Ident && o.line == nameTok.line) {
-            const d: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", binderReason(), o)
-            return { pat: APat.PName(name, [], false), tp: adv(d) }
+        // `.V m` — the paren-free payload binder: in a `!{}` arm the legacy
+        // spelling of `.V(m)` (§19.4.3 ruling 2: "the same pattern as `| .V(m)
+        // :>`"; S452 ruling c: it deprecates with the `|` form) — ONE binder,
+        // `parens` false (analyze holds it to §18.7's arity: E-TYPE-021 on a
+        // unit or multi-field variant). A `match` arm has no such pattern
+        // (§18.2 `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`).
+        if (o.cls == TC.Ident && o.line == nameTok.line && o.v != "_") {
+            if (!guard) {
+                const d: TP = diagAt(tp, "E-PARSE-ARM", binderReason(), o)
+                return { pat: APat.PName(name, [], false), tp: adv(d) }
+            }
+            const bnd: ABind = { nid: tp.nid, span: mkSpan(o.start, o.end), name: o.v }
+            return { pat: APat.PName(name, [bnd], false), tp: bumpId(adv(tp)) }
         }
         return { pat: APat.PName(name, [], false), tp: tp }
     }
@@ -629,6 +644,8 @@ ${
             return false
         }
         if (j < 0 || j >= ts.length) return false
+        // the legacy paren-free binder (`.V m :>`): one identifier before the separator
+        if (j < ts.length && a.cls != TC.Ident && a.cls != TC.Keyword && ts[j].cls == TC.Ident && ts[j].line == a.line && j + 1 < ts.length && ts[j + 1].cls == TC.Punct) j = j + 1
         if (ts[j].cls == TC.Punct && ts[j].text == "(") {
             let depth: int = 0
             let going = true

@@ -155,8 +155,29 @@ lower reads facts, check states the invariant, print emits).
 ## 1. Out of scope (stated)
 
 - E-SQL-011 (cross-database envelope) — needs U1e (transactions). Noted in progress.md.
-- §19.4.3 ruling 2 (`| .V m :>` binds the payload) — NOT in the brief's item list. Today's refusal text claims "the
-  SPEC does not settle what it binds", which is no longer true; the text is corrected to name ruling 2 and the form
-  stays refused. Surfaced as a deferred item.
+- ~~§19.4.3 ruling 2 (`| .V m :>` binds the payload) — NOT in the brief's item list … the form stays refused.~~
+  Superseded mid-dispatch by S452 ruling c (§2 below): the paren-free binder is accepted in a `!{}` arm as the legacy
+  spelling of `.V(m)`.
 - `tables=` / `protect=` / `<schema>`; functions inside an element's `${}`; `transaction {}` (U1e); U1b/U1c/U1d.
 - Any SPEC.md change.
+
+## 2. S452 ruling c (mid-dispatch, relayed by PA) — `!{}` arms take the `match` arm grammar
+
+Ruling (ruling:user-voice-scrml.md §S452, "c looks right", relayed by the PA — the SPEC amendment has NOT landed):
+`!{}` handler arms use the SAME grammar as `match` arms — §18.2 `match-arm ::= arm-pattern (':>' | '=>' | '->')
+arm-body`, `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`, `whole-error-arm ::= '_' Identifier`.
+Canonical handler: `!{ .Network(msg) :> …  _ err :> … }` (no leading `|`). The leading `|` form and the paren-free
+binder (`| ::V m :>`) are SOFT-DEPRECATED through §63: they parse identically during the window; the W-lint is named in
+a SPEC amendment that has not landed — NO code is emitted for it here.
+
+What the bootstrap had and what changed:
+- **Already one arm parser.** parse.scrml `parseArms` is shared by `parseGuard` (`!{}`) and `parseMatch`; the
+  optional leading `|` was already accepted by both. Nothing to unify. It now takes `guard: boolean` (the only place the
+  legacy paren-free binder is read).
+- **The paren-free binder** `.V m` in a `!{}` arm (refused before — the brief did not list ruling 2): now parsed as the
+  legacy spelling of `.V(m)` — `PName(name, [m], parens: false)`; analyze holds it to §19.4.3 ruling 2's arity (one
+  field; E-TYPE-021 on a unit or multi-field variant); lower/print treat it exactly as `.V(m)` (same Core — tested).
+  In a `match` arm it is not in §18.2's grammar → E-PARSE-ARM (never a silent reading).
+- E-MATCH-BARE-BINDER and the whole-error binder were already shared by `!{}` and `match` (one `resolveArm`).
+- Tests: error-rulings.test.js uses the canonical pipe-less form as the primary case; a "S452 ruling c" block pins the
+  legacy spellings as equivalences (same Core, same runtime, both binder codes in both spellings, no warning emitted).

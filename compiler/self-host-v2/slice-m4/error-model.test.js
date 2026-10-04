@@ -323,8 +323,10 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
   test("a block arm that falls through, where the result is used as a value — E-ERROR-012", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-ERROR-012"]);
   });
-  test("a payload binder without parentheses (`| .V m :>`, §19.4.3 ruling 2) — not built yet, refused", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .NotFound m :> @log = m | _ :> @log = "o" }\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  // s452: the paren-free binder is the legacy spelling of `.V(m)` in a `!{}` arm (§19.4.3 ruling 2,
+  // S452 ruling c) — accepted; error-rulings.test.js covers its arity and the `match` parse error
+  test("a payload binder without parentheses (`| .V m :>`) binds the payload — accepted as the legacy spelling", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .NotFound m :> @log = m | _ :> @log = "o" }\n    }`))).toEqual([]);
     // s452: `| _ e :>` is the whole-error binder (§18.6.1) — error-rulings.test.js
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" }\n    }`))).toEqual([]);
   });

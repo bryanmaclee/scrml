@@ -6155,6 +6155,11 @@ ${
                 idx = i
                 const fs: FieldDef[] = vs[i].fields
                 if (pn.parens && pn.binds.length != fs.length) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + "` carries " + fs.length + " value(s) but the pattern binds " + pn.binds.length + " — bind one name (or `_`) per payload field, in declaration order (§18.7)")
+                // s452 — the legacy paren-free binder `.V m` (a `!{}` arm only, the
+                // parser's): §19.4.3 ruling 2 "the same pattern as `| .V(m) :>`: `m`
+                // binds the variant's PAYLOAD … under §18.7's positional arity: on a
+                // unit variant or a variant with two or more fields it SHALL be E-TYPE-021"
+                if (!pn.parens && pn.binds.length == 1 && fs.length != 1) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + " " + pn.binds[0].name + "` binds ONE payload value (it is `." + pn.name + "(" + pn.binds[0].name + ")`, §19.4.3) but `." + pn.name + "` carries " + fs.length + " — bind every field positionally (`." + pn.name + "(a, b)`), or none (`." + pn.name + "`) (§18.7)")
                 const rb2: RBinds = bindArm(armEnv, pn.binds, fs, st)
                 armEnv = rb2.env
                 st = rb2.st
@@ -6359,6 +6364,8 @@ ${
         if (exprName(c) == "reset") return true
         const m: MethodCall | not = methodCall(c)
         if (m is some) return isReactiveRoot(placeRoot(m.obj))
+        const rm: MethodCall | not = removeCall(c)
+        if (rm is some) return isReactiveRoot(placeRoot(rm.obj))
         return false
     }
 
