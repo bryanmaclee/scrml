@@ -34,7 +34,7 @@ import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRE
  *  every SSE route; dropped again when the module declares no `?{}` handle (and so
  *  carries no transaction runtime to call). */
 const SSE_STREAM_END_LINE = "        if (await _scrml_db_stream_end()) { try { _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\ndata: ' + JSON.stringify({ error: { kind: \"TransactionLeftOpen\", message: \"the stream ended with its database transaction still open; its writes were rolled back (SPEC §19.10.6)\" } }) + '\\n\\n')); } catch (_scrml_enqErr) { /* the client is already gone */ } }";
-import { fileDefaultDbDecl, dbAttrValue } from "../db-ownership.ts";
+import { dbAttrValue, resolveDbScopes, dbHandlesWithin, type DbScopeResolution, type DbHandle } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -805,53 +805,34 @@ function attrSpanOf(node: any, name: string): unknown {
 export function collectDbScopes(
   fileAST: any,
 ): Map<string, DbScope> {
+  // §8.1.1 (S451) — one handle per DATABASE a scope in this file names; each `?{}` is
+  // lowered onto the handle of its NEAREST enclosing scope (`db-ownership.ts
+  // resolveDbScopes` — the one rule, shared with the ownership decision and with the
+  // per-node `_dbVar` tags codegen/index.ts sets from it). `_scrml_sql` stays the
+  // file's default database (`fileDefaultDbDecl`: first `<db src=>`, else first
+  // `<program db=>`), so a single-database file emits exactly what it always did.
+  // Replaces the per-file single handle (g-impl1-db-resolution-not-nearest-s451).
   const scopes = new Map<string, DbScope>();
-  const nodes: any[] = getNodes(fileAST);
-
-  function walk(children: any[]): void {
-    if (!Array.isArray(children)) return;
-    for (const node of children) {
-      if (!node || typeof node !== "object") continue;
-
-      // Form 1: `<program db=>` with `_dbScope` annotation from index.ts.
-      if (node.kind === "markup" && node.tag === "program" && (node as any)._dbScope) {
-        const ds = (node as any)._dbScope;
-        if (typeof ds.dbVar === "string" && typeof ds.connectionString === "string") {
-          scopes.set(ds.dbVar, {
-            connectionString: ds.connectionString,
-            driver: ds.driver ?? "sqlite",
-            transactions: dbAttrValue(node, "transactions"),
-            transactionsSpan: attrSpanOf(node, "transactions"),
-          });
-        }
-      }
-
-      // Recurse into markup children + state children.
-      if (Array.isArray(node.children) && node.children.length > 0) {
-        walk(node.children);
-      }
-    }
-  }
-
-  walk(nodes);
-
-  // The default unscoped `_scrml_sql` handle — the one EVERY `?{}` in this file is
-  // lowered onto (codegen/index.ts passes `dbVar: "_scrml_sql"`; `context.ts` /
-  // `rewrite.ts` default to it; emit-server does not thread the scoped
-  // `_scrml_sql_<n>` names into per-handler opts). Which database it is comes from
-  // ONE rule shared with the ownership decision (S445 review F6):
-  // `db-ownership.ts fileDefaultDbValue` — the first `<db src=>` in document order,
-  // else the first `<program db=>` (the prior first-`<db src>` / first-scope
-  // aliasing, now in one place). Filed: a `<program db=a>` with a sibling
-  // `<db src=b>` runs every `?{}` on b.
-  const defaultDecl = fileDefaultDbDecl(nodes);
-  if (defaultDecl !== null) {
-    const defaultValue = defaultDecl.value;
-    const driverResult = resolveDbDriver(defaultValue);
+  for (const h of dbScopeResolutionFor(fileAST).handles) {
+    const driverResult = resolveDbDriver(h.value);
     const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok ? driverResult.info.driver : "sqlite";
-    scopes.set("_scrml_sql", { connectionString: defaultValue, driver, transactions: dbAttrValue(defaultDecl.node, "transactions"), transactionsSpan: attrSpanOf(defaultDecl.node, "transactions") });
+    scopes.set(h.ident, {
+      connectionString: h.value,
+      driver,
+      transactions: dbAttrValue(h.node, "transactions"),
+      transactionsSpan: attrSpanOf(h.node, "transactions"),
+    });
   }
   return scopes;
+}
+
+/**
+ * The §8.1.1 resolution over this file's CURRENT node tree (recomputed per call — the
+ * walk is cheap, and a cached answer could outlive a tree edit).
+ */
+export function dbScopeResolutionFor(fileAST: any): DbScopeResolution {
+  const filePath = typeof fileAST?.filePath === "string" && fileAST.filePath ? fileAST.filePath : null;
+  return resolveDbScopes(getNodes(fileAST), filePath);
 }
 
 /**

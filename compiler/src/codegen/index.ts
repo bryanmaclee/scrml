@@ -102,6 +102,7 @@ import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { resolveDbScopes } from "../db-ownership.ts";
 import { parseSchemaBlock } from "../schema-differ.js";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
 import { lowerDefers } from "./lower-defer.ts";
@@ -1812,7 +1813,12 @@ export function runCG(input: CgInput): CgOutput {
     // §4.12.6: DB scope annotation — tag children of <program db="..."> with _dbScope.
     // §44.2: classify the db= URI into a driver kind (sqlite | postgres | mysql).
     // Unsupported prefixes (e.g. mongodb://) emit E-SQL-005 at compile time.
-    let dbScopeCounter = 0;
+    // §8.1.1 (S451) — which handle each node's `?{}` runs on is its NEAREST database
+    // scope (`<program db=>` or `<db src=>`), resolved ONCE from the ancestor chain
+    // (`db-ownership.ts resolveDbScopes`, also read by `collectDbScopes` to declare the
+    // handles). Every node under a scope is tagged `_dbVar = <that scope's handle>`;
+    // `emitLogicNode` lowers a `?{}` onto `opts.dbVar ?? node._dbVar`.
+    const _dbResolution = resolveDbScopes(nodes, typeof filePath === "string" && filePath ? filePath : null);
     function annotateDbScopes(parentChildren: any[]): void {
       for (const node of parentChildren) {
         if (!node || typeof node !== "object") continue;
@@ -1821,9 +1827,9 @@ export function runCG(input: CgInput): CgOutput {
           const dbAttr = attrs.find((a: any) => a.name === "db");
           const nameAttr = attrs.find((a: any) => a.name === "name");
           if (dbAttr && !nameAttr) {
-            // Scoped DB context — tag all children with the scoped DB variable
+            // Scoped DB context — the handle comes from the §8.1.1 resolution.
             const dbVal = dbAttr.value?.value ?? dbAttr.value?.name ?? "";
-            const scopedDbVar = `_scrml_sql_${++dbScopeCounter}`;
+            const scopedDbVar = _dbResolution.scopeOf.get(node)?.ident ?? "_scrml_sql";
             // §44.2 driver resolution — emit E-SQL-005 on unsupported prefix.
             // On error we still annotate the scope (with driver=sqlite default)
             // so downstream codegen does not crash; the user sees the diagnostic.
@@ -1840,20 +1846,6 @@ export function runCG(input: CgInput): CgOutput {
               ));
             }
             (node as any)._dbScope = { dbVar: scopedDbVar, connectionString: dbVal, driver };
-            // Tag all descendant logic/sql nodes
-            function tagDescendants(children: any[]): void {
-              for (const child of children) {
-                if (!child) continue;
-                (child as any)._dbVar = scopedDbVar;
-                if (child.children) tagDescendants(child.children);
-                if (child.body && Array.isArray(child.body)) {
-                  for (const stmt of child.body) {
-                    if (stmt) (stmt as any)._dbVar = scopedDbVar;
-                  }
-                }
-              }
-            }
-            tagDescendants(node.children ?? []);
           }
         }
         if (node.kind === "markup" && node.children?.length > 0) {
@@ -1862,6 +1854,24 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
     annotateDbScopes(nodes);
+    {
+      // Tag every node under a database scope with its nearest scope's handle — the
+      // whole subtree (statement bodies, nested blocks, expression trees), not one
+      // level of it, so no lowering path falls through to the file default.
+      const seen = new WeakSet<object>();
+      const tag = (value: unknown): void => {
+        if (value === null || typeof value !== "object" || seen.has(value as object)) return;
+        seen.add(value as object);
+        if (Array.isArray(value)) { for (const v of value) tag(v); return; }
+        const h = _dbResolution.scopeOf.get(value as object);
+        if (h) (value as any)._dbVar = h.ident;
+        for (const key of Object.keys(value as object)) {
+          if (key === "span" || key.startsWith("_")) continue;
+          tag((value as any)[key]);
+        }
+      };
+      tag(nodes);
+    }
 
     // §14.8.11 — E-DBAUTH-SQLITE gate. A `db-authoritative` table relocates the
     // tenant-isolation floor to Postgres RLS (roles/FORCE-RLS/GUC) — primitives
