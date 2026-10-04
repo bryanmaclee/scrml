@@ -54,6 +54,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
+    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -14283,6 +14284,507 @@ ${
             }
         }
         return st
+    }
+
+    // =========================================================================
+    // s452 (dpa-066, RATIFIED S452 "all your recs" item 3) — THE EFFECT
+    // SUMMARY. One record per CALLABLE — a scrml function, a user
+    // declaration's CONSTRUCTION, a FORMULA (a field computed on its read) —
+    // computed once, after binding, over the binder's Syms, and closed over
+    // the call graph by effects.scrml (strongly connected components,
+    // bottom-up; ruling 3.1). Every rule that asks "what does this callable
+    // transitively do?" reads it.
+    //
+    // The OWN facts of a callable come from its body, read once: the write
+    // scan (BodyScan — writes, references, unresolvable calls; the no-write
+    // rule's banner above), its `?{}` sites, its client reads and DOM globals
+    // (placement), whether it reads the clock, and whether a call of it yields
+    // a value. The DIMENSIONS, each closed over the references that carry it
+    // (per-dimension knowledge, ruling 3.2 — known facts and open reasons are
+    // separate dimensions; no global TOP):
+    //   writes      §6.7.4 / §6.15 — the cells it may write; every reference
+    //               (calls, function values — rule 3 —, the construction a
+    //               shared-instance read runs, the formula a derived read runs)
+    //   writesOpen  §6.7.4 rule 4 — the calls the analysis cannot resolve; the same references
+    //   client      §12.4 R2 — a client-only access (DOM global, cell write,
+    //               cell read) of a NON-server function, through non-server
+    //               functions: a server callee is judged on its own
+    //   routeOpen   §12.4 R3 — the unresolvable calls of a function, through non-server functions
+    //   waits       §13.2 / §13.7 item 2 — async colour: a server or split
+    //               function, through every function reference
+    //   clock       §48.6 / §33.3 item 7 — a body that reads the clock, through
+    //               function CALLS (§48.6.2 is a rule about calls; a function
+    //               value is refused in the bootstrap)
+    //   noValue     §19.4.3 ruling 1a — a call of it yields no value: its own
+    //               body (a bare `return`, a path that falls off, `-> void`),
+    //               or a `return <call>` of a function that yields none (G7 —
+    //               ruling 3.4/3.6: "returns a value" is in the summary)
+    // and the ONE placement (§12.2): each function by its own body, an
+    // ambient one that reaches client-only code made client (§12.4).
+    // =========================================================================
+    type CallableK:enum = { KFn, KConstruct, KFormula }
+    // `f`: the own facts (a construction / formula has no `?{}`, client read or
+    // DOM access of its own here — its reads are cell reads, recorded by the
+    // reads that reach it). `clock` / `noValue` / `rets`: functions only.
+    type Callable:struct = { kind: CallableK, label: string, f: FnFacts, clock: boolean, noValue: boolean, rets: int[] }
+    type Summary:struct = {
+        nodes: Callable[],
+        writes: FxAtom[][],
+        writesOpen: FxAtom[][],
+        places: PlaceFact[],
+        client: FxAtom[][],
+        routeOpen: FxAtom[][],
+        waits: FxAtom[][],
+        clock: FxAtom[][],
+        noValue: FxAtom[][],
+    }
+
+    fn summarize(g: Globals, t: Tables) -> Summary {
+        const cx: PlaceCx = { t: t, g: g }
+        let nodes: Callable[] = []
+        for (const fs of g.fns) {
+            nodes = nodes.concat([{ kind: CallableK.KFn, label: fs.info.name + "()", f: fnFacts(cx, fs), clock: blockClock(fs.f.body),
+                                    noValue: ownNoValue(fs), rets: retCallsOf(t, fs) }])
+        }
+        for (const ds of g.decls) {
+            if (!ds.isProgram) {
+                const label: string = constructionLabel(ds.info.sym.hint)
+                nodes = nodes.concat([{ kind: CallableK.KConstruct, label: label, f: valueFacts(ds.info.sym.id, label, ds.file, ds.info.span, ds.info.nid, constructionScan(t, ds)),
+                                        clock: false, noValue: false, rets: [] }])
+            }
+            for (const fi of ds.info.fields) {
+                const w: Sym | not = fi.wcap
+                if (w is not) {
+                    const flabel: string = formulaLabel(t, fi)
+                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
+                    nodes = nodes.concat([{ kind: CallableK.KFormula, label: flabel, f: valueFacts(fi.sym.id, flabel, ds.file, fi.span, fi.nid, fscan),
+                                            clock: false, noValue: false, rets: [] }])
+                }
+            }
+        }
+        // the references: every one (the write dimensions), those to a function
+        // (called or handed on as a value), and the CALLS of a function (the clock)
+        let all: int[][] = []
+        let fnE: int[][] = []
+        let callE: int[][] = []
+        for (const c of nodes) {
+            all = all.concat([refTargets(nodes, c.f.scan.refs, false)])
+            fnE = fnE.concat([refTargets(nodes, c.f.scan.refs, true)])
+            callE = callE.concat([callTargets(nodes, c.f.scan.refs)])
+        }
+        const order: int[][] = sccOrder(all)
+        // writes / writesOpen
+        let ownW: FxAtom[][] = []
+        let ownU: FxAtom[][] = []
+        let i: int = 0
+        for (const c of nodes) {
+            ownW = ownW.concat([writeAtoms(c.f.scan.writes, i)])
+            ownU = ownU.concat([openAtoms(c.f.scan.unproven, i)])
+            i = i + 1
+        }
+        // the placement: each function by its own body …
+        let direct: PlaceFact[] = []
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn) direct = direct.concat([{ sym: c.f.sym, name: c.f.name, place: directPlace(c.f) }])
+        }
+        // … client reach: non-server functions, through non-server functions
+        let ownC: FxAtom[][] = []
+        let edgeC: int[][] = []
+        i = 0
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn && placeOf(direct, c.f.sym) != PlaceK.Server) {
+                ownC = ownC.concat([clientAtoms(c.f, i)])
+                edgeC = edgeC.concat([notServer(nodes, direct, fnE[i])])
+            } else {
+                ownC = ownC.concat([[]])
+                edgeC = edgeC.concat([[]])
+            }
+            i = i + 1
+        }
+        const client: FxAtom[][] = closeDim(ownC, edgeC, order)
+        // … and an ambient function that reaches client-only code is client (§12.4)
+        let places: PlaceFact[] = []
+        for (const p of direct) {
+            let pk: PlaceK = p.place
+            if (pk == PlaceK.Ambient && client[nodeIdx(nodes, p.sym)].length > 0) pk = PlaceK.Client
+            places = places.concat([{ sym: p.sym, name: p.name, place: pk }])
+        }
+        // routeOpen / waits / clock / noValue — functions only
+        let ownR: FxAtom[][] = []
+        let edgeR: int[][] = []
+        let ownA: FxAtom[][] = []
+        let edgeF: int[][] = []
+        let ownK: FxAtom[][] = []
+        let edgeK: int[][] = []
+        let ownV: FxAtom[][] = []
+        let edgeV: int[][] = []
+        i = 0
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn) {
+                const pk: PlaceK = placeOf(places, c.f.sym)
+                ownR = ownR.concat([openAtoms(c.f.scan.unproven, i)])
+                edgeR = edgeR.concat([notServer(nodes, places, fnE[i])])
+                let a: FxAtom[] = []
+                if (pk == PlaceK.Server || pk == PlaceK.Split) a = [ownAtom("s", i, 0)]
+                ownA = ownA.concat([a])
+                edgeF = edgeF.concat([fnE[i]])
+                let k: FxAtom[] = []
+                if (c.clock) k = [ownAtom("c", i, 0)]
+                ownK = ownK.concat([k])
+                edgeK = edgeK.concat([callE[i]])
+                let v: FxAtom[] = []
+                if (c.noValue) v = [ownAtom("v", i, 0)]
+                ownV = ownV.concat([v])
+                edgeV = edgeV.concat([fnTargets(nodes, c.rets)])
+            } else {
+                ownR = ownR.concat([[]])
+                edgeR = edgeR.concat([[]])
+                ownA = ownA.concat([[]])
+                edgeF = edgeF.concat([[]])
+                ownK = ownK.concat([[]])
+                edgeK = edgeK.concat([[]])
+                ownV = ownV.concat([[]])
+                edgeV = edgeV.concat([[]])
+            }
+            i = i + 1
+        }
+        return { nodes: nodes, writes: closeDim(ownW, all, order), writesOpen: closeDim(ownU, all, order), places: places,
+                 client: client, routeOpen: closeDim(ownR, edgeR, order), waits: closeDim(ownA, edgeF, order),
+                 clock: closeDim(ownK, edgeK, order), noValue: closeDim(ownV, edgeV, order) }
+    }
+
+    // The own facts of a construction / a formula: its scan only.
+    fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
+        return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
+                 sqls: [], reads: [], doms: [], scan: scan }
+    }
+
+    // The callable a Sym names (-1: none — a reference with no summary).
+    fn nodeIdx(nodes: Callable[], sym: int) -> int {
+        let i: int = 0
+        for (const c of nodes) {
+            if (c.f.sym == sym) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn isFnNode(nodes: Callable[], i: int) -> boolean {
+        if (i < 0) return false
+        return nodes[i].kind == CallableK.KFn
+    }
+
+    // The callables a body's references name, in source order (`fnOnly`: functions only).
+    fn refTargets(nodes: Callable[], refs: FnRef[], fnOnly: boolean) -> int[] {
+        let out: int[] = []
+        for (const r of refs) {
+            const j: int = nodeIdx(nodes, r.sym)
+            if (j >= 0 && (!fnOnly || isFnNode(nodes, j))) out = out.concat([j])
+        }
+        return out
+    }
+
+    // The functions a body CALLS (§48.6.2's purity rule is about calls, and a
+    // function value is refused in the bootstrap — the clock follows calls).
+    fn callTargets(nodes: Callable[], refs: FnRef[]) -> int[] {
+        let out: int[] = []
+        for (const r of refs) {
+            const j: int = nodeIdx(nodes, r.sym)
+            if (!r.asValue && isFnNode(nodes, j)) out = out.concat([j])
+        }
+        return out
+    }
+
+    fn fnTargets(nodes: Callable[], syms: int[]) -> int[] {
+        let out: int[] = []
+        for (const s of syms) {
+            const j: int = nodeIdx(nodes, s)
+            if (isFnNode(nodes, j)) out = out.concat([j])
+        }
+        return out
+    }
+
+    // The references to a function NOT placed on the server (a server callee is judged on its own).
+    fn notServer(nodes: Callable[], ps: PlaceFact[], es: int[]) -> int[] {
+        let out: int[] = []
+        for (const j of es) {
+            if (placeOf(ps, nodes[j].f.sym) != PlaceK.Server) out = out.concat([j])
+        }
+        return out
+    }
+
+    fn writeAtoms(ws: WSite[], i: int) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let k: int = 0
+        for (const w of ws) {
+            out = out.concat([ownAtom("w:" + w.cell, i, k)])
+            k = k + 1
+        }
+        return out
+    }
+
+    fn openAtoms(us: USite[], i: int) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let k: int = 0
+        for (const u of us) {
+            out = out.concat([ownAtom("u:" + u.file + ":" + u.span.start, i, k)])
+            k = k + 1
+        }
+        return out
+    }
+
+    // A function's own client-only accesses, in §12.4's order of report: its
+    // DOM globals, then its cell writes, then its cell reads.
+    fn clientWhats(f: FnFacts) -> string[] {
+        let out: string[] = []
+        for (const d of f.doms) { out = out.concat([d.what]) }
+        for (const w of f.scan.writes) { out = out.concat(["writes `" + w.cell + "`"]) }
+        for (const r of f.reads) { out = out.concat(["reads `" + r.what + "`"]) }
+        return out
+    }
+
+    fn clientAtoms(f: FnFacts, i: int) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let k: int = 0
+        for (const w of clientWhats(f)) {
+            out = out.concat([ownAtom("c:" + w, i, k)])
+            k = k + 1
+        }
+        return out
+    }
+
+    // ---- the own "yields a value" fact (§19.4.3 ruling 1a) -----------------------
+    // Does a call of the function produce no value, by its OWN body? A declared
+    // return type does produce one (`-> void` declares that it does not, §7.5 —
+    // FnInfo.ret is `not` for it); a `!` function's result is handled, never
+    // read as a value; otherwise the body decides — a value on EVERY path,
+    // proven syntactically, FAIL CLOSED:
+    //   - s452 r3 (MED-B): a bare `return` ANYWHERE in the body (any depth — an
+    //     `if` branch, a `given` body, a handling form's arm block) is a path
+    //     with no value;
+    //   - otherwise the statements are walked in order and the FIRST one that
+    //     returns a value on every path through it decides (s452 r3 LOW-C — what
+    //     follows it is dead): `return <expr>`, or an `if` / `else` both of whose
+    //     blocks do. Reaching the end of the body is no value.
+    //   - A `fn` / `function` body's tail EXPRESSION is not a value: the
+    //     bootstrap gives neither implicit tail return (`fn h() { "a" }` prints
+    //     `function h() { "a"; }` — returns nothing; checked s452 r3).
+    // Unprovable, so judged "no value": a `given` (its body runs only when the
+    // value is present), a statement-position handling form whose arms return,
+    // an `if` without `else`. What a `return <call>` returns is the CALLEE's
+    // (retCallsOf — the summary closes it, G7).
+    fn ownNoValue(fs: FnSrc) -> boolean {
+        if (fs.info.ret is some || fs.info.failable) return false
+        const r: AType | not = fs.f.ret
+        if (r is some) return declaresVoid(r)
+        if (blockHasBareReturn(fs.f.body)) return true
+        return !blockYieldsOnAllPaths(fs.f.body)
+    }
+
+    // G7 (dpa-066): every `return <call of a scrml function>` in a function's
+    // body, at any depth — the value it returns is that callee's, so a callee
+    // that yields none makes this a path with no value. (A `!` function's
+    // result is handled: none. A `-> void` function yields none already.)
+    fn retCallsOf(t: Tables, fs: FnSrc) -> int[] {
+        if (fs.info.failable) return []
+        return retCallsBlock(t, fs.f.body)
+    }
+
+    fn retCallsBlock(t: Tables, b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const s of b.stmts) { out = out.concat(retCallsStmt(t, s)) }
+        return out
+    }
+
+    fn retCallsStmt(t: Tables, s: AStmt) -> int[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> retCallsReturn(t, x)
+            .If(cond: c, thenB: tb, elseB: eb) :> retCallsExpr(t, c).concat(retCallsBlock(t, tb)).concat(retCallsElse(t, eb))
+            .Given(name: n, subject: x, body: b) :> retCallsExpr(t, x).concat(retCallsBlock(t, b))
+            .Eval(e: x) :> retCallsExpr(t, x)
+            .Local(name: n, init: i) :> retCallsExpr(t, i)
+            .EffectStmt(w: w) :> []
+            .Defer(body: d) :> []                       // a deferred body holds no `return` (§19.16.3 rule 1)
+            .Fail(f: x) :> []
+        }
+    }
+
+    fn retCallsElse(t: Tables, b: ABlock | not) -> int[] {
+        if (b is not) return []
+        return retCallsBlock(t, b)
+    }
+
+    fn retCallsReturn(t: Tables, x: AExpr | not) -> int[] {
+        if (x is not) return []
+        let out: int[] = retCallsExpr(t, x)
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is some) {
+            const s: Sym | not = fnSymOf(nameFact(t.names, c.nid))
+            if (s is some) out = [s.id].concat(out)
+        }
+        return out
+    }
+
+    // ... a `return` inside a handling form's arm block in `e`, at any depth.
+    fn retCallsExpr(t: Tables, e: AExpr) -> int[] {
+        let out: int[] = []
+        for (const b of exprBlocks(e)) { out = out.concat(retCallsBlock(t, b)) }
+        for (const x of exprKids(e)) { out = out.concat(retCallsExpr(t, x)) }
+        return out
+    }
+
+    // ---- the queries -------------------------------------------------------------
+    // The witness of callable `i` in a dimension, as the chain of labels down to it.
+    fn fxChain(s: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string[] {
+        let out: string[] = []
+        for (const j of atomChain(dim, i, a)) { out = out.concat([s.nodes[j].label]) }
+        return out
+    }
+
+    // =========================================================================
+    // s452 (dpa-066 M0) — THE SHADOW: each per-rule walker's answer beside the
+    // summary's, over one program — every disagreement as a line ([] — none).
+    // The differential test (slice-m4/effects-shadow.test.js) runs it over
+    // every slice program and every conformance-counter case. Each migration
+    // step deletes the comparisons of the walkers it retires.
+    // =========================================================================
+    export fn effectsShadow(files: FileAst[], entry: string) -> string[] {
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
+        const ra: RGlobals = phaseA(files, entry, st0)
+        let st: AS = checkImports(files, ra.g, ra.st)
+        st = phaseB(ra.g, st)
+        st = strayEffects(files, st)
+        const rr: RResets = resetOnPass(ra.g, st)
+        st = rr.st
+        const rp: RPersists = persistPass(ra.g, files, st)
+        st = rp.st
+        let decls: DeclInfo[] = []
+        for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
+        let fns: FnInfo[] = []
+        for (const f of ra.g.fns) { fns = fns.concat([f.info]) }
+        const fs: NodeFacts = indexed(st.facts)
+        const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
+                                names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
+                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
+        const sum: Summary = summarize(ra.g, bound)
+        let out: string[] = []
+        // W3 — the write summaries (effectPass, valueDiags)
+        for (const ws of fnSummaries(ra.g, bound)) {
+            const i: int = nodeIdx(sum.nodes, ws.sym)
+            if (i < 0) {
+                out = out.concat(["W3 " + ws.name + ": no callable in the summary"])
+            } else {
+                out = out.concat(shadowLine("W3 writes " + ws.name, walkerW(ws.w), summaryW(sum, i)))
+                out = out.concat(shadowLine("W3 open " + ws.name, walkerU(ws.u), summaryU(sum, sum.writesOpen, i)))
+            }
+        }
+        // W4-W7 — placement and its three reaches (placePass)
+        const cx: PlaceCx = { t: bound, g: ra.g }
+        let all: FnFacts[] = []
+        for (const f of ra.g.fns) { all = all.concat([fnFacts(cx, f)]) }
+        let places: PlaceFact[] = []
+        for (const f of all) { places = places.concat([{ sym: f.sym, name: f.name, place: directPlace(f) }]) }
+        const creach: ReachOf[] = clientReach(all, places)
+        let ps2: PlaceFact[] = []
+        for (const p of places) {
+            let pk: PlaceK = p.place
+            if (pk == PlaceK.Ambient && reachOf(creach, p.sym) is some) pk = PlaceK.Client
+            ps2 = ps2.concat([{ sym: p.sym, name: p.name, place: pk }])
+        }
+        const ureach: ReachOf[] = unresolvedReach(all, ps2)
+        const areach: ReachOf[] = asyncReach(all, ps2)
+        for (const f of all) {
+            const i: int = nodeIdx(sum.nodes, f.sym)
+            const label: string = f.name + "()"
+            out = out.concat(shadowLine("W4 place " + label, placeText(placeOf(ps2, f.sym)), placeText(placeOf(sum.places, f.sym))))
+            out = out.concat(shadowLine("W5 client " + label, walkerReach(reachOf(creach, f.sym)), summaryClient(sum, i)))
+            out = out.concat(shadowLine("W6 route-open " + label, walkerReach(reachOf(ureach, f.sym)), summaryRouteOpen(sum, i)))
+            out = out.concat(shadowLine("W7 waits " + label, walkerReach(reachOf(areach, f.sym)), summaryWaits(sum, i)))
+        }
+        // W8 / W9 / W1 — the binder's call-site re-derivations and the clock set
+        for (const f of ra.g.fns) {
+            const i: int = nodeIdx(sum.nodes, f.info.sym.id)
+            const label: string = f.info.name + "()"
+            out = out.concat(shadowLine("W8 server " + label, boolText(mayRunOnServer(ra.g, f.info)), boolText(sum.nodes[i].f.sqls.length > 0 || sum.nodes[i].f.modifier)))
+            out = out.concat(shadowLine("W9 yields " + label, boolText(fnYieldsValue(ra.g, f.info)), boolText(sum.noValue[i].length == 0)))
+            out = out.concat(shadowLine("W1 clock " + label, boolText(ra.g.clock.indexOf(f.info.name) >= 0), boolText(sum.clock[i].length > 0)))
+        }
+        return out
+    }
+
+    fn shadowLine(what: string, walker: string, summary: string) -> string[] {
+        if (walker == summary) return []
+        return [what + ": walker {" + walker + "} summary {" + summary + "}"]
+    }
+
+    fn placeText(p: PlaceK) -> string {
+        return match p {
+            .Ambient :> "ambient"
+            .Client :> "client"
+            .Server :> "server"
+            .Split :> "split"
+        }
+    }
+
+    fn fixText2(f: FixShape) -> string {
+        return match f {
+            .ResetFix :> "reset"
+            .RequestFix :> "request"
+            .OtherFix :> "other"
+        }
+    }
+
+    fn walkerW(w: Witness | not) -> string {
+        if (w is not) return "-"
+        return w.chain.join(" → ") + " ⇒ " + w.site.cell + " @" + w.site.file + ":" + w.site.span.start + " " + fixText2(w.site.fix)
+    }
+
+    fn summaryW(s: Summary, i: int) -> string {
+        const a: FxAtom | not = witnessOf(s.writes[i])
+        if (a is not) return "-"
+        const w: WSite = s.nodes[a.root].f.scan.writes[a.pos]
+        return fxChain(s, s.writes, i, a).join(" → ") + " ⇒ " + w.cell + " @" + w.file + ":" + w.span.start + " " + fixText2(w.fix)
+    }
+
+    fn walkerU(u: UWitness | not) -> string {
+        if (u is not) return "-"
+        return u.chain.join(" → ") + " ⇒ " + u.site.what + " @" + u.site.file + ":" + u.site.span.start
+    }
+
+    fn summaryU(s: Summary, dim: FxAtom[][], i: int) -> string {
+        if (i < 0) return "-"
+        const a: FxAtom | not = witnessOf(dim[i])
+        if (a is not) return "-"
+        const u: USite = s.nodes[a.root].f.scan.unproven[a.pos]
+        return fxChain(s, dim, i, a).join(" → ") + " ⇒ " + u.what + " @" + u.file + ":" + u.span.start
+    }
+
+    fn walkerReach(r: Reach | not) -> string {
+        if (r is not) return "-"
+        return r.chain.join(" → ") + " ⇒ " + r.what
+    }
+
+    fn summaryRouteOpen(s: Summary, i: int) -> string {
+        if (i < 0) return "-"
+        const a: FxAtom | not = witnessOf(s.routeOpen[i])
+        if (a is not) return "-"
+        return fxChain(s, s.routeOpen, i, a).join(" → ") + " ⇒ " + s.nodes[a.root].f.scan.unproven[a.pos].what
+    }
+
+    fn summaryClient(s: Summary, i: int) -> string {
+        if (i < 0) return "-"
+        const a: FxAtom | not = witnessOf(s.client[i])
+        if (a is not) return "-"
+        return fxChain(s, s.client, i, a).join(" → ") + " ⇒ " + clientWhats(s.nodes[a.root].f)[a.pos]
+    }
+
+    fn summaryWaits(s: Summary, i: int) -> string {
+        if (i < 0) return "-"
+        const a: FxAtom | not = witnessOf(s.waits[i])
+        if (a is not) return "-"
+        return fxChain(s, s.waits, i, a).join(" → ") + " ⇒ "
     }
 
     // =========================================================================

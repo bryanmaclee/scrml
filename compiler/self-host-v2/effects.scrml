@@ -1,0 +1,237 @@
+// =============================================================================
+// self-host-v2 / effects.scrml — THE EFFECT SUMMARY ENGINE (dpa-066 Approach B,
+// RATIFIED S452 "all your recs" item 3; design: scrml-support/docs/deep-dives/
+// bootstrap-effect-summary-dpa-066-2026-10-04.md).
+//
+// SPEC §6.15: "The write list … and the write summary (per function,
+// transitive over the static call graph, a fixed point; one summary shared by
+// every rule that uses it) are §6.7.4's." §6.7.4: "the compiler reads the
+// callee's body once and records a fact about it in its signature".
+//
+// This module is the part of the summary that knows NOTHING about scrml
+// syntax: a graph of CALLABLES (numbered 0..n-1), each callable's OWN facts in
+// one DIMENSION (its own atoms), and the references each callable makes (its
+// edges, in source order). It closes a dimension over the graph — strongly
+// connected components bottom-up, iterating inside a component to a fixed
+// point (recursion and mutual recursion) — and answers "the first path down
+// to the fact" for a message. analyze.scrml extracts the facts (its body
+// scan, over the binder's Syms) and asks the questions; this module is the
+// one fixpoint every rule shares (it replaces the hand-rolled
+// `while (changed && pass < n + 2)` loops, dpa-066 inventory W1/W3/W5/W6/W7).
+//
+// One summary, PER-DIMENSION knowledge (ruling 3.2): a dimension is a SET of
+// atoms (a known fact — a cell written, a client access, a server reach — or
+// an OPEN reason — a call the analysis cannot resolve), each kept once per
+// key with the SHORTEST path that reaches it. Known and open facts are
+// separate dimensions, so a "may" query (known or open) and a "provably"
+// query (known only) read the same summary (§6.7.7.1 vs §6.7.7.3). There is
+// no global TOP and no effect variable (ruling 3.5).
+//
+// THE PATH ORDER — what "the first chain" means, so every message is a pure
+// function of the program: fewer references followed first; then the earlier
+// reference (by source order) at the first step where two paths differ; then
+// the earlier own site. (It is the breadth-first witness the per-rule
+// walkers chose; dpa-066 M0 proves it equal over every slice program and
+// every conformance case.)
+// =============================================================================
+${
+    // One atom of one callable's summary in one dimension.
+    //   key   — the fact's identity: two paths to the same fact are one atom;
+    //   root  — the callable whose OWN facts hold it, and `pos` its index in
+    //           that callable's own list (the extractor's record of the site);
+    //   depth — the references followed from this callable down to `root`;
+    //   path  — the reference index (in each callable's edge list) taken at
+    //           each step, outermost first — the tie-break;
+    //   via   — the next callable on the path (-1: the fact is this callable's own).
+    export type FxAtom:struct = { key: string, root: int, pos: int, depth: int, path: int[], via: int }
+
+    // A callable's own fact.
+    export fn ownAtom(key: string, root: int, pos: int) -> FxAtom {
+        return { key: key, root: root, pos: pos, depth: 0, path: [], via: -1 }
+    }
+
+    // `a` comes before `b` in the path order (see the banner).
+    export fn atomBefore(a: FxAtom, b: FxAtom) -> boolean {
+        if (a.depth != b.depth) return a.depth < b.depth
+        let i = 0
+        while (i < a.path.length && i < b.path.length) {
+            if (a.path[i] != b.path[i]) return a.path[i] < b.path[i]
+            i = i + 1
+        }
+        return a.pos < b.pos
+    }
+
+    // The atom a caller gains from callee `c`'s atom `a` through its reference number `e`.
+    fn viaAtom(a: FxAtom, c: int, e: int) -> FxAtom {
+        return { key: a.key, root: a.root, pos: a.pos, depth: a.depth + 1, path: [e].concat(a.path), via: c }
+    }
+
+    // Would adding `a` change `xs` (a new key, or a shorter path to a present one)?
+    fn improves(xs: FxAtom[], a: FxAtom) -> boolean {
+        for (const x of xs) {
+            if (x.key == a.key) return atomBefore(a, x)
+        }
+        return true
+    }
+
+    // `xs` (in path order, one atom per key) with `a` in its place; `a` replaces
+    // the atom of its key. Call only when `improves(xs, a)`.
+    fn withAtom(xs: FxAtom[], a: FxAtom) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let placed = false
+        for (const x of xs) {
+            if (x.key != a.key) {
+                if (!placed && atomBefore(a, x)) {
+                    out = out.concat([a])
+                    placed = true
+                }
+                out = out.concat([x])
+            }
+        }
+        if (!placed) out = out.concat([a])
+        return out
+    }
+
+    // A callable's own atoms in path order, one per key (the first site of a key wins).
+    fn ownSorted(xs: FxAtom[]) -> FxAtom[] {
+        let out: FxAtom[] = []
+        for (const x of xs) {
+            if (improves(out, x)) out = withAtom(out, x)
+        }
+        return out
+    }
+
+    fn setAtoms(xs: FxAtom[][], i: int, v: FxAtom[]) -> FxAtom[][] {
+        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
+    }
+
+    // Close ONE dimension: `own[i]` — callable i's own atoms; `edges[i]` — the
+    // callables i references for this dimension, in source order; `order` —
+    // sccOrder over a superset of every dimension's edges. Returns each
+    // callable's atoms in path order (its first atom is the witness).
+    export fn closeDim(own: FxAtom[][], edges: int[][], order: int[][]) -> FxAtom[][] {
+        let fx: FxAtom[][] = []
+        for (const o of own) { fx = fx.concat([ownSorted(o)]) }
+        for (const scc of order) {
+            let changed = true
+            while (changed) {
+                changed = false
+                for (const i of scc) {
+                    let mine: FxAtom[] = fx[i]
+                    let grew = false
+                    let e = 0
+                    for (const c of edges[i]) {
+                        for (const a of fx[c]) {
+                            const v: FxAtom = viaAtom(a, c, e)
+                            if (improves(mine, v)) {
+                                mine = withAtom(mine, v)
+                                grew = true
+                            }
+                        }
+                        e = e + 1
+                    }
+                    if (grew) {
+                        fx = setAtoms(fx, i, mine)
+                        changed = true
+                    }
+                }
+            }
+        }
+        return fx
+    }
+
+    // The first atom (the witness) of a callable's closed atoms, else not.
+    export fn witnessOf(xs: FxAtom[]) -> FxAtom | not {
+        if (xs.length == 0) return not
+        return xs[0]
+    }
+
+    fn atomKeyed(xs: FxAtom[], key: string) -> FxAtom | not {
+        for (const x of xs) {
+            if (x.key == key) return x
+        }
+        return not
+    }
+
+    // The callables from `i` down to the site of its atom `a`, outermost first:
+    // `i`, then each `via`, following the atom's key (at the fixed point every
+    // step is the callee's own shortest path to it).
+    export fn atomChain(fx: FxAtom[][], i: int, a: FxAtom) -> int[] {
+        let out: int[] = [i]
+        let cur: FxAtom = a
+        while (cur.via >= 0) {
+            out = out.concat([cur.via])
+            const nxt: FxAtom | not = atomKeyed(fx[cur.via], cur.key)
+            if (nxt is not) return out
+            cur = nxt
+        }
+        return out
+    }
+
+    // ---- the call graph's strongly connected components (Tarjan) ---------------
+    // Returned callees first: every component after every component it reaches,
+    // so a component is closed once the components below it are final.
+    type Tarjan:struct = { index: int[], low: int[], on: boolean[], stack: int[], next: int, out: int[][] }
+
+    export fn sccOrder(edges: int[][]) -> int[][] {
+        let index: int[] = []
+        let low: int[] = []
+        let on: boolean[] = []
+        for (const e of edges) {
+            index = index.concat([-1])
+            low = low.concat([-1])
+            on = on.concat([false])
+        }
+        let ts: Tarjan = { index: index, low: low, on: on, stack: [], next: 0, out: [] }
+        let v = 0
+        while (v < edges.length) {
+            if (ts.index[v] < 0) ts = strongFrom(edges, v, ts)
+            v = v + 1
+        }
+        return ts.out
+    }
+
+    fn strongFrom(edges: int[][], v: int, ts0: Tarjan) -> Tarjan {
+        let ts: Tarjan = { index: setInt(ts0.index, v, ts0.next), low: setInt(ts0.low, v, ts0.next), on: setBool(ts0.on, v, true),
+                           stack: ts0.stack.concat([v]), next: ts0.next + 1, out: ts0.out }
+        for (const w of edges[v]) {
+            if (ts.index[w] < 0) {
+                ts = strongFrom(edges, w, ts)
+                ts = withLow(ts, v, minInt(ts.low[v], ts.low[w]))
+            } else if (ts.on[w]) {
+                ts = withLow(ts, v, minInt(ts.low[v], ts.index[w]))
+            }
+        }
+        if (ts.low[v] != ts.index[v]) return ts
+        // `v` roots a component: everything above it on the stack
+        let comp: int[] = []
+        let stack: int[] = ts.stack
+        let on2: boolean[] = ts.on
+        let done = false
+        while (!done) {
+            const w: int = stack[stack.length - 1]
+            stack = stack.slice(0, stack.length - 1)
+            on2 = setBool(on2, w, false)
+            comp = [w].concat(comp)
+            if (w == v) done = true
+        }
+        return { index: ts.index, low: ts.low, on: on2, stack: stack, next: ts.next, out: ts.out.concat([comp]) }
+    }
+
+    fn withLow(ts: Tarjan, v: int, l: int) -> Tarjan {
+        return { index: ts.index, low: setInt(ts.low, v, l), on: ts.on, stack: ts.stack, next: ts.next, out: ts.out }
+    }
+
+    fn setInt(xs: int[], i: int, v: int) -> int[] {
+        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
+    }
+
+    fn setBool(xs: boolean[], i: int, v: boolean) -> boolean[] {
+        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
+    }
+
+    fn minInt(a: int, b: int) -> int {
+        if (a < b) return a
+        return b
+    }
+}
