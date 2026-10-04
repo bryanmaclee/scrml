@@ -12,3 +12,4 @@
 - fix round r4
 - r4 item 1: pipe-less `::V <ident> :>` measured by instrumenting the legacy `::` arm path and compiling examples/ samples/ conformance/cases/ stdlib/ (2321 files): ZERO sites. Now E-PARSE-001 (same as `.V m :>`). prov=pa-ruled:§19.4.5 paren-free binder only after | — newly-rejecting, corpus measured zero. parser-conformance-markup parity cases moved to the legacy `|` spelling.
 - fix round r5
+- r5: qualifier check resolves aliases (registry holds 'type A = E' as asIs — no alias resolution existed in the checker; resolved via the decl RHS + existing resolveTypeExpr, skip if either side is not an enum); named-field binder gets a 'not yet supported' E-PARSE-001 message. §34 row text updated.
