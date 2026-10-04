@@ -1,16 +1,18 @@
-// Phase 6: explicit transaction block (§8.5.2)
-// Should compile clean.
+// Phase 6: explicit transaction block (§19.10.2)
+// Should compile clean. A `transaction` block is valid only inside a `!`
+// function (§19.10.4 — E-ERROR-001 otherwise), so bulkInsert is declared `!`
+// and its caller handles the result (S450).
 
 < db src="./test.db" tables="orders">
 ${
-  server function bulkInsert(name1, name2) {
+  server function bulkInsert(name1, name2)! {
     transaction {
       ?{`INSERT INTO orders (name) VALUES (${name1})`}.run()
       ?{`INSERT INTO orders (name) VALUES (${name2})`}.run()
     }
   }
 }
-<form onsubmit=bulkInsert("A", "B")>
+<form onsubmit={ bulkInsert("A", "B") !{ | _ :> console.warn("bulk insert failed") } }>
   <button type="submit">Bulk Insert</>
 </form>
 </>

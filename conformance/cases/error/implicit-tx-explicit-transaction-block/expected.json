@@ -1,0 +1,14 @@
+{
+  "id": "error-implicit-tx-explicit-transaction-block",
+  "description": "§19.10.5 / §8.9.2 E-BATCH-001 — a `!` server handler whose two `?{}` reads form an implicit per-handler transaction envelope AND which contains an explicit `transaction { }` block. Source-reachable since S450 (before it, `transaction { }` did not parse in a function body — see ../implicit-tx-explicit-begin/NOTES.md gap #1).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/batch-planner.test.js §11",
+  "spec": "§19.10.5",
+  "rationale": "§19.10.5: \"An implicit per-handler transaction SHALL NOT compose with an explicit `transaction { }` block in the same handler. The compiler SHALL emit E-BATCH-001 when both are present.\"",
+  "expect": {
+    "codes": ["E-BATCH-001"],
+    "notCodes": ["E-SCOPE-001", "E-ERROR-001", "E-ERROR-007"],
+    "severity": { "E-BATCH-001": "error" },
+    "codeCounts": { "E-BATCH-001": 1 }
+  }
+}

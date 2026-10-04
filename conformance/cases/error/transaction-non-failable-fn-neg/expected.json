@@ -1,0 +1,14 @@
+{
+  "id": "error-transaction-non-failable-fn-neg",
+  "description": "§19.10.4 — a `transaction { }` block inside a function that is NOT declared `!` is E-ERROR-001. Pre-S450 the block did not parse in a function body at all (E-SCOPE-001 on `transaction`); `notCodes` pins that the block is now recognised and rejected for the governed reason.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/transaction-in-function-body.test.js",
+  "spec": "§19.10.4",
+  "rationale": "§19.10.4: \"`transaction { }` SHALL be valid only inside `!` functions. Using `transaction` in a non-`!` function SHALL be a compile error (E-ERROR-001 applies).\"",
+  "expect": {
+    "codes": ["E-ERROR-001"],
+    "notCodes": ["E-SCOPE-001", "E-ERROR-007"],
+    "severity": { "E-ERROR-001": "error" },
+    "codeCounts": { "E-ERROR-001": 1 }
+  }
+}

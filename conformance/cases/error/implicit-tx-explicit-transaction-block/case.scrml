@@ -1,0 +1,21 @@
+<program db="./app.db">
+    <schema>
+        users {
+            id: integer primary key
+            name: text
+        }
+        posts {
+            id: integer primary key
+            user_id: integer
+        }
+    </schema>
+    server function both(id: string)! SqlError {
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all()
+        transaction {
+            ?{`UPDATE users SET name = 'x' WHERE id = ${id}`}.run()
+        }
+        return { a, b }
+    }
+    <p>x</p>
+</program>
