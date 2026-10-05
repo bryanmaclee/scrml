@@ -43,6 +43,7 @@ const KNOWN = {
   "runtime/pass-runtime": ["PASS", false],
   "runtime/fail-runtime": ["FAIL", false],
   "runtime/codes-only": ["CODES-ONLY", true],
+  "runtime/server-stub": ["PASS", false],
   "refused/unsupported": ["UNSUPPORTED", false],
   "refused/legacy": ["PASS", false],
   "refused/invalid": ["INVALID", false],
@@ -73,6 +74,23 @@ describe("fixture corpus — each case lands in its known bucket", () => {
     const fail = await classifyCase(boot, cs.find((x) => x.relDir === "runtime/fail-runtime"));
     expect(fail.runtimeExecuted).toBe(true);
     expect(fail.failures).toEqual(["state: cell 'count' expected 2, got 1"]);
+  }, { timeout: 60000 });
+
+  // s454 (U1b, design Item 3.4): a `serverStub` case's runtime half EXECUTES — the stub answers the
+  // bootstrap's own client call over its route manifest (stubFetch). Bite: the same case with the
+  // stub answering an impl#1-shaped error (`type: "CpsError"`) — strict decoding makes it
+  // Transport(Malformed), so the case's `.Transport(t)` arm runs and the expected state no longer holds.
+  test("a serverStub case runs: the stub answers the client call (and an impl#1-shaped error stub is Transport(Malformed))", async () => {
+    const cs = loadCases(FIXTURES);
+    const c = cs.find((x) => x.relDir === "runtime/server-stub");
+    const pass = await classifyCase(boot, c);
+    expect(pass.runtimeExecuted).toBe(true);
+    expect(pass.bucket).toBe("PASS");
+    const bad = structuredClone(c);
+    bad.expected.expect.serverStub = { count: { __serverError: { type: "CpsError", variant: "ServerError" } } };
+    const fail = await classifyCase(boot, bad);
+    expect(fail.bucket).toBe("FAIL");
+    expect(fail.failures.join("\n")).toContain("seen");
   }, { timeout: 60000 });
 
   // s452-boot-arm-pipe: a parse-phase Info lint (W-ARM-PIPE-LEGACY) is an ACCEPTED form — graded,
@@ -256,7 +274,7 @@ describe("the report states its own scope", () => {
     const some = all.filter((c) => c.relDir.startsWith("runtime/"));
     const r = await runBootstrapConformance(boot, some, all.length, "runtime/");
     const md = renderReport(r);
-    expect(md).toContain(`**3 of ${all.length} cases attempted** (filter: \`runtime/\`)`);
+    expect(md).toContain(`**4 of ${all.length} cases attempted** (filter: \`runtime/\`)`);   // s454: + runtime/server-stub
     for (const b of ["PASS", "CODES-ONLY", "FAIL", "LEGACY", "NOT-TWINNED", "UNSUPPORTED", "CRASH", "INVALID"]) expect(md).toContain(`| ${b} |`);
     expect(md).toContain("- `runtime/fail-runtime` (runtime)");
   }, { timeout: 60000 });
@@ -335,7 +353,7 @@ describe("CLI — exit status is separate from the output (pa-base §8)", () => 
     const run = (...a) => Bun.spawnSync(["bun", SCRIPT, "--cases", FIXTURES, ...a], { cwd: REPO, stdout: "pipe", stderr: "pipe" });
     const plain = run();
     expect(plain.exitCode).toBe(0);
-    expect(plain.stdout.toString()).toContain("14 of 14 cases attempted");
+    expect(plain.stdout.toString()).toContain("15 of 15 cases attempted");   // s454: + runtime/server-stub
     expect(plain.stdout.toString()).toContain("### §66 twins");
     expect(run("--fail-on-fail").exitCode).toBe(1);
     const none = run("--filter", "no-such-case-anywhere");

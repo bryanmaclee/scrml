@@ -198,3 +198,41 @@ server body, no SQL, no database path. `fetch` is stubbed per row; the Save clic
 | no answer; the deadline passes | "transport", `@cause` = Unreachable |
 | `wordCount`: 200 `12`, then 503 | `@words` = 12, then kept at 12 (`.Transport(t) :> @words`) |
 | `touch` (yields NO value): 204, then 200 `1` | `stamp()`: "stamped"; then "stamp failed", `@cause` = Malformed(…) (a body for a no-value function) |
+
+## S5 — DONE (the conformance harness's server-stub hook, design §3.4)
+- scripts/bootstrap-conformance.ts: `serverStub` is no longer a non-client runtime key — `stubFetch(stub, routes)`
+  answers the client artifact's `rt.call`s over the printer's route manifest (`Output.routes`), keyed by the
+  impl-neutral scrml-source function name: a plain value → 200 + its JSON; `null` / no stub → 204 for a no-value
+  function, 200 `null` for a value function (impl#1's "deterministic empty 200", which the strict client reads as
+  Malformed); `__serverError {type, variant, data?, status?}` → status (default 500) + the §57.8 envelope
+  (`data` absent → `{}`); `__httpError` → raw status + body; `__batches` → batch 0 (no body split in the bootstrap).
+  `runBootstrapArtifact` installs it for the run and restores `fetch` after. The U1a printer-refusal comment updated.
+- compiler/tests/integration/bootstrap-conformance-counter: the CODES-ONLY fixture used `serverStub` as its
+  "server half the bootstrap cannot run" — it now names `ssr: true` (still CODES-ONLY); NEW fixture
+  `runtime/server-stub` (PASS: a handler's client call answered by the stub, runtime executed) + a bite: the same case
+  with an impl#1-shaped `CpsError` error stub becomes Transport(Malformed) under strict decoding, the `.Transport(t)`
+  arm runs, and the case FAILs on the state it expected.
+- OUTCOME CHANGES IN THE CORPUS from the hook: **0**. None of the 30 `serverStub` cases reaches the runtime half on the
+  bootstrap today (counter JSON, per case): 15 UNSUPPORTED — `<schema>` (defer/cps-after-last-continuation [+ a
+  body split, U1d], defer/cps-batch0-failure, defer/cps-batch1-failure, defer/server-callee-error-total-handler [+ a
+  server call in a `defer` body — refused by the plan], defer/server-callee-error-total-handler-twin), `<formFor>`
+  (form-for/formfor-submit-collects-values), `<request>` (server-fn/error-boundary-request-error-twin), unannotated
+  parameters (server-db/inline-handler-server-call-condition-runtime, nested-helper-server-fn-some-runtime,
+  nested-helper-sibling-block-let-some-runtime, on-mount-server-call-some-runtime), parse-reject
+  (server-fn/branch-declared-server-fn-routes-to-server; server-fn/cell-assign-{independent-writes-batched,
+  read-after-write, successive-writes-ordered} — the legacy `server fn … : T`); 11 NOT-TWINNED; 4 FAIL at the codes
+  half, stale against §19.9.10 (defer/deferred-server-call-completes; server-fn/cell-assign-failable-{arm-return-live,
+  recovery-value, success-then-read}). The impl#1-shaped `{"type":"CpsError","variant":"ServerError"}` stubs
+  (defer/server-callee-error-total-handler, -twin, defer/cps-batch0-failure, defer/cps-batch1-failure) will decode as
+  Transport(Malformed) when they reach the runtime half — the -twin's `_ :>` arm still catches it (its expected
+  outcome is unchanged); the cps-batch cases are body-split (U1d).
+- Counter (final): before (base 859f60f79) PASS 121 · FAIL 48 · NOT-TWINNED 514 · UNSUPPORTED 629 · CRASH 0 → after
+  PASS 121 · FAIL 58 · NOT-TWINNED 514 · UNSUPPORTED 619 · CRASH 0. 0 cases moved to PASS (the design measured 0 of
+  13; confirmed). 10 moved UNSUPPORTED → FAIL, each now failing on a §19.9.10 diagnostic the stale corpus does not
+  assert: E-ERROR-002 on an unhandled client call — server-db/sql-configured-db-no-e-sql-004,
+  server-db/sql-missing-db-e-sql-004-neg, server-fn/e-route-002-neg, -002-pos, -005-neg, -005-pos; E-TYPE-080 on a
+  handler without `.Transport` — server-fn/cell-assign-failable-arm-return-live, -recovery-value, -success-then-read;
+  E-DEFER-UNHANDLED-FAILABLE — defer/deferred-server-call-completes. (The other 3 of the design's 13 —
+  server-fn/cell-assign-{read-after-write, successive-writes-ordered, independent-writes-batched} — stay parse-reject.)
+  The counter's per-case JSON holds no diagnostic naming U1b. `docs/bootstrap-conformance.md` regenerated
+  (`--write`); `--check` → current.
