@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { compileScrml } from "../../src/api.js";
 import { loadCodec, descriptor } from "./harness.js";
 import { frontEnd } from "../slice-m2/lowered.js";
-import { decodeText, encodeText } from "./runtime/codec.js";
+import { decodeError, decodeText, encodeText } from "./runtime/codec.js";
 
 // ---- impl#1 side -------------------------------------------------------------
 const APP = `<program>
@@ -30,6 +30,17 @@ server function onePt(id: int) -> Pt {
 }
 server function echo(n: int | not) -> int | not {
     return n
+}
+type Shape:enum = { Circle(r: number), Square }
+type LoadError:enum = { Boom(msg: string), Gone }
+server function shape(k: int) -> Shape {
+    if (k == 0) return .Square
+    return Shape.Circle(2)
+}
+server function risky(k: int)! -> LoadError {
+    if (k == 0) fail LoadError.Gone
+    if (k == 1) fail LoadError.Boom("neg")
+    return
 }
 let a = maybePt(1)
 let b = onePt(1)
@@ -74,6 +85,8 @@ const SRC = `<program>
     type Pt:struct = { x: int, label: string, on: boolean }
     type Color:enum = { Red, Green, Blue }
     type Pair:struct = { p: Pt | not, c: Color | not }
+    type Shape:enum = { Circle(r: number), Square }
+    type LoadError:enum = { Boom(msg: string), Gone }
     let <n:int=0/>
     <main><p>\${@n}</p></main>
 </program>`;
@@ -143,6 +156,39 @@ describe("shared shapes — bootstrap-encoded values decode identically in impl#
   }
 });
 
+// ---- s454: §57.8 payload-enum VALUES — a shared shape ----------------------------
+// impl#1's runtime enum constructors, as its server artifact emits them (its runtime value
+// keys `data` by field name; the bootstrap's is positional — the codec maps between them).
+function extractConst(src, name) {
+  const m = src.match(new RegExp(`const ${name} = Object\\.freeze\\(.*\\);`));
+  if (m === null) throw new Error(`impl#1 emitted no ${name}`);
+  return new Function(m[0] + `; return ${name};`)();
+}
+const I1Shape = extractConst(serverJs, "Shape");
+
+describe("shared shapes (s454) — §57.8 payload enum values, both directions", () => {
+  test("pinned: impl#1's server fn returns the enum value through `JSON.stringify(_scrml_result ?? null)`", () => {
+    expect(serverJs).toContain("return Shape.Circle(2);");
+    expect(JSON.stringify(I1Shape.Circle(2))).toBe('{"variant":"Circle","data":{"r":2}}');
+  });
+
+  const cases = [
+    ["Shape.Circle(2)", () => I1Shape.Circle(2), { variant: "Circle", data: [2] }],
+    ["Shape.Circle(-0.5)", () => I1Shape.Circle(-0.5), { variant: "Circle", data: [-0.5] }],
+    ["Shape.Square", () => I1Shape.Square, "Square"],
+  ];
+  for (const [name, i1v, bv] of cases) {
+    test(`impl#1-encoded → bootstrap strict decode, and the bytes agree: ${name}`, () => {
+      const text = I1.serverPlain(i1v());
+      expect(decodeText(tb(Named("Shape")), text, { canonicalOnly: true })).toEqual({ ok: true, value: bv });
+      expect(encodeText(tb(Named("Shape")), bv)).toEqual({ ok: true, text });
+    });
+    test(`bootstrap-encoded → impl#1 client decode yields impl#1's own value: ${name}`, () => {
+      expect(I1.clientPlain(encodeText(tb(Named("Shape")), bv).text)).toEqual(i1v());
+    });
+  }
+});
+
 describe("DIVERGENCES — impl#1 vs §57 (pinned; see progress.md)", () => {
   test("D1: impl#1 envelopes only a server fn's TOP-LEVEL return; a nested `T | not` goes out as raw null", () => {
     // impl#1 can only express this through a struct value carrying null; its encoder leaves it alone.
@@ -169,6 +215,24 @@ describe("DIVERGENCES — impl#1 vs §57 (pinned; see progress.md)", () => {
   test("D4: impl#1's decoder passes a malformed payload through unchanged (§57.4: treat as malformed)", () => {
     expect(I1.clientMaybe('"not a Pt"')).toBe("not a Pt");
     expect(decodeText(tb(Maybe(Named("Pt"))), '"not a Pt"').error.kind).toBe("malformed");
+  });
+
+  test("D6 (s454): impl#1's `fail` envelope data is NOT §57.8's keyed object — unit → null, payload → the bare argument — and it is sent 200", () => {
+    // §57.8: "For an error variant with no fields, `data` is `{}`"; a payload variant's `data` is keyed by
+    // declared field name. impl#1 (frozen) emits `data: null` / `data: "neg"`, status 200.
+    expect(serverJs).toContain('return { __scrml_error: true, type: "LoadError", variant: "Gone", data: null };');
+    expect(serverJs).toContain('return { __scrml_error: true, type: "LoadError", variant: "Boom", data: "neg" };');
+    const errTb = tb(Named("LoadError"));
+    // the bootstrap's strict envelope decoder refuses both (never coerces them into a variant) …
+    expect(decodeError(errTb, { __scrml_error: true, type: "LoadError", variant: "Gone", data: null }, { canonicalOnly: true }).error)
+      .toEqual({ kind: "malformed", path: "$.data", reason: "expected the payload object of LoadError.Gone, got null" });
+    expect(decodeError(errTb, { __scrml_error: true, type: "LoadError", variant: "Boom", data: "neg" }, { canonicalOnly: true }).error.path).toBe("$.data");
+    // … and reads the §57.8 forms
+    expect(decodeError(errTb, { __scrml_error: true, type: "LoadError", variant: "Gone", data: {} }, { canonicalOnly: true })).toEqual({ ok: true, value: "Gone" });
+    expect(decodeError(errTb, { __scrml_error: true, type: "LoadError", variant: "Boom", data: { msg: "neg" } }, { canonicalOnly: true }))
+      .toEqual({ ok: true, value: { variant: "Boom", data: ["neg"] } });
+    // impl#1's transport envelope names another type (CpsError) — not the callee's declared enum
+    expect(decodeError(errTb, { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: "x", fn: "risky" } }, { canonicalOnly: true }).error.path).toBe("$.type");
   });
 
   test("D5: impl#1 serializes server-fn ARGUMENTS with plain JSON.stringify (no envelope for a `T | not` argument)", () => {
