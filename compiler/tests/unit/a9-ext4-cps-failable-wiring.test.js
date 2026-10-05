@@ -283,14 +283,42 @@ describe("D4: SPEC amendments — §19.6.7 + §19.9.5 + §34", () => {
     const spec = await Bun.file("compiler/SPEC.md").text();
     expect(spec).toContain("#### 19.9.5 Auto-`!`-Wrap of CPS Server Stubs");
   });
-  test("§19.9.5 documents CpsError synthetic enum with NetworkError/ServerError variants", async () => {
+  // S454 (ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline", F1 + F2): `CpsError`
+  // is RETIRED; a body-split function's failure set is §19.9.10's — declared variants plus
+  // `Transport(t: ServerCallError)`. These assert the CURRENT normative text, read from the specific
+  // paragraphs (never the whole section, whose supersedes quote still names the retired enum).
+  const sectionOf = (spec, head, nextHead) => {
+    const a = spec.indexOf(head);
+    expect(a).toBeGreaterThan(-1);
+    const b = spec.indexOf(nextHead, a + head.length);
+    expect(b).toBeGreaterThan(a);
+    return spec.slice(a, b);
+  };
+  test("§19.9.5 implicit `!`-typing uses the §19.9.10 set — Transport(t: ServerCallError), not CpsError", async () => {
     const spec = await Bun.file("compiler/SPEC.md").text();
-    const idx = spec.indexOf("19.9.5 Auto-`!`-Wrap");
-    expect(idx).toBeGreaterThan(-1);
-    const section = spec.slice(idx, idx + 5000);
-    expect(section).toContain("CpsError");
-    expect(section).toContain("NetworkError");
-    expect(section).toContain("ServerError");
+    const section = sectionOf(spec, "#### 19.9.5 Auto-`!`-Wrap", "#### 19.9.6 ");
+    const para = section.split("\n").find((l) => l.startsWith("**Implicit `!`-typing.**"));
+    expect(para).toBeDefined();
+    expect(para).toContain("`Transport(t: ServerCallError)`");
+    expect(para).toContain("no second synthetic enum");
+    expect(para).not.toContain("CpsError");
+  });
+  test("§19.9.5 keeps impl#1's emitted CpsError only as a carried divergence", async () => {
+    const spec = await Bun.file("compiler/SPEC.md").text();
+    const section = sectionOf(spec, "#### 19.9.5 Auto-`!`-Wrap", "#### 19.9.6 ");
+    expect(section).toContain("**the name `CpsError` is RETIRED**");
+    expect(section).toContain("**Carried divergence:** impl#1 still synthesizes `CpsError`");
+  });
+  test("§19.9.10 defines the built-in ServerCallError with its four variants and the Transport wrapper", async () => {
+    const spec = await Bun.file("compiler/SPEC.md").text();
+    const section = sectionOf(spec, "#### 19.9.10 A Client Call to a Server Function Is Failable", "### 19.10 ");
+    const enumBlock = sectionOf(section, "type ServerCallError:enum = {", "```");
+    for (const v of ["Unreachable", "Refused(status: int)", "ServerFault(status: int)", "Malformed(reason: string)"]) {
+      expect(enumBlock).toMatch(new RegExp(`^\\s+${v.replace(/[()]/g, "\\$&")}\\s`, "m"));
+    }
+    expect((enumBlock.match(/^\s+renders /gm) ?? []).length).toBe(4);
+    expect(section).toContain("ONE variant, **`Transport(t: ServerCallError)`**");
+    expect(section).toContain("the failure set is `Transport(t: ServerCallError)` alone");
   });
   test("§34 master registry contains W-CPS-NEEDS-FAILABLE and E-CPS-NEEDS-FAILABLE", async () => {
     const spec = await Bun.file("compiler/SPEC.md").text();
