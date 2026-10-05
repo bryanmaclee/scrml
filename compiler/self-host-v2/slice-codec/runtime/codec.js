@@ -11,4 +11,4 @@
 // the code.
 // =============================================================================
 
-export { ABSENT_KEY, CodecDefect, isAbsenceEnvelope, encode, encodeText, decode, decodeText } from "../../slice-m1/runtime/runtime.js";
+export { ABSENT_KEY, CodecDefect, isAbsenceEnvelope, encode, encodeText, decode, decodeText, decodeError } from "../../slice-m1/runtime/runtime.js";

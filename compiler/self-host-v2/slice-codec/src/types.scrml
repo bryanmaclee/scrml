@@ -5,6 +5,7 @@
     type Node:struct = { v: int, kids: Node[], next: Node | not }
     type Shape:enum = { Circle(r: number), Square }
     type Holder:struct = { s: Shape }
+    type Res:enum = { Done, Conflict(current: int, note: string | not), Moved(to: Pt, via: Shape[]), Wrapped(inner: Shape | not, tint: Color) }
     let <n:int=0/>
     <main><p>${@n}</p></main>
 </program>

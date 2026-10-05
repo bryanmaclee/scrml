@@ -15,11 +15,15 @@
 // type whose wire shape the SPEC does not fix (see `why` below).
 //
 // What a descriptor covers (the Core types of arc plan Uc):
-//   Int · Num · Str · Bool · Named(struct) · Named(payload-free enum) · Seq · Maybe.
+//   Int · Num · Str · Bool · Named(struct) · Named(enum) · Seq · Maybe.
+// An enum def carries every variant WITH its declared payload fields (s454):
+// §57.8 (S451 R8) — "An enum value whose variant carries NO payload SHALL be
+// encoded as the variant name, a JSON string" and "An enum value whose variant
+// carries a payload SHALL be encoded as a JSON object with exactly two own
+// properties: `"variant"` … and `"data"`, a JSON object whose keys are the
+// variant's DECLARED field names". (Until s454 a payload variant was refused
+// here: R8 had not ruled the shape — docs/changes/s446-bootstrap-uc-codec Q1.)
 // Refused (with a reason in `WireBuild.why`, never a guessed shape):
-//   - a payload-carrying enum variant — §12.5.1 says "Enum types (serialize as
-//     the variant name string)", which cannot carry a payload; the SPEC fixes
-//     no payload wire shape (SPEC question, docs/changes/s446-bootstrap-uc-codec).
 //   - a struct field named `__scrml_absent` — its value would be the §57.2
 //     envelope itself, so a present struct in a `T | not` position would decode
 //     as absence (lossy). §57.2 puts the envelope in the `__scrml_*` namespace.
@@ -61,9 +65,15 @@ ${
 
     export type WireField:struct = { name: string, ty: WireTy }
 
+    // One enum variant: its declared name and its payload fields in declared
+    // order (empty for a unit variant). The order is the runtime value's
+    // positional `data` order (print.scrml `variantValueJs`), so the runtime
+    // half maps wire key <-> index through this list alone.
+    export type WireVariant:struct = { name: string, fields: WireField[] }
+
     export type WireDef:enum = {
         WStruct(name: string, fields: WireField[]),
-        WEnum(name: string, tags: string[]),
+        WEnum(name: string, variants: WireVariant[]),
     }
 
     export type WireTable:struct = { defs: WireDef[], root: WireTy }
@@ -186,7 +196,7 @@ ${
     fn defOfTypeDef(syms: Sym[], td: TypeDef) -> DefBuild {
         return match td {
             .StructDef(sym: ts, fields: fs) :> structDef(syms, ts, fs)
-            .EnumDef(sym: es, variants: vs) :> enumDef(es, vs)
+            .EnumDef(sym: es, variants: vs) :> enumDef(syms, es, vs)
         }
     }
 
@@ -203,17 +213,20 @@ ${
         return { def: WireDef.WStruct(ts.hint, fields), why: [] }
     }
 
-    fn enumDef(es: Sym, vs: VariantDef[]) -> DefBuild {
-        let tags: string[] = []
-        let why: string[] = []
+    // §57.8: a variant's wire `data` keys are its DECLARED field names. A
+    // payload field named `__scrml_absent` is NOT refused (unlike a struct
+    // field): the `data` object never stands in a `T | not` position, so it
+    // can never be read as the §57.2 envelope.
+    fn enumDef(syms: Sym[], es: Sym, vs: VariantDef[]) -> DefBuild {
+        let variants: WireVariant[] = []
         for (const v of vs) {
-            if (v.fields.length > 0) {
-                why = why.concat(["enum " + es.hint + " variant " + v.sym.hint + " carries a payload: SPEC §12.5.1 fixes only the variant-name-string wire form; a payload wire shape is not ruled"])
+            let fields: WireField[] = []
+            for (const f of v.fields) {
+                fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }])
             }
-            tags = tags.concat([v.sym.hint])
+            variants = variants.concat([{ name: v.sym.hint, fields: fields }])
         }
-        if (why.length > 0) return { def: not, why: why }
-        return { def: WireDef.WEnum(es.hint, tags), why: [] }
+        return { def: WireDef.WEnum(es.hint, variants), why: [] }
     }
 
     // -------------------------------------------------------------------------
@@ -239,7 +252,7 @@ ${
     // -------------------------------------------------------------------------
     // The JS literal the printer embeds (and the runtime half reads):
     //   { defs: [ { k: "struct", name, fields: [ { name, ty } ] } |
-    //             { k: "enum", name, tags: [ … ] } ],
+    //             { k: "enum", name, variants: [ { name, fields: [ { name, ty } ] } ] } ],
     //     root: ty }
     //   ty = { k: "int" | "num" | "str" | "bool" }
     //      | { k: "maybe", inner: ty }
@@ -273,8 +286,16 @@ ${
     fn wireDefJs(d: WireDef) -> JsExpr {
         return match d {
             .WStruct(name: n, fields: fs) :> JsExpr.JObject([kind("struct"), prop("name", jstr(n)), prop("fields", fieldsJs(fs))])
-            .WEnum(name: n, tags: ts) :> JsExpr.JObject([kind("enum"), prop("name", jstr(n)), prop("tags", strsJs(ts))])
+            .WEnum(name: n, variants: vs) :> JsExpr.JObject([kind("enum"), prop("name", jstr(n)), prop("variants", variantsJs(vs))])
         }
+    }
+
+    fn variantsJs(vs: WireVariant[]) -> JsExpr {
+        let out: JsExpr[] = []
+        for (const v of vs) {
+            out = out.concat([JsExpr.JObject([prop("name", jstr(v.name)), prop("fields", fieldsJs(v.fields))])])
+        }
+        return JsExpr.JArray(out)
     }
 
     fn fieldsJs(fs: WireField[]) -> JsExpr {
@@ -282,12 +303,6 @@ ${
         for (const f of fs) {
             out = out.concat([JsExpr.JObject([prop("name", jstr(f.name)), prop("ty", wireTyJs(f.ty))])])
         }
-        return JsExpr.JArray(out)
-    }
-
-    fn strsJs(ss: string[]) -> JsExpr {
-        let out: JsExpr[] = []
-        for (const s of ss) { out = out.concat([jstr(s)]) }
         return JsExpr.JArray(out)
     }
 
@@ -335,8 +350,15 @@ ${
     fn defHasFixed(d: WireDef) -> boolean {
         return match d {
             .WStruct(fields: fs) :> fieldsHaveFixed(fs)
-            .WEnum(tags: ts) :> false
+            .WEnum(variants: vs) :> variantsHaveFixed(vs)
         }
+    }
+
+    fn variantsHaveFixed(vs: WireVariant[]) -> boolean {
+        for (const v of vs) {
+            if (fieldsHaveFixed(v.fields)) return true
+        }
+        return false
     }
 
     fn fieldsHaveFixed(fs: WireField[]) -> boolean {
