@@ -1,15 +1,15 @@
 /**
- * fix-sql-failable.test.js — the `scrml fix` rule `sql-failable` (SPEC §19.8.3, S451 R11 item 5(a)).
- * change-id: s455-scrml-fix-r11-sql-failable.
+ * fix-sql-failable.test.js — the `scrml fix` rule `sql-failable` (SPEC §19.8.3, S451 R11; S455
+ * "b your rec on R11": READS only). change-id: s455-scrml-fix-r11-sql-failable.
  *
- * An UNHANDLED `?{}` outside a `!` function gets the superseded silent meaning written out:
- * `.get() !{ _ :> not }`, `.all()` / bare `!{ _ :> [] }`, `.run() !{ _ :> {} }`. Every rewritten site
- * carries an INFO (on impl#1 a failure there used to throw). Sites the rule cannot rewrite are
- * LISTED (blockers). Exempt / already handled sites are untouched and not reported.
+ * An UNHANDLED `?{}` READ outside a `!` function gets the superseded silent meaning written out:
+ * `.get() !{ _ :> not }`, `.all()` / bare `!{ _ :> [] }`. Every rewritten site carries an INFO (on
+ * impl#1 a failure there used to throw). Every WRITE (`.run()`, a bare `?{}` statement, anything not
+ * provably a pure SELECT) is LISTED, never rewritten. Exempt / already handled sites are untouched.
  */
 
 import { describe, test, expect } from "bun:test";
-import { fixSqlFailable, SQL_FALLBACK, SQL_FAILABLE_RULE } from "../../src/commands/fix-sql-failable.js";
+import { fixSqlFailable, classifySql, SQL_FALLBACK, SQL_FAILABLE_RULE } from "../../src/commands/fix-sql-failable.js";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES } from "../../src/commands/fix-s66.js";
 
 const SQ = "?" + "{";
@@ -19,49 +19,90 @@ const fix = (src, opts = {}) => fixSqlFailable(src, { filePath: "/virtual/app.sc
 const reasons = (r) => r.blockers.map((b) => b.reason);
 const NOT = SQL_FALLBACK.get;
 const EMPTY = SQL_FALLBACK.all;
-const CONT = SQL_FALLBACK.run;
 
-describe("sql-failable — the spelling (S451 5(a), §18.2 arm, no leading `|`)", () => {
-  test("per terminator", () => {
+describe("sql-failable — the spelling (S451 5(a), §18.2 arm, no leading `|`; reads only, S455)", () => {
+  test("per terminator — no `.run()` shape", () => {
     expect(SQL_FALLBACK.get).toBe("!{ _ :> not }");
     expect(SQL_FALLBACK.all).toBe("!{ _ :> [] }");
     expect(SQL_FALLBACK.bare).toBe("!{ _ :> [] }");
-    expect(SQL_FALLBACK.run).toBe("!{ _ :> {} }");
+    expect(SQL_FALLBACK.run).toBeUndefined();
   });
 });
 
-describe("sql-failable — rewrites", () => {
-  test("statements: `.run()`, bare, a discarded `.get()`, inside `if` and `for` bodies — each handled + an INFO", () => {
+describe("sql-failable — classifySql (lead-keyword scan, fail closed)", () => {
+  test("pure reads", () => {
+    for (const s of [
+      "SELECT n FROM t",
+      "  select n from t where id = ${id}",
+      "-- a comment\nSELECT 1",
+      "/* lead */ SELECT 1",
+      "(SELECT n FROM t) UNION (SELECT n FROM u)",
+      "WITH x AS (SELECT n FROM t) SELECT * FROM x",
+      "WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 3) SELECT n FROM c",
+      "VALUES (1), (2)",
+      "SELECT replace(name, 'a', 'b') FROM t",
+      "SELECT 'INSERT INTO x' AS s, \"update\" FROM t",
+      "SELECT n FROM t WHERE s = ${'DELETE FROM t'}",
+      "SELECT n FROM t;",
+    ]) expect([s, classifySql(s)]).toEqual([s, "read"]);
+  });
+  test("writes — every statement kind, RETURNING, WITH-led, comment-led, multi-statement, unclassifiable", () => {
+    for (const s of [
+      "INSERT INTO t (n) VALUES (1)",
+      "insert into t (n) values (1) returning id",
+      "UPDATE t SET n = 1",
+      "UPDATE t SET n = 1 RETURNING n",
+      "DELETE FROM t WHERE id = ${id}",
+      "DELETE FROM t RETURNING *",
+      "REPLACE INTO t (n) VALUES (1)",
+      "INSERT OR REPLACE INTO t (n) VALUES (1)",
+      "UPSERT INTO t VALUES (1)",
+      "INSERT INTO t (n) VALUES (1) ON CONFLICT (n) DO UPDATE SET n = 2",
+      "MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET n = 1",
+      "WITH x AS (SELECT 1) UPDATE t SET n = 1",
+      "WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x",
+      "WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d",
+      "-- just a select?\nDELETE FROM t",
+      "/* SELECT */ UPDATE t SET n = 1",
+      "SELECT * INTO t2 FROM t",
+      "SELECT 1; DELETE FROM t",
+      "CREATE TABLE t (n INT)",
+      "PRAGMA user_version = 3",
+      "BEGIN",
+      "",
+      "SELECT 'unterminated",
+      "${q}",
+    ]) expect([s, classifySql(s)]).toEqual([s, "write"]);
+  });
+});
+
+describe("sql-failable — reads rewritten", () => {
+  test("statements: a discarded `.get()` / `.all()` read, inside `if` and `for` bodies — each handled + an INFO", () => {
     const src = program([
-      "  ${ function save(id) {",
-      `      ${q("INSERT INTO t (n) VALUES (1)")}.run()`,
-      `      ${q("DELETE FROM t WHERE n = 0")}`,
+      "  ${ function warm(id) {",
       `      ${q("SELECT n FROM t")}.get()`,
       "      if (id > 1) {",
-      `          ${q("UPDATE t SET n = 2")}.run()`,
+      `          ${q("SELECT n FROM t WHERE n = 2")}.all()`,
       "      }",
       "      for (const i of [1, 2]) {",
-      `          ${q("UPDATE t SET n = 3")}.run()`,
+      `          ${q("SELECT n FROM t WHERE n = 3")}.get()`,
       "      }",
       "      return 1",
       "  } }",
-      "  <button onclick={ @out = save(1) !{ .Transport(_) :> { return } } }>go</button>",
+      "  <button onclick={ @out = warm(1) !{ .Transport(_) :> { return } } }>go</button>",
     ]);
     const r = fix(src);
     expect(r.blockers).toEqual([]);
-    expect(r.changed).toBe(true);
-    expect(r.output).toContain(`${q("INSERT INTO t (n) VALUES (1)")}.run() ${CONT}\n`);
-    expect(r.output).toContain(`${q("DELETE FROM t WHERE n = 0")} ${EMPTY}\n`);
     expect(r.output).toContain(`${q("SELECT n FROM t")}.get() ${NOT}\n`);
-    expect(r.output).toContain(`${q("UPDATE t SET n = 2")}.run() ${CONT}\n`);
-    expect(r.output).toContain(`${q("UPDATE t SET n = 3")}.run() ${CONT}\n`);
-    expect(r.applied.length).toBe(5);
+    expect(r.output).toContain(`${q("SELECT n FROM t WHERE n = 2")}.all() ${EMPTY}\n`);
+    expect(r.output).toContain(`${q("SELECT n FROM t WHERE n = 3")}.get() ${NOT}\n`);
+    expect(r.applied.length).toBe(3);
     expect(r.applied.every((a) => a.rule === SQL_FAILABLE_RULE)).toBe(true);
-    expect(r.infos.length).toBe(5);
-    expect(r.infos.every((i) => /used to throw on impl#1 \(HTTP 500, caller aborted\); it now continues/.test(i.message))).toBe(true);
+    expect(r.infos.length).toBe(3);
+    expect(r.infos.every((i) => /used to throw on impl#1 \(HTTP 500, caller aborted\); it now continues past it/.test(i.message))).toBe(true);
   });
 
-  test("values: const / let / plain reassignment / return with `.get()` / `.all()` / bare", () => {
+  test("values: const / let / keywordless `x =` / return with `.get()` / `.all()` / bare, a WITH-led read", () => {
     const src = program([
       "  ${ function load() {",
       `      const a = ${q("SELECT n FROM t")}.get()`,
@@ -69,7 +110,8 @@ describe("sql-failable — rewrites", () => {
       `      const c = ${q("SELECT n FROM t")}`,
       "      let d = not",
       `      d = ${q("SELECT n FROM t WHERE n = 1")}.get()`,
-      "      log(a, b, c, d)",
+      `      const e = ${q("WITH x AS (SELECT n FROM t) SELECT n FROM x")}.all()`,
+      "      log(a, b, c, d, e)",
       `      return ${q("SELECT n FROM t WHERE n = 2")}.get()`,
       "  } }",
       "  ${ function list() {",
@@ -88,6 +130,7 @@ describe("sql-failable — rewrites", () => {
     expect(r.output).toContain(`let b = ${q("SELECT n FROM t")}.all() ${EMPTY}\n`);
     expect(r.output).toContain(`const c = ${q("SELECT n FROM t")} ${EMPTY}\n`);
     expect(r.output).toContain(`d = ${q("SELECT n FROM t WHERE n = 1")}.get() ${NOT}\n`);
+    expect(r.output).toContain(`const e = ${q("WITH x AS (SELECT n FROM t) SELECT n FROM x")}.all() ${EMPTY}\n`);
     expect(r.output).toContain(`return ${q("SELECT n FROM t WHERE n = 2")}.get() ${NOT}\n`);
     expect(r.output).toContain(`return ${q("SELECT n FROM t")}.all() ${EMPTY}\n`);
     expect(r.output).toContain(`return ${q("SELECT n FROM t")} ${EMPTY}\n`);
@@ -124,7 +167,58 @@ describe("sql-failable — rewrites", () => {
     const twice = fix(once.output);
     expect(twice.changed).toBe(false);
     expect(twice.output).toBe(once.output);
-    expect(twice.blockers).toEqual([]);
+    expect(reasons(twice)).toEqual(reasons(once));
+  });
+});
+
+describe("sql-failable — writes listed, never rewritten (S455)", () => {
+  test("`.run()`, a bare statement, INSERT/UPDATE/DELETE/REPLACE … RETURNING via `.get()`/`.all()`/bare, WITH-led, comment-led, unclassifiable — in every rewrite position", () => {
+    const src = program([
+      "  ${ function save(id) {",
+      `      ${q("INSERT INTO t (n) VALUES (1)")}.run()`,
+      `      ${q("DELETE FROM t WHERE n = 0")}`,
+      `      ${q("SELECT n FROM t")}.run()`,
+      "      if (id > 1) {",
+      `          ${q("UPDATE t SET n = 2")}.run()`,
+      "      }",
+      `      const a = ${q("INSERT INTO t (n) VALUES (2) RETURNING id")}.get()`,
+      `      let b = ${q("UPDATE t SET n = 3 RETURNING n")}.all()`,
+      `      const c = ${q("WITH x AS (SELECT 1) DELETE FROM t RETURNING *")}`,
+      "      let d = not",
+      `      d = ${q("REPLACE INTO t (n) VALUES (4) RETURNING n")}.get()`,
+      `      const e = ${q("-- read?\nDELETE FROM t RETURNING n")}.all()`,
+      "      log(a, b, c, d, e)",
+      `      return ${q("INSERT INTO t (n) VALUES (5) RETURNING id")}.get()`,
+      "  } }",
+      "  <button onclick={ @out = save(1) !{ .Transport(_) :> { return } } }>go</button>",
+    ]);
+    const r = fix(src);
+    expect(r.changed).toBe(false);
+    expect(r.output).toBe(src);
+    expect(r.infos).toEqual([]);
+    const w = r.blockers.filter((b) => /WRITE/.test(b.reason));
+    expect(w.length).toBe(10);
+    expect(w.every((b) => /a failure throws today/.test(b.reason) && /swallow it silently/.test(b.reason) && /move it into a `!` function/.test(b.reason))).toBe(true);
+    expect(w.some((b) => /`\.run\(\)`/.test(b.reason))).toBe(true);
+    expect(w.some((b) => /a bare `\?\{…\}` statement/.test(b.reason))).toBe(true);
+    expect(w.some((b) => /not provably a pure SELECT/.test(b.reason))).toBe(true);
+  });
+  test("reads and writes in one function: the reads are rewritten, the writes listed (S239: admin-panel doRevokeKey shape)", () => {
+    const src = program([
+      "  ${ function revoke(id) {",
+      `      const key = ${q("SELECT id FROM api_keys WHERE id = ${id}")}.get()`,
+      `      ${q("UPDATE api_keys SET revoked = 1 WHERE id = ${id}")}.run()`,
+      `      ${q("INSERT INTO admin_log (action) VALUES ('revoked')")}.run()`,
+      "      return key",
+      "  } }",
+      "  <button onclick={ @out = revoke(1) !{ .Transport(_) :> { return } } }>go</button>",
+    ]);
+    const r = fix(src);
+    expect(r.output).toContain(`.get() ${NOT}\n`);
+    expect(r.output).toContain(`${q("UPDATE api_keys SET revoked = 1 WHERE id = ${id}")}.run()\n`);
+    expect(r.output).toContain(`${q("INSERT INTO admin_log (action) VALUES ('revoked')")}.run()\n`);
+    expect(r.applied.length).toBe(1);
+    expect(r.blockers.filter((b) => /WRITE/.test(b.reason)).length).toBe(2);
   });
 });
 
@@ -200,7 +294,7 @@ describe("sql-failable — listed, never rewritten", () => {
     listedOnly(["  ${ function a() {", `      let x = ${q("SELECT n FROM t")}.first()`, "      return x", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /not a §44.3 terminator/);
     listedOnly(["  ${ function a() {", `      const n = ${q("SELECT n FROM t")}.all().length`, "      return n", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /inside an expression/);
     listedOnly(["  ${ function a() {", `      ${q("UPDATE t SET n = 1")}.nobatch().run()`, "      return 1", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /nobatch/);
-    listedOnly(["  ${ function a() {", `      const r = ${q("UPDATE t SET n = 1")}.run()`, "      return 1", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /`\.run\(\)` as a value/);
+    listedOnly(["  ${ function a() {", `      const r = ${q("UPDATE t SET n = 1")}.run()`, "      return 1", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /WRITE \(`\.run\(\)`\)/);
   });
   test("a declaration in a nested block / loop, or captured by a closure (impl#1 lowers a handled declaration to `var`)", () => {
     listedOnly([
@@ -236,7 +330,7 @@ describe("sql-failable — listed, never rewritten", () => {
   test("a body-split function (it also writes a cell)", () => {
     listedOnly([
       "  ${ function a() {",
-      `      ${q("UPDATE t SET n = 1")}.run()`,
+      `      ${q("SELECT n FROM t")}.get()`,
       "      @out = \"done\"",
       "  } }",
       "  <button onclick={ a() !{ .Transport(_) :> { return } } }>a</button>",
@@ -248,11 +342,11 @@ describe("sql-failable — listed, never rewritten", () => {
   test("the gate: a rewrite that changes impl#1's codes reverts the WHOLE file (a handled `?{}` in a `fn` loses E-FN-001 on impl#1)", () => {
     const src = program([
       "  ${ function ok() {",
-      `      ${q("UPDATE t SET n = 1")}.run()`,
+      `      ${q("SELECT n FROM t")}.get()`,
       "      return 1",
       "  } }",
       "  ${ fn bad() {",
-      `      ${q("UPDATE t SET n = 2")}.run()`,
+      `      ${q("SELECT n FROM t WHERE n = 2")}.get()`,
       "      return 2",
       "  } }",
       "  <button onclick={ @out = ok() !{ .Transport(_) :> { return } } }>a</button>",
@@ -283,14 +377,14 @@ describe("sql-failable — listed, never rewritten", () => {
   test("a listed site does not stop the other sites in the file", () => {
     const src = program([
       "  ${ function a() {",
-      `      ${q("UPDATE t SET n = 1")}.run()`,
+      `      ${q("SELECT n FROM t WHERE n = 1")}.get()`,
       `      lift ${q("SELECT n FROM t")}.all()`,
       "  } }",
       "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>",
     ]);
     const r = fix(src);
     expect(r.changed).toBe(true);
-    expect(r.output).toContain(`${q("UPDATE t SET n = 1")}.run() ${CONT}\n`);
+    expect(r.output).toContain(`${q("SELECT n FROM t WHERE n = 1")}.get() ${NOT}\n`);
     expect(r.output).toContain(`      lift ${q("SELECT n FROM t")}.all()\n`);
     expect(reasons(r).some((x) => /inside a `lift`/.test(x))).toBe(true);
   });

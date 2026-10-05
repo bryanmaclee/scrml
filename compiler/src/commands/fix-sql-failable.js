@@ -8,33 +8,37 @@
  * "then go on F8" ("alongside the owed R11 rule"), unblocked by the S454 freeze exception (#1305).
  * change-id: s455-scrml-fix-r11-sql-failable.
  *
- * ═══ THE REWRITE ═══
+ * ═══ THE REWRITE — READS ONLY (S455 "b your rec on R11") ═══
  *
- * At an UNHANDLED `?{}` outside a `!` function the rule writes the SUPERSEDED §19.8.3 meaning out
- * (failed `.get()` → `not`, failed `.all()` → `[]`, no error raised). The arm is §18.2 (no leading
- * `|`, S452):
+ * At an UNHANDLED `?{}` READ outside a `!` function the rule writes the SUPERSEDED §19.8.3 meaning
+ * out (failed `.get()` → `not`, failed `.all()` → `[]`). The arm is §18.2 (no leading `|`, S452):
  *
- *     ?{…}.get()   →  ?{…}.get() !{ _ :> not }
- *     ?{…}.all()   →  ?{…}.all() !{ _ :> [] }
- *     ?{…}         →  ?{…} !{ _ :> [] }          (a bare `?{}` is `.all()`, §44.3)
- *     ?{…}.run()   →  ?{…}.run() !{ _ :> {} }    (statement position only)
+ *     ?{`SELECT …`}.get()   →  ?{`SELECT …`}.get() !{ _ :> not }
+ *     ?{`SELECT …`}.all()   →  ?{`SELECT …`}.all() !{ _ :> [] }
+ *     ?{`SELECT …`}         →  ?{`SELECT …`} !{ _ :> [] }     (value position; bare = `.all()`, §44.3)
  *
- * ⚠ impl#1 never implemented that superseded meaning at run time: an unhandled `?{}` that fails to
+ * A WRITE is LISTED, never rewritten (S455 ruling — supersedes S451 5(a)'s `.run() !{ _ :> {} }`
+ * shape): a fallback arm on a failed write lets the function continue as if it had succeeded (S239
+ * review: samples/admin-panel doRevokeKey — the UPDATE fails, the audit INSERT records "revoked", the
+ * client sees success). A write is any `.run()`, any bare `?{}` statement, and any `.get()` / `.all()`
+ * / bare value whose SQL is not provably a pure read (`classifySql` — a lead-keyword scan of the
+ * query text in the tree: comments, leading parens and `WITH` clauses skipped; INSERT / UPDATE /
+ * DELETE / REPLACE / UPSERT / MERGE, `… RETURNING`, a data-modifying CTE, `SELECT … INTO`, more than
+ * one statement, or anything unclassifiable = WRITE, fail closed).
+ *
+ * ⚠ impl#1 never implemented the superseded meaning at run time: an unhandled `?{}` that fails to
  * run THROWS on the server (HTTP 500; the caller aborts) — `g-sql-error-surface-unwired`. Since
- * #1305 a HANDLED `?{}` is really caught. So on impl#1 the rewrite changes the FAILURE path from
- * "throws" to the ruled `not` / `[]` / continue (measured, docs/changes/s455-…/progress.md Phase 0).
- * Every rewritten site therefore carries an INFO saying so. The two success paths (a row / no row)
- * are unchanged.
+ * #1305 a HANDLED `?{}` is really caught. So on impl#1 the rewrite changes a read's FAILURE path
+ * from "throws" to the ruled `not` / `[]` (measured, docs/changes/s455-…/progress.md Phase 0). Every
+ * rewritten site carries an INFO saying so. The two success paths (a row / no row) are unchanged.
  *
- * Positions REWRITTEN (Phase 0: success values identical on impl#1, both implementations accept the
- * handled spelling, the failure yields exactly the superseded value) — in the body of a
- * server-placed, non-body-split function, reached only through `if` / `for` / `while` bodies:
- *   - a whole statement `?{…}[.get()|.all()|.run()]`;
+ * Positions REWRITTEN (reads only) — in the body of a server-placed, non-body-split function, reached
+ * only through `if` / `for` / `while` bodies:
+ *   - a whole statement `?{…}.get()` / `.all()` (its value discarded);
  *   - the right-hand side of a `const` / `let` declaration directly in the function body (not
- *     nested, not captured by a closure — impl#1 lowers a guarded declaration to `var`), `.get()` /
- *     `.all()` / bare only;
- *   - the right-hand side of a plain reassignment `x = ?{…}` (`.get()` / `.all()` / bare);
- *   - a `return ?{…}` (`.get()` / `.all()` / bare).
+ *     nested, not captured by a closure — impl#1 lowers a guarded declaration to `var`);
+ *   - the right-hand side of a keywordless `x = ?{…}` (same nesting / capture limit);
+ *   - a `return ?{…}`.
  *
  * Positions LISTED, never rewritten (reported for a human): a `?{}` inside an expression (an `if`
  * condition, a `for … of` iterable, an operand — impl#1 / the bootstrap mis-handle the handled
@@ -42,7 +46,7 @@
  * moves the write to the server), at a body top / in markup (impl#1 cannot run it there), in a
  * `transaction { }` / `defer` body / `yield` / closure / handler or match arm, a terminator other
  * than `.get()` / `.all()` / `.run()` (`.first()`, `.prepare()`, a chained member), `.nobatch()`,
- * `.run()` in a value position (no superseded value), a transaction-control statement (`BEGIN` …),
+ * every WRITE (above), a transaction-control statement (`BEGIN` …),
  * a nested / captured declaration, and any `?{}` in a function impl#1 does not place on the server
  * or splits across client and server (body-split).
  *
@@ -77,9 +81,114 @@ import { skipBalanced, endsStatement, lineOf, scratchProject, compileWithRI, pro
 
 export const SQL_FAILABLE_RULE = "sql-failable";
 
-/** The arm the rule writes, per terminator (S451 item 5(a); §18.2 arm, no leading `|`). */
-export const SQL_FALLBACK = Object.freeze({ get: "!{ _ :> not }", all: "!{ _ :> [] }", bare: "!{ _ :> [] }", run: "!{ _ :> {} }" });
-const FALLBACK_WORD = { get: "`not`", all: "`[]`", bare: "`[]`", run: "nothing — execution continues" };
+/** The arm the rule writes on a READ, per terminator (S451 item 5(a); §18.2 arm, no leading `|`). */
+export const SQL_FALLBACK = Object.freeze({ get: "!{ _ :> not }", all: "!{ _ :> [] }", bare: "!{ _ :> [] }" });
+const FALLBACK_WORD = { get: "`not`", all: "`[]`", bare: "`[]`" };
+
+/** Keywords that make a statement a WRITE wherever they appear outside quoted text / comments. */
+const WRITE_WORDS = new Set(["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "RETURNING", "INTO", "CREATE", "DROP", "ALTER", "TRUNCATE", "ATTACH", "DETACH", "VACUUM", "REINDEX", "GRANT", "REVOKE", "COPY", "CALL", "DO", "LOCK", "SET", "PRAGMA"]);
+const READ_LEADS = new Set(["SELECT", "VALUES"]);
+
+/**
+ * Tokenize SQL text as the tree holds it. Skips `--` / block comments, '…' / "…" / `…` / […] quoted
+ * text and `${…}` interpolations (a bound parameter, never SQL). Returns upper-cased word tokens
+ * (with their paren depth) and the punctuation `(` `)` `;` `,` — or null when a quote, comment,
+ * interpolation or paren is unterminated (unclassifiable).
+ */
+function sqlTokens(text) {
+  const out = [];
+  let i = 0;
+  let depth = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "-" && text[i + 1] === "-") { const e = text.indexOf("\n", i); i = e === -1 ? n : e + 1; continue; }
+    if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); if (e === -1) return null; i = e + 2; continue; }
+    if (c === "$" && text[i + 1] === "{") {
+      let d = 0;
+      let k = i + 1;
+      for (; k < n; k++) { if (text[k] === "{") d++; else if (text[k] === "}" && --d === 0) break; }
+      if (k >= n) return null;
+      out.push({ t: "?", depth });
+      i = k + 1;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`" || c === "[") {
+      const close = c === "[" ? "]" : c;
+      let k = i + 1;
+      for (; k < n; k++) {
+        if (text[k] !== close) continue;
+        if (c !== "[" && text[k + 1] === close) { k++; continue; } // doubled quote = escaped
+        break;
+      }
+      if (k >= n) return null;
+      out.push({ t: c === "'" ? "'str" : "ident", depth });
+      i = k + 1;
+      continue;
+    }
+    if (c === "(") { out.push({ t: "(", depth }); depth++; i++; continue; }
+    if (c === ")") { depth--; if (depth < 0) return null; out.push({ t: ")", depth }); i++; continue; }
+    if (c === ";" || c === ",") { out.push({ t: c, depth }); i++; continue; }
+    const m = /^[A-Za-z_][A-Za-z0-9_$]*/.exec(text.slice(i));
+    if (m) { out.push({ t: m[0].toUpperCase(), word: true, depth }); i += m[0].length; continue; }
+    out.push({ t: c, depth });
+    i++;
+  }
+  return depth === 0 ? out : null;
+}
+
+/**
+ * Is this SQL text provably a pure READ? `"read"` only when, outside comments / quoted text /
+ * interpolations: it is ONE statement (nothing after a `;`), no write keyword (WRITE_WORDS — incl.
+ * RETURNING, `SELECT … INTO`, a data-modifying CTE body, PRAGMA) appears anywhere, and its lead
+ * keyword — after leading parens and any `WITH [RECURSIVE] name [(cols)] AS [NOT] [MATERIALIZED]
+ * ( … )` clauses — is SELECT or VALUES. `replace(…)` as SQLite's string function is not the REPLACE
+ * statement. Everything else, including text the scan cannot read, is `"write"` (fail closed).
+ * @param {string} text
+ * @returns {"read"|"write"}
+ */
+export function classifySql(text) {
+  const toks = sqlTokens(String(text ?? ""));
+  if (!toks || toks.length === 0) return "write";
+  const semi = toks.findIndex((t) => t.t === ";");
+  if (semi !== -1 && toks.slice(semi + 1).some((t) => t.t !== ";")) return "write";
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (!t.word || !WRITE_WORDS.has(t.t)) continue;
+    // `replace(x, y, z)` in an expression (preceded by an operand position, followed by `(`).
+    if (t.t === "REPLACE" && i > 0 && toks[i + 1]?.t === "(" && !["INTO", "OR"].includes(toks[i - 1]?.t)) continue;
+    return "write";
+  }
+  let i = 0;
+  while (toks[i]?.t === "(") i++;
+  // skip `( … )` balanced from the `(` at index j; returns the index after its `)`
+  const skipGroup = (j) => {
+    const d = toks[j].depth;
+    let k = j + 1;
+    while (k < toks.length && !(toks[k].t === ")" && toks[k].depth === d)) k++;
+    return k + 1;
+  };
+  if (toks[i]?.t === "WITH") {
+    i++;
+    if (toks[i]?.t === "RECURSIVE") i++;
+    for (;;) {
+      if (!(toks[i]?.word || toks[i]?.t === "ident")) return "write";
+      i++;
+      if (toks[i]?.t === "(") i = skipGroup(i);
+      if (toks[i]?.t !== "AS") return "write";
+      i++;
+      if (toks[i]?.t === "NOT") i++;
+      if (toks[i]?.t === "MATERIALIZED") i++;
+      if (toks[i]?.t !== "(") return "write";
+      i = skipGroup(i);
+      if (toks[i]?.t === ",") { i++; continue; }
+      break;
+    }
+    while (toks[i]?.t === "(") i++;
+  }
+  return READ_LEADS.has(toks[i]?.t) ? "read" : "write";
+}
 
 /** Statement containers a rewritten `?{}` may sit under, between its function and itself. */
 const CONTAINERS = new Set(["if-stmt", "for-stmt", "while-stmt", "do-while-stmt", "block"]);
@@ -185,6 +294,18 @@ export function collectSqlSites(ast, ri) {
     if (sql.nobatch) return { ...base, action: "list", kind: "nobatch", reason: "an unhandled `?{…}.nobatch()` — handle it by hand (§19.8.3, §8.9.5)" };
     if (chain.length > 1) return { ...base, action: "list", kind: "expression", reason: `an unhandled \`?{}\` whose result is used inside an expression (\`.${chain.map((c) => c.method).join("().")}()\`) — handle it by hand (§19.8.3)` };
     const term = chain.length === 0 ? "bare" : chain[0].method;
+    // READS ONLY (S455 "b your rec on R11"): a write is listed — a fallback arm would swallow its failure.
+    const isStatement = STATEMENT_PARENTS.has(parent.kind);
+    const writeWhy = term === "run" ? "`.run()`"
+      : term === "bare" && isStatement ? "a bare `?{…}` statement"
+      : classifySql(sql.query) === "write" ? "a statement that is not provably a pure SELECT (an INSERT / UPDATE / DELETE / REPLACE / UPSERT, `… RETURNING`, a data-modifying `WITH`, or SQL the rule cannot classify)"
+      : null;
+    if (writeWhy) {
+      return {
+        ...base, action: "list", kind: "write",
+        reason: `an unhandled \`?{}\` WRITE (${writeWhy}): on impl#1 a failure throws today (HTTP 500, nothing after it runs); a fallback arm would swallow it silently and let the function continue as if it succeeded — handle it (retry, surface the failure, or move it into a \`!\` function and handle the result at the caller) (§19.8.3, S455)`,
+      };
+    }
     if (!(term in SQL_FALLBACK) || (chain[0] && String(chain[0].args ?? "").trim() !== "")) return { ...base, action: "list", kind: "terminator", reason: `an unhandled \`?{…}.${term}()\` — not a §44.3 terminator the superseded rule defined a value for; handle it by hand (§19.8.3)` };
     // Placement — impl#1's own Route Inference.
     const route = routeOf(ri, fn);
@@ -194,12 +315,10 @@ export function collectSqlSites(ast, ri) {
     // Position.
     if (STATEMENT_PARENTS.has(parent.kind)) return { ...base, action: "rewrite", kind: "statement", term, fn };
     if (parent.kind === "return-stmt") {
-      if (term === "run") return { ...base, action: "list", kind: "run-value", reason: "`return ?{…}.run()` — `.run()` has no superseded value; handle it by hand (§19.8.3)" };
       return { ...base, action: "rewrite", kind: "return", term, fn, stmt: parent };
     }
     // const / let (impl#1 records a plain reassignment `x = …` as a const-decl with `_bareAssign`).
     if (parent.sqlNode !== sql) return { ...base, action: "list", kind: "expression", reason: "an unhandled `?{}` inside a declaration's initializer expression — handle it by hand (§19.8.3)" };
-    if (term === "run") return { ...base, action: "list", kind: "run-value", reason: "`.run()` as a value — it has no superseded value; handle it by hand (§19.8.3)" };
     // A keywordless `x = ?{…}` is a reassignment when `x` is already bound, and impl#1's implicit
     // declaration otherwise (base emits `const x = …`); handled, impl#1 emits `var x` for the
     // latter (measured S455 Phase 2), so the same nested / captured hazard applies to both.
@@ -363,7 +482,7 @@ export function fixSqlFailable(source, opts = {}) {
     for (const e of uniq) {
       infos.push({
         rule: SQL_FAILABLE_RULE, line: e.line,
-        message: `a failure here used to throw on impl#1 (HTTP 500, caller aborted); it now ${e.term === "run" || e.kind === "statement" ? "continues" : `yields ${FALLBACK_WORD[e.term]}`} — the §19.8.3 meaning made explicit; change the arm to handle it`,
+        message: `a failure here used to throw on impl#1 (HTTP 500, caller aborted); it now ${e.kind === "statement" ? "continues past it" : `yields ${FALLBACK_WORD[e.term]}`} — the §19.8.3 meaning made explicit; change the arm to handle it`,
       });
     }
     return { output, changed: output !== source, applied, blockers, infos };
