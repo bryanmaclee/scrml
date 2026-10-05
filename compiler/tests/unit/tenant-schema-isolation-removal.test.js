@@ -90,27 +90,35 @@ describe("(i) isolation removal — charged", () => {
   });
 });
 
-describe("(i) not an isolation removal", () => {
-  const quiet = [
+const NA = "statement not admitted in a tenant schema*";
+
+describe("(i) the app-role grant is admitted; other privilege / session statements are not admitted", () => {
+  for (const s of [
     `GRANT SELECT, INSERT, UPDATE, DELETE ON assets TO ${DBAUTH_ROLE}`,
     `GRANT SELECT ON TABLE public.assets TO "${DBAUTH_ROLE}"`,
     `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${DBAUTH_ROLE}`,
-    "GRANT SELECT ON config TO PUBLIC",                         // not a tenant table
+    `GRANT SELECT ON config TO ${DBAUTH_ROLE}`,
+  ]) test(`admitted: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+  // not isolation removals of a tenant table, but outside the allow-list (S455 "your rec on the allow-list")
+  for (const s of [
+    "GRANT SELECT ON config TO PUBLIC",
     "DROP POLICY p ON config",
     "ALTER TABLE config DISABLE ROW LEVEL SECURITY",
     "CREATE ROLE ok NOLOGIN NOBYPASSRLS",
     "ALTER ROLE ok NOSUPERUSER",
     "SET search_path = public",
-    "PRAGMA foreign_keys = ON",                                 // SQLite, names no table
-  ];
-  for (const s of quiet) test(s, () => expect(kindsOf(s)).toEqual([]));
+    "PRAGMA foreign_keys = ON",
+  ]) test(`not admitted: ${s}`, () => expect(kindsOf(s)).toEqual([NA]));
   test("no tenant table in the compilation → nothing is charged at all", () => {
-    expect(findSchemaTenantHazards(body(CONFIG, "CREATE ROLE ops BYPASSRLS", "SET row_security = off"), [])).toEqual([]);
+    expect(findSchemaTenantHazards(body(CONFIG, "CREATE ROLE ops BYPASSRLS", "SET row_security = off", "DROP TABLE config"), [])).toEqual([]);
   });
 });
 
-describe("(ii) the CLOSED exemption list — CREATE INDEX, ALTER TABLE … ADD COLUMN, ANALYZE, REINDEX", () => {
-  const exempt = [
+// ruling:user-voice-scrml.md S455 "your rec on the allow-list" — a tenant compilation's
+// <schema> admits a CLOSED set of statement kinds; everything else is charged, whether or
+// not it names a tenant table.
+describe("the statement-kind ALLOW-LIST", () => {
+  const admitted = [
     "CREATE INDEX ix ON assets (name)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix ON public.assets (name)",
     "ALTER TABLE assets ADD COLUMN extra TEXT",
@@ -119,35 +127,91 @@ describe("(ii) the CLOSED exemption list — CREATE INDEX, ALTER TABLE … ADD C
     `ALTER TABLE "assets" ADD COLUMN "extra" TEXT`,
     "alter table public.assets add column extra text",
     "ALTER TABLE assets ADD COLUMN tenant_id TEXT",              // the item-2 scoping declaration
-    "ALTER TABLE config ADD COLUMN aid INTEGER REFERENCES assets(id)",   // a plain FK: no action
+    "ALTER TABLE config ADD COLUMN aid INTEGER REFERENCES assets(id)",
+    "ALTER TABLE assets ALTER COLUMN name SET NOT NULL",
+    "ALTER TABLE assets ALTER name DROP NOT NULL",
+    "ALTER TABLE assets ALTER COLUMN name SET DEFAULT 'x'",
+    "ALTER TABLE assets ALTER COLUMN name DROP DEFAULT",
+    "ALTER TABLE assets RENAME COLUMN name TO title",
+    "ALTER TABLE assets RENAME name TO title",
+    "ALTER TABLE assets ADD CONSTRAINT c CHECK (length(name) > 0)",
+    "ALTER TABLE assets ADD CHECK (id > 0)",
+    "ALTER TABLE config ADD CONSTRAINT fk FOREIGN KEY (k) REFERENCES assets(name)",
+    "ALTER TABLE config ADD FOREIGN KEY (k) REFERENCES assets(name) ON DELETE RESTRICT ON UPDATE NO ACTION",
+    "COMMENT ON TABLE assets IS 'tenant data'",
+    "COMMENT ON COLUMN assets.name IS 'x'",
     "ANALYZE assets",
     "REINDEX assets",
-  ];
-  for (const s of exempt) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
-
-  // Everything the old INERT_LEADERS / own-target rule exempted that names a tenant table — now charged.
-  const moved = [
-    "DROP TABLE assets",
-    "DROP TABLE IF EXISTS public.assets",
-    "DROP TRIGGER t ON assets",
-    "PRAGMA table_info(assets)",
-    "COMMENT ON TABLE assets IS 'tenant data'",
-    "REVOKE SELECT ON assets FROM bob",
     "VACUUM assets",
-    "ALTER TABLE assets RENAME COLUMN name TO title",
+    "CREATE POLICY p ON config AS RESTRICTIVE USING (true)",
+  ];
+  for (const s of admitted) test(`admitted: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+
+  const notAdmittedStmts = [
+    "DROP TABLE assets",
+    "DROP TABLE config",                                           // names no tenant table — still charged
+    "DROP TRIGGER t ON assets",
+    "DROP INDEX ix",
+    "PRAGMA table_info(assets)",
+    "REVOKE SELECT ON assets FROM bob",
     "ALTER TABLE assets DROP COLUMN name",
-    "ALTER TABLE assets ALTER COLUMN name SET NOT NULL",
+    "ALTER TABLE assets ALTER COLUMN name TYPE TEXT",
     "ALTER TABLE assets ADD CONSTRAINT u UNIQUE (name)",
     "ALTER TABLE assets ADD PRIMARY KEY (id)",
     "ALTER TABLE assets ADD COLUMN extra TEXT, DROP COLUMN name",
     "ALTER TABLE assets ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE assets FORCE ROW LEVEL SECURITY",
-    "ALTER TABLE config ADD CONSTRAINT fk FOREIGN KEY (k) REFERENCES assets(name)",
+    "ALTER TABLE config RENAME TO cfg",
+    "INSERT INTO config (k, v) VALUES ('a', 'b')",
+    "CREATE SEQUENCE s",
+    "CREATE TYPE mood AS ENUM ('a', 'b')",
+    "BEGIN",
+    // every reviewer finding from the r1 isolation review
+    `GRANT ${DBAUTH_ROLE} TO evil`,
+    `CREATE ROLE evil IN ROLE ${DBAUTH_ROLE}`,
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC",
+    "REASSIGN OWNED BY app TO evil",
+    "CREATE PUBLICATION pub FOR ALL TABLES",
+    "CREATE EXTENSION dblink",
+    "SELECT dblink_exec('host=x', 'DELETE FROM assets')",
+    "RESET ROLE",
+    "SELECT set_config('row_security', 'off', false)",
+    "ALTER DATABASE app SET row_security = off",
   ];
-  for (const s of moved) test(`charged (was exempt): ${s}`, () => expect(kindsOf(s)).toEqual(["statement"]));
+  for (const s of notAdmittedStmts) test(`not admitted: ${s}`, () => expect(kindsOf(s)).toEqual([NA]));
 
-  test("an ADD COLUMN holding a `${…}` is unreadable, so not exempt", () => {
-    expect(kindsOf("ALTER TABLE assets ADD COLUMN ${col} TEXT")).toEqual(["statement"]);
+  test("an ADD COLUMN holding a `${…}` is unreadable, so charged", () => {
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN ${col} TEXT")).toEqual(["statement*"]);
+  });
+  test("a cascading FK constraint is not admitted (and the FK rule names its tenant end)", () => {
+    expect(kindsOf("ALTER TABLE config ADD CONSTRAINT f FOREIGN KEY (k) REFERENCES assets(name) ON DELETE CASCADE").sort())
+      .toEqual(["foreign key", NA]);
+    expect(kindsOf("ALTER TABLE config ADD CONSTRAINT f FOREIGN KEY (k) REFERENCES other(x) ON DELETE SET NULL")).toEqual([NA]);
+  });
+  test("the message names the kind and sends roles / privileges to deploy / ops", () => {
+    const b = body(ASSETS, "CREATE EXTENSION dblink");
+    const [h] = findSchemaTenantHazards(b, ["assets"]);
+    const m = schemaHazardMessage(h, b);
+    expect(m).toContain("a statement not admitted in a tenant schema");
+    expect(m).toContain("`CREATE EXTENSION` is not an admitted statement kind");
+    expect(m).toContain("belong to deploy / ops");
+  });
+  test("the realistic SaaS schema compiles clean", () => {
+    const saas = [
+      "CREATE TABLE invoices (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, n serial, amount numeric(10,2) CHECK (amount >= 0), customer_id uuid, deleted_at timestamptz, tenant_id text NOT NULL)",
+      "CREATE TABLE customers (id uuid PRIMARY KEY, email text NOT NULL, tenant_id text NOT NULL)",
+      "CREATE TABLE rooms (room int, during tsrange, EXCLUDE USING gist (room WITH =, during WITH &&))",
+      "CREATE UNIQUE INDEX inv_live ON invoices (id) WHERE deleted_at IS NULL",
+      "CREATE INDEX cust_email ON customers (lower(email))",
+      "ALTER TABLE invoices ALTER COLUMN customer_id SET NOT NULL",
+      "ALTER TABLE invoices RENAME COLUMN n TO number",
+      "ALTER TABLE invoices ADD CONSTRAINT inv_cust FOREIGN KEY (customer_id) REFERENCES customers(id)",
+      "COMMENT ON TABLE invoices IS 'billing'",
+      "VACUUM invoices",
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON invoices TO ${DBAUTH_ROLE}`,
+    ];
+    const b = body(...saas);
+    expect(findSchemaTenantHazards(b, ["invoices", "customers"])).toEqual([]);
   });
 });
 
@@ -164,8 +228,8 @@ describe("review #1 — only `scrml_app` (unquoted, any case) or exactly `\"scrm
     `GRANT SELECT ON assets TO SCRML_APP`,
     `GRANT SELECT ON assets TO "scrml_app"`,
   ]) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
-  test(`GRANT admin TO "SCRML_APP" is not a grant to the app role (a different role) — not charged as one`, () => {
-    expect(kindsOf(`GRANT admin TO "SCRML_APP"`)).toEqual([]);
+  test(`GRANT admin TO "SCRML_APP" is not a grant to the app role (a different role) — not admitted, not an isolation removal`, () => {
+    expect(kindsOf(`GRANT admin TO "SCRML_APP"`)).toEqual(["statement not admitted in a tenant schema*"]);
     expect(kindsOf(`GRANT admin TO "scrml_app"`)).toEqual(["isolation removal*"]);
   });
 });
@@ -186,7 +250,7 @@ describe("review #6 — every expression in an exempt statement is held to the f
   ];
   for (const s of code) test(`charged: ${s}`, () => expect(kindsOf(s)).toEqual(["statement*"]));
   test("charged: ALTER TABLE assets ADD COLUMN x TEXT DEFAULT ${dflt} (an unreadable ADD COLUMN is not exempt)", () => {
-    expect(kindsOf("ALTER TABLE assets ADD COLUMN x TEXT DEFAULT ${dflt}")).toEqual(["statement"]);
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN x TEXT DEFAULT ${dflt}")).toEqual(["statement*"]);
   });
   const fine = [
     "CREATE INDEX ix ON assets (lower(name))",
@@ -301,8 +365,8 @@ describe("view / trigger bodies — FROM inside a call's arguments is not a tabl
 });
 
 describe("reporting — every hazard is reported, not one per table", () => {
-  test("an ADD CONSTRAINT CHECK and a DROP COLUMN on the same table are both reported", () => {
-    const hs = findSchemaTenantHazards(body(ASSETS, "ALTER TABLE assets ADD CONSTRAINT c CHECK (id > 0)", "ALTER TABLE assets DROP COLUMN name"), ["assets"]);
+  test("two charged statements on the same table are both reported", () => {
+    const hs = findSchemaTenantHazards(body(ASSETS, "ALTER TABLE assets ADD CONSTRAINT u UNIQUE (id)", "ALTER TABLE assets DROP COLUMN name"), ["assets"]);
     expect(hs).toHaveLength(2);
   });
 });

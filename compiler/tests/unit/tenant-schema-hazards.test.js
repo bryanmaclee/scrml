@@ -112,7 +112,7 @@ describe("(3) foreign keys with CASCADE / SET NULL / SET DEFAULT, either end ten
     // S455 "yes both": the ALTER is ALSO charged as a statement naming `assets` — `ADD
     // CONSTRAINT` is not on the closed exemption list (only `ADD COLUMN` is)
     expect(hazards(ASSETS, "ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (aid) REFERENCES assets(id) ON UPDATE CASCADE").map((h) => h.kind).sort())
-      .toEqual(["foreign key", "statement"]);
+      .toEqual(["foreign key", "statement not admitted in a tenant schema"]);
   });
   test("RESTRICT / NO ACTION / no action, and cascades between non-tenant tables, are not hazards", () => {
     expect(hazards(ASSETS, "CREATE TABLE notes (aid INTEGER REFERENCES assets(id) ON DELETE RESTRICT ON UPDATE NO ACTION)")).toEqual([]);
@@ -120,7 +120,8 @@ describe("(3) foreign keys with CASCADE / SET NULL / SET DEFAULT, either end ten
     expect(hazards(ASSETS, CONFIG, "CREATE TABLE notes (k TEXT REFERENCES config(k) ON DELETE CASCADE)")).toEqual([]);
   });
   test("an action the checker cannot tie to a declaring table is charged (unattributable)", () => {
-    const hs = hazards(ASSETS, "REFERENCES config(k) ON DELETE CASCADE");
+    // (S455 "your rec on the allow-list": the bare statement is also not an admitted kind)
+    const hs = hazards(ASSETS, "REFERENCES config(k) ON DELETE CASCADE").filter((h) => h.kind === "foreign key");
     expect(hs.map((h) => h.unattributable)).toEqual([true]);
     expect(hs[0].tables).toEqual(["assets"]);
   });
@@ -177,7 +178,8 @@ describe("fail-closed — what the checker cannot attribute is charged, never tr
   });
   test("other statements that move tenant rows: CREATE TABLE … AS SELECT, a virtual table over one, a rename", () => {
     expect(kinds(hazards(ASSETS, "CREATE TABLE snap AS SELECT * FROM assets"))).toEqual(["statement:CREATE TABLE snap"]);
-    expect(kinds(hazards(ASSETS, "CREATE VIRTUAL TABLE docs USING fts5(name, content='assets')"))).toEqual(["statement:CREATE VIRTUAL TABLE docs"]);
+    // S455 "your rec on the allow-list": a virtual table is not an admitted kind
+    expect(kinds(hazards(ASSETS, "CREATE VIRTUAL TABLE docs USING fts5(name, content='assets')"))).toEqual(["statement not admitted in a tenant schema:CREATE VIRTUAL TABLE docs:unattributable"]);
     expect(hazards(ASSETS, "ALTER TABLE assets RENAME TO archive")).toHaveLength(1);
   });
   test("bare DDL with no `;` between statements: one statement does not run into the next", () => {
@@ -240,8 +242,8 @@ describe("keyword-spelled identifiers never end or skip a parse (S455 review HIG
   });
   test("a column named `rename` is not a table rename; `RENAME TO` is", () => {
     expect(hazards(ASSETS, "ALTER TABLE assets ADD COLUMN rename TEXT")).toEqual([]);
-    // S455 "yes both": a column rename on a tenant table is not on the closed exemption list
-    expect(hazards(ASSETS, "ALTER TABLE assets RENAME COLUMN name TO title")).toHaveLength(1);
+    // S455 "your rec on the allow-list": RENAME COLUMN is an admitted ALTER TABLE action
+    expect(hazards(ASSETS, "ALTER TABLE assets RENAME COLUMN name TO title")).toEqual([]);
     expect(hazards(ASSETS, "ALTER TABLE assets RENAME TO archive")).toHaveLength(1);
   });
   test("a view whose columns are spelled `end` / `as` / `begin` is read to its end", () => {
@@ -289,8 +291,9 @@ describe("row-security POLICY on a tenant table: only AS RESTRICTIVE is exempt",
     expect(kinds(hazards(ASSETS, `CREATE POLICY p ON assets AS "restrictive" ${USING}`))).toEqual(["permissive policy:p:unattributable"]);
     expect(kinds(hazards(ASSETS, `CREATE POLICY p USING (true)`))).toEqual(["permissive policy:p:unattributable"]);
   });
-  test("a policy on a table without tenant_id is not charged", () => {
-    expect(hazards(ASSETS, CONFIG, "CREATE POLICY p ON config USING (true)")).toEqual([]);
+  test("a policy on a table without tenant_id: admitted only AS RESTRICTIVE (S455 \"your rec on the allow-list\")", () => {
+    expect(hazards(ASSETS, CONFIG, "CREATE POLICY p ON config AS RESTRICTIVE USING (true)")).toEqual([]);
+    expect(kinds(hazards(ASSETS, CONFIG, "CREATE POLICY p ON config USING (true)"))).toEqual(["statement not admitted in a tenant schema:CREATE POLICY p:unattributable"]);
   });
 });
 

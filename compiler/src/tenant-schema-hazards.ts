@@ -10,7 +10,14 @@
  * compile error at the declaration (`E-TENANT-SCHEMA-HAZARD`), whatever the
  * program's queries do.
  *
- * WHAT IS CHARGED (when the file declares at least one tenant-scoped table):
+ * THE STATEMENT KINDS ARE AN ALLOW-LIST (S455 "your rec on the allow-list"): in a
+ * compilation with a tenant-scoped table a `<schema>` admits only CREATE TABLE / INDEX /
+ * VIEW / TRIGGER, admitted ALTER TABLE actions, CREATE POLICY … AS RESTRICTIVE, GRANT …
+ * TO scrml_app, COMMENT ON, ANALYZE, REINDEX, VACUUM (`ADMITTED_PLAIN_LEADERS`,
+ * `alterAdmission`); everything else is charged ("statement not admitted in a tenant
+ * schema"), as is an isolation removal (`isolationRemoval`). WITHIN the admitted kinds:
+ *
+ * WHAT IS CHARGED (when the compilation declares at least one tenant-scoped table):
  *   1. a TRIGGER (any timing, `INSTEAD OF` included, on a table or a view) declared
  *      ON a tenant-scoped table, or whose body names one;
  *   2. a Postgres RULE on, or whose action names, a tenant-scoped table;
@@ -53,7 +60,8 @@ import { schemaTableDeclarations, DBAUTH_ROLE } from "./schema-differ.js";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
 export type SchemaHazardKind =
-  | "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy" | "isolation removal";
+  | "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy" | "isolation removal"
+  | "statement not admitted in a tenant schema";
 
 export interface SchemaHazard {
   kind: SchemaHazardKind;
@@ -617,19 +625,28 @@ const KNOWN_OBJECTS = new Set([
 ]);
 
 /**
- * The statement leaders exempt even when they name a tenant-scoped table — part of
- * the §14.8.10 CLOSED exemption list (ruling:user-voice-scrml.md S455 "yes both"):
- * `CREATE INDEX`, `ALTER TABLE … ADD COLUMN`, `ANALYZE`, `REINDEX`. Anything else that
- * names a tenant-scoped table is charged.
+ * THE STATEMENT-KIND ALLOW-LIST (§14.8.10, ruling:user-voice-scrml.md S455 "your rec on
+ * the allow-list"). In a compilation with ANY tenant-scoped table a `<schema>` admits
+ * ONLY: `CREATE TABLE` · `CREATE INDEX` (allow-listed expressions) · `ALTER TABLE` with
+ * admitted actions (`alterAdmission`) · `CREATE VIEW` / `CREATE TRIGGER` (hazard-checked) ·
+ * `CREATE POLICY … AS RESTRICTIVE` · `GRANT <privileges> ON … TO scrml_app` · `COMMENT ON`
+ * · `ANALYZE` · `REINDEX` · `VACUUM`. Every other statement is E-TENANT-SCHEMA-HAZARD,
+ * kind "statement not admitted in a tenant schema", whether or not it names a tenant
+ * table: privilege statements remove isolation without naming one (`GRANT scrml_app TO
+ * evil`, `ALTER DEFAULT PRIVILEGES … TO PUBLIC`, `REASSIGN OWNED`, `CREATE PUBLICATION
+ * FOR ALL TABLES`, an extension) and an enumerated deny-list never closes.
+ * Supersedes the S455 "yes both" (ii) exemption list over statements naming a tenant table.
  *
- * Until S455 "yes both" this set also held DROP, PRAGMA, COMMENT, GRANT, REVOKE,
- * VACUUM, BEGIN, COMMIT, END, ROLLBACK, SAVEPOINT, RELEASE and SET — which hid
- * `DROP POLICY scrml_tenant_iso ON assets`, `GRANT … ON assets TO PUBLIC` and
- * `SET row_security = off` (each passed clean). Those leaders are now read like any
- * other statement: charged when they name a tenant table, the isolation-removal
- * shapes under their own kind (`isolationRemoval`).
+ * These leaders evaluate no expression of their own; they are admitted outright (bar a `${…}`).
  */
-const INERT_LEADERS = new Set(["ANALYZE", "REINDEX"]);
+const ADMITTED_PLAIN_LEADERS = new Set(["COMMENT", "ANALYZE", "REINDEX", "VACUUM"]);
+
+/** The hazard kind for a statement outside the allow-list. */
+const NOT_ADMITTED = "statement not admitted in a tenant schema" as const;
+
+function notAdmitted(object: string, offset: number, allTenant: string[], why: string): SchemaHazard {
+  return { kind: NOT_ADMITTED, object, tables: allTenant, unattributable: true, offset, why };
+}
 
 /**
  * §14.8.11's bounded application role (`schema-differ.js` `DBAUTH_ROLE`, emitted as
@@ -645,12 +662,16 @@ const ADD_NOT_A_COLUMN = new Set([
 ]);
 
 /**
- * True when every action of an `ALTER TABLE` — its action tokens are `[from, to)` —
- * is `ADD [COLUMN] [IF NOT EXISTS] <column> …`: the closed list's `ALTER TABLE … ADD
- * COLUMN` (a non-tenant column, or `tenant_id` itself — the scoping declaration). A
- * `REFERENCES` inside a column definition is the foreign-key rule's business.
+ * The admitted `ALTER TABLE` actions (S455 "your rec on the allow-list"), over the action
+ * tokens `[from, to)` (comma-separated at depth 0):
+ *   `ADD [COLUMN] [IF NOT EXISTS] <col> …` · `ALTER [COLUMN] <col> SET NOT NULL | DROP NOT
+ *   NULL | SET DEFAULT <expr> | DROP DEFAULT` · `RENAME [COLUMN] <a> TO <b>` · `ADD
+ *   [CONSTRAINT <n>] CHECK (…)` · `ADD [CONSTRAINT <n>] FOREIGN KEY (…) REFERENCES …` with no
+ *   `CASCADE` / `SET NULL` / `SET DEFAULT` action.
+ * Returns the expression regions (column constraints, `SET DEFAULT`, `CHECK`) to hold to
+ * the allow-list, or — for the first action not admitted — its leading words.
  */
-function alterOnlyAddsColumns(toks: Tok[], from: number, to: number): boolean {
+function alterAdmission(toks: Tok[], from: number, to: number): Array<[number, number]> | string {
   const actions: Array<[number, number]> = [];
   let depth = 0;
   let s = from;
@@ -660,15 +681,47 @@ function alterOnlyAddsColumns(toks: Tok[], from: number, to: number): boolean {
     else if (isP(toks[k], ",") && depth === 0) { actions.push([s, k]); s = k + 1; }
   }
   actions.push([s, to]);
+  const regions: Array<[number, number]> = [];
   for (const [a, b] of actions) {
-    if (b <= a || !isW(toks[a], "ADD")) return false;
+    const shown = toks.slice(a, Math.min(b, a + 3)).map((t) => t.t).join(" ") || "(empty)";
+    if (b <= a) return shown;
     let k = a + 1;
-    if (isW(toks[k], "COLUMN")) k++;
-    else if (toks[k]?.k === "w" && ADD_NOT_A_COLUMN.has(toks[k].up)) return false;
-    if (isW(toks[k], "IF") && isW(toks[k + 1], "NOT") && isW(toks[k + 2], "EXISTS")) k += 3;
-    if (k >= b || !isName(toks[k])) return false;
+    if (isW(toks[a], "ADD")) {
+      if (isW(toks[k], "CONSTRAINT") && isName(toks[k + 1])) k += 2;
+      if (isW(toks[k], "CHECK") && isP(toks[k + 1], "(")) { regions.push([k, b]); continue; }
+      if (isW(toks[k], "FOREIGN") && isW(toks[k + 1], "KEY")) {
+        for (let j = k; j < b; j++) {
+          if (isW(toks[j], "ON") && (isW(toks[j + 1], "DELETE") || isW(toks[j + 1], "UPDATE")) &&
+              (isW(toks[j + 2], "CASCADE") || isW(toks[j + 2], "SET"))) return shown;
+        }
+        continue;
+      }
+      if (k !== a + 1) return shown;                        // ADD CONSTRAINT <n> <not CHECK / FK>
+      if (isW(toks[k], "COLUMN")) k++;
+      else if (toks[k]?.k === "w" && ADD_NOT_A_COLUMN.has(toks[k].up)) return shown;
+      if (isW(toks[k], "IF") && isW(toks[k + 1], "NOT") && isW(toks[k + 2], "EXISTS")) k += 3;
+      if (k >= b || !isName(toks[k])) return shown;
+      regions.push([columnExpressionsStart(toks, k, b), b]);
+      continue;
+    }
+    if (isW(toks[a], "ALTER")) {
+      if (isW(toks[k], "COLUMN")) k++;
+      if (!isName(toks[k])) return shown;
+      k++;
+      const rest = toks.slice(k, b).map((t) => t.up);
+      if ((rest[0] === "SET" || rest[0] === "DROP") && rest[1] === "NOT" && rest[2] === "NULL" && rest.length === 3) continue;
+      if (rest[0] === "DROP" && rest[1] === "DEFAULT" && rest.length === 2) continue;
+      if (rest[0] === "SET" && rest[1] === "DEFAULT" && rest.length > 2) { regions.push([k + 2, b]); continue; }
+      return shown;
+    }
+    if (isW(toks[a], "RENAME")) {
+      if (isW(toks[k], "COLUMN")) k++;
+      if (isName(toks[k]) && !isW(toks[k], "TO") && isW(toks[k + 1], "TO") && isName(toks[k + 2]) && k + 3 === b) continue;
+      return shown;
+    }
+    return shown;
   }
-  return true;
+  return regions;
 }
 
 /** Words that end a column's TYPE in a column definition (what follows is constraints / expressions). */
@@ -842,27 +895,6 @@ function indexExpressionRegions(toks: Tok[], start: number, end: number): Array<
   return [[start, end]];   // no readable ON: read it all (fail-closed)
 }
 
-/** The expression regions of `ADD [COLUMN] [IF NOT EXISTS] <col> <type …> <constraints …>` actions in `[from, to)`. */
-function addColumnExpressionRegions(toks: Tok[], from: number, to: number): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  let depth = 0;
-  let s = from;
-  const actions: Array<[number, number]> = [];
-  for (let k = from; k < to; k++) {
-    if (isP(toks[k], "(")) depth++;
-    else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
-    else if (isP(toks[k], ",") && depth === 0) { actions.push([s, k]); s = k + 1; }
-  }
-  actions.push([s, to]);
-  for (const [a, b] of actions) {
-    let k = a + 1;                                            // past ADD
-    if (isW(toks[k], "COLUMN")) k++;
-    if (isW(toks[k], "IF") && isW(toks[k + 1], "NOT") && isW(toks[k + 2], "EXISTS")) k += 3;
-    out.push([columnExpressionsStart(toks, k, b), b]);
-  }
-  return out;
-}
-
 /**
  * In a column definition starting at its NAME (token `k`), the index where its
  * constraints / expressions begin: past the name and the TYPE — words, and a
@@ -1007,8 +1039,9 @@ function isolationRemoval(
     }
     const objs = readRegion(toks, onAt + 1, toAt === -1 ? g.end : toAt, tainted);
     const allTables = isW(toks[onAt + 1], "ALL");
-    if (!allTables && objs.names.length === 0 && !objs.interp) return null;
+    // the admitted kind (S455 "your rec on the allow-list"): a privilege grant to scrml_app alone
     if (onlyApp && !objs.interp && toAt !== -1) return "exempt";
+    if (!allTables && objs.names.length === 0 && !objs.interp) return null;   // → not admitted
     const to = toAt === -1 ? "a grantee the checker cannot read" : grantees.map((n) => `\`${n}\``).join(", ");
     if (allTables || objs.interp) return everyTable(`it grants access to every table it names in bulk to ${to} — any grantee but \`${APP_ROLE}\` is a principal the tier does not bound`);
     return { kind: "isolation removal", object: label, tables: tenantsUnder(objs.names), unattributable: false, offset: g.at,
@@ -1174,6 +1207,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     }
     if (d.kind === "trigger" || d.kind === "rule") {
       const what = d.kind;
+      const before = out.length;
       const onTainted = d.on !== undefined && tainted.has(d.on);
       const un = unattributableWhy(d, r);
       if (onTainted) {
@@ -1190,6 +1224,10 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
         out.push({ kind: what, object: shown, tables: tenantsUnder(r.names), unattributable: false, offset: d.at,
           why: `its body names ${r.names.map((n) => `\`${n}\``).join(", ")}${r.names.every((n) => tenant.has(n)) ? "" : " (a view over a tenant-scoped table)"} — ` +
             `the database runs it outside any query the floor scopes, so one tenant's request reads or writes every tenant's rows` });
+      }
+      // a Postgres RULE is not an admitted kind at all (S455 "your rec on the allow-list")
+      if (what === "rule" && out.length === before) {
+        out.push(notAdmitted(`CREATE RULE ${shown}`, d.at, allTenant, "`CREATE RULE` is not an admitted statement kind"));
       }
       continue;
     }
@@ -1261,8 +1299,14 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
           why: "the checker cannot read which table it is declared on" });
         continue;
       }
-      if (!tainted.has(tbl.name)) continue;
       let mode: string | null = "PERMISSIVE (the default when `AS` is omitted)";
+      if (!tainted.has(tbl.name)) {
+        // admitted only `AS RESTRICTIVE` (S455 "your rec on the allow-list"), on any table
+        if (!(isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE"))) {
+          out.push(notAdmitted(`CREATE POLICY ${pShown}`, d.at, allTenant, "only `CREATE POLICY … AS RESTRICTIVE` is admitted"));
+        }
+        continue;
+      }
       if (isW(toks[tbl.next], "AS")) {
         const m = toks[tbl.next + 1];
         if (isW(m, "RESTRICTIVE")) mode = null;
@@ -1280,25 +1324,26 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       }
       continue;
     }
-    if (r.names.length || r.interp) {
-      const mods = ["VIRTUAL", "FOREIGN"].filter((m) => d.flags.has(m)).join(" ");
-      out.push({ kind: "statement", object: `CREATE ${mods ? `${mods} ` : ""}${d.object ?? "?"} ${shown}`.trim(), tables: r.names.length ? tenantsUnder(r.names) : allTenant,
-        unattributable: r.names.length === 0, offset: d.at,
-        why: r.names.length
-          ? `it names ${r.names.map((n) => `\`${n}\``).join(", ")}, and the floor cannot scope what it does with that table`
-          : "it holds a `${…}` interpolation the checker cannot read" });
-    }
+    // Every other CREATE (a role, sequence, type, extension, publication, schema, a virtual /
+    // foreign table, …) is outside the allow-list (S455 "your rec on the allow-list").
+    const mods = ["VIRTUAL", "FOREIGN"].filter((m) => d.flags.has(m)).join(" ");
+    out.push(notAdmitted(`CREATE ${mods ? `${mods} ` : ""}${d.object ?? "?"} ${shown}`.trim(), d.at, allTenant,
+      `\`CREATE ${mods ? `${mods} ` : ""}${d.object ?? "?"}\` is not an admitted statement kind`));
   }
 
-  // 3. Other SQL statements in the `<schema>`.
+  // 3. Other SQL statements in the `<schema>` — the statement-kind ALLOW-LIST
+  //    (ruling:user-voice-scrml.md S455 "your rec on the allow-list"): besides the CREATE
+  //    kinds above, a tenant compilation's `<schema>` admits ONLY `ALTER TABLE` (admitted
+  //    actions), `GRANT … ON … TO scrml_app`, `COMMENT ON`, `ANALYZE`, `REINDEX`, `VACUUM`.
   if (!declsOnly) {
     for (const g of generic) {
-      if (INERT_LEADERS.has(g.leader)) {
-        // ANALYZE / REINDEX evaluate no expression of their own (`ANALYZE t (col)` is a
-        // column list, not a call); a `${…}` is still SQL the checker cannot read
+      const label = toks.slice(g.start, Math.min(g.end, g.start + 3)).map((t) => t.t).join(" ");
+      const interpWhy = "it holds a `${…}` interpolation the checker cannot read";
+      if (ADMITTED_PLAIN_LEADERS.has(g.leader)) {
+        // COMMENT ON / ANALYZE / REINDEX / VACUUM evaluate no expression of their own
+        // (`ANALYZE t (col)` is a column list); a `${…}` is still SQL the checker cannot read
         if (readRegion(toks, g.start + 1, g.end, new Set()).interp) {
-          out.push({ kind: "statement", object: toks.slice(g.start, Math.min(g.end, g.start + 3)).map((t) => t.t).join(" "),
-            tables: allTenant, unattributable: true, offset: g.at, why: "it holds a `${…}` interpolation the checker cannot read" });
+          out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: interpWhy });
         }
         continue;
       }
@@ -1307,36 +1352,33 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
           why: "the statement is a `${…}` interpolation, SQL the checker cannot read" });
         continue;
       }
-      const r = readRegion(toks, g.start + 1, g.end, tainted);
-      const label = toks.slice(g.start, Math.min(g.end, g.start + 3)).map((t) => t.t).join(" ");
       if (g.leader === "DO" || g.leader === "CALL" || g.leader === "EXECUTE") {
         out.push({ kind: "function", object: label, tables: allTenant, unattributable: true, offset: g.at,
           why: "it runs code the floor never sees" });
         continue;
       }
-      // ISOLATION REMOVAL (S455 "yes both") — its own kind, whatever else the statement names.
+      // ISOLATION REMOVAL (S455 "yes both" (i)) — named as such; `"exempt"` is the admitted
+      // `GRANT <privileges> ON … TO scrml_app`.
       const removal = isolationRemoval(toks, g, tainted, allTenant, tenantsUnder);
-      if (removal === "exempt") continue;             // GRANT … ON <tenant> TO scrml_app only
+      if (removal === "exempt") continue;
       if (removal !== null) { out.push(removal); continue; }
-      // The closed exemption list's `ALTER TABLE … ADD COLUMN`: every action adds a column.
-      // (Any OTHER action on a statement naming a tenant table is charged — RENAME, DROP /
-      // ALTER COLUMN, ADD CONSTRAINT, ENABLE / FORCE ROW LEVEL SECURITY, … S455 "yes both".)
-      if (g.leader === "ALTER" && g.target !== null && g.targetEnd !== -1 && !r.interp &&
-          alterOnlyAddsColumns(toks, g.targetEnd, g.end)) {
-        // …unless a DEFAULT / GENERATED / CHECK expression calls off the allow-list (S239 #6)
-        const code = exemptStatementCode(toks, addColumnExpressionRegions(toks, g.targetEnd, g.end), true);
+      // ALTER TABLE — admitted only when EVERY action is an admitted one.
+      if (g.leader === "ALTER" && g.target !== null && g.targetEnd !== -1) {
+        if (readRegion(toks, g.start + 1, g.end, new Set()).interp) {
+          out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: interpWhy });
+          continue;
+        }
+        const adm = alterAdmission(toks, g.targetEnd, g.end);
+        if (typeof adm === "string") {
+          out.push(notAdmitted(label, g.at, allTenant, `its action \`${adm}\` is not an admitted \`ALTER TABLE\` action`));
+          continue;
+        }
+        // …and its DEFAULT / GENERATED / CHECK expressions are held to the allow-list (S239 #6)
+        const code = exemptStatementCode(toks, adm, true);
         if (code) out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: code });
         continue;
       }
-      const hits = r.names;
-      if (hits.length || r.interp) {
-        out.push({ kind: "statement", object: label, tables: hits.length ? tenantsUnder(hits) : allTenant,
-          unattributable: hits.length === 0, offset: g.at,
-          why: hits.length
-            ? `it names ${hits.map((n) => `\`${n}\``).join(", ")}, and the floor cannot scope what it does with that table ` +
-              "(the only statements exempt are `CREATE INDEX`, `ALTER TABLE … ADD COLUMN`, `ANALYZE` and `REINDEX`)"
-            : "it holds a `${…}` interpolation the checker cannot read" });
-      }
+      out.push(notAdmitted(label, g.at, allTenant, `\`${g.leader}\` is not an admitted statement kind`));
     }
   }
 
@@ -1542,6 +1584,18 @@ export function schemaHazardMessage(h: SchemaHazard, body: string): string {
   const tables = h.unattributable
     ? `every tenant-scoped table (${h.tables.map((t) => `\`${t}\``).join(", ")})`
     : `the tenant-scoped table${h.tables.length > 1 ? "s" : ""} ${h.tables.map((t) => `\`${t}\``).join(", ")}`;
+  if (h.kind === NOT_ADMITTED) {
+    return (
+      `E-TENANT-SCHEMA-HAZARD: this \`<schema>\` holds \`${h.object}\` (line ${lineAt(body, h.offset)} of the \`<schema>\` ` +
+      `body), a statement not admitted in a tenant schema: ${h.why}. In a compilation with a tenant-scoped table ` +
+      `(${h.tables.map((t) => `\`${t}\``).join(", ")}) a \`<schema>\` admits only \`CREATE TABLE\`, \`CREATE INDEX\`, ` +
+      `\`ALTER TABLE\` (\`ADD COLUMN\`, \`ALTER COLUMN … SET | DROP NOT NULL\`, \`SET | DROP DEFAULT\`, \`RENAME COLUMN\`, ` +
+      `\`ADD CONSTRAINT\` — a \`CHECK\`, or a foreign key with no cascading action), \`CREATE VIEW\`, \`CREATE TRIGGER\`, ` +
+      `\`CREATE POLICY … AS RESTRICTIVE\`, \`GRANT … ON … TO ${DBAUTH_ROLE}\`, \`COMMENT ON\`, \`ANALYZE\`, \`REINDEX\` and ` +
+      `\`VACUUM\`. Roles, privileges, publications, extensions, session settings and data changes belong to deploy / ops, ` +
+      `not to the schema the compiler checks. (See SPEC §14.8.10.)`
+    );
+  }
   if (h.kind === "isolation removal") {
     return (
       `E-TENANT-SCHEMA-HAZARD: this \`<schema>\` holds an isolation removal \`${h.object}\` (line ${lineAt(body, h.offset)} of ` +

@@ -288,20 +288,22 @@ describe("item 2 — the shared recognizer reads ALTER TABLE", () => {
     // a modelled statement is still read exactly — no unmodelled form, no widening
     expect(tenantOf("CREATE TABLE notes (id INTEGER, x TEXT DEFAULT ')')")).toEqual([]);
   });
-  test("F1: the `[org create]` repro — `notes` is tenant-scoped, so (S455 \"yes both\") its RENAME COLUMN is refused", () => {
+  test("F1 EXECUTED: the `[org create]` repro — `notes` is tenant-scoped and filtered at the source", async () => {
     const src = NOTES
       .replace("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)", "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, [org create] TEXT)")
       .replace("ALTER TABLE notes ADD COLUMN tenant_id TEXT", "ALTER TABLE notes RENAME COLUMN [org create] TO tenant_id");
-    // was: compiled clean with a bare `SELECT body FROM notes` (A read B's note). Now the
-    // table is in the tenant set, and a RENAME COLUMN on a tenant table is not on the closed
-    // exemption list — the program does not compile.
-    const e = fatal(project({ "notes.scrml": src }).result);
-    expect(e.map((x) => x.code)).toEqual(["E-TENANT-SCHEMA-HAZARD"]);
-    expect(e[0].message).toContain("`notes`");
+    // was: compiled clean with a bare `SELECT body FROM notes` (A read B's note). RENAME COLUMN
+    // is an admitted ALTER TABLE action (S455 "your rec on the allow-list"), so it compiles —
+    // scoped.
+    const p = project({ "notes.scrml": src });
+    expect(fatal(p.result)).toEqual([]);
+    const r = await routesOf(p.out, "notes.server.js");
+    expect(await call(r, "notesOut", await pinned(r, "A"))).toEqual([{ body: "A-note" }]);
   });
   test("F1 EXECUTED: a `$$ CREATE $$` default before `ADD COLUMN tenant_id` — scoped at the source; the hazard set agrees", async () => {
+    // a replacer FUNCTION: in a replacement STRING `$$` means a single `$`
     const src = NOTES.replace("ALTER TABLE notes ADD COLUMN tenant_id TEXT",
-      "ALTER TABLE notes ADD COLUMN memo TEXT DEFAULT $$ CREATE $$, ADD COLUMN tenant_id TEXT");
+      () => "ALTER TABLE notes ADD COLUMN memo TEXT DEFAULT $$ CREATE $$, ADD COLUMN tenant_id TEXT");
     const p = project({ "notes.scrml": src });
     expect(fatal(p.result)).toEqual([]);
     expect(readFileSync(join(p.out, "notes.server.js"), "utf8"))
