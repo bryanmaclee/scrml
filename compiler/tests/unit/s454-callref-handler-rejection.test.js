@@ -159,6 +159,8 @@ describe("S454 — every call-ref registration path colours an async callee", ()
   test("in-arm NON-delegable listener (emit-variant-guard — never coloured before S454)", () => {
     const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=go() /></></match>`);
     expect(r.errs).toEqual([]);
+    // `(event)` here is a carried divergence from §5.2.2 ("with no arguments"), pre-existing:
+    // g-inarm-callref-handler-passes-event-s454. Pinned as current behaviour, not as the rule.
     expect(r.js).toMatch(/const _h = async function\(event\) \{ try \{ await _scrml_go_\d+\(event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("oninput _scrml_attr_oninput_\d+"/);
   });
 
