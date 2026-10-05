@@ -6,7 +6,7 @@ ${
         return ?{`SELECT id, name FROM users`}.all()
     }
 }
-<button id="load" onclick=@users = loadUsers()>Load</>
+<button id="load" onclick={ @users = loadUsers() !{ .Transport(_) :> { return } } }>Load</>
 <ul id="list">
     <each in=@users key=@.id as u>
         <li class="row">${u.name}</li>

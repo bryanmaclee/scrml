@@ -12,5 +12,5 @@
     }
   </db>
   <fp> = not
-  <button id="load" onclick=${ @fp = pinFingerprint(1) }>load</button>
+  <button id="load" onclick={ @fp = pinFingerprint(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

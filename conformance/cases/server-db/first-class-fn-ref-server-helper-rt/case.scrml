@@ -14,7 +14,7 @@ ${
         return picker(rows)
     }
     function onLoad() {
-        @total = loadTotal()
+        @total = loadTotal() !{ .Transport(_) :> { return } }
     }
 }
 <button id="load" onclick=onLoad()>Total</>

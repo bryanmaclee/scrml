@@ -37,9 +37,9 @@
         return "absent"
     }
     function go() {
-        @hit = hasNotes()
-        @miss = hasEmpties()
-        @failed = hasGone()
+        @hit = hasNotes() !{ .Transport(_) :> { return } }
+        @miss = hasEmpties() !{ .Transport(_) :> { return } }
+        @failed = hasGone() !{ .Transport(_) :> { return } }
     }
     <button id="go" onclick=go()>go</button>
     <p id="hit">${@hit}</p>

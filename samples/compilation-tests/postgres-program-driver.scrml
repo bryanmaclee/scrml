@@ -27,7 +27,7 @@
 
     <div>
         <h1>Phase 2 Postgres Smoke</>
-        <button onclick=recordHit()>Record Hit</>
+        <button onclick={ recordHit() !{ .Transport(_) :> { return } } }>Record Hit</>
     </>
 
 </>

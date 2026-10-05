@@ -60,13 +60,13 @@
         return row is not ? "none" : row.body
     }
     function go() {
-        @hit = getHit()
-        @miss = getMiss()
-        @failed = getFailed()
-        @allHit = countHit()
-        @allFailed = countFailed()
-        @reassigned = reassign()
-        @paren = parenthesized()
+        @hit = getHit() !{ .Transport(_) :> { return } }
+        @miss = getMiss() !{ .Transport(_) :> { return } }
+        @failed = getFailed() !{ .Transport(_) :> { return } }
+        @allHit = countHit() !{ .Transport(_) :> { return } }
+        @allFailed = countFailed() !{ .Transport(_) :> { return } }
+        @reassigned = reassign() !{ .Transport(_) :> { return } }
+        @paren = parenthesized() !{ .Transport(_) :> { return } }
     }
     <button id="go" onclick=go()>go</button>
     <p id="hit">${@hit}</p>

@@ -5,7 +5,7 @@ ${
         return n * 2
     }
     function go() {
-        @out = double(21)
+        @out = double(21) !{ .Transport(_) :> { return } }
         @seen = @out
     }
 }

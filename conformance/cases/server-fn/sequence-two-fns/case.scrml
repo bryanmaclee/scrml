@@ -11,6 +11,6 @@ ${
         return rows
     }
 }
-<button id="load-a" onclick=@a = loadA()>A</>
-<button id="load-b" onclick=@b = loadB()>B</>
+<button id="load-a" onclick={ @a = loadA() !{ .Transport(_) :> { return } } }>A</>
+<button id="load-b" onclick={ @b = loadB() !{ .Transport(_) :> { return } } }>B</>
 <p id="counts">A:${@a.length} B:${@b.length}</>

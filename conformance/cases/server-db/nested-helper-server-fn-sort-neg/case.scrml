@@ -5,7 +5,7 @@ server function ranked() {
   return [3, 1, 2].sort((a, b) => inner(a) ? -1 : 1)
 }
 function go() {
-  const r = ranked()
+  const r = ranked() !{ .Transport(_) :> { return } }
   console.log(r)
 }
 <button onclick=go()>go</button>

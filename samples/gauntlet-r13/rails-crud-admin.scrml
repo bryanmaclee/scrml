@@ -36,12 +36,12 @@
         }
     }
     <h1>Product Admin</>
-    <button onclick=createProduct()>New Product</>
+    <button onclick={ createProduct() !{ .Transport(_) :> { return } } }>New Product</>
     <div if=@editId>
         <h2>Edit Product</>
         <input type="text" bind:value=@editName placeholder="Name"/>
         <input type="number" bind:value=@editPrice placeholder="Price"/>
-        <button onclick=updateProduct()>Save</>
+        <button onclick={ updateProduct() !{ .Transport(_) :> { return } } }>Save</>
         <button onclick=cancelEdit()>Cancel</>
     </div>
     <table>

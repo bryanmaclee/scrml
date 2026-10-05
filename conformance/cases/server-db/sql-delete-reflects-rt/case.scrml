@@ -8,10 +8,10 @@ ${
         return ?{`SELECT COUNT(*) AS n FROM tasks`}.get()
     }
     function onDelete() {
-        removeTask(2)
+        removeTask(2) !{ .Transport(_) :> { return } }
     }
     function onCount() {
-        @remaining = countTasks()
+        @remaining = countTasks() !{ .Transport(_) :> { return } }
     }
 }
 <button id="del" onclick=onDelete()>Delete task 2</>

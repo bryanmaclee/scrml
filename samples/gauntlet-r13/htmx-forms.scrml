@@ -44,7 +44,7 @@
             <label>Message</>
             <textarea bind:value=@message></>
         </div>
-        <button onclick=submitForm()>Send</>
+        <button onclick={ submitForm() !{ .Transport(_) :> { return } } }>Send</>
         <ul if=@errors.length>
             ${
                 for (let err of @errors) {

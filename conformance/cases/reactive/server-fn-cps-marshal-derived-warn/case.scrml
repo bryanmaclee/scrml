@@ -8,7 +8,7 @@
         @lastRows = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}.all()
       }
     }
-    <button on:click=saveOrder()>Save</button>
+    <button on:click={ saveOrder() !{ .Transport(_) :> { return } } }>Save</button>
     <ul>${ for (let r of @lastRows) { lift <li>${r.id}</li> } }</ul>
   </db>
 </program>

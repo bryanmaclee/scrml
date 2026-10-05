@@ -108,8 +108,11 @@ import { frontEnd as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lo
  * `arm-pipe` (§19.4.5, S452). The `|`-led arm is a §63 spelling deprecation whose legacy form is
  * itself in the conformance contract during the window (§63.5: W-ARM-PIPE-LEGACY is
  * conformance-required), so a case written in it must be graded AS WRITTEN, not on a pipe-less twin.
+ * `client-server-call` (§19.9.10, S454 F8) is excluded too: it changes what a case MEANS to the
+ * bootstrap (it adds a handler), so it is applied to the corpus source (reviewed, committed), never
+ * silently at grading time.
  */
-const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe");
+const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "client-server-call");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");

@@ -47,7 +47,7 @@ ${
 
 ${
     function initLoad() {
-        @files = loadFiles()
+        @files = loadFiles() !{ .Transport(_) :> { return } }
     }
 }
 
@@ -121,7 +121,7 @@ ${
     }
 
     function doDelete() {
-        @files = deleteFiles(@selectedIds)
+        @files = deleteFiles(@selectedIds) !{ .Transport(_) :> { return } }
         @selectedIds = []
         @showConfirm = false
     }

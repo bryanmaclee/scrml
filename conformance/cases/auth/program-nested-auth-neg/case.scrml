@@ -7,6 +7,6 @@
 function add(body) {
     ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
 }
-<button onclick=add("x")>add</button>
+<button onclick={ add("x") !{ .Transport(_) :> { return } } }>add</button>
 </>
 </>

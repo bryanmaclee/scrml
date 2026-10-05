@@ -12,5 +12,5 @@
     }
   </db>
   <total> = 0
-  <button id="load" onclick=${ @total = getUser(1) }>load</button>
+  <button id="load" onclick={ @total = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

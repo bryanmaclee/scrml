@@ -5,5 +5,5 @@
             ?{`DELETE FROM users WHERE id = ${id}`}.run()
         }
     }
-    <button onclick=deleteUser(1)>delete</>
+    <button onclick={ deleteUser(1) !{ .Transport(_) :> { return } } }>delete</>
 </>

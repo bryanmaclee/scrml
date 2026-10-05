@@ -13,5 +13,5 @@
     }
   </db>
   <items> = []
-  <button id="load" onclick=${ @items = getItems(1) }>load</button>
+  <button id="load" onclick={ @items = getItems(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

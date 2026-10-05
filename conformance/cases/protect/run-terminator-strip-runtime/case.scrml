@@ -11,5 +11,5 @@
     }
   </db>
   <users> = []
-  <button id="load" onclick=${ @users = getUsers() }>load</button>
+  <button id="load" onclick={ @users = getUsers() !{ .Transport(_) :> { return } } }>load</button>
 </program>

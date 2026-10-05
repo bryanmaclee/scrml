@@ -7,5 +7,5 @@ ${
     }
 }
 <program db="ftp://bad">
-    <button id="load" onclick=@items = loadTasks()>Load</>
+    <button id="load" onclick={ @items = loadTasks() !{ .Transport(_) :> { return } } }>Load</>
 </program>

@@ -71,16 +71,16 @@
       // These wrap the server fns so the result lands in @tasks on the client.
       function submit() {
         if (@draftTitle.trim() == "") return
-        @tasks = addTask(@draftTitle)
+        @tasks = addTask(@draftTitle) !{ .Transport(_) :> { return } }
         reset(@draftTitle)
       }
 
       function toggle(id, completed) {
-        @tasks = toggleTask(id, completed)
+        @tasks = toggleTask(id, completed) !{ .Transport(_) :> { return } }
       }
 
       function remove(id) {
-        @tasks = deleteTaskById(id)
+        @tasks = deleteTaskById(id) !{ .Transport(_) :> { return } }
       }
     }
 
