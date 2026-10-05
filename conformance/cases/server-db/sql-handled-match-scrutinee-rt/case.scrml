@@ -52,10 +52,10 @@
         return r
     }
     function go() {
-        @hit = matchHit()
-        @miss = matchMiss()
-        @failed = matchFailed()
-        @allFailed = matchAllFailed()
+        @hit = matchHit() !{ .Transport(_) :> { return } }
+        @miss = matchMiss() !{ .Transport(_) :> { return } }
+        @failed = matchFailed() !{ .Transport(_) :> { return } }
+        @allFailed = matchAllFailed() !{ .Transport(_) :> { return } }
     }
     <button id="go" onclick=go()>go</button>
     <p id="hit">${@hit}</p>
