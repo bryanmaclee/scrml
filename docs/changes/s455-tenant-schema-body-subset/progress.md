@@ -30,3 +30,30 @@ ruling:user-voice-scrml.md S455 "yes, both" — *"(2) the next arc: in a compila
 
 ## Deleted (dead after the change)
 - `readRegion` (the hand-rolled body reader) and its `RegionRead` type; the `unattributableWhy` helper; `isDoubleColonAt` (its only user was `readRegion`); the policy branch's expression-mode read. Statement-level reads (`GRANT` objects, `${…}` in ALTER / COMMENT / …) use a 10-line `namesAndInterp` (names + interpolation only — no call/type/bracket logic). The schema lexer's `[`-name-position rule stays: expression regions (kept) and statement heads still use it.
+
+## Built / verified
+- 162b6187f code + tests (one commit): pre-commit gate 31216 pass / 58 skip / 12 todo / 0 fail (31286 tests). Types gate 190 (unchanged). Conformance 1283/1333 + 50 xfail (unchanged; every tenant/ case passes).
+- Self-review adversarial probes (scratch .tmp/probe2.mjs, 63 cases, all as intended): IS DISTINCT FROM comma trick, CTE shadowing a table, recursive CTE, derived alias named like a table, renamed-away column, commented-out declaration, nested-comment ADD COLUMN (SQLite-only live), ISNULL implicit-alias trick, three-part, (o).f, excluded.f, trigger over-read (`END; ALTER ROLE …; END`), WITH / PRAGMA / `;;` in a trigger, MySQL FOR EACH ROW form — all refused; real columns / CTE / derived-table columns / schema-qualified FROM relations admitted. CTE and derived-table columns are RESOLVED (their own first SELECT / column list), not refused — first cut refused them (FP in "WITH c AS (…) SELECT c.code FROM c"); fixed before commit.
+- cd94ddb3e SPEC §14.8.10 ("Bodies are read in the tenant SQL subset" + provenance; restrictive-policy clause; Diagnostics; Implementation status) + §34 row; SPEC-INDEX + FACTS regenerated; s34-census --check-new PASS.
+- 6046fa95b: cache the subset reading per body (it does not depend on the taint fixpoint).
+
+## Measurements (base 1b47d97e3 = the 3 changed compiler sources flipped in place, restored after; same paths)
+- Single-file: `scripts/corpus-emit-differential.ts` capture both sides (roots examples, samples, conformance, stdlib, benchmarks): 2362 enumerated / 1421 compiled on both sides; 0 newly failing / 0 newly passing; 0 of 11550 artifacts changed; 0 diagnostic-code changes; 1436 "text-only" diffs = the work-dir path + timing in CLI stdout — 0 residual after normalizing both (.tmp/textdiff.mjs).
+- Multi-file projects (examples/22-multifile 3 files, examples/23-trucking-dispatch 36, examples/ 71, stdlib/ 53, flogence/src 28 — flogence read-only, output under .tmp; its pre-existing dirty state `handOffs/omega/log.jsonl`, `undefined/` unchanged): identical artifacts, identical diagnostic codes and text (bar output path / timing); stdlib 160 / flogence 2 E-codes pre-existing on both sides.
+- No real program newly fails.
+
+## False-positive check — realistic Postgres SaaS schema (scratch .tmp/fp.mjs, base vs head)
+Clean on head: joins, LEFT JOIN + count + GROUP BY, CASE, COALESCE, scalar subquery, correlated EXISTS, UNION ALL, CTE (incl. `c.col`), IN list / BETWEEN / LIKE, count(*) FILTER, lower/upper/trim/substr/replace; SQLite audit trigger with OLD./NEW. + datetime('now'); updated-at trigger with WHEN NEW.x <> OLD.x; restrictive policy `tenant_id = current_setting('app.tenant_id', true)` and `CAST(current_setting(…) AS uuid)`.
+NEWLY refused on head (clean on base) — the closed token set itself, per the ruling:
+1. `::` casts in a body — `SELECT id::text …`, and the canonical RLS-docs / Supabase shape `USING (tenant_id = current_setting('app.tenant_id', true)::uuid)`. Rewrite: `CAST(… AS uuid)`. HIGHEST-COST FP.
+2. a `--` / `/* */` comment inside a view / trigger body.
+3. a quoted identifier inside a body (ORM-generated SQL: Prisma / Drizzle quote everything).
+4. a `[…]` subscript / array literal, a `$$` string in a body.
+Refused on BOTH (pre-existing, unchanged — the body allow-list is the per-row list): `now()`, `date_trunc`, `string_agg`, `row_number() OVER`, and a Postgres `EXECUTE FUNCTION` trigger (every Postgres trigger).
+
+## Subset gaps / follow-ups surfaced (not built — need a ruling or are out of scope)
+- RECOMMENDATION (fork for bryan): grow the ONE shared subset by `::<built-in type>` (two colons + an identifier on the closed built-in type list — read exactly). It would close FP 1 for bodies, but it also WIDENS the query floor (a tenant query could then cast), so it is a language-wide subset change, not a body-only tweak. Recommend: yes, with the cast target held to BUILTIN_TYPES on both sides.
+- RECOMMENDATION: body allow-list = the side-effect-free expression list (now / date_trunc / to_char / …) instead of the per-row query list — views over non-tenant tables use them constantly; the criterion "no side effect, no code execution" is what the expression list already encodes. Pre-existing restriction, not widened here.
+- QUERY-FLOOR observations (out of scope, PA to triage): (a) the query subset's `firstDisallowedCall` treats `LIKE` / `GLOB` / `END` / `NULL` / … followed by `(` as syntax (NON_CALL_WORDS) — `like(x, y)` is a callable name in SQLite and Postgres can resolve a user function named `like`; the schema reader's `isSyntacticParen` is stricter. (b) the query subset accepts `CAST(x AS user_type)` (`cast` is allow-listed; the target type is not checked) — a user type's input function is code, which the schema rule charges.
+- `CREATE TABLE … AS <query>` moved from expression mode to the body subset (PA reading, adjacent to the four named kinds) — veto-able.
+- A view / trigger over a table declared ONLY in the `<db tables=>` registry or a live database has no known columns: a qualified `t.col` there is refused (fail-closed FP; unqualified columns fine).
