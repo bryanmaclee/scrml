@@ -69,3 +69,9 @@ acrossTenantInsertMissingTenantColumn fallback (non-subset `.acrossTenants()` IN
 could hide the head -> that check not firing; integrity, not confidentiality; NOT fixed, reported);
 type-system.ts + bool-coerce.ts via extractSelectProjection (typing / bool decode, not security).
 Executed: the 9 new conformance cases fail on 612e8c5ea (each body carries SECRET) and on 79bd05028.
+r2 commit d1bb51a0d. Full gate 28295 pass / 0 fail. g-sql-row-protect-leak: `UPDATE "users" … RETURNING *`
+now resolves to passwordHash (was strip-all only because no `q` was known in that ctx).
+r2 differential (base 79bd05028 vs head d1bb51a0d, whole corpus 2339 sources; 319 contain `?{`, 108 of
+those also `protect=`): after path normalization 0 artifacts differ, 0 compile outputs differ;
+_scrml_protect_tag( sites 174/174, strip-all "*" tags 4/4; I-PROTECT-STRIP-001 49/49; E-PROTECT-003/004/005/006
+unchanged. No tagged->untagged change.
