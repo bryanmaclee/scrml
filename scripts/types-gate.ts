@@ -76,13 +76,30 @@
 //
 // WHERE IT RUNS (S365 fix round). It landed runnable and NOTHING RAN IT, while `ci.yml`'s header
 // advertised a layer named "types (always-on local)" that did not exist — this script's own thesis,
-// reproduced one level up. It is now wired into the NON-BLOCKING `tracking` job in
-// `.github/workflows/ci.yml`, as a `continue-on-error` step placed first (a failed step halts even a
-// continue-on-error job, so it must not be able to suppress the tracking signals below it).
+// reproduced one level up. It was then wired into the NON-BLOCKING `tracking` job in
+// `.github/workflows/ci.yml` as a `continue-on-error` step.
 //
-// PROMOTION INTO THE BLOCKING `gate` JOB IS STILL NOT TAKEN. That is an operator-level call and it
-// wants a decision on the nine live `never` failures first (fix them, or record them and drain).
-// One line moves it: the same step, without `continue-on-error`, under `gate`.
+// IT IS BLOCKING NOW (S454). In `tracking` it sat red, unread, for ~32 merges — 30 NEW + 1 GROWN by
+// the time anyone looked — which is the cry-wolf shape this header warns about, arrived at by the
+// other road: not "always red so bypassed" but "never blocking so never read". The 30 + 1 were fixed
+// (or, for three re-keyed / drifted entries, re-recorded with the reason in
+// docs/changes/s454-types-gate-blocking/progress.md), and the step moved into the required `gate`
+// job, without `continue-on-error`, placed right after `bun install` (it needs no pretest / dist, so
+// no earlier step can skip it). The nine live `never` failures stay RECORDED and drain through
+// ordinary work — the "record and drain" branch of the decision the S365 text left open.
+// > Provenance: ruling:user-voice-scrml.md S454 "yes, fix the 30 then promote it"
+//
+// WHAT BLOCKING MEANS IN PRACTICE — read this before you curse it:
+//   - `--check` is BIDIRECTIONAL. Fixing a diagnostic without `--write` turns `gate` RED (stale
+//     baseline) exactly as adding one does. Run `bun scripts/types-gate.ts --write` in the commit
+//     that changes the set, and commit compiler/tests/TYPES-BASELINE.json with it.
+//   - The key embeds tsc's message, which for some diagnostics embeds a (truncated) TYPE SHAPE.
+//     Widening an options type re-keys every recorded diagnostic that prints it: NEW + GONE for the
+//     same site. That is a re-key, not a regression — `--write` records it — but review the pair.
+//   - A NEW `.ts` -> `.js` import of a JS module with no sibling `.d.ts` is a NEW TS7016 per
+//     importing file. Prefer adding the `.d.ts` (see compiler/src/*.d.ts — `export declare` form)
+//     over re-recording the TS7016.
+//   - It is not run by any local hook. `bun run types:check` before pushing compiler/src changes.
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname, relative } from "path";

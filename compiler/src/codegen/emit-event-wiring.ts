@@ -98,6 +98,8 @@ interface LogicBinding {
    * while only the first two were declared. Nothing caught it: no tsconfig
    * covers `compiler/`, so this interface is unchecked documentation. Keep it
    * complete by hand — it is the only description of the shape this file reads.
+   * (S454: `scripts/types-gate.ts`, now a BLOCKING CI step, does type-check this
+   * file — a read of an undeclared field is a NEW TS2339 there.)
    */
   isReactiveValueAttr?: boolean;
   valueAttrName?: string;

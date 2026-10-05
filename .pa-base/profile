@@ -59,11 +59,11 @@ SCOPE:  large. **Derived figures live in `docs/FACTS.md` (generated; `bun script
         Non-derived shape (stable, safe to state): samples/ + examples/ · lsp/ + editors/ · conformance/ ·
         18 spa-lists · a second in-progress implementation (compiler/self-host-v2) + an opt-in native
         parser (compiler/native-parser, behind `--parser=scrml-native`). Single operator (bryan) / two machines.
-GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-on).
+GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (BLOCKING `gate` step since S454 — `bun run types:check`; no local hook runs it; `--check` is bidirectional, so `--write` the baseline in the commit that changes the set).
   - pre-commit hook: `bun test compiler/tests/{unit,integration,conformance} --bail` (0 failures = contract).
   - pre-push (config B, this machine): RELAXED (S254) — a NEW-REF feature-branch push SKIPS the full suite
     (cloud `gate` on the PR is authority); release-tag/forced pushes still run FULL `bun run test`. NEVER --no-verify without authz.
-  - CLOUD `gate` (PR-flow, S254): the required GitHub CI check (`unit+conformance+gauntlet`) — GREEN gates the PR merge.
+  - CLOUD `gate` (PR-flow, S254): the required GitHub CI check (`types+unit+conformance+gauntlet`+…) — GREEN gates the PR merge.
     Boot pulls status: `gh run list --branch main --limit 3` + `gh pr list`. This REPLACES the retired commit-lock main-authority check.
   - REVIEW-FLOOR probe (S316, MANDATORY at boot 0.6, both profiles): `bun scripts/review-debt.ts`.
     `gh pr list` reports OPEN PRs; the S313 review floor binds MERGED ones, and nothing computed the difference —

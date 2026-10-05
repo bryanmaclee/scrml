@@ -1,7 +1,7 @@
 # CI — the authoritative async gate (clean env). Never blocks a local push.
 #
 # Gate-layering (flogence gate-layering-methodology-2026-07-06 + scrml S242/S243; TUNED S253 cloud-PA arc):
-#   types (`bun run types:check`; NON-BLOCKING in `tracking` below — NOT always-on local, nothing local
+#   types (`bun run types:check`; BLOCKING in `gate` below since S454 — NOT always-on local, nothing local
 #   invokes it) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #   (S365 fix round: this line previously advertised a layer that did not exist — `scripts/types-gate.ts`
@@ -9,12 +9,13 @@
 #
 # THREE jobs:
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
-#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet.
-#                This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
+#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet
+#                + the types gate (S454). This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
 #                green in `tracking` (the v1 self-host dist tests were removed S447 — see KEY FINDING).
 #   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
 #                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
-#                interp) + the types gate. Visible, never blocks. (The M6.x within-node parser-parity
+#                interp) + the bootstrap conformance/severity reports. Visible, never blocks. (The types
+#                gate ran here S365-S454; it is in `gate` now.) (The M6.x within-node parser-parity
 #                step was retired S449 item 6 — native-parser frozen as part of impl#1.)
 #   • windows  — NON-BLOCKING (continue-on-error). unit + conformance on windows-latest — surfaces the
 #                OS-path-separator regressions the Linux gate can't see (#25/#26 `\` vs `/`). Promote into
@@ -116,6 +117,25 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
+      # S365 / S454 — the compiler's own TypeScript diagnostics do not change silently. BLOCKING.
+      #
+      # `scripts/types-gate.ts --check` diffs `tsc --noEmit --strict` over compiler/src against the
+      # NAME->COUNT baseline in compiler/tests/TYPES-BASELINE.json and exits 1 on ANY difference, in
+      # EITHER direction: a NEW name or a GROWN count is a regression; a GONE name or a SHRUNK count
+      # means the baseline is stale — record a fix in the same commit with
+      # `bun scripts/types-gate.ts --write`. It is a ratchet, not a "tsc-clean" demand: the recorded
+      # population drains through ordinary work.
+      #
+      # It ran from S365 as a continue-on-error step in `tracking`, and sat red there unseen for
+      # ~32 merges (30 NEW + 1 GROWN when promoted). Those were fixed, the baseline re-recorded,
+      # and the step moved here without continue-on-error.
+      # > Provenance: ruling:user-voice-scrml.md S454 "yes, fix the 30 then promote it"
+      #
+      # PLACED FIRST (right after Install deps): it needs neither `pretest` nor a populated dist, so
+      # no earlier step's failure can skip it. `typescript` is a devDependency (installed above);
+      # the script refuses to fall back to a PATH tsc and exits 2 if it is missing.
+      - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
+        run: bun scripts/types-gate.ts --check
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
       - name: Gate suite (unit + conformance — reproducibly green from source)
@@ -233,28 +253,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
-      # S365 — the compiler's own TypeScript diagnostics do not grow silently.
+      # (The Types gate step that ran here S365-S454 is now BLOCKING, in `gate` — S454.)
       #
-      # NON-BLOCKING BY TWO MECHANISMS, ON PURPOSE. The job is `continue-on-error`, and so is
-      # this STEP. The step-level flag is not redundant: a failed step HALTS the job even in a
-      # continue-on-error job (verified on run 30742472551, where the within-node parity step
-      # reported `skipped` and had never run at all). Without it, a types regression would
-      # silently suppress every tracking signal below it — the exact failure this job exists
-      # to avoid.
+      # STEP-LEVEL continue-on-error ON EVERY TRACKING STEP, ON PURPOSE: a failed step HALTS the
+      # job even in a continue-on-error job (verified on run 30742472551, where the within-node
+      # parity step reported `skipped` and had never run at all), so one red signal would
+      # silently suppress every tracking signal below it.
       #
-      # PLACED FIRST because it needs neither `pretest` nor a populated dist, so it cannot be
-      # skipped by an earlier step's failure. Promotion into the BLOCKING `gate` job remains an
-      # operator call and is NOT taken here; it wants a decision on the nine live `never`
-      # failures first (fix, or record and drain).
-      - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
-        continue-on-error: true
-        run: bun scripts/types-gate.ts --check
       # S449 (s449-bootstrap-conformance-counter) — how many conformance cases the PURE bootstrap
       # (compiler/self-host-v2/) passes, by bucket and area; ~7 s. TRACKING ONLY, never in `gate`:
       # the number is a backlog, and a red gate over a backlog is the cry-wolf shape. `--check`
       # exits 1 only when docs/bootstrap-conformance.md is stale (regenerate with `--write`); the
-      # FAIL count never sets the exit status here. Step-level continue-on-error for the same reason
-      # as the types gate above (a failed step halts the job). Needs no pretest.
+      # FAIL count never sets the exit status here. Step-level continue-on-error for the reason
+      # stated above (a failed step halts the job). Needs no pretest.
       - name: Bootstrap conformance count (tracking; report staleness)
         continue-on-error: true
         run: bun scripts/bootstrap-conformance.ts --check
