@@ -70,3 +70,22 @@ No corpus file contains a D1/D2/D3 site (they never built / never ran).
 5. for-of header `for (const r of ?{…}.all() !{…})` → E-PARSE-001 (unchanged; out of scope per brief). LOW.
 6. Object-literal method shorthand converts to an EMPTY escape-hatch (`{ close() { … } }` → `{close: }`), pre-existing (expression-parser ObjectExpression). Surfaced in stdlib/store/kv. MED.
 7. Expression-position `?{}` still bypasses buildBlock, so E-SQL-003 (runtime-expr body) does not fire there (g-sqlref-direct-call-arg-unresolved's diagnostic half). Its RUNTIME half is now closed: `out.push(?{…}.all())` emits the real query (base: `null /* sql-ref unresolved */.all()`).
+
+## Fix round (S239 review of 87c1f2cdb) — 7fba39934
+
+Governing exhaustiveness sentences (quoted verbatim):
+- §19.7.3: "In logic context, matching a `!` function result SHALL require exhaustive coverage of all variants (success and error). Missing variants SHALL trigger E-TYPE-020." / "A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules."
+- §34 catalog: "E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error".
+- §19.8.3 (the `?{}` handler): "The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `_ :>` arm keeps a handler total as the enum grows."
+- §8.9.4: "Prepare-phase errors … surface as a single variant `SqlError::BatchPrepareFailed { sites: […] }`."
+Reading: a `?{}` handler is exhaustive when it has a catch-all, or names every SqlError variant the SPEC declares — §19.8.1's three plus §8.9.4's `BatchPrepareFailed`. The SPEC recommends `_` ("keeps a handler total as the enum grows") but does not require it. This is a decision about future variants, so the PA should confirm it.
+
+- F1: type-system runs `_checkHandlerExhaustive` for (a) every statement guard on a `?{}`, and (b) every expression-position guard (`_checkExpressionPositionHandlers` walks all ExprNodes; the operand's error type comes from the `?{}` (SqlError) or from the callee's declared enum). It also checks every `match` on a `?{}` (E-TYPE-020, which needs `::Ok` + every SqlError variant, or `_`). As defence in depth, codegen emits `unhandledFailureThrow` (a host error) on the no-arm-matched branch of an expression-position guard, a `?{}` guard, and a `match` on a `?{}`.
+- F2: `opaqueSlashSpanEnd` (regexAllowedAfter + scanRegexLiteralEnd; comments) in both scanners.
+- F3: `_scrml_sql_attempt(run, args, then)`: params are evaluated as arguments, `then` (tenant scope / `[0] ?? null` / bool coercion / protect tag) runs after the try. `case "sql"` builds every driver call through one `emitSqlDriverCall`, and the unhandled form is byte-identical.
+
+## Known-gaps notes (fix-round F4, recorded only, not fixed)
+- A function made only of a regex like `/\?{3}/` is now server-placed (runtime-correct, wrong placement). Base was wrong in a different way: the old `?{` text detector in route inference fires on it.
+- On both base and head, `?{` inside a string or template literal was corrupted by the old non-string-aware `replaceSqlBlockPlaceholder` pass.
+- On both, `c ?{a:1} : …` (ternary + object literal, no space) is read as a SQL block and server-placed.
+- stdlib crypto `verifyHash`: `input = String(input)` inside an `if` emits `const input = String(input)` (block-scoped shadow, TDZ ReferenceError when the branch runs).
