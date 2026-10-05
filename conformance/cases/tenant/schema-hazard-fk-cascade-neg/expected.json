@@ -1,0 +1,16 @@
+{
+  "id": "tenant-schema-hazard-fk-cascade-neg",
+  "description": "§14.8.10 (S455) — M1: the tenant-scoped `assets` declares `cfg REFERENCES config(k) ON DELETE CASCADE` against a non-tenant parent. A delete of the parent row fans out to every tenant's assets (on SQLite only if foreign keys are enabled; on Postgres always). Refused at the declaration.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-schema-hazards.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (S455): a `<schema>` that declares, against a tenant-scoped table (one carrying `tenant_id`), a trigger declared on it or whose body names it, a Postgres rule on or naming it, a foreign key with a CASCADE / SET NULL / SET DEFAULT action whose either end is tenant-scoped, or a view (materialized included) reading it directly or through another view, SHALL be a compile error at the declaration (E-TENANT-SCHEMA-HAZARD); a declaration the checker cannot attribute is charged, never treated as safe. Provenance: ruling:user-voice-scrml.md S455 \"go, comp-time schema\".",
+  "expect": {
+    "codes": [
+      "E-TENANT-SCHEMA-HAZARD"
+    ],
+    "codeCounts": {
+      "E-TENANT-SCHEMA-HAZARD": 1
+    }
+  }
+}

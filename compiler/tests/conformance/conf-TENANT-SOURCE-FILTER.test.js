@@ -783,33 +783,46 @@ describe("CONF-TENANT-SOURCE-FILTER r4 — a table-level ON CONFLICT REPLACE can
   }
 });
 
-describe("CONF-TENANT-SOURCE-FILTER r4 — a write to a table with a <schema> trigger / cascading FK is refused", () => {
+// S455 (ruling "go, comp-time schema") moved this boundary to the DECLARATION: the
+// `<schema>` itself is refused (E-TENANT-SCHEMA-HAZARD). The r4 per-write E-TENANT-WRITE
+// limb is kept as defense in depth and still reports beside it; `.acrossTenants()` is no
+// longer an opt-out — a schema that declares the hazard does not compile at all.
+describe("CONF-TENANT-SOURCE-FILTER r4 → S455 — a <schema> trigger / cascading FK on a tenant table is refused at the declaration", () => {
   const ASSETS = "CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)";
-  test("an AFTER UPDATE trigger → E-TENANT-WRITE naming it", async () => {
+  test("an AFTER UPDATE trigger → E-TENANT-SCHEMA-HAZARD naming it (and the per-write E-TENANT-WRITE beside it)", async () => {
     const p = await buildCustom(
       [ASSETS, R4_ORDERS, "CREATE TRIGGER t_upd AFTER UPDATE ON assets BEGIN UPDATE orders SET label = 'pwned'; END"],
       R4_SEED,
       `    function bump() {\n      ?{${BT}UPDATE assets SET cost = 1 WHERE id = 1${BT}}.run()\n      return "ok"\n    }`);
     expect(p.routes).toBeNull();
+    const h = (p.result.errors ?? []).find((x) => x.code === "E-TENANT-SCHEMA-HAZARD");
+    expect(h.message).toContain("trigger `t_upd`");
+    expect(h.message).toContain("declared on the tenant-scoped table `assets`");
     const e = (p.result.errors ?? []).find((x) => x.code === "E-TENANT-WRITE");
     expect(e.message).toContain("trigger `t_upd`");
   });
-  test("an ON DELETE CASCADE foreign key referencing the table → E-TENANT-WRITE naming it", async () => {
+  test("an ON DELETE CASCADE foreign key referencing the table → E-TENANT-SCHEMA-HAZARD naming it", async () => {
     const p = await buildCustom(
       [ASSETS, "CREATE TABLE orders (id INTEGER PRIMARY KEY, asset_id INTEGER REFERENCES assets(id) ON DELETE CASCADE, label TEXT, tenant_id TEXT)"],
       R4_SEED,
       `    function drop() {\n      ?{${BT}DELETE FROM assets WHERE id = 1${BT}}.run()\n      return "ok"\n    }`);
     expect(p.routes).toBeNull();
+    const h = (p.result.errors ?? []).find((x) => x.code === "E-TENANT-SCHEMA-HAZARD");
+    expect(h.message).toContain("ON DELETE CASCADE");
     const e = (p.result.errors ?? []).find((x) => x.code === "E-TENANT-WRITE");
     expect(e.message).toContain("ON DELETE CASCADE");
   });
-  test("`.acrossTenants()` is the explicit opt-out; a READ of the table is unaffected", async () => {
-    const p = await buildCustom(
+  test("`.acrossTenants()` is NOT an opt-out any more: the schema itself is refused, even with no write at all", async () => {
+    const withOptOut = await buildCustom(
       [ASSETS, R4_ORDERS, "CREATE TRIGGER t_upd AFTER UPDATE ON assets BEGIN UPDATE orders SET label = 'pwned'; END"],
       R4_SEED,
-      `    function bump() {\n      ?{${BT}UPDATE assets SET cost = 1 WHERE id = 1${BT}}.acrossTenants().run()\n      return "ok"\n    }\n    function mine() {\n      return ?{${BT}SELECT id FROM assets${BT}}.all()\n    }`);
-    expect(fatal(p.result)).toEqual([]);
-    expect(await call("mine", { cookie: await pin("A", p) }, p)).toEqual([{ id: 1 }]);
+      `    function bump() {\n      ?{${BT}UPDATE assets SET cost = 1 WHERE id = 1${BT}}.acrossTenants().run()\n      return "ok"\n    }`);
+    expect([...new Set(fatal(withOptOut.result))]).toEqual(["E-TENANT-SCHEMA-HAZARD"]); // declared ON assets + its body names orders
+    const readOnly = await buildCustom(
+      [ASSETS, R4_ORDERS, "CREATE TRIGGER t_upd AFTER UPDATE ON assets BEGIN UPDATE orders SET label = 'pwned'; END"],
+      R4_SEED,
+      `    function mine() {\n      return ?{${BT}SELECT id FROM assets${BT}}.all()\n    }`);
+    expect([...new Set(fatal(readOnly.result))]).toEqual(["E-TENANT-SCHEMA-HAZARD"]);
   });
 });
 

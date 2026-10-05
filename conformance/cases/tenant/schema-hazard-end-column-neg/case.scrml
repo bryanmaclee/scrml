@@ -1,0 +1,16 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+        ?{`CREATE TABLE config (k TEXT, v TEXT)`}
+        ?{`CREATE TABLE audit (v TEXT, end TEXT)`}
+        ?{`CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN INSERT INTO audit (v, end) SELECT name, 'x' FROM assets; END`}
+    </>
+    // SQLite does not reserve `end`: the column named `end` is not the end of the trigger body.
+    ${
+        function go() {
+            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run()
+            return "ok"
+        }
+    }
+    <button onclick=${ go() }>go</button>
+</program>
