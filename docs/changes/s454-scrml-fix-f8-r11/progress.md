@@ -70,3 +70,13 @@ function to the client with a dead query. The cause is an impl#1 codegen defect 
 declaration / assignment RHS lowers to an empty initializer), not a spelling choice. Operator ruling needed (S435
 freeze exception to fix that impl#1 lowering, or a bootstrap-only R11 migration, or build the §19.9.10 rule alone
 now). Rules NOT built; corpus NOT rewritten.
+
+## Part 0b — DONE (c90e3eade)
+- SPEC §19.9.10: the "⚑ OPEN (not ruled): the deadline's value / configurability" line replaced by the ruling (30 s,
+  fixed, not configurable) + a handler-task paragraph (a second event does not cancel an in-flight invocation; each
+  runs to completion; last-to-complete wins; newest-wins is `<effect>` / `<request>` only), each with a Provenance
+  block quoting S454 "your recs on both, then go on F8"; the two normative bullets updated/added.
+- Bootstrap runtime.js `SERVER_CALL_DEADLINE_MS` comment: placeholder → ruled; its test comment likewise (value unchanged, 30000).
+- SPEC-INDEX + FACTS regenerated; `regen-spec-index.ts --check` OK 72/72; `facts.ts --check` PASS.
+- Pre-commit gate on that commit: 30642 pass / 0 fail.
+- Scratch `.tmp/p0` deleted.
