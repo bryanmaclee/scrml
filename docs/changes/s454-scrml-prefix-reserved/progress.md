@@ -37,3 +37,16 @@ html-fragment (same), engine rulesRaw (parseEngineStateChildren: shorthand bodie
 onTransition, onTimeout, nested engines via buildAST), match armsRaw (parseMatchArms: binders, attrs, `:` bodies),
 each openers, endpoint/onchange arm bodies, param defaults, test asserts, escape-hatch raws, template/SQL
 interpolations — logic fragments lexed with tokenizeLogic (STRING/COMMENT tokens are not identifiers).
+
+## Differential (scripts/corpus-emit-differential.ts, write:true captures)
+- roots: examples, samples, conformance, stdlib, benchmarks, compiler/self-host-v2 — 2404 sources both sides.
+- base b35593879 (detached worktree) vs head (this branch, pre-conformance-case-add).
+- run 1 (before the `<#name>` desugar exemption): 7 newly failing — ALL the TAB `<#name>` desugar class
+  (`_scrml_worker_*` / `_scrml_input_*_` written into the author tree by ast-builder/tokenizer), not author refs.
+  Fixed by the reference-position exemption.
+- run 2: compile-failure delta 0 newly failing / 0 newly passing; diagnostic-CODE changes 0; syntax delta 0.
+  222 artifact diffs + 1472 text-only diagnostic diffs — all verified path-only (compiler-root
+  `.tmp/base` vs root; normalized: 0 residual). stdlib/ and self-host-v2/ compile unchanged.
+- Real `_scrml_` references in examples/samples/conformance: ZERO (all text hits were comments/strings).
+- conformance: 1265 pass + 50 xfail of 1315 (3 new cases pass).
+- pre-commit gate at b3b3f8b99: 30472 pass / 58 skip / 12 todo / 0 fail.
