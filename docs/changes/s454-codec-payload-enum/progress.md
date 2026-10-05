@@ -96,3 +96,14 @@ regenerate.
   so whether `Fixed` should apply there is a question for U5's owner.
 - The bootstrap cannot CONSTRUCT a payload enum value outside `fail` (`Shape.Box(3)` / `.Box(3)` in a value
   position → E-BOOTSTRAP-UNSUPPORTED) — tests construct one via `!{ _ e :> @s = e }`.
+
+## 6. Fix round (S239 review LAND-WITH-NITS on 60cd085b6)
+
+- LOW-1: an unknown foreign key went into path + reason unbounded and raw (reviewer: a 10019-char path ending in a
+  raw ESC). One helper pair, `keyPath` / `keyText` next to `show`: a short plain identifier (`^[A-Za-z_$][A-Za-z0-9_$]{0,39}$`)
+  stays dotted (`$.data.zzz`, unchanged); anything else goes through `show` (40-char cap, JSON-escaped) as
+  `$["KKK…"]`. Applied at all SIX unknown-key sites — the 4 new ones (encEnum, decEnum, decPayload, decError) AND
+  the 2 pre-existing struct sites (enc, dec), which share the helper.
+- LOW-2: encEnum now reads `variant` / `data` as OWN properties (missing → `$.variant` / `$.data` value failure),
+  matching the decoder; a polluted Object.prototype no longer turns `{}` into a value.
+- NIT 5: decEnum / decError share `noVariant` for the unknown-variant failure (inert).

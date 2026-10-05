@@ -830,3 +830,68 @@ describe("§57.8 — decodeError: the `fail` envelope (\"__scrml_error\": true, 
     expect(() => decodeError(table(T.Int), env("Done", {}))).toThrow(CodecDefect);
   });
 });
+
+// ---- s454 fix round (S239 review LOW-1 / LOW-2) ----------------------------------
+
+describe("fix round — an unknown foreign KEY is bounded and escaped in path AND reason (every unknown-key site)", () => {
+  const evil = "K".repeat(10000) + "\n\x1b[31mINJECT";
+  const bounded = (e) => {
+    expect(e.path.length).toBeLessThan(120);
+    expect(e.reason.length).toBeLessThan(200);
+    for (const s of [e.path, e.reason]) {
+      expect(s).not.toContain("\n");
+      expect(s).not.toContain("\x1b");
+      expect(s).not.toContain("INJECT");
+    }
+  };
+  const SITES = [
+    ["decEnum top-level key", () => decode(table(named("Res")), { variant: "Conflict", data: { current: 1, note: "x" }, [evil]: 1 }), "$["],
+    ["decPayload unknown field", () => decode(table(named("Res")), { variant: "Conflict", data: { current: 1, note: "x", [evil]: 1 } }), "$.data["],
+    ["decError unknown key", () => decodeError(table(named("Res")), { __scrml_error: true, type: "Res", variant: "Done", data: {}, [evil]: 1 }), "$["],
+    ["encEnum top-level key", () => encode(table(named("Res")), { variant: "Conflict", data: [1, "x"], [evil]: 1 }), "$["],
+    ["struct decode (pre-existing site, same helper)", () => decode(table(named("Pt")), { x: 1, y: 2, label: "a", on: true, [evil]: 1 }), "$["],
+    ["struct encode (pre-existing site, same helper)", () => encode(table(named("Pt")), { x: 1, y: 2, label: "a", on: true, [evil]: 1 }), "$["],
+  ];
+  for (const [name, run, prefix] of SITES) {
+    test(name, () => {
+      const r = run();
+      expect(r.ok).toBe(false);
+      bounded(r.error);
+      expect(r.error.path.startsWith(prefix)).toBe(true);
+      expect(r.error.path).toContain('"KKKK');
+    });
+  }
+
+  test("the reviewer's repro: path was 10019 chars with a raw ESC; now bounded", () => {
+    const r = decode(table(named("Res")), { variant: "Conflict", data: { current: 1, note: "x", [evil]: 1 } });
+    expect(r.error.path).toBe('$.data["' + "K".repeat(40) + '…"]');
+  });
+
+  test("a short plain key keeps the dotted path (unchanged); a key with punctuation is quoted", () => {
+    expect(decodeText(table(named("Res")), '{"variant":"Conflict","data":{"current":1,"note":"x","zzz":0}}').error.path).toBe("$.data.zzz");
+    expect(decode(table(named("Res")), { variant: "Conflict", data: { current: 1, note: "x", "a.b": 0 } }).error)
+      .toEqual({ kind: "malformed", path: '$.data["a.b"]', reason: 'Res.Conflict has no field "a.b"' });
+  });
+});
+
+describe("fix round — encEnum reads `variant` / `data` as OWN properties (symmetric with decode)", () => {
+  afterEach(() => {
+    delete Object.prototype.variant;
+    delete Object.prototype.data;
+  });
+
+  test("a polluted Object.prototype.variant / .data does not make {} a value", () => {
+    Object.prototype.variant = "Conflict";
+    Object.prototype.data = [1, "x"];
+    expect(encode(table(named("Res")), {}).error).toEqual({ kind: "value", path: "$.variant", reason: "missing the variant name of a Res value" });
+    expect(encode(table(named("Res")), { variant: "Conflict" }).error).toEqual({ kind: "value", path: "$.data", reason: "missing the payload of Res.Conflict" });
+    // own properties still encode
+    expect(encodeText(table(named("Res")), { variant: "Conflict", data: [1, "x"] }).ok).toBe(true);
+  });
+
+  test("the reviewer's repro (an undeclared inherited variant name)", () => {
+    Object.prototype.variant = "Z";
+    Object.prototype.data = [1, "x"];
+    expect(encode(table(named("Res")), {}).ok).toBe(false);
+  });
+});

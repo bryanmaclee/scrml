@@ -1366,7 +1366,7 @@ function enc(table, ty, v, path, opts) {
       // An undeclared own key is refused, not dropped — the decoder refuses it too.
       const declared = new Set(d.fields.map((f) => f.name));
       for (const k of Object.keys(v)) {
-        if (!declared.has(k)) return fail("value", `${path}.${k}`, `${d.name} has no field ${k}`);
+        if (!declared.has(k)) return fail("value", keyPath(path, k), `${d.name} has no field ${keyText(k)}`);
       }
       const out = {};
       for (const f of d.fields) {
@@ -1401,11 +1401,15 @@ function encEnum(table, d, v, path, opts) {
   }
   if (!isPlainObject(v)) return fail("value", path, `expected a ${d.name} variant, got ${show(v)}`);
   for (const k of Object.keys(v)) {
-    if (k !== "variant" && k !== "data") return fail("value", `${path}.${k}`, `a ${d.name} value has no key ${k}`);
+    if (k !== "variant" && k !== "data") return fail("value", keyPath(path, k), `a ${d.name} value has no key ${keyText(k)}`);
   }
+  // OWN properties only, as the decoder reads them — an inherited `variant` /
+  // `data` (a polluted Object.prototype) is not part of the value.
+  if (!hasOwn(v, "variant")) return fail("value", `${path}.variant`, `missing the variant name of a ${d.name} value`);
   const p = variantOf(d, v.variant);
   if (p === undefined) return fail("value", `${path}.variant`, `${d.name} has no variant ${show(v.variant)}`);
   if (p.fields.length === 0) return fail("value", path, `${d.name}.${p.name} carries no payload; its value is the name ${JSON.stringify(p.name)}`);
+  if (!hasOwn(v, "data")) return fail("value", `${path}.data`, `missing the payload of ${d.name}.${p.name}`);
   const data = v.data;
   if (!Array.isArray(data)) return fail("value", `${path}.data`, `expected the payload array of ${d.name}.${p.name}, got ${show(data)}`);
   if (data.length !== p.fields.length) {
@@ -1499,7 +1503,7 @@ function dec(table, ty, w, path, opts) {
       const declared = new Set(d.fields.map((f) => f.name));
       for (const k of Object.keys(w)) {
         // A key the type does not declare is refused, not dropped (no coercion).
-        if (!declared.has(k)) return fail("malformed", `${path}.${k}`, `${d.name} has no field ${k}`);
+        if (!declared.has(k)) return fail("malformed", keyPath(path, k), `${d.name} has no field ${keyText(k)}`);
       }
       const out = {};
       for (const f of d.fields) {
@@ -1529,14 +1533,11 @@ function decEnum(table, d, w, path, opts) {
   }
   if (!isPlainObject(w)) return fail("malformed", path, `expected a ${d.name} variant name or {"variant", "data"} object, got ${show(w)}`);
   for (const k of Object.keys(w)) {
-    if (k !== "variant" && k !== "data") return fail("malformed", `${path}.${k}`, `a ${d.name} value has no key ${k} (§57.8: exactly "variant" and "data")`);
+    if (k !== "variant" && k !== "data") return fail("malformed", keyPath(path, k), `a ${d.name} value has no key ${keyText(k)} (§57.8: exactly "variant" and "data")`);
   }
   if (!hasOwn(w, "variant")) return fail("malformed", `${path}.variant`, `missing the variant name of a ${d.name} value`);
   const p = variantOf(d, w.variant);
-  if (p === undefined) {
-    if (typeof w.variant !== "string") return fail("malformed", `${path}.variant`, `expected a ${d.name} variant name, got ${show(w.variant)}`);
-    return fail("malformed", `${path}.variant`, `${d.name} has no variant ${show(w.variant)}`);
-  }
+  if (p === undefined) return noVariant(d, w.variant, path);
   if (p.fields.length === 0) {
     return fail("malformed", path, `${d.name}.${p.name} carries no payload; its wire form is the string ${JSON.stringify(p.name)} (§57.8)`);
   }
@@ -1544,6 +1545,12 @@ function decEnum(table, d, w, path, opts) {
   const r = decPayload(table, d, p, w.data, `${path}.data`, opts);
   if (!r.ok) return r;
   return { ok: true, value: { variant: p.name, data: r.value } };
+}
+
+// The failure for a wire `variant` that names none of d's variants (decEnum, decError).
+function noVariant(d, name, path) {
+  if (typeof name !== "string") return fail("malformed", `${path}.variant`, `expected a ${d.name} variant name, got ${show(name)}`);
+  return fail("malformed", `${path}.variant`, `${d.name} has no variant ${show(name)}`);
 }
 
 // A variant's `data` object (keys = its declared field names, exactly) → the
@@ -1554,7 +1561,7 @@ function decPayload(table, d, p, data, path, opts) {
   if (!isPlainObject(data)) return fail("malformed", path, `expected the payload object of ${d.name}.${p.name}, got ${show(data)}`);
   const declared = new Set(p.fields.map((f) => f.name));
   for (const k of Object.keys(data)) {
-    if (!declared.has(k)) return fail("malformed", `${path}.${k}`, `${d.name}.${p.name} has no field ${k}`);
+    if (!declared.has(k)) return fail("malformed", keyPath(path, k), `${d.name}.${p.name} has no field ${keyText(k)}`);
   }
   const out = [];
   for (const f of p.fields) {
@@ -1578,7 +1585,7 @@ function decError(table, d, w, opts) {
   if (!isPlainObject(w)) return fail("malformed", path, `expected a ${ERROR_KEY} envelope object, got ${show(w)}`);
   for (const k of Object.keys(w)) {
     if (k !== ERROR_KEY && k !== "type" && k !== "variant" && k !== "data") {
-      return fail("malformed", `${path}.${k}`, `an error envelope has no key ${k} (§57.8: ${ERROR_KEY}, type, variant, data)`);
+      return fail("malformed", keyPath(path, k), `an error envelope has no key ${keyText(k)} (§57.8: ${ERROR_KEY}, type, variant, data)`);
     }
   }
   if (!hasOwn(w, ERROR_KEY) || w[ERROR_KEY] !== true) return fail("malformed", `${path}.${ERROR_KEY}`, `not an error envelope: ${ERROR_KEY} is not true`);
@@ -1586,10 +1593,7 @@ function decError(table, d, w, opts) {
   if (w.type !== d.name) return fail("malformed", `${path}.type`, `error type ${show(w.type)} is not the declared ${JSON.stringify(d.name)}`);
   if (!hasOwn(w, "variant")) return fail("malformed", `${path}.variant`, `missing the variant name of a ${d.name} error`);
   const p = variantOf(d, w.variant);
-  if (p === undefined) {
-    if (typeof w.variant !== "string") return fail("malformed", `${path}.variant`, `expected a ${d.name} variant name, got ${show(w.variant)}`);
-    return fail("malformed", `${path}.variant`, `${d.name} has no variant ${show(w.variant)}`);
-  }
+  if (p === undefined) return noVariant(d, w.variant, path);
   if (!hasOwn(w, "data")) return fail("malformed", `${path}.data`, `missing the payload of ${d.name}.${p.name} ({} for a variant with no fields)`);
   const r = decPayload(table, d, p, w.data, `${path}.data`, opts);
   if (!r.ok) return r;
@@ -1665,6 +1669,18 @@ function message(e) {
   } catch {
     return "an unprintable error";
   }
+}
+
+// A foreign object KEY in a failure (path and reason): a short plain identifier
+// verbatim (`$.data.zzz`); anything else — long, control characters, punctuation —
+// through `show`'s bounded (40-char), JSON-escaped form (`$["KKKK…"]`). A failure
+// never carries an unbounded or raw foreign key.
+const PLAIN_KEY = /^[A-Za-z_$][A-Za-z0-9_$]{0,39}$/;
+function keyText(k) {
+  return PLAIN_KEY.test(k) ? k : show(k);
+}
+function keyPath(path, k) {
+  return PLAIN_KEY.test(k) ? `${path}.${k}` : `${path}[${show(k)}]`;
 }
 
 function show(x) {
