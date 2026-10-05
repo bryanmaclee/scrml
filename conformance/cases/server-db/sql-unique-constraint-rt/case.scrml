@@ -7,7 +7,7 @@
     </schema>
     <total> = not
     function tryAdd(email: string) {
-        ?{`INSERT OR IGNORE INTO members (email) VALUES (${email})`}.run() !{ _ :> {} }
+        ?{`INSERT OR IGNORE INTO members (email) VALUES (${email})`}.run()
     }
     function memberCount() {
         return ?{`SELECT COUNT(*) AS n FROM members`}.get() !{ _ :> not }

@@ -62,7 +62,7 @@
     ?{`
       INSERT INTO signups (first_name, last_name, email, theme, newsletter)
       VALUES (${firstName}, ${lastName}, ${email}, ${theme}, ${newsletter})
-    `}.run() !{ _ :> {} }
+    `}.run()
   }
 
   function submit() {

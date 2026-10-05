@@ -1,7 +1,7 @@
 ${
     <price> = 10
     function saveOrder() : number {
-        result = ?{`INSERT INTO orders (amount) VALUES (${@price}) RETURNING id`} !{ _ :> [] }
+        result = ?{`INSERT INTO orders (amount) VALUES (${@price}) RETURNING id`}
         return result
     }
 }

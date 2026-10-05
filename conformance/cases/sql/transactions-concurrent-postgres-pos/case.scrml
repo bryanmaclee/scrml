@@ -1,7 +1,7 @@
 <program db="postgres://app:secret@localhost:5432/ledger" transactions="concurrent">
     ${
         function record(note) {
-            ?{`INSERT INTO entries (note) VALUES (${note})`}.run() !{ _ :> {} }
+            ?{`INSERT INTO entries (note) VALUES (${note})`}.run()
             return 1
         }
     }

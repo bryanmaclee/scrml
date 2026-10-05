@@ -126,7 +126,7 @@ ${
     }
 
     server function createOrder(product, amount) {
-        ?{`INSERT INTO orders (product, amount, status) VALUES (${product}, ${amount}, "pending")`}.run() !{ _ :> {} }
+        ?{`INSERT INTO orders (product, amount, status) VALUES (${product}, ${amount}, "pending")`}.run()
         return ?{`SELECT id, product, amount, status FROM orders ORDER BY id DESC LIMIT 50`}.all() !{ _ :> [] }
     }
 

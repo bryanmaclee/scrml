@@ -129,7 +129,7 @@ ${
             ?{`
                 INSERT INTO messages (room_id, user_id, content, inserted_at)
                 VALUES (${roomId}, ${user.id}, ${content}, datetime('now'))
-            `}.run() !{ _ :> {} }
+            `}.run()
             return { ok: true }
         }
 
@@ -143,12 +143,12 @@ ${
                 INSERT INTO typing_status (room_id, username, last_typed)
                 VALUES (${roomId}, ${username}, datetime('now'))
                 ON CONFLICT (room_id, username) DO UPDATE SET last_typed = datetime('now')
-            `}.run() !{ _ :> {} }
+            `}.run()
             if (!isTyping) {
                 ?{`
                     DELETE FROM typing_status
                     WHERE room_id = ${roomId} AND username = ${username}
-                `}.run() !{ _ :> {} }
+                `}.run()
             }
         }
 
@@ -169,7 +169,7 @@ ${
             // There is no subscribe mechanism. No handle_info equivalent.
             let user = ?{`SELECT id FROM users WHERE username = ${username}`}.first()
             if (!user) {
-                ?{`INSERT INTO users (username) VALUES (${username})`}.run() !{ _ :> {} }
+                ?{`INSERT INTO users (username) VALUES (${username})`}.run()
             }
             return { ok: true }
         }

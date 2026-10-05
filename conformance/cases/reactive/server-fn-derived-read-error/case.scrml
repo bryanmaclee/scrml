@@ -2,7 +2,7 @@ ${
     <price> = 10
     const <total> = @price * 3
     function saveOrder() : number {
-        result = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`} !{ _ :> [] }
+        result = ?{`INSERT INTO orders (amount) VALUES (${@total}) RETURNING id`}
         return result
     }
 }

@@ -7,7 +7,7 @@ ${
     // separate client-only fn): the contradiction is inside one body →
     // E-ROUTE-005.
     function saveAndPaint(name: string) {
-        ?{`INSERT INTO audit (who) VALUES (${name})`}.run() !{ _ :> {} }
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
         document.title = name
     }
 }

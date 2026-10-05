@@ -35,7 +35,7 @@ ${
 
     server function deleteFiles(ids) {
         for (let id of ids) {
-            ?{`DELETE FROM files WHERE id = ${id}`}.run() !{ _ :> {} }
+            ?{`DELETE FROM files WHERE id = ${id}`}.run()
         }
         return ?{`
             SELECT id, name, size, type, modified

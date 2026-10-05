@@ -1,6 +1,6 @@
 <program db="sqlite:./notes.db" auth="required">
 function saveNote(body: string) {
-    ?{`INSERT INTO notes (sid, body) VALUES (${session.userId}, ${body})`}.run() !{ _ :> {} }
+    ?{`INSERT INTO notes (sid, body) VALUES (${session.userId}, ${body})`}.run()
 }
 function logout() {
     @session.destroy()

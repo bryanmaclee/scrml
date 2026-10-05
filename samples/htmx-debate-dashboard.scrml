@@ -67,7 +67,7 @@
         // --- Server function: write path with optimistic update ---
         server function createOrder(product, qty) {
             ?{`INSERT INTO orders (product, qty, status, user_id, created_at)
-               VALUES (${product}, ${qty}, 'pending', 1, datetime('now'))`}.run() !{ _ :> {} }
+               VALUES (${product}, ${qty}, 'pending', 1, datetime('now'))`}.run()
             return ?{`SELECT o.id, o.product, o.qty, o.status, u.name as customer
                       FROM orders o JOIN users u ON o.user_id = u.id
                       ORDER BY o.created_at DESC LIMIT 50`}.all() !{ _ :> [] }

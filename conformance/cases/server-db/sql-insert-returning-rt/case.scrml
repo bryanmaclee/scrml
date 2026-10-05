@@ -8,7 +8,7 @@
     <inserted> = []
     <total> = not
     function addNote(body: string) {
-        return ?{`INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`}.all() !{ _ :> [] }
+        return ?{`INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`}.all()
     }
     function countNotes() {
         return ?{`SELECT COUNT(*) AS n FROM notes`}.get() !{ _ :> not }

@@ -125,7 +125,7 @@
         // Client wrapper assigns the returned data to reactive state.
         server function doDeleteSelected(ids) {
             for (let id of ids) {
-                ?{`DELETE FROM employees WHERE id = ${id}`}.run() !{ _ :> {} }
+                ?{`DELETE FROM employees WHERE id = ${id}`}.run()
             }
             return loadEmployees()
         }
@@ -166,7 +166,7 @@
 
         // Approach D: server function takes explicit params, returns fresh data.
         server function doInsertEmployee(name, department, role, salary) {
-            ?{`INSERT INTO employees (name, department, role, salary, active) VALUES (${name}, ${department}, ${role}, ${salary}, 1)`}.run() !{ _ :> {} }
+            ?{`INSERT INTO employees (name, department, role, salary, active) VALUES (${name}, ${department}, ${role}, ${salary}, 1)`}.run()
             return loadEmployees()
         }
 

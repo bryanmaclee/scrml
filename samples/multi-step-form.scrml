@@ -45,7 +45,7 @@ ${
             INSERT INTO signups (first_name, last_name, email, phone, street, city, state, zip, country)
             VALUES (${personal.firstName}, ${personal.lastName}, ${personal.email}, ${personal.phone},
                     ${address.street}, ${address.city}, ${address.state}, ${address.zip}, ${address.country})
-        `}.run() !{ _ :> {} }
+        `}.run()
     }
 
     function personalDone() {

@@ -53,7 +53,7 @@
         ?{`
           INSERT INTO notes (user_id, title, body, published)
           VALUES (${user.id}, ${title}, ${body}, 1)
-        `}.run() !{ _ :> {} }
+        `}.run()
       }
 
       function listNotes() {

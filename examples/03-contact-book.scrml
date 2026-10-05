@@ -43,7 +43,7 @@
       return ?{`
         INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})
         RETURNING id, name, email, phone
-      `}.get() !{ _ :> not }
+      `}.get()
     }
 
     function loadContacts() {
@@ -51,7 +51,7 @@
     }
 
     function removeContact(id) {
-      ?{`DELETE FROM contacts WHERE id = ${id}`}.run() !{ _ :> {} }
+      ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
     }
 
     function addContact() {

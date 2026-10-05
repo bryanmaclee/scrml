@@ -59,12 +59,12 @@
             username  text not null,
             minted_at timestamp DEFAULT CURRENT_TIMESTAMP
           )
-        `}.run() !{ _ :> {} }
+        `}.run()
         ?{`
           INSERT INTO tickets (token, username)
           VALUES (${token}, ${username})
           ON CONFLICT DO NOTHING
-        `}.run() !{ _ :> {} }
+        `}.run()
         return token
       }
 

@@ -1,6 +1,6 @@
 ${
     function loadRows(q) {
-        return ?{`${q}`}.all() !{ _ :> [] }
+        return ?{`${q}`}.all()
     }
 }
 <program db="./app.db">

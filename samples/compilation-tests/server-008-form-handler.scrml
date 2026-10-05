@@ -8,7 +8,7 @@
 <div>
     ${
         server function createUser() {
-            ?{`INSERT INTO users (name) VALUES ('New User')`} !{ _ :> [] }
+            ?{`INSERT INTO users (name) VALUES ('New User')`}
         }
     }
     <form onsubmit=createUser()>

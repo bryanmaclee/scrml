@@ -12,7 +12,7 @@ ${
 
     // Server-classified via the ?{} SQL context. It calls no client-only fn.
     function auditName(name: string) {
-        ?{`INSERT INTO audit (who) VALUES (${name})`}.run() !{ _ :> {} }
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
     }
 }
 <button id="go" onclick=refresh("hi")>Go</button>

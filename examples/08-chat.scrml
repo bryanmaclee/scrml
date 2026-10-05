@@ -62,7 +62,7 @@
       ?{`
         INSERT INTO messages (id, author_id, body, sent_at)
         VALUES (${id}, ${authorId}, ${body}, ${sentAt})
-      `}.run() !{ _ :> {} }
+      `}.run()
     }
 
     function sendMessage() {

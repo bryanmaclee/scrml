@@ -2,7 +2,7 @@
 ${
     <remaining> = not
     function removeTask(id: number) {
-        ?{`DELETE FROM tasks WHERE id = ${id}`}.run() !{ _ :> {} }
+        ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
     }
     function countTasks() {
         return ?{`SELECT COUNT(*) AS n FROM tasks`}.get() !{ _ :> not }

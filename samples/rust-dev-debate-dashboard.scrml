@@ -101,7 +101,7 @@ ${
     }
 
     server function createOrder(item, amount) {
-        ?{`INSERT INTO orders (item, amount) VALUES (${item}, ${amount})`}.run() !{ _ :> {} }
+        ?{`INSERT INTO orders (item, amount) VALUES (${item}, ${amount})`}.run()
         return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 1`}.get() !{ _ :> not }
     }
 

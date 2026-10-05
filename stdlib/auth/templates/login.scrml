@@ -48,7 +48,7 @@
           return { error: "Invalid email or password" }
         }
 
-        ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run() !{ _ :> {} }
+        ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
 
         // Establish the session (SPEC §20.5.1). This is what a
         // <program auth="required"> gate checks: without it the user is

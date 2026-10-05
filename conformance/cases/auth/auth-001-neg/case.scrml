@@ -8,7 +8,7 @@ ${
     // client-local cell `${@editingId}`, so no unmediated client-controlled
     // value reaches the write. This is the SPEC §52.4.6 remedy.
     function logEdit(id) {
-        ?{`INSERT INTO audit_log (object_id) VALUES (${id})`}.run() !{ _ :> {} }
+        ?{`INSERT INTO audit_log (object_id) VALUES (${id})`}.run()
     }
     logEdit(@editingId)
 }

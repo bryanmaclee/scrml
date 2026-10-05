@@ -111,7 +111,7 @@ ${
     // --- Submit ---
     server function submitRegistration(firstName, lastName, email, plan, emailUpdates, smsAlerts, newsletter) {
         ?{`INSERT INTO registrations (first_name, last_name, email, plan, email_updates, sms_alerts, newsletter)
-           VALUES (${firstName}, ${lastName}, ${email}, ${plan}, ${emailUpdates}, ${smsAlerts}, ${newsletter})`}.run() !{ _ :> {} }
+           VALUES (${firstName}, ${lastName}, ${email}, ${plan}, ${emailUpdates}, ${smsAlerts}, ${newsletter})`}.run()
         return "ok"
     }
 

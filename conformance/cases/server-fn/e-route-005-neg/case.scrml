@@ -10,7 +10,7 @@ ${
         persist(name) !{ .Transport(_) :> { return } }
     }
     function persist(name: string) {
-        ?{`INSERT INTO audit (who) VALUES (${name})`}.run() !{ _ :> {} }
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
     }
 }
 <button id="go" onclick=flash("hi")>Go</button>

@@ -4,7 +4,7 @@ ${
     // pins to the client (it touches the browser-only `document` global). A
     // server fn calling a client-only fn is the §12.4 violation: E-ROUTE-002.
     function auditAndFlash(name: string) {
-        ?{`INSERT INTO audit (who) VALUES (${name})`}.run() !{ _ :> {} }
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
         flashTitle(name)
     }
 

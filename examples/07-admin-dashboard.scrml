@@ -48,7 +48,7 @@
       }
 
       function deleteUser(id) {
-        ?{`DELETE FROM users WHERE id = ${id}`}.run() !{ _ :> {} }
+        ?{`DELETE FROM users WHERE id = ${id}`}.run()
       }
     }
 
