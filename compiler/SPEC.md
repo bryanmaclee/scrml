@@ -10090,13 +10090,13 @@ The compiler SHALL:
 **Developer writes (synchronous-looking):**
 ```scrml
 ${ function loadDashboard() {
-    let user = getUser(userId) !{ _ :> return };
-    let items = getItems(userId) !{ _ :> return };
-    let stats = getStats(userId) !{ _ :> return };
+    let user = getUser(userId) !{ _ :> { return } };
+    let items = getItems(userId) !{ _ :> { return } };
+    let stats = getStats(userId) !{ _ :> { return } };
 } }
 ```
 
-*(S451 — each call is handled: a client call to a server function is failable (§19.9.10), and each `!{ _ :> return }` leaves on failure (§19.4.3, value position). Supersedes the unhandled `let user = getUser(userId);` lines. The emitted shape below shows only the parallelization; the failure checks are omitted from it. Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1.)*
+*(S451 — each call is handled: a client call to a server function is failable (§19.9.10), and each `!{ _ :> { return } }` leaves on failure (§19.4.3, value position). Supersedes the unhandled `let user = getUser(userId);` lines. The emitted shape below shows only the parallelization; the failure checks are omitted from it. Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1.)*
 
 **Compiler emits (simplified):**
 ```javascript
@@ -16439,6 +16439,9 @@ arm-body        ::= expression | block-body
 block-body      ::= '{' statement* expression? '}'
 ```
 
+> ⚑ **A bare control-flow statement (`return`, `fail`) is NOT an arm body today** — `arm-body ::= expression | block-body`, so write `:> { return }` / `:> { fail E.V(…) }`. A widening is banked (dpa-068).
+> **Provenance:** ruling:user-voice-scrml.md S454 "grant the exception. Your rec, but we will likely widen this later. significantly more ergonomic" · supersedes: the bare `:> return` / `:> fail …` spellings in the §13.2, §19.5 and §19.9.10 examples (corrected to the braced form, S454).
+
 Note: `variant-pattern` accepts both `.` (canonical) and `::` (alias) notation (S37-AM-001).
 `wildcard-arm` accepts both `else` (canonical) and `_` (alias) (S37-AM-003). The match arm
 separator is `:>` (canonical); `=>` and `->` are deprecated aliases accepted during the
@@ -18427,7 +18430,7 @@ The `?` operator is postfix. When applied to the result of a `!` function call:
 ```scrml
 match riskyFunction() {
     ::Ok(val) :> val
-    ::ErrorVariant(args) :> fail EnclosingErrorType::ErrorVariant(args)
+    ::ErrorVariant(args) :> { fail EnclosingErrorType::ErrorVariant(args) }
 }
 ```
 
@@ -19425,9 +19428,9 @@ second synthetic enum exists; `CpsError` is retired (§19.9.5).
 
 > **Migration (informative — tooling, owed).** The code this section rejects is migrated by a `scrml fix` rule built
 > alongside the §19.8.3 R11 rule (S454 F8): at an unhandled client call it writes the old behaviour out — a failed
-> call stopped the rest of the code from running — as a local `!{ .Transport(t) :> return }` (for a `! E` callee, the
+> call stopped the rest of the code from running — as a local `!{ .Transport(t) :> { return } }` (for a `! E` callee, the
 > arms already present plus that one). In an event-handler value the rule writes the BRACED form, `onclick={ f() !{
-> .Transport(t) :> return } }`; `return` is legal there because §5.2.3 makes an inline handler block "the same
+> .Transport(t) :> { return } } }`; `return` is legal there because §5.2.3 makes an inline handler block "the same
 > statement grammar as a function body (§7.3)" (this settles the design's open question that S454 F8 was conditional
 > on). At a site in a client function body the local rewrite is not meaning-identical — before, the failure also
 > aborted every awaiting caller; after, callers continue — so the rule SHALL emit an Info at each such site saying so.
@@ -25161,6 +25164,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-CLOSER-001 | §4.14 | A tag uses `:`-shorthand body but ALSO has an explicit closer (`</>`, `/`, `/>`). Choose one form: `:`-shorthand has no closer; bare-body uses a closer; self-closing has no body. (Stage 0b D4) | Error |
 | E-COLON-SHORTHAND-ON-VOID | §4.14, §24 | A `:`-shorthand body (`<tag : expr>`) is used on a VOID HTML element (`isVoid:true` in the §24 element registry — `<input>`, `<img>`, `<br>`, `<hr>`, and the SVG geometry elements `<rect>`/`<circle>`/`<line>`/`<path>`/`<polyline>`/`<polygon>`). A void element has no content model, so there is no body to render the expression into. Non-void HTML elements render `:`-shorthand as their single-expression body (byte-identical to `<tag>${expr}</tag>`); a void element binds a value through an attribute (e.g. `<input bind:value=@x/>`), not a body. (S159 — S154 design ruling (a)) | Error |
 | E-NAME-COLLIDES-RESERVED | §4.15, §24.4 | A user-declared component or state-type name collides with a reserved scrml structural-element identifier (`engine`, `match`, `errors`, `onTransition` — case-sensitive at registry level). (Stage 0b D4) | Error |
+| E-NAME-COLLIDES-RESERVED-PREFIX | §47.1.1 | A user-authored program declares or references a name beginning with `_scrml_` (the compiler/runtime namespace; S439 #7, S440 #9) — including a foreign block's `in:{}` crossing header and the `${}` interpolations of quoted attribute values. Decided on the parsed tree; string literals, comments, markup text, the literal text of quoted attribute values, object-literal keys in parsed logic, and the opaque body of `_{}` foreign code (§23.2.3) are not inspected. `stdlib/` source exempt by real path. **Provenance:** ruling:user-voice-scrml.md S439 #7 + S440 #9. (impl#1 post-TAB, `compiler/src/validators/reserved-prefix.ts`, S454 #1301; bootstrap twin owed.) | Error |
 | E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; **a structural-DECLARATION element (`<schema>` / `<engine>` / `<channel>` / `<page>` / `<auth>` / `<errors>` / `<onTransition>` / `<onTimeout>` / `<onIdle>`) appears inside a `${...}` logic body (S135 — silent-swallow class)**; etc. The owning section's error subsection documents the precise condition. **`<match>` (block-form) is the 10th §4.15 entry but is intentionally NOT covered by this code in the `${...}` context — block-form `<match>` is markup-as-value (§18.0.1 + §1.4 L1 pillar) and is canonical inside `${...}` markup-emit contexts (the canonical output of `bun scrml promote --match`, §56.10).** (Stage 0b D4; S67 amendment; S135 amendment — `${...}` logic-body silent-swallow class closed; emitted at `compiler/src/ast-builder.js:parseLogicBody` html-fragment fallback sites.) | Error |
 | E-IF-IN-DISPATCHED-ARM | §17.1, §17.1.1, §18.0.1, §51.0.B | **TEMPORARY IMPLEMENTATION RESTRICTION — not a language rule.** An `if=` element, or an `if=`/`else-if=`/`else` chain, appears inside the body of a DISPATCHED arm: a `<match>` block-form arm (§18.0.1) or an `<engine>` state-child (§51.0.B). Those bodies are emitted as HTML strings and injected with `innerHTML` on dispatch, then wired by a per-arm wire function; §17.1 `if=` puts its subtree inside a `<template>`, which that wire function cannot see into, and the `if=` controller itself is created at boot against a document that does not yet contain the arm. The gated subtree would therefore render empty or never appear, with NO runtime error — so the compiler refuses the composition instead of emitting it. Express the condition as ARM STRUCTURE (a variant for the gated state) until the restriction lifts. NOTE: hoisting the `if=` to wrap the whole `<match>`/`<engine>` is NOT a workaround — that is a separate defect. SPEC places no limit on where `if=` may appear; this row is expected to be REMOVED, not amended, when the arm-dispatch path re-runs the conditional controllers against the injected arm root. (S301 — `if=` Phase 2; emitted at `compiler/src/codegen/emit-html.ts:refuseConditionalInDispatchedArm` — **THREE call sites** as of S302: `:1508` (markup `if=`), `:1737` (`if`/`else-if`/`else` chain), `:2727` (`emitGatedStructural`, added with the §17.1.2 widening so the three structural elements refuse identically). The row previously said *two*; it was written before the structural surface existed. **Revert as a unit** — a partial revert leaves one surface refusing and another silently mis-emitting.) | Error |
 | E-MULTI-STATEMENT-HANDLER | §5.2.3, §4.14 | NARROWED S435 (L19 reversed). Fires on exactly two shapes: (1) a BARE (unbraced) event-handler attribute value containing a top-level `;` statement sequence — `onclick=startGame(); track()` — whose extent cannot be told apart from the opener's following attributes; fix: wrap it in braces, `onclick={ startGame(); track() }`, or name a function; (2) a `:`-shorthand body (§4.14) containing multiple statements; fix: the bare-body form. An inline-block handler value (`onclick={ … }`) never fires it. (Stage 0b D4; narrowed per ruling:user-voice-scrml.md S435) (Emitted at `compiler/src/ast-builder.js:17890` — the unbraced bare `;` sequence on an event-handler attribute, at every markup position including `<each>` rows, engine state-children and `<match>` arms (forwarded out of those error-discarding sub-builds by `_forwardSubparseErrors`, S437) — and at `compiler/src/symbol-table.ts:7776` — the multi-statement `:`-shorthand body.) | Error |
@@ -30772,10 +30776,10 @@ seq           ::= 1 or 2 base36 characters [0-9a-z]  (see §47.4)
 ```
 
 - The `_` prefix is reserved for compiler-generated names. User-authored scrml identifiers and vanilla JS identifiers SHALL NOT begin with `_` followed by a `kind` character and 8 base36 characters. The compiler SHALL reject any user-authored identifier that would collide with this pattern (E-CG-012).
-- **S439 ruling (#7) — the `_scrml_` identifier namespace is RESERVED.** A user-authored scrml program SHALL NOT **declare** a binding whose name begins with `_scrml_`; that prefix names compiler/runtime identifiers (`_scrml_reactive_set`, `_scrml_session_destroy`, …). Such a declaration is a compile error: **`E-NAME-COLLIDES-RESERVED-PREFIX`** — **Nominal / spec-ahead — not yet emitted**; its §34 catalog row lands WITH the implementation (house rule — no §34 row precedes its emitter, as §66.20). Newly-rejecting, so reversible, and it limits rather than widens.
+- **S439 ruling (#7) — the `_scrml_` identifier namespace is RESERVED.** A user-authored scrml program SHALL NOT **declare** a binding whose name begins with `_scrml_`; that prefix names compiler/runtime identifiers (`_scrml_reactive_set`, `_scrml_session_destroy`, …). Such a declaration is a compile error: **`E-NAME-COLLIDES-RESERVED-PREFIX`** — emitted by impl#1 since S454 (#1301); §34 row present; bootstrap twin owed. Newly-rejecting, so reversible, and it limits rather than widens.
   > ~~⚑ **OPEN (not ruled):** whether a *reference* to a `_scrml_` name is refused, and the status of stdlib source (which references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`), is not ruled.~~ *(ruled S440 #9 — see the next bullet)*
   > **Provenance:** ruling:user-voice-scrml.md S439 #7 "all recs" (Rec: yes — a SPEC sentence plus a diagnostic).
-- **S440 ruling (#9) — REFERENCES are refused too; stdlib is exempt by path.** A user-authored scrml program SHALL NOT **reference** a name that begins with `_scrml_` either — the reservation above covers references as well as declarations, under the same code, **`E-NAME-COLLIDES-RESERVED-PREFIX`** (Nominal / spec-ahead — not yet emitted; impl#1 carries it, §34.0). **Standard-library source is exempt by path:** a file of the scrml standard library (the `stdlib/` source tree) MAY declare and reference `_scrml_` names (it references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`).
+- **S440 ruling (#9) — REFERENCES are refused too; stdlib is exempt by path.** A user-authored scrml program SHALL NOT **reference** a name that begins with `_scrml_` either — the reservation above covers references as well as declarations, under the same code, **`E-NAME-COLLIDES-RESERVED-PREFIX`** (emitted by impl#1 since S454, #1301). **Standard-library source is exempt by path:** a file of the scrml standard library (the `stdlib/` source tree) MAY declare and reference `_scrml_` names (it references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`).
   > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 9) — *"`_scrml_` → reject references as well as declarations; stdlib exempt by path"* · supersedes: the S439 #7 OPEN block (above, struck).
 - The full alphabet of the encoded portion (excluding the `$` separator used in debug mode, §47.3) is `[_0-9a-z]`.
 
