@@ -259,3 +259,21 @@ rewritten: 203 sites (124 handler values written braced, 79 inserted; 79 client-
 - **handler reference** (1): conformance/cases/form-for/formfor-onsubmit-signature/case.scrml:19
 - **value position (inside a handler expression)** (1): conformance/cases/server-db/async-call-then-in-handler-neg/case.scrml:5
 - **closure** (1): conformance/cases/server-db/inline-handler-server-call-sort-neg/case.scrml:6
+
+## Merge of origin/main (8041451f4: #1305 handled-?{}, #1306 wrap, #1307 maps) — c7de2d181
+- Conflicts only in generated docs (compiler/SPEC-INDEX.md totals + §18/§19+ line ranges; docs/FACTS.md table):
+  resolved by REGENERATING (`regen-spec-index.ts`, `facts.ts --write`; both `--check` OK; `state.ts --check` all
+  @generated sections current). SPEC.md auto-merged: the Part 0b deadline / handler-task text and #1306's bare-`return`
+  correction both present. (Still stale on main's text, not touched here: §19.9.10 migration note "The rule is not
+  built." — the rule is built.)
+- Pre-commit gate on the merge: 30700 pass / 0 fail. Rule tests 22/22; fix-s66 + fix-arm-pipe green.
+- `scrml fix --rules=client-server-call --check` over the corpus: would change the 11 held-back cases (as before)
+  PLUS #1305's three new cases — server-db/sql-handled-decl-rhs-rt (7 sites), sql-handled-in-condition-rt (3),
+  sql-handled-match-scrutinee-rt (4): each case's client driver `go()` writes cells from client calls of non-`!`
+  server functions with no handler (written after the migration, so not §19.9.10-shaped). Those functions write /
+  fail, so impl#1 does not batch them; the gate passes. NOT applied — they are #1305's contract cases; PA's call.
+- impl#1 conformance vs main (main corpus vs this branch, same merged compiler): 1268 pass + 50 xfail both, identical
+  case by case.
+- Bootstrap counter vs main: PASS 121 = 121 (name set identical) · FAIL 58 → 56 · UNSUPPORTED 625 → 627 · the same
+  two FAIL → UNSUPPORTED moves (sql-configured-db-no-e-sql-004, sql-missing-db-e-sql-004-neg) and the same 17
+  unexpected-error-set changes as at fd3a012b9. Counts/classes otherwise unchanged vs fd3a012b9.
