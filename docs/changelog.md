@@ -2,6 +2,23 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S454 — 2026-10-04/05 (bryan · ASUS; solo — Peter landed #1297/#1300 alongside) — three fail-open floors closed, U1b built, the Types gate made real
+
+**Landed (each S239-reviewed; markers in `docs/pr-reviews.md`, 0 owed):**
+- **#1295** bootstrap codec — §57.8 payload enums encode + strict decode; the `fail`-envelope decoder (U1b prerequisite).
+- **#1296** B-1 ("a yes, b yes, root fix") — call-ref handlers coloured by author name, so `onclick=fn()` and `onclick=${fn()}` emit the same logging wrapper; a 16th listener-registration site found; §5.2.2 states meaning, §19.6.8 B7.
+- **#1298** SPEC — §19.9.10 U1b (`ServerCallError`, one `Transport` wrapper, a client deadline, E-ERROR-016 reserved); owed S452 tenant-floor + arm-pipe text; Peter's S453 readings ratified.
+- **#1299** security — the `protect=` floor failed OPEN on any statement it could not read (13 executed leak shapes); inverted to positive-proof-only.
+- **#1301** security — `E-NAME-COLLIDES-RESERVED-PREFIX` (the S439/S440 ruling, never emitted): author code can no longer reach `_scrml_sql.unsafe`.
+- **#1302** the Types gate — red on main for ≥32 merges behind `continue-on-error`; 30 diagnostics cleared, the step is now BLOCKING in `gate`.
+- **#1303** bootstrap U1b — the client→server call end to end (Suspend/Attempt lowering, `rt.call` that never rejects, a 30 s deadline).
+- **#1305** impl#1 (freeze exception) — a handled `?{}` lowers in every expression position; handlers exhaustive everywhere and fail closed (r1 caught a fail-open "ADMIN-GRANTED").
+
+**Rulings (user-voice §S454):** B-1; U1b forks ("all your recs, F3 with the deadline"); Peter's S453 note ("your recs on all"); the Types gate ("fix the 30 then promote it"); deadline 30 s + double-click both continue; the handled-`?{}` impl#1 exception; bare-`return` arm body = grammar now, widen later (dpa-068 banked).
+
+**In flight at wrap:** F8 `scrml fix client-server-call` (`feat/s454-scrml-fix-f8-r11`) — fix round on four review findings. **Owed:** R11 `sql-failable` rule; the foreign-block closure hole; tenant r4 residuals.
+
+
 ## S452 — 2026-10-04 (bryan · ASUS; S453-peter concurrent) — one pattern-arm spelling, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary
 
 **Rulings (user-voice §S452).** **One pattern-arm grammar** in logic: `!{}` handler arms and engine message arms take §18.2's

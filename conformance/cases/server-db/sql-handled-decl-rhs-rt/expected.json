@@ -1,0 +1,37 @@
+{
+  "id": "server-db-sql-handled-decl-rhs-rt",
+  "description": "§19.8.3 / §19.8.4 (S451 R11) — a `?{}` query handled by `!{}` as the right-hand side of a declaration / assignment in a server function (RUNTIME, sqlEngine:\"real\"). Three database states in one program: `notes` has a row, `empties` is an empty table, `gone` is declared in <schema> but never created, so a query on it FAILS TO RUN (\"no such table\"). `.get()` on the row → the row; on the empty table → `not` (no row is not a failure); on the missing table → the `.QueryFailed(m)` arm runs. `.all()` on the missing table → the `_ :> []` arm (length 0). A keywordless reassignment `row = ?{…}.get() !{…}` assigns the existing binding; a parenthesized `( ?{…}.get() !{…} )` lowers like the bare form. Pre-S454 every one of these failed the build with E-CODEGEN-INVALID-LOGIC (`let _scrml__scrml_result_N = ;`) — g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454.",
+  "language-version": "1.0",
+  "spec": "§19.8.3, §19.8.4, §19.4.3",
+  "rationale": "§19.8.3: \"A `?{}` query is a failable expression everywhere\"; handling form 1 is \"A `!{}` handler on the query — written after the terminator (`.get()`, `.all()`, `.run()`), its arms match `SqlError` variants\" with example 1 `const row = ?{…}.get() !{ .QueryFailed(m) :> { …; return \"?\" } … }`. §19.8.3: \"`.get()` on zero rows returns `not`, and `.all()` on zero rows returns `[]` … Only a query that fails to run … produces a `SqlError` variant.\" §19.4.3 lists the declaration initializer and the assignment right-hand side (`x = f() !{ … }`) as value positions.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ],
+      "empties": []
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "hit": "hello",
+      "miss": "none",
+      "failed": "failed",
+      "allHit": 1,
+      "allFailed": 0,
+      "reassigned": "hello",
+      "paren": "none"
+    },
+    "domAnchored": [
+      { "selector": "#hit", "text": "hello" },
+      { "selector": "#miss", "text": "none" },
+      { "selector": "#failed", "text": "failed" }
+    ]
+  }
+}

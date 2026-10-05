@@ -47,6 +47,7 @@ import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
 import { buildTenantContext, SERVER_TENANT_HELPER } from "./tenant-egress.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 import { extractDesiredSchema } from "./db-authoritative.ts";
 import { setTenantContextForRewriter, drainTenantViolationsFromRewriter } from "./rewrite.ts";
 import {
@@ -371,6 +372,11 @@ const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   // means a `_scrml_print(` reference is INLINED (not an E-TOOL-005 gap): a
   // `kind="tool"` program is the primary print consumer (its stdout is parsed).
   { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
+  // §19.8.3 (S451 R11) — a `?{}` handled by `!{}` / `match` lowers through
+  // `_scrml_sql_attempt(`. Listed explicitly: the `_scrml_sql*` db-handle
+  // exemption in the fail-closed scan below would otherwise wave it through
+  // un-inlined.
+  { sig: `${SQL_ATTEMPT_FN}(`, src: SERVER_SQL_ATTEMPT_HELPER },
 ];
 
 // Runtime-helper identifiers the tool module legitimately DEFINES itself (the

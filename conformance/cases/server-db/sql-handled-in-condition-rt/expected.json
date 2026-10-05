@@ -1,0 +1,32 @@
+{
+  "id": "server-db-sql-handled-in-condition-rt",
+  "description": "§19.8.3 / §19.4.3 (S451 R11) — a `?{}` query handled by `!{}` INSIDE an expression: the condition of an `if` in a server function (RUNTIME, sqlEngine:\"real\"). `notes` has a row → the condition is the row (truthy) → \"found\"; `empties` is empty → `not` → \"absent\"; `gone` is declared but never created, so the query fails to run → the `_ :> not` arm's value → \"absent\". Pre-S454 the build failed with E-CODEGEN-INVALID-LOGIC: the `!{` reached the emitted JS raw, because a `!{}` written anywhere but the end of a whole statement was never parsed as a handler.",
+  "language-version": "1.0",
+  "spec": "§19.8.3, §19.4.3",
+  "rationale": "§19.8.4: \"A `?{}` query SHALL be a failable expression in every context. Outside a `!` function it SHALL be handled at the site with a `!{}` handler or a `match`\". §19.4.3: a handler is in a value position in \"an operand of an operator … — any position whose result is read\", where every arm yields a value of the success type (`.get()` yields `Row | not`, so `_ :> not` yields a value).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ],
+      "empties": []
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "hit": "found",
+      "miss": "absent",
+      "failed": "absent"
+    },
+    "domAnchored": [
+      { "selector": "#hit", "text": "found" },
+      { "selector": "#failed", "text": "absent" }
+    ]
+  }
+}

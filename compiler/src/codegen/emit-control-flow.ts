@@ -2,7 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
+import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -11,6 +11,7 @@ import { isDestructurePattern, emitDestructurePatternText } from "./emit-destruc
 import { CGError } from "./errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
+import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow } from "./sql-attempt.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -143,6 +144,8 @@ export function setVariantFieldsForFile(
       if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
     }
   }
+  // The SqlError schema scope never outlives a file (see enterSqlErrorSchema).
+  if (variantFields === null) _sqlErrorSchemaDepth = 0;
   // Seed the ParseError schema for parseVariant binding resolution. Only fill
   // in variants the file does NOT already declare — a file-local enum of the
   // same name always wins (and a genuine cross-enum collision keeps the entry,
@@ -155,6 +158,21 @@ export function setVariantFieldsForFile(
 }
 
 /**
+ * §19.8.1 / §19.8.3 (S454) — the SqlError payload schema, in force while the
+ * arms of a handler whose subject is a `?{}` query are emitted. Those arms'
+ * error type IS SqlError, so `.QueryFailed(m)` binds the `message` field and
+ * `.ConstraintViolation(f)` the `field` (matching the envelope `_scrml_sql_error`
+ * builds, sql-attempt.ts). Scoped — not seeded into the per-file registries —
+ * because a SQL handler is the only place the error type is KNOWN to be
+ * SqlError; a file-local enum's same-named variant elsewhere is untouched, and
+ * the server pass (which publishes no per-file registry) still resolves it.
+ */
+let _sqlErrorSchemaDepth = 0;
+const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map(SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]]));
+export function enterSqlErrorSchema(): void { _sqlErrorSchemaDepth++; }
+export function exitSqlErrorSchema(): void { if (_sqlErrorSchemaDepth > 0) _sqlErrorSchemaDepth--; }
+
+/**
  * Error-envelope field schema for a variant NAME, for the consumers whose
  * subject is a failable result / `!{}` handler / `fail` payload and whose error
  * enum TS did not resolve: file-local enums + the compiler-ambient ParseError
@@ -165,6 +183,10 @@ export function setVariantFieldsForFile(
  * wrong here (S438 review F1). This is exactly the pre-F11 lookup.
  */
 export function getErrorVariantFieldSchema(variantName: string): string[] | null {
+  if (_sqlErrorSchemaDepth > 0) {
+    const sqlFields = _sqlErrorSchema.get(variantName);
+    if (sqlFields) return [...sqlFields];
+  }
   if (!_localVariantFields) return null;
   if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)
       && !(_importedVariantNames?.has(variantName) ?? false)) return null;
@@ -512,7 +534,9 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     // g-reactive-map-set-control-flow — REACTIVE `@`-cell map/set names so a
     // condition `if (@s.has(k))` / `if (@m.size > 0)` lowers to `_scrml_map_*`
     // (the reactive twin of the local sets above; closes the ss52-filed gap).
-    mapVarNames: opts.mapVarNames ?? null, setVarNames: opts.setVarNames ?? null, orderedMapVarNames: opts.orderedMapVarNames ?? null };
+    mapVarNames: opts.mapVarNames ?? null, setVarNames: opts.setVarNames ?? null, orderedMapVarNames: opts.orderedMapVarNames ?? null,
+    // S454 — an expression-position `?{}` / `!{}` in the condition lowers with these options.
+    logicOpts: opts };
   const _ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _ifExprCtx);
   lines.push(`if (${_ifCond}) {`);
 
@@ -704,7 +728,7 @@ function _emitForStmtInner(
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
-      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
       const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitExprField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
@@ -892,7 +916,7 @@ function _emitForStmtInner(
   }
 
   // Non-reactive path — plain for loop
-  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   iterable = emitExprField(node.iterExpr, iterable, _plainForCtx);
   // s427 round 3 (F1) — a RENDERING loop whose body writes its own binder: the
   // binder is the body's own binding (so the write assigns it, not an outer
@@ -1135,7 +1159,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   // which emitted `yield null; // SQL — client cannot evaluate _scrml_sql`
   // inside SSE generator bodies.
   const lines: string[] = [];
-  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
@@ -1157,7 +1181,7 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
-  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
@@ -2569,6 +2593,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
   const _matchCtx: EmitExprContext = {
     mode: _matchMode,
     ...(engineCtx?.exprCtxExtras ?? {}),
+    // S454 — a `?{}` scrutinee / `!{}` in an arm lowers with the statement options.
+    ...(opts ? { logicOpts: opts } : {}),
   };
 
   // §18.19 — multi-scrutinee match: desugar to nested single-scrutinee dispatch
@@ -2582,7 +2608,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     return emitMultiScrutineeMatch(node, _scrutineeExprs, _matchCtx, _matchMode, opts);
   }
 
-  const header = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
   const body: any[] = node.body ?? [];
 
   const tmpVar = genVar("match");
@@ -2680,9 +2706,16 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // success value is bare, so the `::Ok` arm can only be recognized via the
   // `__scrml_error`-sentinel tag).
   const subjectVariants = getMatchSubjectVariantFields(node);
-  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(node));
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(node))
+    || isSqlFailableMatch(node.headerExpr, arms);
   const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
+  // §19.8.3 — a `match` on a `?{}` query's result IS its handler: a query that
+  // fails to run must reach the arms as a SqlError variant, not throw past them.
+  const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  // The arms' error type is SqlError (released before this function returns).
+  if (_handlesSql) enterSqlErrorSchema();
 
   const iifeLines: string[] = [];
   // inline-sql-in-branch-cps (2026-06-01): a server-batch match-stmt may emit
@@ -2844,6 +2877,11 @@ export function emitMatchExpr(node: any, opts?: any): string {
       conditionIndex++;
     }
   }
+  // S454 fix round (F1) — FAIL CLOSED: a match on a `?{}` with no catch-all re-raises
+  // a failure none of its arms names, rather than evaluating to `undefined`.
+  if (_handlesSql && conditionIndex > 0 && !arms.some((a) => a.kind === "wildcard")) {
+    iifeLines.push(`  else if (${tagVar} !== "Ok") { ${unhandledFailureThrow(tmpVar)} }`);
+  }
 
   iifeLines.push(`})()`);
 
@@ -2880,6 +2918,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
   iifeLines[0] = (_matchMode === "server" || _bodyHasAwait)
     ? `await (async function() {`
     : `(function() {`;
+  if (_handlesSql) exitSqlErrorSchema();
   return iifeLines.join("\n");
 }
 
@@ -3163,6 +3202,34 @@ export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | 
  * (it lands in `_variantFields`), so this predicate defers to the regular
  * tagged-object path in that (pathological) collision.
  */
+/** The SqlError variant names (§19.8.1) a `match` on a `?{}` result may test. */
+const SQL_ERROR_VARIANT_NAMES: ReadonlySet<string> = new Set(SQL_ERROR_VARIANT_FIELDS.map(([n]) => n));
+
+/**
+ * §19.8.3 — a `match` whose scrutinee is exactly a `?{}` query and whose arms
+ * test `::Ok` or a `SqlError` variant is a match over a FAILABLE result: the
+ * query's value arrives as `::Ok`, a query that fails to run as its SqlError
+ * variant. (`isFailableOkMatch` already covers the `::Ok` case; this adds a match
+ * that names only error variants and `_`.)
+ */
+export function isSqlFailableMatch(headerExpr: any, arms: MatchArm[]): boolean {
+  if (sqlQueryExprShape(headerExpr) === null) return false;
+  return arms.some(a => {
+    if (a.kind !== "variant") return false;
+    const tests = Array.isArray(a.tests) ? a.tests : [a.test];
+    return tests.some(t => t === "Ok" || (typeof t === "string" && SQL_ERROR_VARIANT_NAMES.has(t)));
+  });
+}
+
+/**
+ * §19.8.3 — does this `match` HANDLE a `?{}` query, so its scrutinee must be
+ * evaluated through `_scrml_sql_attempt` (a failure becomes the SqlError variant
+ * the arms match on)? Server boundary only: a query is never emitted client-side.
+ */
+export function matchScrutineeHandlesSql(headerExpr: any, failableMatch: boolean, mode: "client" | "server"): boolean {
+  return mode === "server" && failableMatch && sqlQueryExprShape(headerExpr) !== null;
+}
+
 export function isFailableOkMatch(
   arms: MatchArm[],
   subject?: SubjectVariantFields | null,

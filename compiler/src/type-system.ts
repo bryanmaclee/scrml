@@ -73,9 +73,10 @@
  */
 
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
-import { parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
+import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -12668,6 +12669,14 @@ function annotateNodes(
           }
         }
 
+        // §19.8.3 (S454 fix round, F1) — a `!{}` on a `?{}` query is checked
+        // against `SqlError` "like any other `!{}` handler". The query is the
+        // whole guarded statement (`?{…}.run() !{…}`), a declaration / return's
+        // structured `sqlNode`, or an expression-position query operand.
+        if (!errorTypeName && guardedNode && _guardedNodeHandlesSql(guardedNode)) {
+          _checkHandlerExhaustive("SqlError", SQL_ERROR_EXHAUSTIVE_VARIANTS, errorArms.map((a) => String(a.pattern ?? "")), n.span as Span);
+        }
+
         // S28 — scope-check each arm's handler body with arm.binding pushed
         // as a local. Pre-S28 handler bodies bypassed the scope walker entirely
         // (E-SCOPE-001 didn't fire for undeclared idents inside handlers) and
@@ -15166,7 +15175,131 @@ function annotateNodes(
     }
   }
 
+  // §19.7 / §19.4.3 / §19.8.3 (S454 fix round, F1) — handler exhaustiveness for
+  // the handlers the statement walk above never sees: a `!{}` INSIDE an
+  // expression, and a `match` whose scrutinee is a `?{}` query.
+  _checkExpressionPositionHandlers(topNodes);
+
   return nodeTypes;
+
+  // ---------------------------------------------------------------------------
+  // S454 fix round (F1) — handler exhaustiveness in every position.
+  //
+  // §19.7.3: "In logic context, matching a `!` function result SHALL require
+  // exhaustive coverage of all variants (success and error). Missing variants
+  // SHALL trigger E-TYPE-020." and "A `_` wildcard arm SHALL satisfy
+  // exhaustiveness for remaining unmatched variants". A `!{}` handler is checked
+  // the same way (E-TYPE-080, §34: "Non-exhaustive error handler: not all error
+  // variants covered"), and §19.8.3: "The handler is checked for exhaustiveness
+  // against `SqlError` like any other `!{}` handler." Before this, only a
+  // WHOLE-STATEMENT `!{}` on a call to a same-file `!` function was checked; a
+  // handler inside an expression (`if (q() !{ .A :> false })`) and every handler
+  // on a `?{}` were not — and an unmatched failure then flowed on as the value.
+  // ---------------------------------------------------------------------------
+
+  /** Is the statement a `!{}` guards a `?{}` query? */
+  function _guardedNodeHandlesSql(g: ASTNodeLike): boolean {
+    const r = g as Record<string, unknown>;
+    if (g.kind === "sql") return true;
+    const sq = r.sqlNode as { kind?: string } | undefined;
+    if (sq && sq.kind === "sql") return true;
+    return sqlQueryExprShape((r.initExpr ?? r.exprNode) as ExprNode | undefined) !== null;
+  }
+
+  /** The variant name an arm pattern names, or "_" for a catch-all. */
+  function _armVariant(pattern: string): string {
+    let p = pattern.trim().replace(/^\|\s*/, "");
+    if (p === "_" || p === "else" || /^_\s+[A-Za-z_$]/.test(p) || p.startsWith("_(")) return "_";
+    p = p.replace(/\(.*$/s, "").trim();          // payload binder
+    p = p.replace(/\s+[A-Za-z_$][\w$]*$/, "");    // paren-free binder (`| ::V m`)
+    p = p.replace(/^(?:[A-Za-z_$][\w$]*)?(?:::|\.)/, ""); // `::V` / `.V` / `T.V` / `T::V`
+    return p.trim();
+  }
+
+  /** E-TYPE-080 when `patterns` neither include a catch-all nor cover `variants`. */
+  function _checkHandlerExhaustive(typeName: string, variants: readonly string[], patterns: string[], span: Span): void {
+    const heads = patterns.map(_armVariant);
+    if (heads.includes("_")) return;
+    const missing = variants.filter((v) => !heads.includes(v));
+    if (missing.length === 0) return;
+    errors.push(new TSError(
+      "E-TYPE-080",
+      `E-TYPE-080: Non-exhaustive error handler for \`${typeName}\`. ` +
+      `Missing variant(s): ${missing.join(", ")}. ` +
+      `Add the missing arms or a \`_ :>\` arm to handle all remaining variants` +
+      (typeName === "SqlError" ? ` (the compiler MAY add SqlError variants, §19.8.4, so \`_ :>\` keeps the handler total).` : `.`),
+      span,
+    ));
+  }
+
+  /** The error enum's variant names for a handled operand, or null when unknown. */
+  function _operandErrorVariants(operand: ExprNode): { typeName: string; variants: readonly string[] } | null {
+    if (sqlQueryExprShape(operand) !== null) return { typeName: "SqlError", variants: SQL_ERROR_EXHAUSTIVE_VARIANTS };
+    if (operand.kind === "call" && operand.callee.kind === "ident") {
+      const typeName = fnErrorTypes.get(operand.callee.name);
+      if (!typeName) return null;
+      const t = typeRegistry.get(typeName);
+      if (!t || t.kind !== "enum") return null;
+      return { typeName, variants: ((t as EnumType).variants ?? []).map((v: VariantDef) => v.name) };
+    }
+    return null;
+  }
+
+  function _checkExpressionPositionHandlers(roots: unknown[]): void {
+    const seen = new WeakSet<object>();
+    const walk = (v: unknown, span: Span | null): void => {
+      if (!v || typeof v !== "object") return;
+      if (seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) walk(x, span); return; }
+      const o = v as Record<string, unknown>;
+      const own = o.span as Span | undefined;
+      const here = own && typeof own.line === "number" && own.line > 1 ? own : (span ?? own ?? null);
+      // An expression-position `!{}` (expression-parser extractHandledOperands).
+      const raw = typeof o.kind === "string" ? guardCallArmsRaw(o as unknown as ExprNode) : null;
+      if (raw !== null) {
+        const operand = ((o.callee as Record<string, unknown>).object) as ExprNode;
+        const known = _operandErrorVariants(operand);
+        const arms = known ? parseGuardArmsFromRaw(raw, filePath) : null;
+        if (known && arms) {
+          _checkHandlerExhaustive(known.typeName, known.variants, arms.map((a) => String(a.pattern ?? "")), (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span);
+        }
+      }
+      // A `match` on a `?{}` query (§19.8.3 form 2): `::Ok` plus every SqlError
+      // variant, or a catch-all (E-TYPE-020, §19.7.3).
+      if (o.kind === "match-expr" || o.kind === "match-stmt") {
+        const header = (o.headerExpr ?? o.subject) as ExprNode | undefined;
+        if (sqlQueryExprShape(header) !== null) {
+          const heads: string[] = [];
+          const body = Array.isArray(o.body) ? o.body as Array<Record<string, unknown>> : [];
+          for (const arm of body) {
+            if (!arm) continue;
+            if (arm.kind === "match-arm-inline") heads.push(_armVariant(String(arm.test ?? "")));
+            else if (arm.kind === "match-arm-block") heads.push(arm.isWildcard ? "_" : String(arm.variant ?? ""));
+            else if (typeof arm.expr === "string") heads.push(_armVariant(String(arm.expr).split(/:>|=>|->/)[0] ?? ""));
+          }
+          for (const r of (Array.isArray(o.rawArms) ? o.rawArms as string[] : [])) heads.push(_armVariant(String(r).split(/:>|=>|->/)[0] ?? ""));
+          if (heads.length > 0 && !heads.includes("_")) {
+            const missing = ["Ok", ...SQL_ERROR_EXHAUSTIVE_VARIANTS].filter((x) => !heads.includes(x));
+            if (missing.length > 0) {
+              errors.push(new TSError(
+                "E-TYPE-020",
+                `E-TYPE-020: Non-exhaustive match over the result of a \`?{}\` query. Missing variant(s): ` +
+                `${missing.join(", ")}. A match on a query's result must cover \`::Ok\` and every \`SqlError\` ` +
+                `variant, or end with a \`_ :>\` arm (§19.7.3, §19.8.3).`,
+                (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span,
+              ));
+            }
+          }
+        }
+      }
+      for (const k of Object.keys(o)) {
+        if (k === "span" || k === "parent") continue;
+        walk(o[k], here);
+      }
+    };
+    walk(roots, null);
+  }
 }
 
 // ---------------------------------------------------------------------------

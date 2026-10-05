@@ -1787,6 +1787,20 @@ export function walkBodyForTriggers(
         localArrayBindings.add(declName);
       }
 
+      // §19.8.3 / §12.2 (S454) — a declaration whose value is a `match` / `if` /
+      // `for` EXPRESSION carries it on `matchExpr` / `ifExpr` / `forExpr` (with
+      // `init: ""`), so none of the scans above saw it. Walk it like any other
+      // statement: `const r = match ?{…}.get() { … }` must server-escalate on the
+      // `?{}` in its scrutinee exactly as `const r = ?{…}.get()` does (before
+      // this, the function was silently CLIENT-placed and the query emitted as
+      // `null /* sql-ref unresolved */`), and calls in the arms are call-graph edges.
+      for (const valueKey of ["matchExpr", "ifExpr", "forExpr"] as const) {
+        const valueNode = (node as any)[valueKey];
+        if (valueNode && typeof valueNode === "object" && typeof valueNode.kind === "string") {
+          visitNode(valueNode);
+        }
+      }
+
       return;
     }
 

@@ -12,6 +12,7 @@ import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -6897,6 +6898,13 @@ export function generateServerJs(
   // no boolean column emits none of these and is byte-unchanged).
   if (finalEmitted.includes("_scrml_coerce_bool_")) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_BOOL_COERCE_HELPER);
+  }
+
+  // §19.8.3 (S451 R11) — inject the handled-query helper IFF a `?{}` handled by
+  // `!{}` / `match` was lowered (sql-attempt.ts). Gated purely on the emitted
+  // call; a module with no handled query is byte-unchanged.
+  if (finalEmitted.includes(`${SQL_ATTEMPT_FN}(`)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_SQL_ATTEMPT_HELPER);
   }
 
   // §14.8.11 — A1/S2 DB-authoritative principal transaction wrapper (CONDITIONAL

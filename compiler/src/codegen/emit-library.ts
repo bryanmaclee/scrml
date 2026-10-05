@@ -21,6 +21,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 // to travel with the emit or the reference is a ReferenceError at import time.
 import { SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 // §59 value-native map/set runtime — the SAME marker-delimited slice of
 // `runtime-template.js` that `emit-server.ts` injects (g-value-native-map-set-
 // server-runtime). Reused rather than re-listed: it is one source of truth that
@@ -66,6 +67,8 @@ const LIB_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   { sig: "_scrml_structural_eq(", src: SERVER_STRUCTURAL_EQ_HELPER },
   { sig: "_scrml_log(", src: SERVER_LOG_HELPER },
   { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
+  // §19.8.3 (S451 R11) — a `?{}` handled by `!{}` / `match` (sql-attempt.ts).
+  { sig: `${SQL_ATTEMPT_FN}(`, src: SERVER_SQL_ATTEMPT_HELPER },
 ];
 
 /**
