@@ -12007,8 +12007,8 @@ composing with the §14.8.9 protect redact at the same sink), the fail-closed-wh
 zero-row behavior, `.acrossTenants()` declassification, the INSERT column-injection, and the
 `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` hard-fails all enforce this contract;
 `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` / `I-TENANT-STRIP` / `I-TENANT-ACROSS`
-fire (§34). The V1.next INJECT optimization (SQL-WHERE predicate injection) remains deferred (see
-"Implementation status" below). Codegen: `compiler/src/codegen/tenant-egress.ts` +
+fire (§34). The V1.next INJECT optimization (SQL-WHERE predicate injection) remains deferred for
+reads (see "Implementation status" below); writes are injected since S452 r3 (the Write bullet). Codegen: `compiler/src/codegen/tenant-egress.ts` +
 `rewrite.ts` + `emit-logic.ts` + `emit-server.ts`.
 **Amended** 2026-10-04 (S452, ruling "a") — the floor filters at the **SOURCE**: a tenant-scoped
 read's rows are filtered to the active tenant immediately after the query executes, before any
@@ -12083,8 +12083,122 @@ columns, and that asymmetry drives the mechanism split:
   - **Write** (INSERT / UPDATE / DELETE) against a tenant-scoped table → **inject-or-hard-fail
     `E-TENANT-WRITE`.** A write returns no rows to filter and has no egress sink; a committed
     cross-tenant write is durable before any filter could run, so it must fail closed at compile. An INSERT gets
-    `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE/DELETE without an
-    injectable tenant constraint hard-fails.
+    `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE / DELETE gets the
+    tenant conjunct injected into its WHERE — the author's condition is parenthesized whole and
+    `AND tenant_id = <active tenant>` is appended (a statement with no WHERE gets one) — so the injection
+    this bullet sanctions is what is built for both (S452 r3). A write the floor cannot inject soundly
+    hard-fails. As built, the injectable shapes are exactly the subset's (next bullet): a single-row
+    `INSERT INTO t (plain columns) VALUES (…)` that does not name `tenant_id`; `UPDATE t SET col = expr, …
+    [WHERE …]` that does not SET `tenant_id`; `DELETE FROM t [WHERE …]`. Everything else on a tenant
+    table without `.acrossTenants()` is `E-TENANT-WRITE` — an INSERT that names `tenant_id` (the floor
+    cannot verify the chosen tenant), a multi-row INSERT, `INSERT … SELECT`, `DEFAULT VALUES`, an INSERT
+    without a column list, a REPLACE statement or `OR REPLACE`, `ON CONFLICT`, `RETURNING`, an UPDATE with
+    an alias or FROM / ORDER BY / LIMIT, a write that names a second tenant-scoped table, a call outside
+    the per-row function allow-list, or `SELECT … INTO`.
+    - **The conflict clause.** The database's own conflict resolution can reach another tenant's row:
+      a SQLite table-level `UNIQUE ON CONFLICT REPLACE` makes a scoped UPDATE or INSERT that collides
+      DELETE the other tenant's conflicting row. Every injected SQLite INSERT / UPDATE therefore carries
+      a statement-level `OR ABORT` (`INSERT OR ABORT …`, `UPDATE OR ABORT …`), which overrides the
+      table-level clause: the statement fails with the constraint error and no other row is touched. An
+      author-written conflict clause on a tenant write (`INSERT OR …` / `UPDATE OR …`, whatever it names)
+      is `E-TENANT-WRITE` — the floor sets the conflict resolution. A Postgres or MySQL handle gets the
+      plain statement: neither has table-level conflict resolution, and their statement-level upserts
+      are outside the subset. A handle whose driver the compiler cannot determine is treated as SQLite
+      (on another database the statement then fails — closed).
+    - **Writes the database runs because of the statement.** The floor constrains the statement, not
+      what the database executes in consequence. A write to a tenant-scoped table is `E-TENANT-WRITE`,
+      naming the object, when the program's `<schema>` declares, on that table, a **trigger**, a
+      Postgres **rule**, or a **foreign key** referencing it whose `ON DELETE` / `ON UPDATE` action is
+      `CASCADE`, `SET NULL` or `SET DEFAULT`. The check reads the `<schema>` text and is deliberately
+      over-inclusive (a hazard it cannot attribute to a table is charged to every tenant-scoped table;
+      a commented-out declaration still counts). `.acrossTenants()` is the opt-out. **Limit:** only
+      `<schema>` is visible — a trigger, rule or cascading key created outside it (an external
+      database, a `<db src>` with no `<schema>`, a migration run by hand) is not seen and not
+      introspected.
+    - **An INSERT with no active tenant is refused at run time (S452).** With no active tenant — code
+      outside any request (boot, a scheduled job, code called from them), or a request with no pinned
+      `@currentUser.tenantId` — an INSERT into a tenant-scoped table SHALL be a defined, named runtime
+      refusal (`E-TENANT-WRITE (runtime)`; nothing is written), unless the query is
+      `?{…}.acrossTenants()` AND names the tenant column explicitly (`INSERT INTO assets (name,
+      tenant_id) VALUES (…, ${t})`), which keeps the `I-TENANT-ACROSS` audit trail. This is the write
+      twin of "outside a request, reads see zero rows". An `.acrossTenants()` INSERT that does not name
+      `tenant_id` (or has no column list) is `E-TENANT-WRITE` at compile: an opted-out query gets no
+      tenant injected, so it would write a row no tenant owns. An implementation MAY instead refuse at
+      compile time a write it proves reachable only outside a request.
+      *(impl#1, as built: the injected value reads the active tenant per query from the request
+      context, so a server function called in-process by another is written under its caller's tenant;
+      with no active tenant the same runtime refusal fires for an UPDATE / DELETE as well, whose
+      injected conjunct has no tenant to compare to. Pinned by `conf-TENANT-SOURCE-FILTER` "INSERT with
+      no active tenant"; `g-tenant-insert-injection-reads-lexical-req-in-peer-callables-s452` resolved
+      `819a84148`, which replaced an accidental unnamed `ReferenceError`. The bootstrap does not build the
+      floor yet.)*
+    > **Provenance:** ruling:user-voice-scrml.md S452 "your rec" — *"**(a):** with no active tenant
+    > (boot, scheduled jobs, code called from them), an INSERT into a tenant-scoped table is a defined,
+    > named RUNTIME REFUSAL — unless it is `?{…}.acrossTenants()` AND names the tenant column explicitly
+    > (`INSERT INTO assets (name, tenant_id) VALUES (…, ${t})`). … The bootstrap MAY later tighten to a
+    > compile error once the dpa-066 effect summary proves reachability outside a request."* · spec
+    > currency to the built floor (#1287 `819a84148`; #1293 r3 `5e6b39b92`, r4 `c02da0f86`) for the
+    > UPDATE / DELETE injection, the conflict clause and the schema-hazard limb — these are PA
+    > directions under the S452 "a" ruling and this bullet's existing "inject-or-hard-fail" sentence,
+    > recorded here as built (veto window), not separate bryan rulings · **supersedes:** *"An INSERT gets
+    > `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE/DELETE without an
+    > injectable tenant constraint hard-fails."* (an UPDATE / DELETE is now injected, not refused) ·
+    > **Direction of change (pa-base §8):** newly-accepting for subset UPDATE / DELETE on a tenant table
+    > (was E-TENANT-WRITE); newly-rejecting for author conflict clauses, an INSERT naming `tenant_id`
+    > outside `.acrossTenants()`, and writes to a table with a `<schema>` trigger / rule / cascading
+    > key; semantics-changed for an INSERT with no active tenant (was an accidental `ReferenceError`,
+    > now a named refusal). Corpus measured at #1293: no corpus program declares a tenant table (2258
+    > `.scrml`, 0 artifact diffs).
+  - **The SQL subset — anything else on a tenant table is refused (S452 r3).** A query that names a
+    tenant-scoped table is legal without `.acrossTenants()` ONLY if it lies in an allow-listed SQL
+    subset that the compiler reads exactly, token by token; a query outside it is **`E-TENANT-SQL-SUBSET`**
+    (a refused read inside the subset stays `E-TENANT-AGG`, a refused write `E-TENANT-WRITE`).
+    `.acrossTenants()` is the opt-out. The subset:
+    - **A closed token set.** Whitespace; unquoted identifiers `[A-Za-z_][A-Za-z0-9_]*` (qualified
+      `a.b` is identifier `.` identifier); plain numbers (no hex, no digit separators); plain
+      single-quoted string literals whose only escape is `''` (no backslash, no `${`, no control
+      character inside); `${…}` interpolations, which are bound parameters and never SQL text; and the
+      punctuation `( ) , . * = <> != < > <= >= + - / % ||`. ANY other character or form is outside:
+      among others `"`, `` ` ``, `[`, `]`, `$` (other than `${`), `\`, `;`, `:`, `?`, `@`, `#`, `{`,
+      `}`, a `--` or `/* */` comment, a prefixed literal (`E'…'`, `X'…'`, `N'…'`), and any non-ASCII
+      character outside a literal. A `${…}` is accepted only when its expression — after removing
+      plain JavaScript string literals — holds no brace, quote, backtick, slash or backslash, so that
+      where it ends is not in doubt; dialect-specific forms (Postgres `$q$…$q$`, `E'…'`, `ARRAY[…]`) are
+      simply outside the subset.
+    - **One statement.** Exactly one statement, led by `SELECT`, `INSERT`, `UPDATE` or `DELETE` (`;` is
+      not a token, so a second statement cannot exist).
+    - **No escape from the floor's reading.** No `WITH`, no subquery (`(` followed by `SELECT`, `WITH` or
+      `VALUES`), no `IN <table>`, no `UNION` / `INTERSECT` / `EXCEPT`, no `OVER` / `WINDOW`, no REPLACE /
+      `OR REPLACE`, no `ON CONFLICT`, no `RETURNING`, no `SELECT … INTO`, no `FOR` locking clause.
+    - **Allow-listed functions.** Every function call is on the per-row allow-list (`lower` `upper`
+      `length` `trim` `ltrim` `rtrim` `substr` `substring` `replace` `instr` `coalesce` `ifnull`
+      `nullif` `abs` `round` `date` `time` `datetime` `julianday` `strftime` `cast`); a qualified
+      callee (`schema.fn(…)`) never is. A read grouped by every tenant source's `tenant_id` may also
+      call `count` `sum` `avg` `min` `max` `total`, and nothing else. A query that does not read a
+      tenant table but whose text names one ANYWHERE — a string literal included — is held to the same
+      function allow-list, because a function can run SQL held in a string (Postgres
+      `query_to_xml('select … from assets', …)`).
+    - **Detection does not trust a query it cannot read.** For a query inside the subset, a tenant
+      table is named when an identifier token names it (a literal is data; a parameter is a value). For
+      a query outside the subset, a whole-word occurrence of a tenant table's name ANYWHERE in its text
+      — comment, literal and parameter text included — counts, so an unreadable query that mentions a
+      tenant table is refused rather than passed.
+    The subset is an implementation's guarantee that what it scopes is what the database runs; it is
+    deliberately small, and it MAY grow only by forms the implementation reads exactly.
+    > **Provenance:** spec currency to the built floor — #1293 (`5e6b39b92` r3, `c02da0f86` r4;
+    > `g-tenant-floor-sql-lexical-bypasses-s452-r3` and `g-tenant-floor-write-side-effects-s452-r4`,
+    > both resolved), whose emitter is `compiler/src/codegen/tenant-sql-subset.ts` (`analyzeTenantSql`)
+    > reached through `tenant-egress.ts` `tenantFloorViolation` from `rewrite.ts` `_lowerTenantForQuery`.
+    > A PA direction under ruling:user-voice-scrml.md S452 "a" (*"rows read from a tenant-scoped table
+    > are filtered to the active tenant IMMEDIATELY after the query, before any program code sees
+    > them"*) after three security-review rounds beat text classification of tenant SQL
+    > (`g-tenant-floor-sql-classification-bypasses-s452-r2`, r3) — not a separate bryan ruling; recorded
+    > as built, in its veto window · **supersedes:** nothing struck — this section named no syntactic
+    > bound on a tenant query · **Direction of change (pa-base §8): newly-rejecting** — a comment or
+    > quoted identifier in a tenant query; a `${…}` holding a brace, slash, template or escaped string; a
+    > non-listed function or aggregate (`group_concat`, `json_group_array`) on a tenant table; a
+    > non-tenant query outside the subset whose text names a tenant table. Corpus measured at #1293:
+    > 2258 `.scrml`, 0 artifact diffs, 0 tenant codes (no corpus program declares a tenant table).
 - **Raw egress of cross-tenant rows** → **hard-fail `E-TENANT-RAW-EGRESS`** (narrowed, S452). It
   fires only when rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual
   `Response` / `handle()` body (§40). Under the source filter those are the only foreign-tenant rows
@@ -12140,8 +12254,11 @@ platform-wide count, a background job, a boot-time scan) returns a different res
   remaining rows in their original order.
 - **`LIMIT` / `OFFSET`.** Under the runtime filter they are applied by the database BEFORE the
   filter, so a page may hold fewer rows than `LIMIT` (or none) although more of the active tenant's
-  rows exist. This is fail-closed (no foreign row is observed) but it is a visible short-read;
-  the v1.next injection removes it by filtering before the limit.
+  rows exist. No foreign row is observed, but the short page is an **oracle**: how short it is
+  depends on how many of the first rows belong to other tenants, so it tells the request something
+  about their data (see Soundness scope). The v1.next injection removes it by filtering before the
+  limit. *(S454 currency — supersedes "This is fail-closed (no foreign row is observed) but it is a
+  visible short-read"; `g-tenant-floor-predicate-oracles-before-filter-s452`.)*
 - **JOINs.** A result row is admitted iff, for EVERY tenant-scoped table among the query's FROM /
   JOIN sources, that source's `tenant_id` in the row equals the active tenant; query-lowering
   carries one `tenant_id` per tenant-scoped source. A non-tenant table joined to a tenant table
@@ -12200,10 +12317,19 @@ observes.
 **complete for reads of statically-declared tenant-scoped tables, and for every value server code
 derives from them**: a non-opted-out read hands the program only the active tenant's rows, so every
 extracted field, count, join, and serialized value is scoped by construction. It does **NOT** cover:
-covert channels (timing; the database's own behavior on foreign rows, e.g. a `UNIQUE` violation
-revealing that a value exists in another tenant); the `LIMIT` / `OFFSET` short-read above (a
-completeness loss, not a leak); and any value read with `.acrossTenants()`, which is the declared
-opt-out. Aggregate-without-discriminator, writes, and `.acrossTenants()` rows reaching a raw
+covert channels and oracles — timing; the database's own behavior on foreign rows, e.g. a `UNIQUE`
+violation revealing that a value exists in another tenant; the `LIMIT` / `OFFSET` short read above,
+whose length depends on other tenants' rows; and an author's `WHERE` whose evaluation fails only on a
+foreign row (a cast or a division over another tenant's value), because the author's `WHERE`,
+`ORDER BY` and `LIMIT` run over every tenant's rows before the source filter (and, for an injected
+UPDATE / DELETE, before the tenant conjunct is known to short-circuit) — each is an existence or value
+oracle on other tenants' data, closed structurally only by filtering in the database (the v1.next read
+injection, or the §14.8.11 tier); and any value read with `.acrossTenants()`, which is the declared
+opt-out.
+> **Provenance:** spec:§14.8.10 (S454 currency; review:s452-tenant-r3 finding (c), filed as
+> `g-tenant-floor-predicate-oracles-before-filter-s452`, whose "SPEC wording item (PA)" this is) · **supersedes:** *"the `LIMIT` / `OFFSET` short-read above (a completeness loss, not a
+> leak)"* · **Direction of change:** inert — no program's acceptance or behaviour changes; the bound is
+> stated truthfully (it over-claimed). Aggregate-without-discriminator, writes, and `.acrossTenants()` rows reaching a raw
 `Response` fail closed at compile; an unresolvable dynamic read yields zero rows (never
 accept-unknown).
 
@@ -12219,7 +12345,16 @@ is the entire invariant/policy firewall.
   discriminator and no injectable tenant constraint (the source filter has no row to key on); also
   a tenant-scoped table read only inside a subquery / CTE / derived table (S452 reading).
 - **`E-TENANT-WRITE`** (Error) — an INSERT/UPDATE/DELETE against a tenant-scoped table with no
-  injectable tenant value (no egress sink can redact a durable write; it must fail closed).
+  injectable tenant value (no egress sink can redact a durable write; it must fail closed): a
+  subset write shape the floor cannot inject (the Write bullet), an author conflict clause, a write to
+  a table whose `<schema>` declares a trigger / rule / cascading foreign key, or an `.acrossTenants()`
+  INSERT that does not name `tenant_id`. Its runtime form `E-TENANT-WRITE (runtime)` refuses a write
+  with no active tenant.
+- **`E-TENANT-SQL-SUBSET`** (Error) — a query whose text names a tenant-scoped table and that lies
+  outside the floor's allow-listed SQL subset (a token or form outside the closed token set, a
+  statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, a `GROUP` without
+  `BY`, `RETURNING` or `FOR` on a read, or a non-allow-listed function in a query that names a tenant
+  table only in its text), without `.acrossTenants()` (S452 r3).
 - **`E-TENANT-RAW-EGRESS`** (Error) — rows obtained through an `.acrossTenants()` read reach a raw
   `Response` (a manual `Response` / `handle()` body, §40): the one remaining foreign-tenant egress
   under the source filter (narrowed S452; the S273 trigger — any tenant-scoped row at a raw `_{}` /
@@ -12232,14 +12367,18 @@ is the entire invariant/policy firewall.
   tenant-scoped table (the cross-tenant audit surface).
 
 **Implementation status (Nominal — V1-minimal = the source filter + the hard-fails).**
-- **S452 — impl#1 implements the superseded model.** impl#1 tags at query-lowering and strips only
-  at the egress sink, so server code sees every tenant's rows, and a value extracted from them
-  passes the strip (`_scrml_tenant_redact` returns non-objects unchanged): MEASURED at `e7fb5fba5`,
-  `rows.map(r => r.name)` over a tenant table served every tenant's names to an unpinned request
-  while `I-TENANT-STRIP` fired (dpa-067 §C4). The source-filter fix is in flight on
-  `fix/s452-tenant-filter-at-source` under the standing security exception. The bootstrap
-  (`compiler/self-host-v2/`) does not build the floor yet (U1c keeps tenant refused); the same rule
-  applies to it when built (dpa-067 F2).
+- **S452 — impl#1 filters at the source (landed).** The S273 model (strip at the egress only)
+  leaked a value extracted from tenant rows — MEASURED at `e7fb5fba5`, `rows.map(r => r.name)` served
+  every tenant's names to an unpinned request while `I-TENANT-STRIP` fired (dpa-067 §C4). Fixed under
+  the standing security exception: the source filter (#1287), then the allow-listed SQL subset, the
+  UPDATE / DELETE injection, `OR ABORT`, the schema-hazard refusal and the named no-tenant write
+  refusal (#1293). Open residuals: a `<schema>` VIEW over a tenant table is not scoped
+  (`g-tenant-floor-schema-view-over-tenant-table-s452`), the predicate oracles above
+  (`g-tenant-floor-predicate-oracles-before-filter-s452`), and the raw driver handle
+  (`g-tenant-floor-raw-driver-handle-callable-s452`). The bootstrap (`compiler/self-host-v2/`) does
+  not build the floor yet (U1c keeps tenant refused); the same rule applies to it when built
+  (dpa-067 F2). *(S454 currency — supersedes "impl#1 implements the superseded model … The
+  source-filter fix is in flight on `fix/s452-tenant-filter-at-source`".)*
 - **S452 — `E-TENANT-RAW-EGRESS` diverges.** impl#1 enforces the S273 trigger (any tenant-scoped
   row at a raw `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`), not the
   narrowed one (`.acrossTenants()` rows reaching a raw `Response`). It therefore still rejects raw
@@ -24682,9 +24821,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-UNRESOLVED-COLUMNS | §14.8.9 | A row whose output columns the compile cannot determine — an unresolvable dynamic `?{}`, a query over a table or view whose columns the compile does not know, a projection `*` the resolver cannot attach to a table, a `RETURNING` list over an unreadable target or an `UPDATE … FROM` — reaches a client-egress sink, in an implementation that takes §14.8.9's compile-time option for such rows. The message tells the author to name the columns (an explicit select list over a table the compile knows). §14.8.9 permits either this rejection or the run-time wholesale strip (`I-PROTECT-STRIP-001`); both fail closed. A row that reaches no client-egress sink is unaffected. The bootstrap takes this option when it builds the floor. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 4 (dpa-067 F5) · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the wholesale strip as the only conforming treatment · Direction of change: implementation-defined (inert for impl#1; newly-rejecting for the bootstrap relative to impl#1). **Nominal** — impl#1 takes the run-time option and does not emit it; the bootstrap refuses `protect=` at this revision. | Error |
 | I-PROTECT-REVEAL | §14.8.9 | One per `reveal("col")` site in the compile, naming the site and the column(s) it declassifies (or that it names none), so an audit can list every declassification of a protected column in the codebase — the twin of `I-TENANT-ACROSS` (§14.8.10), whatever mechanism implements the floor. Info-level — never fatal. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 4 (dpa-067 F6) · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: nothing · Direction of change: inert. **Nominal** — impl#1 does not emit it. | Info |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row filter (at the source, S452) has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar before any filter can run. The same holds for a tenant-scoped table read only inside a subquery / CTE / derived table whose `tenant_id` does not reach the output row (S452 PA reading). In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
-| E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
+| E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the subset single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = <active tenant>`; a subset `UPDATE t SET … [WHERE …]` / `DELETE FROM t [WHERE …]` gets `AND tenant_id = <active tenant>` on its parenthesized WHERE (S452 r3 — supersedes "an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse) … fires this error"); injected SQLite writes carry `OR ABORT`. Fires on: an un-injectable write (an INSERT that names `tenant_id`, is multi-row, `INSERT … SELECT`, `DEFAULT VALUES` or has no column list; a SET of `tenant_id`; an UPDATE with an alias / FROM / ORDER BY / LIMIT; REPLACE / `OR REPLACE`; `ON CONFLICT`; `RETURNING`; `SELECT … INTO`; a second tenant table; a non-allow-listed function), an author-written `INSERT OR …` / `UPDATE OR …` conflict clause, a write to a table whose `<schema>` declares a trigger / rule / cascading foreign key (S452 r4), and an `.acrossTenants()` INSERT that does not name `tenant_id`. **Runtime form** `E-TENANT-WRITE (runtime)`: a write to a tenant-scoped table with no active tenant is refused by name, nothing written (ruling:user-voice-scrml.md S452 "your rec"). Resolution: write the plain subset shape without `tenant_id` (the floor injects the request's tenant), or mark the query `.acrossTenants()` and, for an INSERT, name `tenant_id`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql` (#1293); the runtime form by the server helper `_scrml_tenant_write_key`.) | Error |
+| E-TENANT-SQL-SUBSET | §14.8.10 | A query whose text names a tenant-scoped table lies outside the floor's allow-listed SQL subset and is not `.acrossTenants()`: a token or form outside the closed token set (a quoted identifier, a comment, `;`, a dialect-specific literal, a `${…}` whose end cannot be read without parsing JavaScript, …), a statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, `GROUP` without `BY`, `RETURNING` or `FOR` on a read, or — in a query that names a tenant table only in its text (a literal included) — a function outside the allow-list. A query the floor cannot read exactly is refused rather than scoped by a guess. Resolution: write the query in the subset (§14.8.10 "The SQL subset"), or mark it `.acrossTenants()` for a deliberate cross-tenant query. **Provenance:** spec currency to #1293 (S452 r3 `5e6b39b92`, r4 `c02da0f86`) under ruling:user-voice-scrml.md S452 "a" — a PA direction, recorded as built. (Emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | **Narrowed S452.** Rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual `Response` / `handle()` body (§40). Under the §14.8.10 source filter these are the only foreign-tenant rows server code holds, so this is the one remaining egress of another tenant's data through a body the compiler does not own. Rows from a read WITHOUT `.acrossTenants()` are already scoped to the active tenant at the source, so their raw egress (a manual `Response`, a `_{}` block, an `asIs` value) is NOT an error. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the cross-tenant rows through a compiler-emitted response. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 1 · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the S273 trigger (any tenant-scoped row at a `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`) · Direction of change: newly-accepting for raw egress of non-opted-out rows; newly-rejecting for `.acrossTenants()` rows in a manual `Response`. **Nominal as worded** — impl#1 still enforces the S273 trigger until a sibling dispatch narrows it. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
-| I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. **Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
+| I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. impl#1 filters at the source since #1287 (S454 currency — supersedes "**Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands."). Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
 | E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), OR the `<schema>` declares a SECURITY-DEFINER `fn` (§14.8.11.2 P2 writes-authority — `CREATE FUNCTION … SECURITY DEFINER`, a bounded owner role, `GRANT`/`REVOKE`), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS, no `SECURITY DEFINER` — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker / SECDEF `fn` to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`. P2 (2026-07-26) extended the trigger to a SECDEF `fn`.) | Error |
 | E-DBAUTH-NO-TENANT-COLUMN | §14.8.11 | A `db-authoritative` `<schema>` table declares no `tenant_id` column. The M1 tenant-isolation policy is keyed on `tenant_id` (`CREATE POLICY … USING ("tenant_id" = current_setting('scrml.tenant', true)::…)`), so a db-authoritative table without one would emit DDL referencing a missing column — an opaque Postgres error + full transaction rollback at apply time. `scrml db-migrate` (§14.8.11.1) pre-flights this BEFORE touching the DB and fails closed, naming the offending table(s). Resolution: add a `tenant_id` column, or drop the `db-authoritative` marker. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/commands/db-migrate.js`.) | Error |
