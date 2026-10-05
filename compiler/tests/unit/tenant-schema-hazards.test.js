@@ -419,7 +419,86 @@ describe("end to end — a schema whose triggers / FKs / views touch only non-te
   });
 });
 
-describe("end to end — a table tenant-scoped only by the <db> registry is charged from codegen", () => {
+// S455 review round 2b (PA-reproduced on c85602108: exit 0, floor active, A's go() rewrote
+// B's row): a `${ schemaFor(Assets) }` tenant table was invisible to the first cut — GCP1
+// read the schema BEFORE TS expanded schemaFor, and emit-server skipped every table the
+// expanded `<schema>` declared on the ASSUMPTION GCP1 had reported it. The rule is now one
+// stage (TENANT-SCHEMA, after TS + ME, before CG). Every way a table enters the tenant set,
+// each with a trigger AND a view over it.
+describe("every way a table becomes tenant-scoped — a trigger and a view over it are both refused", () => {
+  const TRIG = "CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN UPDATE assets SET name = 'pwned'; END";
+  const VIEW = "CREATE VIEW va AS SELECT * FROM assets";
+  const compileSrc = (src) => {
+    const dir = mkdtempSync(join(tmpdir(), "tenant-schema-path-"));
+    _tmp.push(dir);
+    writeFileSync(join(dir, "app.scrml"), src);
+    return compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, outputDir: join(dir, "out"), log: () => {} });
+  };
+  const hazardMsgs = (r) => (r.errors ?? []).filter((e) => e.code === "E-TENANT-SCHEMA-HAZARD").map((e) => e.message);
+  const expectBoth = (r) => {
+    const m = hazardMsgs(r);
+    expect(m.some((x) => x.includes("trigger `t_cfg`"))).toBe(true);
+    expect(m.some((x) => x.includes("view `va`"))).toBe(true);
+  };
+  const prog = (pre, schemaLines, extra = "") => `${pre}<program db="./app.db">
+  <schema>
+${schemaLines.map((l) => `    ${l}`).join("\n")}
+  </schema>
+${extra}  <p>x</p>
+</program>
+`;
+  const STRUCT = "${ import { schemaFor } from 'scrml:data'\n   type Assets:struct = { id: number, name: string, tenant_id: string } }\n";
+  test("a raw CREATE TABLE", () => expectBoth(compileSrc(prog("", [w(ASSETS), w(CONFIG), w(TRIG), w(VIEW)]))));
+  test("a DSL head", () => expectBoth(compileSrc(prog("", ["assets {\n      id: integer primary key\n      name: text\n      tenant_id: text\n    }", w(CONFIG), w(TRIG), w(VIEW)]))));
+  test("`${ schemaFor(T) }` (expanded by TS — the round-2b repro)", () => expectBoth(compileSrc(prog(STRUCT, ["${ schemaFor(Assets) }", w(CONFIG), w(TRIG), w(VIEW)]))));
+  test("`schemaFor(T, { omit })` and `{ pick }` keeping tenant_id", () => {
+    expectBoth(compileSrc(prog(STRUCT, ['${ schemaFor(Assets, { omit: ["name"] }) }', w(CONFIG), w(TRIG), w(VIEW)])));
+    expectBoth(compileSrc(prog(STRUCT, ['${ schemaFor(Assets, { pick: ["id", "tenant_id"] }) }', w(CONFIG), w(TRIG), w(VIEW)])));
+  });
+  test("`schemaFor(T, { omit: [\"tenant_id\"] })` is NOT tenant-scoped — nothing charged", () => {
+    expect(hazardMsgs(compileSrc(prog(STRUCT, ['${ schemaFor(Assets, { omit: ["tenant_id"] }) }', w(CONFIG), w(TRIG), w(VIEW)])))).toEqual([]);
+  });
+  test("a commented-out declaration that agrees (the floor reads the union)", () => {
+    expectBoth(compileSrc(prog("", ["-- CREATE TABLE assets (id INTEGER, name TEXT, tenant_id TEXT)", w(ASSETS), w(CONFIG), w(TRIG), w(VIEW)])));
+  });
+  test("a second `<schema>` block (E-SCHEMA-002 also fires; the hazard still does)", () => {
+    const src = `<program db="./app.db">
+  <schema>
+    ${w(ASSETS)}
+  </schema>
+  <schema>
+    ${w(CONFIG)}
+    ${w(TRIG)}
+    ${w(VIEW)}
+  </schema>
+  <p>x</p>
+</program>
+`;
+    const r = compileSrc(src);
+    expectBoth(r);
+  });
+});
+
+describe("a `${…}` anywhere in SQL is charged, as SPEC says (S455 review round 2b LOW)", () => {
+  test("in a foreign-key action", () => {
+    expect(hazards(ASSETS, "CREATE TABLE notes (aid INTEGER REFERENCES assets(id) ON DELETE ${ACT})").length).toBeGreaterThan(0);
+  });
+  test("inside a string literal in a trigger body", () => {
+    expect(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN INSERT INTO config (k) VALUES ('${nm()}'); END").length)
+      .toBeGreaterThan(0);
+  });
+});
+
+describe("performance — linear in literal size (the quadratic was schema-differ parseSchemaBlock, shared with the floor)", () => {
+  test("a 200 KB string literal is checked quickly", () => {
+    const big = "x".repeat(200_000);
+    const t0 = performance.now();
+    hazards(ASSETS, CONFIG, `CREATE VIEW v AS SELECT '${big}' AS s FROM config`);
+    expect(performance.now() - t0).toBeLessThan(1500);
+  });
+});
+
+describe("end to end — a table tenant-scoped only by the <db> registry is charged", () => {
   test("a `<schema>` view over a live-database tenant table → E-TENANT-SCHEMA-HAZARD (GCP1 cannot see that table)", () => {
     const dir = mkdtempSync(join(tmpdir(), "tenant-schema-hazard-dbreg-"));
     _tmp.push(dir);

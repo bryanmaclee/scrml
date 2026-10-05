@@ -144,7 +144,7 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
       }
       const prefixed = (/[Ee]/.test(text[i - 1] ?? "") && !WORD_CHAR.test(text[i - 2] ?? " ")) ||
         (text[i - 1] === "&" && /[Uu]/.test(text[i - 2] ?? ""));
-      push("s", s, i, prefixed || s.includes("\\") || j >= to);
+      push("s", s, i, prefixed || s.includes("\\") || s.includes("${") || j >= to);
       i = Math.min(j + 1, to);
       continue;
     }
@@ -156,7 +156,7 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
         if (text[j] === '"') break;
         s += text[j++];
       }
-      push("q", s, i, s.includes("\\") || j >= to);
+      push("q", s, i, s.includes("\\") || s.includes("${") || j >= to);
       i = Math.min(j + 1, to);
       continue;
     }
@@ -913,8 +913,22 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     if (!t.odd) continue;
     if (!t.sql && !decls.some((d) => k >= d.start && k < d.end)) continue;
     out.push({ kind: "statement", object: "a quoted literal", tables: allTenant, unattributable: true, offset: t.at,
-      why: "a backslash escape, an `E'…'` / `U&'…'` string or an unclosed quote — databases disagree on where it ends, " +
-        "so the checker cannot tell what SQL follows it" });
+      why: "a backslash escape, an `E'…'` / `U&'…'` string, a `${…}` inside quotes or an unclosed quote — " +
+        "databases (and the template it sits in) disagree on what it holds, so the checker cannot tell what SQL it makes" });
+    break;
+  }
+  // 6. A `${…}` anywhere else in SQL — a foreign-key action, a column list — is SQL text
+  //    the checker cannot read. (Regions that read their own interpolations — a view,
+  //    trigger, rule or other CREATE body, a statement — already charge it.)
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (!isP(t, "${")) continue;
+    const inRead = decls.some((d) => d.kind !== "table" && d.kind !== "index" && k >= d.region[0] && k < d.region[1]) ||
+      generic.some((g) => k >= g.start && k < g.end);
+    if (inRead) continue;
+    if (!t.sql && !decls.some((d) => k >= d.start && k < d.end)) continue;
+    out.push({ kind: "statement", object: "a `${…}` interpolation", tables: allTenant, unattributable: true, offset: t.at,
+      why: "it is SQL text the checker cannot read (in a table declaration, a foreign key or a column list)" });
     break;
   }
   // Backstop: an action the REFERENCES reading above did not consume is unattributable.
@@ -966,12 +980,65 @@ export function schemaTenantTableNames(bodies: Iterable<string>): Set<string> {
   return out;
 }
 
+/** A `<schema>` block as the compiler will finally see it: its text children, after expansion. */
+function schemaBlocksOf(fileAST: unknown): Array<{ body: string; span: any }> {
+  const out: Array<{ body: string; span: any }> = [];
+  const seen = new WeakSet<object>();
+  const walk = (v: unknown, depth: number): void => {
+    if (v === null || typeof v !== "object" || depth > 64 || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    const n = v as Record<string, any>;
+    if (n.kind === "state" && n.stateType === "schema") {
+      let body = "";
+      for (const c of n.children ?? []) if (c && c.kind === "text" && typeof c.value === "string") body += c.value;
+      out.push({ body, span: n.span ?? null });
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      walk(n[k], depth + 1);
+    }
+  };
+  walk(fileAST, 0);
+  return out;
+}
+
+export interface SchemaHazardDiagnostic { code: "E-TENANT-SCHEMA-HAZARD"; message: string; span: any; severity: "error" }
+
 /**
- * A key naming the declared object (de-duplication across call sites): a wider
- * tenant set can change WHICH tables a hazard reaches, never which object it is.
+ * THE ONE authoritative E-TENANT-SCHEMA-HAZARD evaluation for a file (S455 review
+ * round 2b). It runs as its own pipeline stage AFTER every compile-time expansion of
+ * `<schema>` (TS expands `${ schemaFor(T) }` into a table declaration; ME splices
+ * meta output) and before CG, over the AST CG consumes — so it sees the schema as it
+ * will actually exist. The tenant set is the floor's own (`tenantTables(bodies)`,
+ * supplied by the caller from `buildTenantContext` over the same AST) unioned with
+ * every `tenant_id` declaration the schema reader finds — never smaller than what
+ * the floor scopes.
+ *
+ * ⚑ THERE IS NO SECOND SITE AND NO "ALREADY REPORTED" SKIP. The S455 first cut ran
+ * at GCP1 (before schemaFor expanded — an empty tenant set) and again in emit-server
+ * (which skipped hazards it ASSUMED GCP1 had reported): a schemaFor tenant table with
+ * a trigger over it was reported by neither. Measured by the reviewer and the PA.
  */
-export function schemaHazardKey(h: SchemaHazard): string {
-  return `${h.kind}|${h.object.toLowerCase()}`;
+export function fileTenantSchemaHazards(
+  fileAST: unknown,
+  floorTenantTables: Iterable<string>,
+): SchemaHazardDiagnostic[] {
+  const blocks = schemaBlocksOf(fileAST);
+  if (blocks.length === 0) return [];
+  const tenant = new Set<string>();
+  for (const t of floorTenantTables) if (typeof t === "string") tenant.add(t.toLowerCase());
+  for (const t of schemaTenantTableNames(blocks.map((b) => b.body))) tenant.add(t);
+  if (tenant.size === 0) return [];
+  const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
+  const out: SchemaHazardDiagnostic[] = [];
+  for (const { body, span } of blocks) {
+    const sp = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    for (const h of findSchemaTenantHazards(body, tenant)) {
+      out.push({ code: "E-TENANT-SCHEMA-HAZARD", message: schemaHazardMessage(h, body), span: sp, severity: "error" });
+    }
+  }
+  return out;
 }
 
 /** The `E-TENANT-SCHEMA-HAZARD` message for one hazard. */

@@ -28,6 +28,10 @@ import { quoteIdent } from "./codegen/sql-ident.ts";
  * @param {object} schemaBody — AST node with body text, or the raw body string
  * @returns {{ tables: TableDecl[], fns: SecdefFnDecl[] }}
  */
+// Sticky (`y`) head regexes for `parseSchemaBlock` — matched AT an offset, no slicing.
+const FN_HEAD_RE = /fn\s+([A-Za-z_]\w*)\s*\(/y;
+const TBL_HEAD_RE = /([A-Za-z_]\w*)\s*\{/y;
+
 export function parseSchemaBlock(schemaBody) {
   const tables = [];
   const fns = [];
@@ -47,10 +51,29 @@ export function parseSchemaBlock(schemaBody) {
     while (i < n && /\s/.test(text[i])) i++;
     if (i >= n) break;
 
-    const rest = text.slice(i);
+    // LINEAR SCAN (S455 review round 2b — measured: a 40 KB string literal in a `<schema>`
+    // cost ~1 s here, 80 KB ~4 s). The scan used to `text.slice(i)` and re-run both
+    // head regexes at EVERY offset, and inside a long word run each attempt re-scanned
+    // the run's tail. Same matches, same order, without that: the heads are sticky
+    // regexes at `i`, and an offset inside a word run is skipped when no head can start
+    // there — a table head needs the run to be followed by `\s*{` (then the first
+    // letter of the run matches, exactly as before, including the glued-tail cases
+    // E-SCHEMA-012/013 rely on), and an `fn` head inside a run can only be its final
+    // two characters.
+    if (/\w/.test(text[i])) {
+      let e = i + 1;
+      while (e < n && /\w/.test(text[e])) e++;
+      let w = e;
+      while (w < n && /\s/.test(text[w])) w++;
+      if (text[w] !== "{" && e - i > 2) {
+        const fnAt = text.slice(e - 2, e) === "fn" ? e - 2 : e;
+        if (fnAt > i) { i = fnAt; continue; }
+      }
+    }
 
     // §14.8.11.2 S4 — a SECURITY-DEFINER `fn` decl: `fn NAME(args) …modifiers… { body }`.
-    const fnHead = /^fn\s+([A-Za-z_]\w*)\s*\(/.exec(rest);
+    FN_HEAD_RE.lastIndex = i;
+    const fnHead = FN_HEAD_RE.exec(text);
     if (fnHead) {
       const parsed = parseFnDecl(text, i, fnHead);
       if (parsed) {
@@ -65,7 +88,8 @@ export function parseSchemaBlock(schemaBody) {
     }
 
     // A plain table: `tableName { … }` optionally followed by the `db-authoritative` marker.
-    const tblHead = /^([A-Za-z_]\w*)\s*\{/.exec(rest);
+    TBL_HEAD_RE.lastIndex = i;
+    const tblHead = TBL_HEAD_RE.exec(text);
     if (tblHead) {
       const tableName = tblHead[1];
       const tblStart = i;

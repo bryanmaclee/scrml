@@ -1,0 +1,18 @@
+${ import { schemaFor } from 'scrml:data'
+   type Assets:struct = { id: number, name: string, tenant_id: string } }
+<program db="./app.db">
+    <schema>
+        ${ schemaFor(Assets) }
+        ?{`CREATE TABLE config (k TEXT, v TEXT)`}
+        ?{`CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN UPDATE assets SET name = 'pwned'; END`}
+        ?{`CREATE VIEW va AS SELECT * FROM assets`}
+    </>
+    // The tenant table comes from schemaFor, expanded at compile time.
+    ${
+        function go() {
+            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run()
+            return "ok"
+        }
+    }
+    <button onclick=${ go() }>go</button>
+</program>
