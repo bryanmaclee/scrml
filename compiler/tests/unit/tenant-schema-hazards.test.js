@@ -109,7 +109,10 @@ describe("(3) foreign keys with CASCADE / SET NULL / SET DEFAULT, either end ten
   test("the tenant table is the PARENT (SET NULL / SET DEFAULT / ON UPDATE CASCADE; table-level and ALTER TABLE forms)", () => {
     expect(hazards(ASSETS, "CREATE TABLE notes (id INTEGER, aid INTEGER REFERENCES assets(id) ON DELETE SET NULL)")).toHaveLength(1);
     expect(hazards(ASSETS, "CREATE TABLE notes (id INTEGER, aid INTEGER, FOREIGN KEY (aid) REFERENCES assets(id) ON UPDATE SET DEFAULT)")).toHaveLength(1);
-    expect(hazards(ASSETS, "ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (aid) REFERENCES assets(id) ON UPDATE CASCADE")).toHaveLength(1);
+    // S455 "yes both": the ALTER is ALSO charged as a statement naming `assets` — `ADD
+    // CONSTRAINT` is not on the closed exemption list (only `ADD COLUMN` is)
+    expect(hazards(ASSETS, "ALTER TABLE notes ADD CONSTRAINT fk FOREIGN KEY (aid) REFERENCES assets(id) ON UPDATE CASCADE").map((h) => h.kind).sort())
+      .toEqual(["foreign key", "statement"]);
   });
   test("RESTRICT / NO ACTION / no action, and cascades between non-tenant tables, are not hazards", () => {
     expect(hazards(ASSETS, "CREATE TABLE notes (aid INTEGER REFERENCES assets(id) ON DELETE RESTRICT ON UPDATE NO ACTION)")).toEqual([]);
@@ -237,7 +240,8 @@ describe("keyword-spelled identifiers never end or skip a parse (S455 review HIG
   });
   test("a column named `rename` is not a table rename; `RENAME TO` is", () => {
     expect(hazards(ASSETS, "ALTER TABLE assets ADD COLUMN rename TEXT")).toEqual([]);
-    expect(hazards(ASSETS, "ALTER TABLE assets RENAME COLUMN name TO title")).toEqual([]);
+    // S455 "yes both": a column rename on a tenant table is not on the closed exemption list
+    expect(hazards(ASSETS, "ALTER TABLE assets RENAME COLUMN name TO title")).toHaveLength(1);
     expect(hazards(ASSETS, "ALTER TABLE assets RENAME TO archive")).toHaveLength(1);
   });
   test("a view whose columns are spelled `end` / `as` / `begin` is read to its end", () => {

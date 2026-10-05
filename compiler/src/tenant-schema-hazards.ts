@@ -49,10 +49,11 @@
  */
 
 import { TENANT_ROW_FUNCTIONS, TENANT_GROUP_AGGREGATES } from "./codegen/tenant-sql-subset.ts";
-import { schemaTableDeclarations } from "./schema-differ.js";
+import { schemaTableDeclarations, DBAUTH_ROLE } from "./schema-differ.js";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
-export type SchemaHazardKind = "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy";
+export type SchemaHazardKind =
+  | "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy" | "isolation removal";
 
 export interface SchemaHazard {
   kind: SchemaHazardKind;
@@ -570,11 +571,172 @@ const KNOWN_OBJECTS = new Set([
   "DATABASE", "TABLESPACE", "EVENT",
 ]);
 
-/** Statement leaders that move or rename nothing the floor reads. */
-const INERT_LEADERS = new Set([
-  "DROP", "PRAGMA", "COMMENT", "GRANT", "REVOKE", "ANALYZE", "VACUUM", "REINDEX", "BEGIN", "COMMIT",
-  "END", "ROLLBACK", "SAVEPOINT", "RELEASE", "SET",
+/**
+ * The statement leaders exempt even when they name a tenant-scoped table — part of
+ * the §14.8.10 CLOSED exemption list (ruling:user-voice-scrml.md S455 "yes both"):
+ * `CREATE INDEX`, `ALTER TABLE … ADD COLUMN`, `ANALYZE`, `REINDEX`. Anything else that
+ * names a tenant-scoped table is charged.
+ *
+ * Until S455 "yes both" this set also held DROP, PRAGMA, COMMENT, GRANT, REVOKE,
+ * VACUUM, BEGIN, COMMIT, END, ROLLBACK, SAVEPOINT, RELEASE and SET — which hid
+ * `DROP POLICY scrml_tenant_iso ON assets`, `GRANT … ON assets TO PUBLIC` and
+ * `SET row_security = off` (each passed clean). Those leaders are now read like any
+ * other statement: charged when they name a tenant table, the isolation-removal
+ * shapes under their own kind (`isolationRemoval`).
+ */
+const INERT_LEADERS = new Set(["ANALYZE", "REINDEX"]);
+
+/**
+ * §14.8.11's bounded application role (`schema-differ.js` `DBAUTH_ROLE`, emitted as
+ * `CREATE ROLE scrml_app NOLOGIN NOBYPASSRLS`): the one grantee a `GRANT … ON
+ * <tenant table>` may name without removing isolation.
+ */
+const APP_ROLE = DBAUTH_ROLE.toLowerCase();
+
+/** Words after `ADD` in `ALTER TABLE` that add something other than a column. */
+const ADD_NOT_A_COLUMN = new Set([
+  "CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "EXCLUDE", "INDEX", "KEY", "FULLTEXT",
+  "SPATIAL", "PARTITION", "PERIOD", "SYSTEM",
 ]);
+
+/**
+ * True when every action of an `ALTER TABLE` — its action tokens are `[from, to)` —
+ * is `ADD [COLUMN] [IF NOT EXISTS] <column> …`: the closed list's `ALTER TABLE … ADD
+ * COLUMN` (a non-tenant column, or `tenant_id` itself — the scoping declaration). A
+ * `REFERENCES` inside a column definition is the foreign-key rule's business.
+ */
+function alterOnlyAddsColumns(toks: Tok[], from: number, to: number): boolean {
+  const actions: Array<[number, number]> = [];
+  let depth = 0;
+  let s = from;
+  for (let k = from; k < to; k++) {
+    if (isP(toks[k], "(")) depth++;
+    else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
+    else if (isP(toks[k], ",") && depth === 0) { actions.push([s, k]); s = k + 1; }
+  }
+  actions.push([s, to]);
+  for (const [a, b] of actions) {
+    if (b <= a || !isW(toks[a], "ADD")) return false;
+    let k = a + 1;
+    if (isW(toks[k], "COLUMN")) k++;
+    else if (toks[k]?.k === "w" && ADD_NOT_A_COLUMN.has(toks[k].up)) return false;
+    if (isW(toks[k], "IF") && isW(toks[k + 1], "NOT") && isW(toks[k + 2], "EXISTS")) k += 3;
+    if (k >= b || !isName(toks[k])) return false;
+  }
+  return true;
+}
+
+/** The grantees of `GRANT … TO a, b [WITH …] [GRANTED BY …]`, from the token after `TO`. */
+function granteesOf(toks: Tok[], from: number, end: number): string[] {
+  const out: string[] = [];
+  for (let k = from; k < end; k++) {
+    const t = toks[k];
+    if (isW(t, "WITH") || isW(t, "GRANTED")) break;
+    if (isP(t, ",") || isW(t, "GROUP") || isW(t, "ROLE")) continue;
+    out.push(isName(t) ? t.t.toLowerCase() : `?${t.t}`);
+  }
+  return out;
+}
+
+/**
+ * ISOLATION REMOVAL (§14.8.10, ruling:user-voice-scrml.md S455 "yes both"): a `<schema>`
+ * statement that removes or bypasses the §14.8.11 database-tier isolation of a
+ * tenant-scoped table. `g` is one generic statement (tokens `[start, end)`).
+ * Returns the hazard, `"exempt"` for a GRANT whose every grantee is the app role, or
+ * null when the statement is not one of these shapes (read further as a statement).
+ */
+function isolationRemoval(
+  toks: Tok[],
+  g: { start: number; end: number; leader: string; target: string | null; at: number },
+  tainted: ReadonlySet<string>,
+  allTenant: string[],
+  tenantsUnder: (names: string[]) => string[],
+): SchemaHazard | "exempt" | null {
+  const label = toks.slice(g.start, Math.min(g.end, g.start + 4)).map((t) => t.t).join(" ");
+  const everyTable = (why: string): SchemaHazard =>
+    ({ kind: "isolation removal", object: label, tables: allTenant, unattributable: true, offset: g.at, why });
+  const onTable = (t: string, why: string): SchemaHazard =>
+    ({ kind: "isolation removal", object: label, tables: tenantsUnder([t]), unattributable: false, offset: g.at, why });
+  const has = (word: string): boolean => {
+    for (let k = g.start; k < g.end; k++) if (isW(toks[k], word)) return true;
+    return false;
+  };
+  const lead2 = toks[g.start + 1];
+  // DROP POLICY [IF EXISTS] p ON t
+  if (g.leader === "DROP" && isW(lead2, "POLICY")) {
+    let k = g.start + 2;
+    if (isW(toks[k], "IF") && isW(toks[k + 1], "EXISTS")) k += 2;
+    const p = readName(toks, k);
+    const t = p && isW(toks[p.next], "ON") ? readName(toks, p.next + 1) : null;
+    if (!t) return everyTable("the checker cannot read which table the dropped row-security policy is on");
+    if (tainted.has(t.name)) {
+      return onTable(t.name, `it drops a row-security policy on \`${t.name}\` — the §14.8.11 tier's \`scrml_tenant_iso\` (or a restrictive policy that narrows it) stops isolating its tenants`);
+    }
+    return null;
+  }
+  // ALTER TABLE <tenant> DISABLE | NO FORCE ROW LEVEL SECURITY · OWNER TO
+  if (g.leader === "ALTER" && g.target !== null && tainted.has(g.target)) {
+    for (let k = g.start; k < g.end; k++) {
+      if (isW(toks[k], "DISABLE") && isW(toks[k + 1], "ROW") && isW(toks[k + 2], "LEVEL") && isW(toks[k + 3], "SECURITY")) {
+        return onTable(g.target, `it disables row-level security on \`${g.target}\` — the database stops applying the §14.8.11 isolation policy`);
+      }
+      if (isW(toks[k], "NO") && isW(toks[k + 1], "FORCE") && isW(toks[k + 2], "ROW")) {
+        return onTable(g.target, `it un-forces row-level security on \`${g.target}\` — the table's owner then reads every tenant's rows`);
+      }
+      if (isW(toks[k], "OWNER") && isW(toks[k + 1], "TO")) {
+        return onTable(g.target, `it changes \`${g.target}\`'s owner — an owner (or a superuser one) can bypass or disable its row-level security`);
+      }
+    }
+    return null;
+  }
+  // ALTER ROLE | USER … BYPASSRLS | SUPERUSER
+  if (g.leader === "ALTER" && (isW(lead2, "ROLE") || isW(lead2, "USER")) && (has("BYPASSRLS") || has("SUPERUSER"))) {
+    return everyTable("it gives a role BYPASSRLS / SUPERUSER — that role reads every tenant's rows, whatever the row-security policy says");
+  }
+  // SET [SESSION | LOCAL] ROLE | row_security | SESSION AUTHORIZATION
+  if (g.leader === "SET") {
+    let k = g.start + 1;
+    if (isW(toks[k], "SESSION") && isW(toks[k + 1], "AUTHORIZATION")) {
+      return everyTable("it switches the session's authorization — the statements after it may run as a role that bypasses row-level security");
+    }
+    if (isW(toks[k], "SESSION") || isW(toks[k], "LOCAL")) k++;
+    if (isW(toks[k], "ROLE")) {
+      return everyTable("it switches the session's role — the statements after it may run as a role that bypasses row-level security");
+    }
+    if (isW(toks[k], "ROW_SECURITY") || (toks[k]?.k === "q" && toks[k].t.toLowerCase() === "row_security")) {
+      return everyTable("it sets `row_security`, which decides whether row-level security applies to the session");
+    }
+    return null;
+  }
+  // GRANT … [ON objects] TO grantees
+  if (g.leader === "GRANT") {
+    let onAt = -1;
+    let toAt = -1;
+    let depth = 0;
+    for (let k = g.start + 1; k < g.end; k++) {
+      if (isP(toks[k], "(")) depth++;
+      else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
+      else if (depth === 0 && onAt === -1 && isW(toks[k], "ON")) onAt = k;
+      else if (depth === 0 && isW(toks[k], "TO")) { toAt = k; break; }
+    }
+    const grantees = toAt === -1 ? [] : granteesOf(toks, toAt + 1, g.end);
+    const onlyApp = grantees.length > 0 && grantees.every((n) => n === APP_ROLE);
+    if (onAt === -1) {
+      // a role grant: `GRANT some_role TO scrml_app` widens the app role itself
+      if (grantees.includes(APP_ROLE)) return everyTable(`it grants a role to \`${APP_ROLE}\`, the bounded role the §14.8.11 tier's requests run as`);
+      return null;
+    }
+    const objs = readRegion(toks, onAt + 1, toAt === -1 ? g.end : toAt, tainted);
+    const allTables = isW(toks[onAt + 1], "ALL");
+    if (!allTables && objs.names.length === 0 && !objs.interp) return null;
+    if (onlyApp && !objs.interp && toAt !== -1) return "exempt";
+    const to = toAt === -1 ? "a grantee the checker cannot read" : grantees.map((n) => `\`${n}\``).join(", ");
+    if (allTables || objs.interp) return everyTable(`it grants access to every table it names in bulk to ${to} — any grantee but \`${APP_ROLE}\` is a principal the tier does not bound`);
+    return { kind: "isolation removal", object: label, tables: tenantsUnder(objs.names), unattributable: false, offset: g.at,
+      why: `it grants access to ${objs.names.map((n) => `\`${n}\``).join(", ")} to ${to} — any grantee but \`${APP_ROLE}\` is a principal the tier does not bound` };
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // The checker
@@ -592,7 +754,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
   const allTenant = [...tenant];
   const decls: Decl[] = [];
   const consumed = new Uint8Array(toks.length);
-  const generic: Array<{ start: number; end: number; leader: string; target: string | null; at: number }> = [];
+  const generic: Array<{ start: number; end: number; leader: string; target: string | null; targetEnd: number; at: number }> = [];
   const contexts: Array<{ from: number; to: number; table: string }> = [];
 
   // 1. Statements.
@@ -641,7 +803,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     // A statement that STARTS with a `${…}` is SQL text the checker cannot see at all.
     if (isP(t, "${") && t.sql && atStart) {
       const end = statementEnd(toks, i);
-      generic.push({ start: i, end, leader: "${", target: null, at: t.at });
+      generic.push({ start: i, end, leader: "${", target: null, targetEnd: -1, at: t.at });
       for (let k = i; k < Math.max(end, i + 1); k++) consumed[k] = 1;
       i = Math.max(end, i + 1) - 1;
       continue;
@@ -649,14 +811,19 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     if (t.k === "w" && t.sql && atStart) {
       const end = statementEnd(toks, i);
       let target: string | null = null;
+      let targetEnd = -1;
       if (t.up === "ALTER" && isW(toks[i + 1], "TABLE")) {
         let k = i + 2;
-        if (isW(toks[k], "ONLY")) k++;
         if (isW(toks[k], "IF") && isW(toks[k + 1], "EXISTS")) k += 2;
+        if (isW(toks[k], "ONLY") && isName(toks[k + 1]) && !isW(toks[k + 1], "ADD")) k++;
         const nm = readName(toks, k);
-        if (nm) { target = nm.name; contexts.push({ from: nm.next, to: end, table: nm.name }); }
+        if (nm) {
+          target = nm.name;
+          targetEnd = isP(toks[nm.next], "*") ? nm.next + 1 : nm.next;
+          contexts.push({ from: nm.next, to: end, table: nm.name });
+        }
       }
-      generic.push({ start: i, end, leader: t.up, target, at: t.at });
+      generic.push({ start: i, end, leader: t.up, target, targetEnd, at: t.at });
       for (let k = i; k < Math.max(end, i + 1); k++) consumed[k] = 1;
       i = Math.max(end, i + 1) - 1;
     }
@@ -773,6 +940,18 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     // WIDENS the tier's isolation policy. Only an explicit `AS RESTRICTIVE` (ANDed: it
     // can only narrow) is exempt; a policy whose target or AS clause cannot be read is
     // charged. A policy on a table without `tenant_id` is not this floor's business.
+    // ISOLATION REMOVAL (S455 "yes both"): a role created BYPASSRLS / SUPERUSER reads every
+    // tenant's rows whatever the row-security policy says. It names no table, so it is
+    // charged against every tenant-scoped table (the file is checked only when there is one).
+    if (d.object === "ROLE" || d.object === "USER") {
+      let bypass: string | null = null;
+      for (let k = d.start; k < d.end; k++) if (isW(toks[k], "BYPASSRLS") || isW(toks[k], "SUPERUSER")) { bypass = toks[k].up; break; }
+      if (bypass) {
+        out.push({ kind: "isolation removal", object: `CREATE ${d.object} ${shown}`, tables: allTenant, unattributable: true, offset: d.at,
+          why: `it creates a ${bypass} role — that role reads every tenant's rows, whatever the row-security policy says` });
+        continue;
+      }
+    }
     if (d.object === "POLICY") {
       let p = d.start;
       while (p < d.end && !isW(toks[p], "POLICY")) p++;
@@ -829,25 +1008,22 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
           why: "it runs code the floor never sees" });
         continue;
       }
-      let hits = r.names;
-      if (g.leader === "ALTER" && g.target !== null) {
-        // ALTER TABLE <t> …: naming its own target is fine — unless it RENAMEs a tenant table
-        // (the renamed table no longer carries the name the floor scopes).
-        // A TABLE rename is `RENAME TO` (a column may be NAMED `rename`; `RENAME [COLUMN] a TO b`
-        // renames a column).
-        let renames = false;
-        for (let k = g.start; k < g.end; k++) if (isW(toks[k], "RENAME") && isW(toks[k + 1], "TO")) renames = true;
-        hits = hits.filter((n) => n !== g.target || renames);
-        // a REFERENCES target is the foreign-key rule's business
-        const refTargets = new Set<string>();
-        for (let k = g.start; k < g.end; k++) if (isW(toks[k], "REFERENCES")) { const nm = readName(toks, k + 1); if (nm) refTargets.add(nm.name); }
-        hits = hits.filter((n) => !refTargets.has(n) || (n === g.target && renames));
-      }
+      // ISOLATION REMOVAL (S455 "yes both") — its own kind, whatever else the statement names.
+      const removal = isolationRemoval(toks, g, tainted, allTenant, tenantsUnder);
+      if (removal === "exempt") continue;             // GRANT … ON <tenant> TO scrml_app only
+      if (removal !== null) { out.push(removal); continue; }
+      // The closed exemption list's `ALTER TABLE … ADD COLUMN`: every action adds a column.
+      // (Any OTHER action on a statement naming a tenant table is charged — RENAME, DROP /
+      // ALTER COLUMN, ADD CONSTRAINT, ENABLE / FORCE ROW LEVEL SECURITY, … S455 "yes both".)
+      if (g.leader === "ALTER" && g.target !== null && g.targetEnd !== -1 && !r.interp &&
+          alterOnlyAddsColumns(toks, g.targetEnd, g.end)) continue;
+      const hits = r.names;
       if (hits.length || r.interp) {
         out.push({ kind: "statement", object: label, tables: hits.length ? tenantsUnder(hits) : allTenant,
           unattributable: hits.length === 0, offset: g.at,
           why: hits.length
-            ? `it names ${hits.map((n) => `\`${n}\``).join(", ")}, and the floor cannot scope what it does with that table`
+            ? `it names ${hits.map((n) => `\`${n}\``).join(", ")}, and the floor cannot scope what it does with that table ` +
+              "(the only statements exempt are `CREATE INDEX`, `ALTER TABLE … ADD COLUMN`, `ANALYZE` and `REINDEX`)"
             : "it holds a `${…}` interpolation the checker cannot read" });
       }
     }
@@ -1051,6 +1227,15 @@ export function schemaHazardMessage(h: SchemaHazard, body: string): string {
   const tables = h.unattributable
     ? `every tenant-scoped table (${h.tables.map((t) => `\`${t}\``).join(", ")})`
     : `the tenant-scoped table${h.tables.length > 1 ? "s" : ""} ${h.tables.map((t) => `\`${t}\``).join(", ")}`;
+  if (h.kind === "isolation removal") {
+    return (
+      `E-TENANT-SCHEMA-HAZARD: this \`<schema>\` holds an isolation removal \`${h.object}\` (line ${lineAt(body, h.offset)} of ` +
+      `the \`<schema>\` body) that reaches ${tables}${h.unattributable ? " (no table named — charged against every tenant-scoped table)" : ""}: ${h.why}. ` +
+      `A tenant-scoped table's isolation in the database (§14.8.11 row-level security, its \`scrml_tenant_iso\` policy and ` +
+      `the bounded \`${DBAUTH_ROLE}\` role) is not the \`<schema>\`'s to remove or bypass, so the statement is refused where it ` +
+      `is written. Remove it. (See SPEC §14.8.10.)`
+    );
+  }
   const obj = h.kind === "foreign key" || h.kind === "statement" ? h.object : `\`${h.object}\``;
   return (
     `E-TENANT-SCHEMA-HAZARD: this \`<schema>\` declares a ${h.kind} ${obj} (line ${lineAt(body, h.offset)} of the ` +
