@@ -10,7 +10,7 @@
         ?{`INSERT OR IGNORE INTO members (email) VALUES (${email})`}.run()
     }
     function memberCount() {
-        return ?{`SELECT COUNT(*) AS n FROM members`}.get()
+        return ?{`SELECT COUNT(*) AS n FROM members`}.get() !{ _ :> not }
     }
     function onAdd() {
         tryAdd("a@x.com") !{ .Transport(_) :> { return } }

@@ -8,7 +8,7 @@
         o.x = v
       }
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         let h = u.passwordHash
         const o = {}
         setv(o, h)

@@ -98,7 +98,7 @@ ${
                 (${searchQuery} = '' OR name LIKE '%' || ${searchQuery} || '%')
                 AND (${filterCategory} = '' OR category = ${filterCategory})
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
         return rows
     }
 

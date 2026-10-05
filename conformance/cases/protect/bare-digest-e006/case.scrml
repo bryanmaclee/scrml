@@ -6,7 +6,7 @@
     ${
       import { hash } from "scrml:crypto"
       function pinFingerprint(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return hash("md5", u.pin)
       }
     }

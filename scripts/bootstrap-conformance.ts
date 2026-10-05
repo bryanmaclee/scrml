@@ -110,9 +110,10 @@ import { frontEnd as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lo
  * conformance-required), so a case written in it must be graded AS WRITTEN, not on a pipe-less twin.
  * `client-server-call` (§19.9.10, S454 F8) is excluded too: it changes what a case MEANS to the
  * bootstrap (it adds a handler), so it is applied to the corpus source (reviewed, committed), never
- * silently at grading time.
+ * silently at grading time. `sql-failable` (§19.8.3, S451 R11) likewise: it adds a handler to an
+ * unhandled `?{}`.
  */
-const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "client-server-call");
+const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "client-server-call" && r !== "sql-failable");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");

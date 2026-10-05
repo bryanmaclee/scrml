@@ -2,7 +2,7 @@ ${
     type User:struct = { id: number, name: string }
     <userData> : User | not = not
     function loadUser() : User | not {
-        rows = ?{`SELECT id, name FROM users LIMIT 1`}
+        rows = ?{`SELECT id, name FROM users LIMIT 1`} !{ _ :> [] }
         return rows[0]
     }
 }

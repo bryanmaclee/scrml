@@ -30,7 +30,7 @@ ${
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
     }
 
     server function deleteFiles(ids) {
@@ -41,7 +41,7 @@ ${
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
     }
 }
 

@@ -53,7 +53,7 @@
         FROM messages
         ORDER BY sent_at ASC
         LIMIT 200
-      `}.all()
+      `}.all() !{ _ :> [] }
     }
 
     // Server function only persists — no @state assignments (E-RI-002).

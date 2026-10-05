@@ -2,7 +2,7 @@
 <program db="./test.db">
     ${
         function loadUsers() {
-            return ?{`SELECT id, name FROM users`}.all()
+            return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
         }
     }
     <p>${loadUsers().length}</>

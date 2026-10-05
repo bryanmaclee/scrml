@@ -8,7 +8,7 @@ ${
         return s
     }
     function loadTotal() {
-        const rows = ?{`SELECT id, amount FROM sales`}.all()
+        const rows = ?{`SELECT id, amount FROM sales`}.all() !{ _ :> [] }
         const picker0 = sumAmounts
         const picker = picker0
         return picker(rows)

@@ -5,10 +5,10 @@ ${
     <users> : User[] = []
     <posts> : Post[] = []
     function loadUsers() : User[] {
-        return ?{`SELECT id, name FROM users`}.all()
+        return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
     }
     function loadPosts() : Post[] {
-        return ?{`SELECT id, title FROM posts`}.all()
+        return ?{`SELECT id, title FROM posts`}.all() !{ _ :> [] }
     }
 }
 <button id="lu" onclick={ @users = loadUsers() !{ .Transport(_) :> { return } } }>LoadUsers</>

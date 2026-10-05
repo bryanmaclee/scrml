@@ -4,7 +4,7 @@
     ?{`CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)`}.run()
     // _scrml_sql is the compiler's own handle; this comment names it and is not a reference.
     server function everyNote() {
-      return ?{`SELECT body FROM notes`}.all()
+      return ?{`SELECT body FROM notes`}.all() !{ _ :> [] }
     }
     function label() {
       return "the _scrml_ prefix is reserved"

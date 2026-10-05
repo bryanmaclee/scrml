@@ -38,7 +38,7 @@
       // hit F-AUTH-002 (E-SQL-004). The `server` modifier is not needed —
       // the ?{} block escalates the fn structurally.
       function loginServer(emailArg, passwordArg) {
-        const row = ?{`SELECT id, email, password_hash FROM users WHERE email = ${emailArg}`}.get()
+        const row = ?{`SELECT id, email, password_hash FROM users WHERE email = ${emailArg}`}.get() !{ _ :> not }
         if (row is not) {
           return { error: "Invalid email or password" }
         }

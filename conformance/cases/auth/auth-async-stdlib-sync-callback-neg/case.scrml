@@ -4,7 +4,7 @@
       import { verifyPassword } from 'scrml:auth'
 
       function loginServer(emailArg, passwordArg) {
-        const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all()
+        const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all() !{ _ :> [] }
         const ranked = rows.sort((a, b) => verifyPassword(passwordArg, a.password_hash) ? -1 : 1)
         return { ranked }
       }

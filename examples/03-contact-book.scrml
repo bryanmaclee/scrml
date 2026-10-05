@@ -47,7 +47,7 @@
     }
 
     function loadContacts() {
-      return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all()
+      return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all() !{ _ :> [] }
     }
 
     function removeContact(id) {

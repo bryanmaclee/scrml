@@ -1,7 +1,7 @@
 ${
     <items> = []
     function loadTasks(uid) {
-        return ?{`SELECT id, text FROM tasks WHERE user_id = ${uid}`}.all()
+        return ?{`SELECT id, text FROM tasks WHERE user_id = ${uid}`}.all() !{ _ :> [] }
     }
 }
 <program db="./app.db">

@@ -43,22 +43,22 @@
       <draftTitle> = ""
 
       function loadTasks() {
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
       }
 
       function addTask(title) {
         ?{`INSERT INTO tasks (title, position) VALUES (${title}, (SELECT COALESCE(MAX(position), 0) + 1 FROM tasks))`}.run()
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
       }
 
       function toggleTask(id, completed) {
         ?{`UPDATE tasks SET completed = ${completed ? 1 : 0} WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
       }
 
       function deleteTaskById(id) {
         ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
       }
 
       // Pattern B — explicit `on mount` block triggers the initial
