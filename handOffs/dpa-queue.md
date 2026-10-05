@@ -3932,3 +3932,19 @@ effect summary (same fixpoint? separate?); what is checked statically vs enforce
 / the tenant floor's runtime half); prior art (Jif/FlowCaml information-flow types, Rust's taint crates, LIO,
 Laminar/Hails, Ur/Web's policy checking, Rails strong-params, Prisma field omission). Deliver: the design, what it
 replaces in impl#1's approach, cost, sequencing against U1c, and a rec. Security-architecture — R2 minimum.
+
+## [dpa-068] deep-dive — widen the arm-body grammar: bare control-flow statements (`return`, `fail`, …) as an arm body
+`status:    banked`
+banked:     S454 2026-10-05 (bryan: "Your rec, but we will likely widen this later. significantly more ergonomic")
+
+The question: §18.2's `arm-body ::= expression | block-body` makes `!{ .Transport(t) :> return }` / `match x { _ :> fail .E }`
+ill-formed (the bootstrap rejects a bare `return` with E-SCOPE-001; impl#1 accepts it), so S454 corrected the SPEC examples to
+`:> { return }`. bryan's stated intent: the grammar will likely be WIDENED later because the bare form is "significantly more
+ergonomic". Design the widening: which statements may stand bare as an arm body (`return [expr]`, `fail .V(…)`, `break`,
+`continue`, `?`-propagation? a bare assignment?); how the bare form composes with value-position handling (S451 1a — an arm in a
+value position must yield or leave: a bare `return`/`fail` LEAVES, so it is legal there by construction); the parse
+disambiguation against `expression` (is `return x` vs an identifier `return` ambiguous? the `:>` separator and the next-arm
+boundary — newline vs `|` legacy); one grammar for `!{}` arms, `match` arms, engine message arms (S452 "one pattern-arm spelling
+language-wide"); the `scrml fix` impact (the `{ return }` the F8 rule writes would simplify — or stay valid); widen-vs-limit is
+fork-rule row 1, so show worked adopter code for both and the reversibility (newly-accepting = one-way door). Must read §18.2,
+§18.3, §19.4.3 (value vs statement position), §19.4.5, §19.9.10, §51.0.S message arms IN FULL. R2; bryan rules.
