@@ -12063,7 +12063,11 @@ column added in `<schema>` by `ALTER TABLE` declares too: an `ALTER TABLE <t>` s
 makes `<t>` tenant-scoped. That reading is deliberately wide (fail-closed): `tenant_id` anywhere in
 the statement counts — a `DROP COLUMN tenant_id` and a `'tenant_id'` literal included — and a
 table scoped by such a reading fails its reads at run time (the floor's key column is missing); it
-never leaks. This one set is also the set the `<schema>` declaration rule (`E-TENANT-SCHEMA-HAZARD`,
+never leaks. A statement (an `ALTER TABLE`, or a `CREATE TABLE` column list) that holds a quote or
+comment form the compiler does not read exactly — SQLite `[ident]`, Postgres `$$…$$` / `E'…'`, a
+MySQL `\` escape or `#` comment, a backtick, a `${…}` — is read to the end of its `?{}` wrapper,
+and naming `tenant_id` anywhere there scopes the table (S455 review F1: a `CREATE` spelled inside
+`[org create]` ended the statement early and left the table unscoped — executed). This one set is also the set the `<schema>` declaration rule (`E-TENANT-SCHEMA-HAZARD`,
 the Write bullet) charges against, so the two cannot disagree about which tables are
 tenant-scoped. **Accepted cost:** two genuinely different databases compiled together share the
 set — a table name tenant-scoped in one is scoped in the other. **Limit:** a program compiled
