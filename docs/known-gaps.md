@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 242 | 6 |
+| HIGH | 241 | 6 |
 | MED | 511 | 4 |
-| LOW | 276 | 0 |
+| LOW | 277 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -23122,16 +23122,19 @@ Reviewer-executed at cb8264369: `transaction { … const a = _={ (async () => { 
 <!-- @gap id=g-foreign-slice-top-level-and-binary-expr-codegen-s455 sev=LOW status=open locus=searched:emit-logic.ts case "foreign" call sites prov=review:s455-S239-foreign-r1 -->
 Both E-CODEGEN-INVALID-LOGIC on base and head (reviewer-executed).
 
-### g-tenant-floor-per-file-tenant-set-s455 — the §14.8.10 floor's tenant set is per FILE: another file of the same project reads a tenant table UNFILTERED — `NEW S455; HIGH; open (pre-existing; in flight S455)`
-<!-- @gap id=g-tenant-floor-per-file-tenant-set-s455 sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(_tenantCtx from extractDesiredSchema(fileAST)) prov=review:s455-S239-tenant-r3 -->
+### g-tenant-floor-per-file-tenant-set-s455 — the §14.8.10 floor's tenant set is per FILE: another file of the same project reads a tenant table UNFILTERED — `NEW S455; HIGH; RESOLVED S455 (#1316)`
+<!-- @gap id=g-tenant-floor-per-file-tenant-set-s455 sev=HIGH status=resolved locus=compiler/src/codegen/emit-server.ts(_tenantCtx from extractDesiredSchema(fileAST)) prov=review:s455-S239-tenant-r3 -->
+RESOLVED S455 (#1316, 318e76d81): the floor reads the compilation's one tenant set (`compilationTenantSet`), computed once in TENANT-SCHEMA and shared with CG; covers a second `<program>`, an imported module and a tool program (executed: admin.scrml returned A+B → A only).
 Two `<program>` files sharing `db="./app.db"`; `assets` declared tenant-scoped only in app.scrml's `<schema>`; admin.scrml's `SELECT name FROM assets` is emitted unfiltered (observed in emitted code). #1313 gave the hazard CHECK a compilation-wide set; the floor still scopes per file. Dispatched S455 (`fix/s455-tenant-floor-project-set`).
 
-### g-tenant-floor-alter-add-tenant-column-not-scoped-s455 — `ALTER TABLE notes ADD COLUMN tenant_id` in a `<schema>` does not make `notes` tenant-scoped — `NEW S455; MED; open (pre-existing; in flight S455)`
-<!-- @gap id=g-tenant-floor-alter-add-tenant-column-not-scoped-s455 sev=MED status=open locus=compiler/src/schema-differ.js(schemaTableDeclarations)+compiler/src/codegen/db-authoritative.ts(extractDesiredSchema) prov=review:s455-S239-tenant-r1 -->
+### g-tenant-floor-alter-add-tenant-column-not-scoped-s455 — `ALTER TABLE notes ADD COLUMN tenant_id` in a `<schema>` does not make `notes` tenant-scoped — `NEW S455; MED; RESOLVED S455 (#1316)`
+<!-- @gap id=g-tenant-floor-alter-add-tenant-column-not-scoped-s455 sev=MED status=resolved locus=compiler/src/schema-differ.js(schemaTableDeclarations)+compiler/src/codegen/db-authoritative.ts(extractDesiredSchema) prov=review:s455-S239-tenant-r1 -->
+RESOLVED S455 (#1316, 318e76d81; ALTER/CREATE recognizer early-stop F1 closed in #1317): `ALTER TABLE t ADD COLUMN tenant_id` scopes t — floor, E-SCHEMA-015 and the hazard check agree.
 The recognizers read `tenant_id` only from a CREATE TABLE column list or a DSL head; the floor, E-SCHEMA-015 and the #1313 checker agree, so it is consistent but fail-open. Fix in the shared recognizer.
 
-### g-tenant-schema-rls-removal-not-charged-s455 — `<schema>` statements that REMOVE §14.8.11 database-tier isolation (`DROP POLICY scrml_tenant_iso`, `DISABLE`/`NO FORCE ROW LEVEL SECURITY`, `SET row_security = off`, `GRANT … TO PUBLIC`, `OWNER TO`, `BYPASSRLS`) pass the #1313 checker — `NEW S455; MED; open (in flight S455, governing-sentence gated)`
-<!-- @gap id=g-tenant-schema-rls-removal-not-charged-s455 sev=MED status=open locus=compiler/src/tenant-schema-hazards.ts(INERT_LEADERS; ALTER TABLE target filter) prov=review:s455-S239-tenant-r2 -->
+### g-tenant-schema-rls-removal-not-charged-s455 — `<schema>` statements that REMOVE §14.8.11 database-tier isolation (`DROP POLICY scrml_tenant_iso`, `DISABLE`/`NO FORCE ROW LEVEL SECURITY`, `SET row_security = off`, `GRANT … TO PUBLIC`, `OWNER TO`, `BYPASSRLS`) pass the #1313 checker — `NEW S455; MED; RESOLVED S455 (#1317)`
+<!-- @gap id=g-tenant-schema-rls-removal-not-charged-s455 sev=MED status=resolved locus=compiler/src/tenant-schema-hazards.ts(INERT_LEADERS; ALTER TABLE target filter) prov=review:s455-S239-tenant-r2 -->
+RESOLVED S455 (#1317, 1b47d97e3; rulings "yes both" + "your rec on the allow-list"): a tenant compilation's `<schema>` admits only a closed set of statement kinds; DROP POLICY / DISABLE|NO FORCE RLS / OWNER TO / role grants / BYPASSRLS / SET ROLE|row_security / default privileges / REASSIGN OWNED / publications / extensions are all refused. Landed PARTIAL on bryan's word (residual: g-tenant-schema-rel-dot-fn-call-s455).
 Mitigated: scrml never applies raw `<schema>` DDL; db-migrate re-applies ENABLE/FORCE/DROP+CREATE `scrml_tenant_iso` each run — live only when an author hand-applies the schema SQL. Outside the S455 "write hazard" ruling; built only if §14.8.11 already states the compiler owns the policy/RLS state, else a ruling.
 
 ### g-tenant-floor-off-for-live-db-and-body-create-tables-s455 — a table whose `tenant_id` exists only in a live `<program db=>` file or a program-body `?{CREATE TABLE … tenant_id}` (no `<schema>`, no `<db tables=>`) is not tenant-scoped — the floor is off for it — `NEW S455; MED; open (pre-existing)`
@@ -23141,3 +23144,15 @@ Reviewer-executed: reads return both tenants. Direction: make the table tenant-s
 ### g-tenant-small-residuals-s455 — tenant LOWs from the S455 reviews — `NEW S455; LOW; open`
 <!-- @gap id=g-tenant-small-residuals-s455 sev=LOW status=open locus=compiler/src/tenant-schema-hazards.ts+compiler/src/schema-differ.js prov=review:s455-S239-tenant-r2,r3 -->
 (a) `CREATE TEMP TABLE assets (… tenant_id)` not recognized as tenant-scoped (floor + checker agree; pre-existing). (b) FP: `AS /* x */ RESTRICTIVE` / `AS --x⏎ RESTRICTIVE` charged. (c) `parseSchemaBlock` still quadratic on unbalanced braces (`"a{"`×40k ≈ 12 s; same on base). (d) `--no-gather` drops imported files from the compilation-wide set (the documented separately-compiled Limit).
+
+### g-tenant-schema-rel-dot-fn-call-s455 — a Postgres function called through column notation (`SELECT o.evil FROM other o`, `(NEW).evil`) passes the tenant `<schema>` body checks — `NEW S455; MED; open (in flight S455)`
+<!-- @gap id=g-tenant-schema-rel-dot-fn-call-s455 sev=MED status=open locus=compiler/src/tenant-schema-hazards.ts(view/trigger body reader) prov=review:s455-S239-allowlist-r2 -->
+In Postgres `rel.f` calls `f(rel)` when there is no column `f`; text inspection cannot tell a column from a function without column knowledge (SUSPECTED effect — no PG credentials in review). The #1317 PARTIAL landing's residual (bryan "yes, both"). Next arc (dispatched S455, `fix/s455-tenant-schema-body-subset`): schema bodies must lie inside the S452 tenant SQL subset; qualified refs fail closed to declared columns.
+
+### g-tenant-identity-substrate-scoped-breaks-login-s455 — a `users` / `user_roles` table carrying `tenant_id` becomes tenant-scoped, so an unpinned login read in ANY file of the compilation returns zero rows and every login silently fails — `NEW S455; LOW-MED; open`
+<!-- @gap id=g-tenant-identity-substrate-scoped-breaks-login-s455 sev=MED status=open locus=searched:tenant-egress.ts buildTenantContext, protect-analyzer.ts — no diagnostic site exists prov=review:s455-S239-floor-project-set -->
+Reviewer-executed on #1316: app.scrml declares `users(…, tenant_id)`; login.scrml reads users by email unpinned → base `ok:u1`, head `"bad"`; the only signal is info-level I-TENANT-STRIP. Consistent with §14.8.10 ("presence is the declaration"; the identity substrate SHALL NOT be tenant-scoped — an author error), but silent; `scrml generate auth`'s login template is a separate file. Recommend a diagnostic: a tenant-scoped read whose result feeds `session.set("tenantId", …)` (or a tenant_id column on the table the auth flow reads) → W/E naming the corollary.
+
+### g-r11-read-fallback-masks-outage-at-login-s455 — after the R11 `sql-failable` rewrite, a DB failure during a login lookup reads as "Invalid email or password" instead of a 500 — `NEW S455; LOW; open`
+<!-- @gap id=g-r11-read-fallback-masks-outage-at-login-s455 sev=LOW status=open locus=stdlib/auth/templates/login.scrml+examples/23-trucking-dispatch/pages/auth/login.scrml+samples/login.scrml prov=review:s455-S239-r11-r2 -->
+Fails closed (no login), but an outage is misreported as bad credentials — the ruled read-fallback meaning (S455 "b"). The example owners should replace the `!{ _ :> not }` arm at the lookup with real handling (surface the outage).
