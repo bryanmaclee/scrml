@@ -1,0 +1,13 @@
+# progress — s455-tenant-schema-hazard (append-only)
+
+- start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aa8aadbedd3eede44, base bade5cb9d (== origin/main).
+- Ruling: user-voice-scrml.md §S455 (scrml-support f4b36c2) — "go, comp-time schema".
+- Governing sentence being amended (SPEC §14.8.10, Write bullet, "Writes the database runs because of the statement"):
+  > "A write to a tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares, on that table, a **trigger**, a Postgres **rule**, or a **foreign key** referencing it whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."
+  Limit sentence (stands): "**Limit:** only `<schema>` is visible — a trigger, rule or cascading key created outside it (an external database, a `<db src>` with no `<schema>`, a migration run by hand) is not seen and not introspected."
+- Reproduced on base bade5cb9d (compiler at HEAD 64eb91371 = base + BRIEF only), real bun:sqlite file, two seeded tenants, emitted app.server.js imported, handlers called in-process with A pinned (harness `.tmp/repro.mjs`, scratch):
+  - H1 (AFTER INSERT ON config → UPDATE assets): compiles clean; A's INSERT INTO config → BOTH tenants' assets renamed `pwned-by-trigger`. LEAK.
+  - H2 (VIEW va over assets + INSTEAD OF UPDATE ON va → UPDATE assets): compiles clean; A's `UPDATE va … WHERE id = 2` → B's row renamed `pwned-by-A`. LEAK.
+  - M1 (assets.cfg REFERENCES config(k) ON DELETE CASCADE; A runs DELETE FROM config): compiles clean; on SQLite nothing deleted (emitted server never enables `PRAGMA foreign_keys`) — inert on SQLite, the hazard is the Postgres behaviour (not run). Accepted at compile = the defect.
+  - VIEW (CREATE VIEW all_assets AS SELECT * FROM assets): compiles clean; A's `SELECT … FROM all_assets` → both tenants' rows. LEAK.
+  - Non-hazard control (trigger/FK/view touching only non-tenant tables): compiles clean, runs.
