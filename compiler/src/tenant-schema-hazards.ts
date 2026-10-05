@@ -1950,6 +1950,7 @@ function analyze(
     if (pb) return { allowed: EXPRESSION_ALLOWED_CALLS, relColumns, presets: [[pb.table, pb.table]] };
     return { allowed: ALLOWED_CALLS, relColumns, presets: [] };
   };
+  const issueCache = new Map<Decl, OutsideSubset | null>();
   /** A body's reading: where it leaves the subset (or null), and the tenant tables / tainted views it names. */
   const bodyRead = (d: Decl, tainted: ReadonlySet<string>): { outside: OutsideSubset | null; names: string[] } => {
     if (d.kind === "trigger" && d.unreadable === null && d.beginAt === undefined) {
@@ -1964,7 +1965,9 @@ function analyze(
     const lx = lexedOf(d);
     if (lx === null) return { outside: null, names: [] };
     if (!lx.ok) return { outside: lx.outside, names: [] };
-    return { outside: bodyIssue(lx.toks, rulesOf(d)), names: namesAndInterp(lx.toks, 0, lx.toks.length, tainted).names };
+    // (the subset reading does not depend on the taint set — computed once per body)
+    if (!issueCache.has(d)) issueCache.set(d, bodyIssue(lx.toks, rulesOf(d)));
+    return { outside: issueCache.get(d)!, names: namesAndInterp(lx.toks, 0, lx.toks.length, tainted).names };
   };
   const outsideHazard = (what: string, d: Decl, o: OutsideSubset): SchemaHazard => ({
     kind: OUTSIDE_SUBSET, object: d.shown || "?", declKind: what, tables: allTenant, unattributable: true, offset: d.at,
