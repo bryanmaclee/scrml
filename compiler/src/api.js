@@ -75,6 +75,7 @@ import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
 import { runTransactionChecks } from "./validators/lint-transaction.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
+import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
 
@@ -1954,6 +1955,18 @@ function _compileScrmlImpl(options = {}) {
   for (const tabResult of tabResults) {
     const redeclDiags = stage("SCOPE-REDECLARE", () => runRedeclareChecks(tabResult.ast));
     collectErrors("SCOPE-REDECLARE", redeclDiags);
+  }
+
+  // §47.1.1 (S439 #7 + S440 #9, security) — the `_scrml_` identifier prefix is
+  // RESERVED for compiler/runtime names: a user-authored program may neither
+  // declare nor reference one (E-NAME-COLLIDES-RESERVED-PREFIX). Without it an
+  // author's `_scrml_sql.unsafe(...)` reached the raw driver handle around every
+  // `?{}`-lowering floor. Runs HERE, on each file's author tree exactly once,
+  // because the compiler later re-runs buildAST on text it synthesizes (which
+  // legitimately carries `_scrml_` names). stdlib/ source is exempt by path.
+  for (const tabResult of tabResults) {
+    const prefixDiags = stage("RESERVED-PREFIX", () => runReservedPrefixCheck(tabResult.ast));
+    collectErrors("RESERVED-PREFIX", prefixDiags);
   }
 
   // Stage 3.1: Module Resolution
