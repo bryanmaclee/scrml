@@ -1816,8 +1816,10 @@ A handler that runs several statements does NOT need the expression form: the in
 
 **Normative statements:**
 
-- `onclick=handler(arg)` on an event attribute SHALL be auto-wrapped by the compiler
-  as `function(event) { handler(arg); }`. The function is NOT invoked at render time.
+- `onclick=handler(arg)` on an event attribute SHALL wire `handler` as the event's handler:
+  when the event fires, `handler` is called with `arg`. It is NOT invoked at render time. The
+  shape of the emitted listener is the implementation's (§5.2.2).
+  > **Provenance:** ruling:user-voice-scrml.md S454 "a yes, b yes, root fix" · supersedes: *"`onclick=handler(arg)` on an event attribute SHALL be auto-wrapped by the compiler as `function(event) { handler(arg); }`. The function is NOT invoked at render time."* · **Direction of change: semantics-changed** for impl#1's call-ref listeners whose callee is async-coloured (their listener now awaits the call and routes a rejection to the logging surface, §19.6.8 B7); **inert** for a sync callee (the emitted listener is byte-identical).
 - `onclick=${expr}` on an event attribute SHALL use the `${...}` expression directly
   as the event handler, with `@var` references rewritten to reactive getters.
 - `onclick=handler` (no parentheses, no arguments) is valid and wires `handler` directly
@@ -1863,19 +1865,23 @@ All valid event handler binding forms:
 
 | Form | Meaning | When to use |
 |---|---|---|
-| `onclick=fn()` | Auto-wrapped as `function(event){ fn(); }`. `fn` called on click, not at render. | Simple handler, no args |
-| `onclick=fn(literal)` | Auto-wrapped as `function(event){ fn(literal); }`. Literal args forwarded at click time. | Literal (non-computed) arguments |
+| `onclick=fn()` | `fn` is the click handler: called on click with no arguments, not at render. | Simple handler, no args |
+| `onclick=fn(literal)` | `fn` is the click handler: called on click with `literal`, not at render. | Literal (non-computed) arguments |
 | `onclick=${fn(expr)}` | `${}` expression used as-is as the event handler. `expr` evaluated at click time. | Computed arguments, closure capture |
 | `onclick=${(e) => fn(e, arg)}` | Full closure with access to the event object. | Needs `event` object |
-| `onclick=handler` | `handler` wired directly as listener (no auto-wrap). | Pass handler reference directly |
+| `onclick=handler` | `handler` itself is the listener: called with the event object as its argument. | Pass handler reference directly |
 | `onclick={ s1; s2 }` | Inline block — the statements run in order on each event (§5.2.3, S435). | Handler does more than one thing |
+
+*(S454 — the first two rows read "Auto-wrapped as `function(event){ fn(); }`. `fn` called on click, not at render." and "Auto-wrapped as `function(event){ fn(literal); }`. Literal args forwarded at click time."; the `onclick=handler` row read "`handler` wired directly as listener (no auto-wrap)." Provenance: the DQ-4 statements below.)*
 
 **Normative statements (DQ-4):**
 
-- `onclick=fn()` SHALL wire `fn` as a click handler. The compiler MUST auto-wrap the call as `function(event) { fn(); }`. `fn` is NOT invoked at render time.
+- `onclick=fn()` SHALL wire `fn` as the click handler: `fn` is invoked when the event fires, with no arguments (the event object is not passed — use `onclick=${(e) => fn(e)}` for that). `fn` is NOT invoked at render time. The shape of the JavaScript listener the compiler emits is the implementation's, not part of this rule.
+  > **Provenance:** ruling:user-voice-scrml.md S454 "a yes, b yes, root fix" · supersedes: *"`onclick=fn()` SHALL wire `fn` as a click handler. The compiler MUST auto-wrap the call as `function(event) { fn(); }`. `fn` is NOT invoked at render time."* · **Direction of change: semantics-changed** for impl#1's call-ref listeners whose callee is async-coloured — the listener now awaits `fn` and an unexpected rejection reaches the logging surface (§19.6.8 B7) instead of escaping as an unobserved host rejection; the statements after a failing call still do not run (§13.2). **Inert** for a sync callee: its emitted listener is byte-identical. Measured: `docs/changes/s454-handler-rejection-root-fix/`.
 - `onclick=fn(literal)` SHALL pass `literal` as an argument to `fn` at click time, not at render time.
 - `onclick=${fn(expr)}` SHALL use the `${}` expression directly as the event handler. `expr` is evaluated inside the handler (at click time), not at render time.
-- `onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping.
+- `onclick=handler` (no parentheses) SHALL make `handler` itself the event listener: it is called with the event object as its argument, and no call is written in the attribute. This is the form's distinction from `onclick=handler()`, which calls `handler` with no arguments.
+  > **Provenance:** ruling:user-voice-scrml.md S454 "a yes, b yes, root fix" (the MEANING-not-emitted-JS rewrite of DQ-4, applied to the sibling form so §19.6.8 B7 holds for "handler reference" as the ruling's form list requires) · supersedes: *"`onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping."* · **Direction of change: semantics-changed** for impl#1 when `handler` is async-coloured (its listener is now an emitted function that passes the event to `handler`, awaits it, and routes a rejection to the logging surface); **inert** otherwise (`handler` is still registered directly, byte-identical).
 - Use `onclick=${() => fn(item.id)}` (expression form) when inside a loop and closure capture is needed — `onclick=fn(item.id)` does not capture `item.id` per-iteration.
 
 **Dispatch contract — one contract, native bubbling (S439 ruling #9).** Every event-handler form above obeys ONE dispatch contract, the same for page markup and for `<each>` rows (§17.7):
@@ -18449,11 +18455,19 @@ In ADDITION to the typed path, the compiler SHALL emit the boundary's subtree re
 
 **B3 — No `fallback`, propagate.** If a non-`!` error is caught by the backstop but the catching boundary has NO `fallback` attribute, the error SHALL propagate to the next enclosing `<errorBoundary>` (§19.6.4 nesting — inner-catches-first). If there is no enclosing boundary, the error SHALL propagate to the host. The backstop SHALL NOT silently discard an error it cannot display.
 
+A render that awaits (its content reaches an asynchronous call) completes after the code that started it has returned, so no enclosing backstop can observe an error it re-propagates. For such a render, the report on scrml's logging surface (B5) IS the propagation to the host: the error SHALL reach the logging surface exactly once, and SHALL NOT also escape as an unobserved host rejection.
+
+> **Provenance:** ruling:user-voice-scrml.md S454 "a yes, b yes, root fix" — (b) *"fold in B-2 (async `<errorBoundary>` with no `fallback=`, `emit-event-wiring.ts` `${renderFn}();`)"* · supersedes: nothing struck — B3 did not distinguish a render that awaits · **Direction of change: semantics-changed** for impl#1's async boundary renders with no `fallback=` (the re-throw that escaped as an unobserved rejection is now a logged return, and any other rejection of the render is logged at its call site); **inert** for a synchronous render (its re-throw is unchanged).
+
 **B4 — Compiler-emitted, not source try/catch.** The backstop is COMPILER-EMITTED host-JS. It is NOT a scrml-source `try`/`catch`. The no-`try`/`catch` standing rule (§19.9.8) is unaffected: `try`/`catch`/`throw` remain absent from scrml source. The backstop is invisible at the source level — it is a runtime sibling of the compile-time emitted-JS parse gate (§2.2.1) and the bootstrap guards (e.g. the localStorage availability guard), all of which are compiler-provided host-JS the author never writes.
 
 **B5 — No silent swallow; loud in dev.** The backstop SHALL NOT silently swallow an error it displays via `fallback`. The caught error's diagnostic message and stack trace SHALL be routed to scrml's logging surface (loud in development; the adopter-callable backing for this surface is the `log()` builtin, §20.6). The backstop is defense-in-depth, NOT a substitute for typed `!`-coverage: E-ERROR-005 static exhaustiveness (§19.6.6) is STILL required, and the backstop's existence SHALL NOT relax it.
 
 **B6 — Nesting parity.** The backstop respects the §19.6.4 nesting model identically to the typed path: an inner boundary's backstop catches a non-`!` throw from the inner subtree before any outer boundary's backstop sees it. Inner `fallback` is used first; only a re-propagated error (B3) reaches an outer backstop.
+
+**B7 — Every event handler's unexpected rejection reaches the logging surface (S454).** An unexpected rejection or throw from ANY event handler, whatever its form — the call-ref form `onclick=fn()` / `onclick=fn(literal)`, the handler-reference form `onclick=handler` (§5.2.2), the `${…}` expression form, or the inline block `onclick={ … }` (§5.2.3) — SHALL reach scrml's logging surface (B5), whether the handler sits inside an `<errorBoundary>` or outside one. Reaching it does not resume the handler: the statements after the failing call do not run (§13.2). It does not display a boundary's `fallback` either — a boundary catches render-time errors, not handler-time ones (§19.6.6). B7 is a backstop, not a way of handling an error: a client call to a server function is a failable call and SHALL be handled (§19.9.10; E-ERROR-002 otherwise). What B7 covers is what is left after that — an unexpected host throw, or a rejection the handler did not handle. Like the rest of this subsection, it is compiler-emitted host behaviour, not source `try`/`catch` (B4).
+
+> **Provenance:** ruling:user-voice-scrml.md S454 "a yes, b yes, root fix" — (a) *"add a form-independent §19.6.8 sentence: an unexpected rejection from ANY event handler, whatever its form, SHALL reach the §19.6.8 logging surface"*; it extends ruling:user-voice-scrml.md S449 A3 (*"every async event listener routes its rejection to `_scrml_error_boundary_log`"*), which named async listeners, to every handler form · supersedes: nothing struck — before S454 this subsection specified no handler-level backstop (B5 was scoped to a boundary's render) · **Direction of change: semantics-changed** for impl#1's call-ref and handler-reference listeners whose callee is async-coloured (a rejection that escaped the page as an unobserved host rejection is now caught and logged); **inert** for every listener whose handler is synchronous (byte-identical). The `${…}` and inline-block forms already met it under S449 A3 (#1283).
 
 **Cross-references.** §2.2.1 (emitted-JS parse gate — the compile-time sibling of this runtime backstop); §19.6.3 / §19.6.5 (typed `!`-error precedence — the PRIMARY path the backstop layers under); §19.6.6 (E-ERROR-005 static exhaustiveness — UNCHANGED); §19.9.8 (no `async`/`await`; no `try`/`catch` in scrml source — the backstop is compiler-emitted, so this rule is unaffected); Pillar 6 (bullet-proof apps). No new §34 diagnostic code is introduced: E-ERROR-005 already exists in §34 (catalog row, §19.6.3 reference); the backstop is a runtime mechanism, not a new compile-time diagnostic.
 
