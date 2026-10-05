@@ -9,7 +9,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { fixSqlFailable, classifySql, SQL_FALLBACK, SQL_FAILABLE_RULE } from "../../src/commands/fix-sql-failable.js";
+import { fixSqlFailable, classifySql, sqlWriteReason, SQL_FALLBACK, SQL_FAILABLE_RULE } from "../../src/commands/fix-sql-failable.js";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES } from "../../src/commands/fix-s66.js";
 
 const SQ = "?" + "{";
@@ -44,6 +44,10 @@ describe("sql-failable — classifySql (lead-keyword scan, fail closed)", () => 
       "SELECT 'INSERT INTO x' AS s, \"update\" FROM t",
       "SELECT n FROM t WHERE s = ${'DELETE FROM t'}",
       "SELECT n FROM t;",
+      // the PURE_FUNCTIONS allowlist (S239 r2): aggregates and scalars stay reads
+      "SELECT count(*), sum(n), avg(n), min(n), max(n), group_concat(name) FROM t GROUP BY k HAVING count(*) > 1",
+      "SELECT coalesce(a, 0), lower(name), length(name), substr(name, 1, 2), cast(n AS TEXT), datetime('now') FROM t",
+      "SELECT json_extract(doc, '$.a') FROM t WHERE id IN (SELECT id FROM u) AND EXISTS (SELECT 1 FROM v)",
     ]) expect([s, classifySql(s)]).toEqual([s, "read"]);
   });
   test("writes — every statement kind, RETURNING, WITH-led, comment-led, multi-statement, unclassifiable", () => {
@@ -72,7 +76,30 @@ describe("sql-failable — classifySql (lead-keyword scan, fail closed)", () => 
       "",
       "SELECT 'unterminated",
       "${q}",
+      // S239 r2 F1 — side-effecting / unknown function calls inside a SELECT; locking clauses
+      "SELECT nextval('order_seq')",
+      "SELECT pg_advisory_lock(42)",
+      "SELECT pg_notify('ch', ${id})",
+      "SELECT * FROM jobs FOR SHARE SKIP LOCKED",
+      "SELECT * FROM jobs WHERE id = 1 FOR UPDATE",
+      "SELECT load_extension('x')",
+      "SELECT my_proc(${id})",
+      "SELECT \"weird fn\"(1)",
+      // S239 r2 F2 — string forms the scanner does not model exactly
+      "SELECT E'\\'' AS a INTO TEMP x --'",
+      "SELECT U&'d\\0061t' FROM t",
+      "SELECT $$ body $$",
+      "SELECT $tag$ x $tag$",
+      "SELECT 'a\\'b' FROM t",
     ]) expect([s, classifySql(s)]).toEqual([s, "write"]);
+  });
+});
+
+describe("sql-failable — sqlWriteReason names the cause", () => {
+  test("a non-allowlisted call is named, with its possible side effects", () => {
+    expect(sqlWriteReason("SELECT nextval('s')")).toMatch(/`nextval\(…\)`, which may have side effects/);
+    expect(sqlWriteReason("SELECT * FROM t FOR UPDATE")).toMatch(/locking clause/);
+    expect(sqlWriteReason("SELECT count(*) FROM t")).toBeNull();
   });
 });
 
@@ -190,6 +217,12 @@ describe("sql-failable — writes listed, never rewritten (S455)", () => {
       "      log(a, b, c, d, e)",
       `      return ${q("INSERT INTO t (n) VALUES (5) RETURNING id")}.get()`,
       "  } }",
+      "  ${ function seq() {",
+      `      const v = ${q("SELECT nextval('order_seq') AS v")}.get()`,
+      `      const w = ${q("SELECT * FROM jobs FOR UPDATE SKIP LOCKED")}.all()`,
+      "      return v",
+      "  } }",
+      "  <button onclick={ @out = seq() !{ .Transport(_) :> { return } } }>seq</button>",
       "  <button onclick={ @out = save(1) !{ .Transport(_) :> { return } } }>go</button>",
     ]);
     const r = fix(src);
@@ -197,7 +230,9 @@ describe("sql-failable — writes listed, never rewritten (S455)", () => {
     expect(r.output).toBe(src);
     expect(r.infos).toEqual([]);
     const w = r.blockers.filter((b) => /WRITE/.test(b.reason));
-    expect(w.length).toBe(10);
+    expect(w.length).toBe(12);
+    expect(w.some((b) => /`nextval\(…\)`, which may have side effects/.test(b.reason))).toBe(true);
+    expect(w.some((b) => /locking clause/.test(b.reason))).toBe(true);
     expect(w.every((b) => /a failure throws today/.test(b.reason) && /swallow it silently/.test(b.reason) && /move it into a `!` function/.test(b.reason))).toBe(true);
     expect(w.some((b) => /`\.run\(\)`/.test(b.reason))).toBe(true);
     expect(w.some((b) => /a bare `\?\{…\}` statement/.test(b.reason))).toBe(true);

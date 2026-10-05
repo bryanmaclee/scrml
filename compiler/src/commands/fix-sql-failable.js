@@ -24,7 +24,10 @@
  * / bare value whose SQL is not provably a pure read (`classifySql` — a lead-keyword scan of the
  * query text in the tree: comments, leading parens and `WITH` clauses skipped; INSERT / UPDATE /
  * DELETE / REPLACE / UPSERT / MERGE, `… RETURNING`, a data-modifying CTE, `SELECT … INTO`, more than
- * one statement, or anything unclassifiable = WRITE, fail closed).
+ * one statement, a locking clause (`FOR UPDATE` / `FOR SHARE` …), a call of any function outside the
+ * PURE_FUNCTIONS allowlist (`nextval`, `pg_advisory_lock`, `pg_notify`, a user function — S239 r2),
+ * a string form the scan does not model (`E'…'`, `U&'…'`, `$…$`, a backslash), or anything else
+ * unclassifiable = WRITE, fail closed).
  *
  * ⚠ impl#1 never implemented the superseded meaning at run time: an unhandled `?{}` that fails to
  * run THROWS on the server (HTTP 500; the caller aborts) — `g-sql-error-surface-unwired`. Since
@@ -86,14 +89,39 @@ export const SQL_FALLBACK = Object.freeze({ get: "!{ _ :> not }", all: "!{ _ :> 
 const FALLBACK_WORD = { get: "`not`", all: "`[]`", bare: "`[]`" };
 
 /** Keywords that make a statement a WRITE wherever they appear outside quoted text / comments. */
-const WRITE_WORDS = new Set(["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "RETURNING", "INTO", "CREATE", "DROP", "ALTER", "TRUNCATE", "ATTACH", "DETACH", "VACUUM", "REINDEX", "GRANT", "REVOKE", "COPY", "CALL", "DO", "LOCK", "SET", "PRAGMA"]);
+const WRITE_WORDS = new Set(["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "RETURNING", "INTO", "CREATE", "DROP", "ALTER", "TRUNCATE", "ATTACH", "DETACH", "VACUUM", "REINDEX", "GRANT", "REVOKE", "COPY", "CALL", "DO", "LOCK", "SET", "PRAGMA", "NOTIFY", "LISTEN"]);
 const READ_LEADS = new Set(["SELECT", "VALUES"]);
+/**
+ * Functions a READ may call — an ALLOWLIST (S239 r2 F1: `SELECT nextval(…)`, `pg_advisory_lock(…)`,
+ * `pg_notify(…)`, `load_extension(…)` and any user function — the PG `SELECT my_proc()` RPC idiom —
+ * have side effects, so a call to anything not named here makes the query a WRITE). Kept to the
+ * deterministic, side-effect-free core of SQLite / Postgres / MySQL: aggregates, string / number /
+ * date / JSON scalars, and the conditional forms. Adding a name needs the same justification.
+ */
+const PURE_FUNCTIONS = new Set([
+  // aggregates
+  "COUNT", "SUM", "AVG", "MIN", "MAX", "TOTAL", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG", "JSON_GROUP_ARRAY", "JSON_GROUP_OBJECT",
+  // conditionals / casts
+  "COALESCE", "IFNULL", "NULLIF", "IIF", "CAST", "GREATEST", "LEAST",
+  // strings
+  "LOWER", "UPPER", "LENGTH", "TRIM", "LTRIM", "RTRIM", "SUBSTR", "SUBSTRING", "REPLACE", "INSTR", "PRINTF", "FORMAT", "CONCAT", "LIKE", "GLOB",
+  // numbers
+  "ABS", "ROUND",
+  // dates (read the clock; no state change)
+  "DATE", "TIME", "DATETIME", "STRFTIME", "JULIANDAY", "NOW",
+  // JSON
+  "JSON_EXTRACT", "JSON_OBJECT", "JSON_ARRAY",
+]);
+/** Keywords that take a parenthesized operand without being a function call. */
+const PAREN_KEYWORDS = new Set(["SELECT", "VALUES", "FROM", "JOIN", "ON", "USING", "WHERE", "AND", "OR", "NOT", "IN", "EXISTS", "AS", "OVER", "FILTER", "WHEN", "THEN", "ELSE", "CASE", "BETWEEN", "IS", "BY", "HAVING", "UNION", "ALL", "INTERSECT", "EXCEPT", "DISTINCT", "WITH", "RECURSIVE", "MATERIALIZED", "LIMIT", "OFFSET", "ANY", "SOME"]);
 
 /**
  * Tokenize SQL text as the tree holds it. Skips `--` / block comments, '…' / "…" / `…` / […] quoted
  * text and `${…}` interpolations (a bound parameter, never SQL). Returns upper-cased word tokens
- * (with their paren depth) and the punctuation `(` `)` `;` `,` — or null when a quote, comment,
- * interpolation or paren is unterminated (unclassifiable).
+ * (with their paren depth) and the punctuation `(` `)` `;` `,` — or null for anything it does not
+ * model exactly: an unterminated quote / comment / interpolation / paren, a backslash inside quoted
+ * text, a prefixed string (`E'…'`, `U&'…'`, `X'…'`, `B'…'`, `N'…'`) or a `$tag$` dollar quote
+ * (S239 r2 F2) — the caller reads null as unclassifiable (WRITE).
  */
 function sqlTokens(text) {
   const out = [];
@@ -105,7 +133,8 @@ function sqlTokens(text) {
     if (/\s/.test(c)) { i++; continue; }
     if (c === "-" && text[i + 1] === "-") { const e = text.indexOf("\n", i); i = e === -1 ? n : e + 1; continue; }
     if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); if (e === -1) return null; i = e + 2; continue; }
-    if (c === "$" && text[i + 1] === "{") {
+    if (c === "$") {
+      if (text[i + 1] !== "{") return null; // `$$` / `$tag$` dollar quoting, `$1` placeholders
       let d = 0;
       let k = i + 1;
       for (; k < n; k++) { if (text[k] === "{") d++; else if (text[k] === "}" && --d === 0) break; }
@@ -118,6 +147,7 @@ function sqlTokens(text) {
       const close = c === "[" ? "]" : c;
       let k = i + 1;
       for (; k < n; k++) {
+        if (text[k] === "\\") return null;
         if (text[k] !== close) continue;
         if (c !== "[" && text[k + 1] === close) { k++; continue; } // doubled quote = escaped
         break;
@@ -131,7 +161,13 @@ function sqlTokens(text) {
     if (c === ")") { depth--; if (depth < 0) return null; out.push({ t: ")", depth }); i++; continue; }
     if (c === ";" || c === ",") { out.push({ t: c, depth }); i++; continue; }
     const m = /^[A-Za-z_][A-Za-z0-9_$]*/.exec(text.slice(i));
-    if (m) { out.push({ t: m[0].toUpperCase(), word: true, depth }); i += m[0].length; continue; }
+    if (m) {
+      const after = text[i + m[0].length];
+      if (after === "'" || (after === "&" && text[i + m[0].length + 1] === "'")) return null; // E'…' U&'…' X'…'
+      out.push({ t: m[0].toUpperCase(), word: true, depth, quotedCall: false });
+      i += m[0].length;
+      continue;
+    }
     out.push({ t: c, depth });
     i++;
   }
@@ -139,27 +175,22 @@ function sqlTokens(text) {
 }
 
 /**
- * Is this SQL text provably a pure READ? `"read"` only when, outside comments / quoted text /
- * interpolations: it is ONE statement (nothing after a `;`), no write keyword (WRITE_WORDS — incl.
- * RETURNING, `SELECT … INTO`, a data-modifying CTE body, PRAGMA) appears anywhere, and its lead
- * keyword — after leading parens and any `WITH [RECURSIVE] name [(cols)] AS [NOT] [MATERIALIZED]
- * ( … )` clauses — is SELECT or VALUES. `replace(…)` as SQLite's string function is not the REPLACE
- * statement. Everything else, including text the scan cannot read, is `"write"` (fail closed).
+ * Why this SQL text is NOT provably a pure READ — or null when it is. A READ needs ALL of (S455
+ * ruling + S239 r2, allowlist, fail closed): text the scanner models exactly (comments, quoted text,
+ * `${…}` parameters; no `E'…'` / `$…$` / backslash); ONE statement (nothing after a `;`); no write
+ * keyword anywhere (WRITE_WORDS — incl. RETURNING, `SELECT … INTO`, a data-modifying CTE body); no
+ * locking clause (any `FOR` — `FOR UPDATE / SHARE / NO KEY UPDATE / KEY SHARE`, `SKIP LOCKED`);
+ * every function call in PURE_FUNCTIONS; and a lead keyword — after leading parens and any
+ * `WITH [RECURSIVE] name [(cols)] AS [NOT] [MATERIALIZED] ( … )` clauses — of SELECT or VALUES.
  * @param {string} text
- * @returns {"read"|"write"}
+ * @returns {string|null}
  */
-export function classifySql(text) {
+export function sqlWriteReason(text) {
   const toks = sqlTokens(String(text ?? ""));
-  if (!toks || toks.length === 0) return "write";
+  if (!toks) return "SQL the rule cannot read exactly (an unterminated quote / comment, a backslash escape, an `E'…'` / `U&'…'` prefixed string or a `$…$` dollar quote)";
+  if (toks.length === 0) return "an empty query";
   const semi = toks.findIndex((t) => t.t === ";");
-  if (semi !== -1 && toks.slice(semi + 1).some((t) => t.t !== ";")) return "write";
-  for (let i = 0; i < toks.length; i++) {
-    const t = toks[i];
-    if (!t.word || !WRITE_WORDS.has(t.t)) continue;
-    // `replace(x, y, z)` in an expression (preceded by an operand position, followed by `(`).
-    if (t.t === "REPLACE" && i > 0 && toks[i + 1]?.t === "(" && !["INTO", "OR"].includes(toks[i - 1]?.t)) continue;
-    return "write";
-  }
+  if (semi !== -1 && toks.slice(semi + 1).some((t) => t.t !== ";")) return "more than one statement";
   let i = 0;
   while (toks[i]?.t === "(") i++;
   // skip `( … )` balanced from the `(` at index j; returns the index after its `)`
@@ -169,25 +200,48 @@ export function classifySql(text) {
     while (k < toks.length && !(toks[k].t === ")" && toks[k].depth === d)) k++;
     return k + 1;
   };
+  const cteNames = new Set();
   if (toks[i]?.t === "WITH") {
     i++;
     if (toks[i]?.t === "RECURSIVE") i++;
     for (;;) {
-      if (!(toks[i]?.word || toks[i]?.t === "ident")) return "write";
+      if (!(toks[i]?.word || toks[i]?.t === "ident")) return "a `WITH` clause the rule cannot read";
+      cteNames.add(i);
       i++;
       if (toks[i]?.t === "(") i = skipGroup(i);
-      if (toks[i]?.t !== "AS") return "write";
+      if (toks[i]?.t !== "AS") return "a `WITH` clause the rule cannot read";
       i++;
       if (toks[i]?.t === "NOT") i++;
       if (toks[i]?.t === "MATERIALIZED") i++;
-      if (toks[i]?.t !== "(") return "write";
+      if (toks[i]?.t !== "(") return "a `WITH` clause the rule cannot read";
       i = skipGroup(i);
       if (toks[i]?.t === ",") { i++; continue; }
       break;
     }
     while (toks[i]?.t === "(") i++;
   }
-  return READ_LEADS.has(toks[i]?.t) ? "read" : "write";
+  if (!READ_LEADS.has(toks[i]?.t)) return toks[i]?.word ? `a \`${toks[i].t}\` statement` : "a statement that does not lead with SELECT";
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (t.word && t.t === "FOR") return "a locking clause (`FOR UPDATE` / `FOR SHARE` …)";
+    if (t.word && WRITE_WORDS.has(t.t) && !(t.t === "REPLACE" && toks[k + 1]?.t === "(" && !["INTO", "OR"].includes(toks[k - 1]?.t))) {
+      return `a write keyword (\`${t.t}\`)`;
+    }
+    if (toks[k + 1]?.t !== "(" || cteNames.has(k)) continue;
+    if (t.t === "ident") return "a call of a quoted function name, which may have side effects";
+    if (!t.word || PAREN_KEYWORDS.has(t.t)) continue;
+    if (!PURE_FUNCTIONS.has(t.t)) return `a call of \`${t.t.toLowerCase()}(…)\`, which may have side effects`;
+  }
+  return null;
+}
+
+/**
+ * Is this SQL text provably a pure READ? (`sqlWriteReason` is null.) Everything else is `"write"`.
+ * @param {string} text
+ * @returns {"read"|"write"}
+ */
+export function classifySql(text) {
+  return sqlWriteReason(text) === null ? "read" : "write";
 }
 
 /** Statement containers a rewritten `?{}` may sit under, between its function and itself. */
@@ -298,7 +352,7 @@ export function collectSqlSites(ast, ri) {
     const isStatement = STATEMENT_PARENTS.has(parent.kind);
     const writeWhy = term === "run" ? "`.run()`"
       : term === "bare" && isStatement ? "a bare `?{…}` statement"
-      : classifySql(sql.query) === "write" ? "a statement that is not provably a pure SELECT (an INSERT / UPDATE / DELETE / REPLACE / UPSERT, `… RETURNING`, a data-modifying `WITH`, or SQL the rule cannot classify)"
+      : sqlWriteReason(sql.query) !== null ? `not provably a pure SELECT — ${sqlWriteReason(sql.query)}`
       : null;
     if (writeWhy) {
       return {
