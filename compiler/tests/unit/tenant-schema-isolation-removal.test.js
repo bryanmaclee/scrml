@@ -209,8 +209,11 @@ describe("CREATE TABLE column / table expressions are held to the same allow-lis
     "CREATE TABLE t (x INTEGER CHECK (evil_fn(x)))",
     "CREATE TABLE t (x INTEGER, CONSTRAINT c CHECK (evil_fn(x)))",
     "CREATE TABLE t (x INTEGER, CHECK (dblink_exec('a', 'DELETE FROM assets')))",
-    "CREATE TABLE t (x TEXT DEFAULT now())",                     // not provably pure: not added to the list
     "CREATE TABLE t (x TEXT DEFAULT public.evil_fn())",
+    "CREATE TABLE t (x INTEGER CHECK (nextval('s') > 0))",       // nextval only as a column DEFAULT
+    "CREATE TABLE t (x TEXT DEFAULT pg_advisory_lock(1))",
+    "CREATE TABLE t (x TEXT DEFAULT set_config('row_security', 'off', false))",
+    "CREATE TABLE t (x TEXT DEFAULT pg_notify('c', 'p'))",
   ]) test(`charged: ${s}`, () => expect(kindsOf(s)).toEqual(["statement*"]));
   for (const s of [
     "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL DEFAULT 'a')",
@@ -218,7 +221,16 @@ describe("CREATE TABLE column / table expressions are held to the same allow-lis
     "CREATE TABLE t (d TEXT DEFAULT (datetime('now')), u TEXT DEFAULT (lower('X')))",
     "CREATE TABLE t (aid INTEGER REFERENCES public.config(k), UNIQUE (aid), PRIMARY KEY (aid), FOREIGN KEY (aid) REFERENCES config(k))",
     "CREATE TABLE t (x TIMESTAMP(3) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, y TEXT COLLATE NOCASE)",
+    // a realistic Postgres SaaS table — side-effect-free built-ins are not code execution
+    "CREATE TABLE t (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial)",
+    "CREATE TABLE t (id bigint DEFAULT nextval('t_id_seq'::regclass) NOT NULL, k text DEFAULT md5(random()::text))",
+    "CREATE TABLE t (u uuid DEFAULT uuid_generate_v4(), d date DEFAULT current_date, m text GENERATED ALWAYS AS (to_char(created, 'YYYY')) STORED, created timestamptz DEFAULT clock_timestamp())",
+    "CREATE TABLE t (ts INTEGER DEFAULT (unixepoch()), r BLOB DEFAULT (randomblob(16)), h TEXT DEFAULT (hex(randomblob(4))))",
   ]) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+  test("ALTER TABLE … ADD COLUMN created_at timestamptz DEFAULT now() is exempt; nextval in an index is charged", () => {
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN created_at timestamptz DEFAULT now()")).toEqual([]);
+    expect(kindsOf("CREATE INDEX ix ON assets ((nextval('s')))")).toEqual(["statement*"]);
+  });
   test("a `${…}` in a column default is charged once (by the interpolation rule)", () => {
     expect(kindsOf("CREATE TABLE t (x TEXT DEFAULT ${d})")).toEqual(["statement*"]);
   });
@@ -257,6 +269,11 @@ ${stmts.map((s) => `    ${w(s)}`).join("\n")}
   });
   test("…and not when the compilation has no tenant table", () => {
     expect(codes(compile({ "admin.scrml": prog(CONFIG, "CREATE ROLE ops BYPASSRLS") }))).not.toContain("E-TENANT-SCHEMA-HAZARD");
+  });
+  test("a realistic Postgres SaaS tenant table compiles clean; an evil_fn default does not", () => {
+    const saas = "CREATE TABLE invoices (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial, tenant_id text NOT NULL)";
+    expect(codes(compile({ "app.scrml": prog(saas) }))).not.toContain("E-TENANT-SCHEMA-HAZARD");
+    expect(codes(compile({ "app.scrml": prog(saas.replace("now()", "evil_fn()")) }))).toContain("E-TENANT-SCHEMA-HAZARD");
   });
   test("the exempt list compiles clean", () => {
     expect(codes(compile({ "app.scrml": prog(ASSETS, "CREATE INDEX ix ON assets (name)", "ALTER TABLE assets ADD COLUMN extra TEXT",

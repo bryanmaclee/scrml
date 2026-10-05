@@ -12187,8 +12187,17 @@ columns, and that asymmetry drives the mechanism split:
       or a `${…}`, charges the statement *unattributable* (S239 review of the S455 "yes both" build).
       The same holds for a `CREATE TABLE`'s column `DEFAULT` / `GENERATED` / `CHECK` expressions and
       its table-level `CHECK`: a call off the allow-list charges the declaration (a type size, a
-      literal and a keyword such as `CURRENT_TIMESTAMP` are not calls; `now()` and other
-      non-pure functions are not on the list). **Isolation removal** (S455 "yes
+      literal and a keyword such as `CURRENT_TIMESTAMP` are not calls). For these expressions the
+      list's criterion is NO SIDE EFFECT AND NO CODE EXECUTION, not determinism: it adds the
+      side-effect-free built-ins `now`, `current_timestamp` / `current_date` / `current_time`,
+      `clock_timestamp`, `statement_timestamp`, `transaction_timestamp`, `localtimestamp`,
+      `gen_random_uuid`, `uuid_generate_v4`, `random`, `md5`, `char_length`, `octet_length`,
+      `to_char`, `date_trunc`, `extract`, `date_part`, `make_interval`, `unixepoch`, `randomblob`,
+      `hex`. `nextval` (a sequence advance) is allowed ONLY directly as a column `DEFAULT` — how
+      `serial` expands; it advances on an INSERT into that column's own table and the counter
+      carries no tenant's row — and is charged anywhere else. Anything that can write, lock,
+      notify or run user code (`dblink*`, `pg_advisory*`, `set_config`, `lo_*`, `pg_notify`, a
+      user function) stays charged. **Isolation removal** (S455 "yes
       both") is charged as its own kind (*isolation removal*), fail-closed, against the tenant-scoped
       table it names — or, when it names none, against every tenant-scoped table of the
       compilation: `DROP POLICY … ON <tenant>` (any policy — `scrml_tenant_iso`, or a restrictive one

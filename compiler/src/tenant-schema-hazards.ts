@@ -311,6 +311,30 @@ const TABLE_BEFORE_PAREN = new Set(["INTO", "TABLE", "JOIN", "FROM", "REFERENCES
 /** The functions a declaration body may call: the floor's per-row allow-list, its aggregates, and `RAISE`. */
 const ALLOWED_CALLS: ReadonlySet<string> = new Set([...TENANT_ROW_FUNCTIONS, ...TENANT_GROUP_AGGREGATES, "raise"]);
 
+/**
+ * The calls an EXPRESSION in an exempt statement or a column definition may make — an
+ * index expression / predicate, a column `DEFAULT` / `GENERATED` / `CHECK`, a table
+ * `CHECK`. The criterion is NO SIDE EFFECT AND NO CODE EXECUTION — not determinism:
+ * `DEFAULT now()` and `DEFAULT gen_random_uuid()` are on almost every real Postgres
+ * table, and neither reads nor writes a table, locks, notifies or runs user code. The
+ * view/trigger list above, plus side-effect-free built-ins: Postgres clock functions,
+ * UUID / random / hashing, string length / formatting, date arithmetic; SQLite
+ * date/time, `unixepoch`, `randomblob`, `hex`. `uuid_generate_v4` is the uuid-ossp
+ * extension's — side-effect-free, kept. EXCLUDED: anything that can write, lock,
+ * notify or run arbitrary code (`dblink*`, `pg_advisory*`, `set_config`, `lo_*`,
+ * `pg_notify`, any user function). `nextval` advances a sequence — a write — and is
+ * allowed ONLY directly as a column `DEFAULT` (`readRegion` `columnDefault`): that is
+ * how `serial` expands, the advance happens on an INSERT into that column's own table,
+ * and a sequence counter carries no tenant's row; anywhere else it is charged.
+ */
+const EXPRESSION_ALLOWED_CALLS: ReadonlySet<string> = new Set([
+  ...ALLOWED_CALLS,
+  "now", "current_timestamp", "current_date", "current_time", "clock_timestamp", "statement_timestamp",
+  "transaction_timestamp", "localtimestamp", "localtime", "gen_random_uuid", "uuid_generate_v4", "random",
+  "md5", "char_length", "octet_length", "to_char", "date_trunc", "extract", "date_part", "make_interval",
+  "unixepoch", "randomblob", "hex",
+]);
+
 interface RegionRead {
   /** Tainted names (tenant tables, views over them) the region names. */
   names: string[];
@@ -334,8 +358,14 @@ function stringMentions(s: string, names: Iterable<string>): string[] {
 /** What the tokens `[from, to)` name and call. */
 function readRegion(
   toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>,
-  /** a qualified TABLE name before its column list (`REFERENCES public.assets (id)`) is not a call */
+  /**
+   * EXPRESSION mode (an exempt statement's / a column's expressions): a qualified TABLE
+   * name before its column list (`REFERENCES public.assets (id)`) is not a call, the
+   * allow-list is `EXPRESSION_ALLOWED_CALLS`, and — with `columnDefault` — `nextval(…)`
+   * directly as a column `DEFAULT` is allowed.
+   */
   qualifiedTables = false,
+  columnDefault = false,
 ): RegionRead {
   const names = new Set<string>();
   const calls: string[] = [];
@@ -356,7 +386,15 @@ function readRegion(
         continue;
       }
       if (prev && prev.k === "w" && TABLE_BEFORE_PAREN.has(prev.up)) continue;
-      if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
+      const callee = t.k === "q" ? t.t : t.t.toLowerCase();
+      if (qualifiedTables) {
+        if (EXPRESSION_ALLOWED_CALLS.has(callee)) continue;
+        if (columnDefault && callee === "nextval" &&
+            (isW(prev, "DEFAULT") || (isP(prev, "(") && isW(toks[k - 2], "DEFAULT")))) continue;
+        calls.push(t.t);
+        continue;
+      }
+      if (!ALLOWED_CALLS.has(callee)) calls.push(t.t);
     }
   }
   return { names: [...names], calls, interp };
@@ -645,9 +683,9 @@ const COLUMN_CONSTRAINT_WORDS = new Set([
  * exempt statement is held to the SAME function allow-list a view or trigger body is;
  * returns why the statement is charged (a call off the list, or a `${…}`), or null.
  */
-function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>): string | null {
+function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>, columnDefault = false): string | null {
   for (const [a, b] of regions) {
-    const r = readRegion(toks, a, b, new Set(), true);
+    const r = readRegion(toks, a, b, new Set(), true, columnDefault);
     if (r.interp) return "it holds a `${…}` interpolation the checker cannot read";
     if (r.calls.length) {
       return `it calls \`${r.calls[0]}\`, which is not on the floor's function allow-list — the database ` +
@@ -1038,7 +1076,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       // the review #6 class), on any table.
       if (d.cols) {
         // (a `${…}` in a table declaration is already charged by the interpolation rule below)
-        const code = exemptStatementCode(toks, createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1));
+        const code = exemptStatementCode(toks, createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1), true);
         if (code && !code.includes("interpolation")) {
           out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
         }
@@ -1156,7 +1194,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       if (g.leader === "ALTER" && g.target !== null && g.targetEnd !== -1 && !r.interp &&
           alterOnlyAddsColumns(toks, g.targetEnd, g.end)) {
         // …unless a DEFAULT / GENERATED / CHECK expression calls off the allow-list (S239 #6)
-        const code = exemptStatementCode(toks, addColumnExpressionRegions(toks, g.targetEnd, g.end));
+        const code = exemptStatementCode(toks, addColumnExpressionRegions(toks, g.targetEnd, g.end), true);
         if (code) out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: code });
         continue;
       }
