@@ -19459,7 +19459,15 @@ second synthetic enum exists; `CpsError` is retired (§19.9.5).
 > statement grammar as a function body (§7.3)" (this settles the design's open question that S454 F8 was conditional
 > on). At a site in a client function body the local rewrite is not meaning-identical — before, the failure also
 > aborted every awaiting caller; after, callers continue — so the rule SHALL emit an Info at each such site saying so.
-> The rule is not built.
+> The rule is built (S454): `scrml fix` rule `client-server-call` (a default rule; it writes the binder as `_`,
+> `!{ .Transport(_) :> { return } }`). It LISTS for a human, and does not rewrite, every shape whose old behaviour it
+> cannot preserve: a `const`/`let` declaration inside a loop or nested block or captured by a closure, a call that
+> impl#1 runs in a `Promise.all` batch, a call inside a `match` or handler arm, `return f()`, a bare `onsubmit=f()`, a
+> call in a function of a module or route file, and a call in a value position.
+>
+> **Provenance:** ruling:user-voice-scrml.md S454 "your recs on both, then go on F8" — *"build the §19.9.10 `scrml
+> fix` rule (S454 F8), alongside the owed R11 rule."* · **supersedes:** "The rule is not built." · **Direction of
+> change (pa-base §8): inert** — a tooling status line; the language rule is unchanged.
 
 ```scrml
 <program db="sqlite:./app.db">
