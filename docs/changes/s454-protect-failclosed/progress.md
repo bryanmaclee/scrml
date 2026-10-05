@@ -27,3 +27,25 @@ strip). §14.8.9: "it is fail-closed on an unknown origin — a value whose orig
 cannot determine is treated as carrying every protected origin it may carry (stripped wholesale, or
 rejected where this section requires or permits a rejection), never as carrying none."
 Fidelity gain: a trailing `;` no longer forces a wholesale strip.
+
+## Early exits classified (resolveProtectedOutputColumns + helpers, after fix)
+- analyze kind=unknown -> {all} [unknown]; kind=no-rows -> null [proof]; write w/o RETURNING token -> null [proof]
+- returningAsSelect: lead miss (unreachable) -> {all}; no top-level RETURNING -> {all} (was null); empty list / no target / UPDATE…FROM -> {all}
+- !proj.resolvable -> {all}; unknown FROM table -> {all}; opaque may-carry -> {all}; out.size===0 -> null [proof, now requires nested-SELECT sources known]
+- before fix, FAILED-recognition null exits: returningAsSelect lead miss, returningAsSelect no top-level RETURNING (when nested), !isRowProducingQuery, out.size===0 over unknown subquery source.
+
+## Tests
+- conf-PROTECT-EGRESS-FLOOR: 36 pass (26 prior unchanged + 3 un-skipped + 7 new). Against base compiler: 9 fail (8 leaks + trailing-`;` fidelity).
+- unit/protect-failclosed-classify.test.js: 68 pass.
+- integration/g-sql-row-protect-leak: round-5 COUNT(*) subquery assertions now use a ctx where the subquery tables are known; unknown-table variant pinned as {all}.
+- full gate (unit+integration+conformance): 28271 pass / 0 fail (28341 run).
+
+## Corpus emit differential (base 79bd05028 via git-archive extract, head b2fe3b042)
+2339 sources, 1410 compiled both sides, 11421 artifacts. Tool reported 222 artifact diffs + 1425
+diag-text diffs: ALL path noise (absolute `_scrml_project_root`, relative import paths, out-dir
+spelling). After normalizing the compiler-root path: 0 artifacts differ, 0 sources' compile output
+(stdout+stderr incl. every diagnostic) differs. Tool verdict "INCOMPARABLE" is because the base was
+an archive extract (no git revision), not a content issue.
+Diagnostic delta: I-PROTECT-STRIP-001 49 -> 49; E-PROTECT-003/004/005/006 2/4/4/68 unchanged.
+_scrml_protect_tag( occurrences 174 -> 174 across 102 artifacts. No tagged->untagged change; no
+resolved->wholesale fidelity regression in the corpus.
