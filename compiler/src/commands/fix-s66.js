@@ -1296,7 +1296,7 @@ export function fixS66(source, opts = {}) {
   if (enabled.has("client-server-call")) {
     // §19.9.10 (S454 F8) — an unhandled client call of a server function → a local `.Transport`
     // handler. Chained like arm-pipe: its own location (Route Inference + AST) + per-file gate.
-    const cs = fixClientServerCall(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    const cs = fixClientServerCall(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, entry });
     if (cs.changed) src = cs.output;
     applied.push(...cs.applied);
     blockers.push(...cs.blockers);

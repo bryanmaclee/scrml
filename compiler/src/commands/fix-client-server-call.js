@@ -36,8 +36,10 @@
  * position — load it with a `<request>`, §13.7), in a lifecycle body / `<request>`-less markup
  * position / body top / initializer / non-handler attribute, inside a closure or a handler / match
  * arm, a handler REFERENCE (`onclick=f`), a handled call whose `!{}` covers neither `.Transport` nor
- * a catch-all (a `! E` callee's handler naming only E's variants), a `match` on such a call, and a
- * `?` on one (§19.9.10: the enclosing enum must declare `Transport(t: ServerCallError)`).
+ * a catch-all (a `! E` callee's handler naming only E's variants), a `match` on such a call, a
+ * `?` on one (§19.9.10: the enclosing enum must declare `Transport(t: ServerCallError)`), and a
+ * call in a FUNCTION of a module / route file (not an application entry): §19.9.10 F5 makes
+ * "remote" a whole-program fact, and the importing program may place that function on the server.
  *
  * Not touched: a server→server call (the caller is server-placed), a `<request>` body's call, a
  * `<x server>` hydration load, a handled call whose `!{}` already covers the failure set.
@@ -331,7 +333,7 @@ function wholeExprOf(stmt) {
  * Walk the file's AST; classify every call of a server-placed function.
  * Returns `{ sites }`; a site is `{ action: "rewrite" | "list" | "skip", ... }`.
  */
-function collectSites(ast, ri, files) {
+function collectSites(ast, ri, files, isEntry = true) {
   const boundary = new Map(); // name -> "server" | "client" | "mixed"
   for (const [, f] of ri?.routeMap?.functions ?? []) {
     if (!f?.functionName) continue;
@@ -427,6 +429,12 @@ function collectSites(ast, ri, files) {
     if (!whole) {
       return { ...base, action: "list", kind: "value-position", reason: `a call of server function \`${name}\` inside a larger expression — a value position: load it with a \`<request>\` (§13.7) or handle it by hand` };
     }
+    if (fn && !isEntry) {
+      // §19.9.10 F5: "remote" is a WHOLE-PROGRAM placement fact. A function in a module / route
+      // file is placed by the program that imports it — a caller there may make it server-placed
+      // (Trigger 5), and then this call is server→server and a `.Transport` arm is dead handling.
+      return { ...base, action: "list", kind: "module-function", reason: `a call of server function \`${name}\` in \`${fn.name}\`, a function of a module / route file: whether it is a client call depends on the program that imports this file (§19.9.10 — placement is whole-program); handle it by hand once that is known` };
+    }
     return { ...base, action: "rewrite", kind: fn ? "client-function-body" : "handler-braced", call, stmt };
   };
 
@@ -482,7 +490,9 @@ function collectSites(ast, ri, files) {
 /**
  * Rewrite every unhandled client call of a server function in ONE file (§19.9.10).
  * @param {string} source
- * @param {{ filePath?: string, auxSources?: Record<string,string>, verify?: boolean }} [opts]
+ * @param {{ filePath?: string, auxSources?: Record<string,string>, verify?: boolean, entry?: boolean }} [opts]
+ *   `entry: false` — a module / route file: its FUNCTION bodies are listed, not rewritten (placement is
+ *   whole-program, §19.9.10 F5); its handler values are client code wherever it is mounted.
  * @returns {{ output: string, changed: boolean, applied: Array<{rule:string,line:number,detail:string}>,
  *             blockers: Array<{rule:string,line:number,reason:string,snippet:string}>,
  *             infos: Array<{rule:string,line:number,message:string}> }}
@@ -510,7 +520,8 @@ export function fixClientServerCall(source, opts = {}) {
       if (/\bfunction\b|\bserver\b|\bimport\b/.test(source)) block(0, `${before.error ?? "impl#1 built no tree for this file"} — calls of server functions here are not located; check by hand`);
       return none;
     }
-    const sites = collectSites(before.ast, before.ri, before.files);
+    const isEntry = opts.entry !== false;
+    const sites = collectSites(before.ast, before.ri, before.files, isEntry);
     const edits = [];
     const listed = new Set();
     for (const s of sites) {
@@ -614,7 +625,7 @@ export function fixClientServerCall(source, opts = {}) {
         block(uniq[0].start, `impl#1 reports different codes after the rewrite (${before.codes.join(",") || "none"} → ${after.codes.join(",") || "none"}) — no call in this file rewritten`);
         return none;
       }
-      const left = collectSites(after.ast, after.ri, after.files).filter((s) => s.action === "rewrite").length;
+      const left = collectSites(after.ast, after.ri, after.files, isEntry).filter((s) => s.action === "rewrite").length;
       const had = sites.filter((s) => s.action === "rewrite").length;
       if (left !== had - uniq.length) { block(uniq[0].start, `after the rewrite impl#1 still reads ${left} unhandled call(s) where ${had - uniq.length} were expected — no call in this file rewritten`); return none; }
     }

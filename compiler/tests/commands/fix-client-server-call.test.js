@@ -209,6 +209,21 @@ describe("client-server-call — sites LISTED for a human (never rewritten)", ()
     expect(rs.some((x) => /handler \/ match arm/.test(x))).toBe(true);
   });
 
+  test("a module / route file (entry: false): function bodies are listed (placement is whole-program, F5); handler values are still rewritten", () => {
+    const src = program([
+      "  ${ function go() {",
+      "      touch()",
+      "  } }",
+      "  <button onclick=go()>Go</button>",
+      "  <button onclick=touch()>T</button>",
+    ]);
+    const r = fix(src, { entry: false });
+    expect(r.output).toContain("      touch()\n  } }");
+    expect(r.output).toContain(`<button onclick={ touch() ${H} }>T</button>`);
+    expect(r.infos).toEqual([]);
+    expect(reasons(r).some((x) => /module \/ route file.*whole-program/.test(x))).toBe(true);
+  });
+
   test("a `${…}` handler value that reads `event` stays as written", () => {
     const r = fix(program(["  <button onclick=${ @count = getN() + event.detail }>A</button>"]));
     expect(r.changed).toBe(false);
