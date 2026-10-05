@@ -60,8 +60,7 @@
  *
  * ═══ THE GATE (transactional, per file) ═══
  *   1. impl#1's front end re-reads the rewritten file with the same block-splitter error codes.
- *   2. impl#1 re-compiles it in its project: diagnostic codes (errors, warnings, lint) identical,
- *      except that W-TYPE-031-UNPROVEN (impl#1 reporting its own inference gap) may appear.
+ *   2. impl#1 re-compiles it in its project: diagnostic codes (errors, warnings, lint) identical.
  *   3. The rewritten sites are no longer unhandled (the re-read finds `edits` fewer sites).
  * Any failure reverts the WHOLE file and reports why.
  *
@@ -98,27 +97,14 @@ const KIND_WORD = {
 };
 
 /**
- * Codes allowed to APPEAR after the rewrite (never to drop, never any other change):
- * W-TYPE-031-UNPROVEN — impl#1's own inference gap ("the compiler reporting a gap in ITSELF, not a
- * defect in your program"): it does not infer through a `!{}`-handled `?{}` declaration, so a client
- * `const r = serverFn(…)` of that function becomes unproven (measured S455 Phase 2: one more per
- * trucking-dispatch page). The program is unchanged. The F8 precedent is I-FN-PROMOTABLE.
+ * Same diagnostic codes (with counts) before and after — NO tolerance list. (S455 Phase 2 tried
+ * tolerating W-TYPE-031-UNPROVEN, which a handled `?{}` declaration adds on impl#1 — its return-type
+ * inference does not see through the handler — and the trucking-dispatch diagnostic baseline, which
+ * pins that count and says it SHALL only fall, caught it. A file where the rewrite adds it is
+ * reverted and listed; the inference gap is reported, not absorbed.)
  */
-const TOLERATED_NEW_CODES = new Set(["W-TYPE-031-UNPROVEN"]);
-
-/** Same diagnostic codes before and after — except that a TOLERATED_NEW_CODES code may appear. */
 function sameCodes(before, after) {
-  const count = (xs) => xs.reduce((m, c) => m.set(c, (m.get(c) ?? 0) + 1), new Map());
-  const a = count(before);
-  const b = count(after);
-  for (const c of new Set([...a.keys(), ...b.keys()])) {
-    const x = a.get(c) ?? 0;
-    const y = b.get(c) ?? 0;
-    if (x === y) continue;
-    if (TOLERATED_NEW_CODES.has(c) && y > x) continue;
-    return false;
-  }
-  return true;
+  return before.join(",") === after.join(",");
 }
 
 /** Is the identifier `name` read inside a closure (lambda / nested function) anywhere under `scope`? */
