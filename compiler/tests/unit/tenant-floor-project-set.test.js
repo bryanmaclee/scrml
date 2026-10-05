@@ -269,6 +269,50 @@ describe("item 2 — the shared recognizer reads ALTER TABLE", () => {
     // `notes` is NOT cut short by the commented ALTER; the commented ALTER itself also counts (comment-agnostic)
     expect(tenantOf("ALTER TABLE notes /* was: ALTER TABLE y */ ADD COLUMN tenant_id TEXT")).toEqual(["notes", "y"]);
   });
+  // S455 review F1 (executed on 2ab1bd7b): a quote / comment form the reader did not model
+  // ended the statement early — a `CREATE` inside `[org create]`, `$$ … $$`, a MySQL `#`
+  // comment — and the `tenant_id` after it was missed: `notes` unscoped, A read B's note.
+  test("F1: an unmodelled quote / comment form never cuts the statement short (ALTER)", () => {
+    expect(tenantOf("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, [org create] TEXT)",
+      "ALTER TABLE notes RENAME COLUMN [org create] TO tenant_id")).toEqual(["notes"]);
+    expect(tenantOf("ALTER TABLE notes ADD COLUMN a TEXT DEFAULT $$ CREATE $$, ADD COLUMN tenant_id TEXT")).toEqual(["notes"]);
+    expect(tenantOf("ALTER TABLE notes ADD COLUMN x INT # create a column\n, ADD COLUMN tenant_id TEXT")).toEqual(["notes"]);
+    expect(tenantOf("ALTER TABLE notes ADD COLUMN a TEXT DEFAULT E'\\' ALTER TABLE z ', ADD COLUMN tenant_id TEXT")).toContain("notes");
+    expect(tenantOf("ALTER TABLE notes ADD COLUMN a TEXT DEFAULT 'it\\'s; CREATE', ADD COLUMN tenant_id TEXT")).toContain("notes");
+    expect(tenantOf("ALTER TABLE notes ADD COLUMN a TEXT DEFAULT { x }, ADD COLUMN tenant_id TEXT")).toEqual(["notes"]);
+  });
+  test("F1: the CREATE column list — `$$)$$` closing it early, or `$$($$` never closing it", () => {
+    expect(tenantOf("CREATE TABLE notes (id INTEGER, x TEXT DEFAULT $$)$$, tenant_id TEXT)")).toEqual(["notes"]);
+    expect(tenantOf("CREATE TABLE notes (id INTEGER, x TEXT DEFAULT $$($$, tenant_id TEXT)")).toEqual(["notes"]);
+    expect(tenantOf("CREATE TABLE notes (id INTEGER, [x)] TEXT, tenant_id TEXT)")).toEqual(["notes"]);
+    // a modelled statement is still read exactly — no unmodelled form, no widening
+    expect(tenantOf("CREATE TABLE notes (id INTEGER, x TEXT DEFAULT ')')")).toEqual([]);
+  });
+  test("F1: the `[org create]` repro — `notes` is tenant-scoped, and a RENAME COLUMN TO tenant_id is refused", () => {
+    const src = NOTES
+      .replace("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)", "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, [org create] TEXT)")
+      .replace("ALTER TABLE notes ADD COLUMN tenant_id TEXT", "ALTER TABLE notes RENAME COLUMN [org create] TO tenant_id");
+    // was: compiled clean with a bare `SELECT body FROM notes` (A read B's note). The reader
+    // now puts `notes` in the tenant set; renaming a column TO `tenant_id` re-assigns every
+    // row's tenant and is not an admitted ALTER TABLE action (S239 review of d4c4d4ac).
+    expect(tenantOf("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, [org create] TEXT)",
+      "ALTER TABLE notes RENAME COLUMN [org create] TO tenant_id")).toEqual(["notes"]);
+    const e = fatal(project({ "notes.scrml": src }).result);
+    expect(e.map((x) => x.code)).toEqual(["E-TENANT-SCHEMA-HAZARD"]);
+  });
+  test("F1 EXECUTED: a `$$ CREATE $$` default before `ADD COLUMN tenant_id` — scoped at the source; the hazard set agrees", async () => {
+    // a replacer FUNCTION: in a replacement STRING `$$` means a single `$`
+    const src = NOTES.replace("ALTER TABLE notes ADD COLUMN tenant_id TEXT",
+      () => "ALTER TABLE notes ADD COLUMN memo TEXT DEFAULT $$ CREATE $$, ADD COLUMN tenant_id TEXT");
+    const p = project({ "notes.scrml": src });
+    expect(fatal(p.result)).toEqual([]);
+    expect(readFileSync(join(p.out, "notes.server.js"), "utf8"))
+      .toContain("_scrml_tenant_scope(await _scrml_sql`SELECT body, notes.tenant_id AS __scrml_tenant_0 FROM notes ORDER BY id`");
+    const r = await routesOf(p.out, "notes.server.js");
+    expect(await call(r, "notesOut", await pinned(r, "A"))).toEqual([{ body: "A-note" }]);
+    const withView = src.replace("</schema>", `  ${w("CREATE VIEW all_notes AS SELECT * FROM notes")}\n  </schema>`);
+    expect(fatal(project({ "notes.scrml": withView }).result).map((e) => e.code)).toContain("E-TENANT-SCHEMA-HAZARD");
+  });
   test("an ALTER that does not name tenant_id declares nothing; the next statement is not read as its own", () => {
     expect(tenantOf("CREATE TABLE notes (id INTEGER)", "ALTER TABLE notes ADD COLUMN extra TEXT")).toEqual([]);
     expect(tenantOf("ALTER TABLE notes ADD COLUMN extra TEXT", "CREATE TABLE orders (id INTEGER, tenant_id TEXT)")).toEqual(["orders"]);

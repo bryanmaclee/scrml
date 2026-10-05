@@ -12063,7 +12063,11 @@ column added in `<schema>` by `ALTER TABLE` declares too: an `ALTER TABLE <t>` s
 makes `<t>` tenant-scoped. That reading is deliberately wide (fail-closed): `tenant_id` anywhere in
 the statement counts — a `DROP COLUMN tenant_id` and a `'tenant_id'` literal included — and a
 table scoped by such a reading fails its reads at run time (the floor's key column is missing); it
-never leaks. This one set is also the set the `<schema>` declaration rule (`E-TENANT-SCHEMA-HAZARD`,
+never leaks. A statement (an `ALTER TABLE`, or a `CREATE TABLE` column list) that holds a quote or
+comment form the compiler does not read exactly — SQLite `[ident]`, Postgres `$$…$$` / `E'…'`, a
+MySQL `\` escape or `#` comment, a backtick, a `${…}` — is read to the end of its `?{}` wrapper,
+and naming `tenant_id` anywhere there scopes the table (S455 review F1: a `CREATE` spelled inside
+`[org create]` ended the statement early and left the table unscoped — executed). This one set is also the set the `<schema>` declaration rule (`E-TENANT-SCHEMA-HAZARD`,
 the Write bullet) charges against, so the two cannot disagree about which tables are
 tenant-scoped. **Accepted cost:** two genuinely different databases compiled together share the
 set — a table name tenant-scoped in one is scoped in the other. **Limit:** a program compiled
@@ -12160,11 +12164,148 @@ columns, and that asymmetry drives the mechanism split:
       **Fail-closed:** a declaration the compiler cannot attribute is charged as a hazard against
       every tenant-scoped table and named *unattributable* — never treated as safe: a trigger, rule
       or view whose text it cannot read, whose body is a function (a Postgres
-      `EXECUTE FUNCTION f()` trigger), that calls a function outside the subset's allow-list (below),
+      `EXECUTE FUNCTION f()` trigger), that calls a function outside the subset's allow-list (below;
+      every `identifier (` is a call, at any depth — a table reference never takes `(`, so
+      `FROM evil(1)` / `JOIN evil(1)` is a table FUNCTION and `substring(x FROM evil(1))` a call to
+      `evil`; the only non-call forms are a closed syntactic set (a column list after `INSERT INTO
+      t`, `REFERENCES t`, `CREATE VIEW v` or a CTE name, and syntax keywords — S455 PA probe; S239
+      review of the allow-list build, executed),
       or that holds a `${…}`; a `CREATE FUNCTION` / `CREATE PROCEDURE` / `DO` body (code the floor
       never sees, callable from any query); a foreign-key action it cannot tie to a declaring table;
-      and any other `<schema>` statement that names a tenant-scoped table (or a view over one) —
-      `CREATE TABLE … AS SELECT`, `INHERITS`, a virtual table over it, a rename of it. A table is
+      and a `CREATE TABLE` that names a tenant-scoped table (or a view over one) outside its column
+      list — `AS SELECT`, `INHERITS`. **The statement kinds are an ALLOW-LIST** (S455 "your rec on
+      the allow-list"): in a compilation that has ANY tenant-scoped table, a `<schema>` admits ONLY
+      `CREATE TABLE`; `CREATE INDEX`; `ALTER TABLE` whose EVERY action is `ADD [COLUMN] …` (a
+      non-tenant column, or `tenant_id` itself — the declaration above), `ALTER [COLUMN] … SET | DROP
+      NOT NULL`, `ALTER [COLUMN] … SET DEFAULT … | DROP DEFAULT`, `RENAME [COLUMN] a TO b`, or `ADD
+      [CONSTRAINT n] CHECK (…)` / `ADD [CONSTRAINT n] FOREIGN KEY … REFERENCES …` with no `CASCADE` /
+      `SET NULL` / `SET DEFAULT` action — but never a `RENAME` to or from `tenant_id` nor a
+      `SET` / `DROP DEFAULT` (or a type change) of `tenant_id`, which re-assign rows across tenants;
+      `CREATE VIEW` / `CREATE TRIGGER` (held to the rules here); `CREATE POLICY … AS RESTRICTIVE`
+      (its `USING` / `WITH CHECK` expressions held to the expression allow-list below —
+      `current_setting(…)`, the tier's own tenant pattern, is on it); the admitted `GRANT` (below);
+      `COMMENT ON`; `ANALYZE`; `REINDEX`; `VACUUM` (not `VACUUM INTO`, which writes every tenant's
+      rows to a file). **A statement is judged by its LEADER — its first token, whatever it is:**
+      one led by `(`, `WITH`, a literal or any word not listed is not admitted (S239 review of the
+      allow-list build: `(SELECT dblink_exec(…))` was never collected — executed). **The admitted
+      `GRANT`** is ONLY `GRANT {SELECT | INSERT | UPDATE | DELETE}[, …] ON [TABLE] <named tables> TO
+      scrml_app` and `GRANT USAGE[, SELECT] ON SEQUENCE <named sequences> TO scrml_app` — the
+      §14.8.11 bounded application role (*"a per-request principal MUST drop to the bounded
+      `NOBYPASSRLS` `scrml_app` role"*, §14.8.11 S6), spelled unquoted (any case) or exactly
+      `"scrml_app"` (a quoted identifier is case-exact, so `"SCRML_APP"` is another role); NOT `WITH
+      GRANT OPTION`, `TRUNCATE` (it bypasses row-level security and empties every tenant's rows),
+      `ALL [PRIVILEGES]`, `ON ALL TABLES | SEQUENCES IN SCHEMA`, `EXECUTE ON FUNCTION`, `USAGE` on a
+      foreign-data wrapper / server / language, `SET` / `ALTER SYSTEM ON PARAMETER`, `CREATE` /
+      `TEMP` on a database or schema, `REFERENCES`, `TRIGGER`, or a column-level list (a role grant
+      `GRANT <role> TO scrml_app` widens the app role and is an isolation removal; in `GRANT`,
+      `CREATE` is a privilege, not a new statement). *(PA reading of "your rec on the allow-list",
+      S239 review of the allow-list build — in its veto window.)* **Every other statement is
+      `E-TENANT-SCHEMA-HAZARD`** (kind *statement not
+      admitted in a tenant schema*), whether or not it names a tenant table — a `DROP`, a `PRAGMA`,
+      `REVOKE`, an `INSERT`, a `CREATE ROLE` / `SEQUENCE` / `TYPE` / `EXTENSION` / `PUBLICATION` /
+      `RULE`, a virtual table, `ALTER DEFAULT PRIVILEGES`, `REASSIGN OWNED`, `ALTER DATABASE … SET`,
+      a `SELECT` (`dblink_exec(…)`, `set_config(…)`), `RESET ROLE`, any other `ALTER TABLE` action:
+      roles, privileges, publications, extensions, session settings and data changes belong to
+      deploy / ops, not to the schema the compiler checks. The rules here still apply WITHIN the
+      admitted kinds. **Code-carrying types:** a column type, a cast (`::t`, `CAST(… AS t)`) or a
+      typed literal (`t '…'`) whose type is not on a closed built-in list (Postgres built-ins,
+      serials, and SQLite's affinity names) — a domain, enum, composite or extension type — and an
+      index operator class or access method (`USING <am>` on an index, an `EXCLUDE` constraint or a
+      table: `btree` / `hash` / `gist` / `spgist` / `gin` / `brin`, and `heap` for a table) not built
+      in, run functions of their own and are charged — in EVERY region: a column definition, an
+      expression, and a view / trigger / rule / policy body alike. A `GRANT` on a system object
+      (anything in `pg_catalog` / `information_schema`, or named `pg_*` / `sqlite_*`) is not
+      admitted. A `CREATE TABLE` with no column list (`AS SELECT …`, `PARTITION OF … FOR VALUES
+      FROM (…)`) is read for calls like any expression. **`[ … ]` is a quoted name only where a
+      name is expected** (after `CREATE TABLE` / `VIEW` / `INDEX`, `ON`, `REFERENCES`, `INTO`,
+      `FROM`, a `,` / `(` / `.`, …); elsewhere it is a subscript or array literal whose contents are
+      read as SQL (`arr[evil()]`), and a quoted name holding `(` is charged (S239 r2 review of the
+      allow-list build: a call inside a subscript was invisible — executed). A compilation with no
+      tenant-scoped table is unaffected.
+      > **Provenance:** ruling:user-voice-scrml.md S455 "your rec on the allow-list" — *"your rec on
+      > the allow-list"* (answering the PA's fork after the S239 review of the isolation-removal build
+      > found privilege statements that remove isolation without naming a tenant table — `GRANT
+      > scrml_app TO evil`, `ALTER DEFAULT PRIVILEGES … TO PUBLIC`, `REASSIGN OWNED`, `CREATE
+      > PUBLICATION FOR ALL TABLES`, extensions — an enumerate-forever deny-list) · **supersedes:** the
+      > S455 "yes both" (ii) CLOSED EXEMPTION list over statements naming a tenant table (*"a statement
+      > that names a tenant-scoped table is NOT charged ONLY when it is `CREATE INDEX`; `ALTER TABLE …
+      > ADD [COLUMN]` …; `ANALYZE`; or `REINDEX`"*) and the fail-closed clause's *"any other `<schema>`
+      > statement that names a tenant-scoped table"* · **Direction of change (pa-base §8): narrowing
+      > overall** — newly-rejecting for every statement outside the list whether or not it names a
+      > tenant table; newly-ACCEPTING for five kinds the (ii) list charged when they named one:
+      > `COMMENT ON`, `VACUUM`, `ALTER COLUMN … SET | DROP NOT NULL | DEFAULT`, `RENAME COLUMN`, and a
+      > non-cascading `ADD CONSTRAINT` (CHECK / FK). Corpus measured (base `2ab1bd7b0` vs head): 2355
+      > single-file compiles and the multi-file projects examples/22-multifile,
+      > examples/23-trucking-dispatch, examples/, stdlib/, flogence/src — 0 newly failing, 0 artifact
+      > or diagnostic diffs.
+      **An admitted statement still runs code:** an index expression or partial-index
+      predicate, a column `DEFAULT`, `GENERATED` expression or `CHECK` is evaluated by the database
+      per row, at migration, as the migrating role — so every expression in an admitted statement is
+      held to the function allow-list a view or trigger body is (below), on any table; a call off it,
+      or a `${…}`, charges the statement *unattributable* (S239 review of the S455 "yes both" build).
+      The same holds for a `CREATE TABLE`'s column `DEFAULT` / `GENERATED` / `CHECK` expressions and
+      its table-level `CHECK`: a call off the allow-list charges the declaration (a type size, a
+      literal and a keyword such as `CURRENT_TIMESTAMP` are not calls). For these expressions the
+      list's criterion is NO SIDE EFFECT AND NO CODE EXECUTION, not determinism: it adds the
+      side-effect-free built-ins `now`, `current_timestamp` / `current_date` / `current_time`,
+      `clock_timestamp`, `statement_timestamp`, `transaction_timestamp`, `localtimestamp`,
+      `gen_random_uuid`, `uuid_generate_v4`, `random`, `md5`, `char_length`, `octet_length`,
+      `to_char`, `date_trunc`, `extract`, `date_part`, `make_interval`, `unixepoch`, `randomblob`,
+      `hex`. `nextval` (a sequence advance) is allowed ONLY directly as a column `DEFAULT` — how
+      `serial` expands; it advances on an INSERT into that column's own table and the counter
+      carries no tenant's row — and is charged anywhere else. Anything that can write, lock,
+      notify or run user code (`dblink*`, `pg_advisory*`, `set_config`, `lo_*`, `pg_notify`, a
+      user function) stays charged. Also on the list (pure built-ins): `to_tsvector`,
+      `to_tsquery`, `json_valid`, `iif`, `typeof`, `printf`, `left`, `right`, `floor`, `ceil`,
+      `ceiling`, `trunc`, `concat`, `concat_ws`, `split_part`, `regexp_replace`, `regexp_match(es)`,
+      `btrim`, `initcap`, `lpad`, `rpad`, `format`, `age`, `to_timestamp`, `to_date`,
+      `current_setting`, `jsonb_typeof`, `json_typeof`, `array_length`, `cardinality`, `mod`,
+      `power`, `sign`, `sqrt`, `greatest`, `least`, `position`, `overlay`, `reverse`, `repeat`,
+      `starts_with`, `ascii`, `chr`. The reading is a TOKEN-LEVEL allow-list over every
+      expression region — the column definitions, every table constraint, and everything after the
+      column list (`PARTITION BY`, `EXCLUDE`, `WITH (…)`, `INHERITS`): every `identifier (`,
+      qualified or not, is a call that must be on the list, with no keyword exceptions (a name after
+      `FROM` / `ON` / `JOIN` is not a table inside an expression, and an unreserved word such as
+      `match` or `range` is a legal function name). The only non-call `identifier (` forms are a
+      closed syntactic set: a word reserved in Postgres (`CHECK`, `IN`, `AND`, `AS`, `DEFAULT`, `WITH`,
+      …); `PRIMARY` / `FOREIGN KEY (`; `PARTITION BY RANGE | LIST | HASH (`; `AS IDENTITY (`;
+      `INCLUDE (` / `INHERITS (` after a `)`; `EXCLUDE (` at a constraint's start; an index method
+      (`btree`, `hash`, `gist`, `spgist`, `gin`, `brin`) after `USING`; `REFERENCES <table> (`; and a
+      sized built-in type (`varchar`, `numeric`, `timestamp`, …) in a type position. A cast
+      (`::type`, `CAST(… AS type)`) to a type outside a closed built-in list, and an operator outside
+      a closed built-in set, are charged — a user type's input function and a user operator are code.
+      *(S239 review of the S455 "yes both" build, HIGH: `extract(epoch FROM evil(ts))` in an index
+      passed — executed.)* **Isolation removal** (S455 "yes
+      both") is charged as its own kind (*isolation removal*), fail-closed, against the tenant-scoped
+      table it names — or, when it names none, against every tenant-scoped table of the
+      compilation: `DROP POLICY … ON <tenant>` (any policy — `scrml_tenant_iso`, or a restrictive one
+      that narrows it); `ALTER TABLE <tenant> DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL
+      SECURITY`; `ALTER TABLE <tenant> OWNER TO …`; `GRANT … ON <tenant>` (or `ON ALL TABLES IN
+      SCHEMA …`) to any grantee other than `scrml_app`, and `GRANT <role> TO scrml_app`;
+      `CREATE | ALTER ROLE | USER … BYPASSRLS | SUPERUSER`; `SET [SESSION | LOCAL] ROLE`,
+      `SET SESSION AUTHORIZATION` and `SET row_security`. Each removes or bypasses the §14.8.11
+      database-tier isolation (row-level security, its `scrml_tenant_iso` policy, the bounded role),
+      which is not the `<schema>`'s to remove.
+      > **Provenance:** ruling:user-voice-scrml.md S455 "yes both" — *"yes both"* (answering the PA's
+      > two-part ask: (i) charge isolation removal as an E-TENANT-SCHEMA-HAZARD kind; (ii) write the
+      > harmless exemptions into the clause as a CLOSED list — `CREATE INDEX`, `ALTER TABLE … ADD
+      > COLUMN` (non-tenant columns), `ANALYZE`, `REINDEX`; anything not on the list stays charged;
+      > resolves `g-tenant-schema-rls-removal-not-charged-s455`) *(its (ii) list is SUPERSEDED by the
+      > statement-kind allow-list above, S455 "your rec on the allow-list"; (i) stands)* · **supersedes:** the unwritten
+      > impl#1 exemptions — every `DROP` / `PRAGMA` / `COMMENT` / `GRANT` / `REVOKE` / `VACUUM` /
+      > `BEGIN` / `COMMIT` / `END` / `ROLLBACK` / `SAVEPOINT` / `RELEASE` / `SET` statement, and every
+      > `ALTER TABLE` naming only its own target (bar `RENAME TO`) or a `REFERENCES` target — which the
+      > clause above never stated · **Direction of change (pa-base §8): newly-rejecting** — the
+      > isolation-removal shapes, and every statement naming a tenant table that the old exemptions
+      > passed (`DROP TABLE <tenant>`, `ALTER TABLE <tenant> RENAME COLUMN | DROP COLUMN | ALTER
+      > COLUMN | ADD CONSTRAINT | ENABLE / FORCE ROW LEVEL SECURITY`, `REVOKE … ON <tenant>`, `COMMENT
+      > ON <tenant>`, `PRAGMA table_info(<tenant>)`, `VACUUM <tenant>`, `ALTER TABLE x ADD CONSTRAINT
+      > … REFERENCES <tenant>`). The `scrml_app` GRANT exemption is the PA reading of (i)'s *"to
+      > anyone but scrml's own app role"*, recorded here in its veto window. Corpus measured (base
+      > `2ab1bd7b0` vs head): 2355 single-file compiles (examples/ samples/ conformance/cases/
+      > stdlib/) and the multi-file projects examples/22-multifile, examples/23-trucking-dispatch,
+      > examples/, stdlib/, flogence/src — 0 newly failing, 0 artifact or diagnostic diffs.
+      A table is
       *named* when an identifier names it or a string literal holds its name as a whole word (a
       function can read a table named in a string). Tenant-scoped-ness is the `tenant_id`
       convention above; the comment model is the database's, which differs by dialect, so the
@@ -12483,7 +12624,14 @@ is the entire invariant/policy firewall.
   against a tenant-scoped table: a trigger on, or whose body names, one; a rule on or naming one; a
   `CASCADE` / `SET NULL` / `SET DEFAULT` foreign key with a tenant-scoped end; a view reading one,
   directly or through another view; or a declaration the compiler cannot attribute (charged,
-  *unattributable*). Reported at the declaration, whatever the queries; no opt-out (S455; the Write
+  *unattributable*); or an *isolation removal* — `DROP POLICY` on, `DISABLE` / `NO FORCE ROW LEVEL
+  SECURITY` or `OWNER TO` of, or a `GRANT` to anyone but `scrml_app` on, a tenant-scoped table;
+  a `BYPASSRLS` / `SUPERUSER` role; `SET ROLE` / `SET SESSION AUTHORIZATION` / `SET row_security`
+  (S455 "yes both"); or, in a compilation with a tenant-scoped table, a *statement not admitted in a
+  tenant schema* — anything outside the statement-kind allow-list (`CREATE TABLE` / `INDEX` / `VIEW` /
+  `TRIGGER`, admitted `ALTER TABLE` actions, `CREATE POLICY … AS RESTRICTIVE`, `GRANT … TO
+  scrml_app`, `COMMENT ON`, `ANALYZE`, `REINDEX`, `VACUUM`), whether or not it names a tenant table
+  (S455 "your rec on the allow-list"). Reported at the declaration, whatever the queries; no opt-out (S455; the Write
   bullet "SQL the database runs on its own").
 - **`E-TENANT-RAW-EGRESS`** (Error) — rows obtained through an `.acrossTenants()` read reach a raw
   `Response` (a manual `Response` / `handle()` body, §40): the one remaining foreign-tenant egress
@@ -25054,7 +25202,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row filter (at the source, S452) has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar before any filter can run. The same holds for a tenant-scoped table read only inside a subquery / CTE / derived table whose `tenant_id` does not reach the output row (S452 PA reading). In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the subset single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = <active tenant>`; a subset `UPDATE t SET … [WHERE …]` / `DELETE FROM t [WHERE …]` gets `AND tenant_id = <active tenant>` on its parenthesized WHERE (S452 r3 — supersedes "an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse) … fires this error"); injected SQLite writes carry `OR ABORT`. Fires on: an un-injectable write (an INSERT that names `tenant_id`, is multi-row, `INSERT … SELECT`, `DEFAULT VALUES` or has no column list; a SET of `tenant_id`; an UPDATE with an alias / FROM / ORDER BY / LIMIT; REPLACE / `OR REPLACE`; `ON CONFLICT`; `RETURNING`; `SELECT … INTO`; a second tenant table; a non-allow-listed function), an author-written `INSERT OR …` / `UPDATE OR …` conflict clause, a write to a table whose `<schema>` declares a trigger / rule / cascading foreign key (S452 r4), and an `.acrossTenants()` INSERT that does not name `tenant_id`. **Runtime form** `E-TENANT-WRITE (runtime)`: a write to a tenant-scoped table with no active tenant is refused by name, nothing written (ruling:user-voice-scrml.md S452 "your rec"). Resolution: write the plain subset shape without `tenant_id` (the floor injects the request's tenant), or mark the query `.acrossTenants()` and, for an INSERT, name `tenant_id`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql` (#1293); the runtime form by the server helper `_scrml_tenant_write_key`.) | Error |
 | E-TENANT-SQL-SUBSET | §14.8.10 | A query whose text names a tenant-scoped table lies outside the floor's allow-listed SQL subset and is not `.acrossTenants()`: a token or form outside the closed token set (a quoted identifier, a comment, `;`, a dialect-specific literal, a `${…}` whose end cannot be read without parsing JavaScript, …), a statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, `GROUP` without `BY`, `RETURNING` or `FOR` on a read, or — in a query that names a tenant table only in its text (a literal included) — a function outside the allow-list. A query the floor cannot read exactly is refused rather than scoped by a guess. Resolution: write the query in the subset (§14.8.10 "The SQL subset"), or mark it `.acrossTenants()` for a deliberate cross-tenant query. **Provenance:** spec currency to #1293 (S452 r3 `5e6b39b92`, r4 `c02da0f86`) under ruling:user-voice-scrml.md S452 "a" — a PA direction, recorded as built. (Emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql`.) | Error |
-| E-TENANT-SCHEMA-HAZARD | §14.8.10 | A `<schema>` declares SQL the database runs on its own against a tenant-scoped table (one carrying `tenant_id`): (1) a trigger — any timing, `INSTEAD OF` included — declared on a tenant-scoped table or on a view over one, or whose body names one; (2) a Postgres rule declared on, or whose action names, one; (3) a foreign key whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT` with EITHER end tenant-scoped; (4) a view (materialized included) reading one, directly or through another view. Fail-closed: a declaration the compiler cannot attribute — unreadable text, a function body (`EXECUTE FUNCTION`), a call off the §14.8.10 subset allow-list, a `${…}`, a `CREATE FUNCTION` / `PROCEDURE` / `DO` body, an unattributable foreign-key action, text a reading left unread (a keyword-spelled identifier never ends a declaration), a quoted form whose extent differs between databases (a backslash escape, `E'…'`), any other `<schema>` statement naming a tenant table — is charged; a `CREATE POLICY` on a tenant-scoped table is charged (kind *permissive policy*) unless it is explicitly `AS RESTRICTIVE`, because a permissive policy (the Postgres default) is ORed with §14.8.11's `scrml_tenant_iso` and widens it — against every tenant-scoped table (*unattributable*). The tenant floor scopes each query; it cannot scope a trigger or rule body, a view's definition or a foreign-key action, so the declaration is refused where it is declared, whatever the queries do, with no `.acrossTenants()` opt-out. Only `<schema>` is visible (§14.8.10 Limit). Resolution: remove the declaration and do the work in server code, where the floor applies — or declare the object only over tables without `tenant_id`. **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" · supersedes: *"A write to a tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the boundary (kept as defense in depth) · Direction of change: newly-rejecting (corpus: 2410 `.scrml`, 0 newly failing). Evaluated once per file over the `<schema>` as it will exist (after `schemaFor` / meta expansion), against ONE tenant set — the union over every file compiled together, whatever database each names (compilation-scoped; accepted cost: two genuinely different databases compiled together share it) — the SAME set the floor's query scoping reads, computed once (S455), which counts a `tenant_id` added by an `ALTER TABLE` in `<schema>`. A program compiled SEPARATELY that opens the same database is not seen (the Limit). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-schema-hazards.ts` `fileTenantSchemaHazards`.) | Error |
+| E-TENANT-SCHEMA-HAZARD | §14.8.10 | A `<schema>` declares SQL the database runs on its own against a tenant-scoped table (one carrying `tenant_id`): (1) a trigger — any timing, `INSTEAD OF` included — declared on a tenant-scoped table or on a view over one, or whose body names one; (2) a Postgres rule declared on, or whose action names, one; (3) a foreign key whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT` with EITHER end tenant-scoped; (4) a view (materialized included) reading one, directly or through another view. Fail-closed: a declaration the compiler cannot attribute — unreadable text, a function body (`EXECUTE FUNCTION`), a call off the §14.8.10 subset allow-list, a `${…}`, a `CREATE FUNCTION` / `PROCEDURE` / `DO` body, an unattributable foreign-key action, text a reading left unread (a keyword-spelled identifier never ends a declaration), a quoted form whose extent differs between databases (a backslash escape, `E'…'`), any other `<schema>` statement naming a tenant table — is charged; a `CREATE POLICY` on a tenant-scoped table is charged (kind *permissive policy*) unless it is explicitly `AS RESTRICTIVE`, because a permissive policy (the Postgres default) is ORed with §14.8.11's `scrml_tenant_iso` and widens it — against every tenant-scoped table (*unattributable*). **Isolation removal** (kind *isolation removal*, S455 "yes both"): `DROP POLICY … ON <tenant>`; `ALTER TABLE <tenant> DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL SECURITY` / `OWNER TO`; `GRANT … ON <tenant>` (or `ON ALL TABLES IN SCHEMA`) to any grantee but §14.8.11's bounded `scrml_app`, and `GRANT <role> TO scrml_app`; `CREATE | ALTER ROLE | USER … BYPASSRLS | SUPERUSER`; `SET [SESSION | LOCAL] ROLE`, `SET SESSION AUTHORIZATION`, `SET row_security` — the last three groups name no table and are charged against every tenant-scoped table of the compilation. **Provenance (isolation removal):** ruling:user-voice-scrml.md S455 "yes both" · supersedes: impl#1's unwritten DROP / PRAGMA / COMMENT / GRANT / REVOKE / VACUUM / transaction-control / SET exemptions and its "ALTER TABLE naming its own target" exemption · Direction of change: newly-rejecting. **Statement-kind allow-list** (kind *statement not admitted in a tenant schema*, S455 "your rec on the allow-list"): in a compilation with ANY tenant-scoped table, a `<schema>` admits ONLY `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE` whose every action is `ADD [COLUMN]`, `ALTER [COLUMN] … SET | DROP NOT NULL | SET DEFAULT | DROP DEFAULT`, `RENAME [COLUMN] a TO b`, or `ADD [CONSTRAINT] CHECK (…)` / a foreign key with no cascading action, `CREATE VIEW`, `CREATE TRIGGER`, `CREATE POLICY … AS RESTRICTIVE` (its expressions allow-listed), `GRANT {SELECT|INSERT|UPDATE|DELETE}[, …] ON [TABLE] <named tables> TO scrml_app` / `GRANT USAGE[, SELECT] ON SEQUENCE <named> TO scrml_app` (unquoted, or exactly `"scrml_app"`; PA reading — no `WITH GRANT OPTION`, `TRUNCATE`, `ALL`, `ON ALL … IN SCHEMA`, other privileges), `COMMENT ON`, `ANALYZE`, `REINDEX`, `VACUUM` (not `VACUUM INTO`); never a `RENAME` to / from `tenant_id` nor a `SET | DROP DEFAULT` of it; a statement is judged by its first token, whatever it is (a `(`- or `WITH`-led statement is not admitted); a column / cast / literal type, an index operator class or an access method that is not built in is charged, in every region (view / trigger / rule / policy bodies included); a `GRANT` on a system object (`pg_catalog`, `information_schema`, `pg_*`, `sqlite_*`) is not admitted; `[ … ]` is a quoted name only in a name position, elsewhere a subscript whose contents are read (a bracketed name holding `(` is charged); every other statement is charged whether or not it names a tenant table — roles, privileges, publications, extensions, session settings and data changes belong to deploy / ops. The other rules still apply within the admitted kinds. **Provenance (allow-list):** ruling:user-voice-scrml.md S455 "your rec on the allow-list" · supersedes: the S455 "yes both" (ii) closed exemption list over statements naming a tenant table · Direction of change: narrowing overall (newly-rejecting outside the list; newly-accepting `COMMENT ON`, `VACUUM`, `ALTER COLUMN … NOT NULL / DEFAULT`, `RENAME COLUMN`, a non-cascading `ADD CONSTRAINT`); corpus: 2355 single-file + 5 multi-file projects, 0 newly failing. The tenant floor scopes each query; it cannot scope a trigger or rule body, a view's definition or a foreign-key action, so the declaration is refused where it is declared, whatever the queries do, with no `.acrossTenants()` opt-out. Only `<schema>` is visible (§14.8.10 Limit). Resolution: remove the declaration and do the work in server code, where the floor applies — or declare the object only over tables without `tenant_id`. **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" · supersedes: *"A write to a tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the boundary (kept as defense in depth) · Direction of change: newly-rejecting (corpus: 2410 `.scrml`, 0 newly failing). Evaluated once per file over the `<schema>` as it will exist (after `schemaFor` / meta expansion), against ONE tenant set — the union over every file compiled together, whatever database each names (compilation-scoped; accepted cost: two genuinely different databases compiled together share it) — the SAME set the floor's query scoping reads, computed once (S455), which counts a `tenant_id` added by an `ALTER TABLE` in `<schema>`. A program compiled SEPARATELY that opens the same database is not seen (the Limit). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-schema-hazards.ts` `fileTenantSchemaHazards`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | **Narrowed S452.** Rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual `Response` / `handle()` body (§40). Under the §14.8.10 source filter these are the only foreign-tenant rows server code holds, so this is the one remaining egress of another tenant's data through a body the compiler does not own. Rows from a read WITHOUT `.acrossTenants()` are already scoped to the active tenant at the source, so their raw egress (a manual `Response`, a `_{}` block, an `asIs` value) is NOT an error. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the cross-tenant rows through a compiler-emitted response. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 1 · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the S273 trigger (any tenant-scoped row at a `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`) · Direction of change: newly-accepting for raw egress of non-opted-out rows; newly-rejecting for `.acrossTenants()` rows in a manual `Response`. **Nominal as worded** — impl#1 still enforces the S273 trigger until a sibling dispatch narrows it. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. The tenant-scoped set is the COMPILATION's (S455, §14.8.10 "One tenant set per compilation"): it fires in a file whose read touches a table any file compiled together declares tenant-scoped. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. impl#1 filters at the source since #1287 (S454 currency — supersedes "**Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands."). Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
