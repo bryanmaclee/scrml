@@ -66,7 +66,9 @@ export const FOREIGN_SEAL_FN = "_scrml_foreign_seal";
  * ⛔ Constraints on this text (shared with every server-module helper — sql-tx-guard.ts):
  * no `import`, no top-level `await` (the conformance adapter evaluates a server module with
  * `new Function`); `require` / `__dirname` / `__filename` are read through `typeof` because
- * that evaluation has no module context.
+ * that evaluation has no module context. No literal `undefined` either: the server-output
+ * lint W-CG-UNDEFINED-INTERPOLATION flags it (scrml absence is `null`, §42) — so a host name
+ * the module lacks is left UNBOUND in the slice rather than bound to an absent value.
  *
  * ⛔ ASCII ONLY. This is a `String.raw` template, and Bun's transpiler re-prints a non-ASCII
  * character in a raw template as a `\uXXXX` escape — which `String.raw` then keeps as six
@@ -88,14 +90,17 @@ export const SERVER_FOREIGN_SEAL_HELPER: string = String.raw`
 function _scrml_foreign_seal(site, source) {
   const cache = _scrml_foreign_seal.cache || (_scrml_foreign_seal.cache = new Map());
   let sealed = cache.get(source);
-  if (sealed === undefined) {
-    const build = new Function("require", "__dirname", "__filename",
+  if (!sealed) {
+    // The module's host context, bound only where the host provides it (a module
+    // evaluated without one leaves the name unbound, exactly as host code sees it).
+    const hostNames = [];
+    const hostValues = [];
+    if (typeof require === "function") { hostNames.push("require"); hostValues.push(require); }
+    if (typeof __dirname === "string") { hostNames.push("__dirname"); hostValues.push(__dirname); }
+    if (typeof __filename === "string") { hostNames.push("__filename"); hostValues.push(__filename); }
+    const build = new Function(...hostNames,
       "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + site);
-    const slice = build(
-      typeof require === "function" ? require : undefined,
-      typeof __dirname === "string" ? __dirname : undefined,
-      typeof __filename === "string" ? __filename : undefined,
-    );
+    const slice = build(...hostValues);
     sealed = async (...args) => {
       try {
         return await slice(...args);

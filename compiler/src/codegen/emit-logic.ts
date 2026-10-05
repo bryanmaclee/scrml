@@ -3666,14 +3666,30 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (syntaxProblem) {
         const sink = (opts as any).foreignCrossingErrors as CGError[] | undefined;
         if (sink) {
+          // Name the ROOT cause. A slice with no top-level `;` and no top-level
+          // `return` is read as a SINGLE EXPRESSION (§23.2.4a rule 1) and given an
+          // injected `return (…)`. When that fails but the same text parses as a
+          // statement body, the author wrote statements, not a bad expression — the
+          // fix is the multi-statement shape, not "your JavaScript is invalid".
+          // (Recovering by re-reading it as multi-statement is NOT done here: that
+          // would turn a refusal into a silent `undefined` → `not`, the open fork in
+          // g-foreign-multistmt-value-block-mislowers.)
+          const statementsParse = singleExpression
+            && checkForeignSliceSyntax(foreignSliceSource(crossings, slice)) === null;
           const where = syntaxProblem.sliceLine !== null ? ` (line ${syntaxProblem.sliceLine} of the slice)` : "";
           sink.push(new CGError(
             "E-FOREIGN-007",
-            `E-FOREIGN-007: the inline foreign slice at ${site} is not valid JavaScript as written: ` +
-            `${syntaxProblem.message}${where}. A slice is evaluated as the body of a sealed async ` +
-            `function — not a module — so \`import.meta\` and static \`import\` are unavailable ` +
-            `(use \`__dirname\` / \`__filename\` / \`require\` / \`await import(…)\`), and the compiler ` +
-            `does not strip TypeScript type syntax from a slice. See SPEC §23.2.4a.`,
+            statementsParse
+              ? `E-FOREIGN-007: the inline foreign slice at ${site} has no top-level \`;\` and no top-level ` +
+                `\`return\`, so it is read as a SINGLE EXPRESSION and given an injected \`return\` — but it ` +
+                `is a sequence of statements, not one expression. Use the multi-statement shape: end each ` +
+                `statement with \`;\` and give the slice its own \`return\` for the value it produces. ` +
+                `See SPEC §23.2.4a (slice body — single-expression OR multi-statement).`
+              : `E-FOREIGN-007: the inline foreign slice at ${site} is not valid JavaScript as written: ` +
+                `${syntaxProblem.message}${where}. A slice is evaluated as the body of a sealed async ` +
+                `function — not a module — so \`import.meta\` and static \`import\` are unavailable ` +
+                `(use \`__dirname\` / \`__filename\` / \`require\` / \`await import(…)\`), and the compiler ` +
+                `does not strip TypeScript type syntax from a slice. See SPEC §23.2.4a.`,
             span,
           ));
         }

@@ -128,6 +128,8 @@ describe("§23.2.4a — no free lexical capture (the gap's reproducers, executed
   test("compiles clean (opacity: the compiler does not parse the interior for free names)", async () => {
     const { result } = await get();
     expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+    // The seal helper itself must not trip the server-output `undefined` lint (§42).
+    expect(codes(result)).not.toContain("W-CG-UNDEFINED-INTERPOLATION");
   });
 
   test("the raw db handle `_scrml_sql` is NOT reachable from a slice", async () => {
@@ -333,6 +335,26 @@ describe("§23.2.4a — tool host I/O form (executed with bun)", () => {
     expect(stdout).toContain("dyn=.md");
   });
 
+  test("the slice text survives being carried as source: backticks, ${}, backslashes, regex", () => {
+    // The slice travels inside a template literal in the artifact; its COOKED value
+    // must be the author's text byte for byte (same output as the old in-place IIFE).
+    const { result, run, stdout } = runTool("escapes", `<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        const name = "w"
+        const v = _={ in: { name }
+            const t = \`x-\${name}-\\\`q\\\`-\${"a\\\\nb".length}\`;
+            const re = /\\d+\\$/.test("12$");
+            return t + "|" + re + "|" + "tab\\there".length + "|" + '\${not}';
+        }=
+        println(v)
+        return 0
+    }
+</program>`);
+    expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+    expect(run.exitCode).toBe(0);
+    expect(stdout).toBe("x-w-`q`-4|true|8|${not}\n");
+  });
+
   test("a lang=\"ts\" program's (type-free) slices run sealed too", () => {
     const { result, run, stdout } = runTool("tsprog", `<program kind="tool" lang="ts">
     function main(args: string[]): number {
@@ -376,6 +398,19 @@ ${body}
     expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     const e = r.errors.find((d) => d.code === "E-FOREIGN-007");
     expect(e.message).toContain("badsyntax.scrml:");
+  });
+
+  test("statements with no top-level `;`/`return` are E-FOREIGN-007 naming the SHAPE, not 'invalid JavaScript'", () => {
+    // A lone `try { … } catch { … }` has no top-level `;` and no top-level `return`, so
+    // §23.2.4a rule 1 reads it as a single expression. The text IS valid as statements:
+    // the diagnostic must say which shape it was read as and how to write the other.
+    const r = compileOnly("shape", prog(`    const out = _={ in: { x }\n      try { JSON.parse(x) } catch (e) { console.error(e) }\n    }=`));
+    const e = (r.errors ?? []).find((d) => d.code === "E-FOREIGN-007");
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("SINGLE EXPRESSION");
+    expect(e.message).toContain("multi-statement");
+    expect(e.message).not.toContain("not valid JavaScript");
+    expect(errCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
   test("`import.meta` in a slice is E-FOREIGN-007 and the message names the alternatives", () => {
