@@ -1,0 +1,12 @@
+<program kind="tool" lang="js">
+    const banner = "MODULE"
+    function main(args: string[]): number {
+        const hidden = "LOCAL"
+        const seen = _={ [typeof hidden, typeof banner].join(",") }=
+        println(seen)
+        const n = 7
+        const crossed = _={ in: { n } [typeof n, typeof hidden].join(",") }=
+        println(crossed)
+        return 0
+    }
+</program>

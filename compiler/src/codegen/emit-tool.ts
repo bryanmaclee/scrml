@@ -38,6 +38,7 @@ import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs,
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 // s445 — THE SQLite-file handle emission, shared with emit-server.ts.
@@ -377,6 +378,9 @@ const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   // exemption in the fail-closed scan below would otherwise wave it through
   // un-inlined.
   { sig: `${SQL_ATTEMPT_FN}(`, src: SERVER_SQL_ATTEMPT_HELPER },
+  // §23.2.4a — a `_{}` slice (main's host I/O, or an inline value-returning
+  // block) is built in its sealed scope by this helper (foreign-seal.ts).
+  { sig: `${FOREIGN_SEAL_FN}(`, src: SERVER_FOREIGN_SEAL_HELPER },
 ];
 
 // Runtime-helper identifiers the tool module legitimately DEFINES itself (the
