@@ -16639,10 +16639,12 @@ patterns name:
 
 - a call to a function declared `!` (§19.4.1): the declared error enum (`SaveError` above);
 - a `?{}` query (§19.8.3): `SqlError`;
-- a client call to a server function (§19.9.10): the call's failure set — the transport error
-  type, and for a server function declared `!` its declared error enum as well. Its exact shape
+- a client call to a server function (§19.9.10): the call's failure set — `Transport(t:
+  ServerCallError)`, and for a server function declared `! E` the variants of `E` as well (S454,
+  ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline"; supersedes "Its exact shape
   is OPEN for the bootstrap's U1b design pass (§19.9.10); the binder has whatever type U1b gives
-  the failure set, and needs no further rule.
+  the failure set, and needs no further rule."). The binder holds a value of that set; a later
+  `match err { … }` is exhaustive over the declared variants plus `.Transport(t)`.
 
 The binder's static type is that whole type even though, at run time, the value is never one of
 the variants an earlier arm matched: a later `match err { … }` is exhaustive over the whole enum.
@@ -17951,7 +17953,7 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 **A `?{}` query is a failable expression too (S451 R11).** Outside a `!` function, a `?{}` query is handled like a call to a `!` function whose error type is `SqlError` — with `!{}` or `match` at the site — and an unhandled one is E-ERROR-002 (§19.8.3, which states the forms that apply). Inside a `!` function it propagates implicitly (§19.8.2, unchanged). *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: §19.8.3's backwards-compatible mode, quoted there · newly-rejecting.)*
 
-**A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and what its error type covers (its exact shape is OPEN for the bootstrap's U1b design pass). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
+**A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and its failure set: the callee's declared variants, if any, plus `Transport(t: ServerCallError)` (S454 — supersedes "(its exact shape is OPEN for the bootstrap's U1b design pass)"; ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline"). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
 
 At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
@@ -18291,6 +18293,7 @@ For `?` to propagate, the error variants of the called function MUST be compatib
 
 - Every error variant that the called function can produce MUST exist as a variant in the enclosing function's error type.
 - If the called function produces error variants that are not present in the enclosing function's error type, the compiler SHALL emit a compile error (E-ERROR-010) identifying the incompatible variants.
+- For a client call to a server function, the variants the call produces include `Transport(t: ServerCallError)` (§19.9.10), so the enclosing enum SHALL declare it; the E-ERROR-010 message then names that line. *(S454, ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" F1 — "`?` requires the enclosing enum to declare `Transport(t: ServerCallError)` (else E-ERROR-010, message names the line to add)"; supersedes nothing — an application of the rule above · direction: newly-rejecting, narrow.)*
 
 This ensures that `?` never silently drops error information.
 
@@ -18703,7 +18706,9 @@ The client calling `loadUser(id)?` propagates the same `UserError` variants that
 
 A function whose body mixes a server-trigger statement with a reactive-assignment statement is split across the client/server boundary by the compiler (CPS analysis — see §12 + §19.9.3). Per the body-split soundness predicate **S4 (failure-mode preservation)**, every CPS-emitted stub carries implicit `!` semantics regardless of whether the developer wrote `!` in the function signature. Failures (network errors, SQL errors, server exceptions, etc.) are routed through the existing §19 error-handling mechanisms — no new mechanism is introduced.
 
-**Implicit `!`-typing.** A function with a CPS body-split is treated by the type-system as if it were declared `!`. The implicit error type is `CpsError` (a synthetic enum with at minimum `NetworkError(message: string, fn: string)` and `ServerError(message: string, fn: string)` variants).
+**Implicit `!`-typing.** A function with a CPS body-split is treated by the type-system as if it were declared `!`. Its client call fails with the §19.9.10 failure set: the function's declared error variants, if it is declared `!`, plus `Transport(t: ServerCallError)` — for an undeclared split function, `Transport(t: ServerCallError)` alone. A split callee and a plain server callee are therefore handled identically; there is no second synthetic enum.
+
+> **Provenance:** ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" — *"**F1 (B):** … Body-split's implicit `!` uses the same set."* · *"**F2:** the built-in is named `ServerCallError`; it replaces `CpsError`."* · **supersedes:** *"The implicit error type is `CpsError` (a synthetic enum with at minimum `NetworkError(message: string, fn: string)` and `ServerError(message: string, fn: string)` variants)."* — **the name `CpsError` is RETIRED** from the language; and this section's conceptual wrapper building a `type: "CpsError"` envelope. · **Direction of change (pa-base §8): semantics-changed + newly-rejecting (narrow)** — a handler that named `CpsError`'s variants (`.NetworkError` / `.ServerError`) no longer names a variant of the call's failure set (E-TYPE-020 non-exhaustive, or an unknown variant); a `_ :>` handler is unaffected. **Carried divergence:** impl#1 still synthesizes `CpsError` (its body-split wrapper returns a `type: "CpsError"` envelope, and its server sends `ServerError` with the exception's text) — impl#1 is frozen for language semantics (S447) and is not changed for this; the bootstrap builds `ServerCallError` (U1b, with U1d for the split itself).
 
 ```scrml
 // Developer writes:
@@ -18711,20 +18716,14 @@ function loadProfile(id: number) {
     @profile = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
 }
 
-// Compiler treats this AS IF it were:
-// function loadProfile(id: number)! -> CpsError { ... }
+// Compiler treats this AS IF it were declared `!`; its client call's failure set is
+// { Transport(t: ServerCallError) } (no declared variants).
 //
 // CPS-emitted client wrapper (conceptual):
 // async function loadProfile(id) {
-//     try {
-//         const result = await __fetch_loadProfile(id);
-//         if (result.__scrml_error) return result;  // pass-through server-tagged
-//         _scrml_reactive_set("profile", result);
-//     } catch (err) {
-//         return { __scrml_error: true, type: "CpsError",
-//                  variant: "NetworkError",
-//                  data: { message: err.message, fn: "loadProfile" } };
-//     }
+//     const result = await __call_loadProfile(id);   // the runtime's server call; never rejects
+//     if (result is a failure) return result;         // Transport(t) — built on the client (§19.9.10)
+//     _scrml_reactive_set("profile", result.value);
 // }
 ```
 
@@ -18800,20 +18799,21 @@ function notifyOrder(orderId: number) {
    *(S451 — supersedes path 1 "**`<errorBoundary>` markup wrapper**: `<errorBoundary fallback={<div>Failed to load profile</>}> ${loadProfile(@currentUserId)} </>`": a render-time server call is E-VALUE-SERVER-CALL (§13.7). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 2. **Caller `!` modifier** (logic-context propagation):
    ```scrml
-   function reloadProfile(id)! -> CpsError {
-       loadProfile(id)?  // ? propagates CpsError up the call stack
+   type ReloadError:enum = { Transport(t: ServerCallError) }
+   function reloadProfile(id)! ReloadError {
+       loadProfile(id)?  // ? propagates the call's Transport failure up the call stack
    }
    ```
 3. **Explicit match on result** (most-precise control):
    ```scrml
    match loadProfile(id) {
-       ::Ok(p) :> @profile = p
-       ::NetworkError(detail) :> @lastError = detail.message
-       ::ServerError(detail) :> @lastError = detail.message
+       .Ok(p) :> @profile = p
+       .Transport(t) :> @lastError = callProblem(t)   // callProblem: a `match t { … }` over ServerCallError (§19.9.10)
    }
    ```
+   *(S454 — supersedes path 2's `function reloadProfile(id)! -> CpsError { loadProfile(id)?  // ? propagates CpsError up the call stack }` and path 3's `::NetworkError(detail) :> @lastError = detail.message` / `::ServerError(detail) :> @lastError = detail.message` arms: `CpsError` is retired, and `?` requires the enclosing enum to declare `Transport(t: ServerCallError)` (§19.9.10). Provenance: ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" F1 + F2, quoted above. Direction: semantics-changed, as above.)*
 
-**S72 design-dive citations.** Body-split soundness design dive (`docs/deep-dives/body-split-soundness-design-2026-05-08.md`) §3.4 ratifies option 6 (compose 3+4+5). Body-split integration design dive (`docs/deep-dives/body-split-integration-and-residual-design-2026-05-08.md`) Q3 verdict ratifies the per-batch granularity framing; Q4 verdict ratifies the two-stage W- → E- deprecation cycle. The CpsError synthetic enum is introduced in this section; it is the only built-in enum type added by Ext 4. Future scope: A9 Ext 5 (idempotency-key replay safety) supplies the recovery path for non-tail batch failures.
+**S72 design-dive citations.** Body-split soundness design dive (`docs/deep-dives/body-split-soundness-design-2026-05-08.md`) §3.4 ratifies option 6 (compose 3+4+5). Body-split integration design dive (`docs/deep-dives/body-split-integration-and-residual-design-2026-05-08.md`) Q3 verdict ratifies the per-batch granularity framing; Q4 verdict ratifies the two-stage W- → E- deprecation cycle. ~~The CpsError synthetic enum is introduced in this section; it is the only built-in enum type added by Ext 4.~~ *(S454 — retired: a split function's failure set is §19.9.10's, carried by the built-in `ServerCallError`; ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" F2 "it replaces `CpsError`".)* Future scope: A9 Ext 5 (idempotency-key replay safety) supplies the recovery path for non-tail batch failures.
 
 #### 19.9.6 Static Monotonicity Classification + Idempotency-Key Replay
 
@@ -19044,7 +19044,39 @@ The `SELECT` writes `@total`; the `INSERT` reads it in the same batch. Under thi
 > **Status: Nominal / spec-ahead (S451).** NORMATIVE; **impl#1 does not implement it** and is not changed for it
 > (frozen for language semantics, S447 — the divergence is filed: `docs/known-gaps.md`
 > `g-impl1-client-server-call-not-failable-s451`). It is specified here and lands with the bootstrap's client
-> server-call slice (U1b); the bootstrap does not build it yet.
+> server-call slice (U1b); the bootstrap does not build it yet. The error type's shape — OPEN at S451 and assigned
+> to U1b's design pass — is ruled at S454 (below, "The error type — `ServerCallError`" and "The failure set of a
+> client call"); the ruling is SPEC text, not a build, and changes nothing above.
+>
+> **Provenance:** ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" — *"**F1 (B):** a client call
+> to a server-placed `f` fails with `f`'s declared variants plus ONE wrapper variant `Transport(t: ServerCallError)`;
+> a non-`!` callee fails with `Transport` alone. `?` requires the enclosing enum to declare `Transport(t:
+> ServerCallError)` (else E-ERROR-010, message names the line to add). Body-split's implicit `!` uses the same set."*
+> · *"**F2:** the built-in is named `ServerCallError`; it replaces `CpsError`."* · *"**F3, "with the deadline":**
+> variants `Unreachable`, `Refused(status: int)`, `ServerFault(status: int)`, `Malformed(reason: string)`, each with
+> `renders`; no server text on the wire; no separate timeout variant — the client runtime SHALL apply a deadline to
+> every server call, and a call that exceeds it is `Unreachable` (the deadline's value is a separate, later
+> ruling)."* · *"**F4:** a declared variant named `Transport` with payload `(t: ServerCallError)` IS the wrapper; any
+> other payload is a NEW code (e.g. E-ERROR-016) at the client call site."* · *"**F5 (a) SPEC-literal:** "remote" is a
+> whole-program placement fact … PLUS the PA's requirement: when a callee's placement flips because of a new client
+> caller, the diagnostic in the helper SHALL name that caller (file:line) as the cause."* · *"**F6:** sequential
+> server calls in U1b (known deviation); parallel read-only arrives with U3."* · *"**F7:** no nested patterns now"* ·
+> *"**F8:** yes — the §19.9.10 `scrml fix` rule … CONDITIONAL on first settling whether `return` is legal in an
+> event-handler body"*. Design: `scrml-support/docs/deep-dives/bootstrap-u1b-client-server-call-design-2026-10-04.md`
+> §1.0, §1.5, §1.6, §1.10, Item 3, §5.2. · **supersedes:** *"**OPEN — the exact shape is assigned to the bootstrap's
+> U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one built-in transport error), its
+> variants and payloads (whether a decode failure is its own variant, whether a status code travels in the payload),
+> its `renders` clauses (§19.2), and its `httpStatus` behaviour."*; *"**OPEN for U1b:** how the two sets combine in the
+> type system (a flat union of variants, or one wrapping variant such as `.Transport(e)`), and how `?` carries the
+> transport half through §19.5.3's compatibility check (E-ERROR-010) when the enclosing function's error type does not
+> name it."*; the normative statement *"Its exact type is OPEN (U1b)."*; and §19.9.5's synthetic `CpsError` enum
+> (quoted there). · **Direction of change (pa-base §8): newly-rejecting (narrow) + semantics-changed.** Newly
+> rejecting: a `?` on a client server call inside a `!` function whose enum lacks `Transport(t: ServerCallError)`
+> (E-ERROR-010), and a declared variant `Transport` with another payload (E-ERROR-016) — measured exposure: one corpus
+> enum has a `Transport` variant, a data enum that is no server function's error type (design §B). Semantics-changed:
+> a server call now has a deadline (a hung server was a hang; it is now `Unreachable`). A handler written to the S451
+> interim advice (`_ :>` / `_ err :>`) is unaffected. impl#1 is frozen and builds none of it (it still emits
+> `CpsError`, below).
 >
 > **Provenance:** spec:§19.9.10 (currency correction, S452 — `compiler/self-host-v2/` has no reference to §19.9.10,
 > E-ERROR-012..015 or E-MATCH-BARE-BINDER at `488abeedc`; nav-map U-S451-1) · **supersedes:** "The bootstrap builds
@@ -19111,21 +19143,151 @@ error type that carries those failures SHALL distinguish each of them:
 3. **A decode failure** — a response whose body does not decode under the §57 rules for that route (the strict
    decoder on a compiler-emitted route, S451 R10).
 
-§19.9.5's synthetic `CpsError` enum (`NetworkError(message: string, fn: string)`, `ServerError(message: string,
-fn: string)`) already names the first two for body-split stubs, and is the starting point. **OPEN — the exact shape
-is assigned to the bootstrap's U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one
-built-in transport error), its variants and payloads (whether a decode failure is its own variant, whether a status
-code travels in the payload), its `renders` clauses (§19.2), and its `httpStatus` behaviour. Until U1b, a handler
-that must be total over a server call writes a `_ :>` arm (§19.4.3) — or `_ err :>` to bind the whole failure (§18.6.1) — which covers every transport variant whatever
-their final names.
+**The error type — `ServerCallError` (S454).** The three kinds are carried by one built-in enum, **`ServerCallError`**.
+It is provided by the compiler, as `SqlError` is (§19.8.1): the developer SHALL NOT redefine it, it SHALL have at
+least the four variants below, and the compiler MAY add additional variants in future versions (the §19.8.4 wording).
 
-**A server function declared `!`.** Its client call can fail in two ways: with the function's declared error (§19.9.1,
-§19.9.3 — the `fail` envelope it sends) or with a transport failure. The call's failure set is BOTH: the declared
-error type's variants and the transport error's. A `!{}` handler or a `match` on the call SHALL cover both — by
-naming the variants of each, or with a `_ :>` arm. A function declared `!` loses nothing it had: its declared
-variants arrive exactly as §19.9.1 sends them. **OPEN for U1b:** how the two sets combine in the type system (a flat
-union of variants, or one wrapping variant such as `.Transport(e)`), and how `?` carries the transport half through
-§19.5.3's compatibility check (E-ERROR-010) when the enclosing function's error type does not name it.
+```scrml
+// Built-in — compiler-provided, not user-defined. Never sent by the server: the client runtime builds it when a
+// call to a server function does not produce a decodable answer.
+type ServerCallError:enum = {
+    Unreachable                     // kind 1: no response — the connection failed, was reset, or the deadline passed
+        renders <div class="scrml-call-error">The server could not be reached. Check the connection and try again.</>
+    Refused(status: int)            // kind 2: a 4xx that is not the function's own `fail` envelope (auth, CSRF, a guard)
+        renders <div class="scrml-call-error">The server refused the request (${status}).</>
+    ServerFault(status: int)        // kind 2: a 5xx that is not the `fail` envelope (an exception, a rolled-back transaction)
+        renders <div class="scrml-call-error">The server failed (${status}). Try again later.</>
+    Malformed(reason: string)       // kind 3: the body does not decode under §57's strict rules for the route
+        renders <div class="scrml-call-error">The server's answer could not be read.</>
+}
+```
+
+- **Classification.** A non-2xx response whose body is not the callee's own `fail` envelope (§19.9.1 — `type` the
+  callee's declared enum, `variant` one of its variants, `data` decoding strictly under §57.8) is `Refused(status)`
+  for a 4xx and `ServerFault(status)` for a 5xx. A 2xx response whose body does not decode strictly against the
+  return type, and any `__scrml_error` envelope that fails one of those checks (another `type`, an unknown variant,
+  bad `data`, a callee not declared `!`, or an envelope on a 2xx status), is `Malformed(reason)`. No outcome of a
+  server call is coerced into a success (§57.4) or escapes as an uncaught rejection: every outcome is a success value,
+  a declared variant, or a `ServerCallError`.
+- **No server text on the wire.** No `ServerCallError` variant carries text written by the server: the statuses are
+  numbers, and `Malformed.reason` is written by the client from its own decode check. The server records an
+  exception's detail in its own log (the bootstrap's U1c server unit). *(supersedes, for this purpose, `CpsError`'s
+  `ServerError(message: string, fn: string)`, which carried the server's exception text to the browser.)*
+- **No `httpStatus`.** These variants are built by the client and never sent by a server, so §19.9.2's `httpStatus`
+  has no meaning on them; `ServerCallError` declares none. (A user enum that carries a `Transport(t: ServerCallError)`
+  variant and `fail`s with it is sent like any declared variant, under §19.9.2's heuristic.)
+- **The `renders` text above is placeholder wording** (§19.2 requires a `renders` clause so the one route that takes a
+  server call's failure to an `<errorBoundary>` — the `<formFor>` submit dispatch, §19.6.6 / §41.14.3 — can display
+  every variant). An implementation MAY word it differently; the variant set and payloads are normative.
+
+**The deadline.** The client runtime SHALL apply a deadline to every client call of a server function. A call that
+has not produced a response when its deadline passes SHALL fail with `Unreachable` — there is no separate timeout
+variant, so the variant set stays closed and an exhaustive inner `match t` does not break when a deadline is added to
+a runtime. A request the client itself aborts on supersede or teardown (§6.7.7.1) is still not a failure: an abort
+sets no error, and the call's continuation does not run. **⚑ OPEN (not ruled): the deadline's value / configurability**
+— S454 ruled THAT every server call has a deadline, not how long it is or whether an author can change it.
+
+**The failure set of a client call (S454).** At a client call site (scope above) of a server-placed function `f`, the
+call fails with:
+
+- `f`'s declared error enum's variants (when `f` is declared `! E`), exactly as §19.9.1 sends them — unwrapped, so a
+  declared function loses nothing it had (§19.9.3, §19.9.4); **plus**
+- ONE variant, **`Transport(t: ServerCallError)`**, which carries every failure of the boundary itself.
+
+For an `f` not declared `!`, the failure set is `Transport(t: ServerCallError)` alone. A `!{}` handler or a `match` on
+the call SHALL cover the whole set — by naming each variant, or with `_ :>` / `_ err :>` (§18.6.1). Branching on the
+cause of a transport failure is an ordinary `match` on `t` inside the arm (§18.2 has no nested patterns, and none are
+added — S454 F7):
+
+```scrml
+${
+    function save() {
+        @version = saveNote("n1", @body, @version) !{      // saveNote: server-placed, declared `! SaveError`
+            .Conflict(cur) :> { @status = "edited elsewhere (now v" + cur + ")"; return }
+            .Storage       :> { @status = "the server could not store it"; return }
+            .Transport(t)  :> { @status = callProblem(t); return }
+        }
+        @status = "saved"
+    }
+
+    fn callProblem(t: ServerCallError) -> string {
+        return match t {
+            .Unreachable    :> "offline — not saved"
+            .Refused(s)     :> "the server refused the save (" + s + ") — sign in again"
+            .ServerFault(s) :> "the server failed (" + s + ") — try again later"
+            .Malformed(r)   :> "the server's answer could not be read"
+        }
+    }
+
+    function recount() {
+        @words = wordCount("n1") !{ .Transport(t) :> @words }   // wordCount: server-placed, not declared `!`
+    }
+}
+```
+
+**A declared variant named `Transport`.** If `f`'s declared enum has a variant `Transport` whose payload is exactly
+`(t: ServerCallError)`, that variant IS the wrapper: the failure set holds it once, and a transport failure of this
+call and one `f` propagated from an inner call are the same kind of value. A declared variant named `Transport` with
+any other payload (or none) SHALL be a compile error at the client call site — **`E-ERROR-016`** — because the call's
+`Transport` variant cannot be both. The message names `f`, its enum, and the payload `(t: ServerCallError)`.
+*E-ERROR-016 is **Nominal — reserved, §34 row lands with the implementation**: no compiler emits it yet.*
+
+**`?` on a client server call.** In a `!` function, `?` on a client call to a server-placed `f` propagates the call's
+whole failure set, so §19.5.3's compatibility check applies to it: the enclosing function's enum SHALL declare
+`Transport(t: ServerCallError)` — plus `f`'s declared variants, as for any `?` — or the `?` is **E-ERROR-010**. For an
+`f` not declared `!` this is `?` on a failable call (the call is failable by this section), so E-ERROR-004 does not
+apply to it. The E-ERROR-010 message SHALL name the line to add, for example: *"`saveNote` is a server function: a
+call to it from the client can also fail on the wire. Add `Transport(t: ServerCallError)` to `SyncError`, or handle
+the call with `!{ … .Transport(t) :> … }`."*
+
+```scrml
+${
+    type SyncError:enum = {
+        Conflict(current: int)
+        Storage
+        Transport(t: ServerCallError)       // one line covers the boundary, whatever variants ServerCallError gains
+    }
+    function syncAll()! SyncError {
+        @version = saveNote("n1", @body, @version)?
+        @words = wordCount("n1")?
+    }
+}
+```
+
+**Which call sites are remote — placement is whole-program.** Whether a call site is a client call (and so has the
+`Transport` variant) follows §12.2's placement of the CALLER, which is a whole-program fact: a helper with no server
+trigger of its own is server-placed by inheritance (Trigger 5) when every caller is server-placed, and a call inside
+it is then server→server and not failable on the wire (scope above, "Not affected"). An implementation SHALL decide
+"remote" from the resolved whole-program placement — not from the caller's own body alone. Consequences:
+
+- At a call that resolves server→server, a `.Transport` arm handles nothing. When the callee is not declared `!`, the
+  whole handler is attached to a call that cannot fail and is **E-ERROR-013**. When the callee is declared `!`, only
+  the `.Transport` arm is dead; it SHALL be reported as dead handling in the manner of E-ERROR-013 (the message names
+  the callee and says the call is server→server). An unhandled server→server call stays valid.
+- When a helper's placement flips because a client caller was added — the helper was server-placed by inheritance,
+  and a new client call to it makes it client-placed, so its own server calls become client calls — any diagnostic
+  this rule then raises inside the helper (an E-ERROR-002 for a now-unhandled server call, an E-ERROR-010 for a `?`)
+  SHALL name that client caller (file and line) as the cause, so the error is not reported at a site the author did
+  not touch with no account of why.
+
+**Body-split functions.** A function whose body the compiler splits across the boundary (§19.9.5) is implicitly `!`
+with the SAME failure set: its declared variants, if it is declared `!`, plus `Transport(t: ServerCallError)`. No
+second synthetic enum exists; `CpsError` is retired (§19.9.5).
+
+> **Bootstrap status (informative; not a language change).** The bootstrap's U1b unit runs a body's client calls of
+> server functions in source order, each awaited before the next. §13.2's rule that independent, provably read-only
+> server calls run in parallel waits on the READ classification the bootstrap's U3 unit builds; until then source
+> order is a known deviation from §13.2 item 3 (S454 F6). It changes no result a program can observe except timing.
+
+> **Migration (informative — tooling, owed).** The code this section rejects is migrated by a `scrml fix` rule built
+> alongside the §19.8.3 R11 rule (S454 F8): at an unhandled client call it writes the old behaviour out — a failed
+> call stopped the rest of the code from running — as a local `!{ .Transport(t) :> return }` (for a `! E` callee, the
+> arms already present plus that one). In an event-handler value the rule writes the BRACED form, `onclick={ f() !{
+> .Transport(t) :> return } }`; `return` is legal there because §5.2.3 makes an inline handler block "the same
+> statement grammar as a function body (§7.3)" (this settles the design's open question that S454 F8 was conditional
+> on). At a site in a client function body the local rewrite is not meaning-identical — before, the failure also
+> aborted every awaiting caller; after, callers continue — so the rule SHALL emit an Info at each such site saying so.
+> The rule is not built.
 
 ```scrml
 <program db="sqlite:./app.db">
@@ -19139,6 +19301,9 @@ union of variants, or one wrapping variant such as `.Transport(e)`), and how `?`
   } }
   ${ function refreshOrKeep() {
       @users = userCount() !{ _ :> @users }                // VALID — on failure keep the old count
+  } }
+  ${ function refreshNamed() {
+      @users = userCount() !{ .Transport(t) :> @users }    // VALID — the one variant a non-`!` callee's call has (S454)
   } }
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>   // VALID — the request handles it (<#usersLoad>.error)
   <button onclick={ userCount() }>Count</button>             // E-ERROR-002 — a handler call is a client call
@@ -19171,10 +19336,25 @@ reached only through an alias or a cell is not counted, and nor is a call inside
   (§52.6.5), and a server call in a value position (E-VALUE-SERVER-CALL, §13.7) SHALL NOT be E-ERROR-002 under this
   rule.
 - A failed client call to a server function SHALL produce an error value that distinguishes a transport failure, a
-  non-2xx route response other than the function's declared error, and a decode failure (§57). Its exact type is
-  OPEN (U1b).
+  non-2xx route response other than the function's declared error, and a decode failure (§57). The boundary's
+  failures SHALL be values of the built-in enum `ServerCallError` (`Unreachable` · `Refused(status: int)` ·
+  `ServerFault(status: int)` · `Malformed(reason: string)`, each with a `renders` clause); the developer SHALL NOT
+  redefine it, and the compiler MAY add variants. No variant SHALL carry server-written text. *(S454 — supersedes
+  "Its exact type is OPEN (U1b).")*
+- The client runtime SHALL apply a deadline to every client call of a server function; a call that exceeds it SHALL
+  fail with `Unreachable`. An abort on supersede or teardown SHALL NOT be a failure. *(The deadline's value is not
+  ruled.)*
 - The client call of a server function declared `! E` SHALL fail with a variant of `E` (as the server sent it) or with
-  a transport error; a handler on it SHALL cover both.
+  `Transport(t: ServerCallError)`; the client call of a server function not declared `!` SHALL fail with
+  `Transport(t: ServerCallError)` only. A handler on either SHALL cover the whole set. A declared variant
+  `Transport(t: ServerCallError)` SHALL be that variant; a declared variant named `Transport` with any other payload
+  SHALL be E-ERROR-016 at the client call site.
+- `?` on a client call of a server function SHALL require the enclosing function's error enum to declare
+  `Transport(t: ServerCallError)` (and the callee's declared variants), else E-ERROR-010, whose message names the
+  variant to add.
+- Whether a call is a client call SHALL be decided from the whole-program placement (§12.2, Trigger 5 included). A
+  diagnostic of this section raised inside a function whose placement became client because of a client caller SHALL
+  name that caller (file and line).
 - W-CPS-NEEDS-FAILABLE (§19.9.5) SHALL NOT be emitted for a client call site: the unhandled call is E-ERROR-002.
 
 ---
@@ -20084,8 +20264,8 @@ return value already computed or an error already in flight — so it SHALL NOT 
 
    **A deferred `!{}` handler SHALL be total — it SHALL carry a catch-all `_ :> …` arm** (S430 round
    3). Listing every variant of the callee's DECLARED error enum is not enough: a server function or a
-   CPS-split callee can also fail with a transport error (`CpsError`, §19.9.5) that no declared enum
-   lists, and outside a deferred body an unmatched error propagates to the caller — which, from a
+   CPS-split callee can also fail with a transport error (`Transport(t: ServerCallError)`, §19.9.10 —
+   S454; formerly `CpsError`, now retired) that no declared enum lists, and outside a deferred body an unmatched error propagates to the caller — which, from a
    `finally`, would replace the function's real return value (exactly what rule 1 forbids). A deferred
    handler without a `_` arm is E-DEFER-UNHANDLED-FAILABLE. The lowering of a deferred body SHALL NOT
    emit any propagation or `return` out of the `finally`, whatever the handler's arms.
@@ -20129,7 +20309,7 @@ is E-FN-001, a deferred outer-scope mutation or call to a non-`fn` function is E
   top-level `defer` is the WHOLE function body. Its deferred body SHALL run after the **LAST**
   continuation completes — after the final server batch's result has been received and every client
   statement scheduled after it has run — and SHALL NOT run when an earlier batch's stub returns. It also
-  runs when an intermediate batch fails and the function returns its `CpsError` / server error envelope
+  runs when an intermediate batch fails and the function returns its `Transport(t: ServerCallError)` failure / server error envelope
   (§19.6.7 — batch 1's commit stands; the deferred body still runs on the way out).
 - For §19.9.9.1 tier classification a `defer` statement takes the tier of its deferred body. A `defer`
   whose deferred body is client-tier is a CLIENT statement: placed between two server statements, it
@@ -24573,7 +24753,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ERROR-015 | §19.10.4 | Manual transaction control — a `?{}` whose statement is `BEGIN` (any form), `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT` or `RELEASE` — where no enclosing function is declared `!` (a function without `!`, or a body top). Use `transaction { }` inside a `!` function. Replaces W-BATCH-001 at those sites. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c). **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-manual-tx-outside-failable-s451`); lands with the bootstrap. | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `_ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `_ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `Transport(t: ServerCallError)`, §19.9.10 — S454; impl#1 still names it `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `<onMount>` / `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — a `when … changes` / `when message` body, an `on*=${ … }` event-handler attribute or a `<channel>` `<onchange>` arm body (S432, S446; lowered as text, so a function declared inside a `when` body cannot hold one either; a `~{}` test body is not diagnosed by impl#1, S446) — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9) — OR (S430 review) a `defer` of any tier nested inside a top-level statement the split places on the server (e.g. an `if` whose branch holds a `?{}`). Either way the deferred body would run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected (fail closed) rather than lowered wrongly. The message names the concrete trigger (query, server-only resource, or the callee the compiler placed server-side). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` written in a bare `{ }` block statement, as a single-statement (unbraced) `match` / `!{}` handler arm (`.A :> defer D()`), or as the whole unbraced body of an `if` / `else` / `for` / `while` / `do` arm (S430 round 6 — the live front-end drops an unbraced `else` arm, which would silently attach the defer to the enclosing block). The front-ends carry those bodies as text (the native bridge flattens bare blocks), so the `defer` would never be parsed or lowered — or would silently attach to the enclosing block. Also: a `defer` directly in an arm of a `match` / `if` / `for` used for its VALUE (a value-form expression, or a `match` that is a `fn`'s implicit-return tail) — the defer block would capture the arm's result (measured: the produced value was lost). Rejected in stage 1; supporting bare blocks needs them parsed structurally (a separate arc). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
