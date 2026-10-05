@@ -12164,7 +12164,9 @@ columns, and that asymmetry drives the mechanism split:
       **Fail-closed:** a declaration the compiler cannot attribute is charged as a hazard against
       every tenant-scoped table and named *unattributable* — never treated as safe: a trigger, rule
       or view whose text it cannot read, whose body is a function (a Postgres
-      `EXECUTE FUNCTION f()` trigger), that calls a function outside the subset's allow-list (below),
+      `EXECUTE FUNCTION f()` trigger), that calls a function outside the subset's allow-list (below;
+      inside a call's arguments `FROM` / `ON` / `JOIN` introduce no table and every `identifier (`
+      is a call — `substring(x FROM evil(1))` is a call to `evil`, S455 PA probe),
       or that holds a `${…}`; a `CREATE FUNCTION` / `CREATE PROCEDURE` / `DO` body (code the floor
       never sees, callable from any query); a foreign-key action it cannot tie to a declaring table;
       and any other `<schema>` statement that names a tenant-scoped table (or a view over one) —

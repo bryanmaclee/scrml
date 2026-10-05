@@ -360,22 +360,43 @@ function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<
   const names = new Set<string>();
   const calls: string[] = [];
   let interp = false;
+  // The open parentheses, each marked whether it is a CALL's argument list. Inside a
+  // call's arguments there is no statement clause: `substring('a' FROM evil(1))`,
+  // `extract(epoch FROM evil(ts))`, `trim(BOTH FROM evil(n))` — FROM / ON / JOIN there do
+  // NOT introduce a table, and a non-reserved keyword is a legal function name. So inside
+  // a call frame every `identifier (` is a call (the expression-mode rule, S455 PA probe
+  // of 50150700: a trigger body `SELECT substring('a' FROM evil(1))` passed). At the
+  // statement's own clause level (no call frame open) the clause reading is unchanged.
+  const frames: boolean[] = [];
+  let pendingCall = -1;
   for (let k = from; k < to; k++) {
     const t = toks[k];
+    if (isP(t, "(")) { frames.push(pendingCall === k); continue; }
+    if (isP(t, ")")) { frames.pop(); continue; }
     if (t.k === "p" && t.t === "${") interp = true;
     if ((t.k === "w" || t.k === "q") && tainted.has(t.t.toLowerCase())) names.add(t.t.toLowerCase());
     if (t.k === "s") for (const n of stringMentions(t.t, tainted)) names.add(n);
+    if (!((t.k === "w" || t.k === "q") && isP(toks[k + 1], "("))) continue;
+    const prev = toks[k - 1];
+    const inCall = frames.includes(true);
+    if (inCall) {
+      if (t.k === "w" && RESERVED_BEFORE_PAREN.has(t.up)) continue;     // `IN (`, `CASE (`, `AND (` — syntax
+      pendingCall = k + 1;
+      if (isP(prev, ".")) { calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`); continue; }
+      if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
+      continue;
+    }
     // A callee may be QUOTED (`"query_to_xml"(…)` is a call in Postgres; `[f](…)` in
     // SQLite) — a quoted name is never a keyword, and is case-exact.
-    if ((t.k === "w" || t.k === "q") && isP(toks[k + 1], "(") && !(t.k === "w" && NOT_A_CALL.has(t.up))) {
-      const prev = toks[k - 1];
-      if (isP(prev, ".")) {
-        calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`);
-        continue;
-      }
-      if (prev && prev.k === "w" && TABLE_BEFORE_PAREN.has(prev.up)) continue;
-      if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
+    if (t.k === "w" && NOT_A_CALL.has(t.up)) continue;
+    if (isP(prev, ".")) {
+      pendingCall = k + 1;
+      calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`);
+      continue;
     }
+    if (prev && prev.k === "w" && TABLE_BEFORE_PAREN.has(prev.up)) continue;
+    pendingCall = k + 1;
+    if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
   }
   return { names: [...names], calls, interp };
 }

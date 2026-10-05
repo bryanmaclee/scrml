@@ -272,6 +272,34 @@ describe("expression mode — every `identifier (` is a call, no keyword excepti
   ]) test(`clean: ${s.slice(0, 70)}`, () => expect(exprKinds(s)).toEqual([]));
 });
 
+// PA probe of 50150700 (executed): the FROM blind spot survived in view / trigger bodies —
+// `SELECT substring('a' FROM evil(1))` in a trigger on a NON-tenant table compiled clean.
+// Inside a call's arguments FROM / ON / JOIN introduce no table: every `identifier (` there
+// is a call. At the statement's own clause level tables are still read as tables.
+describe("view / trigger bodies — FROM inside a call's arguments is not a table", () => {
+  const L = "CREATE TABLE logs (id INTEGER, msg TEXT, ts TIMESTAMP)";
+  const K = "CREATE TABLE kinds (k TEXT, label TEXT)";
+  const bodyKinds = (stmt) => findSchemaTenantHazards(body(ASSETS, L, K, stmt), ["assets"]).map((h) => h.kind + (h.unattributable ? "*" : ""));
+  for (const s of [
+    "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN SELECT substring('a' FROM evil(1)); END",
+    "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN SELECT trim(BOTH FROM evil(NEW.msg)); END",
+    "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN SELECT lower(substring(NEW.msg FROM evil.fn(1))); END",
+  ]) test(`trigger charged: ${s}`, () => expect(bodyKinds(s)).toEqual(["trigger*"]));
+  for (const s of [
+    "CREATE VIEW v AS SELECT substring(msg FROM evil(1)) AS s FROM logs",
+    "CREATE VIEW v AS SELECT trim(BOTH FROM match(msg)) FROM logs",
+  ]) test(`view charged: ${s}`, () => expect(bodyKinds(s)).toEqual(["view*"]));
+  for (const s of [
+    "CREATE VIEW v AS SELECT l.id, k.label FROM logs l JOIN kinds k ON k.k = l.msg WHERE l.id IN (SELECT id FROM logs WHERE msg IS NOT NULL)",
+    "CREATE VIEW v AS SELECT id, (SELECT label FROM kinds WHERE k = msg) AS lab, substring(msg FROM 2 FOR 3) AS s, lower(trim(msg)) FROM logs",
+    "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN INSERT INTO kinds (k, label) VALUES (NEW.msg, upper(substring(NEW.msg FROM 1 FOR 2))); END",
+  ]) test(`clean: ${s.slice(0, 70)}`, () => expect(bodyKinds(s)).toEqual([]));
+  test("tenant-table naming is unchanged: a view joining a tenant table is still a view hazard on it", () => {
+    const hs = findSchemaTenantHazards(body(ASSETS, L, "CREATE VIEW v AS SELECT * FROM logs l JOIN assets a ON a.id = l.id"), ["assets"]);
+    expect(hs.map((h) => `${h.kind}:${h.tables.join(",")}:${h.unattributable}`)).toEqual(["view:assets:false"]);
+  });
+});
+
 describe("reporting — every hazard is reported, not one per table", () => {
   test("an ADD CONSTRAINT CHECK and a DROP COLUMN on the same table are both reported", () => {
     const hs = findSchemaTenantHazards(body(ASSETS, "ALTER TABLE assets ADD CONSTRAINT c CHECK (id > 0)", "ALTER TABLE assets DROP COLUMN name"), ["assets"]);
