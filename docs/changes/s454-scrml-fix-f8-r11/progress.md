@@ -277,3 +277,13 @@ rewritten: 203 sites (124 handler values written braced, 79 inserted; 79 client-
 - Bootstrap counter vs main: PASS 121 = 121 (name set identical) · FAIL 58 → 56 · UNSUPPORTED 625 → 627 · the same
   two FAIL → UNSUPPORTED moves (sql-configured-db-no-e-sql-004, sql-missing-db-e-sql-004-neg) and the same 17
   unexpected-error-set changes as at fd3a012b9. Counts/classes otherwise unchanged vs fd3a012b9.
+
+## PA follow-up — #1305 cases migrated (20334bfdc) + SPEC migration note (811a40f2e)
+- `scrml fix --rules=client-server-call` applied to server-db/sql-handled-{decl-rhs,in-condition,match-scrutinee}-rt
+  (14 sites, all in each case's client driver `go()`). impl#1 conformance: 1268 pass + 50 xfail, 0 FAIL, 0 XPASS; all
+  three PASS. Bootstrap counter: PASS 121 (unchanged; the three cases are UNSUPPORTED before and after). Pre-commit
+  gate 30700/0.
+- SPEC §19.9.10 migration note: "The rule is not built." → the rule is built (S454), writes `.Transport(_)`, and LISTS
+  the shapes it cannot preserve; Provenance S454 "your recs on both, then go on F8" (verified in
+  user-voice-scrml.md:20318). SPEC-INDEX + FACTS regenerated; both `--check` OK.
+- Final corpus: 217 sites / 160 files — examples 8/5, samples 68/33, conformance/cases 140/121, stdlib 1/1.
