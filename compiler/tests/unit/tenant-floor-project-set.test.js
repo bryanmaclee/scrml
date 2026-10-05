@@ -262,6 +262,13 @@ describe("item 2 — the shared recognizer reads ALTER TABLE", () => {
   test("a `;` inside a string or a comment does not end the statement early (fail-closed extent)", () => {
     expect(tenantOf("ALTER TABLE notes ADD COLUMN a TEXT DEFAULT ';', ADD COLUMN tenant_id TEXT")).toEqual(["notes"]);
   });
+  test("`ALTER COLUMN` (an action of the same statement) and a keyword inside a string or comment are not a statement end", () => {
+    expect(tenantOf("ALTER TABLE notes ALTER COLUMN body SET DEFAULT 'x', ADD COLUMN tenant_id TEXT")).toEqual(["notes"]);
+    // the string's own `ALTER TABLE x` is ALSO read as a head (literal-agnostic, over-inclusive) — never fewer
+    expect(tenantOf("ALTER TABLE notes ADD COLUMN a TEXT DEFAULT 'CREATE ALTER TABLE x', ADD COLUMN tenant_id TEXT")).toEqual(["notes", "x"]);
+    // `notes` is NOT cut short by the commented ALTER; the commented ALTER itself also counts (comment-agnostic)
+    expect(tenantOf("ALTER TABLE notes /* was: ALTER TABLE y */ ADD COLUMN tenant_id TEXT")).toEqual(["notes", "y"]);
+  });
   test("an ALTER that does not name tenant_id declares nothing; the next statement is not read as its own", () => {
     expect(tenantOf("CREATE TABLE notes (id INTEGER)", "ALTER TABLE notes ADD COLUMN extra TEXT")).toEqual([]);
     expect(tenantOf("ALTER TABLE notes ADD COLUMN extra TEXT", "CREATE TABLE orders (id INTEGER, tenant_id TEXT)")).toEqual(["orders"]);

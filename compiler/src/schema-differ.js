@@ -956,18 +956,51 @@ function alterTableTenantDecls(text, masked) {
   return out;
 }
 
-/** Where an `ALTER TABLE` statement read from `from` ends (see `alterTableTenantDecls`). */
+/**
+ * Where an `ALTER TABLE` statement read from `from` ends (see `alterTableTenantDecls`):
+ * at the next `ALTER TABLE` / `CREATE` head, the next `?{` / `` `} `` wrapper edge, or a
+ * `{` / `}` outside a `${…}`. A stop is looked for only OUTSIDE `'…'` / `"…"` literals
+ * and `--` / `/* *\/` comments (nesting model — the longest comment), so a keyword
+ * spelled inside one never ends the statement early. Every misreading here makes the
+ * statement LONGER, never shorter: a longer statement can only over-declare.
+ * `ALTER COLUMN` (an action of this same statement) is not a stop.
+ */
 function alterStatementEnd(text, from) {
   let interp = 0;
   for (let k = from; k < text.length; k++) {
     const c = text[k];
+    if (c === "'" || c === '"') {
+      let j = k + 1;
+      while (j < text.length && !(text[j] === c && text[j + 1] !== c)) j += text[j] === c ? 2 : 1;
+      k = j;
+      continue;
+    }
+    if (c === "-" && text[k + 1] === "-") {
+      const nl = text.indexOf("\n", k);
+      k = nl === -1 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[k + 1] === "*") {
+      let depth = 1;
+      let j = k + 2;
+      while (j < text.length && depth > 0) {
+        if (text[j] === "/" && text[j + 1] === "*") { depth++; j += 2; continue; }
+        if (text[j] === "*" && text[j + 1] === "/") { depth--; j += 2; continue; }
+        j++;
+      }
+      k = j - 1;
+      continue;
+    }
     if (c === "$" && text[k + 1] === "{") { interp++; k++; continue; }
     if (c === "}" && interp > 0) { interp--; continue; }
     if (c === "{" || c === "}") return k;
     if (c === "?" && text[k + 1] === "{") return k;
     if (c === "`" && /^`\s*\}/.test(text.slice(k, k + 64))) return k;
-    if ((c === "a" || c === "A" || c === "c" || c === "C") && !SQL_IDENT_CHAR.test(text[k - 1] ?? " ") &&
-        (readSqlKeyword(text, k, "ALTER") !== -1 || readSqlKeyword(text, k, "CREATE") !== -1)) return k;
+    if ((c === "a" || c === "A" || c === "c" || c === "C") && !SQL_IDENT_CHAR.test(text[k - 1] ?? " ")) {
+      if (readSqlKeyword(text, k, "CREATE") !== -1) return k;
+      const afterAlter = readSqlKeyword(text, k, "ALTER");
+      if (afterAlter !== -1 && readSqlKeyword(text, skipSqlTrivia(text, afterAlter), "TABLE") !== -1) return k;
+    }
   }
   return text.length;
 }
