@@ -842,7 +842,9 @@ function _emitForStmtInner(
         } else {
           // Pass continueBehavior:"return" so continue-stmts nested at any depth
           // (e.g. inside an if-body) emit `return;` rather than illegal `continue;`.
-          const code = emitLogicNode(child, { continueBehavior: "return", declaredNames: bodyNames });
+          // boundary: this is the DocumentFragment item-factory — client code by
+          // construction (emitLogicNode defaulted a missing boundary to "client").
+          const code = emitLogicNode(child, { boundary: "client", continueBehavior: "return", declaredNames: bodyNames });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -1122,7 +1124,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null; mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to the body emission so
   // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
   // `while` body parse-time-attached sqlNode are emitted via the server
@@ -1151,7 +1153,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null; mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];

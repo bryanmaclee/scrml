@@ -129,7 +129,10 @@ interface LogicBinding {
    * A1c C11: `errors-element` discriminates the `<errors of=expr/>` first-class
    * element binding (SPEC §55.8 / L13).
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "errors-element" | "render-element";
+  // The full discriminator set binding-registry.ts declares (this file branches on every one).
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content" | "lift-host";
+  /** `kind === "lift-host"` — the host-parameterised lift group fn name. See binding-registry.ts. */
+  liftMountFn?: string;
   chainId?: string;
   branchId?: string;
   branchIndex?: number;
