@@ -288,17 +288,17 @@ describe("item 2 — the shared recognizer reads ALTER TABLE", () => {
     // a modelled statement is still read exactly — no unmodelled form, no widening
     expect(tenantOf("CREATE TABLE notes (id INTEGER, x TEXT DEFAULT ')')")).toEqual([]);
   });
-  test("F1 EXECUTED: the `[org create]` repro — `notes` is tenant-scoped and filtered at the source", async () => {
+  test("F1: the `[org create]` repro — `notes` is tenant-scoped, and a RENAME COLUMN TO tenant_id is refused", () => {
     const src = NOTES
       .replace("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)", "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, [org create] TEXT)")
       .replace("ALTER TABLE notes ADD COLUMN tenant_id TEXT", "ALTER TABLE notes RENAME COLUMN [org create] TO tenant_id");
-    // was: compiled clean with a bare `SELECT body FROM notes` (A read B's note). RENAME COLUMN
-    // is an admitted ALTER TABLE action (S455 "your rec on the allow-list"), so it compiles —
-    // scoped.
-    const p = project({ "notes.scrml": src });
-    expect(fatal(p.result)).toEqual([]);
-    const r = await routesOf(p.out, "notes.server.js");
-    expect(await call(r, "notesOut", await pinned(r, "A"))).toEqual([{ body: "A-note" }]);
+    // was: compiled clean with a bare `SELECT body FROM notes` (A read B's note). The reader
+    // now puts `notes` in the tenant set; renaming a column TO `tenant_id` re-assigns every
+    // row's tenant and is not an admitted ALTER TABLE action (S239 review of d4c4d4ac).
+    expect(tenantOf("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, [org create] TEXT)",
+      "ALTER TABLE notes RENAME COLUMN [org create] TO tenant_id")).toEqual(["notes"]);
+    const e = fatal(project({ "notes.scrml": src }).result);
+    expect(e.map((x) => x.code)).toEqual(["E-TENANT-SCHEMA-HAZARD"]);
   });
   test("F1 EXECUTED: a `$$ CREATE $$` default before `ADD COLUMN tenant_id` — scoped at the source; the hazard set agrees", async () => {
     // a replacer FUNCTION: in a replacement STRING `$$` means a single `$`

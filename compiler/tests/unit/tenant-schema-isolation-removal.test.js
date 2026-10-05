@@ -96,7 +96,6 @@ describe("(i) the app-role grant is admitted; other privilege / session statemen
   for (const s of [
     `GRANT SELECT, INSERT, UPDATE, DELETE ON assets TO ${DBAUTH_ROLE}`,
     `GRANT SELECT ON TABLE public.assets TO "${DBAUTH_ROLE}"`,
-    `GRANT ALL ON ALL TABLES IN SCHEMA public TO ${DBAUTH_ROLE}`,
     `GRANT SELECT ON config TO ${DBAUTH_ROLE}`,
   ]) test(`admitted: ${s}`, () => expect(kindsOf(s)).toEqual([]));
   // not isolation removals of a tenant table, but outside the allow-list (S455 "your rec on the allow-list")
@@ -362,6 +361,98 @@ describe("view / trigger bodies — FROM inside a call's arguments is not a tabl
     const hs = findSchemaTenantHazards(body(ASSETS, L, "CREATE VIEW v AS SELECT * FROM logs l JOIN assets a ON a.id = l.id"), ["assets"]);
     expect(hs.map((h) => `${h.kind}:${h.tables.join(",")}:${h.unattributable}`)).toEqual(["view:assets:false"]);
   });
+});
+
+// S239 review of d4c4d4ac (DO-NOT-LAND; items 1 and 2 PA-reproduced at exit 0).
+describe("S239 review of d4c4d4ac — items 1–9", () => {
+  const L = "CREATE TABLE logs (id INTEGER, msg TEXT, k TEXT)";
+  const k2 = (stmt) => findSchemaTenantHazards(body(ASSETS, L, stmt), ["assets"]).length;
+  const charged = (label, list) => { for (const s of list) test(`${label} charged: ${s.slice(0, 80)}`, () => expect(k2(s)).toBeGreaterThan(0)); };
+  const clean = (label, list) => { for (const s of list) test(`${label} clean: ${s.slice(0, 80)}`, () => expect(k2(s)).toBe(0)); };
+  charged("1 leader", [
+    "(SELECT dblink_exec('dbname=app','DELETE FROM ass'||'ets'))",
+    "WITH x AS (SELECT 1) SELECT * FROM x",
+  ]);
+  test("1 leader: a `(`-led statement is 'not admitted'", () => {
+    expect(kindsOf("(SELECT dblink_exec('dbname=app','DELETE FROM ass'||'ets'))")).toEqual(["statement not admitted in a tenant schema*"]);
+  });
+  charged("2 table function", [
+    "CREATE VIEW v AS SELECT * FROM evil(1)",
+    "CREATE VIEW v AS SELECT * FROM logs JOIN evil(1) ON true",
+    "CREATE VIEW v AS WITH c AS (SELECT * FROM evil()) SELECT * FROM c",
+    "CREATE VIEW v AS SELECT * FROM logs WHERE id IN (SELECT * FROM evil())",
+    "CREATE TRIGGER t AFTER INSERT ON logs BEGIN INSERT INTO logs (msg) SELECT x FROM evil(NEW.k); END",
+    "CREATE TRIGGER t AFTER INSERT ON logs BEGIN UPDATE logs SET msg = 'x' FROM evil(1); END",
+    "CREATE VIEW v AS SELECT * FROM logs WHERE match(msg)",
+  ]);
+  clean("2 table reference", [
+    "CREATE VIEW v AS SELECT l.id FROM logs l JOIN logs m ON m.id = l.id WHERE l.id IN (SELECT id FROM logs) AND l.msg LIKE ('a%')",
+    "CREATE VIEW v AS WITH c (a) AS (SELECT id FROM logs) SELECT * FROM c",
+    "CREATE TRIGGER t AFTER INSERT ON logs BEGIN INSERT INTO logs (msg, k) VALUES (NEW.msg, upper(NEW.k)) ON CONFLICT (id) DO NOTHING; END",
+  ]);
+  clean("3 policy", ["CREATE POLICY p ON assets AS RESTRICTIVE USING (tenant_id = current_setting('scrml.tenant', true))"]);
+  charged("3 policy", [
+    "CREATE POLICY p ON assets AS RESTRICTIVE USING (evil(tenant_id))",
+    "CREATE POLICY p ON assets AS RESTRICTIVE FOR INSERT TO scrml_app WITH CHECK (dblink_exec('a','b') IS NULL)",
+  ]);
+  charged("4 tenant column", [
+    "ALTER TABLE assets RENAME COLUMN tenant_id TO t2",
+    "ALTER TABLE assets RENAME COLUMN owner TO tenant_id",
+    "ALTER TABLE assets RENAME \"tenant_id\" TO t2",
+    "ALTER TABLE assets ALTER COLUMN tenant_id SET DEFAULT 'B'",
+    "ALTER TABLE assets ALTER COLUMN tenant_id DROP DEFAULT",
+    "ALTER TABLE assets ALTER COLUMN tenant_id TYPE int",
+  ]);
+  clean("4 tenant column", ["ALTER TABLE assets ALTER COLUMN tenant_id SET NOT NULL", "ALTER TABLE assets RENAME COLUMN name TO title"]);
+  charged("5 vacuum", ["VACUUM INTO '/tmp/x.db'", "VACUUM main INTO 'copy.db'"]);
+  clean("5 vacuum", ["VACUUM", "VACUUM assets"]);
+  charged("6 code-carrying type", [
+    "CREATE TABLE t (x mydomain)",
+    "CREATE TABLE t (x public.mytype)",
+    "CREATE TABLE t (x \"MyType\")",
+    "ALTER TABLE assets ADD COLUMN x mydomain",
+    "CREATE TABLE t (x TEXT DEFAULT mytype 'a')",
+    "CREATE TABLE t (x TEXT CHECK (x::mytype IS NOT NULL))",
+    "CREATE INDEX i ON assets USING bloom (name)",
+    "CREATE INDEX i ON assets USING gin (name gin_trgm_ops)",
+    "CREATE TABLE t (x int) USING columnar",
+  ]);
+  clean("6 built-in types", [
+    "CREATE INDEX i ON assets (name text_pattern_ops)",
+    "CREATE INDEX i ON assets USING btree (name DESC NULLS LAST)",
+    "CREATE TABLE t (x int) USING heap",
+    "CREATE TABLE t (a INTEGER, b TEXT, c REAL, d BLOB, e NUMERIC, f DATETIME, g double precision, h character varying(5), i timestamp with time zone, j int[], k BOOLEAN, l uuid, m jsonb, n bigserial, o)",
+    "CREATE TABLE t (d DATE DEFAULT DATE '2020-01-01', i INTERVAL DEFAULT INTERVAL '1 day')",
+  ]);
+  charged("7/8 grant", [
+    "GRANT CREATE ON SCHEMA public TO scrml_app",
+    "GRANT TEMP ON DATABASE app TO scrml_app",
+    "GRANT TRUNCATE ON assets TO scrml_app",
+    "GRANT ALL ON assets TO scrml_app",
+    "GRANT ALL PRIVILEGES ON TABLE assets TO scrml_app",
+    "GRANT ALL ON ALL TABLES IN SCHEMA public TO scrml_app",
+    "GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO scrml_app",
+    "GRANT SELECT ON assets TO scrml_app WITH GRANT OPTION",
+    "GRANT EXECUTE ON FUNCTION f() TO scrml_app",
+    "GRANT USAGE ON FOREIGN DATA WRAPPER w TO scrml_app",
+    "GRANT SET ON PARAMETER row_security TO scrml_app",
+    "GRANT REFERENCES ON assets TO scrml_app",
+    "GRANT TRIGGER ON assets TO scrml_app",
+    "GRANT SELECT (name) ON assets TO scrml_app",
+  ]);
+  test("7: `GRANT CREATE ON SCHEMA …` is ONE statement (not split at CREATE) — reported once", () => {
+    expect(kindsOf("GRANT CREATE ON SCHEMA public TO scrml_app")).toEqual(["statement not admitted in a tenant schema*"]);
+  });
+  clean("8 grant", [
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON assets, logs TO scrml_app",
+    "GRANT SELECT ON TABLE public.assets TO scrml_app",
+    "GRANT USAGE, SELECT ON SEQUENCE s TO scrml_app",
+  ]);
+  clean("9 pure functions", [
+    "CREATE TABLE t (a TEXT CHECK (length(left(a, 3)) > 0 AND json_valid(a) AND iif(1, 1, 0) = 1), b TEXT DEFAULT (printf('%d', 1)), c INT CHECK (mod(c, 2) = 0))",
+    "CREATE TABLE t (a TEXT CHECK (char_length(trim(a)) BETWEEN 1 AND 80), s tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(a, ''))) STORED, f TEXT CHECK (starts_with(a, 'x') OR ascii(a) > 0))",
+    "CREATE INDEX i ON assets (split_part(name, '-', 1), lower(regexp_replace(name, '[^a-z]', '', 'g')))",
+  ]);
 });
 
 describe("reporting — every hazard is reported, not one per table", () => {
