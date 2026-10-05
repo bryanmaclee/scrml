@@ -2002,10 +2002,11 @@ export function call(route, args, task) {
     let settled = false;
     let timer = null;
     // s454 fix round F3 — resource hygiene ONLY: when the deadline passes the call has already FAILED
-    // (Unreachable); aborting the fetch and cancelling a stalled body stops holding the socket. It is
+    // (Unreachable); aborting the fetch stops holding the socket (the abort also errors a body read in
+    // progress — no separate `body.cancel()`: the body is locked by `text()`, and cancelling a locked
+    // stream returns a REJECTED promise, an unhandled rejection; re-review N1). It is
     // not the supersede / teardown abort (§6.7.7.1) — that stays "nothing aborts, the result is dropped".
     const controller = typeof AbortController === "function" ? new AbortController() : null;
-    let response = null;
     const settle = (v) => {
       if (settled) return;
       settled = true;
@@ -2016,7 +2017,6 @@ export function call(route, args, task) {
       if (settled) return;
       settle(unreachable());
       try { if (controller) controller.abort(); } catch { /* best effort */ }
-      try { if (response && response.body && typeof response.body.cancel === "function") response.body.cancel(); } catch { /* best effort */ }
     }, SERVER_CALL_DEADLINE_MS);
     // the request: a JSON ARRAY of the arguments, each encoded against its parameter's type (Item 3.1)
     let body;
@@ -2049,7 +2049,6 @@ export function call(route, args, task) {
     }
     Promise.resolve(pending).then(
       (resp) => {
-        response = resp;
         let status;
         try { status = resp.status; } catch { settle(unreachable()); return; }
         Promise.resolve()

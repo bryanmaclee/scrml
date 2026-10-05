@@ -174,24 +174,37 @@ describe("S4 fix round — F1 / F3 / F6", () => {
     });
   }
 
-  test("F3: fetch gets an AbortSignal; it is aborted when the deadline passes (resource hygiene) — still exactly one outcome", async () => {
+  test("F3: fetch gets an AbortSignal; it is aborted when the deadline passes — a REAL Response with a stalled body (locked by text()): exactly one Unreachable, no unhandled rejection (re-review N1)", async () => {
     const timers = [];
     globalThis.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
     let signal;
-    let cancelled = 0;
-    globalThis.fetch = (path, init) => { signal = init.signal; return Promise.resolve({ status: 200, body: { cancel() { cancelled++; } }, text: () => new Promise(() => {}) }); };
-    let outcomes = 0;
-    const p = rtUnit.call(SAVE_ROUTE, ["n1", "x", 1], null).then((v) => { outcomes++; return v; });
-    await new Promise((r) => realSetTimeout(r, 0));
-    expect(signal).toBeDefined();
-    expect(signal.aborted).toBe(false);
-    timers[0].fn();
-    expect(ok(await p)).toEqual(transport("Unreachable"));
-    expect(signal.aborted).toBe(true);
-    expect(cancelled).toBe(1);
-    timers[0].fn();
-    await new Promise((r) => realSetTimeout(r, 0));
-    expect(outcomes).toBe(1);
+    globalThis.fetch = (path, init) => {
+      signal = init.signal;
+      const stalled = new ReadableStream({ start() { /* never enqueues, never closes */ } });
+      return Promise.resolve(new Response(stalled, { status: 200 }));
+    };
+    const unhandled = [];
+    const onProc = (e) => unhandled.push(e);
+    const onWin = (e) => unhandled.push(e.reason);
+    process.on("unhandledRejection", onProc);
+    window.addEventListener("unhandledrejection", onWin);
+    try {
+      let outcomes = 0;
+      const p = rtUnit.call(SAVE_ROUTE, ["n1", "x", 1], null).then((v) => { outcomes++; return v; });
+      await new Promise((r) => realSetTimeout(r, 0));
+      expect(signal).toBeDefined();
+      expect(signal.aborted).toBe(false);
+      timers[0].fn();
+      expect(ok(await p)).toEqual(transport("Unreachable"));
+      expect(signal.aborted).toBe(true);
+      timers[0].fn();
+      await new Promise((r) => realSetTimeout(r, 20));
+      expect(outcomes).toBe(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onProc);
+      window.removeEventListener("unhandledrejection", onWin);
+    }
   });
 
   test("F3: an answer before the deadline is not aborted", async () => {

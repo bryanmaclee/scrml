@@ -272,3 +272,14 @@ server body, no SQL, no database path. `fetch` is stubbed per row; the Save clic
   no runtime clash); (c) for the migration owner — 5 of the 10 moved cases ALSO fail on pre-existing non-U1b errors:
   server-fn/e-route-002-neg, e-route-002-pos, e-route-005-neg (E-SCOPE-001 `document`, E-SQL-004 no `db=`),
   e-route-005-pos (E-SQL-004), server-fn/cell-assign-failable-success-then-read (E-OPERATOR-OPERAND-TYPE).
+
+## Re-review of 056025276 (LAND-WITH-NITS, one MED)
+- N1 (MED, introduced by F3): the deadline timer called `response.body.cancel()` — on a stream locked by `text()`
+  that returns a REJECTED promise (no throw), so every deadline after headers produced an unhandled rejection, and
+  never cancelled anything. DROPPED: `controller.abort()` already errors the body read. The F3 test now uses a REAL
+  `Response` over a stalled `ReadableStream` (locked by `text()`) and asserts exactly one `Unreachable`, the signal
+  aborted, and no unhandled rejection (process + window).
+- N2 (NIT, recorded for U3 — not fixed): the F2 abandon is TASK-wide, not per call: two waiting chains on one task
+  where one throws would drop the healthy sibling's caller continuation too. Unreachable from emitted code today
+  (R4: server calls are printed sequentially, one chain per task at a time); it becomes reachable when U3
+  parallelizes read-only calls — U3 must make the abandon per waiting call.
