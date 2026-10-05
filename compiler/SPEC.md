@@ -22956,7 +22956,7 @@ hand off the `raw` content and `lang` to the external toolchain invocation.
 | RI | Skips `ForeignBlock` nodes — foreign code does not affect route analysis |
 | TS | Skips `ForeignBlock` nodes — no type checking of foreign code |
 | DG | Skips `ForeignBlock` nodes |
-| CG | Sidecar form: extracts `raw`, invokes the declared external toolchain. Inline value-returning ts/js form (§23.2.4a): splices the verbatim slice into an async IIFE with the `in:{}` names as params + a codegen-injected boundary `await` (§13180); server-only (E-SQL-004 color rule) |
+| CG | Sidecar form: extracts `raw`, invokes the declared external toolchain. Inline value-returning ts/js form (§23.2.4a) and the §64 tool host-I/O form: evaluates the verbatim slice as an async function in a SEALED scope whose parameters are the `in:{}` names (no free lexical capture), called with the same-named enclosing values + a codegen-injected boundary `await` (§13180); a slice that cannot be built as such a function is E-FOREIGN-007; server-only (E-SQL-004 color rule) |
 
 ### 23.2.4 Valid Contexts
 
@@ -23018,18 +23018,38 @@ slice is declared ONCE, at the top of the block, inside the braces, as `in: { na
 named values are the ONLY things that cross — there is NO free lexical capture (the slice sees only
 what `in:{}` names). The header is optional (`in: {}` or omitted = no crossings).
 
-**Codegen (the §13180 boundary).** The compiler lowers the inline form to an async IIFE: the
-`in:{}` names become the IIFE parameters, called with the same-named enclosing locals, and the
-`await` is INJECTED by codegen at the boundary (no source-level `await` is required on the scrml
-side — the slice itself, being verbatim ts/js, MAY use `await` internally):
+**The sealed scope (what a slice can name).** A slice is evaluated in a SEALED scope. The names it
+can resolve are exactly:
 
-```js
-const out = await (async (prompt, path) => {
-  return (await new Response(Bun.spawn(["claude","-p",prompt,"--output-format","text"],{cwd:path}).stdout).text());
-})(prompt, path);
-```
+1. its `in:{}` crossings — bound to the values of the same-named enclosing bindings at the point of
+   the block;
+2. host globals (`Bun`, `process`, `fetch`, `Response`, `globalThis`, …);
+3. the host module context the emitted module would itself have — `require`, `__dirname`,
+   `__filename`, and dynamic `import()` — which a host such as Bun binds per MODULE rather than
+   globally.
 
-This mirrors the `?{}` `case "sql"` lowering — the await is the boundary, not source vocabulary.
+It SHALL NOT resolve any other name in scope at the block: no enclosing scrml local or parameter
+that is not crossed, no module-level scrml binding (a `const`, a `function`, an import, an enum),
+and no compiler-owned binding (a runtime helper, the `?{}` database handle). A slice that reads
+such a name fails at runtime exactly as host code reading an unbound name does (a `ReferenceError`
+in ts/js); implementations SHOULD name the slice's source location and this rule in that error. The
+seal is against the PROGRAM's and the COMPILER's scope, not a sandbox: foreign code is author-trusted
+host code (§23.2.3) and keeps every host capability. The rule applies to every in-process slice —
+the inline value-returning form here and the §64 `kind="tool"` host-I/O form (§23.2.4 form 3),
+which share the `in:{}` header. A slice is evaluated as the body of a strict-mode async function —
+not as module code — so `import.meta` and a static `import` are not available inside it (§23.2.6
+E-FOREIGN-007); `this` is `undefined` and `arguments` is the crossings.
+
+**Codegen (the §13180 boundary).** The crossings are the parameters of the sealed slice and the
+block is a call of it with the same-named enclosing values; the `await` of that call is INJECTED by
+codegen at the boundary (no source-level `await` is required on the scrml side — the slice itself,
+being verbatim ts/js, MAY use `await` internally). This mirrors the `?{}` `case "sql"` lowering — the
+await is the boundary, not source vocabulary. The slice is built ONCE per distinct slice, not on
+every evaluation of the block. How the seal is realized is implementation freedom; impl#1 carries the
+slice's source text into the artifact and builds it once with the host's `Function` constructor
+(whose only lexical scope is the global one), handing in the host module context explicitly.
+
+> **Provenance:** spec:§23.2.4a "there is NO free lexical capture" (conformance restoration; g-foreign-iife-captures-module-scope-s454)
 
 **Slice body — single-expression OR multi-statement (both NORMATIVE).** The slice body is a
 **verbatim ts/js slice**, not restricted to a single expression. Two shapes are sanctioned, and the
@@ -23037,8 +23057,8 @@ compiler discriminates between them:
 
 1. **Single-expression slice** — the body is one expression (the example above). Codegen **injects**
    the `return`, wrapping the expression: `{ return (<expr>); }`.
-2. **Multi-statement slice** — the body is a statement sequence. Codegen splices it **verbatim** as
-   the async-IIFE body and injects NOTHING; the slice **SHALL** carry its own `return` to produce a
+2. **Multi-statement slice** — the body is a statement sequence. Codegen uses it **verbatim** as
+   the sealed async function's body and injects NOTHING; the slice **SHALL** carry its own `return` to produce a
    value. A multi-statement slice that never returns settles to `undefined`, which crosses the
    §13180 boundary as `not` per §42.
 
@@ -23066,30 +23086,39 @@ arbitrary statements means.
 </program>
 ```
 
-lowers to — note the slice arriving verbatim, with NO injected `return`:
-
-```js
-const digest = await (async (bytes, root) => { const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-  const dir  = `${root}/${hash.slice(0,2)}`;
-  await Bun.write(`${dir}/${hash}.bin`, bytes);
-  return hash; })(bytes, root);
-```
+means: an async function of `(bytes, root)` whose body is the four statements exactly as written —
+with NO injected `return`, so the slice's own `return hash;` is what produces the value — evaluated
+in the sealed scope above and called with the enclosing `bytes` and `root`; `digest` receives the
+settled value at the injected boundary `await`.
 
 **Author obligation.** Because codegen injects no `return` for the multi-statement shape, forgetting
 one is not a compile error — the binding receives `undefined` → `not`. This is the documented cost of
 §23.2.3 opacity: the compiler does not read the slice interior and so cannot know a value was
 intended. Prefer the single-expression shape when the work fits in one expression.
 
-**Crossing-shadow (E-FOREIGN-006).** Because the `in:{}` crossing names become the async-IIFE
-PARAMETERS, a crossing name that the slice ALSO declares at its TOP LEVEL — as a `const`, `let`,
-`var`, `function`, or `class` of the same name — redeclares the parameter, which is invalid JS
-(`(async (x) => { const x = … })(x)`). This SHALL be a compile error (E-FOREIGN-006) that NAMES the
+**Crossing-shadow (E-FOREIGN-006).** Because the `in:{}` crossing names are the PARAMETERS of the
+sealed slice, a crossing name that the slice ALSO declares at its TOP LEVEL — as a `const`, `let`,
+`var`, `function`, or `class` of the same name — redeclares the parameter (for `const` / `let` /
+`class`, invalid JS: `async function (x) { const x = … }`; for `var` / `function`, a silent
+overwrite of the crossed value). This SHALL be a compile error (E-FOREIGN-006) that NAMES the
 shadowed binding. The check is a pre-emit SYNTACTIC scan (brace/string/comment/template-aware; it
 inspects only top-level binding keywords and never type-checks or rewrites the interior, so §23.2.3
 opacity is preserved): a same-named binding NESTED inside an arrow body, a block, or any `{}`/`()`/`[]`
 is NOT a top-level collision and does NOT fire. The author resolves it by renaming the crossing name
 or the slice-local binding. (Without this guard the redeclaration surfaces post-emit as the misleading
 E-CODEGEN-INVALID-LOGIC "compiler defect — please report it", even though the cause is author choice.)
+
+**Unbuildable slice (E-FOREIGN-007).** A slice that is not valid JavaScript as the body of a
+strict-mode async function whose parameters are its crossings SHALL be a compile error
+(E-FOREIGN-007) that names the slice's source location and the parser's complaint. This covers a
+plain syntax error, `import.meta` or a static `import` (module-only syntax — a slice is not a module;
+use `__dirname` / `__filename` / `require` / `await import(…)`), and TypeScript type syntax in a
+`lang="ts"` slice (the slice is not transpiled). The check asks only whether the slice can be BUILT —
+the question the artifact's own syntax gate asks of every emitted line — and never type-checks,
+analyses or rewrites the interior, so §23.2.3 opacity is preserved. It is an AUTHOR error at the
+slice, never reported as a compiler defect.
+
+> **Provenance:** spec:§23.2.4a "there is NO free lexical capture" (conformance restoration; g-foreign-iife-captures-module-scope-s454) — the sealed slice is carried as source text, so the artifact syntax gate that used to catch an unbuildable in-place slice no longer sees it; E-FOREIGN-007 restores that check at the slice.
 
 **Opacity (§23.2.3).** The slice interior is OPAQUE: the TS / RI / DG stages SKIP it (no type
 checking, no route analysis, no dependency tracking of foreign code). scrml's guarantees end at the
@@ -23186,7 +23215,8 @@ ancestor `<program>`. Add `lang="go"` (or the appropriate language) to the enclo
 | E-FOREIGN-003 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | `_{}` block in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (the admitted forms are the §23.4 sidecar, the §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body, and the S238 `kind="tool"` program-body `function`/`main` host-I/O form §64) | Error |
 | E-FOREIGN-005 | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (arbitrary-language inline value-flow not yet supported — use a `use foreign:` sidecar §23.4) | Error |
-| E-FOREIGN-006 | inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice — the crossing becomes an async-IIFE parameter, so the slice-local redeclares it (invalid JS). Author error; rename the crossing or the slice-local | Error |
+| E-FOREIGN-006 | inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice — the crossing is a parameter of the sealed slice, so the slice-local redeclares it (invalid JS, or a silent overwrite). Author error; rename the crossing or the slice-local (Emitted at `compiler/src/codegen/emit-logic.ts:3632`.) | Error |
+| E-FOREIGN-007 | an in-process `_{}` slice that is not valid JavaScript as the body of a strict-mode async function of its crossings — a syntax error, `import.meta` / a static `import` (a slice is not a module), or TypeScript type syntax (the slice is not transpiled). Author error at the slice; names its source location (§23.2.4a) (Emitted at `compiler/src/codegen/emit-logic.ts:3681`.) | Error |
 | W-FOREIGN-001 | Level-0 `_{` used; `_={}=` recommended | Warning |
 
 ### 23.3 Call-Char Sigils for WASM
@@ -24838,7 +24868,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-FOREIGN-003 | §23.2 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | §23.2.4 | `_{}` in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (admitted: §23.4 sidecar + §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body + the S238 `kind="tool"` program-body `function`/`main` host-I/O form §64) | Error |
 | E-FOREIGN-005 | §23.2.4a | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (use a `use foreign:` sidecar §23.4 for an out-of-process service) | Error |
-| E-FOREIGN-006 | §23.2.4a | an inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice. The crossing becomes an async-IIFE parameter (§23.2.4a codegen), so the slice-local redeclares it — invalid JS. Author error; rename the crossing or the slice-local. A pre-emit syntactic scan (depth-aware; opacity-preserving) names the shadowed binding instead of letting the redeclaring IIFE fall through to the misleading post-emit E-CODEGEN-INVALID-LOGIC "compiler defect" framing. (ss23 — emit-logic.ts `case "foreign"`.) | Error |
+| E-FOREIGN-006 | §23.2.4a | an inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice. The crossing is a parameter of the sealed slice (§23.2.4a), so the slice-local redeclares it — invalid JS, or a silent overwrite. Author error; rename the crossing or the slice-local. A pre-emit syntactic scan (depth-aware; opacity-preserving) names the shadowed binding instead of letting the redeclaration fall through to the misleading post-emit E-CODEGEN-INVALID-LOGIC "compiler defect" framing. (ss23 — emit-logic.ts `case "foreign"`.) (Emitted at `compiler/src/codegen/emit-logic.ts:3632`.) | Error |
+| E-FOREIGN-007 | §23.2.4a | an in-process `_{}` slice (the inline value-returning form, or the §64 tool host-I/O form) that is not valid JavaScript as the body of a strict-mode async function of its crossings: a syntax error, `import.meta` / a static `import` (a slice is evaluated in a sealed scope, not as a module), or TypeScript type syntax (the slice is not transpiled). Author error at the slice, naming its source location. (S455 — emit-logic.ts `case "foreign"` + codegen/foreign-seal.ts; g-foreign-iife-captures-module-scope-s454.) (Emitted at `compiler/src/codegen/emit-logic.ts:3681`.) | Error |
 | E-FOREIGN-LANG-DUPLICATE | §23.6 | More than one top-level `<foreign lang=…>` block in a file. A file has ONE foreign-language context (the `lang=` sibling of the §44.7.1 module-with-db-context — like ONE `<db src>`) — keep a single `<foreign lang=…>` and remove the others. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-FOREIGN-LANG-IN-PROGRAM | §23.6 | A `<foreign lang=…>` block in a file that ALSO declares a top-level `<program>`. The two do not stack (§23.6.1): a program file declares the foreign-code language on the `<program lang=…>` attribute (§23.2.1). `<foreign lang>` is the library-file surface (§21.5 — a file with `export` fns and NO `<program>`). Resolution: remove the `<foreign lang=…>` block and set `lang=` on the `<program>`. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-TOOL-001 | §64.2 | A `<program kind="tool">` declares no top-level `function main` entry. A standalone tool SHALL declare exactly one `function main(args: string[])` (optionally `: number` for the process exit code; §64.3) — the emitted module runs `main(process.argv.slice(2))`. (S238 — Standalone Tool Target, §64.) | Error |

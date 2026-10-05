@@ -6,7 +6,7 @@
     ${
       function getUser(id) {
         let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let payload = _={ JSON.stringify(u) }=
+        let payload = _={ in: { u } JSON.stringify(u) }=
         return payload
       }
     }

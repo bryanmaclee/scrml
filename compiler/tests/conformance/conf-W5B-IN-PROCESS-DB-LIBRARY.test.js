@@ -61,7 +61,7 @@ function main(args: string[]): number {
   insertItem("b")
   insertItem("c")
   const c = countItems()
-  _={ console.log("CONF_COUNT=" + c) }=
+  _={ in: { c } console.log("CONF_COUNT=" + c) }=
   return 0
 }
 </program>`;

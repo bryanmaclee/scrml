@@ -6,7 +6,8 @@
     ${
       function getUser(id) {
         let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let payload = _={ JSON.stringify(u.reveal("passwordHash")) }=
+        let r = u.reveal("passwordHash")
+        let payload = _={ in: { r } JSON.stringify(r) }=
         return payload
       }
     }

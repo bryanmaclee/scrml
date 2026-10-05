@@ -41,6 +41,7 @@ import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE, DEFAULT_SQL_
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./log-loc.ts";
+import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
@@ -1529,6 +1530,11 @@ export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): str
   // fn that calls print writes the server process's stdout).
   if (emitted.includes("_scrml_print(")) {
     emitted = injectAfterHeader(emitted, SERVER_PRINT_HELPER);
+  }
+  // §23.2.4a — a server-importable fn's `_={ }=` slice is built in its sealed
+  // scope by `_scrml_foreign_seal` (foreign-seal.ts).
+  if (emitted.includes(`${FOREIGN_SEAL_FN}(`)) {
+    emitted = injectAfterHeader(emitted, SERVER_FOREIGN_SEAL_HELPER);
   }
 
   return emitted;
@@ -6956,6 +6962,14 @@ export function generateServerJs(
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_PRINT_HELPER + finalEmitted.slice(headerEndIdx);
     }
+  }
+
+  // §23.2.4a — every `_={ }=` slice in a server function is built in its SEALED
+  // scope (only its in:{} crossings + host globals; no module or scrml binding)
+  // by `_scrml_foreign_seal` (foreign-seal.ts). Gated purely on the emitted call;
+  // inlined at the post-header boundary like the helpers above.
+  if (finalEmitted.includes(`${FOREIGN_SEAL_FN}(`)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_FOREIGN_SEAL_HELPER);
   }
 
   // Phase-2 colorless-async — inject any collection-combinator helper

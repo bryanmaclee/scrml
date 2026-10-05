@@ -66,7 +66,7 @@ function main(args: string[]): number {
   insertItem("alpha")
   insertItem("beta")
   const c = countItems()
-  _={ console.log("count=" + c + " score=" + scoreOf(c)) }=
+  _={ in: { c, scoreOf } console.log("count=" + c + " score=" + scoreOf(c)) }=
   return 0
 }
 </program>`;
@@ -142,7 +142,7 @@ function main(args: string[]): number {
   seedTask("alpha")
   seedTask("beta")
   const r = routeSemantic("F1")
-  _={ console.log(r + " " + taskLabel(7)) }=
+  _={ in: { r, taskLabel } console.log(r + " " + taskLabel(7)) }=
   return 0
 }
 </program>`;
@@ -151,10 +151,10 @@ function main(args: string[]): number {
       expect(errCodes(result)).toEqual([]);
       const libJs = readFileSync(join(dist, "fspcore.js"), "utf8");
       // Combined `?{}` + `_{}` fn: SQL lowers to the in-process handle, foreign to
-      // the async IIFE. Neither leaks raw scrml.
+      // the §23.2.4a sealed slice. Neither leaks raw scrml.
       expect(libJs).toContain("export async function routeSemantic");
       expect(libJs).toContain("await _scrml_sql`SELECT id, name FROM fsp_task`");
-      expect(libJs).toContain("await (async (frame, rows) =>");
+      expect(libJs).toContain("`async function (frame, rows) {");
       // No RAW scrml `?{`…`}` SQL opener nor a `_={`…`}=` foreign opener leaks (the
       // banner comment mentions `?{}` / `_{}` textually — check the code openers).
       expect(libJs).not.toContain("?{`");
@@ -259,7 +259,7 @@ export fn multiply(a, b) { return a * b }
     const PTOOL = `<program kind="tool" lang="ts">
 \${ import { addup, multiply } from "./purelib.scrml" }
 function main(args: string[]): number {
-  _={ console.log("r=" + addup(multiply(2, 3), 1)) }=
+  _={ in: { addup, multiply } console.log("r=" + addup(multiply(2, 3), 1)) }=
   return 0
 }
 </program>`;
@@ -308,7 +308,7 @@ function main(args: string[]): number {
   seedItem("a")
   seedItem("b")
   const n = report()
-  _={ console.log("report=" + n) }=
+  _={ in: { n } console.log("report=" + n) }=
   return 0
 }
 </program>`;
@@ -365,7 +365,7 @@ function main(args: string[]): number {
   ensureX()
   seedX("alpha")
   const s = label(1)
-  _={ console.log("label=" + s) }=
+  _={ in: { s } console.log("label=" + s) }=
   return 0
 }
 </program>`;
@@ -395,7 +395,7 @@ export const total = ?{\`SELECT COUNT(*) AS c FROM items\`}.get().c
 }`;
     const TOOL = `<program kind="tool" lang="ts" db="sqlite:./c.db">
 \${ import { ensureC, total } from "./clib.scrml" }
-function main(args: string[]): number { _={ console.log(total) }= return 0 }
+function main(args: string[]): number { _={ in: { total } console.log(total) }= return 0 }
 </program>`;
     const { result, dir } = compileMultiToDist({ clib: LIB, ctool: TOOL }, ["ctool", "clib"]);
     try {
@@ -416,7 +416,7 @@ export function countE() { const r = ?{\`SELECT COUNT(*) AS c FROM items\`}.get(
 function main(args: string[]): number {
   ensureE()
   const c = countE()
-  _={ console.log("status=" + Status.Open + " c=" + c) }=
+  _={ in: { Status, c } console.log("status=" + Status.Open + " c=" + c) }=
   return 0
 }
 </program>`;
@@ -443,7 +443,7 @@ export function countThings() {
 }`;
     const TOOL = `<program kind="tool" lang="ts">
 \${ import { countThings } from "./nodblib.scrml" }
-function main(args: string[]): number { const c = countThings() _={ console.log(c) }= return 0 }
+function main(args: string[]): number { const c = countThings() _={ in: { c } console.log(c) }= return 0 }
 </program>`;
     const { result, dir } = compileMultiToDist({ nodblib: LIB, ndtool: TOOL }, ["ndtool", "nodblib"]);
     try {
@@ -468,7 +468,7 @@ export fn label(n) { return "acct#" + n }
 }`);
     writeFileSync(join(dir, "actool.scrml"), `<program kind="tool" lang="ts" db="${dbFile}">
 \${ import { label } from "./aclib.scrml" }
-function main(args: string[]): number { _={ console.log(label(7)) }= return 0 }
+function main(args: string[]): number { _={ in: { label } console.log(label(7)) }= return 0 }
 </program>`);
     try {
       const result = compileScrml({ inputFiles: [join(dir, "actool.scrml"), join(dir, "aclib.scrml")], write: true, outputDir: dist, validateEmit: true, log: () => {} });
