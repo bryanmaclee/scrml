@@ -1,0 +1,27 @@
+# BRIEF — s454-impl1-handled-sql-rhs (archived verbatim)
+
+start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-afc6e38adcae2e9c1
+
+---
+
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (path-discipline incidents to date are non-zero).
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- ; `git rev-parse --show-toplevel` == pwd; clean tree. `git fetch origin main`; `git merge-base HEAD origin/main` MUST equal `git rev-parse origin/main` (else `git merge --ff-only origin/main`; if that fails STOP). Expected base ≥ 3261a4423.
+2. Every Read/Write/Edit uses an ABSOLUTE path under YOUR worktree root; never write under /home/bryan-maclee/scrmlMaster/scrml/ outside it; never `cd` into the main checkout or another worktree.
+3. NEVER `git stash`; NEVER `pkill -f`; never `git -c core.hooksPath=…`.
+4. `bun install`, then `bun run pretest` from your worktree cwd. Scratch under "$WT/.tmp/" (delete at end). TMPDIR if set → ~/.cache/scrml-agent-tmp/s454-sql-rhs.
+5. First commit: archive THIS ENTIRE PROMPT verbatim as docs/changes/s454-impl1-handled-sql-rhs/BRIEF.md (body `start at $(pwd)`); progress.md append-only. Code + tests in ONE commit. Never --no-verify. Pre-commit timeout 300000. The Types gate is BLOCKING (`bun scripts/types-gate.ts --check`; it fails on new AND on fixed-but-unrecorded diagnostics — `--write` in the same commit if you fix one). Never put a status-bearing command behind a pipe.
+6. Push as `fix/s454-impl1-handled-sql-rhs` (normal push). If DENIED, report and stop. Do NOT open/merge a PR.
+
+MAPS — REQUIRED FIRST READ: .claude/maps/primary.map.md. Report whether load-bearing.
+CONCURRENCY: a sibling is building a `scrml fix` rule (compiler/src/commands/fix-*.js) and rewriting corpus files under examples/ samples/ conformance/cases/ on another branch, and editing compiler/SPEC.md. Do NOT touch those; your footprint is impl#1 codegen/parse for `?{}` handling + new tests + docs/changes/s454-impl1-handled-sql-rhs/. Do NOT edit SPEC.md or known-gaps.md — give entry text in your report.
+
+TASK — impl#1, under an S435 freeze EXCEPTION bryan granted S454 (verbatim: "grant the exception." — scrml-support/user-voice-scrml.md §S454, last entries). Governing: SPEC §19.8.3 / §19.8.4 (S451 R11): a `?{}` query is a failable expression everywhere; handled with `!{}` / `match`, the arm value replaces the result; §19.8.3's own example 1 (`const row = ?{…}.get() !{ … }`) is the canonical shape — read §19.8.3, §19.8.4, §19.4.3 (value position — every arm yields or leaves), §18.3 IN FULL and QUOTE the governing sentences in progress.md.
+DEFECTS (reproduce each FIRST on your base; record compiler SHA + emitted fragment):
+  D1 — a handled `?{}` as a DECLARATION or ASSIGNMENT right-hand side in a server function: `const row = ?{\`SELECT id FROM notes\`}.get() !{ _ :> not }` (also `.all() !{ _ :> [] }`, `let`, a plain `x = …` reassignment, parenthesized forms) fails the build with E-CODEGEN-INVALID-LOGIC; the server.js gets `let _scrml__scrml_result_N = ; …`. Existing gap entry: `g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454` (docs/known-gaps.md — read it).
+  D2 — the `match` form `const r = match ?{…}.get() { ::Ok(r) :> r  _ :> not }` compiles at EXIT 0 but SILENTLY moves the function to the client: the query emits as `null /* sql-ref unresolved */.get()`. Silent-wrong — the worst of the three.
+  D3 — `if (?{…}.get() !{ _ :> not }) { … }` exits 1 with a raw `!{` in emitted JS.
+  (`for (… of ?{}.all() !{…})` is E-PARSE-001 before any of this — out of scope; note it.)
+Locus is UNKNOWN — trace it (the guarded-expr / `!{}` lowering for a `?{}` operand: emit-logic.ts / rewrite.ts / the sql-ref resolution; the `match`-on-failable lowering; route inference's server-escalation trigger for a `?{}` inside a match scrutinee — D2's client move suggests the escalation trigger never sees the `?{}` there). State the entry→decision path you traced for each.
+FIX the ROOT for each, not per-position: a handled `?{}` (by `!{}` or `match`) must lower to a real query whose result (or the arm's value on failure) initialises the binding, in every expression position the SPEC admits, and its presence must escalate the enclosing function to the server exactly as an unhandled `?{}` does. On failure the arm value is used (`.get()` handled with `_ :> not` gives `not` on a failed query; a successful query with no row is still `not` per §19.8.4 — "no row is not a failure"). Do NOT change the semantics of already-working shapes.
+EVIDENCE: execute each repro end-to-end against a real bun:sqlite db (success with a row, success with no row, and a forced query failure — e.g. a missing table) and show the bound value for each, base vs head; SPEC §19.8.3 example 1 compiles and runs. Whole-corpus impl#1 emit differential base vs head (write:true): every changed artifact explained — the ONLY expected changes are files containing these shapes (list them). Conformance `bun conformance/run.ts` green. Add conformance cases pinning D1/D2/D3 (positive + runtime). Direction of change: D1/D3 newly-accepting toward the contract (conformance restoration — quote the sentence); D2 semantics-changed toward the contract.
+FINAL REPORT (<600 words): FINAL_SHA (== pushed tip); repro results base; traced loci; the fix; executed outcomes table; differential; tests/conformance; known-gaps text (resolve `g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454`, retitled to cover D1–D3); `git status` clean.
