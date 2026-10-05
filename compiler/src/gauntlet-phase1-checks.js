@@ -82,6 +82,14 @@ import {
   findGluedDslTableHeads,
   findTenantDeclarationDisagreements,
 } from "./schema-differ.js";
+// §14.8.10 (S455, ruling "go, comp-time schema") — E-TENANT-SCHEMA-HAZARD: a `<schema>`
+// declaration the tenant floor cannot scope (a trigger / rule / view / cascading FK over a
+// tenant-scoped table) is refused where it is declared. Pure; imports no codegen stage.
+import {
+  findSchemaTenantHazards,
+  schemaTenantTableNames,
+  schemaHazardMessage,
+} from "./tenant-schema-hazards.ts";
 // s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
 // route-inference.ts imports them the same way.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
@@ -758,6 +766,11 @@ function checkSchemaDeclarations(ast, filePath, errors) {
     ));
   }
 
+  // §14.8.10 — the tenant-scoped tables, read over EVERY `<schema>` body of the file
+  // (the union the floor reads; a table is tenant-scoped when any declaration of it
+  // carries `tenant_id`). E-TENANT-SCHEMA-HAZARD below charges each body against it.
+  const tenantTables = schemaTenantTableNames(schemaEntries.map((e) => schemaBodyText(e.node)));
+
   for (const { node, programRoot } of schemaEntries) {
     const span = node.span ?? fallbackSpan;
 
@@ -919,6 +932,18 @@ function checkSchemaDeclarations(ast, filePath, errors) {
         `of \`${dis.name}\` agree on \`tenant_id\`). (See SPEC §39.2, §14.8.10.)`,
         span,
       ));
+    }
+
+    // E-TENANT-SCHEMA-HAZARD (§14.8.10, S455 ruling "go, comp-time schema") — the tenant
+    // floor scopes each QUERY; it cannot scope SQL the database runs on its own. A
+    // trigger / rule declared on, or whose body names, a tenant-scoped table; a view over
+    // one (directly or through another view); a CASCADE / SET NULL / SET DEFAULT foreign
+    // key with a tenant-scoped end; and — fail-closed — any such declaration the checker
+    // cannot attribute, are refused HERE, at the declaration, whatever the program's
+    // queries do. The S452 r4 per-write E-TENANT-WRITE schema limb stays in codegen as
+    // defense in depth; it is unreachable for anything this check sees.
+    for (const h of findSchemaTenantHazards(body, tenantTables)) {
+      errors.push(new GauntletError("E-TENANT-SCHEMA-HAZARD", schemaHazardMessage(h, body), span));
     }
 
     let parsed;

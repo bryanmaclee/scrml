@@ -61,6 +61,13 @@ import {
   wrapWithTenantScope,
   type TenantContext,
 } from "./tenant-egress.ts";
+// §14.8.10 (S455) — E-TENANT-SCHEMA-HAZARD for tables the `<db>` registry makes tenant-scoped.
+import {
+  findSchemaTenantHazards,
+  schemaHazardKey,
+  schemaHazardMessage,
+  schemaTenantTableNames,
+} from "../tenant-schema-hazards.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
 import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
 // g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,
@@ -1620,6 +1627,27 @@ function parseArmBindings(raw: string | undefined | null): EndpointArmBinding[] 
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
  */
+/** The span of the file's first `<schema>` block (E-TENANT-SCHEMA-HAZARD's locus), or null. */
+function findSchemaNodeSpan(fileAST: any): any | null {
+  const seen = new WeakSet<object>();
+  const walk = (v: any, depth: number): any | null => {
+    if (v === null || typeof v !== "object" || depth > 64 || seen.has(v)) return null;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      for (const x of v) { const r = walk(x, depth + 1); if (r) return r; }
+      return null;
+    }
+    if (v.kind === "state" && v.stateType === "schema") return v.span ?? null;
+    for (const k of Object.keys(v)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      const r = walk(v[k], depth + 1);
+      if (r) return r;
+    }
+    return null;
+  };
+  return walk(fileAST, 0);
+}
+
 export function generateServerJs(
   ctxOrFileAST: CompileContext | any,
   routeMapLegacy?: any,
@@ -1964,6 +1992,30 @@ export function generateServerJs(
     (ident: string) => _dbScopesForFile.get(ident)?.driver,
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
+  // §14.8.10 (S455, ruling "go, comp-time schema") — E-TENANT-SCHEMA-HAZARD. GCP1
+  // charges every `<schema>` declaration against the tables `<schema>` itself makes
+  // tenant-scoped. The floor's tenant set is wider: the `<db>` registry adds a table
+  // whose LIVE database (or a `?{CREATE TABLE …}` in the program) carries `tenant_id`.
+  // A `<schema>` view / trigger / cascading key over such a table is the same hazard,
+  // so it is charged here — only the hazards GCP1 did not already report.
+  if (_tenantActive && _desiredForTenant.schemaText.trim().length > 0) {
+    const _schemaOnly = schemaTenantTableNames([_desiredForTenant.schemaText]);
+    if ([..._tenantCtx.tenantScopedTables].some((t) => !_schemaOnly.has(t))) {
+      const _reported = new Set(
+        findSchemaTenantHazards(_desiredForTenant.schemaText, _schemaOnly).map(schemaHazardKey),
+      );
+      const _sp: any = findSchemaNodeSpan(fileAST) ?? {};
+      for (const h of findSchemaTenantHazards(_desiredForTenant.schemaText, _tenantCtx.tenantScopedTables)) {
+        if (_reported.has(schemaHazardKey(h))) continue;
+        errors.push(new CGError(
+          "E-TENANT-SCHEMA-HAZARD",
+          schemaHazardMessage(h, _desiredForTenant.schemaText),
+          { file: filePath, start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
+          "error",
+        ));
+      }
+    }
+  }
   // Tier-1 `SELECT * FROM <tenant table>` + SSR seed reads are hand-emitted (not
   // via the rewriter), so their I-TENANT-STRIP records are collected here.
   const _tenantStripsFromHandEmit: string[] = [];
