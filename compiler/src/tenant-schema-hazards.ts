@@ -52,7 +52,7 @@ import { TENANT_ROW_FUNCTIONS, TENANT_GROUP_AGGREGATES } from "./codegen/tenant-
 import { schemaTableDeclarations } from "./schema-differ.js";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
-export type SchemaHazardKind = "trigger" | "rule" | "foreign key" | "view" | "function" | "statement";
+export type SchemaHazardKind = "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy";
 
 export interface SchemaHazard {
   kind: SchemaHazardKind;
@@ -767,10 +767,42 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     // reads as `CREATE x VIEW`); a CREATE of no known object kind is that artifact, and
     // the comment-free readings own the live statement.
     if (declsOnly && !KNOWN_OBJECTS.has(d.object ?? "")) continue;
-    // A row-security POLICY restricts what a role sees; it runs no write and moves no
-    // row, and §14.8.11 expects hand-authored policies beside the tier's own
-    // (`scrml_tenant_iso` "never touches a hand-authored one"). Not a hazard.
-    if (d.object === "POLICY") continue;
+    // A row-security POLICY (§14.8.11 expects hand-authored ones beside the tier's own
+    // `scrml_tenant_iso`). Postgres combines PERMISSIVE policies with OR — and PERMISSIVE
+    // is the DEFAULT when `AS` is omitted — so a permissive policy on a tenant table
+    // WIDENS the tier's isolation policy. Only an explicit `AS RESTRICTIVE` (ANDed: it
+    // can only narrow) is exempt; a policy whose target or AS clause cannot be read is
+    // charged. A policy on a table without `tenant_id` is not this floor's business.
+    if (d.object === "POLICY") {
+      let p = d.start;
+      while (p < d.end && !isW(toks[p], "POLICY")) p++;
+      const pname = readName(toks, p + 1);
+      const tbl = pname && isW(toks[pname.next], "ON") ? readName(toks, pname.next + 1) : null;
+      const pShown = pname ? toks[pname.next - 1].t : "?";
+      if (!tbl) {
+        out.push({ kind: "permissive policy", object: pShown, tables: allTenant, unattributable: true, offset: d.at,
+          why: "the checker cannot read which table it is declared on" });
+        continue;
+      }
+      if (!tainted.has(tbl.name)) continue;
+      let mode: string | null = "PERMISSIVE (the default when `AS` is omitted)";
+      if (isW(toks[tbl.next], "AS")) {
+        const m = toks[tbl.next + 1];
+        if (isW(m, "RESTRICTIVE")) mode = null;
+        else if (isW(m, "PERMISSIVE")) mode = "PERMISSIVE";
+        else {
+          out.push({ kind: "permissive policy", object: pShown, tables: tenantsUnder([tbl.name]), unattributable: true, offset: d.at,
+            why: `its \`AS\` clause (\`${m ? m.t : "?"}\`) could not be read — write \`AS RESTRICTIVE\`` });
+          continue;
+        }
+      }
+      if (mode !== null) {
+        out.push({ kind: "permissive policy", object: pShown, tables: tenantsUnder([tbl.name]), unattributable: false, offset: d.at,
+          why: `it is ${mode} on \`${tbl.name}\`, and Postgres ORs permissive policies with the tier's own isolation policy ` +
+            "(`scrml_tenant_iso`), so it can only WIDEN which tenants' rows a request sees — write `AS RESTRICTIVE` (ANDed; it can only narrow)" });
+      }
+      continue;
+    }
     if (r.names.length || r.interp) {
       const mods = ["VIRTUAL", "FOREIGN"].filter((m) => d.flags.has(m)).join(" ");
       out.push({ kind: "statement", object: `CREATE ${mods ? `${mods} ` : ""}${d.object ?? "?"} ${shown}`.trim(), tables: r.names.length ? tenantsUnder(r.names) : allTenant,

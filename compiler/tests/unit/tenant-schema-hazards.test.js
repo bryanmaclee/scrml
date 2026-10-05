@@ -260,9 +260,33 @@ describe("string forms the lexer does not model exactly are charged (S455 review
   });
 });
 
-describe("a row-security POLICY is not a hazard (§14.8.11 expects hand-authored policies)", () => {
-  test("CREATE POLICY on a tenant table", () => {
-    expect(hazards(ASSETS, "CREATE POLICY p ON assets USING (tenant_id = current_setting('scrml.tenant', true))")).toEqual([]);
+// PA decision (S455 review, closed wins): Postgres ORs PERMISSIVE policies — the default
+// when `AS` is omitted — with the §14.8.11 tier's `scrml_tenant_iso`, so a permissive policy
+// on a tenant table widens isolation. Only an explicit `AS RESTRICTIVE` (ANDed) is exempt.
+describe("row-security POLICY on a tenant table: only AS RESTRICTIVE is exempt", () => {
+  const USING = "USING (tenant_id = current_setting('scrml.tenant', true))";
+  test("AS RESTRICTIVE (any case) is quiet", () => {
+    expect(hazards(ASSETS, `CREATE POLICY p ON assets AS RESTRICTIVE FOR SELECT ${USING}`)).toEqual([]);
+    expect(hazards(ASSETS, `CREATE POLICY p ON assets as restrictive ${USING}`)).toEqual([]);
+    expect(hazards(ASSETS, `CREATE POLICY "p q" ON public.assets As Restrictive ${USING}`)).toEqual([]);
+  });
+  test("AS PERMISSIVE → charged, the message says to write AS RESTRICTIVE", () => {
+    const b = body(ASSETS, "CREATE POLICY open_all ON assets AS PERMISSIVE USING (true)");
+    const hs = findSchemaTenantHazards(b, ["assets"]);
+    expect(kinds(hs)).toEqual(["permissive policy:open_all"]);
+    expect(schemaHazardMessage(hs[0], b)).toContain("write `AS RESTRICTIVE`");
+  });
+  test("no AS clause → PERMISSIVE by default → charged", () => {
+    const hs = hazards(ASSETS, `CREATE POLICY p ON assets FOR SELECT ${USING}`);
+    expect(kinds(hs)).toEqual(["permissive policy:p"]);
+    expect(hs[0].why).toContain("the default when `AS` is omitted");
+  });
+  test("an unreadable AS clause (quoted keyword) or target → charged unattributable", () => {
+    expect(kinds(hazards(ASSETS, `CREATE POLICY p ON assets AS "restrictive" ${USING}`))).toEqual(["permissive policy:p:unattributable"]);
+    expect(kinds(hazards(ASSETS, `CREATE POLICY p USING (true)`))).toEqual(["permissive policy:p:unattributable"]);
+  });
+  test("a policy on a table without tenant_id is not charged", () => {
+    expect(hazards(ASSETS, CONFIG, "CREATE POLICY p ON config USING (true)")).toEqual([]);
   });
 });
 
