@@ -1,0 +1,16 @@
+{
+  "id": "tenant-schema-hazard-unattributable-neg",
+  "description": "§14.8.10 (S455) fail-closed: a Postgres trigger on a non-tenant table whose body is a function (`EXECUTE FUNCTION audit_fn()`). The checker cannot read the function, so it cannot tell whether it touches a tenant table; the declaration is charged as unattributable, never treated as safe.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-schema-hazards.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (S455): a `<schema>` that declares, against a tenant-scoped table (one carrying `tenant_id`), a trigger declared on it or whose body names it, a Postgres rule on or naming it, a foreign key with a CASCADE / SET NULL / SET DEFAULT action whose either end is tenant-scoped, or a view (materialized included) reading it directly or through another view, SHALL be a compile error at the declaration (E-TENANT-SCHEMA-HAZARD); a declaration the checker cannot attribute is charged, never treated as safe. Provenance: ruling:user-voice-scrml.md S455 \"go, comp-time schema\".",
+  "expect": {
+    "codes": [
+      "E-TENANT-SCHEMA-HAZARD"
+    ],
+    "codeCounts": {
+      "E-TENANT-SCHEMA-HAZARD": 1
+    }
+  }
+}
