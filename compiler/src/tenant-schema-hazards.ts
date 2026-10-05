@@ -589,6 +589,14 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     // A SQL statement (inside a `?{}` wrapper, at a statement start).
     const prev = toks[i - 1];
     const atStart = i === 0 || prev.k === "b" || isP(prev, ";");
+    // A statement that STARTS with a `${…}` is SQL text the checker cannot see at all.
+    if (isP(t, "${") && t.sql && atStart) {
+      const end = statementEnd(toks, i);
+      generic.push({ start: i, end, leader: "${", target: null, at: t.at });
+      for (let k = i; k < Math.max(end, i + 1); k++) consumed[k] = 1;
+      i = Math.max(end, i + 1) - 1;
+      continue;
+    }
     if (t.k === "w" && t.sql && atStart) {
       const end = statementEnd(toks, i);
       let target: string | null = null;
@@ -724,6 +732,11 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
   if (!declsOnly) {
     for (const g of generic) {
       if (INERT_LEADERS.has(g.leader)) continue;
+      if (g.leader === "${") {
+        out.push({ kind: "statement", object: "`${…}`", tables: allTenant, unattributable: true, offset: g.at,
+          why: "the statement is a `${…}` interpolation, SQL the checker cannot read" });
+        continue;
+      }
       const r = readRegion(toks, g.start + 1, g.end, tainted);
       const label = toks.slice(g.start, Math.min(g.end, g.start + 3)).map((t) => t.t).join(" ");
       if (g.leader === "DO" || g.leader === "CALL" || g.leader === "EXECUTE") {

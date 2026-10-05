@@ -154,8 +154,16 @@ describe("fail-closed — what the checker cannot attribute is charged, never tr
     expect(kinds(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN SELECT my_fn(NEW.k); END")))
       .toEqual(["trigger:t:unattributable"]);
   });
-  test("a `${…}` interpolation inside a declaration", () => {
+  test("a `${…}` interpolation inside a declaration, or as a whole statement", () => {
     expect(kinds(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT * FROM ${t}"))).toEqual(["view:v:unattributable"]);
+    expect(kinds(hazards(ASSETS, "${ddl}"))).toEqual(["statement:`${…}`:unattributable"]);
+  });
+  test("quoted, bracketed, backticked and schema-qualified names are read", () => {
+    expect(kinds(hazards(ASSETS, CONFIG, `CREATE TRIGGER "t" AFTER INSERT ON "config" BEGIN UPDATE "assets" SET name = 'x'; END`))).toEqual(["trigger:t"]);
+    expect(kinds(hazards(ASSETS, "CREATE TRIGGER t2 AFTER DELETE ON main.assets BEGIN SELECT 1; END"))).toEqual(["trigger:t2"]);
+    expect(kinds(hazards(ASSETS, "CREATE VIEW [v3] AS SELECT * FROM [assets]"))).toEqual(["view:v3"]);
+    const bare = "\n    CREATE TABLE assets (id INTEGER, tenant_id TEXT)\n    CREATE VIEW `v4` AS SELECT * FROM `assets`\n";
+    expect(kinds(findSchemaTenantHazards(bare, schemaTenantTableNames([bare])))).toEqual(["view:v4"]);
   });
   test("an unclosed BEGIN, an unreadable ON target, a function / DO body, an event trigger", () => {
     expect(kinds(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN UPDATE config SET v = 1;"))).toEqual(["trigger:t:unattributable"]);
