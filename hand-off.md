@@ -13,6 +13,7 @@
 - Peter's inbox notes from S454 (on scrml `inbox`): B-1 claimed · S453 note answered · #1297 merge-on-green review (2 HIGH, his to fix).
 
 ### 1. In flight at wrap
+> ⚑ **POST-WRAP UPDATE (S454, same session): F8 LANDED as #1308** (r2 LAND-WITH-NITS; 217 sites / 160 files). The F8 bullet below is history; its worktree `agent-a511269d8a8009187` can be removed. Next owed item is R11 `sql-failable` (§2 item 1).
 - **F8 — `scrml fix client-server-call`** on `feat/s454-scrml-fix-f8-r11` (tip at wrap: see `git log`; worktree `agent-a511269d8a8009187` RETAINED).
   Built + applied (229 sites / 167 files; impl#1 conformance identical case by case; counter PASS 121 = 121). S239 r1 (e17b7cc59):
   corpus safe EXCEPT class G; the RULE has **HIGH** — a guarded `const`/`let` inside a loop captured by a closure becomes impl#1 `var` →
