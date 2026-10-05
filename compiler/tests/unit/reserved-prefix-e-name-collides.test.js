@@ -27,7 +27,7 @@ import {
   isReservedPrefixExemptPath,
   reservedPrefixMessage,
 } from "../../src/validators/reserved-prefix.ts";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, symlinkSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, symlinkSync, mkdirSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -156,6 +156,95 @@ describe("references to a prefixed name are refused", () => {
 });
 
 // ---------------------------------------------------------------------------
+// S239 fix round — positions the first cut missed. Each is asserted through the
+// FULL compile: the exit-relevant error count separately from the message.
+// ---------------------------------------------------------------------------
+
+function compileOutcome(src) {
+  const dir = mkdtempSync(join(tmpdir(), "rsvprefix-fr-"));
+  const f = join(dir, "case.scrml");
+  writeFileSync(f, src);
+  const r = compileScrml({ inputFiles: [f], outputDir: join(dir, "dist"), write: false, log: () => {} });
+  const errors = r.errors || [];
+  return {
+    failed: errors.some((e) => (e.severity ?? "error") === "error"),
+    names: errors.filter((d) => d.code === CODE).map((d) => d.message.match(/`([^`]+)`/)[1]),
+  };
+}
+
+describe("fix round — crossing header, quoted attribute interpolations, component `${}` attrs, test bodies", () => {
+  test("1b: a `_scrml_` name in a foreign block's `in: { … }` crossing HEADER is refused", () => {
+    const o = compileOutcome(`<program lang="js">
+  <db src="./a.db" tables="notes">
+    \${
+      server function leak() {
+        let v = _={ in: { _scrml_sql } return _scrml_sql }=
+        return v
+      }
+    }
+  </db>
+</program>
+`);
+    expect(o.failed).toBe(true);
+    expect(o.names).toEqual(["_scrml_sql"]);
+  });
+
+  test("1b: the foreign BODY stays opaque — a `_scrml_` name only inside the body is not inspected", () => {
+    expect(flagged(`<program lang="js">\n\${ function f(a) { return _={ in: { a } return a + _scrml_inside }= } }\n</program>\n`)).toEqual([]);
+  });
+
+  test("2: quoted attribute values — the `${}` interpolations are checked, the literal text is not", () => {
+    const o = compileOutcome(prog(`  <count> = 0
+  <p style="color: \${_scrml_q1}">a</p>
+  <p class="a \${_scrml_reactive_get("count")}">b</p>
+  <p title="plain _scrml_ text">c</p>`));
+    expect(o.failed).toBe(true);
+    expect(o.names).toEqual(["_scrml_q1", "_scrml_reactive_get"]);
+  });
+
+  test("2: …also inside <each>, a <match> arm, an engine state body, and `lift`", () => {
+    const names = flagged(prog(`  type P:enum = { A, B }
+  <p2>: P = .A
+  <items> = [1]
+  <ul><each in=@items as r><li class="x \${_scrml_e1}">i</li></each></ul>
+  <match for=P on=@p2>
+    <A><p class="m \${_scrml_m1}">a</p></>
+    <B><p>b</p></>
+  </match>
+  <engine for=P initial=.A>
+    <A rule=.B><p class="g \${_scrml_g1}">a</p></>
+    <B rule=.A></>
+  </>
+  \${ function f() { lift <p class="z \${_scrml_l1}">l</p> } }`));
+    for (const n of ["_scrml_e1", "_scrml_m1", "_scrml_g1", "_scrml_l1"]) expect(names).toContain(n);
+  });
+
+  test("3: a `${}` attribute inside a COMPONENT body is checked", () => {
+    const o = compileOutcome(prog(`  <count> = 0
+  \${ const Card = <div><button onclick=\${() => _scrml_reactive_set("count", 7)}>x</button></div> }
+  <Card/>`));
+    expect(o.failed).toBe(true);
+    expect(o.names).toEqual(["_scrml_reactive_set"]);
+  });
+
+  test("5: a `~{}` test body is checked", () => {
+    expect(flagged(prog(`<p>x</p>
+~{ "t"
+    test "uses a runtime name" { let k = _scrml_reactive_get("x")
+ assert k == 1 }
+}`))).toContain("_scrml_reactive_get");
+  });
+
+  test("controls — the same shapes with ordinary names compile with zero hits", () => {
+    const o = compileOutcome(prog(`  <count> = 0
+  <p style="color: \${@count}">a</p>
+  \${ const Card = <div><button onclick=\${() => @count = 7}>x</button></div> }
+  <Card/>`));
+    expect(o.names).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Occurrences that are NOT names
 // ---------------------------------------------------------------------------
 
@@ -242,6 +331,20 @@ describe("stdlib/ source is exempt by path; a lookalike is not", () => {
     const link = join(dir, "linked-stdlib");
     symlinkSync(STDLIB, link, "dir");
     expect(isReservedPrefixExemptPath(join(link, "data", "messages.scrml"))).toBe(true);
+  });
+
+  test("a USER directory symlinked INTO stdlib/ is NOT exempt (decided on the real path)", () => {
+    const userDir = mkdtempSync(join(tmpdir(), "rsvprefix-userdir-"));
+    writeFileSync(join(userDir, "evil.scrml"), "${ function f() { return _scrml_sql } }\n");
+    const linkInStdlib = join(STDLIB, `.rsvprefix-test-link-${process.pid}`);
+    symlinkSync(userDir, linkInStdlib, "dir");
+    try {
+      const p = join(linkInStdlib, "evil.scrml");
+      expect(isReservedPrefixExemptPath(p)).toBe(false);
+      expect(flagged(readFileSync(p, "utf8"), p)).toEqual(["_scrml_sql"]);
+    } finally {
+      unlinkSync(linkInStdlib);
+    }
   });
 
   test("relative and empty paths", () => {

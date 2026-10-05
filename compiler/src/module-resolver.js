@@ -23,7 +23,7 @@
  * relative paths only.
  */
 
-import { resolve, dirname, join, posix } from "path";
+import { resolve, dirname, join, basename, posix } from "path";
 import { existsSync, realpathSync } from "fs";
 import { fileURLToPath } from "url";
 import { toPosix, PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
@@ -1075,14 +1075,17 @@ export function isStdlibFilePath(absPath) {
  * §47.1.1 (S440 ruling #9) — is `filePath` a source file of the scrml standard
  * library (the `stdlib/` tree this compiler ships with)?
  *
- * The `_scrml_` reserved-prefix rule exempts stdlib source BY PATH. This is
- * `isStdlibFilePath` made robust for that use:
- *   - a relative input is `resolve()`d first (the lexical check needs absolute);
- *   - separators are POSIX-canonicalized by `isStdlibFilePath` (Windows `\`,
- *     docs/cross-os-invariants.md invariant 1);
- *   - symlinks are resolved on BOTH sides — the file's real path is compared
- *     against the stdlib root's real path, so a stdlib file reached through a
- *     symlinked install (or a symlinked checkout) is still recognized.
+ * The `_scrml_` reserved-prefix rule exempts stdlib source BY PATH, decided on
+ * the file's REAL path only:
+ *   - a relative input is `resolve()`d first;
+ *   - the file's real path (every symlink followed) is compared against the REAL
+ *     path of the stdlib root — so a user directory symlinked INTO stdlib/ is NOT
+ *     exempt (its real path is outside the tree), while a genuine stdlib file
+ *     reached through a symlinked install or checkout still is;
+ *   - a path that does not exist is decided by the real path of its deepest
+ *     existing ancestor plus the remaining segments;
+ *   - separators are POSIX-canonicalized before the prefix test (Windows `\`,
+ *     docs/cross-os-invariants.md invariant 1).
  * A user file whose path merely CONTAINS a `stdlib` segment (`/app/stdlib/x.scrml`)
  * is NOT exempt — the comparison is against this compiler's absolute stdlib root,
  * never a substring match.
@@ -1092,20 +1095,32 @@ export function isStdlibFilePath(absPath) {
  */
 export function isStdlibSourceFile(filePath) {
   if (typeof filePath !== "string" || filePath.length === 0) return false;
-  const abs = resolve(filePath);
-  if (isStdlibFilePath(abs)) return true;
-  let realFile;
-  let realRoot;
-  try {
-    realFile = realpathSync(abs);
-    realRoot = realpathSync(STDLIB_ROOT);
-  } catch {
-    return false; // a path that does not exist cannot be a stdlib source file
-  }
-  const normFile = toPosix(realFile);
-  const normRoot = toPosix(realRoot);
+  const normFile = toPosix(realPathOrNearest(resolve(toPosix(filePath))));
+  const normRoot = toPosix(realPathOrNearest(STDLIB_ROOT));
   if (normFile === normRoot) return true;
   return normFile.startsWith(normRoot.endsWith("/") ? normRoot : normRoot + "/");
+}
+
+/**
+ * The real path of `abs`; when it does not exist, the real path of its deepest
+ * existing ancestor joined with the remaining segments.
+ * @param {string} abs
+ * @returns {string}
+ */
+function realPathOrNearest(abs) {
+  let head = abs;
+  const rest = [];
+  for (;;) {
+    try {
+      const real = realpathSync(head);
+      return rest.length > 0 ? join(real, ...rest.slice().reverse()) : real;
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return abs;
+      rest.push(basename(head));
+      head = parent;
+    }
+  }
 }
 
 /**

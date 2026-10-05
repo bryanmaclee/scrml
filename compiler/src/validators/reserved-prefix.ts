@@ -44,7 +44,8 @@
  *
  * WHAT IS NOT INSPECTED (limits — stated, not hidden):
  *   - `_{}` foreign code is OPAQUE (§23.2.3): the compiler never tokenizes its
- *     interior, so neither does this check.
+ *     interior, so neither does this check. Its `in: { … }` crossing HEADER is
+ *     scrml-side grammar and IS checked (§23.2.4a).
  *   - String literals are values, not names: `obj["_scrml_x"]` is not a
  *     reference under this rule.
  *   - Object-literal KEYS are not checked. A key declares a property of a value
@@ -54,7 +55,9 @@
  *   - Type-annotation expressions (`let x: T`) are not lexed: types are erased
  *     and never become emitted identifiers; a `_scrml_` TYPE NAME is refused at
  *     its declaration.
- *   - Markup text, CSS, SQL text, comments and attribute NAMES are not names.
+ *   - Markup text, CSS, SQL text, comments, attribute NAMES and the literal text
+ *     of a quoted attribute value are not names (a quoted value's `${}`
+ *     interpolations ARE checked).
  *
  * @module validators/reserved-prefix
  */
@@ -170,7 +173,7 @@ const RAW_TWIN: Record<string, string[]> = {
 };
 
 /** Node kinds whose subtree is never inspected. */
-const OPAQUE_KINDS = new Set<string>(["foreign", "Foreign", "comment", "text", "string-literal"]);
+const OPAQUE_KINDS = new Set<string>(["comment", "text"]);
 
 /** Node kinds whose string fields are not scrml names (CSS). */
 const CSS_KINDS = new Set<string>(["css-inline", "style", "theme-decl"]);
@@ -330,6 +333,23 @@ function walk(
   if (kind) {
     if (OPAQUE_KINDS.has(kind)) return;
 
+    if (kind === "foreign" || kind === "Foreign") {
+      // §23.2.3 — the foreign BODY is opaque and is not inspected. The `in: { … }`
+      // crossing HEADER is scrml-side grammar (§23.2.4a): its names are scrml
+      // bindings handed into the slice — the designated crossing point — so a
+      // `_scrml_` name there would carry a compiler binding across. The AST
+      // builder already parsed the header into `crossings`.
+      for (const name of Array.isArray(n.crossings) ? n.crossings : []) c.checkName(name, here, true);
+      return;
+    }
+    if (kind === "string-literal") {
+      // A QUOTED attribute value. Its literal text is not a name, but codegen
+      // evaluates a `${}` interpolation inside it (`style="color: ${x}"`), so the
+      // interpolations are lexed — via the compiler's own interpolation splitter.
+      c.scanTemplate(n.value, here, depth);
+      return;
+    }
+
     if (kind === "ident") {
       if (isReservedPrefixName(n.name) && !isTabDesugaredReference(n.name as string)) {
         c.report(n.name as string, here);
@@ -376,6 +396,11 @@ function walk(
     if (kind === "bare-expr" && !n.exprNode && typeof n.expr === "string") {
       c.scanLogicText(n.expr, here, depth);
     }
+    if (kind === "expr" && !n.exprNode && typeof n.raw === "string") {
+      // An attribute `${…}` value with no parsed twin — the native-parser shape a
+      // re-parsed COMPONENT body produces (`{kind:"expr", raw}`). Lex the raw.
+      c.scanLogicText(n.raw, here, depth);
+    }
   }
 
   const isCss = kind !== null && CSS_KINDS.has(kind);
@@ -407,6 +432,11 @@ function walk(
     if (v && typeof v === "object") {
       if (Array.isArray(v) && key === "args" && n.argExprNodes) {
         walk(n.argExprNodes, c, seen, "argExprNodes", here, depth);
+        continue;
+      }
+      if (Array.isArray(v) && key === "body" && container === "tests") {
+        // `~{}` test bodies are a list of raw statement strings.
+        for (const line of v) c.scanLogicText(line, here, depth);
         continue;
       }
       walk(v, c, seen, key, here, depth);

@@ -50,3 +50,17 @@ interpolations — logic fragments lexed with tokenizeLogic (STRING/COMMENT toke
 - Real `_scrml_` references in examples/samples/conformance: ZERO (all text hits were comments/strings).
 - conformance: 1265 pass + 50 xfail of 1315 (3 new cases pass).
 - pre-commit gate at b3b3f8b99: 30472 pass / 58 skip / 12 todo / 0 fail.
+
+## S239 fix round (PA review of 240d5beed — LAND-WITH-NITS)
+- merged origin/main (96751008d); docs/FACTS.md conflict resolved by REGENERATING (facts.ts --write), not by side.
+- 1b HIGH: foreign `_={ in: { … } … }=` crossing HEADER now checked (the AST builder's parsed `crossings`);
+  the foreign BODY stays opaque (§23.2.3).
+- 2 MED: `string-literal` (quoted attribute value) no longer opaque — its `${}` interpolations are lexed via
+  tokenizeTemplateInterpolations; literal text untouched. Covers <each>/<match>/engine/lift (walked trees).
+- 3 MED: `{kind:"expr", raw}` with no exprNode (native-parser shape in re-parsed component bodies) — raw lexed.
+- 5 LOW: `~{}` test bodies are `string[]` — the dead string-only branch replaced by an array branch.
+- 7 NIT: isStdlibSourceFile decides on the REAL path only (realpath of file — or deepest existing ancestor +
+  rest — vs realpath of stdlib/); a user dir symlinked INTO stdlib/ is no longer exempt.
+- differential (base origin/main 96751008d vs head fix-round, 2404 common sources): 0 newly failing, 0 code
+  changes; 222 artifact + 1472 message diffs path-only (verified); 2 "script-goggle" hits are the server.js of
+  this branch's own NEW conformance cases (head-only sources; effective-syntax delta 0).
