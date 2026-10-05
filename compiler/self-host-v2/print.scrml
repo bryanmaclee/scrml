@@ -46,9 +46,10 @@ ${
     // s454 (U1b): the printer emits the CLIENT artifact of a program with server
     // functions (design Item 4: "print the CLIENT artifact + manifest only");
     // `routes` is the manifest — every server function the client calls, by
-    // name, and the route path its client call POSTs to. The server artifact
+    // name, the route path its client call POSTs to, and whether it answers with a
+    // value (`value: false` — the 204 no-value contract). The server artifact
     // (the route handlers, the server half of the §57 codec) is unit U1c's.
-    export type RouteOut:struct = { fn: string, path: string }
+    export type RouteOut:struct = { fn: string, path: string, value: boolean }
     export type Output:struct = { js: string, html: string, refused: string[], routes: RouteOut[] }
 
     type HandleLoc:struct = { sym: int, js: JsExpr }
@@ -1878,7 +1879,7 @@ ${
         if (called.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("server routes (the client half of each call — the server artifact is unit U1c)")])
         for (const sf of called) {
             body = body.concat([routeJs(p, sf)])
-            routes = routes.concat([{ fn: sf.sym.hint, path: routePath(sf.sym) }])
+            routes = routes.concat([{ fn: sf.sym.hint, path: routePath(sf.sym), value: sf.ret is some }])
         }
         // s454 (U1b): a function whose calls reach a server function IN PLACE
         // (§12.2 Trigger 5 — server-placed by inheritance) is server code: it

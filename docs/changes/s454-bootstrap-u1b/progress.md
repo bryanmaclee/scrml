@@ -149,3 +149,52 @@ SPEC §19.9.10 (as amended by #1298), §19.9.5, §19.4.3, §19.5.3, §13.7, §57
 - Tests: NEW `slice-m4/server-call-check.test.js` (16: the worked program's Core is clean; 15 bites, one per rule,
   each a corrupted Core the check reports by its own tag). Shared sources moved to `slice-m4/server-call-fixtures.js`.
   effect.test.js's C12 message assertion migrated to the widened message. self-host-v2 1972 pass / 0 fail.
+
+## S4 — DONE (runtime) + the EMPIRICAL run
+- slice-m1/runtime/runtime.js:
+  - `call(route, args, task)` → a Promise that RESOLVES with the outcome — never rejects; `classify(route, status,
+    text)` (exported, pure) implements the design Item 3.2 table with the #1295 codec (`decode` / `decodeError`,
+    `canonicalOnly: true` always — R10 strict). Request: POST `route.path`, `Content-Type: application/json`, body =
+    JSON ARRAY of the arguments, each `encode`d against its parameter's table (an argument that does not encode is a
+    compiler defect: reported to the host-error reporter, and the call settles as Transport(Malformed)).
+  - THE DEADLINE: `SERVER_CALL_DEADLINE_MS = 30000` — ⚑ PA PLACEHOLDER pending a ruling (SPEC §19.9.10: "⚑ OPEN (not
+    ruled): the deadline's value / configurability"). One named exported constant; a call with no answer read when it
+    passes settles `Transport(Unreachable)`; an earlier answer wins (the timer is cleared).
+  - READING (flagged): statuses outside 2xx/4xx/5xx (a 1xx / 3xx reaching the client) → Transport(Malformed) — the
+    design table names only 2xx / 4xx / 5xx; a 3xx is not a route's answer and fetch follows redirects itself.
+  - READING (flagged): a body that cannot be READ (reset mid-body) → Unreachable (no response arrived, kind 1).
+  - `suspend`: the continuation runs as ONE `batch` (untracked); a host exception in it, or a rejection of the
+    suspended value on a live task, goes to ONE reporter (`reportHostError`; `setHostErrorReporter` replaces it) —
+    never an unhandled rejection; a cancelled task drops its continuation (nothing aborts).
+  - `waiting(executor)` — a waiting function's Promise, settled by `ret$` on every exit.
+  - `on`: each invocation runs in its own Task (passed as the handler's first argument); scope teardown cancels the
+    live ones. READING (design §2.3, flagged): a second event does NOT cancel the first's task.
+- Print: `Output.routes` entries carry `value` (false = the 204 no-value contract), for the conformance stub.
+- Migrated: slice-m1/effect.runtime.test.js "a rejection … on a live task it is re-raised" → it now reaches the
+  host-error reporter and is NOT an unhandled rejection (design §2.4 item 3 — the old behaviour is what U1b fixes).
+- Tests: NEW `slice-m4/server-call-runtime.test.js` (32): classify per row (incl. strict-not-dual, bounded
+  Malformed.reason), call (request shape, rejected / throwing fetch, unreadable body, the deadline with a hung
+  server, an early answer beats the deadline), suspend (one flush for two writes, one reporter, cancel drops),
+  handler tasks (per invocation, teardown cancels), `waiting`, and the EMPIRICAL rows. self-host-v2 2003 pass / 0 fail.
+
+### EMPIRICAL — the design's notes editor, compiled by the bootstrap, run in happy-dom, every Item-3.2 row
+Program: NOTES_SRC in server-call-runtime.test.js (the design's Item 1 B `save()` + `recount()`, adapted: rows are
+not read — no row types; a declared variant's payload is recorded in `@seen` — scrml has no implicit string + int;
+`callProblem`'s inner `match t` is replaced by `@cause = t` — no `match` over a non-failable value in the bootstrap,
+the §18 match unit). The front end reports no error; `checkCore` is clean; the printed client artifact holds no
+server body, no SQL, no database path. `fetch` is stubbed per row; the Save click shows "saving" synchronously, then:
+
+| stubbed answer to `saveNote` | handled outcome (`@status` / other cells) |
+|---|---|
+| 200 `2` | "saved", `@version` = 2 |
+| 2xx + `"two"` (does not decode as int) | "transport", `@cause` = Malformed(…), version unchanged |
+| 2xx + a `__scrml_error` envelope | "transport", `@cause` = Malformed(…) |
+| 409 + declared envelope `Conflict {current: 7}` | "conflict", `@seen` = 7 |
+| 500 + declared envelope `Storage {}` | "the server could not store it" |
+| 500 + FOREIGN envelope (`type: "CpsError"`) | "transport", `@cause` = Malformed(…) |
+| 403, not an envelope | "transport", `@cause` = Refused(403) |
+| 500, not an envelope | "transport", `@cause` = ServerFault(500) |
+| fetch rejects | "transport", `@cause` = Unreachable |
+| no answer; the deadline passes | "transport", `@cause` = Unreachable |
+| `wordCount`: 200 `12`, then 503 | `@words` = 12, then kept at 12 (`.Transport(t) :> @words`) |
+| `touch` (yields NO value): 204, then 200 `1` | `stamp()`: "stamped"; then "stamp failed", `@cause` = Malformed(…) (a body for a no-value function) |
