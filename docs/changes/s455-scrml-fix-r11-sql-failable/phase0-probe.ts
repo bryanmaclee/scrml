@@ -67,6 +67,18 @@ function programCell(handled: boolean, h = "!{ _ :> not }"): string {
   return program({ id: "x", handler: "", fn: () => "" }, false).replace(/    function[\s\S]*<\/program>/, `${fns}\n${btns}\n</program>`).replace(/(    <r_notes>[\s\S]*?<r_gone> = "init")/, cells);
 }
 
+// body-split kinds: the function ALSO writes a client cell (impl#1 splits it client/server)
+const SPLIT: Array<[string, (T: string, h: string) => string, string]> = [
+  ["split-stmt-run", (T, h) => `?{\`INSERT INTO ${T} (body) VALUES ('x')\`}.run()${h}\n        @r_${T} = "after"`, "!{ _ :> {} }"],
+  ["split-const-all", (T, h) => `const rows = ?{\`SELECT id FROM ${T}\`}.all()${h}\n        @r_${T} = "n=" + rows.length`, "!{ _ :> [] }"],
+  ["split-const-get", (T, h) => `const row = ?{\`SELECT body FROM ${T}\`}.get()${h}\n        @r_${T} = row is not ? "none" : row.body`, "!{ _ :> not }"],
+];
+function programSplit(body: (T: string, h: string) => string, h: string): string {
+  const fns = TABLES.map((T) => `    function f_${T}() {\n        ${body(T, h ? " " + h : "")}\n    }`).join("\n");
+  const btns = TABLES.map((T) => `    <button id="b_${T}" onclick={ f_${T}() !{ .Transport(_) :> { return } } }>${T}</button>`).join("\n");
+  return program({ id: "x", handler: "", fn: () => "" }, false).replace(/    function[\s\S]*<\/program>/, `${fns}\n${btns}\n</program>`);
+}
+
 function implCompile(src: string) {
   const dir = mkdtempSync(join(tmpdir(), "r11p0-"));
   const f = join(dir, "case.scrml");
@@ -102,6 +114,7 @@ const only = process.argv[2];
 const rows: string[] = [];
 const cases: Array<[string, string, string]> = K.filter((k) => !only || k.id === only).map((k) => [k.id, program(k, false), program(k, true)]);
 if (!only || only === "cell-get") cases.push(["cell-get", programCell(false), programCell(true)]);
+for (const [id, body, h] of SPLIT) if (!only || only === id || only === "split") cases.push([id, programSplit(body, ""), programSplit(body, h)]);
 if (only === "dump") { console.log(program(K[0], true)); process.exit(0); }
 for (const [id, base, hand] of cases) {
   const cb = implCompile(base), ch = implCompile(hand);

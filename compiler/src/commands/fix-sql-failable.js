@@ -60,7 +60,8 @@
  *
  * ═══ THE GATE (transactional, per file) ═══
  *   1. impl#1's front end re-reads the rewritten file with the same block-splitter error codes.
- *   2. impl#1 re-compiles it in its project: diagnostic codes (errors, warnings, lint) identical.
+ *   2. impl#1 re-compiles it in its project: diagnostic codes (errors, warnings, lint) identical,
+ *      except that W-TYPE-031-UNPROVEN (impl#1 reporting its own inference gap) may appear.
  *   3. The rewritten sites are no longer unhandled (the re-read finds `edits` fewer sites).
  * Any failure reverts the WHOLE file and reports why.
  *
@@ -95,6 +96,30 @@ const KIND_WORD = {
   "lambda": "a closure",
   "arm": "a handler / match arm",
 };
+
+/**
+ * Codes allowed to APPEAR after the rewrite (never to drop, never any other change):
+ * W-TYPE-031-UNPROVEN — impl#1's own inference gap ("the compiler reporting a gap in ITSELF, not a
+ * defect in your program"): it does not infer through a `!{}`-handled `?{}` declaration, so a client
+ * `const r = serverFn(…)` of that function becomes unproven (measured S455 Phase 2: one more per
+ * trucking-dispatch page). The program is unchanged. The F8 precedent is I-FN-PROMOTABLE.
+ */
+const TOLERATED_NEW_CODES = new Set(["W-TYPE-031-UNPROVEN"]);
+
+/** Same diagnostic codes before and after — except that a TOLERATED_NEW_CODES code may appear. */
+function sameCodes(before, after) {
+  const count = (xs) => xs.reduce((m, c) => m.set(c, (m.get(c) ?? 0) + 1), new Map());
+  const a = count(before);
+  const b = count(after);
+  for (const c of new Set([...a.keys(), ...b.keys()])) {
+    const x = a.get(c) ?? 0;
+    const y = b.get(c) ?? 0;
+    if (x === y) continue;
+    if (TOLERATED_NEW_CODES.has(c) && y > x) continue;
+    return false;
+  }
+  return true;
+}
 
 /** Is the identifier `name` read inside a closure (lambda / nested function) anywhere under `scope`? */
 function capturedByClosure(scope, name) {
@@ -318,7 +343,7 @@ export function fixSqlFailable(source, opts = {}) {
     if (opts.verify !== false) {
       const after = compileWithRI(proj, output);
       if (after.error || !after.ast) { block(uniq[0].start, `${after.error ?? "impl#1 built no tree"} after the rewrite — no \`?{}\` in this file rewritten`); return none; }
-      if (before.codes.join(",") !== after.codes.join(",")) {
+      if (!sameCodes(before.codes, after.codes)) {
         block(uniq[0].start, `impl#1 reports different codes after the rewrite (${before.codes.join(",") || "none"} → ${after.codes.join(",") || "none"}) — no \`?{}\` in this file rewritten`);
         return none;
       }

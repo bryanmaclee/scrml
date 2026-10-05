@@ -235,6 +235,24 @@ describe("sql-failable — listed, never rewritten", () => {
   test("a transaction-control statement", () => {
     listedOnly(["  ${ function a() {", `      ${q("BEGIN")}.run()`, `      ${q("COMMIT")}.run()`, "      return 1", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /transaction-control/);
   });
+  test("the gate: a rewrite that changes impl#1's codes reverts the WHOLE file (a handled `?{}` in a `fn` loses E-FN-001 on impl#1)", () => {
+    const src = program([
+      "  ${ function ok() {",
+      `      ${q("UPDATE t SET n = 1")}.run()`,
+      "      return 1",
+      "  } }",
+      "  ${ fn bad() {",
+      `      ${q("UPDATE t SET n = 2")}.run()`,
+      "      return 2",
+      "  } }",
+      "  <button onclick={ @out = ok() !{ .Transport(_) :> { return } } }>a</button>",
+    ]);
+    const r = fix(src);
+    expect(r.changed).toBe(false);
+    expect(r.output).toBe(src);
+    expect(r.infos).toEqual([]);
+    expect(reasons(r).some((x) => /different codes after the rewrite/.test(x) && /E-FN-001/.test(x))).toBe(true);
+  });
   test("a listed site does not stop the other sites in the file", () => {
     const src = program([
       "  ${ function a() {",

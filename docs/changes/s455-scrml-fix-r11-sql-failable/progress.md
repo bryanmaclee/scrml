@@ -135,3 +135,34 @@ re-raise outside a `!` function). Options:
 - (b) bootstrap-only: apply the rule only at grading time (TWIN_RULES), corpus untouched — impl#1 runtime unchanged,
   but the corpus stays R11-invalid for the bootstrap.
 - (c) do nothing (impl#1 cannot be aligned: it is frozen).
+
+## PA decision — gate (a) (relayed by the PA; grounded in S451 "your recs on all five" item 5(a))
+"proceed with gate (a). … The rule targets the RULED meaning (the old SPEC semantics), not impl#1's divergent
+throw." Rewrite a kind iff success values identical (row + no-row), both implementations accept it with impl#1 codes
+unchanged, and on a forced failure it yields exactly `not` / `[]` / continue; INFO at every rewrite; LIST lift,
+`@x =` in a function, for-of, if-conditions, body top, `.first()`/`.prepare()`/`yield`/`transaction`/`defer`,
+anything uncertain.
+
+### Phase 0 addendum — body-split functions (probe kinds split-*)
+A function that runs a `?{}` AND writes a cell is split client/server by impl#1 (CPS). `?{}.run() !{ _ :> {} }`
+there → **E-RI-002 ×3 (new)**, and the cell write never lands; `const x = ?{}… !{…}` there is already E-RI-002 in
+the base. So `?{}` in a body-split function (impl#1 RI `cpsSplit` non-null) is LISTED.
+
+## Phase 1 — DONE (38a4462d5): `compiler/src/commands/fix-sql-failable.js`
+- Default rule (`IMPL1_SAFE_RULES`, `S66_RULES`), chained in `fix-s66.js` right after client-server-call;
+  excluded from the counter's `TWIN_RULES`; INFOs flow through `fixS66` / the CLI. fix-client-server-call.js now
+  exports its scanning / scratch-compile helpers (no behaviour change).
+- Classification from the AST + impl#1's captured Route Inference (placement + `cpsSplit` keyed
+  `file::span.start`); handled = the `?{}` is the guarded operand of a statement `guarded-expr`, an expression
+  `__scrml_guard__` call (#1305 form), or a match subject; Pattern C = a `state-decl` with `isServer`; `!` = any
+  enclosing `function-decl.canFail`; reassignment = impl#1's `_bareAssign` const-decl.
+- Edit point from the `sql` node's source span (opens `?{`, balanced close == span.end), the terminator the AST
+  recorded must follow as written, the statement must end there, and the prefix must be the statement's own
+  (`return` / `const|let name =` / `name =` / nothing). Gate per file: front-end re-read (same block-splitter
+  E- codes), impl#1 re-compile in the project (codes identical — no tolerance list), unhandled count drops by
+  exactly the edits; else the whole file is reverted and reported.
+- Tests: compiler/tests/commands/fix-sql-failable.test.js — 16 (spelling; statement kinds incl. if/for bodies;
+  const/let/reassign/return; multi-line; idempotence; `!`-fn / handled (stmt, decl, match) / Pattern C negatives;
+  lift, `@x =`, if-condition, for-of, body top, `.first()`, chained member, nobatch, `.run()` value, nested and
+  captured decls, body-split, tx control; chaining). commands suite 494/494 (fix-s66 rule-id list updated).
+  Types gate unchanged (190). Pre-commit gate 30700/0.
