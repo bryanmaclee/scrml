@@ -12177,8 +12177,14 @@ columns, and that asymmetry drives the mechanism split:
       foreign-key item's business); `ANALYZE`; or `REINDEX` — plus the two shapes the rules here
       already permit: a `CREATE POLICY … AS RESTRICTIVE` (below) and a `GRANT … ON` a tenant table
       whose every grantee is the §14.8.11 bounded application role `scrml_app` (*"a per-request
-      principal MUST drop to the bounded `NOBYPASSRLS` `scrml_app` role"*, §14.8.11 S6). Anything not
-      on the list that names a tenant-scoped table is charged. **Isolation removal** (S455 "yes
+      principal MUST drop to the bounded `NOBYPASSRLS` `scrml_app` role"*, §14.8.11 S6) — the role
+      spelled unquoted (any case) or exactly `"scrml_app"`; a quoted identifier is case-exact, so
+      `"SCRML_APP"` is another role. Anything not on the list that names a tenant-scoped table is
+      charged. **An exempt statement still runs code:** an index expression or partial-index
+      predicate, a column `DEFAULT`, `GENERATED` expression or `CHECK` is evaluated by the database
+      per row, at migration, as the migrating role — so every expression in an exempt statement is
+      held to the function allow-list a view or trigger body is (below), on any table; a call off it,
+      or a `${…}`, charges the statement *unattributable* (S239 review of the S455 "yes both" build). **Isolation removal** (S455 "yes
       both") is charged as its own kind (*isolation removal*), fail-closed, against the tenant-scoped
       table it names — or, when it names none, against every tenant-scoped table of the
       compilation: `DROP POLICY … ON <tenant>` (any policy — `scrml_tenant_iso`, or a restrictive one

@@ -151,6 +151,64 @@ describe("(ii) the CLOSED exemption list — CREATE INDEX, ALTER TABLE … ADD C
   });
 });
 
+// S239 review of 3d798369 — #1: a QUOTED grantee is case-exact in Postgres.
+describe("review #1 — only `scrml_app` (unquoted, any case) or exactly `\"scrml_app\"` is the app role", () => {
+  for (const s of [
+    `GRANT SELECT ON assets TO "SCRML_APP"`,
+    `GRANT SELECT ON assets TO "Scrml_App"`,
+    `GRANT SELECT ON assets TO [SCRML_APP]`,
+    `GRANT SELECT ON assets TO scrml_app, "SCRML_APP"`,
+  ]) test(`charged: ${s}`, () => expect(kindsOf(s)).toEqual(["isolation removal"]));
+  for (const s of [
+    `GRANT SELECT ON assets TO scrml_app`,
+    `GRANT SELECT ON assets TO SCRML_APP`,
+    `GRANT SELECT ON assets TO "scrml_app"`,
+  ]) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+  test(`GRANT admin TO "SCRML_APP" is not a grant to the app role (a different role) — not charged as one`, () => {
+    expect(kindsOf(`GRANT admin TO "SCRML_APP"`)).toEqual([]);
+    expect(kindsOf(`GRANT admin TO "scrml_app"`)).toEqual(["isolation removal*"]);
+  });
+});
+
+// #6: an exempt statement still evaluates expressions — per row, at migration, as the migrating role.
+describe("review #6 — every expression in an exempt statement is held to the function allow-list", () => {
+  const code = [
+    "CREATE INDEX ix ON assets ((evil_fn(name)))",
+    "CREATE INDEX ix ON assets (name) WHERE evil_fn(name)",
+    "CREATE INDEX ix ON assets USING btree (dblink_exec('x', 'DELETE FROM assets'))",
+    "CREATE INDEX ix ON config ((evil_fn(k)))",                     // any table — a function can write any table
+    "ALTER TABLE assets ADD COLUMN x TEXT DEFAULT evil_fn()",
+    "ALTER TABLE assets ADD COLUMN x TEXT GENERATED ALWAYS AS (evil_fn(name)) STORED",
+    "ALTER TABLE assets ADD COLUMN x INTEGER CHECK (evil_fn(x))",
+    "ALTER TABLE config ADD COLUMN x TEXT DEFAULT dblink_exec('db', 'UPDATE assets SET name = 1')",
+    "ALTER TABLE assets ADD COLUMN x TEXT, ADD COLUMN y TEXT DEFAULT public.evil_fn()",
+    "ANALYZE ${t}",
+  ];
+  for (const s of code) test(`charged: ${s}`, () => expect(kindsOf(s)).toEqual(["statement*"]));
+  test("charged: ALTER TABLE assets ADD COLUMN x TEXT DEFAULT ${dflt} (an unreadable ADD COLUMN is not exempt)", () => {
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN x TEXT DEFAULT ${dflt}")).toEqual(["statement"]);
+  });
+  const fine = [
+    "CREATE INDEX ix ON assets (lower(name))",
+    "CREATE INDEX ix ON assets USING gin (name) WHERE name IS NOT NULL",
+    "CREATE INDEX ix ON public.assets (name DESC, id)",
+    "ALTER TABLE assets ADD COLUMN x VARCHAR(64) DEFAULT 'a' NOT NULL",
+    "ALTER TABLE assets ADD COLUMN x NUMERIC(10, 2) CHECK (x > 0)",
+    "ALTER TABLE assets ADD COLUMN x TEXT DEFAULT (datetime('now'))",
+    "ALTER TABLE assets ADD COLUMN x TIMESTAMP(3) WITH TIME ZONE",
+    "ALTER TABLE assets ADD COLUMN x TEXT GENERATED ALWAYS AS (upper(name)) STORED",
+    "ANALYZE assets (name)",
+  ];
+  for (const s of fine) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+});
+
+describe("reporting — every hazard is reported, not one per table", () => {
+  test("an ADD CONSTRAINT CHECK and a DROP COLUMN on the same table are both reported", () => {
+    const hs = findSchemaTenantHazards(body(ASSETS, "ALTER TABLE assets ADD CONSTRAINT c CHECK (id > 0)", "ALTER TABLE assets DROP COLUMN name"), ["assets"]);
+    expect(hs).toHaveLength(2);
+  });
+});
+
 describe("compile — the rule runs over the compilation's tenant set", () => {
   const compile = (files) => {
     const dir = mkdtempSync(join(tmpdir(), "tenant-iso-removal-"));

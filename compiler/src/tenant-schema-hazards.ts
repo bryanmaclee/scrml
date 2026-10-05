@@ -626,6 +626,77 @@ function alterOnlyAddsColumns(toks: Tok[], from: number, to: number): boolean {
   return true;
 }
 
+/** Words that end a column's TYPE in a column definition (what follows is constraints / expressions). */
+const COLUMN_CONSTRAINT_WORDS = new Set([
+  "DEFAULT", "NOT", "NULL", "PRIMARY", "UNIQUE", "CHECK", "REFERENCES", "GENERATED", "COLLATE",
+  "CONSTRAINT", "AS", "ON", "AUTO_INCREMENT", "AUTOINCREMENT", "COMMENT",
+]);
+
+/**
+ * S239 review #6 — an EXEMPT statement still runs code: an index expression or partial-
+ * index predicate, a column DEFAULT, a GENERATED expression or a CHECK is evaluated by
+ * the database per row, at migration, as the migrating role. Every expression in an
+ * exempt statement is held to the SAME function allow-list a view or trigger body is;
+ * returns why the statement is charged (a call off the list, or a `${…}`), or null.
+ */
+function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>): string | null {
+  for (const [a, b] of regions) {
+    const r = readRegion(toks, a, b, new Set());
+    if (r.interp) return "it holds a `${…}` interpolation the checker cannot read";
+    if (r.calls.length) {
+      return `it calls \`${r.calls[0]}\`, which is not on the floor's function allow-list — the database ` +
+        "evaluates it per row, at migration, as the migrating role, and it may read or write any table";
+    }
+  }
+  return null;
+}
+
+/** The expression regions of a `CREATE INDEX` statement: everything after `ON <table> [USING <method>]`. */
+function indexExpressionRegions(toks: Tok[], start: number, end: number): Array<[number, number]> {
+  let depth = 0;
+  for (let k = start; k < end; k++) {
+    if (isP(toks[k], "(")) depth++;
+    else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && isW(toks[k], "ON")) {
+      let j = k + 1;
+      if (isW(toks[j], "ONLY") && isName(toks[j + 1])) j++;
+      const nm = readName(toks, j);
+      if (!nm) return [[k + 1, end]];
+      j = nm.next;
+      if (isW(toks[j], "USING") && isName(toks[j + 1])) j += 2;
+      return [[j, end]];
+    }
+  }
+  return [[start, end]];   // no readable ON: read it all (fail-closed)
+}
+
+/** The expression regions of `ADD [COLUMN] [IF NOT EXISTS] <col> <type …> <constraints …>` actions in `[from, to)`. */
+function addColumnExpressionRegions(toks: Tok[], from: number, to: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let depth = 0;
+  let s = from;
+  const actions: Array<[number, number]> = [];
+  for (let k = from; k < to; k++) {
+    if (isP(toks[k], "(")) depth++;
+    else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
+    else if (isP(toks[k], ",") && depth === 0) { actions.push([s, k]); s = k + 1; }
+  }
+  actions.push([s, to]);
+  for (const [a, b] of actions) {
+    let k = a + 1;                                            // past ADD
+    if (isW(toks[k], "COLUMN")) k++;
+    if (isW(toks[k], "IF") && isW(toks[k + 1], "NOT") && isW(toks[k + 2], "EXISTS")) k += 3;
+    k++;                                                      // the column name
+    // the type: words (and a parenthesized size after one) up to the first constraint word
+    while (k < b && toks[k].k === "w" && !COLUMN_CONSTRAINT_WORDS.has(toks[k].up)) {
+      k++;
+      if (isP(toks[k], "(")) { const c = closeParen(toks, k); if (c === -1 || c > b) break; k = c; }
+    }
+    out.push([k, b]);
+  }
+  return out;
+}
+
 /** The grantees of `GRANT … TO a, b [WITH …] [GRANTED BY …]`, from the token after `TO`. */
 function granteesOf(toks: Tok[], from: number, end: number): string[] {
   const out: string[] = [];
@@ -633,7 +704,12 @@ function granteesOf(toks: Tok[], from: number, end: number): string[] {
     const t = toks[k];
     if (isW(t, "WITH") || isW(t, "GRANTED")) break;
     if (isP(t, ",") || isW(t, "GROUP") || isW(t, "ROLE")) continue;
-    out.push(isName(t) ? t.t.toLowerCase() : `?${t.t}`);
+    // An unquoted name folds case (Postgres folds it to lower case); a QUOTED one is
+    // case-exact — `"SCRML_APP"` is a different role from `scrml_app` (S239 review #1),
+    // so it is kept quoted and can never equal APP_ROLE unless spelled `"scrml_app"`.
+    if (t.k === "w") out.push(t.t.toLowerCase());
+    else if (t.k === "q") out.push(t.t === APP_ROLE ? APP_ROLE : `"${t.t}"`);
+    else out.push(`?${t.t}`);
   }
   return out;
 }
@@ -928,7 +1004,14 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       }
       continue;
     }
-    if (d.kind === "index") continue;
+    if (d.kind === "index") {
+      // exempt (closed list) — unless an expression in it runs code off the allow-list (S239 #6)
+      const code = exemptStatementCode(toks, indexExpressionRegions(toks, d.start, d.end));
+      if (code) {
+        out.push({ kind: "statement", object: `CREATE INDEX ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
+      }
+      continue;
+    }
     // Any other CREATE (a virtual / foreign table, a policy, a publication, …). In the
     // comment-content reading, comment text can split a statement (`CREATE /* x */ VIEW`
     // reads as `CREATE x VIEW`); a CREATE of no known object kind is that artifact, and
@@ -995,7 +1078,15 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
   // 3. Other SQL statements in the `<schema>`.
   if (!declsOnly) {
     for (const g of generic) {
-      if (INERT_LEADERS.has(g.leader)) continue;
+      if (INERT_LEADERS.has(g.leader)) {
+        // ANALYZE / REINDEX evaluate no expression of their own (`ANALYZE t (col)` is a
+        // column list, not a call); a `${…}` is still SQL the checker cannot read
+        if (readRegion(toks, g.start + 1, g.end, new Set()).interp) {
+          out.push({ kind: "statement", object: toks.slice(g.start, Math.min(g.end, g.start + 3)).map((t) => t.t).join(" "),
+            tables: allTenant, unattributable: true, offset: g.at, why: "it holds a `${…}` interpolation the checker cannot read" });
+        }
+        continue;
+      }
       if (g.leader === "${") {
         out.push({ kind: "statement", object: "`${…}`", tables: allTenant, unattributable: true, offset: g.at,
           why: "the statement is a `${…}` interpolation, SQL the checker cannot read" });
@@ -1016,7 +1107,12 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       // (Any OTHER action on a statement naming a tenant table is charged — RENAME, DROP /
       // ALTER COLUMN, ADD CONSTRAINT, ENABLE / FORCE ROW LEVEL SECURITY, … S455 "yes both".)
       if (g.leader === "ALTER" && g.target !== null && g.targetEnd !== -1 && !r.interp &&
-          alterOnlyAddsColumns(toks, g.targetEnd, g.end)) continue;
+          alterOnlyAddsColumns(toks, g.targetEnd, g.end)) {
+        // …unless a DEFAULT / GENERATED / CHECK expression calls off the allow-list (S239 #6)
+        const code = exemptStatementCode(toks, addColumnExpressionRegions(toks, g.targetEnd, g.end));
+        if (code) out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: code });
+        continue;
+      }
       const hits = r.names;
       if (hits.length || r.interp) {
         out.push({ kind: "statement", object: label, tables: hits.length ? tenantsUnder(hits) : allTenant,
@@ -1136,7 +1232,11 @@ export function findSchemaTenantHazards(body: string, tenantTables: Iterable<str
   const seen = new Set<string>();
   const out: SchemaHazard[] = [];
   for (const h of all.sort((a, b) => a.offset - b.offset)) {
-    const key = `${h.kind}|${h.object.toLowerCase()}|${h.why}`;
+    // The OFFSET is part of the key: two different statements on one table (an `ADD
+    // CONSTRAINT CHECK` and a `DROP COLUMN`) share kind, label and reason, and were
+    // reported once (S239 review nit). The three readings agree on offsets, so a hazard
+    // they all find is still reported once.
+    const key = `${h.kind}|${h.offset}|${h.object.toLowerCase()}|${h.why}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(h);
