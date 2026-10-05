@@ -12105,16 +12105,61 @@ columns, and that asymmetry drives the mechanism split:
       plain statement: neither has table-level conflict resolution, and their statement-level upserts
       are outside the subset. A handle whose driver the compiler cannot determine is treated as SQLite
       (on another database the statement then fails — closed).
-    - **Writes the database runs because of the statement.** The floor constrains the statement, not
-      what the database executes in consequence. A write to a tenant-scoped table is `E-TENANT-WRITE`,
-      naming the object, when the program's `<schema>` declares, on that table, a **trigger**, a
-      Postgres **rule**, or a **foreign key** referencing it whose `ON DELETE` / `ON UPDATE` action is
-      `CASCADE`, `SET NULL` or `SET DEFAULT`. The check reads the `<schema>` text and is deliberately
-      over-inclusive (a hazard it cannot attribute to a table is charged to every tenant-scoped table;
-      a commented-out declaration still counts). `.acrossTenants()` is the opt-out. **Limit:** only
-      `<schema>` is visible — a trigger, rule or cascading key created outside it (an external
-      database, a `<db src>` with no `<schema>`, a migration run by hand) is not seen and not
-      introspected.
+    - **SQL the database runs on its own — refused at the `<schema>` declaration (S455).** The floor
+      constrains each query, not what the database executes in consequence of it or on its behalf. A
+      program whose `<schema>` declares any of the following SHALL be a compile error at that
+      declaration, **`E-TENANT-SCHEMA-HAZARD`**, naming the object, the tenant-scoped table it reaches,
+      and the hazard kind — whatever the program's queries are, and with no opt-out
+      (`.acrossTenants()` opts a query out; it cannot opt a declaration out):
+      1. a **trigger** (any timing, `INSTEAD OF` included, on a table or a view) declared ON a
+         tenant-scoped table — or on a view over one — or whose body names one;
+      2. a Postgres **rule** declared on, or whose action names, a tenant-scoped table;
+      3. a **foreign key** whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or
+         `SET DEFAULT`, when EITHER end — the declaring table or the referenced table — is
+         tenant-scoped;
+      4. a **view** (materialized included) whose definition reads a tenant-scoped table, directly or
+         through another view.
+      **Fail-closed:** a declaration the compiler cannot attribute is charged as a hazard against
+      every tenant-scoped table and named *unattributable* — never treated as safe: a trigger, rule
+      or view whose text it cannot read, whose body is a function (a Postgres
+      `EXECUTE FUNCTION f()` trigger), that calls a function outside the subset's allow-list (below),
+      or that holds a `${…}`; a `CREATE FUNCTION` / `CREATE PROCEDURE` / `DO` body (code the floor
+      never sees, callable from any query); a foreign-key action it cannot tie to a declaring table;
+      and any other `<schema>` statement that names a tenant-scoped table (or a view over one) —
+      `CREATE TABLE … AS SELECT`, `INHERITS`, a virtual table over it, a rename of it. A table is
+      *named* when an identifier names it or a string literal holds its name as a whole word (a
+      function can read a table named in a string). Tenant-scoped-ness is the `tenant_id`
+      convention above; the comment model is the database's, which differs by dialect, so the
+      compiler reads the body with comments removed under each model AND reads each comment's text
+      as declarations — a commented-out declaration still counts. A `<schema>` whose objects touch
+      only tables without `tenant_id` is unaffected, as is an index.
+      **Defense in depth:** the S452 r4 per-write refusal stays — a write to a tenant-scoped table is
+      `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares on that table a
+      trigger, a rule, or a cascading foreign key referencing it. A program that meets it is already
+      refused at its `<schema>`, so it adds no reachable acceptance boundary; it reports beside the
+      declaration error. **Limit:** only `<schema>` is visible — a trigger, rule, view or cascading
+      key created outside it (an external database, a `<db src>` with no `<schema>`, a migration run
+      by hand) is not seen and not introspected. A table that the `<db>` registry (§14.8.9, a live
+      database) makes tenant-scoped IS charged when a `<schema>` declaration reaches it.
+      > **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" — *"go, comp-time
+      > schema"* (answering the PA's fork: reject schema write hazards at schema declaration time —
+      > a compile error on the `<schema>` block — or check every write at runtime; the S452 durable
+      > "stop patching statements, change the boundary"; resolves
+      > `g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4` and
+      > `g-tenant-floor-schema-view-over-tenant-table-s452`) · **supersedes:** *"A write to a
+      > tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>`
+      > declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose
+      > `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the
+      > boundary (it is kept as defense in depth) and *"`.acrossTenants()` is the opt-out."* ·
+      > **Direction of change (pa-base §8): newly-rejecting** — a `<schema>` declaring any item above
+      > no longer compiles (before: a trigger / FK on a non-tenant table, an `INSTEAD OF` trigger on a
+      > view, and every view compiled clean and leaked — H1 / H2 / the VIEW read executed on
+      > `bade5cb9d`; an `.acrossTenants()` write to a table with a trigger compiled). The fail-closed
+      > items beyond the four ruled kinds (a function / `DO` body, any other statement naming a
+      > tenant table, a call off the allow-list) are the PA-located reading of the ruling's
+      > fail-closed clause, recorded as built in their veto window. Corpus measured: 2410 `.scrml`
+      > (repo + gauntlets), 0 newly failing, 0 artifact or diagnostic diffs — no corpus program
+      > declares a tenant table. Reversible.
     - **An INSERT with no active tenant is refused at run time (S452).** With no active tenant — code
       outside any request (boot, a scheduled job, code called from them), or a request with no pinned
       `@currentUser.tenantId` — an INSERT into a tenant-scoped table SHALL be a defined, named runtime
@@ -12347,7 +12392,8 @@ is the entire invariant/policy firewall.
 - **`E-TENANT-WRITE`** (Error) — an INSERT/UPDATE/DELETE against a tenant-scoped table with no
   injectable tenant value (no egress sink can redact a durable write; it must fail closed): a
   subset write shape the floor cannot inject (the Write bullet), an author conflict clause, a write to
-  a table whose `<schema>` declares a trigger / rule / cascading foreign key, or an `.acrossTenants()`
+  a table whose `<schema>` declares a trigger / rule / cascading foreign key (defense in depth since
+  S455 — such a `<schema>` is already `E-TENANT-SCHEMA-HAZARD`), or an `.acrossTenants()`
   INSERT that does not name `tenant_id`. Its runtime form `E-TENANT-WRITE (runtime)` refuses a write
   with no active tenant.
 - **`E-TENANT-SQL-SUBSET`** (Error) — a query whose text names a tenant-scoped table and that lies
@@ -12355,6 +12401,12 @@ is the entire invariant/policy firewall.
   statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, a `GROUP` without
   `BY`, `RETURNING` or `FOR` on a read, or a non-allow-listed function in a query that names a tenant
   table only in its text), without `.acrossTenants()` (S452 r3).
+- **`E-TENANT-SCHEMA-HAZARD`** (Error) — a `<schema>` declares SQL the database runs on its own
+  against a tenant-scoped table: a trigger on, or whose body names, one; a rule on or naming one; a
+  `CASCADE` / `SET NULL` / `SET DEFAULT` foreign key with a tenant-scoped end; a view reading one,
+  directly or through another view; or a declaration the compiler cannot attribute (charged,
+  *unattributable*). Reported at the declaration, whatever the queries; no opt-out (S455; the Write
+  bullet "SQL the database runs on its own").
 - **`E-TENANT-RAW-EGRESS`** (Error) — rows obtained through an `.acrossTenants()` read reach a raw
   `Response` (a manual `Response` / `handle()` body, §40): the one remaining foreign-tenant egress
   under the source filter (narrowed S452; the S273 trigger — any tenant-scoped row at a raw `_{}` /
@@ -12372,13 +12424,25 @@ is the entire invariant/policy firewall.
   every tenant's names to an unpinned request while `I-TENANT-STRIP` fired (dpa-067 §C4). Fixed under
   the standing security exception: the source filter (#1287), then the allow-listed SQL subset, the
   UPDATE / DELETE injection, `OR ABORT`, the schema-hazard refusal and the named no-tenant write
-  refusal (#1293). Open residuals: a `<schema>` VIEW over a tenant table is not scoped
-  (`g-tenant-floor-schema-view-over-tenant-table-s452`), the predicate oracles above
+  refusal (#1293). Open residuals: ~~a `<schema>` VIEW over a tenant table is not scoped
+  (`g-tenant-floor-schema-view-over-tenant-table-s452`)~~ *(closed S455 — refused at the declaration,
+  `E-TENANT-SCHEMA-HAZARD`, below)*, the predicate oracles above
   (`g-tenant-floor-predicate-oracles-before-filter-s452`), and the raw driver handle
   (`g-tenant-floor-raw-driver-handle-callable-s452`). The bootstrap (`compiler/self-host-v2/`) does
   not build the floor yet (U1c keeps tenant refused); the same rule applies to it when built
   (dpa-067 F2). *(S454 currency — supersedes "impl#1 implements the superseded model … The
   source-filter fix is in flight on `fix/s452-tenant-filter-at-source`".)*
+- **S455 — the schema boundary (landed, impl#1).** `E-TENANT-SCHEMA-HAZARD` is emitted by GCP1
+  (`compiler/src/gauntlet-phase1-checks.js`, at the `<schema>` span, over the tables the file's
+  `<schema>` makes tenant-scoped) through the pure checker `compiler/src/tenant-schema-hazards.ts`,
+  and by `compiler/src/codegen/emit-server.ts` for a table only the `<db>` registry makes
+  tenant-scoped. It closes the S452 r4 residuals measured on `bade5cb9d` (a trigger on a non-tenant
+  table writing a tenant table rewrote every tenant's rows; an `INSTEAD OF` trigger on a view
+  rewrote another tenant's row; a `<schema>` view served every tenant's rows; a cascading key from a
+  non-tenant parent compiled) and `g-tenant-floor-schema-view-over-tenant-table-s452`. The S452 r4
+  per-write limb (`tenant-egress.ts` `schemaWriteHazards` → `tenant-sql-subset.ts`
+  `analyzeTenantSql`) is unchanged, as defense in depth. The bootstrap does not build the floor
+  yet; the same rule applies to it when built.
 - **S452 — `E-TENANT-RAW-EGRESS` diverges.** impl#1 enforces the S273 trigger (any tenant-scoped
   row at a raw `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`), not the
   narrowed one (`.acrossTenants()` rows reaching a raw `Response`). It therefore still rejects raw
@@ -24868,6 +24932,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row filter (at the source, S452) has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar before any filter can run. The same holds for a tenant-scoped table read only inside a subquery / CTE / derived table whose `tenant_id` does not reach the output row (S452 PA reading). In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the subset single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = <active tenant>`; a subset `UPDATE t SET … [WHERE …]` / `DELETE FROM t [WHERE …]` gets `AND tenant_id = <active tenant>` on its parenthesized WHERE (S452 r3 — supersedes "an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse) … fires this error"); injected SQLite writes carry `OR ABORT`. Fires on: an un-injectable write (an INSERT that names `tenant_id`, is multi-row, `INSERT … SELECT`, `DEFAULT VALUES` or has no column list; a SET of `tenant_id`; an UPDATE with an alias / FROM / ORDER BY / LIMIT; REPLACE / `OR REPLACE`; `ON CONFLICT`; `RETURNING`; `SELECT … INTO`; a second tenant table; a non-allow-listed function), an author-written `INSERT OR …` / `UPDATE OR …` conflict clause, a write to a table whose `<schema>` declares a trigger / rule / cascading foreign key (S452 r4), and an `.acrossTenants()` INSERT that does not name `tenant_id`. **Runtime form** `E-TENANT-WRITE (runtime)`: a write to a tenant-scoped table with no active tenant is refused by name, nothing written (ruling:user-voice-scrml.md S452 "your rec"). Resolution: write the plain subset shape without `tenant_id` (the floor injects the request's tenant), or mark the query `.acrossTenants()` and, for an INSERT, name `tenant_id`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql` (#1293); the runtime form by the server helper `_scrml_tenant_write_key`.) | Error |
 | E-TENANT-SQL-SUBSET | §14.8.10 | A query whose text names a tenant-scoped table lies outside the floor's allow-listed SQL subset and is not `.acrossTenants()`: a token or form outside the closed token set (a quoted identifier, a comment, `;`, a dialect-specific literal, a `${…}` whose end cannot be read without parsing JavaScript, …), a statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, `GROUP` without `BY`, `RETURNING` or `FOR` on a read, or — in a query that names a tenant table only in its text (a literal included) — a function outside the allow-list. A query the floor cannot read exactly is refused rather than scoped by a guess. Resolution: write the query in the subset (§14.8.10 "The SQL subset"), or mark it `.acrossTenants()` for a deliberate cross-tenant query. **Provenance:** spec currency to #1293 (S452 r3 `5e6b39b92`, r4 `c02da0f86`) under ruling:user-voice-scrml.md S452 "a" — a PA direction, recorded as built. (Emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql`.) | Error |
+| E-TENANT-SCHEMA-HAZARD | §14.8.10 | A `<schema>` declares SQL the database runs on its own against a tenant-scoped table (one carrying `tenant_id`): (1) a trigger — any timing, `INSTEAD OF` included — declared on a tenant-scoped table or on a view over one, or whose body names one; (2) a Postgres rule declared on, or whose action names, one; (3) a foreign key whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT` with EITHER end tenant-scoped; (4) a view (materialized included) reading one, directly or through another view. Fail-closed: a declaration the compiler cannot attribute — unreadable text, a function body (`EXECUTE FUNCTION`), a call off the §14.8.10 subset allow-list, a `${…}`, a `CREATE FUNCTION` / `PROCEDURE` / `DO` body, an unattributable foreign-key action, any other `<schema>` statement naming a tenant table — is charged against every tenant-scoped table (*unattributable*). The tenant floor scopes each query; it cannot scope a trigger or rule body, a view's definition or a foreign-key action, so the declaration is refused where it is declared, whatever the queries do, with no `.acrossTenants()` opt-out. Only `<schema>` is visible (§14.8.10 Limit). Resolution: remove the declaration and do the work in server code, where the floor applies — or declare the object only over tables without `tenant_id`. **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" · supersedes: *"A write to a tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the boundary (kept as defense in depth) · Direction of change: newly-rejecting (corpus: 2410 `.scrml`, 0 newly failing). (Emitted at `compiler/src/gauntlet-phase1-checks.js` `checkSchemaDeclarations` via `compiler/src/tenant-schema-hazards.ts` `findSchemaTenantHazards`, and at `compiler/src/codegen/emit-server.ts` for a table only the `<db>` registry makes tenant-scoped.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | **Narrowed S452.** Rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual `Response` / `handle()` body (§40). Under the §14.8.10 source filter these are the only foreign-tenant rows server code holds, so this is the one remaining egress of another tenant's data through a body the compiler does not own. Rows from a read WITHOUT `.acrossTenants()` are already scoped to the active tenant at the source, so their raw egress (a manual `Response`, a `_{}` block, an `asIs` value) is NOT an error. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the cross-tenant rows through a compiler-emitted response. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 1 · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the S273 trigger (any tenant-scoped row at a `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`) · Direction of change: newly-accepting for raw egress of non-opted-out rows; newly-rejecting for `.acrossTenants()` rows in a manual `Response`. **Nominal as worded** — impl#1 still enforces the S273 trigger until a sibling dispatch narrows it. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. impl#1 filters at the source since #1287 (S454 currency — supersedes "**Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands."). Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
