@@ -175,6 +175,7 @@ const CASES = [
   ["match arm (page-level registry)", `<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><button id="b" onclick=go()>b</button></></match>`, "click", /^onclick /],
   ["arm-bound factory (reads a payload binding)", `<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><button id="b" onclick=goArg(note.length)>b</button></></match>`, "click", /^onclick /],
   ["in-arm non-delegable (emit-variant-guard)", `<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="b" oninput=go() /></></match>`, "input", /^oninput /],
+  ["in-arm non-delegable `${…}` form (emit-variant-guard)", `<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="b" oninput=\${ if (@x == 0) { @x = netfail(); @after = "ran" } } /></></match>`, "input", /^oninput /],
   ["bare-ref (onclick=handler)", `<button id="b" onclick=go>b</button>`, "click", /^onclick /],
   ["<each> row", `<ul><each in=@rows key=@.id as r><li><button id="b" onclick=go()>b</button></li></each></ul>`, "click", /^onclick <each> row$/],
   ["for … lift row", `<ul>\${ for (r of @rows) { lift <li><button id="b" onclick=go()>b</button></li>; } }</ul>`, "click", /^onclick lift row$/],

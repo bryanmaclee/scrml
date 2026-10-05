@@ -95,7 +95,7 @@
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
-import { colorActiveHandler } from "./js-async-analysis.ts";
+import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1275,27 +1275,35 @@ function emitArmWireFunction(
     if (lowered !== null) {
       return `function(event) { ${preventLine}${lowered}; }`;
     }
-    // S454 (bryan: "a yes, b yes, root fix") — §19.6.8: a call-ref handler's
-    // rejection reaches the logging surface whatever site registers it. This
-    // in-arm, non-delegable registration never coloured its handler, so an
-    // async callee was fired unobserved. Colour it under the active client
-    // emission exactly as the row / lift emitters do (`colorActiveHandler`):
-    // an async callee is awaited inside the S453 rejection arm; a sync callee
-    // is returned verbatim (byte-identical). `handlerName` is the AUTHOR name
-    // (the post-fn-name-mangle pass renames it), which is what the colouring
-    // resolves.
-    return colorActiveHandler(
-      `function(event) { ${preventLine}${handlerName}(${callArgs}); }`,
-      binding.span,
-      { boundaryId: `${binding.eventName} ${binding.placeholderId}` },
-    );
+    return `function(event) { ${preventLine}${handlerName}(${callArgs}); }`;
   }
 
   for (const binding of wireableEvents) {
     const placeholderId = binding.placeholderId as string;
     const eventName = binding.eventName as string; // e.g. "onfocus"
     const domEvent = eventName.replace(/^on/, "");
-    const handlerExpr = buildHandlerExpr(binding);
+    // S454 (bryan: "a yes, b yes, root fix") — §19.6.8 B7: every handler's
+    // rejection reaches the logging surface, whatever its form and whatever
+    // site registers it. This in-arm, NON-delegable registration never
+    // coloured its handler (a 16th listener-registration site the S453
+    // inventory missed), so an async callee was fired unobserved — and a
+    // `${ if (isOk(1)) {…} }` handler here tested a Promise, the s441 class
+    // the page-level emitter closed. Colour it under the active client
+    // emission exactly as the page-level / row / lift emitters do, with the
+    // same statement-list options (`colorActiveHandler`): async calls are
+    // awaited inside the S453 rejection arm; a handler with no async call is
+    // returned verbatim (byte-identical). Handler text here carries AUTHOR
+    // names (the post-fn-name-mangle pass renames them), which is what the
+    // colouring resolves. Coloured ONCE, here — `buildHandlerExpr` stays a
+    // pure lowering.
+    const handlerExpr = colorActiveHandler(
+      buildHandlerExpr(binding),
+      binding.span,
+      {
+        ...activeHandlerStatementListColor(binding.handlerBlock?.stmts),
+        boundaryId: `${eventName} ${placeholderId}`,
+      },
+    );
     const dataAttr = `data-scrml-bind-${eventName}`;
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector('[${dataAttr}=${JSON.stringify(placeholderId)}]');`);

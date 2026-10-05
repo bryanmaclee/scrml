@@ -169,6 +169,30 @@ describe("S454 — every call-ref registration path colours an async callee", ()
     expect(r.js).not.toContain("_scrml_error_boundary_log");
   });
 
+  test("in-arm NON-delegable `${…}` handler — awaited like its page-level twin (s441 class at the missed site)", () => {
+    // Same registration site, the expression form: before S454 the condition
+    // tested a Promise (always truthy) and its rejection was unobserved, while
+    // the identical page-level handler awaited it.
+    const pre = PRE + `  server function isOk(n: number) { return n > 0 }\n`;
+    const r = emit(
+      `<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=\${ if (isOk(1)) { @y = 1 } } /></></match>` +
+      `<input id="t" oninput=\${ if (isOk(1)) { @y = 1 } } />`,
+      pre,
+    );
+    expect(r.errs).toEqual([]);
+    expect(r.js).toMatch(/const _h = async function\(event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
+    // the page-level twin is the oracle
+    expect(r.js).toMatch(/"_scrml_attr_oninput_\d+": async function\(event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
+    expect(catchArms(r.js).length).toBe(2);
+  });
+
+  test("in-arm NON-delegable `${…}` handler with no async call is unchanged", () => {
+    const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=\${@y = 1} /></></match>`);
+    expect(r.errs).toEqual([]);
+    expect(r.js).toMatch(/const _h = function\(event\) \{ _scrml_cs_reactive_set\("y", 1\); \};/);
+    expect(r.js).not.toContain("_scrml_error_boundary_log");
+  });
+
   test("component body", () => {
     const r = emit(`<Btn/>`, PRE + `  const Btn = <button id="c" onclick=go()>go</>\n`);
     expect(r.errs).toEqual([]);
