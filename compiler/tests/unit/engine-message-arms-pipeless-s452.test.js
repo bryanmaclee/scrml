@@ -22,9 +22,11 @@
 import { describe, expect, test } from "bun:test";
 import { parseMessageArms, parseEngineStateChildren } from "../../src/engine-statechild-parser.ts";
 
-/** Strip the source spans (they differ by the deleted `|` bytes) for AST equality. */
+/** Strip the source spans (they differ by the deleted `|` bytes) and the
+ *  §19.4.5 legacy-spelling marker (present only on a `|`-led arm) for AST
+ *  equality. */
 function armsShape(body) {
-  return parseMessageArms(body).arms.map(({ spanStart, spanEnd, ...rest }) => rest);
+  return parseMessageArms(body).arms.map(({ spanStart, spanEnd, legacyPipe, ...rest }) => rest);
 }
 /** Delete the legacy lead `| ` at the start of each line. */
 function unpipe(body) {

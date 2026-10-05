@@ -11,11 +11,11 @@ ${
 
     function safeCall() {
         let result = call() !{
-            | .Network(c) => {
+            .Network(c) => {
                 let display = "net-" + c
                 return display
             }
-            | .Parse(r) => {
+            .Parse(r) => {
                 let display = "parse-" + r
                 return display
             }

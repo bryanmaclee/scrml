@@ -1,6 +1,9 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-04T16:05:00-06:00  commit: fd2f757d0
+# generated: 2026-10-04T17:38:00-06:00  commit: 7ce905ac2
+# ⛑ **S452-WRAP STAMP — `fd2f757d0` -> `7ce905ac2` (5 commits: #1281 #1290 #1292 #1285 #1293), incremental; scan
+# mode INCREMENTAL (in-window changed docs + SPEC grep cross-check). New section `## Summary — S452-WRAP pass` below.
+# ━━━━━━━ BELOW IS THE S453 HEADER (stamp `fd2f757d0`), CARRIED. ━━━━━━━
 # ⛑ **S453 STAMP — `d3e660a08` -> `fd2f757d0`. 17 COMMITS (#1269 SPEC whole-error binder, #1271 S451 wrap, #1270
 # bootstrap §34 severity, S452-bryan #1272/#1273/#1274/#1275/#1276/#1277/#1278/#1279/#1280, S453-peter #1283/#1286
 # + the S453 bookkeeping commit `b6a43445e`, and #1287 brought in by the merge commit `fd2f757d0`), incremental
@@ -448,6 +451,70 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S452-WRAP pass (this pass, stamp `7ce905ac2`)
+
+Window `fd2f757d0..7ce905ac2` (5 commits). Docs scanned: the in-window changed `.md` set (SPEC.md, SPEC-INDEX.md,
+README.md, NERDME.md, docs/{FACTS,PA-SCRML-PRIMER,bootstrap-conformance,known-gaps,tutorial}.md, master-list.md,
+hand-off.md, 4 `docs/changes/s452-*/` dirs) + a grep cross-check of every new code / symbol against SPEC.
+Non-compliant: 3 · Uncertain: 2 · Prior findings closed: 3 (one with residue).
+
+### N-S452W-1 — `E-TENANT-SQL-SUBSET` is emitted by impl#1 and has NO SPEC text (code ahead of SPEC)
+**Reason:** grep-mismatch (reverse direction — code names a diagnostic the SPEC does not)
+**Detail:** `grep -c E-TENANT-SQL-SUBSET compiler/SPEC.md` = **0** at `7ce905ac2`; no §34 row, no §14.8.10 prose.
+impl#1 emits it (`codegen/tenant-egress.ts` `tenantFloorViolation` :590/:617; `tenant-sql-subset.ts` `TenantCode`
+:260). Same for the r4 behaviour: statement-level `OR ABORT` on injected SQLite writes, the refusal of an
+author-written `OR …` conflict clause, and the `<schema>` trigger / rule / cascading-FK hazard limb of
+`E-TENANT-WRITE` (`schemaWriteHazards` :105) — none is in §14.8.10. A conformance author or a second
+implementation reading the SPEC cannot know these refusals exist. Only `docs/known-gaps.md` (:22952 / :22958) records them.
+**Suggested disposition:** update to match current — a §34 row + a §14.8.10 paragraph (bryan lane).
+
+### N-S452W-2 — four SPEC sentences still say the arm-pipe `scrml fix` rule is not landed / the corpus is unmigrated
+**Reason:** content-heuristic (present-tense status contradicted by #1285)
+**Detail:** #1285 landed `scrml fix --rules=arm-pipe` (`commands/fix-arm-pipe.js`, a DEFAULT rule) and migrated
+170 arms / 72 files, and updated the §34 `E-ARM-PIPE-LEGACY` row (`SPEC.md:24739`, "The `scrml fix` rule landed
+S452"). The twins were NOT updated: `SPEC.md:18199` ("gate-blocked until the `scrml fix` rule above is
+verified-landed"), the §19 local table row `:19495` ("gate-blocked until … verified-landed … **Nominal / not yet
+emitted.**" — no landed note), `:42884-42886` (§63 registry, same), and `:18232-18239` ("**186 `|`-led arms in 70
+files** … The corpus migrates by the `scrml fix` rule" — a pre-migration census stated in the present tense).
+Also in §51.0.S.2.3 (`:35225-35238`): "**Nominal / not yet emitted** by impl#1 or the bootstrap" for the
+message-arm lint (impl#1 emits it at `symbol-table.ts:7654` since #1285) and "impl#1 today MISCOMPILES the
+canonical form silently" (measured on `8c02ff49a`, pre-#1275 — not re-executed this pass). The SPEC now disagrees
+with itself on the rule's and the lint's status.
+**Suggested disposition:** update to match current (mirror the `:24739` wording into the other three sites; past-tense the census).
+
+### N-S452W-3 — `docs/bootstrap-conformance.md` STALE for the FOURTH consecutive window
+**Reason:** content-heuristic (generated doc vs live run)
+**Detail:** committed 1310 cases; live `bun scripts/bootstrap-conformance.ts` at `7ce905ac2` = 1312 attempted,
+PASS 121 · FAIL 48 · NOT-TWINNED 514 · UNSUPPORTED 629; `--check` says STALE. #1290 regenerated it, #1285/#1293
+then added 2 conformance cases without regenerating. The S453 recommendation (make `--check` blocking on PRs
+touching `conformance/cases/**` or `self-host-v2/**`) is still unactioned.
+**Suggested disposition:** update to match current (`--write`) + the blocking-check fix.
+
+## Uncertain docs (needs human review) — S452-WRAP pass
+
+### `compiler/SPEC.md` §14.8.11 composition (`:12310-12315`) — "`UPDATE`/`DELETE` … fires `E-TENANT-WRITE`"
+**Reason:** since #1293 an UPDATE / DELETE inside the tenant SQL subset is FILTERED (`injectWriteTenantFilter`), not
+refused; whether the `db-authoritative` path still refuses it (the `:12657` "compile-time ban on the direct …") was not executed this pass.
+**What to check:** compile a `db-authoritative` tenant table with a plain `UPDATE … WHERE id = ${x}` at `7ce905ac2`; if it compiles, the sentence is stale.
+
+### `hand-off.md:313-325` (S453 non-compliance digest)
+**Reason:** carries N-S453-2 / N-S453-3 as open; both are now resolved by #1285 in the sense below, but `hand-off.md` is the PA's live doc.
+**What to check:** the PA's S452 wrap hand-off should mark them closed (or re-scoped to N-S452W-2).
+
+## Prior findings CLOSED at `7ce905ac2`
+- **N-S453-2** (W-ARM-PIPE-LEGACY "not yet emitted by impl#1 or the bootstrap" / "never emitted under either name") —
+  CLOSED in substance: the `:19494` and `:24738` rows now name impl#1's and the bootstrap's emit sites; "not yet
+  emitted by impl#1 (frozen) or the bootstrap" greps 0. Residue: both rows keep the rename-history parenthetical
+  "(never emitted under either name)" beside "**Emitted by impl#1**" — reads as a contradiction; folded into N-S452W-2.
+- **N-S453-3** (`scrml fix` deletes the `|` — no such rule) — CLOSED as stated: the rule exists (#1285). Residual
+  status drift re-filed as N-S452W-2.
+- **S453 §3 bullet 2** (README / NERDME / readme-snippets kept the `|` lead) — CLOSED: migrated by #1285.
+- CARRIED, still true at `7ce905ac2`: `db-authoritative.ts:105` and `tenant-egress.ts:517` comments narrate the
+  retired `_scrml_tenant_tag` (517 is now past-tense history — acceptable); `emit-server.ts:7077` E-SQL-004 message
+  still carries the §8.1.1-superseded "no `db=` in any ancestor `<program>`" wording (line moved from :7096).
+- CARRIED: `structure.generated.md` / `test.generated.md` / `dependencies.generated.md` / `error.generated.md` are
+  dated 2026-09-08 (flogence `mapgen.ts`), 195 src files vs live 226 — stale generated companions; not regenerated by this pass.
 
 ## Summary — S453 pass (this pass, stamp `fd2f757d0`)
 
@@ -4472,7 +4539,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
+#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness

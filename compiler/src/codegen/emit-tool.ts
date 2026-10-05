@@ -341,9 +341,13 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
 // around the tool's SQL lowering, then released.
 // ---------------------------------------------------------------------------
 function beginToolTenantFloor(fileAST: ASTNode): boolean {
+  const desired = extractDesiredSchema(fileAST as never);
+  const dbScopes = collectDbScopes(fileAST as never);
   const ctx = buildTenantContext(
     { protectedByTable: new Map(), schemaByTable: new Map() } as never,
-    extractDesiredSchema(fileAST as never).tenantTables,
+    desired.tenantTables,
+    desired.schemaText,
+    (ident: string) => dbScopes.get(ident)?.driver,
   );
   if (ctx.tenantScopedTables.size === 0) return false;
   setTenantContextForRewriter(ctx);

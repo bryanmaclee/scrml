@@ -841,9 +841,9 @@ Some operations can fail: a network call, a database query, a parsing pass. scrm
       function save() {
         @phase = Phase.Saving
         persistUser(@form.name, @form.email) !{
-          | .EmptyName        :> { @phase = Phase.Errored("Name can't be empty.") ; return }
-          | .InvalidEmail(e)  :> { @phase = Phase.Errored("Not an email: " + e) ; return }
-          | .DuplicateEmail(e):> { @phase = Phase.Errored(e + " is already taken.") ; return }
+          .EmptyName        :> { @phase = Phase.Errored("Name can't be empty.") ; return }
+          .InvalidEmail(e)  :> { @phase = Phase.Errored("Not an email: " + e) ; return }
+          .DuplicateEmail(e):> { @phase = Phase.Errored(e + " is already taken.") ; return }
         }
         @phase = Phase.Saved
       }
@@ -1100,8 +1100,8 @@ By now you have seen every primitive you need to build a working scrml app. Here
 
       function submit() {
         saveNote(@draft.note) !{
-          | .TooShort     :> { @phase = Phase.Failed("Too short.") ; return }
-          | .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved.") ; return }
+          .TooShort     :> { @phase = Phase.Failed("Too short.") ; return }
+          .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved.") ; return }
         }
         @lastSaved = @draft.note
         reset(@draft)

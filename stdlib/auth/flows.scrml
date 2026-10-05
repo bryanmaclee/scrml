@@ -57,7 +57,7 @@ ${
             // unknown recipient) MUST NOT change the neutral result, or request*
             // becomes an account-existence oracle. Swallow via safeCallAsync.
             safeCallAsync(() => sendEmail(email, { subject: subjectFor(purpose), link: link, token: token })) !{
-                | ::Thrown(m, n) -> not
+                ::Thrown(m, n) -> not
             }
         }
         // Neutral — never leak the token or the account's existence to the caller.
@@ -76,7 +76,7 @@ ${
         if (store is not || !token) return { valid: false, reason: "used-or-invalid" }
 
         const record = store.get(token) !{
-            | ::ParseFailed(m) -> not
+            ::ParseFailed(m) -> not
         }
         if (record is not) return { valid: false, reason: "used-or-invalid" }
         if (expectedPurpose is some && record.purpose != expectedPurpose) {

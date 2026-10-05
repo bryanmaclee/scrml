@@ -97,13 +97,13 @@
     // the transition contract — a message-arm target is validated against it.
     <engine for=DragPhase initial=.Idle accepts=DragMsg>
         <Idle rule=.Dragging>
-            | .Start(id) :> .Dragging(id)
-            | _          :> @dragPhase
+            .Start(id) :> .Dragging(id)
+            _          :> @dragPhase
         </>
         <Dragging(id) rule=.Idle>
-            | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
-            | .End       :> .Idle
-            | _          :> @dragPhase
+            .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+            .End       :> .Idle
+            _          :> @dragPhase
         </>
     </>
 

@@ -160,8 +160,12 @@ describe("Bug 58 — formFor validity surface IS emitted into client.js", () => 
 
   test("onsubmit handler sets @signup.submitted = true BEFORE invoking the handler (§41.14.3)", () => {
     // The emitted submit-handler body must set submitted true ahead of the call.
+    // S454 — the submit handler's callee is a server fn, so the listener is
+    // async-coloured like every other call-ref (the S453 rejection arm): the
+    // try opens first, then preventDefault + the submitted flag run in the
+    // synchronous prefix, and the call is awaited after them.
     expect(clientJs).toMatch(
-      /function\(event\) \{ event\.preventDefault\(\); _scrml_reactive_set\("signup\.submitted", true\);/,
+      /async function\(event\) \{ try \{ event\.preventDefault\(\); _scrml_reactive_set\("signup\.submitted", true\); await _scrml_fetch_persistSignup_\d+\(/,
     );
   });
 

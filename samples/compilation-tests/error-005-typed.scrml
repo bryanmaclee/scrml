@@ -3,9 +3,9 @@
 
 <div>
     !{
-        | ::ValidationError err -> let msg = "Validation failed"
-        | ::TimeoutError err -> let msg = "Request timed out"
-        | _ err -> let msg = "Something went wrong"
+        ::ValidationError(err) -> let msg = "Validation failed"
+        ::TimeoutError(err) -> let msg = "Request timed out"
+        _ err -> let msg = "Something went wrong"
     }
     <p>Typed error handler</>
 </div>

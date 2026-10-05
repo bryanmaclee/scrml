@@ -2246,6 +2246,7 @@ export function parseMessageArms(
     // `MsgType.Variant`. Capture the leaf variant name (last dotted segment).
     let variantName = "";
     let isWildcard = false;
+    let patternStart = triviaStart; // §19.4.5 — where the arm pattern begins (past a legacy `|`)
     if (pipelessHead) {
       // S452 pipe-less head — already validated by `pipelessHeadAt`.
       variantName = pipelessHead.variantName;
@@ -2255,6 +2256,7 @@ export function parseMessageArms(
       // `|`-led (soft-deprecated, §19.4.5) — recognition unchanged from S154.
       p = triviaStart + 1; // consume `|`
       while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+      patternStart = p;
       if (bodyRaw[p] === "_" && !/[A-Za-z0-9_$]/.test(bodyRaw[p + 1] ?? "")) {
         isWildcard = true;
         variantName = "_";
@@ -2310,6 +2312,7 @@ export function parseMessageArms(
 
     // -- Arm arrow `:>` / `=>` / `->` -----------------------------------------
     while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+    const arrowStart = p;
     const arrow = arrowAt(p);
     if (!arrow) {
       // Malformed arm (no arm-arrow). Recognition-only: stop the arm scan; the
@@ -2400,6 +2403,16 @@ export function parseMessageArms(
       isBlockBody,
       spanStart: armStart,
       spanEnd: p,
+      // §19.4.5 / §51.0.S.2.3 (S452) — a `|`-led arm is soft-deprecated; the
+      // pattern as written (between the `|` and the arrow) feeds the
+      // W-ARM-PIPE-LEGACY lint (symbol-table.ts) and `scrml fix`
+      // (commands/fix-arm-pipe.js). `patternStart` is a `bodyRaw` offset.
+      ...(pipelessHead ? {} : {
+        legacyPipe: {
+          pattern: bodyRaw.slice(patternStart, arrowStart).trim(),
+          patternStart,
+        },
+      }),
     });
     renderBodyStart = p;
     // Advance the outer cursor past this arm. Guard against a non-advancing
@@ -2890,6 +2903,9 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       payloadBindings,
       // ---- §51.0.S NEW (S154 — #14 event-payload-transition) ----
       messageArms,
+      // §19.4.5 (S452) — `rulesRaw` offset of `bodyRaw` (a message arm's
+      // `spanStart` / `legacyPipe.patternStart` are `bodyRaw` offsets).
+      bodyRawOffset: bodyStart,
     });
     i = nextI;
   }

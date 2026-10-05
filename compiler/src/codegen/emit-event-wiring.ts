@@ -1183,8 +1183,25 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
       }
     } else {
-      // call-ref path: resolve handler name and serialize arguments
-      // Resolve the handler: check fnNameMap first, fall back to original name
+      // call-ref path: serialize arguments and build the listener.
+      //
+      // S454 (bryan: "a yes, b yes, root fix") — the listener text is built
+      // with the AUTHOR name (`handlerName`), NOT the mangled
+      // `fnNameMap.get(handlerName)`. Async colouring (`colorHandlerAsync`
+      // below → `outerAsyncRootFromFacts`) resolves callees by author name, as
+      // every other handler form presents them; the emit-client
+      // `post-fn-name-mangle` pass rewrites the author name to its
+      // `_scrml_<name>_N` / `_scrml_fetch_<name>_N` form afterwards, exactly as
+      // it does for `onclick=${fn()}`. Substituting the mangled name HERE (the
+      // pre-S454 code) hid an async callee from the colouring, so
+      // `onclick=fn()` emitted a sync `function(event) { fn(); }` whose
+      // rejection escaped scrml's logging surface while `onclick=${fn()}`
+      // emitted the S453 A3 wrapper. Both forms now run one pipeline and emit
+      // the same listener. A sync callee is byte-identical (the post-pass
+      // produces the same name the substitution did).
+      //
+      // `resolvedHandler` is kept ONLY for the bare-ref form's direct
+      // reference below, which is a value position the colouring never sees.
       const resolvedHandler = fnNameMap.get(handlerName) || handlerName;
 
       // §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parens, no
@@ -1194,8 +1211,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // (that is the call-ref `fn()` form below). The wired listener receives
       // the DOM event as its argument. handlerArgs are always empty for this
       // form (a bare identifier has no parenthesized args).
+      //
+      // S454 — EXCEPT when `handler` is async-coloured: wired directly, its
+      // returned promise is discarded by the event dispatch and a rejection
+      // escapes scrml's logging surface (§19.6.8, every handler form). Then
+      // the listener is the coloured `function(event) { handler(event); }` —
+      // still handed the DOM event, so the form's meaning is unchanged — which
+      // carries the S453 rejection arm. A sync `handler` stays the direct
+      // reference, byte-identical.
       if (binding.bareRefHandler) {
-        handlerExpr = resolvedHandler;
+        const forwarded = `function(event) { ${handlerName}(event); }`;
+        const coloredRef = colorHandlerAsync(forwarded, binding.span, ctx, {
+          boundaryId: `${eventName} ${placeholderId}`,
+        });
+        handlerExpr = coloredRef !== forwarded ? coloredRef : resolvedHandler;
         if (!byEventType.has(eventName)) byEventType.set(eventName, []);
         byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
         continue;
@@ -1213,11 +1242,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       //   3. invoke the handler with the collected `values` — the compound cell
       //      value `_scrml_reactive_get("<cell>")` — so the server/client fn
       //      receives `values: StructType` per its declared signature.
-      // `resolvedHandler` already routes server fns through their `_scrml_fetch_*`
-      // wrapper (fnNameMap), which itself takes `(values)`. Emitted shape:
+      // The author name is routed through its `_scrml_fetch_*` wrapper (which
+      // itself takes `(values)`) by the post-fn-name-mangle pass. Shape BEFORE
+      // colouring (post-mangle):
       //   function(event) { event.preventDefault();
       //     _scrml_reactive_set("signup.submitted", true);
       //     _scrml_fetch_persistSignup_14(_scrml_reactive_get("signup")); }
+      // S454 — this listener now goes through `colorHandlerAsync` like every
+      // other call-ref (it used to `continue` past it), so a server-fn callee
+      // is awaited inside the S453 rejection arm instead of being fired
+      // unobserved. `preventDefault()` stays in the synchronous prefix, before
+      // the first `await`.
       if (binding.formForSubmitCell) {
         const ffCell = binding.formForSubmitCell;
         const encodedCell = encodingCtx && encodingCtx.enabled ? encodingCtx.encode(ffCell) : ffCell;
@@ -1226,11 +1261,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         handlerExpr =
           `function(event) { event.preventDefault(); ` +
           `_scrml_reactive_set(${JSON.stringify(submittedKey)}, true); ` +
-          `${resolvedHandler}(${valuesArg}); }`;
-        if (!byEventType.has(eventName)) byEventType.set(eventName, []);
-        byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
-        continue;
-      }
+          `${handlerName}(${valuesArg}); }`;
+      } else {
 
       // S97 — reactive-method-call shape detection.
       //
@@ -1312,12 +1344,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (cancelTimerLowered !== null) {
         handlerExpr = `function(event) { ${preventLine}${cancelTimerLowered}; }`;
       } else {
-        // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
-        // `function(event) { fn(); }` — `fn` is invoked with the user's
-        // declared args (none for bare-call zero-args). The wrapper STILL
-        // takes `event` as its parameter (so it satisfies the listener
-        // signature), but does NOT forward it into `fn`. The escape-hatch
-        // for "needs event" is `onclick=${(e) => fn(e)}` per §5.2.2 line 1123.
+        // SPEC §5.2.2 normative: `onclick=fn()` wires `fn` as the handler,
+        // invoked with the user's declared args (none for bare-call zero-args)
+        // when the event fires, not at render time. The wrapper takes `event`
+        // as its parameter (so it satisfies the listener signature), but does
+        // NOT forward it into `fn`. The escape-hatch for "needs event" is
+        // `onclick=${(e) => fn(e)}` per §5.2.2.
         //
         // S96 Bug 14 fix — pre-fix code at this site cited "tutorial §1.5:
         // passes the native event implicitly" + a locked test
@@ -1325,9 +1357,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // not normative (Rule 4); locked test was locking spec-divergent
         // behavior. User explicitly chose option-1-spec-wins. Tutorial §1.5
         // also needs alignment.
-        handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${argsStr}); }`;
+        //
+        // S454 — the AUTHOR name, so the colouring below sees the callee (see
+        // the note at the top of this call-ref path).
+        handlerExpr = `function(event) { ${preventLine}${handlerName}(${argsStr}); }`;
       }
       } // close S97 reactive-method-call else branch
+      } // close formFor-submit else branch
     }
 
     // s441 (g-server-call-in-inline-handler-condition-unawaited) — §13.2 in a
@@ -2402,6 +2438,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         if (hasFallback) {
           blk.push(`          el.innerHTML = (${fallbackExpr});`);
           blk.push(`          return;`);
+        } else if (isAsync) {
+          // S454 (bryan: "a yes, b yes, root fix"; folds in
+          // g-errorboundary-async-render-rejection-unobserved-s453) — an ASYNC
+          // render's re-throw can reach no enclosing boundary: the render runs
+          // detached, so a throw here only rejected a promise nobody observed
+          // (a bare host `unhandledrejection`). The log on the line above IS
+          // the propagation to the host (§19.6.8 B3/B5), so return. Any OTHER
+          // rejection of this render is logged by the `.catch` arm at its call
+          // sites below — each error is logged exactly once. The sync path
+          // keeps its re-throw, byte-identical.
+          blk.push(`          return; // §19.6.8 B3 — async render: no enclosing catch can observe a re-throw; logged above`);
         } else {
           blk.push(`          throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
         }
@@ -2420,6 +2467,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         if (hasFallback) {
           blk.push(`          el.innerHTML = (${fallbackExpr}); // boundary fallback (§19.6.5)`);
           blk.push(`          return;`);
+        } else if (isAsync) {
+          // S454 — as the host-throw arm above: logged on the previous line;
+          // an async render's re-throw reaches no enclosing boundary.
+          blk.push(`          return; // §19.6.8 B3 — async render: no enclosing catch can observe a re-throw; logged above`);
         } else {
           blk.push(`          throw _scrml_error_boundary_uncaught(_eb_result); // §19.6.8 B3 — no renders/fallback; propagate`);
         }
@@ -2427,14 +2478,18 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // Success — plain text render.
         blk.push(`        el.textContent = _eb_result;`);
         blk.push(`      }`);
-        // Initial render. When async, the IIFE awaits; reactive re-run wraps in effect.
-        if (isAsync) {
-          blk.push(`      ${renderFn}();`);
-        } else {
-          blk.push(`      ${renderFn}();`);
-        }
+        // Initial render; a reactive re-run wraps the same call in an effect.
+        // S454 — an ASYNC render returns a promise; observe it so a rejection
+        // the body did not already log (a throw from a variant's `renders`
+        // markup or the DOM write after the catch) reaches the logging surface
+        // instead of escaping as an unhandled rejection. An async function
+        // always returns a native Promise, so `.catch` cannot throw here.
+        const renderCall = isAsync
+          ? `${renderFn}().catch(function(_eb_err) { _scrml_error_boundary_log(${bId}, _eb_err); })`
+          : `${renderFn}()`;
+        blk.push(`      ${renderCall};`);
         if (varRefs.length > 0) {
-          blk.push(`      ${anchorTrack(`_scrml_effect(function() { ${renderFn}(); })`, inTpl)};`);
+          blk.push(`      ${anchorTrack(`_scrml_effect(function() { ${renderCall}; })`, inTpl)};`);
         }
         blk.push(`    }`);
         blk.push(`  }`);

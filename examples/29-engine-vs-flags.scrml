@@ -94,7 +94,7 @@
     function load() {
         @itemsPhase = .Loading
         const rows = fetchItems() !{
-            | err :> { @itemsPhase = .Failed("Couldn't load items."); return }
+            _ err :> { @itemsPhase = .Failed("Couldn't load items."); return }
         }
         @itemsPhase = .Loaded(rows)
     }

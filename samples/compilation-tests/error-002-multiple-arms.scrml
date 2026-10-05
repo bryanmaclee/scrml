@@ -3,10 +3,10 @@
 
 <div>
     !{
-        | ::NotFoundError e -> let status = 404
-        | ::AuthError e -> let status = 401
-        | ::ServerError e -> let status = 500
-        | _ e -> let status = 0
+        ::NotFoundError(e) -> let status = 404
+        ::AuthError(e) -> let status = 401
+        ::ServerError(e) -> let status = 500
+        _ e -> let status = 0
     }
     <p>Multi-error handler</>
 </div>

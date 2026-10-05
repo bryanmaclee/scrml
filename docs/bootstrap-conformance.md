@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1310 of 1310 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1312 of 1312 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 120 | 9.2% |
+| PASS | 121 | 9.2% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 48 | 3.7% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 513 | 39.2% |
-| UNSUPPORTED | 629 | 48.0% |
+| NOT-TWINNED | 514 | 39.2% |
+| UNSUPPORTED | 629 | 47.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 168; of those, 120 hold (71.4%). Runtime half executed on the bootstrap for 42 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 169; of those, 121 hold (71.6%). Runtime half executed on the bootstrap for 43 case(s).
 
-- **Vacuous** passes: 11 of 120 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **109**.
+- **Vacuous** passes: 11 of 121 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **110**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 48; the other 21 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,11 +30,11 @@ UNSUPPORTED by reason: bootstrap-unsupported 436 · parse-reject 193.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **583** — PASS 75 · FAIL 44 · UNSUPPORTED 464. Twin holds 75 (non-vacuous 67). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **584** — PASS 76 · FAIL 44 · UNSUPPORTED 464. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (513 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (514 cases; a case counts once per distinct reason):
 
 - 60 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 57 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -54,10 +54,10 @@ NOT-TWINNED by reason (513 cases; a case counts once per distinct reason):
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- 8 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
-- 7 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
 - 6 — engine-simple: nested engine (→ enum-valued child field, structural)
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
@@ -107,10 +107,10 @@ NOT-TWINNED by reason (513 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
-| engine | 91 | 6 | · | 5 | · | 49 | 31 | · | · |
+| engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 70 | 19 | · | 5 | · | 5 | 41 | · | · |
+| error | 71 | 20 | · | 5 | · | 5 | 41 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 18 | · | · | 1 | · | 1 | 16 | · | · |
@@ -274,7 +274,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (120)
+### PASS / CODES-ONLY (121)
 
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
@@ -305,23 +305,24 @@ none
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
-- `defer/handled-failable-ok` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `defer/handled-failable-ok` — PASS · TWIN
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
 - `defer/nested-neg` — PASS · TWIN
 - `defer/not-reached-and-nested-blocks` — PASS · TWIN
-- `defer/propagate-path` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `defer/propagate-path` — PASS · TWIN
 - `defer/return-value-before-deferred` — PASS · TWIN
-- `defer/unhandled-failable-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `defer/unhandled-failable-neg` — PASS · TWIN
 - `engine/engine-var-duplicate-neg` — PASS · TWIN
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/rule-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
+- `error/arm-pipe-legacy-handler` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
-- `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
 - `error/fail-in-failable-neg` — PASS · TWIN
 - `error/fail-non-enum-neg` — PASS · TWIN
 - `error/fail-outside-failable` — PASS · TWIN
@@ -329,15 +330,15 @@ none
 - `error/fail-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-variant-payload-arity-too-few-neg` — PASS · TWIN
 - `error/fail-variant-undeclared-neg` — PASS · TWIN
-- `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
 - `error/handler-pipeless-arms-rt` — PASS · TWIN
-- `error/handler-recovery-into-cell` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/handler-recovery-into-cell` — PASS · TWIN
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
-- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
-- `error/propagate-non-failable-callee-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
-- `error/propagate-non-failable-callee-pos` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/propagate-non-failable-callee-neg` — PASS · TWIN
+- `error/propagate-non-failable-callee-pos` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN
@@ -1029,7 +1030,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (513)
+### NOT-TWINNED (514)
 
 - `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
@@ -1148,6 +1149,7 @@ none
 - `each/when-changes-in-row-body` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/when-changes-in-row-body-no-write` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `engine/accepts-not-enum-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/arm-pipe-legacy-message` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/component-engine-scope-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · engine-simple: `<engine>` impl#1's front end did not surface as an engine declaration (left untouched)
 - `engine/composite-inner-colon-shorthand` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
 - `engine/derived-engine-circular-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)

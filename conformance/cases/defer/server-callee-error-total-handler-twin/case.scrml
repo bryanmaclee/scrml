@@ -17,8 +17,8 @@ ${
     function work() {
         @trace = @trace + "work;"
         release(1) !{
-            | ::Busy :> @trace = @trace + "busy;"
-            | _ :> @trace = @trace + "release-failed;"
+            ::Busy :> @trace = @trace + "busy;"
+            _ :> @trace = @trace + "release-failed;"
         }
         return "OK"
     }

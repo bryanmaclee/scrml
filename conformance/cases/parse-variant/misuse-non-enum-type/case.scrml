@@ -10,10 +10,10 @@ ${
 
     function decode() {
         parseVariant('{"id":1,"name":"ada"}', UserRow) !{
-            | ::MissingDiscriminator          :> { @status = "missing" }
-            | ::UnknownVariant(tag)           :> { @status = "unknown" }
-            | ::InvalidPayload(field, reason) :> { @status = "invalid" }
-            | ::Malformed(reason)             :> { @status = "malformed" }
+            ::MissingDiscriminator          :> { @status = "missing" }
+            ::UnknownVariant(tag)           :> { @status = "unknown" }
+            ::InvalidPayload(field, reason) :> { @status = "invalid" }
+            ::Malformed(reason)             :> { @status = "malformed" }
         }
     }
 }

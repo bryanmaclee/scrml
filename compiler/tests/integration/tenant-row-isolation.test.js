@@ -67,13 +67,29 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
     const r = compile(`      function loadAssets() { let rows = ?{\`SELECT id, name FROM assets\`}.all(); return rows }`);
     expect(hasCode(r, "I-TENANT-STRIP")).toBe(true);
   });
-  test("UPDATE against a tenant table → E-TENANT-WRITE", () => {
-    const r = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1}\`}.run(); return x }`);
-    expect(hasCode(r, "E-TENANT-WRITE")).toBe(true);
+  // S452 r3 — a subset UPDATE / DELETE is tenant-constrained (`AND tenant_id = <active
+  // tenant>` on its parenthesized WHERE); a write the floor cannot constrain is refused.
+  test("UPDATE against a tenant table → constrained to the active tenant", () => {
+    const r = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1} OR id = 2\`}.run(); return x }`);
+    expect(hasCode(r, "E-TENANT-WRITE")).toBe(false);
+    const out = [...r.outputs.values()][0];
+    expect(out.serverJs).toContain("UPDATE OR ABORT assets SET name = ${\"z\"} WHERE (id = ${1} OR id = 2) AND tenant_id = ${_scrml_tenant_write_key()}");
   });
-  test("DELETE against a tenant table → E-TENANT-WRITE", () => {
-    const r = compile(`      function f() { let x = ?{\`DELETE FROM assets WHERE id = \${1}\`}.run(); return x }`);
-    expect(hasCode(r, "E-TENANT-WRITE")).toBe(true);
+  test("DELETE against a tenant table → constrained to the active tenant (a missing WHERE gets one)", () => {
+    const r = compile(`      function f() { let x = ?{\`DELETE FROM assets\`}.run(); return x }`);
+    expect(hasCode(r, "E-TENANT-WRITE")).toBe(false);
+    const out = [...r.outputs.values()][0];
+    expect(out.serverJs).toContain("DELETE FROM assets WHERE tenant_id = ${_scrml_tenant_write_key()}");
+  });
+  test("UPDATE that sets tenant_id / UPDATE … FROM / DELETE … RETURNING → E-TENANT-WRITE", () => {
+    for (const q of [
+      "UPDATE assets SET tenant_id = ${\"z\"} WHERE id = ${1}",
+      "UPDATE assets SET name = 'x' FROM config WHERE id = 1",
+      "DELETE FROM assets WHERE id = 1 RETURNING name",
+    ]) {
+      const r = compile(`      function f() { let x = ?{\`${q}\`}.run(); return x }`);
+      expect(hasCode(r, "E-TENANT-WRITE")).toBe(true);
+    }
   });
   test("aggregate over a tenant table without a discriminator → E-TENANT-AGG", () => {
     const r = compile(`      function f() { let x = ?{\`SELECT COUNT(*) AS n FROM assets\`}.get(); return x }`);
@@ -101,7 +117,7 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
     const r = compile(`      function f() { let x = ?{\`INSERT INTO assets (name) VALUES (\${"z"})\`}.run(); return x }`);
     const out = [...r.outputs.values()][0];
     // read from the per-request store; with no active tenant it refuses by name (S452)
-    expect(out.serverJs).toContain("INSERT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_tenant_write_key()})");
+    expect(out.serverJs).toContain("INSERT OR ABORT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_tenant_write_key()})");
   });
 });
 
