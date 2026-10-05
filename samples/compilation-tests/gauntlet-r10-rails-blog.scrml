@@ -225,9 +225,9 @@
             @currentView = "list"
             @currentPostId = not
             @formError = ""
-            let result = loadPosts(@activeTagFilter) !{ .Transport(t) :> { return } }
+            let result = loadPosts(@activeTagFilter) !{ .Transport(_) :> { return } }
             @posts = result
-            let tags = loadAllTags() !{ .Transport(t) :> { return } }
+            let tags = loadAllTags() !{ .Transport(_) :> { return } }
             @allTags = tags
         }
 
@@ -244,12 +244,12 @@
             @currentView = "edit"
             @currentPostId = postId
             @formError = ""
-            let post = loadPost(postId) !{ .Transport(t) :> { return } }
+            let post = loadPost(postId) !{ .Transport(_) :> { return } }
             @currentPost = post
             @formTitle = post.title
             @formBody = post.body
             @formPublished = post.published == 1
-            let postTags = loadPostTags(postId) !{ .Transport(t) :> { return } }
+            let postTags = loadPostTags(postId) !{ .Transport(_) :> { return } }
             @currentPostTags = postTags
             @formTagInput = postTags.map(t => t.name).join(", ")
         }
@@ -257,15 +257,15 @@
         function showPost(postId) {
             @currentView = "show"
             @currentPostId = postId
-            let post = loadPost(postId) !{ .Transport(t) :> { return } }
+            let post = loadPost(postId) !{ .Transport(_) :> { return } }
             @currentPost = post
-            let postTags = loadPostTags(postId) !{ .Transport(t) :> { return } }
+            let postTags = loadPostTags(postId) !{ .Transport(_) :> { return } }
             @currentPostTags = postTags
         }
 
         function handleCreate() {
             let tagNames = @formTagInput.split(",").map(t => t.trim()).filter(t => t != "")
-            let result = createPost(@formTitle, @formBody, @formPublished, tagNames) !{ .Transport(t) :> { return } }
+            let result = createPost(@formTitle, @formBody, @formPublished, tagNames) !{ .Transport(_) :> { return } }
             if (result.ok) {
                 showList()
             } else {
@@ -275,7 +275,7 @@
 
         function handleUpdate() {
             let tagNames = @formTagInput.split(",").map(t => t.trim()).filter(t => t != "")
-            let result = updatePost(@currentPostId, @formTitle, @formBody, @formPublished, tagNames) !{ .Transport(t) :> { return } }
+            let result = updatePost(@currentPostId, @formTitle, @formBody, @formPublished, tagNames) !{ .Transport(_) :> { return } }
             if (result.ok) {
                 showPost(@currentPostId)
             } else {
@@ -292,7 +292,7 @@
         }
 
         function confirmDelete() {
-            let result = deletePost(@confirmDeleteId) !{ .Transport(t) :> { return } }
+            let result = deletePost(@confirmDeleteId) !{ .Transport(_) :> { return } }
             @confirmDeleteId = not
             if (result.ok) {
                 showList()
@@ -301,29 +301,29 @@
 
         function filterByTag(tagName) {
             @activeTagFilter = tagName
-            let result = loadPosts(tagName) !{ .Transport(t) :> { return } }
+            let result = loadPosts(tagName) !{ .Transport(_) :> { return } }
             @posts = result
         }
 
         function clearTagFilter() {
             @activeTagFilter = not
-            let result = loadPosts(not) !{ .Transport(t) :> { return } }
+            let result = loadPosts(not) !{ .Transport(_) :> { return } }
             @posts = result
         }
 
         function handleRemoveTag(postId, tagId) {
-            let result = removeTagFromPost(postId, tagId) !{ .Transport(t) :> { return } }
+            let result = removeTagFromPost(postId, tagId) !{ .Transport(_) :> { return } }
             if (result.ok) {
-                let updatedTags = loadPostTags(postId) !{ .Transport(t) :> { return } }
+                let updatedTags = loadPostTags(postId)
                 @currentPostTags = updatedTags
             }
         }
 
         function handleAddGlobalTag() {
-            let result = createTag(@newTagName) !{ .Transport(t) :> { return } }
+            let result = createTag(@newTagName) !{ .Transport(_) :> { return } }
             if (result.ok) {
                 @newTagName = ""
-                let tags = loadAllTags() !{ .Transport(t) :> { return } }
+                let tags = loadAllTags()
                 @allTags = tags
             }
         }

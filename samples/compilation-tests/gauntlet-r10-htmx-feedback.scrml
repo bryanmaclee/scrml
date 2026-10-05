@@ -117,7 +117,7 @@
         function handleSubmit() {
             @submitting = true
             @errorMsg = ""
-            submitFeedback() !{ .Transport(t) :> { return } }
+            submitFeedback() !{ .Transport(_) :> { return } }
         }
 
         function resetForm() {

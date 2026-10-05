@@ -35,8 +35,8 @@
         @outcome = "returned"
     }
     function onRead() {
-        @b1 = balanceOf(1) !{ .Transport(t) :> { return } }
-        @b2 = balanceOf(2) !{ .Transport(t) :> { return } }
+        @b1 = balanceOf(1)
+        @b2 = balanceOf(2)
     }
     <button id="commit" onclick=onCommit()>commit</button>
     <button id="bail" onclick=onReturnOut()>bail</button>

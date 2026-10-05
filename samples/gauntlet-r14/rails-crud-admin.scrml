@@ -40,13 +40,13 @@
         }
     }
     <h1>${pageTitle}</>
-    <button onclick={ createProduct() !{ .Transport(t) :> { return } } }>New Product</>
+    <button onclick={ createProduct() !{ .Transport(_) :> { return } } }>New Product</>
     <div if=@editId>
         <h2>Edit Product</>
         <input type="text" bind:value=@editName placeholder="Name"/>
         <input type="number" bind:value=@editPrice placeholder="Price"/>
         <input type="number" bind:value=@editStock placeholder="Stock"/>
-        <button onclick={ updateProduct() !{ .Transport(t) :> { return } } }>Save</>
+        <button onclick={ updateProduct() !{ .Transport(_) :> { return } } }>Save</>
         <button onclick=cancelEdit()>Cancel</>
     </div>
     <table>

@@ -11,7 +11,7 @@ ${
   }
 }
 <div>
-  <button onclick={ updateEmail(1, "new@test.com") !{ .Transport(t) :> { return } } }>Update</>
-  <button onclick={ removeUser(2) !{ .Transport(t) :> { return } } }>Delete</>
+  <button onclick={ updateEmail(1, "new@test.com") !{ .Transport(_) :> { return } } }>Update</>
+  <button onclick={ removeUser(2) !{ .Transport(_) :> { return } } }>Delete</>
 </div>
 </>

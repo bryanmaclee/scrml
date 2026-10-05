@@ -11,5 +11,5 @@
     }
   </db>
   <n> = 0
-  <button id="load" onclick={ @n = getLen(1) !{ .Transport(t) :> { return } } }>load</button>
+  <button id="load" onclick={ @n = getLen(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

@@ -8,7 +8,7 @@ ${
             return "COMPUTED-IN-THE-BODY"
         }
         function pull() {
-            @label = branchLoad() !{ .Transport(t) :> { return } }
+            @label = branchLoad() !{ .Transport(_) :> { return } }
         }
     }
     <button id="go" onclick=pull()>Go</>

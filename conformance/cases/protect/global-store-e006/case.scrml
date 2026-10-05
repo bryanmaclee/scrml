@@ -16,6 +16,6 @@
     }
   </db>
   <out> = not
-  <button id="stash" onclick={ @out = stash(1) !{ .Transport(t) :> { return } } }>stash</button>
-  <button id="peek" onclick={ @out = peek() !{ .Transport(t) :> { return } } }>peek</button>
+  <button id="stash" onclick={ @out = stash(1) !{ .Transport(_) :> { return } } }>stash</button>
+  <button id="peek" onclick={ @out = peek() !{ .Transport(_) :> { return } } }>peek</button>
 </program>

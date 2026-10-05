@@ -22,7 +22,7 @@
         }
     }
     <h1>User Management</>
-    <button onclick={ createUser() !{ .Transport(t) :> { return } } }>Add User</>
+    <button onclick={ createUser() !{ .Transport(_) :> { return } } }>Add User</>
     <table>
         <thead>
             <tr>

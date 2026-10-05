@@ -5,5 +5,5 @@ ${
     }
 }
 <program db="./app.db">
-    <button id="load" onclick={ @items = loadTasks() !{ .Transport(t) :> { return } } }>Load</>
+    <button id="load" onclick={ @items = loadTasks() !{ .Transport(_) :> { return } } }>Load</>
 </program>

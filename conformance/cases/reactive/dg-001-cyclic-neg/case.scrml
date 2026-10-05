@@ -9,6 +9,6 @@
     ?{`SELECT id FROM pets WHERE owner_id = ${id}`}.all()
   }
 
-  <button onclick={ loadOwner(1) !{ .Transport(t) :> { return } } }>Load</button>
+  <button onclick={ loadOwner(1) !{ .Transport(_) :> { return } } }>Load</button>
 
 </program>

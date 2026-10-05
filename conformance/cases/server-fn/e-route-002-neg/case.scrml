@@ -7,7 +7,7 @@ ${
     // refresh()); the negative control guards against a false positive.
     function refresh(name: string) {
         document.title = name
-        auditName(name) !{ .Transport(t) :> { return } }
+        auditName(name) !{ .Transport(_) :> { return } }
     }
 
     // Server-classified via the ?{} SQL context. It calls no client-only fn.

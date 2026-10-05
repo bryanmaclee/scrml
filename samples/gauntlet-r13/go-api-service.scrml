@@ -25,7 +25,7 @@
     }
     <h1>API Entries</>
     <input type="text" bind:value=@newTitle placeholder="New entry"/>
-    <button onclick={ createEntry() !{ .Transport(t) :> { return } } }>Create</>
+    <button onclick={ createEntry() !{ .Transport(_) :> { return } } }>Create</>
     <table>
         <tbody>
             ${

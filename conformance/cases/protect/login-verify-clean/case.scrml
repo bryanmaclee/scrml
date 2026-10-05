@@ -15,5 +15,5 @@
     }
   </db>
   <result> = not
-  <button id="load" onclick={ @result = login("Alice", "correct-pw") !{ .Transport(t) :> { return } } }>login</button>
+  <button id="load" onclick={ @result = login("Alice", "correct-pw") !{ .Transport(_) :> { return } } }>login</button>
 </program>

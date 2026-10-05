@@ -25,7 +25,7 @@
         }
     }
     <h1>Job Pipeline</>
-    <button onclick={ createJob("New Job") !{ .Transport(t) :> { return } } }>Create Job</>
+    <button onclick={ createJob("New Job") !{ .Transport(_) :> { return } } }>Create Job</>
     <table>
         <thead>
             <tr><th>Job</><th>Status</><th>Actions</></tr>

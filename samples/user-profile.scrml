@@ -33,7 +33,7 @@ ${
     }
 
     function loadUser(id) {
-        let row = fetchUser(id) !{ .Transport(t) :> { return } }
+        let row = fetchUser(id) !{ .Transport(_) :> { return } }
         if (row is not) {
             @error = "User not found."
         } else {
@@ -56,7 +56,7 @@ ${
     function saveProfile() {
         @saving = true
         @error  = not
-        persistProfile(@user.id, @editName, @editEmail) !{ .Transport(t) :> { return } }
+        persistProfile(@user.id, @editName, @editEmail) !{ .Transport(_) :> { return } }
         loadUser(@user.id)
         @saving   = false
         @editMode = false

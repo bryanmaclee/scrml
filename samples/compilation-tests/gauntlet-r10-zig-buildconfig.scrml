@@ -231,7 +231,7 @@ ${
 
     function handleSave() {
         @saveStatus = "Saving"
-        saveConfig() !{ .Transport(t) :> { return } }
+        saveConfig() !{ .Transport(_) :> { return } }
         @saveStatus = "Saved"
     }
 }

@@ -7,7 +7,7 @@ ${
     // only cross-boundary call goes client -> server).
     function flash(name: string) {
         document.title = name
-        persist(name) !{ .Transport(t) :> { return } }
+        persist(name) !{ .Transport(_) :> { return } }
     }
     function persist(name: string) {
         ?{`INSERT INTO audit (who) VALUES (${name})`}.run()

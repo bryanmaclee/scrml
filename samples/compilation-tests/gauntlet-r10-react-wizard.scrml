@@ -118,7 +118,7 @@ ${
     function handleSubmit() {
         @isSubmitting = true
         @submitError = ""
-        let result = submitRegistration(@firstName, @lastName, @email, @selectedPlan, @emailUpdates, @smsAlerts, @newsletter) !{ .Transport(t) :> { return } }
+        let result = submitRegistration(@firstName, @lastName, @email, @selectedPlan, @emailUpdates, @smsAlerts, @newsletter) !{ .Transport(_) :> { return } }
         if (result == "ok") {
             @submitted = true
         } else {

@@ -8,7 +8,7 @@ ${
     }
     function refresh() {
         if (@mode == "all") {
-            @items = loadTasks() !{ .Transport(t) :> { return } }
+            @items = loadTasks() !{ .Transport(_) :> { return } }
         }
     }
 }

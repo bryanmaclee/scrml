@@ -8,7 +8,7 @@ ${
   }
 }
 <div>
-  <button onclick={ getPosts("tech") !{ .Transport(t) :> { return } } }>Tech Posts</>
-  <button onclick={ getPosts(not) !{ .Transport(t) :> { return } } }>All Posts</>
+  <button onclick={ getPosts("tech") !{ .Transport(_) :> { return } } }>Tech Posts</>
+  <button onclick={ getPosts(not) !{ .Transport(_) :> { return } } }>All Posts</>
 </div>
 </>

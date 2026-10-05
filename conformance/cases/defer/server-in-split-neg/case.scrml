@@ -13,6 +13,6 @@ ${
         @trace = @trace + "end;"
     }
 }
-<button onclick={ save(1) !{ .Transport(t) :> { return } } }>go</>
+<button onclick={ save(1) !{ .Transport(_) :> { return } } }>go</>
 <p>${@trace}</p>
 </program>

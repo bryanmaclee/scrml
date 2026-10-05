@@ -5,5 +5,5 @@ ${
         return ?{`SELECT id, name FROM users WHERE role = ${role} ORDER BY id`}.all()
     }
 }
-<button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> { return } } }>Load admins</>
+<button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(_) :> { return } } }>Load admins</>
 </program>

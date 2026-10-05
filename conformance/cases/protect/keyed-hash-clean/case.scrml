@@ -12,5 +12,5 @@
     }
   </db>
   <h> = not
-  <button id="load" onclick={ @h = rehash(1) !{ .Transport(t) :> { return } } }>load</button>
+  <button id="load" onclick={ @h = rehash(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

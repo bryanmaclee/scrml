@@ -23,7 +23,7 @@ ${
         ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
     }
 }
-<button id="go" onclick={ save(1) !{ .Transport(t) :> { return } } }>go</button>
-<button id="go2" onclick={ other(1) !{ .Transport(t) :> { return } } }>go2</button>
+<button id="go" onclick={ save(1) !{ .Transport(_) :> { return } } }>go</button>
+<button id="go2" onclick={ other(1) !{ .Transport(_) :> { return } } }>go2</button>
 <p id="out">${@busy}</p>
 </program>

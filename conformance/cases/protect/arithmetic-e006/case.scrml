@@ -12,5 +12,5 @@
     }
   </db>
   <user> = not
-  <button id="load" onclick={ @user = getUser(1) !{ .Transport(t) :> { return } } }>load</button>
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

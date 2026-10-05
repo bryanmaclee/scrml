@@ -18,7 +18,7 @@ ${
         @trace = @trace + "end;"
     }
 }
-<button id="go" onclick={ save(1) !{ .Transport(t) :> { return } } }>Go</>
+<button id="go" onclick={ save(1) !{ .Transport(_) :> { return } } }>Go</>
 <p id="out">${@trace}</p>
 <p id="busy">${@busy}</p>
 </program>

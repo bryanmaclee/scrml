@@ -117,7 +117,7 @@
 
         function refresh() {
             const tok = getSessionToken()
-            const data = fetchHomeData(tok) !{ .Transport(t) :> { return } }
+            const data = fetchHomeData(tok)
             if (data.unauthorized) {
                 window.location.href = "/auth/login?reason=unauthorized"
                 return
