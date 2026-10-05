@@ -250,3 +250,37 @@ byte (idempotent and deterministic; a `--check` re-run changes no file except th
    Repro: `phase0-probe.ts split-stmt-run`.
 10. Caller batching — a handled `?{}` in `balanceOf` makes impl#1 stop `Promise.all`-batching `@b1 = balanceOf(1);
     @b2 = balanceOf(2)` (unit test "the gate: … Promise.all batching").
+
+## S455 RULING — reads only ("b your rec on R11", user-voice-scrml.md §S455; relayed by the PA)
+Trigger: S239 review of 32647fcd — a rewritten WRITE (`.run() !{ _ :> {} }`) that fails lets the function continue
+(samples/admin-panel doRevokeKey: the UPDATE fails, the audit INSERT records "revoked", the client sees success;
+base: 500, nothing logged). Pre-ruling measurement (from the rule's own classification): of the 238 rewritten sites
+86 were writes (statement `.run()` 75, bare statement 3, keywordless `x =` … RETURNING 5, return 3), 152 reads.
+
+### Rule (3fa36bfbd)
+- `classifySql(query)` — tokenizes the tree's query text (skips `--` / block comments, quoted text, `${…}` params);
+  READ only if ONE statement, no write keyword anywhere (INSERT UPDATE DELETE REPLACE UPSERT MERGE RETURNING INTO
+  CREATE DROP ALTER TRUNCATE ATTACH DETACH VACUUM REINDEX GRANT REVOKE COPY CALL DO LOCK SET PRAGMA; `replace(…)` the
+  string function excepted), and the lead keyword after leading parens / `WITH [RECURSIVE] … AS (…)` clauses is
+  SELECT or VALUES. Everything else, incl. unreadable text, = WRITE (fail closed).
+- WRITE = any `.run()`, a bare `?{}` statement, or SQL not provably a pure read → LISTED with: "an unhandled `?{}`
+  WRITE (…): on impl#1 a failure throws today (HTTP 500, nothing after it runs); a fallback arm would swallow it
+  silently and let the function continue as if it succeeded — handle it (retry, surface the failure, or move it
+  into a `!` function and handle the result at the caller)". `SQL_FALLBACK.run` removed.
+- Tests 22 (classifier read / write tables incl. RETURNING, WITH-led, comment-led, multi-statement, unclassifiable;
+  write kinds listed in every position; doRevokeKey shape; reads rewritten; idempotence). commands 516/516.
+
+### Corpus (111751330) — re-applied FROM THE BASE CORPUS with the final rule
+- **Rewritten: 150 reads / 117 files** — examples 8/5, samples 40/20, conformance/cases 101/91, stdlib 1/1. By
+  kind: const/let `.get()` 50 · `.all()` 18 · bare 2; return `.get()` 19 · `.all()` 42 · bare 4; keywordless `x =`
+  bare 11; statement `.all()` 4.
+- **Listed: 362** — writes 181 (`.run()` 155, bare statement 11, not-provably-SELECT 15); body top 71; gate:
+  impl#1 codes changed 39; `@x =` in a function 38; terminator 10; lift 6; nested / captured decl 6; other 5;
+  batching gate 2; tx control 2; body-split 1; impl#1 threw 1. (bare-identifier-body-e-sql-003-neg is now listed —
+  `?{q}` is not provably a SELECT — so no hold-back is needed.)
+- impl#1 conformance: 1268 pass + 50 xfail both sides, case by case identical. Bootstrap counter: PASS 121 / FAIL 56 /
+  NOT-TWINNED 514 / UNSUPPORTED 627 / CRASH 0 both sides.
+- Emit differential (base = archive of the base corpus + this compiler, sibling *.db copied): 0 compile-outcome
+  changes, 0 diagnostic-code changes, syntax 0/0, bare server-fn sites 197 = 197; 464 of 11456 artifacts differ —
+  347 noise (hash / renumbering / work-dir path) + 117 server.js read lowering (`_scrml_sql_attempt` + the `not` /
+  `[]` arm). No client batching change.
