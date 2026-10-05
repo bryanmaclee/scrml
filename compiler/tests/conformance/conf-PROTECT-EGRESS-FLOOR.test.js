@@ -49,6 +49,9 @@ const SEED = [
   "CREATE TABLE notes (id INTEGER PRIMARY KEY, user_id INTEGER, body TEXT)",
   `INSERT INTO users (id, name, passwordHash) VALUES (1, 'alice', '${SECRET}')`,
   "INSERT INTO notes (id, user_id, body) VALUES (10, 1, 'note-body')",
+  // A view the compile does not know (created at runtime, not in `<schema>`):
+  // it re-exposes the protected column under another name.
+  "CREATE VIEW v AS SELECT id, passwordHash AS p FROM users",
 ];
 
 // One program, every shape a server function, compiled + seeded once. The `?{}`
@@ -90,12 +93,36 @@ const SHAPES = {
   union: Q("SELECT name, body FROM notes JOIN users ON users.id = notes.user_id UNION SELECT name, passwordHash FROM users"),
   mixedWith: Q("WiTh t AS (SELECT id, name, passwordHash FROM users) SELECT * FROM t"),
 
-  // --- KNOWN LEAK (pinned, run under test.skip below): a leading `;` makes the
-  // leader test (`isRowProducingQuery` over `stripLeadingSqlNoise`) fail, so no
-  // protect tag is emitted and the full row — passwordHash included — ships.
+  // --- formerly KNOWN LEAK (pinned under test.skip until S454): a leading `;`
+  // made the leader test (`isRowProducingQuery` over `stripLeadingSqlNoise`)
+  // fail, so no protect tag was emitted and the full row — passwordHash
+  // included — shipped. S454 inverted the default: a statement the floor does
+  // not POSITIVELY recognize is stripped wholesale.
   leadingSemicolon: Q("; SELECT id, name, passwordHash FROM users"),
   leadingSemicolonComment: Q("/* x */ ; SELECT id, name, passwordHash FROM users"),
   leadingSemicolonGet: Q("; SELECT id, name, passwordHash FROM users WHERE id = 1", ".get()"),
+
+  // --- S454: further shapes. Each "base:" note is the body 79bd05028 served,
+  // EXECUTED with this harness.
+  // base: LEAK [{"id":1,"name":"alice","passwordHash":"SECRET-…"}]
+  doubleSemicolon: Q(";; SELECT id, name, passwordHash FROM users"),
+  // base: LEAK (same body)
+  lineCommentSemicolon: Q("-- lead\n; SELECT id, name, passwordHash FROM users"),
+  // base: LEAK [{"id":1,"name":"alice","x":"SECRET-…"}] — a scalar subquery
+  // over a view the compile does not know (created at runtime, see SEED)
+  viewSubquery: Q("SELECT id, name, (SELECT p FROM v WHERE v.id = users.id) AS x FROM users"),
+  // base: LEAK — `RETURNING *;` resolved as an opaque `*;` entry
+  returningStarSemi: Q("UPDATE users SET name = 'alice' WHERE id = 1 RETURNING *;"),
+  // base: LEAK [{"id":1,"a":"{","passwordHash":"SECRET-…","b":"}"}] — the SQL
+  // splitter brace-counts `${ "{" } … ${ "}" }` as ONE interpolation, the JS
+  // template it is written back into reads two, and `, passwordHash,` between
+  // them reaches the database as SQL the floor never saw
+  holeBrace: Q("SELECT id, ${ \"{\" } AS a, passwordHash, ${ \"}\" } AS b FROM users"),
+  // base: wholesale strip [{}] (already fail-closed; pins comment + spacing forms)
+  withCommented: Q("/* a */ WITH -- b\n t AS (SELECT id, name, passwordHash FROM users)SELECT * FROM t"),
+  // base: wholesale strip [{}] (an over-strip); S454 RESOLVES it — a trailing
+  // `;` is not part of the statement
+  trailingSemicolon: Q("SELECT id, name, passwordHash FROM users;"),
 };
 
 function buildProgram() {
@@ -235,30 +262,75 @@ describe("CONF-PROTECT-EGRESS-FLOOR — fail-closed wholesale strip: protected v
 });
 
 // ---------------------------------------------------------------------------
-// KNOWN LEAK — PINNED, SKIPPED. A `?{}` whose SQL begins with `;` (bare, or
-// after a leading comment) is NOT recognized as row-producing: §14.8.9's
-// `isRowProducingQuery` runs over `stripLeadingSqlNoise`, which strips leading
-// whitespace and comments but NOT a leading `;`, so the leader regex
-// `/^(?:select|with)\b/` fails, `resolveProtectedOutputColumns` returns null,
-// NO `_scrml_protect_tag` wrap is emitted, and the driver row — passwordHash
-// included — ships. This is the §14.8.9 fail-closed invariant violated: an
-// unresolved-leader query degraded to "no protected column" instead of a
-// wholesale strip (the class the §14.8.10 tenant floor closed in r3,
-// g-tenant-floor-sql-lexical-bypasses-s452-r3). EXECUTED leak body:
-//   [{"id":1,"name":"alice","passwordHash":"SECRET-HASH-7f3a0b91"}]
-// Un-skip when the compiler strips a leading `;` (and other non-SELECT/WITH
-// leaders) before the leader test, or fails closed on them. Do NOT fix here.
+// FORMERLY KNOWN LEAK (pinned under test.skip at 79bd05028; closed S454). A
+// `?{}` whose SQL begins with `;` (bare, or after a leading comment) was NOT
+// recognized as row-producing: `isRowProducingQuery` ran over
+// `stripLeadingSqlNoise`, which stripped leading whitespace and comments but
+// NOT a leading `;`, so the leader regex `/^(?:select|with)\b/` failed,
+// `resolveProtectedOutputColumns` returned null, NO `_scrml_protect_tag` wrap
+// was emitted, and the driver row — passwordHash included — shipped. EXECUTED
+// leak body: [{"id":1,"name":"alice","passwordHash":"SECRET-HASH-7f3a0b91"}]
+// The fix is not a `;` rule: the floor now strips WHOLESALE every statement it
+// does not POSITIVELY recognize (§14.8.9: "fail-closed on an unknown origin").
 // ---------------------------------------------------------------------------
-describe("CONF-PROTECT-EGRESS-FLOOR — KNOWN LEAK (pinned): a leading `;` bypasses the floor", () => {
+describe("CONF-PROTECT-EGRESS-FLOOR — leading `;` (formerly a pinned leak): stripped wholesale", () => {
   const cases = [
     ["leading `;` then SELECT (`.all()`)", "leadingSemicolon"],
     ["leading comment then `;` then SELECT", "leadingSemicolonComment"],
     ["leading `;` then SELECT (`.get()`)", "leadingSemicolonGet"],
   ];
   for (const [label, name] of cases) {
-    test.skip(`${label} — SHOULD strip passwordHash, currently LEAKS it`, async () => {
+    test(`${label} — passwordHash ABSENT`, async () => {
       const { text } = await call(name);
-      expect(text).not.toContain(SECRET); // currently fails: the hash ships
+      expect(text).not.toContain(SECRET);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// S454 — shapes the floor did not positively recognize. Every one of the
+// first five LEAKED on 79bd05028 (executed; bodies in the SHAPES comments).
+// Each is now an UNKNOWN to the floor → the row is stripped wholesale.
+// ---------------------------------------------------------------------------
+describe("CONF-PROTECT-EGRESS-FLOOR — S454 unknown statements: protected value absent, row dropped to {}", () => {
+  const cases = [
+    ["`;;` then SELECT", "doubleSemicolon"],
+    ["line comment, then `;`, then SELECT", "lineCommentSemicolon"],
+    ["scalar subquery over a view the compile does not know", "viewSubquery"],
+    ["`${}` pair whose braces the SQL splitter and JS read differently", "holeBrace"],
+    ["WITH behind a block comment, a line comment and no space before SELECT", "withCommented"],
+  ];
+  for (const [label, name] of cases) {
+    test(`${label} — passwordHash ABSENT (whole row stripped)`, async () => {
+      const { text, json } = await call(name);
+      expect(text).not.toContain(SECRET);
+      expect(Array.isArray(json)).toBe(true);
+      expect(json.length).toBeGreaterThanOrEqual(1);
+      // wholesale: no column of the row survives
+      expect(Object.keys(json[0])).toEqual([]);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// S454 — shapes the floor RESOLVES (a trailing `;` is not part of the
+// statement): the protected column is stripped by name and the others arrive.
+// `returningStarSemi` LEAKED on 79bd05028 (`RETURNING *;` was read as an opaque
+// `*;` entry naming no protected column).
+// ---------------------------------------------------------------------------
+describe("CONF-PROTECT-EGRESS-FLOOR — S454 resolved: trailing `;`", () => {
+  const cases = [
+    ["SELECT … FROM users;", "trailingSemicolon"],
+    ["UPDATE … RETURNING *;", "returningStarSemi"],
+  ];
+  for (const [label, name] of cases) {
+    test(`${label} — passwordHash ABSENT, a non-protected column ARRIVES`, async () => {
+      const { text, json } = await call(name);
+      expect(text).not.toContain(SECRET);
+      const row = json[0];
+      expect(row, "expected a row in the response").toBeTruthy();
+      expect("passwordHash" in row).toBe(false);
+      expect(row.name).toBe("alice");
     });
   }
 });
