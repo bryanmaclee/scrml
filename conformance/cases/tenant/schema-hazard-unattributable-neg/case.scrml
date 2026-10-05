@@ -1,0 +1,14 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)`}
+        ?{`CREATE TABLE config (k TEXT, v TEXT)`}
+        ?{`CREATE TRIGGER t_pg AFTER INSERT ON config FOR EACH ROW EXECUTE FUNCTION audit_fn()`}
+    </>
+    // audit_fn is defined outside this program; its body is unknown.
+    ${
+        function go() {
+            return ?{`SELECT id, name FROM assets`}.all()
+        }
+    }
+    <button onclick=${ go() }>go</button>
+</program>

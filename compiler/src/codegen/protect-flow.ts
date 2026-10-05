@@ -95,6 +95,7 @@
 // @ts-ignore — acorn ships its own types but the compiler imports it untyped elsewhere.
 import * as acorn from "acorn";
 import { CGError } from "./errors.ts";
+import { FOREIGN_SEAL_FN } from "./foreign-seal.ts";
 import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "./session-store-emit.ts";
 
 /** Label used for a row whose SQL origins could not be resolved (strip-all). */
@@ -872,7 +873,7 @@ const TX_GUARD_RUNTIME_NAMES = new Set([
 /** Compiler-runtime helpers the analysis models itself (never walked). */
 function isModelledHelperName(name: string): boolean {
   return name.startsWith("_scrml_protect_") || name.startsWith("_scrml_tenant_") || name === "_scrml_active_tenant"
-    || name === "_scrml_structural_eq" || TX_GUARD_RUNTIME_NAMES.has(name);
+    || name === "_scrml_structural_eq" || TX_GUARD_RUNTIME_NAMES.has(name) || name === FOREIGN_SEAL_FN;
 }
 
 interface Mod {
@@ -3297,6 +3298,25 @@ class FlowAnalysis {
         // them is not just slow but pathological: their Proxy + closure + queue body
         // took the fixpoint from milliseconds to ~140 s per compile (measured).
         return args[0] ?? clean();
+      }
+      if (name === FOREIGN_SEAL_FN) {
+        // §23.2.4a — `_scrml_foreign_seal(site, source)` returns the SEALED `_={ }=`
+        // slice: a function the runtime builds from a string (foreign-seal.ts). Not
+        // walked (its `new Function` would read as the code evaluator and poison
+        // every protect compile that uses a slice at all) and not analysed as the
+        // string it carries. Modelled as what it is to this analysis — host code the
+        // compiler cannot see into — so a call through it takes `hostCall`'s
+        // fail-closed rule: whatever protected value crosses in comes back out
+        // protected. (The source-text gate E-PROTECT-004 already refuses a
+        // protected row reaching a slice; this keeps the flow half closed too.)
+        const site = staticKey(node.arguments[0]) ?? "?";
+        const key = `foreign-slice:${this.curMod?.idx ?? -1}:${node.start}`;
+        let c = this.closures.get(key);
+        if (!c) {
+          c = { cid: this.cidSeq++, host: { source: "the sealed _={ }= foreign slice (§23.2.4a)", imported: site } };
+          this.closures.set(key, c);
+        }
+        return { ...clean(), fns: new Set([c]) };
       }
       if (isModelledHelperName(name)) {
         // `_scrml_tenant_redact(v, t)` / `_scrml_tenant_scope(rows, …)` preserve the

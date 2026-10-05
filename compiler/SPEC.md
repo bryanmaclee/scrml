@@ -12105,16 +12105,97 @@ columns, and that asymmetry drives the mechanism split:
       plain statement: neither has table-level conflict resolution, and their statement-level upserts
       are outside the subset. A handle whose driver the compiler cannot determine is treated as SQLite
       (on another database the statement then fails — closed).
-    - **Writes the database runs because of the statement.** The floor constrains the statement, not
-      what the database executes in consequence. A write to a tenant-scoped table is `E-TENANT-WRITE`,
-      naming the object, when the program's `<schema>` declares, on that table, a **trigger**, a
-      Postgres **rule**, or a **foreign key** referencing it whose `ON DELETE` / `ON UPDATE` action is
-      `CASCADE`, `SET NULL` or `SET DEFAULT`. The check reads the `<schema>` text and is deliberately
-      over-inclusive (a hazard it cannot attribute to a table is charged to every tenant-scoped table;
-      a commented-out declaration still counts). `.acrossTenants()` is the opt-out. **Limit:** only
-      `<schema>` is visible — a trigger, rule or cascading key created outside it (an external
-      database, a `<db src>` with no `<schema>`, a migration run by hand) is not seen and not
-      introspected.
+    - **SQL the database runs on its own — refused at the `<schema>` declaration (S455).** The floor
+      constrains each query, not what the database executes in consequence of it or on its behalf. A
+      program whose `<schema>` declares any of the following SHALL be a compile error at that
+      declaration, **`E-TENANT-SCHEMA-HAZARD`**, naming the object, the tenant-scoped table it reaches,
+      and the hazard kind — whatever the program's queries are, and with no opt-out
+      (`.acrossTenants()` opts a query out; it cannot opt a declaration out):
+      1. a **trigger** (any timing, `INSTEAD OF` included, on a table or a view) declared ON a
+         tenant-scoped table — or on a view over one — or whose body names one;
+      2. a Postgres **rule** declared on, or whose action names, a tenant-scoped table;
+      3. a **foreign key** whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or
+         `SET DEFAULT`, when EITHER end — the declaring table or the referenced table — is
+         tenant-scoped;
+      4. a **view** (materialized included) whose definition reads a tenant-scoped table, directly or
+         through another view.
+      **Fail-closed:** a declaration the compiler cannot attribute is charged as a hazard against
+      every tenant-scoped table and named *unattributable* — never treated as safe: a trigger, rule
+      or view whose text it cannot read, whose body is a function (a Postgres
+      `EXECUTE FUNCTION f()` trigger), that calls a function outside the subset's allow-list (below),
+      or that holds a `${…}`; a `CREATE FUNCTION` / `CREATE PROCEDURE` / `DO` body (code the floor
+      never sees, callable from any query); a foreign-key action it cannot tie to a declaring table;
+      and any other `<schema>` statement that names a tenant-scoped table (or a view over one) —
+      `CREATE TABLE … AS SELECT`, `INHERITS`, a virtual table over it, a rename of it. A table is
+      *named* when an identifier names it or a string literal holds its name as a whole word (a
+      function can read a table named in a string). Tenant-scoped-ness is the `tenant_id`
+      convention above; the comment model is the database's, which differs by dialect, so the
+      compiler reads the body with comments removed under each model AND reads each comment's text
+      as declarations — a commented-out declaration still counts. **A keyword-spelled identifier
+      never ends or skips a declaration** (SQLite does not reserve `end`, `begin`, `execute`,
+      `rename`, …): a trigger body closes only at an `END` that follows a `;` and itself ends the
+      statement, read to the last such `END`; text a reading leaves unread is charged
+      *unattributable*. A quoted form whose extent differs between databases — a backslash inside a
+      quote, a Postgres `E'…'` / `U&'…'` string, an unclosed quote — is charged *unattributable*
+      inside SQL and inside any declaration. A `<schema>` whose objects touch only tables without
+      `tenant_id` is unaffected, as is an index. A row-security `CREATE POLICY` on a tenant-scoped
+      table is exempt ONLY when it is explicitly `AS RESTRICTIVE`: Postgres combines permissive
+      policies with OR — and `PERMISSIVE` is the default when `AS` is omitted — so a permissive
+      policy is ORed with the §14.8.11 tier's `scrml_tenant_iso` and can only WIDEN which tenants'
+      rows a request sees, while a restrictive one is ANDed and can only narrow. `AS PERMISSIVE` or
+      no `AS` clause is `E-TENANT-SCHEMA-HAZARD` (kind *permissive policy*; write `AS RESTRICTIVE`);
+      a policy whose target or `AS` clause cannot be read is charged *unattributable*; a policy on a
+      table without `tenant_id` is not charged. *(PA decision S455, review round: the earlier
+      blanket policy exemption was fail-open at the §14.8.11 tier.)*
+      **Known over-inclusion (deliberate):** a tenant table's name inside a string literal, and an
+      alias, column or other identifier spelled like a tenant table (or like a view over one), count
+      as naming it; a `${…}` or backslash string in a tenant `<schema>` is charged even when harmless.
+      **Defense in depth:** the S452 r4 per-write refusal stays — a write to a tenant-scoped table is
+      `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares on that table a
+      trigger, a rule, or a cascading foreign key referencing it. A program that meets it is already
+      refused at its `<schema>`, so it adds no reachable acceptance boundary; it reports beside the
+      declaration error. **Limit:** only `<schema>` is visible — a trigger, rule, view or cascading
+      key created outside it (an external database, a `<db src>` with no `<schema>`, a migration run
+      by hand) is not seen and not introspected; nor is a program compiled SEPARATELY that opens the
+      same database (its `<schema>` is not part of this compilation — the same kind of limit).
+      **The rule reads the schema as it will exist:** it is evaluated ONCE per file, after every compile-time expansion of `<schema>` (a
+      `${ schemaFor(T) }` table, a meta splice) — so its tenant set is the floor's own: tables
+      declared in `<schema>` in any form (raw `CREATE TABLE`, a DSL head, `schemaFor` with or
+      without `pick` / `omit`, a commented-out agreeing copy, any `<schema>` block of the file) and a
+      table the `<db src=… tables=…>` registry declares with `tenant_id`. A table whose `tenant_id`
+      exists only in a live `<program db=>` file or a program-body `?{CREATE TABLE …}` is NOT
+      tenant-scoped (the floor is off for it — a pre-existing gap, not widened here), and neither is
+      a column added by `ALTER TABLE … ADD COLUMN tenant_id`. **The check is COMPILATION-scoped:** there
+      is ONE tenant set — the union of the tenant tables of every file compiled together, whatever
+      database each names — and every file's `<schema>` is charged against it (a trigger in one file
+      over a tenant table another file declares writes the same database whenever the two names
+      reach one database, and that cannot be decided from a `db=` string: a symlink, a
+      `?mode=` URI, two roots under `SCRML_DATA_DIR`, a hardlink or a case-insensitive filesystem
+      each make two spellings one file). **Accepted cost:** a compilation with two genuinely
+      different databases, where one declares tenant table X and the other's `<schema>` has a
+      hazard naming X, is refused — rename the table or compile the two separately. This scopes the
+      declaration rule only — the floor's own query scoping stays per file. *(PA decision, S455
+      review rounds 3–4: a per-file set, then a per-database set keyed on the lexical `db=` value,
+      were each beaten by an executed repro.)*
+      > **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" — *"go, comp-time
+      > schema"* (answering the PA's fork: reject schema write hazards at schema declaration time —
+      > a compile error on the `<schema>` block — or check every write at runtime; the S452 durable
+      > "stop patching statements, change the boundary"; resolves
+      > `g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4` and
+      > `g-tenant-floor-schema-view-over-tenant-table-s452`) · **supersedes:** *"A write to a
+      > tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>`
+      > declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose
+      > `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the
+      > boundary (it is kept as defense in depth) and *"`.acrossTenants()` is the opt-out."* ·
+      > **Direction of change (pa-base §8): newly-rejecting** — a `<schema>` declaring any item above
+      > no longer compiles (before: a trigger / FK on a non-tenant table, an `INSTEAD OF` trigger on a
+      > view, and every view compiled clean and leaked — H1 / H2 / the VIEW read executed on
+      > `bade5cb9d`; an `.acrossTenants()` write to a table with a trigger compiled). The fail-closed
+      > items beyond the four ruled kinds (a function / `DO` body, any other statement naming a
+      > tenant table, a call off the allow-list) are the PA-located reading of the ruling's
+      > fail-closed clause, recorded as built in their veto window. Corpus measured: 2410 `.scrml`
+      > (repo + gauntlets), 0 newly failing, 0 artifact or diagnostic diffs — no corpus program
+      > declares a tenant table. Reversible.
     - **An INSERT with no active tenant is refused at run time (S452).** With no active tenant — code
       outside any request (boot, a scheduled job, code called from them), or a request with no pinned
       `@currentUser.tenantId` — an INSERT into a tenant-scoped table SHALL be a defined, named runtime
@@ -12347,7 +12428,8 @@ is the entire invariant/policy firewall.
 - **`E-TENANT-WRITE`** (Error) — an INSERT/UPDATE/DELETE against a tenant-scoped table with no
   injectable tenant value (no egress sink can redact a durable write; it must fail closed): a
   subset write shape the floor cannot inject (the Write bullet), an author conflict clause, a write to
-  a table whose `<schema>` declares a trigger / rule / cascading foreign key, or an `.acrossTenants()`
+  a table whose `<schema>` declares a trigger / rule / cascading foreign key (defense in depth since
+  S455 — such a `<schema>` is already `E-TENANT-SCHEMA-HAZARD`), or an `.acrossTenants()`
   INSERT that does not name `tenant_id`. Its runtime form `E-TENANT-WRITE (runtime)` refuses a write
   with no active tenant.
 - **`E-TENANT-SQL-SUBSET`** (Error) — a query whose text names a tenant-scoped table and that lies
@@ -12355,6 +12437,12 @@ is the entire invariant/policy firewall.
   statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, a `GROUP` without
   `BY`, `RETURNING` or `FOR` on a read, or a non-allow-listed function in a query that names a tenant
   table only in its text), without `.acrossTenants()` (S452 r3).
+- **`E-TENANT-SCHEMA-HAZARD`** (Error) — a `<schema>` declares SQL the database runs on its own
+  against a tenant-scoped table: a trigger on, or whose body names, one; a rule on or naming one; a
+  `CASCADE` / `SET NULL` / `SET DEFAULT` foreign key with a tenant-scoped end; a view reading one,
+  directly or through another view; or a declaration the compiler cannot attribute (charged,
+  *unattributable*). Reported at the declaration, whatever the queries; no opt-out (S455; the Write
+  bullet "SQL the database runs on its own").
 - **`E-TENANT-RAW-EGRESS`** (Error) — rows obtained through an `.acrossTenants()` read reach a raw
   `Response` (a manual `Response` / `handle()` body, §40): the one remaining foreign-tenant egress
   under the source filter (narrowed S452; the S273 trigger — any tenant-scoped row at a raw `_{}` /
@@ -12372,13 +12460,27 @@ is the entire invariant/policy firewall.
   every tenant's names to an unpinned request while `I-TENANT-STRIP` fired (dpa-067 §C4). Fixed under
   the standing security exception: the source filter (#1287), then the allow-listed SQL subset, the
   UPDATE / DELETE injection, `OR ABORT`, the schema-hazard refusal and the named no-tenant write
-  refusal (#1293). Open residuals: a `<schema>` VIEW over a tenant table is not scoped
-  (`g-tenant-floor-schema-view-over-tenant-table-s452`), the predicate oracles above
+  refusal (#1293). Open residuals: ~~a `<schema>` VIEW over a tenant table is not scoped
+  (`g-tenant-floor-schema-view-over-tenant-table-s452`)~~ *(closed S455 — refused at the declaration,
+  `E-TENANT-SCHEMA-HAZARD`, below)*, the predicate oracles above
   (`g-tenant-floor-predicate-oracles-before-filter-s452`), and the raw driver handle
   (`g-tenant-floor-raw-driver-handle-callable-s452`). The bootstrap (`compiler/self-host-v2/`) does
   not build the floor yet (U1c keeps tenant refused); the same rule applies to it when built
   (dpa-067 F2). *(S454 currency — supersedes "impl#1 implements the superseded model … The
   source-filter fix is in flight on `fix/s452-tenant-filter-at-source`".)*
+- **S455 — the schema boundary (landed, impl#1).** `E-TENANT-SCHEMA-HAZARD` is emitted by ONE
+  pipeline stage, `TENANT-SCHEMA` (`compiler/src/api.js`, after TS and ME, before CG; at the
+  `<schema>` span) through `compiler/src/tenant-schema-hazards.ts` `fileTenantSchemaHazards`, over
+  the expanded AST and the floor's own tenant set (`buildTenantContext`). *(The first cut ran at
+  GCP1 — before `schemaFor` expanded — and in emit-server, which skipped tables it assumed GCP1 had
+  reported; a `schemaFor` tenant table with a trigger over it was reported by neither — S455 review
+  round 2b, executed.)* It closes the S452 r4 residuals measured on `bade5cb9d` (a trigger on a non-tenant
+  table writing a tenant table rewrote every tenant's rows; an `INSTEAD OF` trigger on a view
+  rewrote another tenant's row; a `<schema>` view served every tenant's rows; a cascading key from a
+  non-tenant parent compiled) and `g-tenant-floor-schema-view-over-tenant-table-s452`. The S452 r4
+  per-write limb (`tenant-egress.ts` `schemaWriteHazards` → `tenant-sql-subset.ts`
+  `analyzeTenantSql`) is unchanged, as defense in depth. The bootstrap does not build the floor
+  yet; the same rule applies to it when built.
 - **S452 — `E-TENANT-RAW-EGRESS` diverges.** impl#1 enforces the S273 trigger (any tenant-scoped
   row at a raw `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`), not the
   narrowed one (`.acrossTenants()` rows reaching a raw `Response`). It therefore still rejects raw
@@ -12615,7 +12717,9 @@ Postgres a `DROP TABLE` CASCADE-drops the table's attached RLS policy, grants, a
 Suppressed, it fires `W-SCHEMA-DESTRUCTIVE-DROP` and points the operator at `--allow-destructive`. The
 scrml-managed security objects are roles/policies (never tables), so the table-DROP gate is the whole
 fence at the table grain; the idempotent `DROP POLICY IF EXISTS scrml_tenant_iso` re-creates its own
-policy in place and never touches a hand-authored one.
+policy in place and never touches a hand-authored one. (A hand-authored policy declared in
+`<schema>` on a tenant-scoped table SHALL be `AS RESTRICTIVE` — a permissive one is ORed with
+`scrml_tenant_iso` and widens it; §14.8.10 refuses it with `E-TENANT-SCHEMA-HAZARD`.)
 
 **Identifier escaping is MANDATORY (SQL-injection defense).** Every table/column/constraint name
 interpolated into emitted DDL SHALL be quoted through the shared `quoteIdent`
@@ -22852,7 +22956,7 @@ hand off the `raw` content and `lang` to the external toolchain invocation.
 | RI | Skips `ForeignBlock` nodes — foreign code does not affect route analysis |
 | TS | Skips `ForeignBlock` nodes — no type checking of foreign code |
 | DG | Skips `ForeignBlock` nodes |
-| CG | Sidecar form: extracts `raw`, invokes the declared external toolchain. Inline value-returning ts/js form (§23.2.4a): splices the verbatim slice into an async IIFE with the `in:{}` names as params + a codegen-injected boundary `await` (§13180); server-only (E-SQL-004 color rule) |
+| CG | Sidecar form: extracts `raw`, invokes the declared external toolchain. Inline value-returning ts/js form (§23.2.4a) and the §64 tool host-I/O form: evaluates the verbatim slice as an async function in a SEALED scope whose parameters are the `in:{}` names (no free lexical capture), called with the same-named enclosing values + a codegen-injected boundary `await` (§13180); a slice that cannot be built as such a function is E-FOREIGN-007; server-only (E-SQL-004 color rule) |
 
 ### 23.2.4 Valid Contexts
 
@@ -22914,18 +23018,38 @@ slice is declared ONCE, at the top of the block, inside the braces, as `in: { na
 named values are the ONLY things that cross — there is NO free lexical capture (the slice sees only
 what `in:{}` names). The header is optional (`in: {}` or omitted = no crossings).
 
-**Codegen (the §13180 boundary).** The compiler lowers the inline form to an async IIFE: the
-`in:{}` names become the IIFE parameters, called with the same-named enclosing locals, and the
-`await` is INJECTED by codegen at the boundary (no source-level `await` is required on the scrml
-side — the slice itself, being verbatim ts/js, MAY use `await` internally):
+**The sealed scope (what a slice can name).** A slice is evaluated in a SEALED scope. The names it
+can resolve are exactly:
 
-```js
-const out = await (async (prompt, path) => {
-  return (await new Response(Bun.spawn(["claude","-p",prompt,"--output-format","text"],{cwd:path}).stdout).text());
-})(prompt, path);
-```
+1. its `in:{}` crossings — bound to the values of the same-named enclosing bindings at the point of
+   the block;
+2. host globals (`Bun`, `process`, `fetch`, `Response`, `globalThis`, …);
+3. the host module context the emitted module would itself have — `require`, `__dirname`,
+   `__filename`, and dynamic `import()` — which a host such as Bun binds per MODULE rather than
+   globally.
 
-This mirrors the `?{}` `case "sql"` lowering — the await is the boundary, not source vocabulary.
+It SHALL NOT resolve any other name in scope at the block: no enclosing scrml local or parameter
+that is not crossed, no module-level scrml binding (a `const`, a `function`, an import, an enum),
+and no compiler-owned binding (a runtime helper, the `?{}` database handle). A slice that reads
+such a name fails at runtime exactly as host code reading an unbound name does (a `ReferenceError`
+in ts/js); implementations SHOULD name the slice's source location and this rule in that error. The
+seal is against the PROGRAM's and the COMPILER's scope, not a sandbox: foreign code is author-trusted
+host code (§23.2.3) and keeps every host capability. The rule applies to every in-process slice —
+the inline value-returning form here and the §64 `kind="tool"` host-I/O form (§23.2.4 form 3),
+which share the `in:{}` header. A slice is evaluated as the body of a strict-mode async function —
+not as module code — so `import.meta` and a static `import` are not available inside it (§23.2.6
+E-FOREIGN-007); `this` is `undefined` and `arguments` is the crossings.
+
+**Codegen (the §13180 boundary).** The crossings are the parameters of the sealed slice and the
+block is a call of it with the same-named enclosing values; the `await` of that call is INJECTED by
+codegen at the boundary (no source-level `await` is required on the scrml side — the slice itself,
+being verbatim ts/js, MAY use `await` internally). This mirrors the `?{}` `case "sql"` lowering — the
+await is the boundary, not source vocabulary. The slice is built ONCE per distinct slice, not on
+every evaluation of the block. How the seal is realized is implementation freedom; impl#1 carries the
+slice's source text into the artifact and builds it once with the host's `Function` constructor
+(whose only lexical scope is the global one), handing in the host module context explicitly.
+
+> **Provenance:** spec:§23.2.4a "there is NO free lexical capture" (conformance restoration; g-foreign-iife-captures-module-scope-s454)
 
 **Slice body — single-expression OR multi-statement (both NORMATIVE).** The slice body is a
 **verbatim ts/js slice**, not restricted to a single expression. Two shapes are sanctioned, and the
@@ -22933,8 +23057,8 @@ compiler discriminates between them:
 
 1. **Single-expression slice** — the body is one expression (the example above). Codegen **injects**
    the `return`, wrapping the expression: `{ return (<expr>); }`.
-2. **Multi-statement slice** — the body is a statement sequence. Codegen splices it **verbatim** as
-   the async-IIFE body and injects NOTHING; the slice **SHALL** carry its own `return` to produce a
+2. **Multi-statement slice** — the body is a statement sequence. Codegen uses it **verbatim** as
+   the sealed async function's body and injects NOTHING; the slice **SHALL** carry its own `return` to produce a
    value. A multi-statement slice that never returns settles to `undefined`, which crosses the
    §13180 boundary as `not` per §42.
 
@@ -22962,30 +23086,39 @@ arbitrary statements means.
 </program>
 ```
 
-lowers to — note the slice arriving verbatim, with NO injected `return`:
-
-```js
-const digest = await (async (bytes, root) => { const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-  const dir  = `${root}/${hash.slice(0,2)}`;
-  await Bun.write(`${dir}/${hash}.bin`, bytes);
-  return hash; })(bytes, root);
-```
+means: an async function of `(bytes, root)` whose body is the four statements exactly as written —
+with NO injected `return`, so the slice's own `return hash;` is what produces the value — evaluated
+in the sealed scope above and called with the enclosing `bytes` and `root`; `digest` receives the
+settled value at the injected boundary `await`.
 
 **Author obligation.** Because codegen injects no `return` for the multi-statement shape, forgetting
 one is not a compile error — the binding receives `undefined` → `not`. This is the documented cost of
 §23.2.3 opacity: the compiler does not read the slice interior and so cannot know a value was
 intended. Prefer the single-expression shape when the work fits in one expression.
 
-**Crossing-shadow (E-FOREIGN-006).** Because the `in:{}` crossing names become the async-IIFE
-PARAMETERS, a crossing name that the slice ALSO declares at its TOP LEVEL — as a `const`, `let`,
-`var`, `function`, or `class` of the same name — redeclares the parameter, which is invalid JS
-(`(async (x) => { const x = … })(x)`). This SHALL be a compile error (E-FOREIGN-006) that NAMES the
+**Crossing-shadow (E-FOREIGN-006).** Because the `in:{}` crossing names are the PARAMETERS of the
+sealed slice, a crossing name that the slice ALSO declares at its TOP LEVEL — as a `const`, `let`,
+`var`, `function`, or `class` of the same name — redeclares the parameter (for `const` / `let` /
+`class`, invalid JS: `async function (x) { const x = … }`; for `var` / `function`, a silent
+overwrite of the crossed value). This SHALL be a compile error (E-FOREIGN-006) that NAMES the
 shadowed binding. The check is a pre-emit SYNTACTIC scan (brace/string/comment/template-aware; it
 inspects only top-level binding keywords and never type-checks or rewrites the interior, so §23.2.3
 opacity is preserved): a same-named binding NESTED inside an arrow body, a block, or any `{}`/`()`/`[]`
 is NOT a top-level collision and does NOT fire. The author resolves it by renaming the crossing name
 or the slice-local binding. (Without this guard the redeclaration surfaces post-emit as the misleading
 E-CODEGEN-INVALID-LOGIC "compiler defect — please report it", even though the cause is author choice.)
+
+**Unbuildable slice (E-FOREIGN-007).** A slice that is not valid JavaScript as the body of a
+strict-mode async function whose parameters are its crossings SHALL be a compile error
+(E-FOREIGN-007) that names the slice's source location and the parser's complaint. This covers a
+plain syntax error, `import.meta` or a static `import` (module-only syntax — a slice is not a module;
+use `__dirname` / `__filename` / `require` / `await import(…)`), and TypeScript type syntax in a
+`lang="ts"` slice (the slice is not transpiled). The check asks only whether the slice can be BUILT —
+the question the artifact's own syntax gate asks of every emitted line — and never type-checks,
+analyses or rewrites the interior, so §23.2.3 opacity is preserved. It is an AUTHOR error at the
+slice, never reported as a compiler defect.
+
+> **Provenance:** spec:§23.2.4a "there is NO free lexical capture" (conformance restoration; g-foreign-iife-captures-module-scope-s454) — the sealed slice is carried as source text, so the artifact syntax gate that used to catch an unbuildable in-place slice no longer sees it; E-FOREIGN-007 restores that check at the slice.
 
 **Opacity (§23.2.3).** The slice interior is OPAQUE: the TS / RI / DG stages SKIP it (no type
 checking, no route analysis, no dependency tracking of foreign code). scrml's guarantees end at the
@@ -23082,7 +23215,8 @@ ancestor `<program>`. Add `lang="go"` (or the appropriate language) to the enclo
 | E-FOREIGN-003 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | `_{}` block in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (the admitted forms are the §23.4 sidecar, the §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body, and the S238 `kind="tool"` program-body `function`/`main` host-I/O form §64) | Error |
 | E-FOREIGN-005 | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (arbitrary-language inline value-flow not yet supported — use a `use foreign:` sidecar §23.4) | Error |
-| E-FOREIGN-006 | inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice — the crossing becomes an async-IIFE parameter, so the slice-local redeclares it (invalid JS). Author error; rename the crossing or the slice-local | Error |
+| E-FOREIGN-006 | inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice — the crossing is a parameter of the sealed slice, so the slice-local redeclares it (invalid JS, or a silent overwrite). Author error; rename the crossing or the slice-local (Emitted at `compiler/src/codegen/emit-logic.ts:3632`.) | Error |
+| E-FOREIGN-007 | an in-process `_{}` slice that is not valid JavaScript as the body of a strict-mode async function of its crossings — a syntax error, `import.meta` / a static `import` (a slice is not a module), or TypeScript type syntax (the slice is not transpiled). Author error at the slice; names its source location (§23.2.4a) (Emitted at `compiler/src/codegen/emit-logic.ts:3681`.) | Error |
 | W-FOREIGN-001 | Level-0 `_{` used; `_={}=` recommended | Warning |
 
 ### 23.3 Call-Char Sigils for WASM
@@ -24734,7 +24868,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-FOREIGN-003 | §23.2 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
 | E-FOREIGN-004 | §23.2.4 | `_{}` in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (admitted: §23.4 sidecar + §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body + the S238 `kind="tool"` program-body `function`/`main` host-I/O form §64) | Error |
 | E-FOREIGN-005 | §23.2.4a | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (use a `use foreign:` sidecar §23.4 for an out-of-process service) | Error |
-| E-FOREIGN-006 | §23.2.4a | an inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice. The crossing becomes an async-IIFE parameter (§23.2.4a codegen), so the slice-local redeclares it — invalid JS. Author error; rename the crossing or the slice-local. A pre-emit syntactic scan (depth-aware; opacity-preserving) names the shadowed binding instead of letting the redeclaring IIFE fall through to the misleading post-emit E-CODEGEN-INVALID-LOGIC "compiler defect" framing. (ss23 — emit-logic.ts `case "foreign"`.) | Error |
+| E-FOREIGN-006 | §23.2.4a | an inline value-returning `_{}` whose `in:{}` crossing name collides with a TOP-LEVEL `const`/`let`/`var`/`function`/`class` of the same name inside the slice. The crossing is a parameter of the sealed slice (§23.2.4a), so the slice-local redeclares it — invalid JS, or a silent overwrite. Author error; rename the crossing or the slice-local. A pre-emit syntactic scan (depth-aware; opacity-preserving) names the shadowed binding instead of letting the redeclaration fall through to the misleading post-emit E-CODEGEN-INVALID-LOGIC "compiler defect" framing. (ss23 — emit-logic.ts `case "foreign"`.) (Emitted at `compiler/src/codegen/emit-logic.ts:3632`.) | Error |
+| E-FOREIGN-007 | §23.2.4a | an in-process `_{}` slice (the inline value-returning form, or the §64 tool host-I/O form) that is not valid JavaScript as the body of a strict-mode async function of its crossings: a syntax error, `import.meta` / a static `import` (a slice is evaluated in a sealed scope, not as a module), or TypeScript type syntax (the slice is not transpiled). Author error at the slice, naming its source location. (S455 — emit-logic.ts `case "foreign"` + codegen/foreign-seal.ts; g-foreign-iife-captures-module-scope-s454.) (Emitted at `compiler/src/codegen/emit-logic.ts:3681`.) | Error |
 | E-FOREIGN-LANG-DUPLICATE | §23.6 | More than one top-level `<foreign lang=…>` block in a file. A file has ONE foreign-language context (the `lang=` sibling of the §44.7.1 module-with-db-context — like ONE `<db src>`) — keep a single `<foreign lang=…>` and remove the others. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-FOREIGN-LANG-IN-PROGRAM | §23.6 | A `<foreign lang=…>` block in a file that ALSO declares a top-level `<program>`. The two do not stack (§23.6.1): a program file declares the foreign-code language on the `<program lang=…>` attribute (§23.2.1). `<foreign lang>` is the library-file surface (§21.5 — a file with `export` fns and NO `<program>`). Resolution: remove the `<foreign lang=…>` block and set `lang=` on the `<program>`. (S238 — Library Foreign-Language Declaration, §23.6.) | Error |
 | E-TOOL-001 | §64.2 | A `<program kind="tool">` declares no top-level `function main` entry. A standalone tool SHALL declare exactly one `function main(args: string[])` (optionally `: number` for the process exit code; §64.3) — the emitted module runs `main(process.argv.slice(2))`. (S238 — Standalone Tool Target, §64.) | Error |
@@ -24868,6 +25003,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row filter (at the source, S452) has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar before any filter can run. The same holds for a tenant-scoped table read only inside a subquery / CTE / derived table whose `tenant_id` does not reach the output row (S452 PA reading). In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the subset single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = <active tenant>`; a subset `UPDATE t SET … [WHERE …]` / `DELETE FROM t [WHERE …]` gets `AND tenant_id = <active tenant>` on its parenthesized WHERE (S452 r3 — supersedes "an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse) … fires this error"); injected SQLite writes carry `OR ABORT`. Fires on: an un-injectable write (an INSERT that names `tenant_id`, is multi-row, `INSERT … SELECT`, `DEFAULT VALUES` or has no column list; a SET of `tenant_id`; an UPDATE with an alias / FROM / ORDER BY / LIMIT; REPLACE / `OR REPLACE`; `ON CONFLICT`; `RETURNING`; `SELECT … INTO`; a second tenant table; a non-allow-listed function), an author-written `INSERT OR …` / `UPDATE OR …` conflict clause, a write to a table whose `<schema>` declares a trigger / rule / cascading foreign key (S452 r4), and an `.acrossTenants()` INSERT that does not name `tenant_id`. **Runtime form** `E-TENANT-WRITE (runtime)`: a write to a tenant-scoped table with no active tenant is refused by name, nothing written (ruling:user-voice-scrml.md S452 "your rec"). Resolution: write the plain subset shape without `tenant_id` (the floor injects the request's tenant), or mark the query `.acrossTenants()` and, for an INSERT, name `tenant_id`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql` (#1293); the runtime form by the server helper `_scrml_tenant_write_key`.) | Error |
 | E-TENANT-SQL-SUBSET | §14.8.10 | A query whose text names a tenant-scoped table lies outside the floor's allow-listed SQL subset and is not `.acrossTenants()`: a token or form outside the closed token set (a quoted identifier, a comment, `;`, a dialect-specific literal, a `${…}` whose end cannot be read without parsing JavaScript, …), a statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, `GROUP` without `BY`, `RETURNING` or `FOR` on a read, or — in a query that names a tenant table only in its text (a literal included) — a function outside the allow-list. A query the floor cannot read exactly is refused rather than scoped by a guess. Resolution: write the query in the subset (§14.8.10 "The SQL subset"), or mark it `.acrossTenants()` for a deliberate cross-tenant query. **Provenance:** spec currency to #1293 (S452 r3 `5e6b39b92`, r4 `c02da0f86`) under ruling:user-voice-scrml.md S452 "a" — a PA direction, recorded as built. (Emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql`.) | Error |
+| E-TENANT-SCHEMA-HAZARD | §14.8.10 | A `<schema>` declares SQL the database runs on its own against a tenant-scoped table (one carrying `tenant_id`): (1) a trigger — any timing, `INSTEAD OF` included — declared on a tenant-scoped table or on a view over one, or whose body names one; (2) a Postgres rule declared on, or whose action names, one; (3) a foreign key whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT` with EITHER end tenant-scoped; (4) a view (materialized included) reading one, directly or through another view. Fail-closed: a declaration the compiler cannot attribute — unreadable text, a function body (`EXECUTE FUNCTION`), a call off the §14.8.10 subset allow-list, a `${…}`, a `CREATE FUNCTION` / `PROCEDURE` / `DO` body, an unattributable foreign-key action, text a reading left unread (a keyword-spelled identifier never ends a declaration), a quoted form whose extent differs between databases (a backslash escape, `E'…'`), any other `<schema>` statement naming a tenant table — is charged; a `CREATE POLICY` on a tenant-scoped table is charged (kind *permissive policy*) unless it is explicitly `AS RESTRICTIVE`, because a permissive policy (the Postgres default) is ORed with §14.8.11's `scrml_tenant_iso` and widens it — against every tenant-scoped table (*unattributable*). The tenant floor scopes each query; it cannot scope a trigger or rule body, a view's definition or a foreign-key action, so the declaration is refused where it is declared, whatever the queries do, with no `.acrossTenants()` opt-out. Only `<schema>` is visible (§14.8.10 Limit). Resolution: remove the declaration and do the work in server code, where the floor applies — or declare the object only over tables without `tenant_id`. **Provenance:** ruling:user-voice-scrml.md S455 "go, comp-time schema" · supersedes: *"A write to a tenant-scoped table is `E-TENANT-WRITE`, naming the object, when the program's `<schema>` declares, on that table, a trigger, a Postgres rule, or a foreign key referencing it whose `ON DELETE` / `ON UPDATE` action is `CASCADE`, `SET NULL` or `SET DEFAULT`."* as the boundary (kept as defense in depth) · Direction of change: newly-rejecting (corpus: 2410 `.scrml`, 0 newly failing). Evaluated once per file over the `<schema>` as it will exist (after `schemaFor` / meta expansion), against ONE tenant set — the union over every file compiled together, whatever database each names (compilation-scoped; accepted cost: two genuinely different databases compiled together share it). A program compiled SEPARATELY that opens the same database is not seen (the Limit). (Emitted by the `TENANT-SCHEMA` stage in `compiler/src/api.js` via `compiler/src/tenant-schema-hazards.ts` `fileTenantSchemaHazards`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | **Narrowed S452.** Rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual `Response` / `handle()` body (§40). Under the §14.8.10 source filter these are the only foreign-tenant rows server code holds, so this is the one remaining egress of another tenant's data through a body the compiler does not own. Rows from a read WITHOUT `.acrossTenants()` are already scoped to the active tenant at the source, so their raw egress (a manual `Response`, a `_{}` block, an `asIs` value) is NOT an error. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the cross-tenant rows through a compiler-emitted response. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 1 · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the S273 trigger (any tenant-scoped row at a `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`) · Direction of change: newly-accepting for raw egress of non-opted-out rows; newly-rejecting for `.acrossTenants()` rows in a manual `Response`. **Nominal as worded** — impl#1 still enforces the S273 trigger until a sibling dispatch narrows it. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. impl#1 filters at the source since #1287 (S454 currency — supersedes "**Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands."). Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |

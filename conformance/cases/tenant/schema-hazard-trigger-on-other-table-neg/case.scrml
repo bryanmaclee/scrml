@@ -1,0 +1,15 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)`}
+        ?{`CREATE TABLE config (k TEXT, v TEXT)`}
+        ?{`CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN UPDATE assets SET name = 'pwned-by-trigger'; END`}
+    </>
+    // The trigger fires on a write the tenant floor never scopes (config has no tenant_id).
+    ${
+        function go() {
+            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run()
+            return "ok"
+        }
+    }
+    <button onclick=${ go() }>go</button>
+</program>

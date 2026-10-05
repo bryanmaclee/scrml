@@ -1,0 +1,12 @@
+{
+  "id": "tenant-schema-hazard-end-column-neg",
+  "description": "§14.8.10 (S455 review) — a `<schema>` trigger on a non-tenant table whose body copies the tenant-scoped `assets` into a shared table, through a column named `end`. SQLite does not reserve `end`; a reading that closed the body at that identifier missed the tenant table (the reviewer executed it on defab9de8: tenant A's INSERT INTO config copied both tenants' asset names into `audit`). A keyword-spelled identifier never ends a declaration; the trigger is refused.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-schema-hazards.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (S455): a `<schema>` trigger whose body names a tenant-scoped table SHALL be a compile error at the declaration (E-TENANT-SCHEMA-HAZARD); a declaration the checker cannot read exactly is charged, never treated as safe. Provenance: ruling:user-voice-scrml.md S455 \"go, comp-time schema\".",
+  "expect": {
+    "codes": ["E-TENANT-SCHEMA-HAZARD"],
+    "codeCounts": { "E-TENANT-SCHEMA-HAZARD": 1 }
+  }
+}

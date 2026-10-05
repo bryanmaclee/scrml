@@ -41,6 +41,11 @@ import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
+// §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion).
+import { fileTenantSchemaHazards, fileSchemaTenantNames } from "./tenant-schema-hazards.ts";
+import { buildTenantContext } from "./codegen/tenant-egress.ts";
+import { buildProtectContext } from "./codegen/protect-egress.ts";
+import { extractDesiredSchema } from "./codegen/db-authoritative.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
@@ -2960,6 +2965,37 @@ function _compileScrmlImpl(options = {}) {
   collectErrors("MC", mcResult.errors);
   const metaEvalResult = stage("ME", () => seams.pick("META-EVAL", runMetaEval)({ files: metaFiles }));
   collectErrors("ME", metaEvalResult.errors);
+
+  // Stage 6.6: TENANT-SCHEMA — §14.8.10 E-TENANT-SCHEMA-HAZARD (S455, ruling
+  // user-voice-scrml.md S455 "go, comp-time schema"). The ONE evaluation of the
+  // schema-declaration rule, placed after every compile-time expansion of `<schema>`
+  // (TS: `${ schemaFor(T) }`; ME: meta splices) and before CG, over the same AST CG
+  // consumes. Its tenant set is the floor's own — `buildTenantContext` over the
+  // `<db tables=>` registry and the expanded `<schema>`, exactly as emit-server builds
+  // it — so a table the floor scopes can never escape the declaration rule.
+  //
+  // COMPILATION-SCOPED (S455 review rounds 3–4, PA decision): ONE tenant set — the
+  // union of every compiled file's tenant tables, whatever database each names — and
+  // every file's hazards are charged against it. A trigger in one file's `<schema>`
+  // over a tenant table another file declares writes the same database whenever the
+  // two names reach one file, and "these databases are different" cannot be proven
+  // from a `db=` string (symlinks, `?mode=` URIs, SCRML_DATA_DIR roots, hardlinks,
+  // case-insensitive filesystems — each executed by the reviewer). Accepted cost: two
+  // genuinely different databases compiled together share the set.
+  {
+    const _tsProtectCtx = buildProtectContext(paResult.protectAnalysis);
+    const projectTenant = new Set();
+    for (const fileAST of metaFiles) {
+      const desired = extractDesiredSchema(fileAST);
+      for (const t of buildTenantContext(_tsProtectCtx, desired.tenantTables, desired.schemaText).tenantScopedTables) projectTenant.add(t);
+      for (const t of fileSchemaTenantNames(fileAST)) projectTenant.add(t);
+    }
+    for (const fileAST of metaFiles) {
+      const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
+      const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, projectTenant));
+      collectErrors("TENANT-SCHEMA", diags, fp);
+    }
+  }
 
   // Stage 7: DG (all files — sees post-meta-expansion AST)
   // When selfHostModules.runDG is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
