@@ -12007,8 +12007,8 @@ composing with the §14.8.9 protect redact at the same sink), the fail-closed-wh
 zero-row behavior, `.acrossTenants()` declassification, the INSERT column-injection, and the
 `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` hard-fails all enforce this contract;
 `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` / `I-TENANT-STRIP` / `I-TENANT-ACROSS`
-fire (§34). The V1.next INJECT optimization (SQL-WHERE predicate injection) remains deferred (see
-"Implementation status" below). Codegen: `compiler/src/codegen/tenant-egress.ts` +
+fire (§34). The V1.next INJECT optimization (SQL-WHERE predicate injection) remains deferred for
+reads (see "Implementation status" below); writes are injected since S452 r3 (the Write bullet). Codegen: `compiler/src/codegen/tenant-egress.ts` +
 `rewrite.ts` + `emit-logic.ts` + `emit-server.ts`.
 **Amended** 2026-10-04 (S452, ruling "a") — the floor filters at the **SOURCE**: a tenant-scoped
 read's rows are filtered to the active tenant immediately after the query executes, before any
@@ -12083,8 +12083,122 @@ columns, and that asymmetry drives the mechanism split:
   - **Write** (INSERT / UPDATE / DELETE) against a tenant-scoped table → **inject-or-hard-fail
     `E-TENANT-WRITE`.** A write returns no rows to filter and has no egress sink; a committed
     cross-tenant write is durable before any filter could run, so it must fail closed at compile. An INSERT gets
-    `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE/DELETE without an
-    injectable tenant constraint hard-fails.
+    `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE / DELETE gets the
+    tenant conjunct injected into its WHERE — the author's condition is parenthesized whole and
+    `AND tenant_id = <active tenant>` is appended (a statement with no WHERE gets one) — so the injection
+    this bullet sanctions is what is built for both (S452 r3). A write the floor cannot inject soundly
+    hard-fails. As built, the injectable shapes are exactly the subset's (next bullet): a single-row
+    `INSERT INTO t (plain columns) VALUES (…)` that does not name `tenant_id`; `UPDATE t SET col = expr, …
+    [WHERE …]` that does not SET `tenant_id`; `DELETE FROM t [WHERE …]`. Everything else on a tenant
+    table without `.acrossTenants()` is `E-TENANT-WRITE` — an INSERT that names `tenant_id` (the floor
+    cannot verify the chosen tenant), a multi-row INSERT, `INSERT … SELECT`, `DEFAULT VALUES`, an INSERT
+    without a column list, a REPLACE statement or `OR REPLACE`, `ON CONFLICT`, `RETURNING`, an UPDATE with
+    an alias or FROM / ORDER BY / LIMIT, a write that names a second tenant-scoped table, a call outside
+    the per-row function allow-list, or `SELECT … INTO`.
+    - **The conflict clause.** The database's own conflict resolution can reach another tenant's row:
+      a SQLite table-level `UNIQUE ON CONFLICT REPLACE` makes a scoped UPDATE or INSERT that collides
+      DELETE the other tenant's conflicting row. Every injected SQLite INSERT / UPDATE therefore carries
+      a statement-level `OR ABORT` (`INSERT OR ABORT …`, `UPDATE OR ABORT …`), which overrides the
+      table-level clause: the statement fails with the constraint error and no other row is touched. An
+      author-written conflict clause on a tenant write (`INSERT OR …` / `UPDATE OR …`, whatever it names)
+      is `E-TENANT-WRITE` — the floor sets the conflict resolution. A Postgres or MySQL handle gets the
+      plain statement: neither has table-level conflict resolution, and their statement-level upserts
+      are outside the subset. A handle whose driver the compiler cannot determine is treated as SQLite
+      (on another database the statement then fails — closed).
+    - **Writes the database runs because of the statement.** The floor constrains the statement, not
+      what the database executes in consequence. A write to a tenant-scoped table is `E-TENANT-WRITE`,
+      naming the object, when the program's `<schema>` declares, on that table, a **trigger**, a
+      Postgres **rule**, or a **foreign key** referencing it whose `ON DELETE` / `ON UPDATE` action is
+      `CASCADE`, `SET NULL` or `SET DEFAULT`. The check reads the `<schema>` text and is deliberately
+      over-inclusive (a hazard it cannot attribute to a table is charged to every tenant-scoped table;
+      a commented-out declaration still counts). `.acrossTenants()` is the opt-out. **Limit:** only
+      `<schema>` is visible — a trigger, rule or cascading key created outside it (an external
+      database, a `<db src>` with no `<schema>`, a migration run by hand) is not seen and not
+      introspected.
+    - **An INSERT with no active tenant is refused at run time (S452).** With no active tenant — code
+      outside any request (boot, a scheduled job, code called from them), or a request with no pinned
+      `@currentUser.tenantId` — an INSERT into a tenant-scoped table SHALL be a defined, named runtime
+      refusal (`E-TENANT-WRITE (runtime)`; nothing is written), unless the query is
+      `?{…}.acrossTenants()` AND names the tenant column explicitly (`INSERT INTO assets (name,
+      tenant_id) VALUES (…, ${t})`), which keeps the `I-TENANT-ACROSS` audit trail. This is the write
+      twin of "outside a request, reads see zero rows". An `.acrossTenants()` INSERT that does not name
+      `tenant_id` (or has no column list) is `E-TENANT-WRITE` at compile: an opted-out query gets no
+      tenant injected, so it would write a row no tenant owns. An implementation MAY instead refuse at
+      compile time a write it proves reachable only outside a request.
+      *(impl#1, as built: the injected value reads the active tenant per query from the request
+      context, so a server function called in-process by another is written under its caller's tenant;
+      with no active tenant the same runtime refusal fires for an UPDATE / DELETE as well, whose
+      injected conjunct has no tenant to compare to. Pinned by `conf-TENANT-SOURCE-FILTER` "INSERT with
+      no active tenant"; `g-tenant-insert-injection-reads-lexical-req-in-peer-callables-s452` resolved
+      `819a84148`, which replaced an accidental unnamed `ReferenceError`. The bootstrap does not build the
+      floor yet.)*
+    > **Provenance:** ruling:user-voice-scrml.md S452 "your rec" — *"**(a):** with no active tenant
+    > (boot, scheduled jobs, code called from them), an INSERT into a tenant-scoped table is a defined,
+    > named RUNTIME REFUSAL — unless it is `?{…}.acrossTenants()` AND names the tenant column explicitly
+    > (`INSERT INTO assets (name, tenant_id) VALUES (…, ${t})`). … The bootstrap MAY later tighten to a
+    > compile error once the dpa-066 effect summary proves reachability outside a request."* · spec
+    > currency to the built floor (#1287 `819a84148`; #1293 r3 `5e6b39b92`, r4 `c02da0f86`) for the
+    > UPDATE / DELETE injection, the conflict clause and the schema-hazard limb — these are PA
+    > directions under the S452 "a" ruling and this bullet's existing "inject-or-hard-fail" sentence,
+    > recorded here as built (veto window), not separate bryan rulings · **supersedes:** *"An INSERT gets
+    > `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE/DELETE without an
+    > injectable tenant constraint hard-fails."* (an UPDATE / DELETE is now injected, not refused) ·
+    > **Direction of change (pa-base §8):** newly-accepting for subset UPDATE / DELETE on a tenant table
+    > (was E-TENANT-WRITE); newly-rejecting for author conflict clauses, an INSERT naming `tenant_id`
+    > outside `.acrossTenants()`, and writes to a table with a `<schema>` trigger / rule / cascading
+    > key; semantics-changed for an INSERT with no active tenant (was an accidental `ReferenceError`,
+    > now a named refusal). Corpus measured at #1293: no corpus program declares a tenant table (2258
+    > `.scrml`, 0 artifact diffs).
+  - **The SQL subset — anything else on a tenant table is refused (S452 r3).** A query that names a
+    tenant-scoped table is legal without `.acrossTenants()` ONLY if it lies in an allow-listed SQL
+    subset that the compiler reads exactly, token by token; a query outside it is **`E-TENANT-SQL-SUBSET`**
+    (a refused read inside the subset stays `E-TENANT-AGG`, a refused write `E-TENANT-WRITE`).
+    `.acrossTenants()` is the opt-out. The subset:
+    - **A closed token set.** Whitespace; unquoted identifiers `[A-Za-z_][A-Za-z0-9_]*` (qualified
+      `a.b` is identifier `.` identifier); plain numbers (no hex, no digit separators); plain
+      single-quoted string literals whose only escape is `''` (no backslash, no `${`, no control
+      character inside); `${…}` interpolations, which are bound parameters and never SQL text; and the
+      punctuation `( ) , . * = <> != < > <= >= + - / % ||`. ANY other character or form is outside:
+      among others `"`, `` ` ``, `[`, `]`, `$` (other than `${`), `\`, `;`, `:`, `?`, `@`, `#`, `{`,
+      `}`, a `--` or `/* */` comment, a prefixed literal (`E'…'`, `X'…'`, `N'…'`), and any non-ASCII
+      character outside a literal. A `${…}` is accepted only when its expression — after removing
+      plain JavaScript string literals — holds no brace, quote, backtick, slash or backslash, so that
+      where it ends is not in doubt; dialect-specific forms (Postgres `$q$…$q$`, `E'…'`, `ARRAY[…]`) are
+      simply outside the subset.
+    - **One statement.** Exactly one statement, led by `SELECT`, `INSERT`, `UPDATE` or `DELETE` (`;` is
+      not a token, so a second statement cannot exist).
+    - **No escape from the floor's reading.** No `WITH`, no subquery (`(` followed by `SELECT`, `WITH` or
+      `VALUES`), no `IN <table>`, no `UNION` / `INTERSECT` / `EXCEPT`, no `OVER` / `WINDOW`, no REPLACE /
+      `OR REPLACE`, no `ON CONFLICT`, no `RETURNING`, no `SELECT … INTO`, no `FOR` locking clause.
+    - **Allow-listed functions.** Every function call is on the per-row allow-list (`lower` `upper`
+      `length` `trim` `ltrim` `rtrim` `substr` `substring` `replace` `instr` `coalesce` `ifnull`
+      `nullif` `abs` `round` `date` `time` `datetime` `julianday` `strftime` `cast`); a qualified
+      callee (`schema.fn(…)`) never is. A read grouped by every tenant source's `tenant_id` may also
+      call `count` `sum` `avg` `min` `max` `total`, and nothing else. A query that does not read a
+      tenant table but whose text names one ANYWHERE — a string literal included — is held to the same
+      function allow-list, because a function can run SQL held in a string (Postgres
+      `query_to_xml('select … from assets', …)`).
+    - **Detection does not trust a query it cannot read.** For a query inside the subset, a tenant
+      table is named when an identifier token names it (a literal is data; a parameter is a value). For
+      a query outside the subset, a whole-word occurrence of a tenant table's name ANYWHERE in its text
+      — comment, literal and parameter text included — counts, so an unreadable query that mentions a
+      tenant table is refused rather than passed.
+    The subset is an implementation's guarantee that what it scopes is what the database runs; it is
+    deliberately small, and it MAY grow only by forms the implementation reads exactly.
+    > **Provenance:** spec currency to the built floor — #1293 (`5e6b39b92` r3, `c02da0f86` r4;
+    > `g-tenant-floor-sql-lexical-bypasses-s452-r3` and `g-tenant-floor-write-side-effects-s452-r4`,
+    > both resolved), whose emitter is `compiler/src/codegen/tenant-sql-subset.ts` (`analyzeTenantSql`)
+    > reached through `tenant-egress.ts` `tenantFloorViolation` from `rewrite.ts` `_lowerTenantForQuery`.
+    > A PA direction under ruling:user-voice-scrml.md S452 "a" (*"rows read from a tenant-scoped table
+    > are filtered to the active tenant IMMEDIATELY after the query, before any program code sees
+    > them"*) after three security-review rounds beat text classification of tenant SQL
+    > (`g-tenant-floor-sql-classification-bypasses-s452-r2`, r3) — not a separate bryan ruling; recorded
+    > as built, in its veto window · **supersedes:** nothing struck — this section named no syntactic
+    > bound on a tenant query · **Direction of change (pa-base §8): newly-rejecting** — a comment or
+    > quoted identifier in a tenant query; a `${…}` holding a brace, slash, template or escaped string; a
+    > non-listed function or aggregate (`group_concat`, `json_group_array`) on a tenant table; a
+    > non-tenant query outside the subset whose text names a tenant table. Corpus measured at #1293:
+    > 2258 `.scrml`, 0 artifact diffs, 0 tenant codes (no corpus program declares a tenant table).
 - **Raw egress of cross-tenant rows** → **hard-fail `E-TENANT-RAW-EGRESS`** (narrowed, S452). It
   fires only when rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual
   `Response` / `handle()` body (§40). Under the source filter those are the only foreign-tenant rows
@@ -12140,8 +12254,11 @@ platform-wide count, a background job, a boot-time scan) returns a different res
   remaining rows in their original order.
 - **`LIMIT` / `OFFSET`.** Under the runtime filter they are applied by the database BEFORE the
   filter, so a page may hold fewer rows than `LIMIT` (or none) although more of the active tenant's
-  rows exist. This is fail-closed (no foreign row is observed) but it is a visible short-read;
-  the v1.next injection removes it by filtering before the limit.
+  rows exist. No foreign row is observed, but the short page is an **oracle**: how short it is
+  depends on how many of the first rows belong to other tenants, so it tells the request something
+  about their data (see Soundness scope). The v1.next injection removes it by filtering before the
+  limit. *(S454 currency — supersedes "This is fail-closed (no foreign row is observed) but it is a
+  visible short-read"; `g-tenant-floor-predicate-oracles-before-filter-s452`.)*
 - **JOINs.** A result row is admitted iff, for EVERY tenant-scoped table among the query's FROM /
   JOIN sources, that source's `tenant_id` in the row equals the active tenant; query-lowering
   carries one `tenant_id` per tenant-scoped source. A non-tenant table joined to a tenant table
@@ -12200,10 +12317,19 @@ observes.
 **complete for reads of statically-declared tenant-scoped tables, and for every value server code
 derives from them**: a non-opted-out read hands the program only the active tenant's rows, so every
 extracted field, count, join, and serialized value is scoped by construction. It does **NOT** cover:
-covert channels (timing; the database's own behavior on foreign rows, e.g. a `UNIQUE` violation
-revealing that a value exists in another tenant); the `LIMIT` / `OFFSET` short-read above (a
-completeness loss, not a leak); and any value read with `.acrossTenants()`, which is the declared
-opt-out. Aggregate-without-discriminator, writes, and `.acrossTenants()` rows reaching a raw
+covert channels and oracles — timing; the database's own behavior on foreign rows, e.g. a `UNIQUE`
+violation revealing that a value exists in another tenant; the `LIMIT` / `OFFSET` short read above,
+whose length depends on other tenants' rows; and an author's `WHERE` whose evaluation fails only on a
+foreign row (a cast or a division over another tenant's value), because the author's `WHERE`,
+`ORDER BY` and `LIMIT` run over every tenant's rows before the source filter (and, for an injected
+UPDATE / DELETE, before the tenant conjunct is known to short-circuit) — each is an existence or value
+oracle on other tenants' data, closed structurally only by filtering in the database (the v1.next read
+injection, or the §14.8.11 tier); and any value read with `.acrossTenants()`, which is the declared
+opt-out.
+> **Provenance:** spec:§14.8.10 (S454 currency; review:s452-tenant-r3 finding (c), filed as
+> `g-tenant-floor-predicate-oracles-before-filter-s452`, whose "SPEC wording item (PA)" this is) · **supersedes:** *"the `LIMIT` / `OFFSET` short-read above (a completeness loss, not a
+> leak)"* · **Direction of change:** inert — no program's acceptance or behaviour changes; the bound is
+> stated truthfully (it over-claimed). Aggregate-without-discriminator, writes, and `.acrossTenants()` rows reaching a raw
 `Response` fail closed at compile; an unresolvable dynamic read yields zero rows (never
 accept-unknown).
 
@@ -12219,7 +12345,16 @@ is the entire invariant/policy firewall.
   discriminator and no injectable tenant constraint (the source filter has no row to key on); also
   a tenant-scoped table read only inside a subquery / CTE / derived table (S452 reading).
 - **`E-TENANT-WRITE`** (Error) — an INSERT/UPDATE/DELETE against a tenant-scoped table with no
-  injectable tenant value (no egress sink can redact a durable write; it must fail closed).
+  injectable tenant value (no egress sink can redact a durable write; it must fail closed): a
+  subset write shape the floor cannot inject (the Write bullet), an author conflict clause, a write to
+  a table whose `<schema>` declares a trigger / rule / cascading foreign key, or an `.acrossTenants()`
+  INSERT that does not name `tenant_id`. Its runtime form `E-TENANT-WRITE (runtime)` refuses a write
+  with no active tenant.
+- **`E-TENANT-SQL-SUBSET`** (Error) — a query whose text names a tenant-scoped table and that lies
+  outside the floor's allow-listed SQL subset (a token or form outside the closed token set, a
+  statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, a `GROUP` without
+  `BY`, `RETURNING` or `FOR` on a read, or a non-allow-listed function in a query that names a tenant
+  table only in its text), without `.acrossTenants()` (S452 r3).
 - **`E-TENANT-RAW-EGRESS`** (Error) — rows obtained through an `.acrossTenants()` read reach a raw
   `Response` (a manual `Response` / `handle()` body, §40): the one remaining foreign-tenant egress
   under the source filter (narrowed S452; the S273 trigger — any tenant-scoped row at a raw `_{}` /
@@ -12232,14 +12367,18 @@ is the entire invariant/policy firewall.
   tenant-scoped table (the cross-tenant audit surface).
 
 **Implementation status (Nominal — V1-minimal = the source filter + the hard-fails).**
-- **S452 — impl#1 implements the superseded model.** impl#1 tags at query-lowering and strips only
-  at the egress sink, so server code sees every tenant's rows, and a value extracted from them
-  passes the strip (`_scrml_tenant_redact` returns non-objects unchanged): MEASURED at `e7fb5fba5`,
-  `rows.map(r => r.name)` over a tenant table served every tenant's names to an unpinned request
-  while `I-TENANT-STRIP` fired (dpa-067 §C4). The source-filter fix is in flight on
-  `fix/s452-tenant-filter-at-source` under the standing security exception. The bootstrap
-  (`compiler/self-host-v2/`) does not build the floor yet (U1c keeps tenant refused); the same rule
-  applies to it when built (dpa-067 F2).
+- **S452 — impl#1 filters at the source (landed).** The S273 model (strip at the egress only)
+  leaked a value extracted from tenant rows — MEASURED at `e7fb5fba5`, `rows.map(r => r.name)` served
+  every tenant's names to an unpinned request while `I-TENANT-STRIP` fired (dpa-067 §C4). Fixed under
+  the standing security exception: the source filter (#1287), then the allow-listed SQL subset, the
+  UPDATE / DELETE injection, `OR ABORT`, the schema-hazard refusal and the named no-tenant write
+  refusal (#1293). Open residuals: a `<schema>` VIEW over a tenant table is not scoped
+  (`g-tenant-floor-schema-view-over-tenant-table-s452`), the predicate oracles above
+  (`g-tenant-floor-predicate-oracles-before-filter-s452`), and the raw driver handle
+  (`g-tenant-floor-raw-driver-handle-callable-s452`). The bootstrap (`compiler/self-host-v2/`) does
+  not build the floor yet (U1c keeps tenant refused); the same rule applies to it when built
+  (dpa-067 F2). *(S454 currency — supersedes "impl#1 implements the superseded model … The
+  source-filter fix is in flight on `fix/s452-tenant-filter-at-source`".)*
 - **S452 — `E-TENANT-RAW-EGRESS` diverges.** impl#1 enforces the S273 trigger (any tenant-scoped
   row at a raw `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`), not the
   narrowed one (`.acrossTenants()` rows reaching a raw `Response`). It therefore still rejects raw
@@ -16639,10 +16778,12 @@ patterns name:
 
 - a call to a function declared `!` (§19.4.1): the declared error enum (`SaveError` above);
 - a `?{}` query (§19.8.3): `SqlError`;
-- a client call to a server function (§19.9.10): the call's failure set — the transport error
-  type, and for a server function declared `!` its declared error enum as well. Its exact shape
+- a client call to a server function (§19.9.10): the call's failure set — `Transport(t:
+  ServerCallError)`, and for a server function declared `! E` the variants of `E` as well (S454,
+  ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline"; supersedes "Its exact shape
   is OPEN for the bootstrap's U1b design pass (§19.9.10); the binder has whatever type U1b gives
-  the failure set, and needs no further rule.
+  the failure set, and needs no further rule."). The binder holds a value of that set; a later
+  `match err { … }` is exhaustive over the declared variants plus `.Transport(t)`.
 
 The binder's static type is that whole type even though, at run time, the value is never one of
 the variants an earlier arm matched: a later `match err { … }` is exhaustive over the whole enum.
@@ -17951,7 +18092,7 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 **A `?{}` query is a failable expression too (S451 R11).** Outside a `!` function, a `?{}` query is handled like a call to a `!` function whose error type is `SqlError` — with `!{}` or `match` at the site — and an unhandled one is E-ERROR-002 (§19.8.3, which states the forms that apply). Inside a `!` function it propagates implicitly (§19.8.2, unchanged). *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: §19.8.3's backwards-compatible mode, quoted there · newly-rejecting.)*
 
-**A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and what its error type covers (its exact shape is OPEN for the bootstrap's U1b design pass). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
+**A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and its failure set: the callee's declared variants, if any, plus `Transport(t: ServerCallError)` (S454 — supersedes "(its exact shape is OPEN for the bootstrap's U1b design pass)"; ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline"). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
 
 At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
@@ -18178,6 +18319,7 @@ legacy-arm-pattern ::= arm-pattern                                              
 | Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
 |---|---|---|---|
 | `\| <pattern> :> body` in a `!{}` (including the paren-free binder `\| .V m :> body`) or as an engine message arm (§51.0.S.2.3) | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | Delete the leading `\|` (and the space after it): `\| <pattern> :>` → `<pattern> :>`. A paren-free binder gains its parentheses: `.V m` → `.V(m)` (`::V m` → `::V(m)`, `T.V m` → `T.V(m)`). Where two or more legacy arms share a line (`!{ \| .A :> 1 \| .B :> 2 }`), put each arm on its own line (§18.2: one arm per line). The separator, the pattern's prefix (`.` / `::`) and the arm body are left as written — the separator has its own lint and rule (`W-MATCH-ARROW-LEGACY`, §18.2). |
+| `\| e :> body` in a `!{}` — a `\|`-led bare binder with no pattern, read as the whole-error arm | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | `\| e :>` → `_ e :>` — the same arm, spelled as §18.2's `whole-error-arm` (§18.6.1); a pipe-less `e :>` would be E-MATCH-BARE-BINDER. *(S454 currency: the case the built rule handles that this table did not name — `compiler/src/commands/fix-arm-pipe.js`, #1285.)* |
 
 **Normative statements:**
 
@@ -18204,7 +18346,9 @@ legacy-arm-pattern ::= arm-pattern                                              
   never a message-arm form and is not one now.
 - **E-ARM-PIPE-LEGACY** is reserved (§63.2): named, not scheduled, never fired before a §62
   MAJOR event schedules it (§63.7 permanent-soft). Scheduling is gate-blocked until the `scrml fix`
-  rule above is verified-landed (§63.4).
+  rule above is verified-landed (§63.4). The rule has LANDED (#1285, `scrml fix`'s default
+  `arm-pipe` rule, `compiler/src/commands/fix-arm-pipe.js`); its §63.4 verification is a separate
+  step and is not claimed here.
 - This section does not change `match`. §18.2's `match` grammar never admitted a leading `|`, so
   the window covers `!{}` arms and engine message arms (§51.0.S.2.3) — the two places the form was
   ever accepted. (impl#1 accepts `| _` on a multi-scrutinee `match` too; that is a filed divergence,
@@ -18238,13 +18382,15 @@ legacy-arm-pattern ::= arm-pattern                                              
 > arm. A pipe-less `_ err :>` is dropped the same way (E-TYPE-080, missing `Gone`). Pipe-less
 > `::Bad(m) :>` and `_ :>` already compile, and the `|`-led forms (`| .Bad(m) :>`, `| ::Bad m :>`)
 > compile clean with no lint. Filed `g-impl1-handler-arm-pipeless-dropped-s452` (impl#1 frozen —
-> carried, §34.0). The legacy form keeps compiling everywhere; W-ARM-PIPE-LEGACY is
+> carried, §34.0) — *since RESOLVED S452 under the "yes exception granted" freeze exception
+> (`79cd61d15`): impl#1 accepts the canonical arm.* The legacy form keeps compiling everywhere; W-ARM-PIPE-LEGACY is
 > non-fatal. **Corpus measured** (each `!{` brace-matched, strings and comments skipped; every lone
 > `|` at the handler's top level is one arm, since impl#1 ends an arm at any `|`): **186 `|`-led
 > arms in 70 files** — `examples/` 4 in 3 (all `| err :>`, already E-MATCH-BARE-BINDER),
 > `samples/` 55 in 16 (32 of them paren-free variant binders), `conformance/cases/` 106 in 44 (six
 > one-line handlers carry a second arm on the same line), `stdlib/` 21 in 7. The corpus migrates by
-> the `scrml fix` rule, not by this SPEC change. **W-ARM-PIPE-LEGACY is emitted by impl#1**
+> the `scrml fix` rule, not by this SPEC change — *the rule landed and the corpus was migrated with it
+> in #1285.* **W-ARM-PIPE-LEGACY is emitted by impl#1**
 > (S452, `s452-arm-pipe-deprecation`; emit sites in its §34 row) and, for `!{}` arms, by the bootstrap (s452-boot-arm-pipe);
 > **E-ARM-PIPE-LEGACY is reserved and emitted by neither** (§63.2).
 
@@ -18291,6 +18437,7 @@ For `?` to propagate, the error variants of the called function MUST be compatib
 
 - Every error variant that the called function can produce MUST exist as a variant in the enclosing function's error type.
 - If the called function produces error variants that are not present in the enclosing function's error type, the compiler SHALL emit a compile error (E-ERROR-010) identifying the incompatible variants.
+- For a client call to a server function, the variants the call produces include `Transport(t: ServerCallError)` (§19.9.10), so the enclosing enum SHALL declare it; the E-ERROR-010 message then names that line. *(S454, ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" F1 — "`?` requires the enclosing enum to declare `Transport(t: ServerCallError)` (else E-ERROR-010, message names the line to add)"; supersedes nothing — an application of the rule above · direction: newly-rejecting, narrow.)*
 
 This ensures that `?` never silently drops error information.
 
@@ -18703,7 +18850,9 @@ The client calling `loadUser(id)?` propagates the same `UserError` variants that
 
 A function whose body mixes a server-trigger statement with a reactive-assignment statement is split across the client/server boundary by the compiler (CPS analysis — see §12 + §19.9.3). Per the body-split soundness predicate **S4 (failure-mode preservation)**, every CPS-emitted stub carries implicit `!` semantics regardless of whether the developer wrote `!` in the function signature. Failures (network errors, SQL errors, server exceptions, etc.) are routed through the existing §19 error-handling mechanisms — no new mechanism is introduced.
 
-**Implicit `!`-typing.** A function with a CPS body-split is treated by the type-system as if it were declared `!`. The implicit error type is `CpsError` (a synthetic enum with at minimum `NetworkError(message: string, fn: string)` and `ServerError(message: string, fn: string)` variants).
+**Implicit `!`-typing.** A function with a CPS body-split is treated by the type-system as if it were declared `!`. Its client call fails with the §19.9.10 failure set: the function's declared error variants, if it is declared `!`, plus `Transport(t: ServerCallError)` — for an undeclared split function, `Transport(t: ServerCallError)` alone. A split callee and a plain server callee are therefore handled identically; there is no second synthetic enum.
+
+> **Provenance:** ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" — *"**F1 (B):** … Body-split's implicit `!` uses the same set."* · *"**F2:** the built-in is named `ServerCallError`; it replaces `CpsError`."* · **supersedes:** *"The implicit error type is `CpsError` (a synthetic enum with at minimum `NetworkError(message: string, fn: string)` and `ServerError(message: string, fn: string)` variants)."* — **the name `CpsError` is RETIRED** from the language; and this section's conceptual wrapper building a `type: "CpsError"` envelope. · **Direction of change (pa-base §8): semantics-changed + newly-rejecting (narrow)** — a handler that named `CpsError`'s variants (`.NetworkError` / `.ServerError`) no longer names a variant of the call's failure set (E-TYPE-020 non-exhaustive, or an unknown variant); a `_ :>` handler is unaffected. **Carried divergence:** impl#1 still synthesizes `CpsError` (its body-split wrapper returns a `type: "CpsError"` envelope, and its server sends `ServerError` with the exception's text) — impl#1 is frozen for language semantics (S447) and is not changed for this; the bootstrap builds `ServerCallError` (U1b, with U1d for the split itself).
 
 ```scrml
 // Developer writes:
@@ -18711,20 +18860,14 @@ function loadProfile(id: number) {
     @profile = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
 }
 
-// Compiler treats this AS IF it were:
-// function loadProfile(id: number)! -> CpsError { ... }
+// Compiler treats this AS IF it were declared `!`; its client call's failure set is
+// { Transport(t: ServerCallError) } (no declared variants).
 //
 // CPS-emitted client wrapper (conceptual):
 // async function loadProfile(id) {
-//     try {
-//         const result = await __fetch_loadProfile(id);
-//         if (result.__scrml_error) return result;  // pass-through server-tagged
-//         _scrml_reactive_set("profile", result);
-//     } catch (err) {
-//         return { __scrml_error: true, type: "CpsError",
-//                  variant: "NetworkError",
-//                  data: { message: err.message, fn: "loadProfile" } };
-//     }
+//     const result = await __call_loadProfile(id);   // the runtime's server call; never rejects
+//     if (result is a failure) return result;         // Transport(t) — built on the client (§19.9.10)
+//     _scrml_reactive_set("profile", result.value);
 // }
 ```
 
@@ -18800,20 +18943,21 @@ function notifyOrder(orderId: number) {
    *(S451 — supersedes path 1 "**`<errorBoundary>` markup wrapper**: `<errorBoundary fallback={<div>Failed to load profile</>}> ${loadProfile(@currentUserId)} </>`": a render-time server call is E-VALUE-SERVER-CALL (§13.7). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 2. **Caller `!` modifier** (logic-context propagation):
    ```scrml
-   function reloadProfile(id)! -> CpsError {
-       loadProfile(id)?  // ? propagates CpsError up the call stack
+   type ReloadError:enum = { Transport(t: ServerCallError) }
+   function reloadProfile(id)! ReloadError {
+       loadProfile(id)?  // ? propagates the call's Transport failure up the call stack
    }
    ```
 3. **Explicit match on result** (most-precise control):
    ```scrml
    match loadProfile(id) {
-       ::Ok(p) :> @profile = p
-       ::NetworkError(detail) :> @lastError = detail.message
-       ::ServerError(detail) :> @lastError = detail.message
+       .Ok(p) :> @profile = p
+       .Transport(t) :> @lastError = callProblem(t)   // callProblem: a `match t { … }` over ServerCallError (§19.9.10)
    }
    ```
+   *(S454 — supersedes path 2's `function reloadProfile(id)! -> CpsError { loadProfile(id)?  // ? propagates CpsError up the call stack }` and path 3's `::NetworkError(detail) :> @lastError = detail.message` / `::ServerError(detail) :> @lastError = detail.message` arms: `CpsError` is retired, and `?` requires the enclosing enum to declare `Transport(t: ServerCallError)` (§19.9.10). Provenance: ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" F1 + F2, quoted above. Direction: semantics-changed, as above.)*
 
-**S72 design-dive citations.** Body-split soundness design dive (`docs/deep-dives/body-split-soundness-design-2026-05-08.md`) §3.4 ratifies option 6 (compose 3+4+5). Body-split integration design dive (`docs/deep-dives/body-split-integration-and-residual-design-2026-05-08.md`) Q3 verdict ratifies the per-batch granularity framing; Q4 verdict ratifies the two-stage W- → E- deprecation cycle. The CpsError synthetic enum is introduced in this section; it is the only built-in enum type added by Ext 4. Future scope: A9 Ext 5 (idempotency-key replay safety) supplies the recovery path for non-tail batch failures.
+**S72 design-dive citations.** Body-split soundness design dive (`docs/deep-dives/body-split-soundness-design-2026-05-08.md`) §3.4 ratifies option 6 (compose 3+4+5). Body-split integration design dive (`docs/deep-dives/body-split-integration-and-residual-design-2026-05-08.md`) Q3 verdict ratifies the per-batch granularity framing; Q4 verdict ratifies the two-stage W- → E- deprecation cycle. ~~The CpsError synthetic enum is introduced in this section; it is the only built-in enum type added by Ext 4.~~ *(S454 — retired: a split function's failure set is §19.9.10's, carried by the built-in `ServerCallError`; ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" F2 "it replaces `CpsError`".)* Future scope: A9 Ext 5 (idempotency-key replay safety) supplies the recovery path for non-tail batch failures.
 
 #### 19.9.6 Static Monotonicity Classification + Idempotency-Key Replay
 
@@ -19044,7 +19188,39 @@ The `SELECT` writes `@total`; the `INSERT` reads it in the same batch. Under thi
 > **Status: Nominal / spec-ahead (S451).** NORMATIVE; **impl#1 does not implement it** and is not changed for it
 > (frozen for language semantics, S447 — the divergence is filed: `docs/known-gaps.md`
 > `g-impl1-client-server-call-not-failable-s451`). It is specified here and lands with the bootstrap's client
-> server-call slice (U1b); the bootstrap does not build it yet.
+> server-call slice (U1b); the bootstrap does not build it yet. The error type's shape — OPEN at S451 and assigned
+> to U1b's design pass — is ruled at S454 (below, "The error type — `ServerCallError`" and "The failure set of a
+> client call"); the ruling is SPEC text, not a build, and changes nothing above.
+>
+> **Provenance:** ruling:user-voice-scrml.md S454 "all your recs, F3 with the deadline" — *"**F1 (B):** a client call
+> to a server-placed `f` fails with `f`'s declared variants plus ONE wrapper variant `Transport(t: ServerCallError)`;
+> a non-`!` callee fails with `Transport` alone. `?` requires the enclosing enum to declare `Transport(t:
+> ServerCallError)` (else E-ERROR-010, message names the line to add). Body-split's implicit `!` uses the same set."*
+> · *"**F2:** the built-in is named `ServerCallError`; it replaces `CpsError`."* · *"**F3, "with the deadline":**
+> variants `Unreachable`, `Refused(status: int)`, `ServerFault(status: int)`, `Malformed(reason: string)`, each with
+> `renders`; no server text on the wire; no separate timeout variant — the client runtime SHALL apply a deadline to
+> every server call, and a call that exceeds it is `Unreachable` (the deadline's value is a separate, later
+> ruling)."* · *"**F4:** a declared variant named `Transport` with payload `(t: ServerCallError)` IS the wrapper; any
+> other payload is a NEW code (e.g. E-ERROR-016) at the client call site."* · *"**F5 (a) SPEC-literal:** "remote" is a
+> whole-program placement fact … PLUS the PA's requirement: when a callee's placement flips because of a new client
+> caller, the diagnostic in the helper SHALL name that caller (file:line) as the cause."* · *"**F6:** sequential
+> server calls in U1b (known deviation); parallel read-only arrives with U3."* · *"**F7:** no nested patterns now"* ·
+> *"**F8:** yes — the §19.9.10 `scrml fix` rule … CONDITIONAL on first settling whether `return` is legal in an
+> event-handler body"*. Design: `scrml-support/docs/deep-dives/bootstrap-u1b-client-server-call-design-2026-10-04.md`
+> §1.0, §1.5, §1.6, §1.10, Item 3, §5.2. · **supersedes:** *"**OPEN — the exact shape is assigned to the bootstrap's
+> U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one built-in transport error), its
+> variants and payloads (whether a decode failure is its own variant, whether a status code travels in the payload),
+> its `renders` clauses (§19.2), and its `httpStatus` behaviour."*; *"**OPEN for U1b:** how the two sets combine in the
+> type system (a flat union of variants, or one wrapping variant such as `.Transport(e)`), and how `?` carries the
+> transport half through §19.5.3's compatibility check (E-ERROR-010) when the enclosing function's error type does not
+> name it."*; the normative statement *"Its exact type is OPEN (U1b)."*; and §19.9.5's synthetic `CpsError` enum
+> (quoted there). · **Direction of change (pa-base §8): newly-rejecting (narrow) + semantics-changed.** Newly
+> rejecting: a `?` on a client server call inside a `!` function whose enum lacks `Transport(t: ServerCallError)`
+> (E-ERROR-010), and a declared variant `Transport` with another payload (E-ERROR-016) — measured exposure: one corpus
+> enum has a `Transport` variant, a data enum that is no server function's error type (design §B). Semantics-changed:
+> a server call now has a deadline (a hung server was a hang; it is now `Unreachable`). A handler written to the S451
+> interim advice (`_ :>` / `_ err :>`) is unaffected. impl#1 is frozen and builds none of it (it still emits
+> `CpsError`, below).
 >
 > **Provenance:** spec:§19.9.10 (currency correction, S452 — `compiler/self-host-v2/` has no reference to §19.9.10,
 > E-ERROR-012..015 or E-MATCH-BARE-BINDER at `488abeedc`; nav-map U-S451-1) · **supersedes:** "The bootstrap builds
@@ -19111,21 +19287,151 @@ error type that carries those failures SHALL distinguish each of them:
 3. **A decode failure** — a response whose body does not decode under the §57 rules for that route (the strict
    decoder on a compiler-emitted route, S451 R10).
 
-§19.9.5's synthetic `CpsError` enum (`NetworkError(message: string, fn: string)`, `ServerError(message: string,
-fn: string)`) already names the first two for body-split stubs, and is the starting point. **OPEN — the exact shape
-is assigned to the bootstrap's U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one
-built-in transport error), its variants and payloads (whether a decode failure is its own variant, whether a status
-code travels in the payload), its `renders` clauses (§19.2), and its `httpStatus` behaviour. Until U1b, a handler
-that must be total over a server call writes a `_ :>` arm (§19.4.3) — or `_ err :>` to bind the whole failure (§18.6.1) — which covers every transport variant whatever
-their final names.
+**The error type — `ServerCallError` (S454).** The three kinds are carried by one built-in enum, **`ServerCallError`**.
+It is provided by the compiler, as `SqlError` is (§19.8.1): the developer SHALL NOT redefine it, it SHALL have at
+least the four variants below, and the compiler MAY add additional variants in future versions (the §19.8.4 wording).
 
-**A server function declared `!`.** Its client call can fail in two ways: with the function's declared error (§19.9.1,
-§19.9.3 — the `fail` envelope it sends) or with a transport failure. The call's failure set is BOTH: the declared
-error type's variants and the transport error's. A `!{}` handler or a `match` on the call SHALL cover both — by
-naming the variants of each, or with a `_ :>` arm. A function declared `!` loses nothing it had: its declared
-variants arrive exactly as §19.9.1 sends them. **OPEN for U1b:** how the two sets combine in the type system (a flat
-union of variants, or one wrapping variant such as `.Transport(e)`), and how `?` carries the transport half through
-§19.5.3's compatibility check (E-ERROR-010) when the enclosing function's error type does not name it.
+```scrml
+// Built-in — compiler-provided, not user-defined. Never sent by the server: the client runtime builds it when a
+// call to a server function does not produce a decodable answer.
+type ServerCallError:enum = {
+    Unreachable                     // kind 1: no response — the connection failed, was reset, or the deadline passed
+        renders <div class="scrml-call-error">The server could not be reached. Check the connection and try again.</>
+    Refused(status: int)            // kind 2: a 4xx that is not the function's own `fail` envelope (auth, CSRF, a guard)
+        renders <div class="scrml-call-error">The server refused the request (${status}).</>
+    ServerFault(status: int)        // kind 2: a 5xx that is not the `fail` envelope (an exception, a rolled-back transaction)
+        renders <div class="scrml-call-error">The server failed (${status}). Try again later.</>
+    Malformed(reason: string)       // kind 3: the body does not decode under §57's strict rules for the route
+        renders <div class="scrml-call-error">The server's answer could not be read.</>
+}
+```
+
+- **Classification.** A non-2xx response whose body is not the callee's own `fail` envelope (§19.9.1 — `type` the
+  callee's declared enum, `variant` one of its variants, `data` decoding strictly under §57.8) is `Refused(status)`
+  for a 4xx and `ServerFault(status)` for a 5xx. A 2xx response whose body does not decode strictly against the
+  return type, and any `__scrml_error` envelope that fails one of those checks (another `type`, an unknown variant,
+  bad `data`, a callee not declared `!`, or an envelope on a 2xx status), is `Malformed(reason)`. No outcome of a
+  server call is coerced into a success (§57.4) or escapes as an uncaught rejection: every outcome is a success value,
+  a declared variant, or a `ServerCallError`.
+- **No server text on the wire.** No `ServerCallError` variant carries text written by the server: the statuses are
+  numbers, and `Malformed.reason` is written by the client from its own decode check. The server records an
+  exception's detail in its own log (the bootstrap's U1c server unit). *(supersedes, for this purpose, `CpsError`'s
+  `ServerError(message: string, fn: string)`, which carried the server's exception text to the browser.)*
+- **No `httpStatus`.** These variants are built by the client and never sent by a server, so §19.9.2's `httpStatus`
+  has no meaning on them; `ServerCallError` declares none. (A user enum that carries a `Transport(t: ServerCallError)`
+  variant and `fail`s with it is sent like any declared variant, under §19.9.2's heuristic.)
+- **The `renders` text above is placeholder wording** (§19.2 requires a `renders` clause so the one route that takes a
+  server call's failure to an `<errorBoundary>` — the `<formFor>` submit dispatch, §19.6.6 / §41.14.3 — can display
+  every variant). An implementation MAY word it differently; the variant set and payloads are normative.
+
+**The deadline.** The client runtime SHALL apply a deadline to every client call of a server function. A call that
+has not produced a response when its deadline passes SHALL fail with `Unreachable` — there is no separate timeout
+variant, so the variant set stays closed and an exhaustive inner `match t` does not break when a deadline is added to
+a runtime. A request the client itself aborts on supersede or teardown (§6.7.7.1) is still not a failure: an abort
+sets no error, and the call's continuation does not run. **⚑ OPEN (not ruled): the deadline's value / configurability**
+— S454 ruled THAT every server call has a deadline, not how long it is or whether an author can change it.
+
+**The failure set of a client call (S454).** At a client call site (scope above) of a server-placed function `f`, the
+call fails with:
+
+- `f`'s declared error enum's variants (when `f` is declared `! E`), exactly as §19.9.1 sends them — unwrapped, so a
+  declared function loses nothing it had (§19.9.3, §19.9.4); **plus**
+- ONE variant, **`Transport(t: ServerCallError)`**, which carries every failure of the boundary itself.
+
+For an `f` not declared `!`, the failure set is `Transport(t: ServerCallError)` alone. A `!{}` handler or a `match` on
+the call SHALL cover the whole set — by naming each variant, or with `_ :>` / `_ err :>` (§18.6.1). Branching on the
+cause of a transport failure is an ordinary `match` on `t` inside the arm (§18.2 has no nested patterns, and none are
+added — S454 F7):
+
+```scrml
+${
+    function save() {
+        @version = saveNote("n1", @body, @version) !{      // saveNote: server-placed, declared `! SaveError`
+            .Conflict(cur) :> { @status = "edited elsewhere (now v" + cur + ")"; return }
+            .Storage       :> { @status = "the server could not store it"; return }
+            .Transport(t)  :> { @status = callProblem(t); return }
+        }
+        @status = "saved"
+    }
+
+    fn callProblem(t: ServerCallError) -> string {
+        return match t {
+            .Unreachable    :> "offline — not saved"
+            .Refused(s)     :> "the server refused the save (" + s + ") — sign in again"
+            .ServerFault(s) :> "the server failed (" + s + ") — try again later"
+            .Malformed(r)   :> "the server's answer could not be read"
+        }
+    }
+
+    function recount() {
+        @words = wordCount("n1") !{ .Transport(t) :> @words }   // wordCount: server-placed, not declared `!`
+    }
+}
+```
+
+**A declared variant named `Transport`.** If `f`'s declared enum has a variant `Transport` whose payload is exactly
+`(t: ServerCallError)`, that variant IS the wrapper: the failure set holds it once, and a transport failure of this
+call and one `f` propagated from an inner call are the same kind of value. A declared variant named `Transport` with
+any other payload (or none) SHALL be a compile error at the client call site — **`E-ERROR-016`** — because the call's
+`Transport` variant cannot be both. The message names `f`, its enum, and the payload `(t: ServerCallError)`.
+*E-ERROR-016 is **Nominal — reserved, §34 row lands with the implementation**: no compiler emits it yet.*
+
+**`?` on a client server call.** In a `!` function, `?` on a client call to a server-placed `f` propagates the call's
+whole failure set, so §19.5.3's compatibility check applies to it: the enclosing function's enum SHALL declare
+`Transport(t: ServerCallError)` — plus `f`'s declared variants, as for any `?` — or the `?` is **E-ERROR-010**. For an
+`f` not declared `!` this is `?` on a failable call (the call is failable by this section), so E-ERROR-004 does not
+apply to it. The E-ERROR-010 message SHALL name the line to add, for example: *"`saveNote` is a server function: a
+call to it from the client can also fail on the wire. Add `Transport(t: ServerCallError)` to `SyncError`, or handle
+the call with `!{ … .Transport(t) :> … }`."*
+
+```scrml
+${
+    type SyncError:enum = {
+        Conflict(current: int)
+        Storage
+        Transport(t: ServerCallError)       // one line covers the boundary, whatever variants ServerCallError gains
+    }
+    function syncAll()! SyncError {
+        @version = saveNote("n1", @body, @version)?
+        @words = wordCount("n1")?
+    }
+}
+```
+
+**Which call sites are remote — placement is whole-program.** Whether a call site is a client call (and so has the
+`Transport` variant) follows §12.2's placement of the CALLER, which is a whole-program fact: a helper with no server
+trigger of its own is server-placed by inheritance (Trigger 5) when every caller is server-placed, and a call inside
+it is then server→server and not failable on the wire (scope above, "Not affected"). An implementation SHALL decide
+"remote" from the resolved whole-program placement — not from the caller's own body alone. Consequences:
+
+- At a call that resolves server→server, a `.Transport` arm handles nothing. When the callee is not declared `!`, the
+  whole handler is attached to a call that cannot fail and is **E-ERROR-013**. When the callee is declared `!`, only
+  the `.Transport` arm is dead; it SHALL be reported as dead handling in the manner of E-ERROR-013 (the message names
+  the callee and says the call is server→server). An unhandled server→server call stays valid.
+- When a helper's placement flips because a client caller was added — the helper was server-placed by inheritance,
+  and a new client call to it makes it client-placed, so its own server calls become client calls — any diagnostic
+  this rule then raises inside the helper (an E-ERROR-002 for a now-unhandled server call, an E-ERROR-010 for a `?`)
+  SHALL name that client caller (file and line) as the cause, so the error is not reported at a site the author did
+  not touch with no account of why.
+
+**Body-split functions.** A function whose body the compiler splits across the boundary (§19.9.5) is implicitly `!`
+with the SAME failure set: its declared variants, if it is declared `!`, plus `Transport(t: ServerCallError)`. No
+second synthetic enum exists; `CpsError` is retired (§19.9.5).
+
+> **Bootstrap status (informative; not a language change).** The bootstrap's U1b unit runs a body's client calls of
+> server functions in source order, each awaited before the next. §13.2's rule that independent, provably read-only
+> server calls run in parallel waits on the READ classification the bootstrap's U3 unit builds; until then source
+> order is a known deviation from §13.2 item 3 (S454 F6). It changes no result a program can observe except timing.
+
+> **Migration (informative — tooling, owed).** The code this section rejects is migrated by a `scrml fix` rule built
+> alongside the §19.8.3 R11 rule (S454 F8): at an unhandled client call it writes the old behaviour out — a failed
+> call stopped the rest of the code from running — as a local `!{ .Transport(t) :> return }` (for a `! E` callee, the
+> arms already present plus that one). In an event-handler value the rule writes the BRACED form, `onclick={ f() !{
+> .Transport(t) :> return } }`; `return` is legal there because §5.2.3 makes an inline handler block "the same
+> statement grammar as a function body (§7.3)" (this settles the design's open question that S454 F8 was conditional
+> on). At a site in a client function body the local rewrite is not meaning-identical — before, the failure also
+> aborted every awaiting caller; after, callers continue — so the rule SHALL emit an Info at each such site saying so.
+> The rule is not built.
 
 ```scrml
 <program db="sqlite:./app.db">
@@ -19139,6 +19445,9 @@ union of variants, or one wrapping variant such as `.Transport(e)`), and how `?`
   } }
   ${ function refreshOrKeep() {
       @users = userCount() !{ _ :> @users }                // VALID — on failure keep the old count
+  } }
+  ${ function refreshNamed() {
+      @users = userCount() !{ .Transport(t) :> @users }    // VALID — the one variant a non-`!` callee's call has (S454)
   } }
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>   // VALID — the request handles it (<#usersLoad>.error)
   <button onclick={ userCount() }>Count</button>             // E-ERROR-002 — a handler call is a client call
@@ -19171,10 +19480,25 @@ reached only through an alias or a cell is not counted, and nor is a call inside
   (§52.6.5), and a server call in a value position (E-VALUE-SERVER-CALL, §13.7) SHALL NOT be E-ERROR-002 under this
   rule.
 - A failed client call to a server function SHALL produce an error value that distinguishes a transport failure, a
-  non-2xx route response other than the function's declared error, and a decode failure (§57). Its exact type is
-  OPEN (U1b).
+  non-2xx route response other than the function's declared error, and a decode failure (§57). The boundary's
+  failures SHALL be values of the built-in enum `ServerCallError` (`Unreachable` · `Refused(status: int)` ·
+  `ServerFault(status: int)` · `Malformed(reason: string)`, each with a `renders` clause); the developer SHALL NOT
+  redefine it, and the compiler MAY add variants. No variant SHALL carry server-written text. *(S454 — supersedes
+  "Its exact type is OPEN (U1b).")*
+- The client runtime SHALL apply a deadline to every client call of a server function; a call that exceeds it SHALL
+  fail with `Unreachable`. An abort on supersede or teardown SHALL NOT be a failure. *(The deadline's value is not
+  ruled.)*
 - The client call of a server function declared `! E` SHALL fail with a variant of `E` (as the server sent it) or with
-  a transport error; a handler on it SHALL cover both.
+  `Transport(t: ServerCallError)`; the client call of a server function not declared `!` SHALL fail with
+  `Transport(t: ServerCallError)` only. A handler on either SHALL cover the whole set. A declared variant
+  `Transport(t: ServerCallError)` SHALL be that variant; a declared variant named `Transport` with any other payload
+  SHALL be E-ERROR-016 at the client call site.
+- `?` on a client call of a server function SHALL require the enclosing function's error enum to declare
+  `Transport(t: ServerCallError)` (and the callee's declared variants), else E-ERROR-010, whose message names the
+  variant to add.
+- Whether a call is a client call SHALL be decided from the whole-program placement (§12.2, Trigger 5 included). A
+  diagnostic of this section raised inside a function whose placement became client because of a client caller SHALL
+  name that caller (file and line).
 - W-CPS-NEEDS-FAILABLE (§19.9.5) SHALL NOT be emitted for a client call site: the unhandled call is E-ERROR-002.
 
 ---
@@ -19225,6 +19549,7 @@ function transferFunds(from, to, amount)! -> TransferError {
 - **Only normal completion COMMITs (S453).** A `return`, or a `break` / `continue` whose target is outside the `transaction` block, SHALL roll the transaction back before the exit proceeds: the block's four endings are therefore **normal completion → COMMIT**, and **`fail` · a SQL error · a `return` / `break` / `continue` out of the block → ROLLBACK**. The exit itself is not suppressed — the `return` returns, the `break` / `continue` reaches its target — and the return expression SHALL be evaluated **before** the rollback, so a `?{}` read inside `return <expr>` still executes within the transaction. A `break` / `continue` whose loop is inside the block does not leave it and is not an exit for this purpose; neither is a `return` after the block, which runs once the block has committed. A `yield` is a suspension rather than an exit and is not governed here (§19.10.4).
 - If a `fail` occurs inside a `transaction` block, the compiler SHALL insert a `?{ROLLBACK}` before the fail's return. The `fail` then returns the error variant to the caller.
 - If a SQL error occurs inside a `transaction` block (and the function is `!`), the transaction is automatically rolled back before the SQL error is propagated.
+- *(Informative — `defer` × `transaction`, S454.)* A `transaction` block's body is a statement list, so it is an **enclosing block** for §19.16.2 registration. A `defer` registered INSIDE the block runs when control leaves the block, before the block's own COMMIT or ROLLBACK: its writes are inside the transaction and share its fate — rolled back with it on a `return` (or any other rollback ending), and on normal completion run (in LIFO order, §19.16.2) and then committed with it. A `defer` registered at FUNCTION level before the block runs when the function exits — AFTER the block has committed or rolled back — so its writes are outside the transaction and persist whatever the block's ending. Both follow from §19.16 scope; nothing here is a new rule. *(Provenance: ruling:user-voice-scrml.md S454 "your recs on all" — item C: *"a §19.10.3 note on `defer` × `transaction` composition (a `defer` inside the block runs inside the transaction; one at function level before the block runs after the rollback and persists) — yes."* · supersedes: nothing · direction: inert. Not measured on impl#1 by this change.)*
 
 #### 19.10.4 Normative Statements
 
@@ -19241,7 +19566,7 @@ function transferFunds(from, to, amount)! -> TransferError {
 - **A `yield` out of the block is a compile error (fail-closed).** Inside a function, a `yield` within a `transaction` block SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW** -- `a 'transaction' block cannot be left by a \`yield\``. A `yield` SUSPENDS the block rather than leaving it, so neither of §19.10.3's endings applies: rolling back would discard work the block is about to continue, and committing would end a transaction that is still open (§19.10.4: no transaction is left open). Move the `yield` out of the block — let the block complete, then yield its result. *(S453 — supersedes the S450 interim sentence "Inside a function, a `return`, a `yield`, or a `break` / `continue` whose target is outside the `transaction` block SHALL be a compile error", which was fail-closed pending a ruling. The ruling (S449, B1a) decided `return` / `break` / `continue`: they ROLL BACK (§19.10.3). `yield` was NOT ruled and stays refused — flagged as a reading, not a ruling.)*
 - **An exit inside a `match` arm is a compile error (fail-closed).** Inside a function, a `return`, or a `break` / `continue` whose target is outside the `transaction` block, written inside an arm of a `match` — **statement- OR expression-position**, at any depth within the arm — SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW**. **Some** `match` arm lowerings are nested functions: impl#1's `emitMatchExpr` / `emitMultiScrutineeMatch` emit the arm set as an IIFE, and an exit inside one returns from the ARM only, so the block's rollback never runs and the statements after the `match` keep executing inside the open transaction (`g-stmt-match-block-return-falls-through`). Measured at S453 against an implementation without this limb: the shape compiled clean, the arm's `return` was swallowed, the post-`match` write ran, and every row persisted. ⛑ **The refusal is on the UNION of arm positions, and deliberately coarser than the defect.** A **DECL-position** `let v = match … { … }` lowers INLINE (impl#1 `emitMatchExprDecl`) with no function boundary, so an exit in one of ITS arms is refused although that lowering may be sound; the compiler does not distinguish arm lowerings at this point and fails closed on all of them rather than admit a shape whose soundness has not been proved by execution. Narrowing it is `g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline`, which names the runtime proof required. Move the exit out of the arm: let the `match` pick a VALUE and exit after it, or use an `if` / `else if` chain. An exit whose target is **inside** the arm (a `break` of a loop declared there) never crosses the arm boundary and is unaffected. This sentence is narrowed when the statement-arm lowering returns from the enclosing function.
 
-> **Provenance:** ruling:user-voice-scrml.md S449 — "your recs" on S450-peter's routed asks (B1a = (a), B1b). **B1a** (verbatim): *"`return` / `break` / `continue` out of a `transaction {}` block ROLLS BACK — only normal completion commits (§19.10.3 'end of normal completion')"*, with the instruction *"replace the interim E-TRANSACTION-CONTROL-FLOW refusal for those exits with the rollback."* **B1b**: *"a top-level `transaction` is rejected (§19.10.4 already says `!` functions only)."* **Supersedes:** the S450 interim E-TRANSACTION-CONTROL-FLOW sentence for those three exits, and §19.10.4's first bullet where it named only a non-`!` FUNCTION. *(Readings, flagged — bryan ruled none of these four: (i) `yield` stays refused, as a suspension is not an exit, so neither ending applies; (ii) the arm limb is widened to those three exits in BOTH `match` positions, because some arm lowerings are an IIFE and B1a would otherwise make the shape legal-and-broken — PA-measured by execution; the refusal is on the union of arm positions and is coarser than the defect, since a decl-position `let v = match …` lowers inline; (iii) B1b reuses **E-ERROR-001** with its §19.10.4 limb restated as "outside a `!` function" rather than minting a new code; **(iv) the EVALUATION ORDER in §19.10.3 — that the return expression SHALL be evaluated BEFORE the rollback — is a PA reading, not part of the ruling.** bryan ruled only THAT the three exits roll back, not WHEN relative to the exit's own expression. The order chosen is the one that keeps a `?{}` read inside `return <expr>` inside the transaction, it is what impl#1's `try`/`finally` does for free, and it is PA-proved by execution (`return n.c`, where `n` COUNTs rows written in the block, returns 1 and the block then rolls back); the alternative — a `fail`-style `return (await rollback(), expr)` — would evaluate the expression after the rollback and return 0. Flagged so the veto window covers it.)* **Direction of change (pa-base §8):** B1a is **newly-accepting** AND **semantics-changed** (what a `transaction` does on a `return`); B1b is **newly-rejecting**. **Corpus MEASURED at S453**, not assumed. Scanned 2,321 `.scrml` files (`examples/` 71, `samples/` 877, `conformance/cases/`, the four r25 gauntlet dev files, and the assetManagement + flogenceP adopter clones), classifying every `transaction-block` node by its enclosing scope and cross-checking against a text scan (10 files hold a `transaction {`; 0 parse failures, so node coverage equals text coverage): **top-level `transaction` — 1 occurrence, and it is the `conformance/cases/error/transaction-top-level-neg` case added BY this change. Pre-existing sources needing migration for B1b: 0.** A `return` / `break` / `continue` out of a block — 0 pre-existing occurrences, necessarily, since it was a compile error. Adopter clones and the r25 gauntlet files carry **no `transaction` at all**. Base-vs-head per-file diagnostic differential over 993 compiled files (the same roots minus `conformance/`): **0 files change**. §19.10.2's own normative example is a `transaction` block inside a `!` function. ⟵ prior: spec:§19.10.2-§19.10.4 — conformance restoration (S450, `g-transaction-block-not-recognized-inside-a-function-body`).
+> **Provenance:** ruling:user-voice-scrml.md S449 — "your recs" on S450-peter's routed asks (B1a = (a), B1b). **B1a** (verbatim): *"`return` / `break` / `continue` out of a `transaction {}` block ROLLS BACK — only normal completion commits (§19.10.3 'end of normal completion')"*, with the instruction *"replace the interim E-TRANSACTION-CONTROL-FLOW refusal for those exits with the rollback."* **B1b**: *"a top-level `transaction` is rejected (§19.10.4 already says `!` functions only)."* **Supersedes:** the S450 interim E-TRANSACTION-CONTROL-FLOW sentence for those three exits, and §19.10.4's first bullet where it named only a non-`!` FUNCTION. *(Readings — **RATIFIED S454** (ruling:user-voice-scrml.md S454 "your recs on all" — *"**Readings 1–4 STAND:** (1) a `return`/`break`/`continue` out of a `transaction {}` stays REFUSED inside a `match` arm until `g-stmt-match-block-return-falls-through` is fixed; (2) `yield` out of a `transaction {}` stays refused; (3) the return expression is evaluated BEFORE the rollback — a new normative SHALL at §19.10.3; (4) B1b reuses E-ERROR-001"*); supersedes the flag "bryan ruled none of these four", which held until S454. Direction: inert — the text of each reading is unchanged: (i) `yield` stays refused, as a suspension is not an exit, so neither ending applies; (ii) the arm limb is widened to those three exits in BOTH `match` positions, because some arm lowerings are an IIFE and B1a would otherwise make the shape legal-and-broken — PA-measured by execution; the refusal is on the union of arm positions and is coarser than the defect, since a decl-position `let v = match …` lowers inline; (iii) B1b reuses **E-ERROR-001** with its §19.10.4 limb restated as "outside a `!` function" rather than minting a new code; **(iv) the EVALUATION ORDER in §19.10.3 — that the return expression SHALL be evaluated BEFORE the rollback — is a PA reading, not part of the ruling.** bryan ruled only THAT the three exits roll back, not WHEN relative to the exit's own expression. The order chosen is the one that keeps a `?{}` read inside `return <expr>` inside the transaction, it is what impl#1's `try`/`finally` does for free, and it is PA-proved by execution (`return n.c`, where `n` COUNTs rows written in the block, returns 1 and the block then rolls back); the alternative — a `fail`-style `return (await rollback(), expr)` — would evaluate the expression after the rollback and return 0. Flagged so the veto window covers it — the window closed with the S454 ratification above.)* **Direction of change (pa-base §8):** B1a is **newly-accepting** AND **semantics-changed** (what a `transaction` does on a `return`); B1b is **newly-rejecting**. **Corpus MEASURED at S453**, not assumed. Scanned 2,321 `.scrml` files (`examples/` 71, `samples/` 877, `conformance/cases/`, the four r25 gauntlet dev files, and the assetManagement + flogenceP adopter clones), classifying every `transaction-block` node by its enclosing scope and cross-checking against a text scan (10 files hold a `transaction {`; 0 parse failures, so node coverage equals text coverage): **top-level `transaction` — 1 occurrence, and it is the `conformance/cases/error/transaction-top-level-neg` case added BY this change. Pre-existing sources needing migration for B1b: 0.** A `return` / `break` / `continue` out of a block — 0 pre-existing occurrences, necessarily, since it was a compile error. Adopter clones and the r25 gauntlet files carry **no `transaction` at all**. Base-vs-head per-file diagnostic differential over 993 compiled files (the same roots minus `conformance/`): **0 files change**. §19.10.2's own normative example is a `transaction` block inside a `!` function. ⟵ prior: spec:§19.10.2-§19.10.4 — conformance restoration (S450, `g-transaction-block-not-recognized-inside-a-function-body`).
 
 #### 19.10.5 Implicit Per-Handler Transactions
 
@@ -19510,7 +19835,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-013 | §19.4.3 | A `!{}` handler is attached to an expression that cannot fail — a call to a function that is neither declared `!` nor treated as `!` by the compiler (§19.9.5 CPS split, a built-in failable), not a `?{}`, or not a call at all. No arm can run; the message names the callee and says to remove the handler or declare the function `!`. The `!{}` sibling of E-ERROR-004. **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 3. **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-handler-on-non-failable-s451`); lands with the bootstrap. | Error |
 | E-ERROR-014 | §19.4.3 | A `!{}` handler written as markup content and attached to no expression (the legacy free-standing "error effect block"). No failure precedes it, so no arm can run; the message says to attach it to a call, load through a `<request>` and read `<#id>.error`, or use an `<errorBoundary>`. The markup sibling of E-ERROR-013. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(b). **Nominal / not yet emitted** by impl#1 — it drops the block silently (frozen; `g-impl1-detached-handler-in-markup-s451`); lands with the bootstrap. | Error |
 | E-ERROR-015 | §19.10.4 | Manual transaction control — a `?{}` whose statement is `BEGIN` (any form), `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT` or `RELEASE` — where no enclosing function is declared `!` (a function without `!`, or a body top). Use `transaction { }` inside a `!` function. Replaces W-BATCH-001 at those sites. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c). **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-manual-tx-outside-failable-s451`); lands with the bootstrap. | Error |
-| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | A `!{}` handler arm or an engine message arm led by `\|` — `\| <pattern> :>`, including the paren-free binder `\| .V m :>` — SOFT-DEPRECATED (§63.1 Stage 1): a `!{}` arm is a §18.2 `match-arm`. Parses identically to `<pattern> :>` / `.V(m) :>`; one lint per arm, naming the canonical arm, `scrml fix` and §19.4.5. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" + "a. one spelling" (message arms). Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). **Emitted by impl#1** (S452): `!{}` arms from type-system.ts `checkArmPipeLegacy` — every arm record carrying `legacyPipe` (set by ast-builder.js `parseErrorTokens`), in a guarded-expr, a standalone error-effect, or a handler nested in an arm body (`_nestedHandlersIn`); message arms from symbol-table.ts's per-state message-arm validation (`legacyPipe`, set by engine-statechild-parser.ts `parseMessageArms`). Emitted by the bootstrap for `!{}` arms (`compiler/self-host-v2/parse.scrml` the arm parser's pipe lint); it parses no engine message arms. | Info |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | A `!{}` handler arm or an engine message arm led by `\|` — `\| <pattern> :>`, including the paren-free binder `\| .V m :>` — SOFT-DEPRECATED (§63.1 Stage 1): a `!{}` arm is a §18.2 `match-arm`. Parses identically to `<pattern> :>` / `.V(m) :>`; one lint per arm, naming the canonical arm, `scrml fix` and §19.4.5. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" + "a. one spelling" (message arms). Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (the old name was never emitted; S454 currency — supersedes "(never emitted under either name)", which #1285 made false). **Emitted by impl#1** (S452): `!{}` arms from type-system.ts `checkArmPipeLegacy` — every arm record carrying `legacyPipe` (set by ast-builder.js `parseErrorTokens`), in a guarded-expr, a standalone error-effect, or a handler nested in an arm body (`_nestedHandlersIn`); message arms from symbol-table.ts's per-state message-arm validation (`legacyPipe`, set by engine-statechild-parser.ts `parseMessageArms`). Emitted by the bootstrap for `!{}` arms (`compiler/self-host-v2/parse.scrml` the arm parser's pipe lint); it parses no engine message arms. | Info |
 | E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
@@ -20084,8 +20409,8 @@ return value already computed or an error already in flight — so it SHALL NOT 
 
    **A deferred `!{}` handler SHALL be total — it SHALL carry a catch-all `_ :> …` arm** (S430 round
    3). Listing every variant of the callee's DECLARED error enum is not enough: a server function or a
-   CPS-split callee can also fail with a transport error (`CpsError`, §19.9.5) that no declared enum
-   lists, and outside a deferred body an unmatched error propagates to the caller — which, from a
+   CPS-split callee can also fail with a transport error (`Transport(t: ServerCallError)`, §19.9.10 —
+   S454; formerly `CpsError`, now retired) that no declared enum lists, and outside a deferred body an unmatched error propagates to the caller — which, from a
    `finally`, would replace the function's real return value (exactly what rule 1 forbids). A deferred
    handler without a `_` arm is E-DEFER-UNHANDLED-FAILABLE. The lowering of a deferred body SHALL NOT
    emit any propagation or `return` out of the `finally`, whatever the handler's arms.
@@ -20129,7 +20454,7 @@ is E-FN-001, a deferred outer-scope mutation or call to a non-`fn` function is E
   top-level `defer` is the WHOLE function body. Its deferred body SHALL run after the **LAST**
   continuation completes — after the final server batch's result has been received and every client
   statement scheduled after it has run — and SHALL NOT run when an earlier batch's stub returns. It also
-  runs when an intermediate batch fails and the function returns its `CpsError` / server error envelope
+  runs when an intermediate batch fails and the function returns its `Transport(t: ServerCallError)` failure / server error envelope
   (§19.6.7 — batch 1's commit stands; the deferred body still runs on the way out).
 - For §19.9.9.1 tier classification a `defer` statement takes the tier of its deferred body. A `defer`
   whose deferred body is client-tier is a CLIENT statement: placed between two server statements, it
@@ -24502,9 +24827,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-UNRESOLVED-COLUMNS | §14.8.9 | A row whose output columns the compile cannot determine — an unresolvable dynamic `?{}`, a query over a table or view whose columns the compile does not know, a projection `*` the resolver cannot attach to a table, a `RETURNING` list over an unreadable target or an `UPDATE … FROM` — reaches a client-egress sink, in an implementation that takes §14.8.9's compile-time option for such rows. The message tells the author to name the columns (an explicit select list over a table the compile knows). §14.8.9 permits either this rejection or the run-time wholesale strip (`I-PROTECT-STRIP-001`); both fail closed. A row that reaches no client-egress sink is unaffected. The bootstrap takes this option when it builds the floor. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 4 (dpa-067 F5) · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the wholesale strip as the only conforming treatment · Direction of change: implementation-defined (inert for impl#1; newly-rejecting for the bootstrap relative to impl#1). **Nominal** — impl#1 takes the run-time option and does not emit it; the bootstrap refuses `protect=` at this revision. | Error |
 | I-PROTECT-REVEAL | §14.8.9 | One per `reveal("col")` site in the compile, naming the site and the column(s) it declassifies (or that it names none), so an audit can list every declassification of a protected column in the codebase — the twin of `I-TENANT-ACROSS` (§14.8.10), whatever mechanism implements the floor. Info-level — never fatal. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 4 (dpa-067 F6) · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: nothing · Direction of change: inert. **Nominal** — impl#1 does not emit it. | Info |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row filter (at the source, S452) has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar before any filter can run. The same holds for a tenant-scoped table read only inside a subquery / CTE / derived table whose `tenant_id` does not reach the output row (S452 PA reading). In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
-| E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
+| E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the subset single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = <active tenant>`; a subset `UPDATE t SET … [WHERE …]` / `DELETE FROM t [WHERE …]` gets `AND tenant_id = <active tenant>` on its parenthesized WHERE (S452 r3 — supersedes "an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse) … fires this error"); injected SQLite writes carry `OR ABORT`. Fires on: an un-injectable write (an INSERT that names `tenant_id`, is multi-row, `INSERT … SELECT`, `DEFAULT VALUES` or has no column list; a SET of `tenant_id`; an UPDATE with an alias / FROM / ORDER BY / LIMIT; REPLACE / `OR REPLACE`; `ON CONFLICT`; `RETURNING`; `SELECT … INTO`; a second tenant table; a non-allow-listed function), an author-written `INSERT OR …` / `UPDATE OR …` conflict clause, a write to a table whose `<schema>` declares a trigger / rule / cascading foreign key (S452 r4), and an `.acrossTenants()` INSERT that does not name `tenant_id`. **Runtime form** `E-TENANT-WRITE (runtime)`: a write to a tenant-scoped table with no active tenant is refused by name, nothing written (ruling:user-voice-scrml.md S452 "your rec"). Resolution: write the plain subset shape without `tenant_id` (the floor injects the request's tenant), or mark the query `.acrossTenants()` and, for an INSERT, name `tenant_id`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql` (#1293); the runtime form by the server helper `_scrml_tenant_write_key`.) | Error |
+| E-TENANT-SQL-SUBSET | §14.8.10 | A query whose text names a tenant-scoped table lies outside the floor's allow-listed SQL subset and is not `.acrossTenants()`: a token or form outside the closed token set (a quoted identifier, a comment, `;`, a dialect-specific literal, a `${…}` whose end cannot be read without parsing JavaScript, …), a statement not led by SELECT / INSERT / UPDATE / DELETE, unbalanced parentheses, `GROUP` without `BY`, `RETURNING` or `FOR` on a read, or — in a query that names a tenant table only in its text (a literal included) — a function outside the allow-list. A query the floor cannot read exactly is refused rather than scoped by a guess. Resolution: write the query in the subset (§14.8.10 "The SQL subset"), or mark it `.acrossTenants()` for a deliberate cross-tenant query. **Provenance:** spec currency to #1293 (S452 r3 `5e6b39b92`, r4 `c02da0f86`) under ruling:user-voice-scrml.md S452 "a" — a PA direction, recorded as built. (Emitted at `compiler/src/codegen/rewrite.ts` `_lowerTenantForQuery` via `tenant-egress.ts` `tenantFloorViolation` over `tenant-sql-subset.ts` `analyzeTenantSql`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | **Narrowed S452.** Rows obtained through an `.acrossTenants()` read reach a raw `Response` — a manual `Response` / `handle()` body (§40). Under the §14.8.10 source filter these are the only foreign-tenant rows server code holds, so this is the one remaining egress of another tenant's data through a body the compiler does not own. Rows from a read WITHOUT `.acrossTenants()` are already scoped to the active tenant at the source, so their raw egress (a manual `Response`, a `_{}` block, an `asIs` value) is NOT an error. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the cross-tenant rows through a compiler-emitted response. **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item 1 · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · supersedes: the S273 trigger (any tenant-scoped row at a `_{}` / manual `Response` / `asIs` egress, suppressed by `.acrossTenants()`) · Direction of change: newly-accepting for raw egress of non-opted-out rows; newly-rejecting for `.acrossTenants()` rows in a manual `Response`. **Nominal as worded** — impl#1 still enforces the S273 trigger until a sibling dispatch narrows it. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
-| I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. **Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
+| I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. impl#1 filters at the source since #1287 (S454 currency — supersedes "**Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands."). Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
 | E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), OR the `<schema>` declares a SECURITY-DEFINER `fn` (§14.8.11.2 P2 writes-authority — `CREATE FUNCTION … SECURITY DEFINER`, a bounded owner role, `GRANT`/`REVOKE`), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS, no `SECURITY DEFINER` — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker / SECDEF `fn` to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`. P2 (2026-07-26) extended the trigger to a SECDEF `fn`.) | Error |
 | E-DBAUTH-NO-TENANT-COLUMN | §14.8.11 | A `db-authoritative` `<schema>` table declares no `tenant_id` column. The M1 tenant-isolation policy is keyed on `tenant_id` (`CREATE POLICY … USING ("tenant_id" = current_setting('scrml.tenant', true)::…)`), so a db-authoritative table without one would emit DDL referencing a missing column — an opaque Postgres error + full transaction rollback at apply time. `scrml db-migrate` (§14.8.11.1) pre-flights this BEFORE touching the DB and fails closed, naming the offending table(s). Resolution: add a `tenant_id` column, or drop the `db-authoritative` marker. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/commands/db-migrate.js`.) | Error |
@@ -24573,7 +24899,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ERROR-015 | §19.10.4 | Manual transaction control — a `?{}` whose statement is `BEGIN` (any form), `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT` or `RELEASE` — where no enclosing function is declared `!` (a function without `!`, or a body top). Use `transaction { }` inside a `!` function. Replaces W-BATCH-001 at those sites. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c). **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-manual-tx-outside-failable-s451`); lands with the bootstrap. | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `_ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `_ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `Transport(t: ServerCallError)`, §19.9.10 — S454; impl#1 still names it `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `<onMount>` / `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — a `when … changes` / `when message` body, an `on*=${ … }` event-handler attribute or a `<channel>` `<onchange>` arm body (S432, S446; lowered as text, so a function declared inside a `when` body cannot hold one either; a `~{}` test body is not diagnosed by impl#1, S446) — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9) — OR (S430 review) a `defer` of any tier nested inside a top-level statement the split places on the server (e.g. an `if` whose branch holds a `?{}`). Either way the deferred body would run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected (fail closed) rather than lowered wrongly. The message names the concrete trigger (query, server-only resource, or the callee the compiler placed server-side). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` written in a bare `{ }` block statement, as a single-statement (unbraced) `match` / `!{}` handler arm (`.A :> defer D()`), or as the whole unbraced body of an `if` / `else` / `for` / `while` / `do` arm (S430 round 6 — the live front-end drops an unbraced `else` arm, which would silently attach the defer to the enclosing block). The front-ends carry those bodies as text (the native bridge flattens bare blocks), so the `defer` would never be parsed or lowered — or would silently attach to the enclosing block. Also: a `defer` directly in an arm of a `match` / `if` / `for` used for its VALUE (a value-form expression, or a `match` that is a `fn`'s implicit-return tail) — the defer block would capture the arm's result (measured: the produced value was lost). Rejected in stage 1; supporting bare blocks needs them parsed structurally (a separate arc). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
@@ -24754,7 +25080,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
-| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` deletes the leading `\|`, writes a paren-free binder as `.V(m)`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). **Emitted by impl#1** (S452, `s452-arm-pipe-deprecation`) — `!{}` arms: type-system.ts `checkArmPipeLegacy` (every arm record carrying `legacyPipe` — guarded-expr, standalone error-effect, or a handler nested in an arm body via ast-builder.js `_nestedHandlersIn`) (set by ast-builder.js `parseErrorTokens` on its `\|` path); message arms: symbol-table.ts per-state message-arm validation, from `MessageArmEntry.legacyPipe` (set by engine-statechild-parser.ts `parseMessageArms`); message text via type-system.ts `armPipeLegacyMessage`. Emitted by the bootstrap for the `!{}` arm at `compiler/self-host-v2/parse.scrml` (the arm parser's pipe lint, s452-boot-arm-pipe; the bootstrap does not parse engine message arms, so it has no message-arm emit site). | Info |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` (its default `arm-pipe` rule, `compiler/src/commands/fix-arm-pipe.js`, landed #1285) deletes the leading `\|`, writes a paren-free binder as `.V(m)`, rewrites a bare `\| e :>` as `_ e :>`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (the old name was never emitted; S454 currency — supersedes "(never emitted under either name)", which #1285 made false). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). **Emitted by impl#1** (S452, `s452-arm-pipe-deprecation`) — `!{}` arms: type-system.ts `checkArmPipeLegacy` (every arm record carrying `legacyPipe` — guarded-expr, standalone error-effect, or a handler nested in an arm body via ast-builder.js `_nestedHandlersIn`) (set by ast-builder.js `parseErrorTokens` on its `\|` path); message arms: symbol-table.ts per-state message-arm validation, from `MessageArmEntry.legacyPipe` (set by engine-statechild-parser.ts `parseMessageArms`); message text via type-system.ts `armPipeLegacyMessage`. Emitted by the bootstrap for the `!{}` arm at `compiler/self-host-v2/parse.scrml` (the arm parser's pipe lint, s452-boot-arm-pipe; the bootstrap does not parse engine message arms, so it has no message-arm emit site). | Info |
 | E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder) and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S452 in impl#1 (`arm-pipe`, commands/fix-arm-pipe.js `fixArmPipe`; a default rule, each rewritten file verified by an impl#1 compile before and after — byte-identical artifacts); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context (an in-`match` `given`-arm already fires `W-MATCH-ARROW-LEGACY`). Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) | Info |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
@@ -35254,7 +35580,12 @@ emitted.)*
 > — `examples/` 5 in 1 (`25-triage-board`), `conformance/cases/` 10 in 6, `docs/` 2 in 1 (a repro
 > under `docs/changes/`); plus 10 in 2 `compiler/tests/fixtures/`. The 22 `<endpoint accepts=>`
 > files use element arms (§61) and are not in scope. Migrated by `scrml fix`, not by this change.
-> **Nominal / not yet emitted** by impl#1 or the bootstrap.
+> ~~**Nominal / not yet emitted** by impl#1 or the bootstrap.~~ *(S454 currency: the silent
+> miscompile above is fixed — `g-impl1-engine-message-arm-pipeless-as-text-s452` RESOLVED S452 under
+> the "yes on the exception" freeze exception — and `W-ARM-PIPE-LEGACY` IS emitted for message arms by
+> impl#1 (`compiler/src/symbol-table.ts`, per-state message-arm validation, #1285); the bootstrap
+> parses no engine message arms, so it has no emit site for them. `scrml fix`'s `arm-pipe` rule
+> migrated the corpus (#1285). E-ENGINE-MSG-ARM-POSITION stays Nominal.)*
 
 ```scrml
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
@@ -42903,7 +43234,9 @@ Applying the machine to the existing corpus:
   rule"*.)*
 - **`W-ARM-PIPE-LEGACY` (`| <pattern> :>` → `<pattern> :>` in a `!{}` or an engine message arm, §19.4.5 / §51.0.S.2.3) — added S452:** SOFT,
   unscheduled; reserved `E-ARM-PIPE-LEGACY` named, unfired; **gate-blocked** until its `scrml fix` rule is
-  verified-landed (§63.4). The rule is mechanical (delete the `|`; a paren-free binder `.V m` → `.V(m)`; arms that
+  verified-landed (§63.4) — the rule LANDED in #1285 (`compiler/src/commands/fix-arm-pipe.js`, a default rule of
+  `scrml fix`); §63.4 verification is not claimed. W-ARM-PIPE-LEGACY is emitted by impl#1 (`!{}` and message arms)
+  and by the bootstrap (`!{}` arms). The rule is mechanical (delete the `|`; a paren-free binder `.V m` → `.V(m)`; arms that
   shared a line onto their own lines). *(Provenance: ruling:user-voice-scrml.md S452 "c looks right" — *"multiple
   syntaxs in logic dosnt work for me. yes, cononical version."*)*
 
