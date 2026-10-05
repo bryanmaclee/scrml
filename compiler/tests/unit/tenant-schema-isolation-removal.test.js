@@ -455,6 +455,50 @@ describe("S239 review of d4c4d4ac — items 1–9", () => {
   ]);
 });
 
+// S239 r2 review of 077b22b8 (DO-NOT-LAND; item 1 executed end to end).
+describe("S239 r2 of 077b22b8 — items 1–4", () => {
+  const A2 = "CREATE TABLE assets (id INTEGER, name TEXT, arr INTEGER[], tenant_id TEXT)";
+  const O = "CREATE TABLE other (id INTEGER, arr INTEGER[])";
+  const n = (stmt) => findSchemaTenantHazards(body(A2, O, stmt), ["assets"]).length;
+  const charged = (label, list) => { for (const s of list) test(`${label} charged: ${s.slice(0, 80)}`, () => expect(n(s)).toBeGreaterThan(0)); };
+  const clean = (label, list) => { for (const s of list) test(`${label} clean: ${s.slice(0, 80)}`, () => expect(n(s)).toBe(0)); };
+  charged("1 subscript", [
+    "CREATE VIEW v AS SELECT arr[evil()] FROM other",
+    "ALTER TABLE assets ALTER COLUMN name SET DEFAULT (ARRAY['a'])[dblink_exec('a','b')]",
+    "CREATE POLICY p ON assets AS RESTRICTIVE USING ((ARRAY[1])[evil()] = 1)",
+    "CREATE INDEX i ON assets ((arr[evil()]))",
+    "CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT (ARRAY[1])[dblink_exec('a','b')]; END",
+    "CREATE TABLE c (a INTEGER[] CHECK (a[evil()] > 0))",
+    "CREATE INDEX i ON assets ((arr[1:evil()]))",
+    "CREATE TABLE c ([x(y)] TEXT)",                               // a name holding `(` — ambiguous, charged
+  ]);
+  clean("1 subscript / bracket name", [
+    "CREATE INDEX i ON assets ((arr[1:2]))",
+    "CREATE TABLE c (a INTEGER[] CHECK (a[1] > 0), [weird name] TEXT)",
+    "CREATE VIEW v AS SELECT [id], arr[2] FROM other",
+  ]);
+  charged("2 body types", [
+    "CREATE VIEW v AS SELECT 'x'::evil_t FROM other",
+    "CREATE VIEW v AS SELECT evil_t 'x' FROM other",
+    "CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT CAST(NEW.id AS evil_t); END",
+  ]);
+  clean("2 body types", [
+    "CREATE VIEW v AS SELECT id::text, CAST(id AS integer), DATE '2020-01-01' FROM other WHERE id > 0 AND arr IS NOT NULL",
+    "CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT RAISE(ABORT, 'no') WHERE NEW.id < 0; END",
+  ]);
+  charged("3 system objects", [
+    "GRANT SELECT ON pg_catalog.pg_authid TO scrml_app",
+    "GRANT SELECT ON information_schema.tables TO scrml_app",
+    "GRANT SELECT ON sqlite_master TO scrml_app",
+    "GRANT SELECT ON pg_shadow TO scrml_app",
+  ]);
+  clean("3 app grant", ["GRANT SELECT ON assets TO scrml_app"]);
+  charged("4 no column list", [
+    "CREATE TABLE t2 AS SELECT dblink_exec('a','b')",
+    "CREATE TABLE t3 PARTITION OF assets FOR VALUES FROM (evil()) TO (10)",
+  ]);
+});
+
 describe("reporting — every hazard is reported, not one per table", () => {
   test("two charged statements on the same table are both reported", () => {
     const hs = findSchemaTenantHazards(body(ASSETS, "ALTER TABLE assets ADD CONSTRAINT u UNIQUE (id)", "ALTER TABLE assets DROP COLUMN name"), ["assets"]);

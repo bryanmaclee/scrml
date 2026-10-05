@@ -98,6 +98,16 @@ interface Tok {
 
 type CommentMode = "skip" | "skip-nested" | "content";
 
+/**
+ * Words after which an identifier (so a SQLite `[ident]`) is expected — the name of an object,
+ * a column, a table being read or written, an alias. After anything else, `[` is a subscript.
+ */
+const NAME_POSITION_WORDS = new Set([
+  "TABLE", "VIEW", "INDEX", "TRIGGER", "RULE", "POLICY", "EXISTS", "ON", "REFERENCES", "INTO", "FROM",
+  "JOIN", "UPDATE", "COLUMN", "RENAME", "TO", "ADD", "SELECT", "WHERE", "AND", "OR", "NOT", "BY", "SET",
+  "AS", "ONLY", "OF", "KEY", "DISTINCT", "HAVING", "WHEN", "THEN", "ELSE", "CONSTRAINT", "USING",
+]);
+
 const WORD_START = /[A-Za-z_\u0080-￿]/;
 const WORD_CHAR = /[A-Za-z0-9_$\u0080-￿]/;
 
@@ -215,10 +225,20 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
       push("p", "}", i); i++; continue;
     }
     if (c === "[") {
+      // `[ident]` is a SQLite quoted identifier ONLY in a NAME position (S239 r2 review of
+      // 077b22b8, executed: `arr[evil()]`, `(ARRAY[1])[dblink_exec(…)]` were read as one
+      // quoted name and the call inside was invisible). Elsewhere `[` opens a SUBSCRIPT /
+      // array literal whose contents are lexed as SQL. In a name position, a quoted name
+      // holding `(` cannot be told from an expression — it is charged (`odd`, fail-closed).
       const close = text.indexOf("]", i + 1);
       const nl = text.indexOf("\n", i + 1);
-      if (close !== -1 && close < to && (nl === -1 || close < nl) && close > i + 1) {
-        push("q", text.slice(i + 1, close), i);
+      const last = out[out.length - 1];
+      const namePos = last === undefined || last.k === "b" ||
+        (last.k === "p" && (last.t === "." || last.t === "," || last.t === "(")) ||
+        (last.k === "w" && NAME_POSITION_WORDS.has(last.up));
+      if (namePos && close !== -1 && close < to && (nl === -1 || close < nl) && close > i + 1) {
+        const inner = text.slice(i + 1, close);
+        push("q", inner, i, inner.includes("("));
         i = close + 1;
         continue;
       }
@@ -406,6 +426,11 @@ interface RegionRead {
   calls: string[];
   /** A `${…}` interpolation (JavaScript — the checker cannot read it). */
   interp: boolean;
+  /**
+   * Casts (`::t`, `CAST(… AS t)`) and typed literals (`t '…'`) whose type is not built in —
+   * a type's input function is code (S239 r2 review: the type rule is region-independent).
+   */
+  types: string[];
 }
 
 /** Whole-word occurrences of `names` inside a string literal. */
@@ -431,17 +456,23 @@ function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<
   // passed), and inside a call FROM / ON / JOIN introduce nothing (`substring('a' FROM
   // evil(1))`, S455 PA probe of 50150700). A callee may be QUOTED (`"query_to_xml"(…)` is a
   // call in Postgres; `[f](…)` in SQLite) — a quoted name is never a keyword, and is case-exact.
+  const types: string[] = [];
+  const castAs = castAsTokens(toks, from, to);
   for (let k = from; k < to; k++) {
     const t = toks[k];
     if (t.k === "p" && t.t === "${") interp = true;
     if ((t.k === "w" || t.k === "q") && tainted.has(t.t.toLowerCase())) names.add(t.t.toLowerCase());
     if (t.k === "s") for (const n of stringMentions(t.t, tainted)) names.add(n);
+    if (isDoubleColonAt(toks, k)) { const why = castTargetIssue(toks, k + 2); if (why) types.push(why); continue; }
+    if (castAs.has(k)) { const why = castTargetIssue(toks, k + 1); if (why) types.push(why); continue; }
+    { const why = typedLiteralIssue(toks, k); if (why) types.push(why); }
     if (!((t.k === "w" || t.k === "q") && isP(toks[k + 1], "("))) continue;
     if (isSyntacticParen(toks, k)) continue;
+    if (t.k === "w" && SIZED_TYPES.has(t.t.toLowerCase()) && typePositionAt(toks, k, castAs)) continue;
     if (isP(toks[k - 1], ".")) { calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`); continue; }
     if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
   }
-  return { names: [...names], calls, interp };
+  return { names: [...names], calls, interp, types };
 }
 
 // ---------------------------------------------------------------------------
@@ -847,6 +878,9 @@ const KEYWORDS_BEFORE_LITERAL = new Set([
   "DEFAULT", "LIKE", "ILIKE", "GLOB", "MATCH", "REGEXP", "SIMILAR", "ESCAPE", "THEN", "ELSE", "WHEN", "IS",
   "AND", "OR", "NOT", "TO", "FROM", "BY", "COLLATE", "COMMENT", "IF", "AT", "ZONE", "AS", "IN", "BETWEEN",
   "SELECT", "VALUES", "RETURN", "SET", "USING", "WITH", "CASE", "ANY", "ALL", "SOME",
+  "JOIN", "INTO", "ON", "WHERE", "HAVING", "LIMIT", "OFFSET", "RETURNING", "EXISTS", "FILTER", "ROW",
+  "UPDATE", "TABLE", "DISTINCT", "UNION", "EXCEPT", "INTERSECT", "ORDER", "GROUP", "BEGIN", "END", "DO",
+  "ABORT", "FAIL", "IGNORE", "ROLLBACK", "REPLACE", "INSERT", "DELETE", "OF", "FOR", "EACH",
   "E", "N", "X", "B", "U",                                   // literal prefixes (`E'…'` is handled as odd)
 ]);
 
@@ -941,6 +975,7 @@ function indexOpclassIssue(toks: Tok[], a: number, b: number): string | null {
 const BUILTIN_OPERATORS = new Set([
   "=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "||", "::", "&&", "~", "~*", "!~",
   "!~*", "^", "@>", "<@", "->", "->>", "#>", "#>>", "?", "?|", "?&", "<<", ">>", "&<", "&>", "-|-", "|",
+  ":",                                                       // an array slice `arr[1:2]`
 ]);
 const OPERATOR_CHARS = new Set(["=", "<", ">", "!", "+", "-", "*", "/", "%", "|", "&", "~", "^", "@", "#", "?", ":"]);
 
@@ -954,10 +989,8 @@ function typePositionAt(toks: Tok[], k: number, castAs: ReadonlySet<number>): bo
 }
 
 /** Why the expression tokens `[a, b)` run code (a call / cast / operator off the closed lists), or null. */
-function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: boolean): string | null {
-  const offList = (what: string): string =>
-    `it ${what} — the database evaluates it per row, at migration, as the migrating role, and it may read or write any table`;
-  // `AS` tokens that sit at depth 1 of a `CAST(` — the type position of a cast.
+/** The `AS` tokens in `[a, b)` that sit at depth 1 of a `CAST(` — the type position of a cast. */
+function castAsTokens(toks: Tok[], a: number, b: number): Set<number> {
   const castAs = new Set<number>();
   for (let k = a; k < b; k++) {
     if (!(isW(toks[k], "CAST") && isP(toks[k + 1], "("))) continue;
@@ -968,6 +1001,38 @@ function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: 
       else if (depth === 1 && isW(toks[j], "AS")) castAs.add(j);
     }
   }
+  return castAs;
+}
+
+/** Why the cast target type at token `j` (after `::` or a CAST's `AS`) runs code, or null. */
+function castTargetIssue(toks: Tok[], j: number): string | null {
+  const ty = toks[j];
+  if (!ty || !isName(ty)) return "casts to a type the checker cannot read";
+  let name = ty.t.toLowerCase();
+  if (isP(toks[j + 1], ".")) {
+    if (name !== "pg_catalog" || !isName(toks[j + 2])) return `casts to \`${ty.t}.…\`, a type outside the built-in list`;
+    name = toks[j + 2].t.toLowerCase();
+  }
+  if (!BUILTIN_TYPES.has(name) && !MULTIWORD_TYPE_HEADS.has(name)) return `casts to \`${ty.t}\`, a type outside the built-in list (its input function is code)`;
+  return null;
+}
+
+/** Why token `k` starts a TYPED literal of a type that runs code (`mytype 'x'`), or null. */
+function typedLiteralIssue(toks: Tok[], k: number): string | null {
+  const t = toks[k];
+  if (!isName(t) || toks[k + 1]?.k !== "s") return null;
+  if (t.k === "w" && (KEYWORDS_BEFORE_LITERAL.has(t.up) || BUILTIN_TYPES.has(t.t.toLowerCase()) || TYPE_TAIL_WORDS.has(t.t.toLowerCase()))) return null;
+  return `writes a literal of the type \`${t.t}\`, which is not a built-in type (its input function is code)`;
+}
+
+/** Is `k` the first `:` of an adjacent `::`? */
+const isDoubleColonAt = (toks: Tok[], k: number): boolean =>
+  isP(toks[k], ":") && isP(toks[k + 1], ":") && toks[k + 1].at === toks[k].at + 1;
+
+function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: boolean): string | null {
+  const offList = (what: string): string =>
+    `it ${what} — the database evaluates it per row, at migration, as the migrating role, and it may read or write any table`;
+  const castAs = castAsTokens(toks, a, b);
   for (let k = a; k < b; k++) {
     const t = toks[k];
     if (isP(t, "${")) return "it holds a `${…}` interpolation the checker cannot read";
@@ -981,29 +1046,19 @@ function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: 
       }
       if (!BUILTIN_OPERATORS.has(op)) return offList(`uses the operator \`${op}\`, which is not a built-in one`);
       if (op === "::") {
-        const ty = toks[j];
-        if (!ty || !isName(ty)) return offList("casts to a type the checker cannot read");
-        let name = ty.t.toLowerCase();
-        if (isP(toks[j + 1], ".")) {
-          if (name !== "pg_catalog" || !isName(toks[j + 2])) return offList(`casts to \`${ty.t}.…\`, a type outside the built-in list`);
-          name = toks[j + 2].t.toLowerCase();
-        }
-        if (!BUILTIN_TYPES.has(name) && !MULTIWORD_TYPE_HEADS.has(name)) return offList(`casts to \`${ty.t}\`, a type outside the built-in list (its input function is code)`);
+        const why = castTargetIssue(toks, j);
+        if (why) return offList(why);
       }
       k = j - 1;
       continue;
     }
     if (castAs.has(k)) {
-      const ty = toks[k + 1];
-      const name = ty && isName(ty) ? ty.t.toLowerCase() : "";
-      if (!BUILTIN_TYPES.has(name) && !MULTIWORD_TYPE_HEADS.has(name)) return offList(`casts to \`${ty?.t ?? "?"}\`, a type outside the built-in list (its input function is code)`);
+      const why = castTargetIssue(toks, k + 1);
+      if (why) return offList(why);
       continue;
     }
     // a TYPED literal `mytype 'x'` runs the type's input function
-    if (isName(t) && toks[k + 1]?.k === "s" && !(t.k === "w" && KEYWORDS_BEFORE_LITERAL.has(t.up)) &&
-        !(t.k === "w" && (BUILTIN_TYPES.has(t.t.toLowerCase()) || TYPE_TAIL_WORDS.has(t.t.toLowerCase())))) {
-      return offList(`writes a literal of the type \`${t.t}\`, which is not a built-in type (its input function is code)`);
-    }
+    { const why = typedLiteralIssue(toks, k); if (why) return offList(why); }
     // an access method (`USING <am>` — an index, an EXCLUDE constraint, a table) must be built in
     if (isW(toks[k - 1], "USING") && isName(t) && !(t.k === "w" && (INDEX_METHODS.has(t.t.toLowerCase()) || t.t.toLowerCase() === "heap"))) {
       return offList(`uses the access method \`${t.t}\`, which is not built in (an extension's access method runs its handler)`);
@@ -1107,7 +1162,11 @@ function grantAdmitted(toks: Tok[], a: number, p: number, t: number, end: number
   for (; k < t; k++) {
     if (expectName) {
       if (!isName(toks[k]) || isW(toks[k], "ALL")) return false;
-      while (isP(toks[k + 1], ".") && isName(toks[k + 2])) k += 2;
+      // a system object (S239 r2 review): anything in `pg_catalog` / `information_schema`,
+      // or named `pg_*` / `sqlite_*` — never the app's to grant
+      const parts = [toks[k].t.toLowerCase()];
+      while (isP(toks[k + 1], ".") && isName(toks[k + 2])) { k += 2; parts.push(toks[k].t.toLowerCase()); }
+      if (parts.some((x) => x === "information_schema" || x.startsWith("pg_") || x.startsWith("sqlite_"))) return false;
       expectName = false;
     } else {
       if (!isP(toks[k], ",")) return false;
@@ -1341,7 +1400,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     grew = false;
     for (const v of views) {
       const r = readRegion(toks, v.region[0], v.region[1], tainted);
-      const unattributable = v.unreadable !== null || r.calls.length > 0 || r.interp;
+      const unattributable = v.unreadable !== null || r.calls.length > 0 || r.types.length > 0 || r.interp;
       if ((r.names.length > 0 || unattributable) && v.name && !tainted.has(v.name)) {
         tainted.add(v.name);
         grew = true;
@@ -1368,7 +1427,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       const v = views.find((x) => x.name === n);
       if (!v) return;
       const r = readRegion(toks, v.region[0], v.region[1], tainted);
-      if (v.unreadable !== null || r.calls.length > 0 || r.interp) for (const t of allTenant) res.add(t);
+      if (v.unreadable !== null || r.calls.length > 0 || r.types.length > 0 || r.interp) for (const t of allTenant) res.add(t);
       for (const m of r.names) visit(m);
     };
     for (const n of names) visit(n);
@@ -1379,6 +1438,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     if (d.unreadable) return d.unreadable;
     if (r.interp) return "it holds a `${…}` interpolation the checker cannot read";
     if (r.calls.length) return `it calls \`${r.calls[0]}\`, which is not on the floor's function allow-list and may read or write any table`;
+    if (r.types.length) return `it ${r.types[0]}`;
     return null;
   };
 
@@ -1437,6 +1497,15 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
         const code = exemptStatementCode(toks,
           [...createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1), [d.cols[1], d.end]], true) ??
           createTableTypeIssue(toks, d.cols[0] + 1, d.cols[1] - 1);
+        if (code && !code.includes("interpolation")) {
+          out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
+        }
+      } else if (!declsOnly) {
+        // no column list — `AS SELECT …`, `PARTITION OF … FOR VALUES FROM (…)`, `OF type`: the
+        // rest is read in expression mode too, so the checker does not lean on E-SCHEMA-014 (S239 r2).
+        // Not in the comment-content reading, where comment text splices into a live head
+        // (`CREATE TABLE t /* live */ (…)` reads as `t live (…)`); the live readings own it.
+        const code = exemptStatementCode(toks, [d.region]);
         if (code && !code.includes("interpolation")) {
           out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
         }
