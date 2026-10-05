@@ -644,7 +644,7 @@ function version() {
 
 // ── last-N session anchors (session-close commits) ───────────────────────────
 function sessionAnchors(n: number) {
-  const r = sh("git", ["log", "--pretty=%h %s", "-n", "600"]);
+  const r = sh("git", ["log", "--abbrev=9", "--pretty=%h %s", "-n", "600"]);
   const seen = new Set<string>();
   const out: string[] = [];
   for (const l of r.stdout.split("\n")) {
@@ -748,7 +748,7 @@ export function sessionNumOf(subj: string): string | null {
 const NO_SESSIONS_SENTINEL = "_(no session-wrap commits found)_";
 
 function recentSessions(n: number): string {
-  const r = sh("git", ["log", "--pretty=%h %s", "-n", "600"]);
+  const r = sh("git", ["log", "--abbrev=9", "--pretty=%h %s", "-n", "600"]);
   const seen = new Set<string>();
   const picked: { sha: string; subj: string }[] = [];
   for (const line of r.stdout.split("\n")) {

@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `babb40672` — wrap(s454): three fail-open floors closed, U1b built end to end, the Types gate made blocking — and the hand-off rotated (509 KB → 43 KB) (#1306) — **pushed**
 - `859f60f79` — wrap(s453): addendum — the routed family is CLOSED by S454, and the two "this box" hazards are fixed (#1300) — **pushed**
 - `b35593879` — wrap(s452): one pattern-arm spelling across the language, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary (#1294) — **pushed**
 - `54ba32715` — wrap(s451): the U1 rulings in the SPEC, the error model and U1a in the bootstrap, a wrong-database security fix in impl#1 (#1271) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `fffc94b75` — wrap(s450-peter): bryan's "stamp all" built end to end — seven landings, two holes found live on main, aM pin bumped behind a deploy guard (#1245) — **pushed**
 - `2d6d8cd43` — wrap(s447): `when` became <effect> that cannot write state, the validity surface and submit gate, keywords outside the opener — and a possibly-accidental "your recs" caught before it shipped (#1231) — **pushed**
 - `4154bf006` — wrap(s448): took the reboot-killed S446-xps lane, landed the bootstrap codec, and found where a million /tmp files came from (#1224) — **pushed**
-- `5ddd56347` — wrap(s446-peter): six landed through merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network (#1223) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
