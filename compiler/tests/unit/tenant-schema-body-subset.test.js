@@ -38,9 +38,13 @@ const CONFIG = "CREATE TABLE config (k TEXT PRIMARY KEY, v TEXT)";
 const OTHER = "CREATE TABLE other (id INTEGER, label TEXT)";
 const OTHER_E = "CREATE TABLE other (id INTEGER, label TEXT, evil TEXT)";
 const LOGS = "CREATE TABLE logs (id INTEGER, msg TEXT, ts TIMESTAMP)";
+// S455 (review of ee1a80bc): the allow-lists are the BUILT-INS of the database the schema
+// runs on. A case may begin with a dialect marker `@sqlite` / `@postgres`; without one the
+// dialect is unknown (the intersection — a name built in on both).
 const hazards = (...stmts) => {
+  const dialect = stmts[0]?.startsWith("@") ? stmts.shift().slice(1) : "unknown";
   const b = body(ASSETS, ...stmts);
-  return findSchemaTenantHazards(b, schemaTenantTableNames([b]));
+  return findSchemaTenantHazards(b, schemaTenantTableNames([b]), undefined, dialect);
 };
 const kinds = (hs) => hs.map((h) => `${h.kind}:${h.object}${h.unattributable ? ":unattributable" : ""}`);
 const charged = (label, cases) => {
@@ -64,9 +68,11 @@ describe("the subset lexer is shared: `;` is a separator ONLY for a trigger stat
     expect(r.toks.map((t) => t.text)).toEqual(["BEGIN", "SELECT", "1", ";", "END"]);
   });
   test("every other character stays outside with the option on", () => {
-    for (const s of ['SELECT "a"', "SELECT a::text", "SELECT a[1]", "SELECT $$x$$", "SELECT 1 -- c", "SELECT E'x'"]) {
+    for (const s of ['SELECT "a"', "SELECT a[1]", "SELECT $$x$$", "SELECT 1 -- c", "SELECT E'x'", "SELECT a::evil_t"]) {
       expect(lexTenantSubset(s, { statementSeparator: true }).ok).toBe(false);
     }
+    // `::` is SQLite-foreign syntax: outside the subset there (S455 "a")
+    expect(lexTenantSubset("SELECT a::text", { statementSeparator: true, dialect: "sqlite" }).ok).toBe(false);
   });
   test("the query floor is unchanged: a `;` query on a tenant table is still E-TENANT-SQL-SUBSET", () => {
     const a = analyzeTenantSql("SELECT name FROM assets; DELETE FROM assets", (n) => n === "assets", ["assets"]);
@@ -155,7 +161,7 @@ describe("`rel.f` (the #1317 residual) — a qualified reference must name a DEC
   ]);
   clean("admitted", [
     [OTHER_E, "CREATE VIEW v AS SELECT o.evil FROM other o"],
-    [OTHER, "CREATE VIEW v AS SELECT o.id FROM public.other o"],                       // a qualified RELATION in FROM
+    ["CREATE TABLE public.other (id INTEGER, label TEXT)", "CREATE VIEW v AS SELECT o.id FROM public.other o"], // a qualified RELATION the <schema> declares so
     [OTHER_E, "ALTER TABLE other RENAME COLUMN evil TO e2", "CREATE VIEW v AS SELECT other.e2 FROM other"],
     [OTHER, "ALTER TABLE other ADD COLUMN extra TEXT", "CREATE VIEW v AS SELECT o.extra FROM other o"],
     [OTHER, "CREATE VIEW v AS SELECT id, label AS lab FROM other", "CREATE VIEW v2 AS SELECT v.lab, v.id FROM v"],
@@ -164,7 +170,7 @@ describe("`rel.f` (the #1317 residual) — a qualified reference must name a DEC
     [OTHER, "CREATE VIEW v AS WITH c AS (SELECT id FROM other) SELECT c.id FROM c"],
     [OTHER, "CREATE VIEW v AS WITH c (a, b) AS (SELECT id, label FROM other) SELECT c.a, c.b FROM c"],
     [CONFIG, "CREATE TABLE audit (k TEXT PRIMARY KEY, n INT)", "CREATE TRIGGER t AFTER INSERT ON config BEGIN INSERT INTO audit (k, n) VALUES (NEW.k, 1) ON CONFLICT (k) DO UPDATE SET n = excluded.n + 1; END"],
-    ["CREATE POLICY p ON assets AS RESTRICTIVE USING (assets.tenant_id = current_setting('app.tenant', true))"],
+    ["@postgres", "CREATE POLICY p ON assets AS RESTRICTIVE USING (assets.tenant_id = current_setting('app.tenant', true))"],
     ["CREATE TABLE z (a INT CHECK (z.a > 0))"],
     ["assets2 { id: integer primary key\n label: text }", "CREATE VIEW v AS SELECT a.label FROM assets2 a"],          // a DSL table's columns
     [OTHER, "CREATE TABLE snap AS SELECT o.id, o.label FROM other o"],
@@ -184,7 +190,7 @@ describe("a trigger body is `BEGIN`, SELECT / INSERT / UPDATE / DELETE statement
     [CONFIG, "CREATE TRIGGER t AFTER INSERT ON config FOR EACH ROW UPDATE config SET v = 'x'"],
   ]);
   clean("leaders", [
-    [CONFIG, "CREATE TABLE audit (m TEXT)", "CREATE TRIGGER t AFTER INSERT ON config BEGIN INSERT INTO audit (m) VALUES (NEW.k); UPDATE audit SET m = CASE WHEN m IS NULL THEN 'x' END; DELETE FROM audit WHERE m = ''; SELECT RAISE(ABORT, 'no') WHERE NEW.k = ''; END"],
+    ["@sqlite", CONFIG, "CREATE TABLE audit (m TEXT)", "CREATE TRIGGER t AFTER INSERT ON config BEGIN INSERT INTO audit (m) VALUES (NEW.k); UPDATE audit SET m = CASE WHEN m IS NULL THEN 'x' END; DELETE FROM audit WHERE m = ''; SELECT RAISE(ABORT, 'no') WHERE NEW.k = ''; END"],
   ]);
 });
 
@@ -198,10 +204,10 @@ describe("ordinary bodies stay clean (no false positive)", () => {
     [ORGS, USERS, "CREATE VIEW org_counts AS SELECT o.id, o.name, count(u.id) AS n FROM organizations o LEFT JOIN users u ON u.full_name = o.name GROUP BY o.id, o.name"],
     [PLANS, "CREATE VIEW paid_plans AS SELECT code FROM plans WHERE price_cents > (SELECT min(price_cents) FROM plans)"],
     [ORGS, USERS, "CREATE VIEW named_orgs AS SELECT o.id FROM organizations o WHERE EXISTS (SELECT 1 FROM users u WHERE u.full_name = o.name)"],
-    [USERS, AUDIT, "CREATE TRIGGER users_audit AFTER UPDATE ON users BEGIN INSERT INTO audit_log (entity, old_value, new_value, at) VALUES ('user', OLD.email, NEW.email, datetime('now')); END"],
-    [USERS, "CREATE TRIGGER users_touch AFTER UPDATE ON users FOR EACH ROW WHEN NEW.email <> OLD.email BEGIN UPDATE users SET full_name = coalesce(NEW.full_name, '') WHERE id = NEW.id; END"],
-    ["CREATE POLICY iso ON assets AS RESTRICTIVE FOR ALL TO scrml_app USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true))"],
-    ["CREATE POLICY iso ON assets AS RESTRICTIVE USING (tenant_id = CAST(current_setting('app.tenant_id', true) AS uuid))"],
+    ["@sqlite", USERS, AUDIT, "CREATE TRIGGER users_audit AFTER UPDATE ON users BEGIN INSERT INTO audit_log (entity, old_value, new_value, at) VALUES ('user', OLD.email, NEW.email, datetime('now')); END"],
+    ["@sqlite", USERS, "CREATE TRIGGER users_touch AFTER UPDATE ON users FOR EACH ROW WHEN NEW.email <> OLD.email BEGIN UPDATE users SET full_name = coalesce(NEW.full_name, '') WHERE id = NEW.id; END"],
+    ["@postgres", "CREATE POLICY iso ON assets AS RESTRICTIVE FOR ALL TO scrml_app USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true))"],
+    ["@postgres", "CREATE POLICY iso ON assets AS RESTRICTIVE USING (tenant_id = CAST(current_setting('app.tenant_id', true) AS uuid))"],
     [PLANS, "CREATE VIEW mid_plans AS SELECT code FROM plans WHERE price_cents BETWEEN 100 AND 1000 AND code LIKE 'pro%' AND code NOT IN ('legacy', 'old')"],
     [ORGS, USERS, "CREATE VIEW all_names AS SELECT name FROM organizations UNION ALL SELECT full_name FROM users"],
     [PLANS, "CREATE VIEW cheap AS WITH c AS (SELECT code, price_cents FROM plans WHERE price_cents < 500) SELECT c.code FROM c"],
@@ -214,28 +220,26 @@ describe("deliberate new refusals — forms outside the closed token set (S455 \
   // Each was accepted by the hand-rolled reader; each is outside the subset the floor reads
   // queries in. The message names the offending token so the author can rewrite it.
   for (const [label, stmts, token] of [
-    ["a `::` cast (write `CAST(x AS t)`)", [OTHER, "CREATE VIEW v AS SELECT id::text FROM other"], "::"],
-    ["a `::` cast in a restrictive policy", ["CREATE POLICY iso ON assets AS RESTRICTIVE USING (tenant_id = current_setting('app.tenant_id', true)::uuid)"], "::"],
+    ["a `::` cast on SQLite (not SQLite syntax — write `CAST(x AS t)`)", ["@sqlite", OTHER, "CREATE VIEW v AS SELECT id::text FROM other"], "::"],
+    ["a `::` cast to a type that is not built in", [OTHER, "CREATE VIEW v AS SELECT id::evil_t FROM other"], "::"],
     ["a comment inside a body", [OTHER, "CREATE VIEW v AS SELECT id -- the id\n FROM other"], "--"],
     ["a quoted identifier inside a body", [OTHER, `CREATE VIEW v AS SELECT "id" FROM other`], '"'],
     ["a subscript / array literal", [OTHER, "CREATE VIEW v AS SELECT arr[2] FROM other"], "["],
   ]) {
     test(label, () => {
-      const b = body(ASSETS, ...stmts);
-      const hs = findSchemaTenantHazards(b, schemaTenantTableNames([b]));
+      const hs = hazards(...stmts);
       expect(hs.map((h) => h.kind)).toEqual([OUTSIDE]);
       expect(hs[0].why).toContain(`first offending token \`${token}`);
     });
   }
   test("the message names the declaration, the subset, the offending token and its line", () => {
-    const b = body(ASSETS, OTHER, "CREATE VIEW v AS SELECT id::text FROM other");
+    const b = body(ASSETS, OTHER, "CREATE VIEW v AS SELECT arr[2] FROM other");
     const [h] = findSchemaTenantHazards(b, schemaTenantTableNames([b]));
     const m = schemaHazardMessage(h, b);
     expect(m.startsWith("E-TENANT-SCHEMA-HAZARD: the body of the view `v`")).toBe(true);
     expect(m).toContain("is outside the tenant SQL subset");
-    expect(m).toContain("first offending token `::`");
+    expect(m).toContain("first offending token `[`");
     expect(m).toContain("(line 4)");
-    expect(m).toContain("`CAST(x AS t)` for `x::t`");
     expect(m).toContain("§14.8.10");
   });
   test("a view outside the subset is unattributable: a view over it is charged too", () => {
@@ -243,7 +247,7 @@ describe("deliberate new refusals — forms outside the closed token set (S455 \
     expect(kinds(hs)).toEqual([`${OUTSIDE}:v:unattributable`, "view:v2"]);
   });
   test("a compilation with NO tenant table is unaffected", () => {
-    const b = body(OTHER, "CREATE VIEW v AS SELECT id::text, o.evil FROM other o -- c");
+    const b = body(OTHER, "CREATE VIEW v AS SELECT id::evil_t, o.evil FROM other o -- c");
     expect(findSchemaTenantHazards(b, schemaTenantTableNames([b]))).toEqual([]);
   });
 });
@@ -261,6 +265,128 @@ describe("schemaColumnKnowledge — fail-closed column knowledge", () => {
   test("a column only one comment model sees is not known", () => {
     const k = schemaColumnKnowledge([body("CREATE TABLE t (a INT)", "/* /* */ ALTER TABLE t ADD COLUMN evil TEXT; */")]);
     expect([...k.get("t")]).toEqual(["a"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S239 review of ee1a80bc (DO-NOT-LAND) — items 1–5, and bryan's S455 "a" (`::<built-in>`)
+// ---------------------------------------------------------------------------
+const O2 = "CREATE TABLE o2 (id INTEGER PRIMARY KEY, evil TEXT)";
+const O3 = "CREATE TABLE o3 (id INTEGER PRIMARY KEY)";
+
+describe("review item 1 (HIGH) — parenthesized JOIN groups; an alias hides its table's name", () => {
+  test("the reviewer's repro (executed on PG16: `o2.evil` resolved to `evil(o3)`) is refused", () => {
+    const hs = hazards(O2, O3, "CREATE VIEW v1 AS SELECT o2.evil FROM o2 a, (o3 o2 JOIN o3 q ON true)");
+    expect(kinds(hs)).toEqual([`${OUTSIDE}:v1:unattributable`]);
+    expect(hs[0].why).toContain("`o2.evil`");
+  });
+  charged("refused", [
+    [O2, O3, "CREATE VIEW v AS SELECT 1 AS one FROM o2 WHERE EXISTS (SELECT 1 FROM (o3 x CROSS JOIN o3 q) WHERE x.evil = 'a')"],
+    [O2, O3, "CREATE VIEW v AS SELECT o2.evil FROM o2 a"],                                  // `o2` is hidden by its alias
+    [O2, O3, "CREATE VIEW v AS SELECT j.evil FROM (o2 x JOIN o3 y ON x.id = y.id) AS j"],  // a JOIN group's alias: columns unknown
+    [O2, O3, "CREATE VIEW v AS SELECT x.evil FROM ((o3 x JOIN o3 y ON true) JOIN o2 z ON true)"],
+    [OTHER, "CREATE VIEW v AS SELECT substring(label FROM o.evil) FROM other o"],          // FROM inside a call is not a FROM clause
+    [OTHER, "CREATE VIEW v AS SELECT trim(BOTH FROM o.evil) FROM other o"],
+  ]);
+  clean("admitted", [
+    [O2, O3, "CREATE VIEW v AS SELECT x.id, y.evil FROM (o3 x JOIN o2 y ON x.id = y.id)"],
+    [O2, O3, "CREATE VIEW v AS SELECT a.evil FROM o2 a, (o3 x JOIN o3 q ON true)"],
+    [OTHER, "CREATE VIEW v AS SELECT substring(o.label FROM 2 FOR 3) AS s FROM other o"],
+  ]);
+});
+
+describe("review item 2 (HIGH) — a relation is the name AS WRITTEN; a qualifier the <schema> does not declare is unknown", () => {
+  charged("refused", [
+    [O2, "CREATE VIEW v AS SELECT x.evil FROM ext.o2 x"],                                   // `ext.o2` is not the declared `o2`
+    [OTHER, "CREATE VIEW v AS SELECT o.id FROM public.other o"],                            // nor is `public.other`
+    ["CREATE TABLE ext.o2 (id INTEGER)", O2, "CREATE VIEW v AS SELECT x.evil FROM ext.o2 x"],
+    [CONFIG, "CREATE TRIGGER t AFTER INSERT ON ext.config BEGIN SELECT NEW.k; END"],        // NEW of an undeclared qualified target
+    [OTHER, "ALTER TABLE ext.other ADD COLUMN evil TEXT", "CREATE VIEW v AS SELECT o.evil FROM other o"], // a qualified ALTER adds to `ext.other` only
+  ]);
+  clean("admitted", [
+    ["CREATE TABLE ext.o2 (id INTEGER, evil TEXT)", "CREATE VIEW v AS SELECT x.evil FROM ext.o2 x"],
+    [O2, "CREATE VIEW v AS SELECT x.evil FROM o2 x"],
+  ]);
+});
+
+describe("review item 3 (HIGH) — the function allow-list is the database's BUILT-INS (per dialect)", () => {
+  charged("on Postgres / unknown, SQLite's built-ins are user-definable names", [
+    ["@postgres", OTHER, "CREATE VIEW v AS SELECT raise(id) AS r FROM other"],               // executed: a user raise(int) read every tenant
+    ["@postgres", OTHER, "CREATE VIEW v AS SELECT julianday(label) AS j FROM other"],
+    [OTHER, "CREATE VIEW v AS SELECT julianday(label) AS j FROM other"],                       // unknown → intersection
+    ["@postgres", CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN SELECT RAISE(ABORT, 'x'); END"],
+    ["@sqlite", OTHER, "CREATE VIEW v AS SELECT now() AS n FROM other"],                       // and the reverse
+  ]);
+  clean("built in where it runs", [
+    ["@sqlite", OTHER, "CREATE VIEW v AS SELECT julianday(label) AS j, ifnull(label, '') AS l FROM other"],
+    ["@sqlite", CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN SELECT RAISE(ABORT, 'x') WHERE NEW.k = ''; END"],
+    [OTHER, "CREATE VIEW v AS SELECT lower(label), coalesce(label, ''), count(*) FROM other GROUP BY label"],
+  ]);
+  test("the query floor reads the same per-dialect list (same subset)", () => {
+    const isT = (n) => n === "assets";
+    const q = (sql, dialect) => analyzeTenantSql(sql, isT, ["assets"], { dialect });
+    expect(q("SELECT julianday(name) AS j FROM assets", "sqlite")).toMatchObject({ kind: "read" });
+    expect(q("SELECT julianday(name) AS j FROM assets", "postgres")).toMatchObject({ code: "E-TENANT-AGG", reason: "function" });
+    expect(q("SELECT julianday(name) AS j FROM assets", "unknown")).toMatchObject({ code: "E-TENANT-AGG" });
+    expect(q("SELECT tenant_id, total(cost) AS t FROM assets GROUP BY tenant_id", "postgres")).toMatchObject({ code: "E-TENANT-AGG" });
+    // an infix keyword is syntax only after an operand: `like(x, y)` is a CALL
+    expect(q("SELECT name FROM assets WHERE like(name, 'x')", "postgres")).toMatchObject({ code: "E-TENANT-AGG" });
+    expect(q("SELECT name FROM assets WHERE name LIKE ('x%')", "postgres")).toMatchObject({ kind: "read" });
+    // a cast / typed literal to a type that is not built in
+    expect(q("SELECT CAST(name AS evil_t) AS x FROM assets", "postgres")).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
+    expect(q("SELECT name FROM assets WHERE name = evil_t 'x'", "postgres")).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
+    expect(q("SELECT CAST(cost AS integer) AS c FROM assets", "postgres")).toMatchObject({ kind: "read" });
+  });
+});
+
+describe("review item 4 (LOW) — a CREATE TABLE … AS / view query is a SELECT, VALUES or WITH … SELECT", () => {
+  charged("refused", [
+    [OTHER, "CREATE TABLE t2 AS EXECUTE p"],
+    [OTHER, "CREATE TABLE t2 AS TABLE other"],
+    [OTHER, "CREATE VIEW v AS WITH x AS (DELETE FROM other RETURNING id) SELECT id FROM x"],
+    [OTHER, "CREATE TABLE t2 AS WITH x AS (UPDATE other SET label = 'a' RETURNING id) SELECT id FROM x"],
+  ]);
+  clean("admitted", [
+    [OTHER, "CREATE TABLE t2 AS SELECT id FROM other"],
+    [OTHER, "CREATE TABLE t2 AS VALUES (1, 'a')"],
+    [OTHER, "CREATE TABLE t2 AS WITH x AS (SELECT id FROM other) SELECT id FROM x"],
+    [OTHER, "CREATE TABLE t2 AS (SELECT id FROM other)"],
+  ]);
+});
+
+describe("review item 5 — `trim(both ' ' from x)` is not a typed literal; EXTRACT keeps a correct message", () => {
+  test("in an expression region and in a body", () => {
+    expect(hazards("CREATE TABLE t (a TEXT CHECK (trim(both ' ' from a) <> ''))")).toEqual([]);
+    expect(hazards(OTHER, "CREATE VIEW v AS SELECT trim(both ' ' from label) AS l FROM other")).toEqual([]);
+  });
+  test("EXTRACT is not on the BODY allow-list — refused as a call, named", () => {
+    const hs = hazards("@postgres", OTHER, "CREATE VIEW v AS SELECT extract(year FROM label) AS y FROM other");
+    expect(hs.map((h) => h.kind)).toEqual([OUTSIDE]);
+    expect(hs[0].why).toContain("a call to `extract`");
+  });
+});
+
+describe("S455 \"a\" — `::<built-in type>` is in the shared subset (queries AND bodies)", () => {
+  test("the canonical RLS policy compiles clean on Postgres", () => {
+    expect(hazards("@postgres", "CREATE POLICY iso ON assets AS RESTRICTIVE USING (tenant_id = current_setting('scrml.tenant')::uuid)")).toEqual([]);
+  });
+  clean("built-in types (multi-word, sized, array)", [
+    ["@postgres", OTHER, "CREATE VIEW v AS SELECT id::int AS a, id::double precision AS b, label::character varying(10) AS c, label::varchar(64) AS d, id::text[] AS e, label::timestamp with time zone AS f, label::timestamp(3) without time zone AS g FROM other"],
+    [OTHER, "CREATE VIEW v AS SELECT id::bigint AS a, label::jsonb AS b FROM other"],
+  ]);
+  charged("refused", [
+    [OTHER, "CREATE VIEW v AS SELECT id::evil_t FROM other"],
+    [OTHER, "CREATE VIEW v AS SELECT id::public.evil_t FROM other"],
+    [OTHER, "CREATE VIEW v AS SELECT id::datetime FROM other"],          // a SQLite affinity name, not a Postgres built-in
+    [OTHER, "CREATE VIEW v AS SELECT id::interval day FROM other"],
+    [OTHER, "CREATE VIEW v AS SELECT id::int[3] FROM other"],
+    ["@sqlite", OTHER, "CREATE VIEW v AS SELECT id::int FROM other"],    // `::` is not SQLite syntax
+  ]);
+  test("a tenant QUERY: `::int` is accepted (still a tenant read, still filtered at source); `::evil_t` is refused", () => {
+    const isT = (n) => n === "assets";
+    expect(analyzeTenantSql("SELECT id::int AS n, name FROM assets", isT, ["assets"], { dialect: "postgres" })).toMatchObject({ kind: "read", table: "assets" });
+    expect(analyzeTenantSql("SELECT id::evil_t AS n FROM assets", isT, ["assets"], { dialect: "postgres" })).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
+    expect(analyzeTenantSql("SELECT id::int AS n FROM assets", isT, ["assets"], { dialect: "sqlite" })).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
   });
 });
 

@@ -285,10 +285,11 @@ describe("string forms the lexer does not model exactly are charged (S455 review
 // on a tenant table widens isolation. Only an explicit `AS RESTRICTIVE` (ANDed) is exempt.
 describe("row-security POLICY on a tenant table: only AS RESTRICTIVE is exempt", () => {
   const USING = "USING (tenant_id = current_setting('scrml.tenant', true))";
-  test("AS RESTRICTIVE (any case) is quiet", () => {
-    expect(hazards(ASSETS, `CREATE POLICY p ON assets AS RESTRICTIVE FOR SELECT ${USING}`)).toEqual([]);
-    expect(hazards(ASSETS, `CREATE POLICY p ON assets as restrictive ${USING}`)).toEqual([]);
-    expect(hazards(ASSETS, `CREATE POLICY "p q" ON public.assets As Restrictive ${USING}`)).toEqual([]);
+  test("AS RESTRICTIVE (any case) is quiet — on Postgres, where `current_setting` is a built-in (S455)", () => {
+    const pg = (...stmts) => { const b = body(...stmts); return findSchemaTenantHazards(b, schemaTenantTableNames([b]), undefined, "postgres"); };
+    expect(pg(ASSETS, `CREATE POLICY p ON assets AS RESTRICTIVE FOR SELECT ${USING}`)).toEqual([]);
+    expect(pg(ASSETS, `CREATE POLICY p ON assets as restrictive ${USING}`)).toEqual([]);
+    expect(pg(ASSETS, `CREATE POLICY "p q" ON public.assets As Restrictive ${USING}`)).toEqual([]);
   });
   test("AS PERMISSIVE → charged, the message says to write AS RESTRICTIVE", () => {
     const b = body(ASSETS, "CREATE POLICY open_all ON assets AS PERMISSIVE USING (true)");

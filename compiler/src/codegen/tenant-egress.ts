@@ -53,6 +53,9 @@ import { normalizeSqlText } from "../sql-projection.ts";
 import type { ProtectContext } from "./protect-egress.ts";
 import { extractDesiredSchema } from "./db-authoritative.ts";
 import { fileSchemaTenantNames } from "../tenant-schema-hazards.ts";
+import { resolveDbScopes } from "../db-ownership.ts";
+import { getNodes } from "./collect.ts";
+import { resolveDbDriver } from "./db-driver.ts";
 import {
   analyzeTenantSql,
   tenantTableMentioned,
@@ -62,7 +65,9 @@ import {
   injectInsertTenant,
   injectWriteTenantFilter,
   TENANT_ROW_FUNCTIONS,
-  TENANT_GROUP_AGGREGATES,
+  tenantRowFunctions,
+  tenantGroupAggregates,
+  type SqlDialect,
   type TenantAnalysis,
 } from "./tenant-sql-subset.ts";
 
@@ -90,6 +95,8 @@ export interface TenantContext {
   writeHazards?: Map<string, string[]>;
   /** S452 r4 — the driver of a SQL handle (`_scrml_sql`, …), for dialect-specific injection. */
   driverFor?: (dbVar: string) => string | undefined;
+  /** S455 — the compilation's dialect (`compilationDialect`): the allow-lists are its built-ins. */
+  dialect?: SqlDialect;
 }
 
 /** The last part of a possibly-qualified, possibly-quoted SQL name, lowercased. */
@@ -237,13 +244,14 @@ export function buildTenantContext(
   // already holds this file's own tables; the file's own reading above is kept so
   // a caller can never NARROW the floor by passing a stale set.
   if (compilation) for (const t of compilation.tables) tenantScopedTables.add(t);
-  if (tenantScopedTables.size === 0) return { tenantScopedTables };
+  const dialect: SqlDialect = compilation?.dialect ?? "unknown";
+  if (tenantScopedTables.size === 0) return { tenantScopedTables, dialect };
   // The S452 r4 per-write limb keeps reading THIS file's `<schema>` text ("the
   // program's `<schema>`"): a hazard in any compiled file's `<schema>` is already
   // refused, compilation-wide, at the declaration (E-TENANT-SCHEMA-HAZARD), and
   // joining every file's text would only spread this regex reader's
   // unattributable over-fire across files.
-  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor };
+  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor, dialect };
 }
 
 /**
@@ -299,6 +307,12 @@ function addSchemaTenantTables(
 export interface CompilationTenantSet {
   /** The tenant-scoped tables (case-insensitive membership; entries lowercased). */
   tables: ReadonlySet<string>;
+  /**
+   * The database every compiled file's handles resolve to (S455): `postgres` / `sqlite`
+   * when ALL agree, else `unknown` (mixed, MySQL, unresolvable, none) — the function /
+   * type allow-lists are that database's built-ins, `unknown` → the intersection.
+   */
+  dialect?: SqlDialect;
 }
 
 /**
@@ -317,11 +331,37 @@ export function compilationTenantOf(fileAST: unknown): CompilationTenantSet | un
 export function compilationTenantSet(files: Iterable<unknown>, protectCtx: ProtectContext): CompilationTenantSet {
   const tables = new TenantTableSet();
   addRegistryTenantTables(tables, protectCtx);
-  for (const fileAST of files) {
+  const list = [...files];
+  for (const fileAST of list) {
     addSchemaTenantTables(tables, extractDesiredSchema(fileAST).tenantTables);
     for (const t of fileSchemaTenantNames(fileAST)) tables.add(t);
   }
-  return { tables };
+  return { tables, dialect: compilationDialect(list) };
+}
+
+/** The dialect a `db=` / `src=` value names (§44): a literal Postgres URI or SQLite target, else `unknown`. */
+export function dialectOfDbValue(value: string): SqlDialect {
+  if (typeof value !== "string" || /[{}]/.test(value)) return "unknown";   // an interpolated value is not a literal target
+  const r = resolveDbDriver(value);
+  if (!r.ok) return "unknown";
+  return r.info.driver === "postgres" ? "postgres" : r.info.driver === "sqlite" ? "sqlite" : "unknown";
+}
+
+/**
+ * The ONE dialect of a compilation: every database handle of every file (§8.1.1
+ * `resolveDbScopes`) resolves to the same driver → that driver; otherwise (mixed,
+ * MySQL, unresolvable, no handle at all) `unknown`, so only names built in on BOTH
+ * databases are admitted (S455 review of ee1a80bc).
+ */
+export function compilationDialect(files: Iterable<unknown>): SqlDialect {
+  const seen = new Set<SqlDialect>();
+  for (const f of files) {
+    const filePath = typeof (f as any)?.filePath === "string" && (f as any).filePath ? (f as any).filePath : null;
+    let handles: Array<{ value: string }> = [];
+    try { handles = resolveDbScopes(getNodes(f as any), filePath).handles; } catch { seen.add("unknown"); }
+    for (const h of handles) seen.add(dialectOfDbValue(h.value));
+  }
+  return seen.size === 1 ? [...seen][0] : "unknown";
 }
 
 /**
@@ -381,6 +421,7 @@ export function analyzeTenantQuery(sqlContent: string, ctx: TenantContext): Tena
   if (ctx.tenantScopedTables.size === 0) return null;
   return analyzeTenantSql(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables, {
     writeHazards: (t) => ctx.writeHazards?.get(t.toLowerCase()),
+    dialect: ctx.dialect ?? "unknown",
   });
 }
 
@@ -646,8 +687,10 @@ function tenantAggMessage(
         `filtered rows in server code, ${optOut}.`;
     case "function":
       return `${head} and calls \`${scoping.detail ?? "?"}\`, which is not on the floor's per-row function allow-list ` +
-        `(${[...TENANT_ROW_FUNCTIONS].join(", ")}). An aggregate (or any function the floor cannot prove reads one ` +
-        `row) can fold several tenants into one value (§14.8.10). Under \`GROUP BY tenant_id\` the aggregates ${[...TENANT_GROUP_AGGREGATES].join(", ")} are also allowed, nothing else. Resolution: add \`GROUP BY tenant_id\` so each ` +
+        `(${[...tenantRowFunctions("unknown")].join(", ")}; on SQLite also ` +
+        `${[...tenantRowFunctions("sqlite")].filter((f) => !tenantRowFunctions("unknown").has(f)).join(", ")} — a name is ` +
+        `allowed only where it is a BUILT-IN of the database the query runs on). An aggregate (or any function the floor cannot prove reads one ` +
+        `row) can fold several tenants into one value (§14.8.10). Under \`GROUP BY tenant_id\` the aggregates ${[...tenantGroupAggregates("sqlite")].join(", ")} are also allowed (\`total\` on SQLite only), nothing else. Resolution: add \`GROUP BY tenant_id\` so each ` +
         `result row is one tenant's group, compute it over the filtered rows in server code, ${optOut}.`;
     case "reserved":
       return `${head} and names the floor's reserved key alias \`__scrml_tenant_…\`, which the source filter reads ` +

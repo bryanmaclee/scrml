@@ -70,9 +70,134 @@ const TENANT_COLUMN = "tenant_id";
 /** The reserved alias prefix of the floor's key columns. */
 const TENANT_KEY_ALIAS_PREFIX = "__scrml_tenant_";
 
+// ---------------------------------------------------------------------------
+// DIALECT (S455 review of ee1a80bc, executed on PG16: `raise(id)` / `julianday(label)`
+// are SQLite built-ins but USER functions on Postgres — a user `evil(record)` named
+// like a SQLite built-in read every tenant). A name is admitted only where it is a
+// BUILT-IN of the database that runs it: the compilation's resolved driver (§44 —
+// a `postgres://` URI → Postgres; a SQLite path / `sqlite:` / `:memory:` → SQLite);
+// unknown or mixed → the INTERSECTION (a name built in on BOTH).
+// ---------------------------------------------------------------------------
+
+/** The database a tenant query / `<schema>` body runs on, as far as the compiler can tell. */
+export type SqlDialect = "sqlite" | "postgres" | "unknown";
+
+/** Where a name is a built-in: both databases, SQLite only, Postgres only. */
+export type Avail = "both" | "sqlite" | "postgres";
+
+/** Is a name with availability `a` built in on `d` (unknown → built in on BOTH)? */
+export function availableOn(a: Avail | undefined, d: SqlDialect): boolean {
+  if (a === undefined) return false;
+  return a === "both" || a === d;
+}
+
+/** Build the allow-list of `table` for dialect `d`. */
+export function namesFor(table: ReadonlyMap<string, Avail>, d: SqlDialect): Set<string> {
+  const out = new Set<string>();
+  for (const [n, a] of table) if (availableOn(a, d)) out.add(n);
+  return out;
+}
+
+/**
+ * THE CLOSED BUILT-IN TYPE LIST a `::` cast may name (S455 "a"; the #1317 expression
+ * rule's list, made dialect-aware). Postgres: its built-in types — a domain, enum,
+ * composite or extension type runs an input function of its own (code). SQLite has no
+ * `::` at all (a syntax error there), so on SQLite a `::` is outside the subset; on an
+ * unknown dialect the Postgres list applies (SQLite runs no code for a type name).
+ * Multi-word heads (`double precision`, `character varying`, `timestamp with time zone`,
+ * `national character`) are read by `readCastType`.
+ */
+export const PG_CAST_TYPES: ReadonlySet<string> = new Set([
+  "int", "int2", "int4", "int8", "integer", "smallint", "bigint", "real", "double", "float", "float4", "float8",
+  "numeric", "decimal", "text", "varchar", "char", "character", "national", "nchar", "bpchar", "bool", "boolean",
+  "date", "time", "timestamp", "timestamptz", "timetz", "interval", "uuid", "json", "jsonb", "bytea", "money",
+  "inet", "cidr", "macaddr", "bit", "varbit", "xml", "oid", "name", "regclass", "tsrange", "tstzrange", "daterange",
+  "int4range", "int8range", "numrange", "tsvector", "tsquery",
+]);
+/** Built-in types that take a size / precision: `varchar(64)`, `numeric(10, 2)`, `timestamp(3)`. */
+const SIZED_CAST_TYPES = new Set([
+  "varchar", "char", "character", "nchar", "numeric", "decimal", "timestamp", "timestamptz", "time", "timetz",
+  "interval", "bit", "varbit", "float",
+]);
+
+/**
+ * Read the type of a `::` cast starting at `j` (just past `::`). Returns the end offset
+ * and the normalized type, or why it is outside the subset. Whitespace may separate the
+ * words; the spelling must END the cast (no `.`-qualified type, no trailing identifier
+ * character, no `interval` field qualifier — each would be read differently by Postgres).
+ */
+function readCastType(src: string, j: number, dialect: SqlDialect): { ok: true; end: number; type: string } | { ok: false; why: string } {
+  if (dialect === "sqlite") return { ok: false, why: "a `::` cast (not SQLite syntax — write `CAST(x AS t)`)" };
+  const n = src.length;
+  const ws = (k: number): number => { while (k < n && (src[k] === " " || src[k] === "\t" || src[k] === "\n" || src[k] === "\r")) k++; return k; };
+  const word = (k: number): { w: string; end: number } | null => {
+    if (!IDENT_START.test(src[k] ?? "")) return null;
+    let e = k + 1;
+    while (e < n && IDENT_CHAR.test(src[e])) e++;
+    return { w: src.slice(k, e).toLowerCase(), end: e };
+  };
+  const nextWord = (k: number, want: string[]): { w: string; end: number } | null => {
+    const s = ws(k);
+    if (s === k) return null;
+    const w = word(s);
+    return w && want.includes(w.w) ? w : null;
+  };
+  const head = word(ws(j));
+  if (!head) return { ok: false, why: "a `::` cast whose type the subset cannot read" };
+  if (!PG_CAST_TYPES.has(head.w)) {
+    return { ok: false, why: `a \`::\` cast to \`${head.w}\`, a type outside the built-in list (its input function is code)` };
+  }
+  let type = head.w;
+  let k = head.end;
+  const size = (): boolean => {
+    if (src[k] !== "(") return true;
+    let e = k + 1;
+    if (!DIGIT.test(src[e] ?? "")) return false;
+    while (DIGIT.test(src[e] ?? "")) e++;
+    if (src[e] === ",") { e = ws(e + 1); if (!DIGIT.test(src[e] ?? "")) return false; while (DIGIT.test(src[e] ?? "")) e++; }
+    if (src[e] !== ")") return false;
+    k = e + 1;
+    return true;
+  };
+  if (type === "double") {
+    const p = nextWord(k, ["precision"]);
+    if (!p) return { ok: false, why: "a `::double` cast without `precision`" };
+    type = "double precision"; k = p.end;
+  } else if (type === "national") {
+    const c = nextWord(k, ["character", "char"]);
+    if (!c) return { ok: false, why: "a `::national` cast without `character`" };
+    type = `national ${c.w}`; k = c.end;
+  }
+  if (["character", "char", "bit", "national character", "national char"].includes(type)) {
+    const v = nextWord(k, ["varying"]);
+    if (v) { type += " varying"; k = v.end; }
+  }
+  const sized = SIZED_CAST_TYPES.has(type.split(" ")[0]) || type.endsWith("varying");
+  if (sized && !size()) return { ok: false, why: `a \`::${type}\` cast whose size the subset cannot read` };
+  if (type === "timestamp" || type === "time") {
+    const w = nextWord(k, ["with", "without"]);
+    if (w) {
+      const t = nextWord(w.end, ["time"]);
+      const z = t ? nextWord(t.end, ["zone"]) : null;
+      if (!z) return { ok: false, why: `a \`::${type} ${w.w} …\` cast the subset cannot read` };
+      type += ` ${w.w} time zone`; k = z.end;
+    }
+  }
+  if (type === "interval") {
+    const f = nextWord(k, ["year", "month", "day", "hour", "minute", "second"]);
+    if (f) return { ok: false, why: "a `::interval` cast with a field qualifier" };
+  }
+  while (src[k] === "[" && src[k + 1] === "]") { type += "[]"; k += 2; }
+  if (k < n && (IDENT_CHAR.test(src[k]) || src[k] === "." || src[k] === "[" || src[k] === "(")) {
+    return { ok: false, why: `a \`::${type}\` cast followed by \`${src[k]}\`` };
+  }
+  return { ok: true, end: k, type };
+}
+
 /** One subset token. Offsets index the RAW `?{}` body. */
 export interface SqlTok {
-  kind: "ident" | "num" | "str" | "param" | "punct";
+  /** `cast` = a `::<built-in type>` cast (S455 "a"), read whole: its type is in `up`. */
+  kind: "ident" | "num" | "str" | "param" | "punct" | "cast";
   /** Raw text. */
   text: string;
   /** Uppercased text for identifiers (keyword comparison); raw text otherwise. */
@@ -121,6 +246,12 @@ export interface SubsetLexOptions {
    * statement to the subset's leaders. Every other character stays outside.
    */
   statementSeparator?: boolean;
+  /**
+   * The database the text runs on (S455 "a"): a `::<type>` cast is in the subset only
+   * where it is that database's syntax and the type is a built-in of it (`readCastType`).
+   * Default `unknown`.
+   */
+  dialect?: SqlDialect;
 }
 
 /**
@@ -210,6 +341,14 @@ export function lexTenantSubset(raw: string, opts: SubsetLexOptions = {}): Subse
       continue;
     }
 
+    // S455 "a" — `::<built-in type>`, read WHOLE (multi-word, size, `[]` suffix): one token.
+    if (c === ":" && src[i + 1] === ":") {
+      const ct = readCastType(src, i + 2, opts.dialect ?? "unknown");
+      if (!ct.ok) return fail(i, ct.why);
+      toks.push({ kind: "cast", text: src.slice(i, ct.end), up: ct.type, start: i, end: ct.end });
+      i = ct.end;
+      continue;
+    }
     if (c === "-" && src[i + 1] === "-") return fail(i, "a `--` comment");
     if (c === "/" && src[i + 1] === "*") return fail(i, "a `/* */` comment");
     const two = src.slice(i, i + 2);
@@ -242,11 +381,18 @@ export function lexTenantSubset(raw: string, opts: SubsetLexOptions = {}): Subse
 // The statement grammar
 // ---------------------------------------------------------------------------
 
-/** Per-row scalar functions a tenant query may call (S451: an ALLOW-list). */
-export const TENANT_ROW_FUNCTIONS: ReadonlySet<string> = new Set([
-  "lower", "upper", "length", "trim", "ltrim", "rtrim", "substr", "substring",
-  "replace", "instr", "coalesce", "ifnull", "nullif", "abs", "round",
-  "date", "time", "datetime", "julianday", "strftime", "cast",
+/**
+ * Per-row scalar functions a tenant query may call (S451: an ALLOW-list), with the
+ * database each is a BUILT-IN of. `instr` / `ifnull` / `datetime` / `julianday` /
+ * `strftime` are SQLite's; on Postgres they are not built in — a user function of that
+ * name is code (S455 review of ee1a80bc, executed). `date(x)` / `time(x)` are Postgres's
+ * function-style casts to its built-in types.
+ */
+export const TENANT_ROW_FUNCTION_DIALECTS: ReadonlyMap<string, Avail> = new Map<string, Avail>([
+  ["lower", "both"], ["upper", "both"], ["length", "both"], ["trim", "both"], ["ltrim", "both"], ["rtrim", "both"],
+  ["substr", "both"], ["substring", "both"], ["replace", "both"], ["coalesce", "both"], ["nullif", "both"],
+  ["abs", "both"], ["round", "both"], ["date", "both"], ["time", "both"], ["cast", "both"],
+  ["instr", "sqlite"], ["ifnull", "sqlite"], ["datetime", "sqlite"], ["julianday", "sqlite"], ["strftime", "sqlite"],
 ]);
 
 /**
@@ -254,20 +400,55 @@ export const TENANT_ROW_FUNCTIONS: ReadonlySet<string> = new Set([
  * may call (each group is one tenant's rows). An ALLOW-list like the per-row one:
  * before r4 a grouped read could call ANY function, and on Postgres
  * `table_to_xml('assets', …)` / `query_to_xml('select … from assets', …)` run SQL
- * from a string — every tenant's rows, in one value.
+ * from a string — every tenant's rows, in one value. `total` is SQLite's.
  */
-export const TENANT_GROUP_AGGREGATES: ReadonlySet<string> = new Set([
-  "count", "sum", "avg", "min", "max", "total",
+export const TENANT_GROUP_AGGREGATE_DIALECTS: ReadonlyMap<string, Avail> = new Map<string, Avail>([
+  ["count", "both"], ["sum", "both"], ["avg", "both"], ["min", "both"], ["max", "both"], ["total", "sqlite"],
 ]);
-const ROW_AND_AGGREGATES: ReadonlySet<string> = new Set([...TENANT_ROW_FUNCTIONS, ...TENANT_GROUP_AGGREGATES]);
 
-/** Keywords a `(` may follow that are not a function call. */
+/** The per-row allow-list on dialect `d`. */
+export function tenantRowFunctions(d: SqlDialect): Set<string> { return namesFor(TENANT_ROW_FUNCTION_DIALECTS, d); }
+/** The grouped-read aggregate allow-list on dialect `d`. */
+export function tenantGroupAggregates(d: SqlDialect): Set<string> { return namesFor(TENANT_GROUP_AGGREGATE_DIALECTS, d); }
+
+/**
+ * Every name either list admits on SOME database (for documentation / tests; NOT an
+ * allow-list — the floor uses `tenantRowFunctions(dialect)`).
+ */
+export const TENANT_ROW_FUNCTIONS: ReadonlySet<string> = new Set(TENANT_ROW_FUNCTION_DIALECTS.keys());
+export const TENANT_GROUP_AGGREGATES: ReadonlySet<string> = new Set(TENANT_GROUP_AGGREGATE_DIALECTS.keys());
+
+/**
+ * The types `CAST(x AS t)` may name on dialect `d`: Postgres / unknown → its built-ins
+ * (`PG_CAST_TYPES`); SQLite → its type-affinity names and the common spellings SQLite
+ * accepts (a type name runs no code there). A user type's input function is code.
+ */
+export const SQLITE_CAST_TYPES: ReadonlySet<string> = new Set([
+  "int", "integer", "smallint", "bigint", "tinyint", "mediumint", "int2", "int8", "real", "double", "float", "numeric",
+  "decimal", "text", "varchar", "char", "character", "nchar", "nvarchar", "clob", "blob", "bool", "boolean", "date",
+  "datetime", "time", "timestamp", "string",
+]);
+export function castTypesFor(d: SqlDialect): ReadonlySet<string> { return d === "sqlite" ? SQLITE_CAST_TYPES : PG_CAST_TYPES; }
+
+/**
+ * Keywords a `(` may follow that are not a function call. NOT here (S455 review of
+ * ee1a80bc): the infix operator words — `LIKE (`, `BETWEEN (` are syntax only after an
+ * operand; `like(x, y)` at an expression start is a CALL (SQLite's built-in, a user
+ * function on Postgres) — see `INFIX_WORDS`; nor `END` / `NULL` / `ASC` / `DESC` /
+ * `ESCAPE` / `IS`, which no `(` follows in SQL.
+ */
 const NON_CALL_WORDS: ReadonlySet<string> = new Set([
   "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "ON", "AS", "JOIN", "USING",
-  "WHEN", "THEN", "ELSE", "CASE", "IS", "LIKE", "GLOB", "BETWEEN", "BY", "LIMIT",
-  "OFFSET", "ESCAPE", "VALUES", "EXISTS", "ASC", "DESC", "END", "NULL", "HAVING",
+  "WHEN", "THEN", "ELSE", "CASE", "BY", "LIMIT", "OFFSET", "VALUES", "EXISTS", "HAVING",
   "DISTINCT", "ALL",
 ]);
+/** Infix keywords: `x LIKE (…)` is syntax; `LIKE(` NOT after an operand is a call. */
+const INFIX_WORDS: ReadonlySet<string> = new Set(["LIKE", "ILIKE", "GLOB", "MATCH", "REGEXP", "SIMILAR", "BETWEEN", "IS", "ESCAPE"]);
+/** Does token `t` end an operand (so a following infix keyword is an operator)? */
+function endsOperandTok(t: SqlTok | undefined): boolean {
+  return !!t && (t.kind === "num" || t.kind === "str" || t.kind === "param" || t.kind === "cast" ||
+    (t.kind === "punct" && t.text === ")") || (t.kind === "ident" && !NON_CALL_WORDS.has(t.up) && !INFIX_WORDS.has(t.up)));
+}
 
 /** Keywords that end a FROM clause / a table reference's alias position. */
 const FROM_STOP = new Set(["WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "WINDOW"]);
@@ -311,6 +492,51 @@ export type TenantAnalysis =
 export interface TenantAnalyzeOptions {
   /** S452 r4 — the `<schema>` triggers / rules / cascading FKs a write to `table` fires (see TenantContext.writeHazards). */
   writeHazards?: (table: string) => readonly string[] | undefined;
+  /**
+   * The database the query runs on (S455): the function allow-list, the `::` cast and
+   * the `CAST` / typed-literal types are that database's BUILT-INS. Default `unknown`
+   * (the intersection — a name built in on both).
+   */
+  dialect?: SqlDialect;
+}
+
+/** Keywords a string literal may follow (anything else before a literal makes it a TYPED literal, `t '…'`). */
+const KEYWORDS_BEFORE_STRING: ReadonlySet<string> = new Set([
+  "AND", "OR", "NOT", "LIKE", "ILIKE", "GLOB", "MATCH", "REGEXP", "SIMILAR", "ESCAPE", "THEN", "ELSE", "WHEN",
+  "IS", "IN", "BETWEEN", "SELECT", "VALUES", "SET", "BY", "AS", "FROM", "WHERE", "ON", "HAVING", "LIMIT", "OFFSET",
+  "CASE", "DISTINCT", "ALL", "ANY", "SOME", "COLLATE", "RETURN", "BOTH", "LEADING", "TRAILING", "FOR",
+]);
+
+/**
+ * The first cast / typed literal whose type is not a built-in of `d`, or null: `CAST(x AS
+ * t)` (at the CAST's own paren depth) and `t '…'`. A user type's input function is code
+ * (the S455 type rule, shared by the query floor and `<schema>` bodies). A `::` cast is
+ * checked by the lexer (`readCastType`).
+ */
+export function firstNonBuiltinType(toks: SqlTok[], d: SqlDialect): string | null {
+  const types = castTypesFor(d);
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (t.kind === "ident" && t.up === "CAST" && isP(toks[k + 1], "(")) {
+      let depth = 0;
+      for (let j = k + 1; j < toks.length; j++) {
+        if (isP(toks[j], "(")) depth++;
+        else if (isP(toks[j], ")")) { depth--; if (depth === 0) break; }
+        else if (depth === 1 && isKw(toks[j], "AS")) {
+          const ty = toks[j + 1];
+          if (!ty || ty.kind !== "ident" || isP(toks[j + 2], ".")) return ty ? ty.text : "?";
+          const name = ty.text.toLowerCase();
+          const tail = toks[j + 2]?.kind === "ident" ? toks[j + 2].text.toLowerCase() : "";
+          const ok = types.has(name) && (name !== "double" || tail === "precision" || d === "sqlite");
+          if (!ok) return ty.text;
+        }
+      }
+    }
+    if (t.kind === "ident" && toks[k + 1]?.kind === "str" && !KEYWORDS_BEFORE_STRING.has(t.up) && !types.has(t.text.toLowerCase())) {
+      return t.text;
+    }
+  }
+  return null;
 }
 
 /** Case-insensitive whole-word mention of `name` anywhere in raw text (quotes, comments and interpolations included). */
@@ -373,7 +599,9 @@ export function analyzeTenantSql(
   tenantNames: Iterable<string>,
   opts: TenantAnalyzeOptions = {},
 ): TenantAnalysis {
-  const lex = lexTenantSubset(raw);
+  const dialect: SqlDialect = opts.dialect ?? "unknown";
+  const fns: CallLists = { row: tenantRowFunctions(dialect), rowAgg: new Set([...tenantRowFunctions(dialect), ...tenantGroupAggregates(dialect)]) };
+  const lex = lexTenantSubset(raw, { dialect });
   if (!lex.ok) {
     const named = tenantTableMentioned(raw, isTenant, tenantNames);
     if (named === null) return null;
@@ -392,7 +620,7 @@ export function analyzeTenantSql(
     // only allow-listed functions, whatever table it reads.
     const named = [...tenantNames].find((n) => rawWordMention(raw, n));
     if (named !== undefined) {
-      const bad = firstDisallowedCall(toks, new Set(), ROW_AND_AGGREGATES);
+      const bad = firstDisallowedCall(toks, new Set(), fns.rowAgg) ?? typeIssue(toks, dialect);
       if (bad !== null) {
         return {
           kind: "refuse", code: "E-TENANT-SQL-SUBSET", reason: "subset", table: named, op: toks[0]?.text.toUpperCase() ?? "?",
@@ -449,10 +677,17 @@ export function analyzeTenantSql(
     if (u === "FOR" && isRead) return refuse("E-TENANT-SQL-SUBSET", "subset", "a FOR locking clause");
   }
 
-  if (isRead) return analyzeSelect(toks, dep, table, isTenant, refuse);
+  // ---- casts / typed literals: a type that is not a built-in runs its input function (S455).
+  const badType = firstNonBuiltinType(toks, dialect);
+  if (badType !== null) {
+    const why = `a cast or typed literal of the type \`${badType}\`, which is not a built-in type of the database (its input function is code)`;
+    return isRead ? refuse("E-TENANT-SQL-SUBSET", "subset", why) : refuse("E-TENANT-WRITE", "write-shape", why);
+  }
+
+  if (isRead) return analyzeSelect(toks, dep, table, isTenant, refuse, fns);
   const write = leader === "INSERT"
-    ? analyzeInsert(toks, dep, isTenant, refuse)
-    : analyzeFilteredWrite(toks, dep, leader as "UPDATE" | "DELETE", isTenant, refuse);
+    ? analyzeInsert(toks, dep, isTenant, refuse, fns)
+    : analyzeFilteredWrite(toks, dep, leader as "UPDATE" | "DELETE", isTenant, refuse, fns);
   // S452 r4 — the floor constrains the STATEMENT; a trigger, rule or cascading
   // foreign key the table's `<schema>` declares runs further writes the floor
   // never sees (measured: an AFTER UPDATE trigger rewrote another tenant's rows).
@@ -469,6 +704,15 @@ export function analyzeTenantSql(
 
 type Refuse = (code: TenantCode, reason: TenantRefusalReason, detail: string, t?: string) => TenantAnalysis;
 
+/** The dialect's call allow-lists: per-row, and per-row ∪ aggregates (a grouped read). */
+interface CallLists { row: ReadonlySet<string>; rowAgg: ReadonlySet<string> }
+
+/** `firstNonBuiltinType` as a call-style refusal detail. */
+function typeIssue(toks: SqlTok[], d: SqlDialect): string | null {
+  const t = firstNonBuiltinType(toks, d);
+  return t === null ? null : `${t} (a type outside the built-in list)`;
+}
+
 /**
  * The first function call not on `allowed` (default: the per-row allow-list), or
  * null. `skip` = token indices known not to be calls. A name followed by `(` right
@@ -477,7 +721,7 @@ type Refuse = (code: TenantCode, reason: TenantRefusalReason, detail: string, t?
 function firstDisallowedCall(
   toks: SqlTok[],
   skip: ReadonlySet<number>,
-  allowed: ReadonlySet<string> = TENANT_ROW_FUNCTIONS,
+  allowed: ReadonlySet<string>,
 ): string | null {
   for (let k = 0; k + 1 < toks.length; k++) {
     const t = toks[k];
@@ -489,6 +733,8 @@ function firstDisallowedCall(
     const prev = toks[k - 1];
     if (prev && prev.kind === "ident" && ["INTO", "TABLE", "EXISTS"].includes(prev.up)) continue;
     if (NON_CALL_WORDS.has(t.up) || allowed.has(t.text.toLowerCase())) continue;
+    // `x LIKE (…)` is the operator; `like(x, y)` (no operand before it) is a CALL
+    if (INFIX_WORDS.has(t.up) && endsOperandTok(prev)) continue;
     return t.text;
   }
   return null;
@@ -500,6 +746,7 @@ function analyzeSelect(
   mentioned: string,
   isTenant: (name: string) => boolean,
   refuse: Refuse,
+  fns: CallLists,
 ): TenantAnalysis {
   const top = (k: number, kw: string): boolean => dep[k] === 0 && isKw(toks[k], kw);
   const fromIdx = toks.findIndex((_, k) => top(k, "FROM"));
@@ -577,13 +824,13 @@ function analyzeSelect(
     if (groupIdx !== -1 || having || distinct) {
       return refuse("E-TENANT-AGG", "aggregate", "GROUP BY / HAVING / DISTINCT not on every tenant source's tenant_id", table);
     }
-    const bad = firstDisallowedCall(toks, new Set());
+    const bad = firstDisallowedCall(toks, new Set(), fns.row);
     if (bad !== null) return refuse("E-TENANT-AGG", "function", bad, table);
   } else {
     // Grouped by every tenant source: the per-row functions plus an explicit
     // aggregate allow-list (S452 r4) — nothing else, since a function may run
     // SQL held in a string (Postgres `table_to_xml('assets', …)`).
-    const bad = firstDisallowedCall(toks, new Set(), ROW_AND_AGGREGATES);
+    const bad = firstDisallowedCall(toks, new Set(), fns.rowAgg);
     if (bad !== null) return refuse("E-TENANT-AGG", "function", bad, table);
   }
   return { kind: "read", table, refs, fromAt: toks[fromIdx].start };
@@ -594,6 +841,7 @@ function analyzeInsert(
   dep: number[],
   isTenant: (name: string) => boolean,
   refuse: Refuse,
+  fns: CallLists,
 ): TenantAnalysis {
   const W = (detail: string, t?: string): TenantAnalysis => refuse("E-TENANT-WRITE", "write-shape", detail, t);
   let k = 1;
@@ -627,7 +875,7 @@ function analyzeInsert(
   for (let j = valsOpen + 1; j < valsClose; j++) {
     if (toks[j].kind === "ident" && isTenant(toks[j].text)) return W("an INSERT whose values name a tenant-scoped table", target.text);
   }
-  const bad = firstDisallowedCall(toks, new Set([colsOpen - 1]));
+  const bad = firstDisallowedCall(toks, new Set([colsOpen - 1]), fns.row);
   if (bad !== null) return W(`a call to \`${bad}\`, which is not on the per-row function allow-list`, target.text);
   void dep;
   return { kind: "insert", table: target.text, colsClose: toks[colsClose].start, valsClose: toks[valsClose].start, leaderEnd: toks[0].end };
@@ -639,6 +887,7 @@ function analyzeFilteredWrite(
   op: "UPDATE" | "DELETE",
   isTenant: (name: string) => boolean,
   refuse: Refuse,
+  fns: CallLists,
 ): TenantAnalysis {
   const W = (detail: string, t?: string): TenantAnalysis => refuse("E-TENANT-WRITE", "write-shape", detail, t);
   let k = 1;
@@ -694,7 +943,7 @@ function analyzeFilteredWrite(
       }
     }
   }
-  const bad = firstDisallowedCall(toks, new Set());
+  const bad = firstDisallowedCall(toks, new Set(), fns.row);
   if (bad !== null) return W(`a call to \`${bad}\`, which is not on the per-row function allow-list`, T);
   return { kind: "filtered-write", table: T, op, whereEnd, leaderEnd: toks[0].end };
 }

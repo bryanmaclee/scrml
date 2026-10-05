@@ -33,8 +33,13 @@ const w = (s) => `?{${BT}${s}${BT}}`;
 const ASSETS = "CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)";
 const CONFIG = "CREATE TABLE config (k TEXT, v TEXT)";
 const body = (...stmts) => "\n" + stmts.map((s) => (s.startsWith("--") ? s : w(s))).join("\n") + "\n";
-const kindsOf = (stmt, tenant = ["assets"]) =>
-  findSchemaTenantHazards(body(ASSETS, CONFIG, stmt), tenant).map((h) => h.kind + (h.unattributable ? "*" : ""));
+// S455 (review of ee1a80bc): the function / type allow-lists are the BUILT-INS of the
+// database the schema runs on — a fixture states its dialect (default: unknown → the
+// intersection, a name built in on both SQLite and Postgres).
+const kindsOf = (stmt, tenant = ["assets"], dialect = "unknown") =>
+  findSchemaTenantHazards(body(ASSETS, CONFIG, stmt), tenant, undefined, dialect).map((h) => h.kind + (h.unattributable ? "*" : ""));
+/** A case `stmt` or `[stmt, dialect]`. */
+const caseOf = (c) => (Array.isArray(c) ? c : [c, "unknown"]);
 
 describe("(i) isolation removal — charged", () => {
   const charged = [
@@ -210,7 +215,7 @@ describe("the statement-kind ALLOW-LIST", () => {
       `GRANT SELECT, INSERT, UPDATE, DELETE ON invoices TO ${DBAUTH_ROLE}`,
     ];
     const b = body(...saas);
-    expect(findSchemaTenantHazards(b, ["invoices", "customers"])).toEqual([]);
+    expect(findSchemaTenantHazards(b, ["invoices", "customers"], undefined, "postgres")).toEqual([]);
   });
 });
 
@@ -257,12 +262,16 @@ describe("review #6 — every expression in an exempt statement is held to the f
     "CREATE INDEX ix ON public.assets (name DESC, id)",
     "ALTER TABLE assets ADD COLUMN x VARCHAR(64) DEFAULT 'a' NOT NULL",
     "ALTER TABLE assets ADD COLUMN x NUMERIC(10, 2) CHECK (x > 0)",
-    "ALTER TABLE assets ADD COLUMN x TEXT DEFAULT (datetime('now'))",
+    ["ALTER TABLE assets ADD COLUMN x TEXT DEFAULT (datetime('now'))", "sqlite"],
     "ALTER TABLE assets ADD COLUMN x TIMESTAMP(3) WITH TIME ZONE",
     "ALTER TABLE assets ADD COLUMN x TEXT GENERATED ALWAYS AS (upper(name)) STORED",
     "ANALYZE assets (name)",
   ];
-  for (const s of fine) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+  for (const c of fine) { const [s, d] = caseOf(c); test(`exempt (${d}): ${s}`, () => expect(kindsOf(s, ["assets"], d)).toEqual([])); }
+  test("S455: `datetime(…)` is a SQLite built-in — on Postgres (or an unknown database) a user function of that name is code", () => {
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN x TEXT DEFAULT (datetime('now'))", ["assets"], "postgres")).toEqual(["statement*"]);
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN x TEXT DEFAULT (datetime('now'))")).toEqual(["statement*"]);
+  });
 });
 
 describe("CREATE TABLE column / table expressions are held to the same allow-list (the #6 class)", () => {
@@ -281,17 +290,24 @@ describe("CREATE TABLE column / table expressions are held to the same allow-lis
   for (const s of [
     "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL DEFAULT 'a')",
     "CREATE TABLE t (n NUMERIC(10, 2) CHECK (n > 0), c TEXT DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE t (d TEXT DEFAULT (datetime('now')), u TEXT DEFAULT (lower('X')))",
+    ["CREATE TABLE t (d TEXT DEFAULT (datetime('now')), u TEXT DEFAULT (lower('X')))", "sqlite"],
     "CREATE TABLE t (aid INTEGER REFERENCES public.config(k), UNIQUE (aid), PRIMARY KEY (aid), FOREIGN KEY (aid) REFERENCES config(k))",
     "CREATE TABLE t (x TIMESTAMP(3) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, y TEXT COLLATE NOCASE)",
     // a realistic Postgres SaaS table — side-effect-free built-ins are not code execution
-    "CREATE TABLE t (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial)",
-    "CREATE TABLE t (id bigint DEFAULT nextval('t_id_seq'::regclass) NOT NULL, k text DEFAULT md5(random()::text))",
-    "CREATE TABLE t (u uuid DEFAULT uuid_generate_v4(), d date DEFAULT current_date, m text GENERATED ALWAYS AS (to_char(created, 'YYYY')) STORED, created timestamptz DEFAULT clock_timestamp())",
-    "CREATE TABLE t (ts INTEGER DEFAULT (unixepoch()), r BLOB DEFAULT (randomblob(16)), h TEXT DEFAULT (hex(randomblob(4))))",
-  ]) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+    ["CREATE TABLE t (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial)", "postgres"],
+    ["CREATE TABLE t (id bigint DEFAULT nextval('t_id_seq'::regclass) NOT NULL, k text DEFAULT md5(random()::text))", "postgres"],
+    ["CREATE TABLE t (d date DEFAULT current_date, m text GENERATED ALWAYS AS (to_char(created, 'YYYY')) STORED, created timestamptz DEFAULT clock_timestamp())", "postgres"],
+    ["CREATE TABLE t (ts INTEGER DEFAULT (unixepoch()), r BLOB DEFAULT (randomblob(16)), h TEXT DEFAULT (hex(randomblob(4))))", "sqlite"],
+  ].map(caseOf)) test(`exempt (${s[1]}): ${s[0]}`, () => expect(kindsOf(s[0], ["assets"], s[1])).toEqual([]));
+  test("S455: `uuid_generate_v4()` is an EXTENSION's function, not a built-in — a user function of that name is code", () => {
+    expect(kindsOf("CREATE TABLE t (u uuid DEFAULT uuid_generate_v4())", ["assets"], "postgres")).toEqual(["statement*"]);
+  });
+  test("S455: a Postgres built-in is charged on SQLite, a SQLite one on Postgres", () => {
+    expect(kindsOf("CREATE TABLE t (id uuid DEFAULT gen_random_uuid())", ["assets"], "sqlite")).toEqual(["statement*"]);
+    expect(kindsOf("CREATE TABLE t (ts INTEGER DEFAULT (unixepoch()))", ["assets"], "postgres")).toEqual(["statement*"]);
+  });
   test("ALTER TABLE … ADD COLUMN created_at timestamptz DEFAULT now() is exempt; nextval in an index is charged", () => {
-    expect(kindsOf("ALTER TABLE assets ADD COLUMN created_at timestamptz DEFAULT now()")).toEqual([]);
+    expect(kindsOf("ALTER TABLE assets ADD COLUMN created_at timestamptz DEFAULT now()", ["assets"], "postgres")).toEqual([]);
     expect(kindsOf("CREATE INDEX ix ON assets ((nextval('s')))")).toEqual(["statement*"]);
   });
   test("a `${…}` in a column default is charged once (by the interpolation rule)", () => {
@@ -305,7 +321,7 @@ describe("CREATE TABLE column / table expressions are held to the same allow-lis
 // every `identifier (` is a call unless it is one of the enumerated syntactic forms.
 describe("expression mode — every `identifier (` is a call, no keyword exceptions", () => {
   const T = "CREATE TABLE assets2 (id INTEGER, name TEXT, ts TIMESTAMP, n INTEGER, tenant_id TEXT)";
-  const exprKinds = (stmt) => findSchemaTenantHazards(body(T, stmt), ["assets2"]).map((h) => h.kind + (h.unattributable ? "*" : ""));
+  const exprKinds = (stmt, d = "unknown") => findSchemaTenantHazards(body(T, stmt), ["assets2"], undefined, d).map((h) => h.kind + (h.unattributable ? "*" : ""));
   for (const s of [
     "CREATE INDEX i ON assets2 ((extract(epoch FROM evil(ts))))",
     "CREATE INDEX i ON assets2 ((substring('abc' FROM evil(1))))",
@@ -322,17 +338,17 @@ describe("expression mode — every `identifier (` is a call, no keyword excepti
   ]) test(`charged: ${s}`, () => expect(exprKinds(s)).toEqual(["statement*"]));
   // the reviewer's realistic SaaS schema shapes
   for (const s of [
-    "CREATE TABLE s (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial, amount numeric(10,2) NOT NULL CHECK (amount >= 0), at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP, status text CHECK (status IN ('open', 'paid')), email text NOT NULL, email_l text GENERATED ALWAYS AS (lower(email)) STORED, deleted_at timestamptz, seq bigint DEFAULT nextval('s_seq'::regclass), d date DEFAULT CAST(now() AS date))",
+    ["CREATE TABLE s (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial, amount numeric(10,2) NOT NULL CHECK (amount >= 0), at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP, status text CHECK (status IN ('open', 'paid')), email text NOT NULL, email_l text GENERATED ALWAYS AS (lower(email)) STORED, deleted_at timestamptz, seq bigint DEFAULT nextval('s_seq'::regclass), d date DEFAULT CAST(now() AS date))", "postgres"],
     "CREATE UNIQUE INDEX u ON assets2 (name) WHERE ts IS NULL",
     "CREATE INDEX l ON assets2 (lower(name))",
-    "CREATE INDEX t ON assets2 (date_trunc('day', ts))",
+    ["CREATE INDEX t ON assets2 (date_trunc('day', ts))", "postgres"],
     "CREATE TABLE r (room int, during tsrange, EXCLUDE USING gist (room WITH =, during WITH &&))",
-    "CREATE TABLE q (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT DEFAULT (datetime('now')), r BLOB DEFAULT (randomblob(16)), u INTEGER DEFAULT (unixepoch()))",
+    ["CREATE TABLE q (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT DEFAULT (datetime('now')), r BLOB DEFAULT (randomblob(16)), u INTEGER DEFAULT (unixepoch()))", "sqlite"],
     "CREATE TABLE f (a INT, b INT, PRIMARY KEY (a), UNIQUE (b), FOREIGN KEY (a) REFERENCES public.f2 (x) ON DELETE RESTRICT, CONSTRAINT c CHECK (a > -1 AND (b < 10 OR b IS NULL)))",
     "CREATE TABLE g (id INT GENERATED BY DEFAULT AS IDENTITY (START WITH 1), v varchar(64) COLLATE \"C\", y character varying(10) DEFAULT 'a'::character varying(10)) WITH (fillfactor=70)",
     "CREATE TABLE p (ts TIMESTAMP) PARTITION BY RANGE (ts)",
     "CREATE INDEX i ON assets2 USING btree (name) INCLUDE (id)",
-  ]) test(`clean: ${s.slice(0, 70)}`, () => expect(exprKinds(s)).toEqual([]));
+  ].map(caseOf)) test(`clean (${s[1]}): ${s[0].slice(0, 70)}`, () => expect(exprKinds(s[0], s[1])).toEqual([]));
 });
 
 // PA probe of 50150700 (executed): the FROM blind spot survived in view / trigger bodies —
@@ -366,9 +382,9 @@ describe("view / trigger bodies — FROM inside a call's arguments is not a tabl
 // S239 review of d4c4d4ac (DO-NOT-LAND; items 1 and 2 PA-reproduced at exit 0).
 describe("S239 review of d4c4d4ac — items 1–9", () => {
   const L = "CREATE TABLE logs (id INTEGER, msg TEXT, k TEXT)";
-  const k2 = (stmt) => findSchemaTenantHazards(body(ASSETS, L, stmt), ["assets"]).length;
-  const charged = (label, list) => { for (const s of list) test(`${label} charged: ${s.slice(0, 80)}`, () => expect(k2(s)).toBeGreaterThan(0)); };
-  const clean = (label, list) => { for (const s of list) test(`${label} clean: ${s.slice(0, 80)}`, () => expect(k2(s)).toBe(0)); };
+  const k2 = (stmt, d = "unknown") => findSchemaTenantHazards(body(ASSETS, L, stmt), ["assets"], undefined, d).length;
+  const charged = (label, list) => { for (const c of list) { const [s, d] = caseOf(c); test(`${label} charged (${d}): ${s.slice(0, 80)}`, () => expect(k2(s, d)).toBeGreaterThan(0)); } };
+  const clean = (label, list) => { for (const c of list) { const [s, d] = caseOf(c); test(`${label} clean (${d}): ${s.slice(0, 80)}`, () => expect(k2(s, d)).toBe(0)); } };
   charged("1 leader", [
     "(SELECT dblink_exec('dbname=app','DELETE FROM ass'||'ets'))",
     "WITH x AS (SELECT 1) SELECT * FROM x",
@@ -390,7 +406,7 @@ describe("S239 review of d4c4d4ac — items 1–9", () => {
     "CREATE VIEW v AS WITH c (a) AS (SELECT id FROM logs) SELECT * FROM c",
     "CREATE TRIGGER t AFTER INSERT ON logs BEGIN INSERT INTO logs (msg, k) VALUES (NEW.msg, upper(NEW.k)) ON CONFLICT (id) DO NOTHING; END",
   ]);
-  clean("3 policy", ["CREATE POLICY p ON assets AS RESTRICTIVE USING (tenant_id = current_setting('scrml.tenant', true))"]);
+  clean("3 policy", [["CREATE POLICY p ON assets AS RESTRICTIVE USING (tenant_id = current_setting('scrml.tenant', true))", "postgres"]]);
   charged("3 policy", [
     "CREATE POLICY p ON assets AS RESTRICTIVE USING (evil(tenant_id))",
     "CREATE POLICY p ON assets AS RESTRICTIVE FOR INSERT TO scrml_app WITH CHECK (dblink_exec('a','b') IS NULL)",
@@ -449,9 +465,10 @@ describe("S239 review of d4c4d4ac — items 1–9", () => {
     "GRANT USAGE, SELECT ON SEQUENCE s TO scrml_app",
   ]);
   clean("9 pure functions", [
-    "CREATE TABLE t (a TEXT CHECK (length(left(a, 3)) > 0 AND json_valid(a) AND iif(1, 1, 0) = 1), b TEXT DEFAULT (printf('%d', 1)), c INT CHECK (mod(c, 2) = 0))",
-    "CREATE TABLE t (a TEXT CHECK (char_length(trim(a)) BETWEEN 1 AND 80), s tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(a, ''))) STORED, f TEXT CHECK (starts_with(a, 'x') OR ascii(a) > 0))",
-    "CREATE INDEX i ON assets (split_part(name, '-', 1), lower(regexp_replace(name, '[^a-z]', '', 'g')))",
+    ["CREATE TABLE t (a TEXT CHECK (json_valid(a) AND iif(1, 1, 0) = 1), b TEXT DEFAULT (printf('%d', 1)), c INT CHECK (mod(c, 2) = 0))", "sqlite"],
+    ["CREATE TABLE t (a TEXT CHECK (length(left(a, 3)) > 0), c INT CHECK (mod(c, 2) = 0))", "postgres"],
+    ["CREATE TABLE t (a TEXT CHECK (char_length(trim(a)) BETWEEN 1 AND 80), s tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(a, ''))) STORED, f TEXT CHECK (starts_with(a, 'x') OR ascii(a) > 0))", "postgres"],
+    ["CREATE INDEX i ON assets (split_part(name, '-', 1), lower(regexp_replace(name, '[^a-z]', '', 'g')))", "postgres"],
   ]);
 });
 
@@ -459,9 +476,9 @@ describe("S239 review of d4c4d4ac — items 1–9", () => {
 describe("S239 r2 of 077b22b8 — items 1–4", () => {
   const A2 = "CREATE TABLE assets (id INTEGER, name TEXT, arr INTEGER[], tenant_id TEXT)";
   const O = "CREATE TABLE other (id INTEGER, arr INTEGER[])";
-  const n = (stmt) => findSchemaTenantHazards(body(A2, O, stmt), ["assets"]).length;
-  const charged = (label, list) => { for (const s of list) test(`${label} charged: ${s.slice(0, 80)}`, () => expect(n(s)).toBeGreaterThan(0)); };
-  const clean = (label, list) => { for (const s of list) test(`${label} clean: ${s.slice(0, 80)}`, () => expect(n(s)).toBe(0)); };
+  const n = (stmt, d = "unknown") => findSchemaTenantHazards(body(A2, O, stmt), ["assets"], undefined, d).length;
+  const charged = (label, list) => { for (const c of list) { const [s, d] = caseOf(c); test(`${label} charged (${d}): ${s.slice(0, 80)}`, () => expect(n(s, d)).toBeGreaterThan(0)); } };
+  const clean = (label, list) => { for (const c of list) { const [s, d] = caseOf(c); test(`${label} clean (${d}): ${s.slice(0, 80)}`, () => expect(n(s, d)).toBe(0)); } };
   charged("1 subscript", [
     "CREATE VIEW v AS SELECT arr[evil()] FROM other",
     "ALTER TABLE assets ALTER COLUMN name SET DEFAULT (ARRAY['a'])[dblink_exec('a','b')]",
@@ -477,11 +494,17 @@ describe("S239 r2 of 077b22b8 — items 1–4", () => {
     "CREATE TABLE c (a INTEGER[] CHECK (a[1] > 0), [weird name] TEXT)",
   ]);
   // S455 "yes, both": a view / trigger BODY is read in the tenant SQL subset, whose closed
-  // token set has no `[`, `]` or `::` — once clean here, now outside the subset (charged).
-  // Expression regions (an index / CHECK, above) keep the expression reader, which models them.
+  // token set has no `[`, `]` — once clean here, now outside the subset (charged). A `::`
+  // cast to a built-in type IS in the subset (S455 "a") — except on SQLite, where `::` is
+  // not syntax. Expression regions (an index / CHECK, above) keep the expression reader.
   charged("1 subscript / bracket name in a BODY (S455 subset)", [
     "CREATE VIEW v AS SELECT [id], arr[2] FROM other",
+    ["CREATE VIEW v AS SELECT id::text FROM other", "sqlite"],
+    "CREATE VIEW v AS SELECT id::evil_t FROM other",
+  ]);
+  clean("1 `::<built-in>` in a BODY (S455 \"a\")", [
     "CREATE VIEW v AS SELECT id::text FROM other",
+    ["CREATE VIEW v AS SELECT id::text FROM other", "postgres"],
   ]);
   charged("2 body types", [
     "CREATE VIEW v AS SELECT 'x'::evil_t FROM other",
@@ -490,7 +513,12 @@ describe("S239 r2 of 077b22b8 — items 1–4", () => {
   ]);
   clean("2 body types", [
     "CREATE VIEW v AS SELECT CAST(id AS text), CAST(id AS integer), DATE '2020-01-01' FROM other WHERE id > 0 AND arr IS NOT NULL",
-    "CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT RAISE(ABORT, 'no') WHERE NEW.id < 0; END",
+    ["CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT RAISE(ABORT, 'no') WHERE NEW.id < 0; END", "sqlite"],
+  ]);
+  charged("2 RAISE is SQLite's (S455 review of ee1a80bc: a user `raise(int)` on Postgres read every tenant)", [
+    ["CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT RAISE(ABORT, 'no') WHERE NEW.id < 0; END", "postgres"],
+    ["CREATE VIEW v AS SELECT raise(id) FROM other", "postgres"],
+    ["CREATE VIEW v AS SELECT julianday(id) FROM other", "unknown"],
   ]);
   charged("3 system objects", [
     "GRANT SELECT ON pg_catalog.pg_authid TO scrml_app",
@@ -539,10 +567,14 @@ ${stmts.map((s) => `    ${w(s)}`).join("\n")}
   test("…and not when the compilation has no tenant table", () => {
     expect(codes(compile({ "admin.scrml": prog(CONFIG, "CREATE ROLE ops BYPASSRLS") }))).not.toContain("E-TENANT-SCHEMA-HAZARD");
   });
-  test("a realistic Postgres SaaS tenant table compiles clean; an evil_fn default does not", () => {
+  test("a realistic Postgres SaaS tenant table compiles clean ON POSTGRES; an evil_fn default does not", () => {
+    // S455: the allow-list is the built-ins of the compilation's resolved database (§44)
     const saas = "CREATE TABLE invoices (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, created_at timestamptz DEFAULT now() NOT NULL, id2 serial, tenant_id text NOT NULL)";
-    expect(codes(compile({ "app.scrml": prog(saas) }))).not.toContain("E-TENANT-SCHEMA-HAZARD");
-    expect(codes(compile({ "app.scrml": prog(saas.replace("now()", "evil_fn()")) }))).toContain("E-TENANT-SCHEMA-HAZARD");
+    const pg = (...s) => prog(...s).replace('db="app.db"', 'db="postgres://localhost/app"');
+    expect(codes(compile({ "app.scrml": pg(saas) }))).not.toContain("E-TENANT-SCHEMA-HAZARD");
+    expect(codes(compile({ "app.scrml": pg(saas.replace("now()", "evil_fn()")) }))).toContain("E-TENANT-SCHEMA-HAZARD");
+    // the same Postgres built-ins on a SQLite database are not SQLite built-ins
+    expect(codes(compile({ "app.scrml": prog(saas) }))).toContain("E-TENANT-SCHEMA-HAZARD");
   });
   test("the exempt list compiles clean", () => {
     expect(codes(compile({ "app.scrml": prog(ASSETS, "CREATE INDEX ix ON assets (name)", "ALTER TABLE assets ADD COLUMN extra TEXT",

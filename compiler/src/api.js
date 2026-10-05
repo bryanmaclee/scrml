@@ -2997,7 +2997,7 @@ function _compileScrmlImpl(options = {}) {
   const compilationColumns = compilationTenant.tables.size > 0 ? compilationSchemaColumns(metaFiles) : new Map();
   for (const fileAST of metaFiles) {
     const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
-    const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns));
+    const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
     collectErrors("TENANT-SCHEMA", diags, fp);
   }
 
