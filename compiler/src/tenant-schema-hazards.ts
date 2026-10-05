@@ -76,7 +76,16 @@ export interface SchemaHazard {
  * w = bare word · q = quoted identifier · s = string literal (t = its content)
  * n = number · p = punctuation · b = statement boundary (a `?{` / `}` wrapper edge)
  */
-interface Tok { k: "w" | "q" | "s" | "n" | "p" | "b"; t: string; up: string; at: number; sql: boolean }
+interface Tok {
+  k: "w" | "q" | "s" | "n" | "p" | "b"; t: string; up: string; at: number; sql: boolean;
+  /**
+   * A quoted form whose extent depends on the dialect, so this lexer cannot model it
+   * exactly: a backslash inside a quote (MySQL escapes it; SQLite and Postgres do not)
+   * or a Postgres `E'…'` / `U&'…'` string. Where one sits, a later token may be code in
+   * one dialect and string text in another — the checker charges it (fail-closed).
+   */
+  odd?: boolean;
+}
 
 type CommentMode = "skip" | "skip-nested" | "content";
 
@@ -92,8 +101,8 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
   let i = from;
   let wrap = sql0 ? 1 : 0;      // `?{` wrappers open
   let braces = 0;               // `{` opened inside the current wrapper (a `${`)
-  const push = (k: Tok["k"], t: string, at: number): void => {
-    out.push({ k, t, up: k === "w" ? t.toUpperCase() : t, at, sql: wrap > 0 });
+  const push = (k: Tok["k"], t: string, at: number, odd = false): void => {
+    out.push({ k, t, up: k === "w" ? t.toUpperCase() : t, at, sql: wrap > 0, ...(odd ? { odd: true } : {}) });
   };
   const comment = (start: number, end: number, cFrom: number, cTo: number): void => {
     // `content` mode reads a comment's text as declarations (a commented-out one counts).
@@ -133,7 +142,9 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
         if (text[j] === "'") break;
         s += text[j++];
       }
-      push("s", s, i);
+      const prefixed = (/[Ee]/.test(text[i - 1] ?? "") && !WORD_CHAR.test(text[i - 2] ?? " ")) ||
+        (text[i - 1] === "&" && /[Uu]/.test(text[i - 2] ?? ""));
+      push("s", s, i, prefixed || s.includes("\\") || j >= to);
       i = Math.min(j + 1, to);
       continue;
     }
@@ -145,7 +156,7 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
         if (text[j] === '"') break;
         s += text[j++];
       }
-      push("q", s, i);
+      push("q", s, i, s.includes("\\") || j >= to);
       i = Math.min(j + 1, to);
       continue;
     }
@@ -264,6 +275,13 @@ function statementEnd(toks: Tok[], i: number): number {
   return toks.length;
 }
 
+/** True when token `i` cannot continue the current statement: `;`, a wrapper edge, the next declaration, or the end. */
+function endsDeclaration(toks: Tok[], i: number): boolean {
+  const t = toks[i];
+  if (t === undefined || t.k === "b" || isP(t, ";") || isW(t, "CREATE")) return true;
+  return t.k === "w" && !t.sql && isP(toks[i + 1], "{");
+}
+
 /** Index just past the `)` matching the `(` at `i`, or -1. */
 function closeParen(toks: Tok[], i: number): number {
   let depth = 0;
@@ -322,14 +340,16 @@ function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<
     if (t.k === "p" && t.t === "${") interp = true;
     if ((t.k === "w" || t.k === "q") && tainted.has(t.t.toLowerCase())) names.add(t.t.toLowerCase());
     if (t.k === "s") for (const n of stringMentions(t.t, tainted)) names.add(n);
-    if (t.k === "w" && isP(toks[k + 1], "(") && !NOT_A_CALL.has(t.up)) {
+    // A callee may be QUOTED (`"query_to_xml"(…)` is a call in Postgres; `[f](…)` in
+    // SQLite) — a quoted name is never a keyword, and is case-exact.
+    if ((t.k === "w" || t.k === "q") && isP(toks[k + 1], "(") && !(t.k === "w" && NOT_A_CALL.has(t.up))) {
       const prev = toks[k - 1];
       if (isP(prev, ".")) {
         calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`);
         continue;
       }
       if (prev && prev.k === "w" && TABLE_BEFORE_PAREN.has(prev.up)) continue;
-      if (!ALLOWED_CALLS.has(t.t.toLowerCase())) calls.push(t.t);
+      if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
     }
   }
   return { names: [...names], calls, interp };
@@ -439,8 +459,17 @@ function parseCreate(toks: Tok[], i: number): Decl {
     const tbl = o < toks.length ? readName(toks, o + 1) : null;
     if (!tbl) { base.unreadable = "the table it is declared ON could not be read"; return base; }
     base.on = tbl.name;
-    // The body: a SQLite / MySQL `BEGIN … END` (CASE … END nests), a Postgres
-    // `EXECUTE FUNCTION f()`, or a MySQL single statement after FOR EACH ROW.
+    // The body: a SQLite / MySQL `BEGIN … END`, a Postgres `EXECUTE FUNCTION f()`, or
+    // a MySQL single statement after FOR EACH ROW.
+    //
+    // ⚑ KEYWORDS ARE NOT RESERVED IN SQLITE. `begin`, `end`, `execute`, `case` are
+    // ordinary column names there (a `WHEN NEW.begin = 1` clause, an
+    // `INSERT INTO audit (v, end)` statement), so a bare keyword word is never by
+    // itself a structural boundary: BEGIN / EXECUTE start the body only where a body
+    // can start (not after `.`; EXECUTE only before FUNCTION / PROCEDURE), and the body
+    // closes only at an END that ends a statement list (after `;`) AND is itself the
+    // end of the CREATE (before `;`, a wrapper edge, the next declaration, or the end).
+    // Whatever such a reading leaves unread is charged by the caller (`trailing`).
     let depth = 0;
     let b = tbl.next;
     for (; b < toks.length; b++) {
@@ -448,7 +477,9 @@ function parseCreate(toks: Tok[], i: number): Decl {
       if (t.k === "b") break;
       if (isP(t, "(")) depth++;
       else if (isP(t, ")")) depth = Math.max(0, depth - 1);
-      else if (depth === 0 && (isW(t, "BEGIN") || isW(t, "EXECUTE") || isP(t, ";"))) break;
+      else if (depth === 0 && isP(t, ";")) break;
+      else if (depth === 0 && !isP(toks[b - 1], ".") &&
+        (isW(t, "BEGIN") || (isW(t, "EXECUTE") && (isW(toks[b + 1], "FUNCTION") || isW(toks[b + 1], "PROCEDURE"))))) break;
     }
     const head: [number, number] = [tbl.next, b];
     if (isW(toks[b], "EXECUTE")) {
@@ -460,17 +491,20 @@ function parseCreate(toks: Tok[], i: number): Decl {
       return base;
     }
     if (isW(toks[b], "BEGIN")) {
-      let d = 0;
-      let e = b;
-      for (; e < toks.length; e++) {
-        const t = toks[e];
-        if (t.k === "b") break;
-        if (isW(t, "BEGIN") || isW(t, "CASE")) d++;
-        else if (isW(t, "END")) { d--; if (d === 0) break; }
+      // The LAST qualifying END before the next declaration or wrapper edge: a nested
+      // `BEGIN … END;` block (MySQL) or a following `END` cannot cut the body short;
+      // reading too far only over-reads (fail-closed).
+      let e = toks.length;
+      let k2 = b + 1;
+      for (; k2 < toks.length; k2++) {
+        const t = toks[k2];
+        if (t.k === "b" || isW(t, "CREATE") || (t.k === "w" && !t.sql && isP(toks[k2 + 1], "{"))) break;
+        if (isW(t, "END") && isP(toks[k2 - 1], ";") && endsDeclaration(toks, k2 + 1)) e = k2;
       }
-      if (e >= toks.length || toks[e].k === "b") {
-        base.end = e;
-        base.region = [head[0], e];
+      if (e === toks.length) {
+        // No closing END before the boundary: read up to it, charge it unclosed.
+        base.end = k2;
+        base.region = [head[0], k2];
         base.unreadable = "its `BEGIN … END` body is not closed";
         return base;
       }
@@ -567,6 +601,21 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     const t = toks[i];
     if (isW(t, "CREATE")) {
       const d = parseCreate(toks, i);
+      // Structural fail-closed: a parse that stopped before its statement's end left text
+      // the checker never read (an identifier spelled like a keyword closing a body early,
+      // a nested block, a dialect form). That text belongs to the declaration and is
+      // unattributable — charged, and read for names, up to the next declaration.
+      if (!endsDeclaration(toks, d.end)) {
+        let j = d.end;
+        while (j < toks.length && !(toks[j].k === "b" || isW(toks[j], "CREATE") ||
+          (toks[j].k === "w" && !toks[j].sql && isP(toks[j + 1], "{")))) j++;
+        if (d.unreadable === null) {
+          const seen = toks.slice(d.end, Math.min(j, d.end + 4)).map((t) => t.t).join(" ");
+          d.unreadable = `text after where its reading stopped was not read (\`${seen}…\`)`;
+        }
+        d.end = j;
+        d.region = [d.region[0], j];
+      }
       decls.push(d);
       for (let k = i; k < Math.max(d.end, i + 1); k++) consumed[k] = 1;
       if (d.kind === "table" && d.cols && d.name) contexts.push({ from: d.cols[0], to: d.cols[1], table: d.name });
@@ -718,6 +767,10 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     // reads as `CREATE x VIEW`); a CREATE of no known object kind is that artifact, and
     // the comment-free readings own the live statement.
     if (declsOnly && !KNOWN_OBJECTS.has(d.object ?? "")) continue;
+    // A row-security POLICY restricts what a role sees; it runs no write and moves no
+    // row, and §14.8.11 expects hand-authored policies beside the tier's own
+    // (`scrml_tenant_iso` "never touches a hand-authored one"). Not a hazard.
+    if (d.object === "POLICY") continue;
     if (r.names.length || r.interp) {
       const mods = ["VIRTUAL", "FOREIGN"].filter((m) => d.flags.has(m)).join(" ");
       out.push({ kind: "statement", object: `CREATE ${mods ? `${mods} ` : ""}${d.object ?? "?"} ${shown}`.trim(), tables: r.names.length ? tenantsUnder(r.names) : allTenant,
@@ -748,7 +801,10 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       if (g.leader === "ALTER" && g.target !== null) {
         // ALTER TABLE <t> …: naming its own target is fine — unless it RENAMEs a tenant table
         // (the renamed table no longer carries the name the floor scopes).
-        const renames = toks.slice(g.start, g.end).some((t) => isW(t, "RENAME"));
+        // A TABLE rename is `RENAME TO` (a column may be NAMED `rename`; `RENAME [COLUMN] a TO b`
+        // renames a column).
+        let renames = false;
+        for (let k = g.start; k < g.end; k++) if (isW(toks[k], "RENAME") && isW(toks[k + 1], "TO")) renames = true;
         hits = hits.filter((n) => n !== g.target || renames);
         // a REFERENCES target is the foreign-key rule's business
         const refTargets = new Set<string>();
@@ -815,6 +871,19 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
         why: `${ends.map((n) => `\`${n}\``).join(" and ")} ${ends.length > 1 ? "are" : "is"} tenant-scoped, and the database applies \`${actions.join("` / `")}\` ` +
           `to every matching row, whichever tenant owns it — a write the floor never sees` });
     }
+  }
+  // 5. A quoted form whose extent depends on the dialect (a backslash inside a quote, an
+  //    `E'…'` / `U&'…'` string, an unterminated quote): where lexers disagree, text that is
+  //    code to one database is string data to another, and the reading above may have
+  //    missed it. Charged inside SQL and inside any declaration — never guessed.
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (!t.odd) continue;
+    if (!t.sql && !decls.some((d) => k >= d.start && k < d.end)) continue;
+    out.push({ kind: "statement", object: "a quoted literal", tables: allTenant, unattributable: true, offset: t.at,
+      why: "a backslash escape, an `E'…'` / `U&'…'` string or an unclosed quote — databases disagree on where it ends, " +
+        "so the checker cannot tell what SQL follows it" });
+    break;
   }
   // Backstop: an action the REFERENCES reading above did not consume is unattributable.
   for (let k = 0; k < toks.length; k++) {

@@ -190,6 +190,82 @@ describe("fail-closed — what the checker cannot attribute is charged, never tr
   });
 });
 
+// S455 review (S239 of defab9de8, PA-reproduced): SQLite does not reserve `end`, `begin`,
+// `execute`, `rename`, …, so a column NAMED like a keyword must never close or skip a parse.
+// Executed by the reviewer on defab9de8: the `audit (v, end)` trigger compiled clean and
+// tenant A's INSERT INTO config copied BOTH tenants' asset names into `audit`.
+describe("keyword-spelled identifiers never end or skip a parse (S455 review HIGH)", () => {
+  const AUDIT_END = "CREATE TABLE audit (v TEXT, end TEXT)";
+  test("the reviewer's repro: an `end` column inside the trigger body", () => {
+    const hs = hazards(ASSETS, CONFIG, AUDIT_END,
+      "CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN INSERT INTO audit (v, end) SELECT name, 'x' FROM assets; END");
+    expect(hs.map((h) => `${h.kind}:${h.object}`)).toContain("trigger:t_cfg");
+  });
+  test("quoted and unquoted `end` / `begin` / `case` columns, and `END` in a CASE expression", () => {
+    for (const body of [
+      `INSERT INTO audit (v, "end") SELECT name, 'x' FROM assets;`,
+      `INSERT INTO audit (begin) SELECT name FROM assets;`,
+      `INSERT INTO audit ("case") SELECT name FROM assets;`,
+      `UPDATE audit SET v = CASE WHEN 1 THEN 'a' END; UPDATE audit SET v = (SELECT name FROM assets);`,
+      `UPDATE audit SET end = 1; UPDATE audit SET v = (SELECT name FROM assets);`,
+    ]) {
+      const hs = hazards(ASSETS, CONFIG, `CREATE TRIGGER t AFTER INSERT ON config BEGIN ${body} END`);
+      expect(hs.length).toBeGreaterThan(0);
+    }
+  });
+  test("a `begin` / `execute` column in the WHEN clause does not start the body early", () => {
+    expect(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config WHEN NEW.begin = 1 BEGIN UPDATE assets SET cost = 0; END"))
+      .toHaveLength(1);
+    const hs = hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config WHEN NEW.execute = 1 BEGIN UPDATE assets SET cost = 0; END");
+    expect(kinds(hs)).toEqual(["trigger:t"]);
+  });
+  test("an `end` column in a trigger that touches only non-tenant tables is quiet (no false positive)", () => {
+    expect(hazards(ASSETS, CONFIG, AUDIT_END,
+      "CREATE TRIGGER t AFTER INSERT ON config BEGIN INSERT INTO audit (v, end) VALUES (NEW.k, 'x'); END")).toEqual([]);
+  });
+  test("a nested BEGIN … END; block does not cut the body short (read to the last END)", () => {
+    const hs = hazards(ASSETS, CONFIG,
+      "CREATE TRIGGER t AFTER INSERT ON config BEGIN BEGIN UPDATE config SET v = 1; END; UPDATE assets SET cost = 0; END");
+    expect(hs.some((h) => h.kind === "trigger" && h.object === "t")).toBe(true); // the body is read to its LAST END
+  });
+  test("an END that does not end the CREATE is not a close — the trigger is charged unclosed, never passed", () => {
+    const hs = hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN UPDATE config SET v = 1; END junk UPDATE config SET v = 2");
+    expect(hs.map((h) => `${h.object}:${h.unattributable}`)).toEqual(["t:true"]);
+    // …and a following declaration is still read on its own
+    const hs2 = hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN UPDATE config SET v = 1; END", "CREATE VIEW vw AS SELECT * FROM assets");
+    expect(kinds(hs2)).toEqual(["view:vw"]);
+  });
+  test("a column named `rename` is not a table rename; `RENAME TO` is", () => {
+    expect(hazards(ASSETS, "ALTER TABLE assets ADD COLUMN rename TEXT")).toEqual([]);
+    expect(hazards(ASSETS, "ALTER TABLE assets RENAME COLUMN name TO title")).toEqual([]);
+    expect(hazards(ASSETS, "ALTER TABLE assets RENAME TO archive")).toHaveLength(1);
+  });
+  test("a view whose columns are spelled `end` / `as` / `begin` is read to its end", () => {
+    expect(kinds(hazards(ASSETS, CONFIG, "CREATE VIEW v (end, begin) AS SELECT k AS end, v AS begin FROM config UNION SELECT name, name FROM assets")))
+      .toEqual(["view:v"]);
+  });
+  test("a QUOTED callee is a call (`\"query_to_xml\"(…)`)", () => {
+    expect(kinds(hazards(ASSETS, CONFIG, `CREATE VIEW v AS SELECT "query_to_xml"('sel' || 'ect 1', true, false, '') AS x FROM config`)))
+      .toEqual(["view:v:unattributable"]);
+  });
+});
+
+describe("string forms the lexer does not model exactly are charged (S455 review)", () => {
+  test("a Postgres E'…' string, or a backslash inside a quote, inside SQL", () => {
+    expect(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT E'it\\'s' AS a FROM config").some((h) => h.object === "a quoted literal")).toBe(true);
+    expect(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT 'a\\' AS a FROM config").some((h) => h.object === "a quoted literal")).toBe(true);
+  });
+  test("plain standard strings are fine", () => {
+    expect(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT 'it''s' AS a, 'e' AS b FROM config")).toEqual([]);
+  });
+});
+
+describe("a row-security POLICY is not a hazard (§14.8.11 expects hand-authored policies)", () => {
+  test("CREATE POLICY on a tenant table", () => {
+    expect(hazards(ASSETS, "CREATE POLICY p ON assets USING (tenant_id = current_setting('scrml.tenant', true))")).toEqual([]);
+  });
+});
+
 describe("comments — read three ways, the union is charged", () => {
   test("a comment inside the declaration does not hide it", () => {
     expect(kinds(hazards(ASSETS, "CREATE /* x */ VIEW v AS SELECT * FROM assets"))).toEqual(["view:v"]);
@@ -273,6 +349,10 @@ describe("end to end — each r4 reproducer is refused at compile with E-TENANT-
       run("go", "UPDATE va SET name = 'pwned-by-A' WHERE id = 2"), "trigger `t_v`"],
     M1: [[CONFIG, "CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, cfg TEXT REFERENCES config(k) ON DELETE CASCADE, tenant_id TEXT)"],
       run("go", "DELETE FROM config WHERE k = 'c'"), "ON DELETE CASCADE"],
+    // S455 review HIGH (executed by the reviewer on defab9de8: compiled clean, A read B's names)
+    END_COLUMN: [[ASSETS, "CREATE TABLE config (k TEXT, v TEXT)", "CREATE TABLE audit (v TEXT, end TEXT)",
+      "CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN INSERT INTO audit (v, end) SELECT name, 'x' FROM assets; END"],
+      run("go", "INSERT INTO config (k, v) VALUES ('a', 'b')"), "trigger `t_cfg`"],
     VIEW: [[ASSETS, "CREATE VIEW all_assets AS SELECT * FROM assets"],
       read("go", "SELECT id, name, tenant_id FROM all_assets ORDER BY id"), "view `all_assets`"],
   };
