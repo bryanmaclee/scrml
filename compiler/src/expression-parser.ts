@@ -334,6 +334,210 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
 }
 
 // ---------------------------------------------------------------------------
+// Handled operands in expression position (§19.8.3 / §19.4.3, S454)
+// ---------------------------------------------------------------------------
+//
+// A `?{}` query is a failable expression everywhere (§19.8.3), and a `!{}`
+// handler may follow a failable expression in ANY value position (§19.4.3,
+// "Handling in a value position"): a declaration initializer, an assignment's
+// right-hand side, an argument, a `return` operand, an operand of an operator,
+// a condition. The statement parser only builds these as structured nodes when
+// they are the whole right-hand side of a declaration / assignment / return; a
+// `?{}` or a `!{}` anywhere else (a `match` scrutinee, an `if` condition, inside
+// parentheses) reaches this parser as raw text. Before this, the `?{}` became an
+// opaque placeholder codegen could not resolve (`null /* sql-ref unresolved */`)
+// and the `!{` made the whole expression a parse error emitted verbatim.
+//
+// `extractHandledOperands` runs on the raw expression text BEFORE any other
+// preprocessing, and replaces
+//   - each `?{ … }`         with  `__scrml_sql_ref__("<source>")`
+//   - each postfix `!{ … }` with  ` .__scrml_guard__("<source>")`
+// Both carry their exact source as a string literal, so nothing is lost to the
+// operator preprocessing (`not`, `is`, `::`, …), and acorn decides what the
+// handler applies to: a member-call binds to the whole postfix chain on its
+// left, exactly as `!{}` does (`f(x).y !{ … }` handles `f(x).y`).
+// `__scrml_sql_ref__(…)` converts to a `sql-ref` carrying `raw`; the guard stays
+// a member call whose callee property is GUARD_MARKER (guardCallArmsRaw reads
+// it back). A `!{` is only a handler when it FOLLOWS an operand — `!{…}` at the
+// start of an operand is logical-not of an object literal and is left alone.
+// An unbalanced block leaves the text untouched, so the existing unbalanced-`?{`
+// diagnostic (E-SQL-008) still fires from replaceSqlBlockPlaceholder.
+
+/** Placeholder callee for an expression-position `?{…}` query. */
+export const SQL_REF_MARKER = "__scrml_sql_ref__";
+/** Placeholder member-call name for an expression-position `!{…}` handler. */
+export const GUARD_MARKER = "__scrml_guard__";
+
+/**
+ * Scan a `{ … }` block whose `{` is at `openIdx`. Template-literal / string
+ * aware (an embedded `${ … }` nests). Returns the index just past the matching
+ * `}`, or -1 when the block is unbalanced.
+ */
+function scanBalancedBraceBlock(input: string, openIdx: number): number {
+  type Frame = { kind: "js"; depth: number } | { kind: "template" } | { kind: "single" } | { kind: "double" };
+  const stack: Frame[] = [{ kind: "js", depth: 1 }];
+  let i = openIdx + 1;
+  const n = input.length;
+  while (i < n) {
+    const top = stack[stack.length - 1];
+    const c = input[i];
+    if (top.kind === "single" || top.kind === "double") {
+      if (c === "\\") { i += 2; continue; }
+      if ((top.kind === "single" && c === "'") || (top.kind === "double" && c === "\"")) stack.pop();
+      i++;
+      continue;
+    }
+    if (top.kind === "template") {
+      if (c === "\\") { i += 2; continue; }
+      if (c === "`") { stack.pop(); i++; continue; }
+      if (c === "$" && input[i + 1] === "{") { stack.push({ kind: "js", depth: 1 }); i += 2; continue; }
+      i++;
+      continue;
+    }
+    if (c === "`") { stack.push({ kind: "template" }); i++; continue; }
+    if (c === "'") { stack.push({ kind: "single" }); i++; continue; }
+    if (c === "\"") { stack.push({ kind: "double" }); i++; continue; }
+    if (c === "{") { top.depth++; i++; continue; }
+    if (c === "}") {
+      top.depth--;
+      i++;
+      if (top.depth === 0) {
+        stack.pop();
+        if (stack.length === 0) return i;
+      }
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * A JS string literal holding `s`. `?{` and `<` are written as `\u` escapes so
+ * the later text passes that are not string-aware (the `?{` placeholder scan and
+ * the `<#id>` ref rewrite in parseExpression) cannot match inside the literal;
+ * the literal's VALUE is still exactly `s`.
+ */
+function markerLiteral(s: string): string {
+  return JSON.stringify(s).replace(/\?\{/g, "\\u003f{").replace(/</g, "\\u003c");
+}
+
+/** The last non-whitespace character of `s`, or "" when there is none. */
+function lastNonWs(s: string): string {
+  for (let k = s.length - 1; k >= 0; k--) {
+    if (!/\s/.test(s[k])) return s[k];
+  }
+  return "";
+}
+
+/**
+ * Replace expression-position `?{…}` queries and postfix `!{…}` handlers with
+ * placeholder calls carrying their source text (see the section comment above).
+ * Returns `input` unchanged when it holds neither, or when a block is unbalanced.
+ */
+export function extractHandledOperands(input: string): string {
+  if (!input || (input.indexOf("?{") === -1 && input.indexOf("!{") === -1)) return input;
+  type Frame = { kind: "js"; depth: number } | { kind: "template" } | { kind: "single" } | { kind: "double" };
+  const stack: Frame[] = [{ kind: "js", depth: 0 }];
+  let out = "";
+  let i = 0;
+  const n = input.length;
+  let changed = false;
+  while (i < n) {
+    const top = stack[stack.length - 1];
+    const c = input[i];
+    if (top.kind === "single" || top.kind === "double") {
+      if (c === "\\") { out += input.slice(i, i + 2); i += 2; continue; }
+      if ((top.kind === "single" && c === "'") || (top.kind === "double" && c === "\"")) stack.pop();
+      out += c; i++;
+      continue;
+    }
+    if (top.kind === "template") {
+      if (c === "\\") { out += input.slice(i, i + 2); i += 2; continue; }
+      if (c === "`") { stack.pop(); out += c; i++; continue; }
+      if (c === "$" && input[i + 1] === "{") { stack.push({ kind: "js", depth: 1 }); out += "${"; i += 2; continue; }
+      out += c; i++;
+      continue;
+    }
+    // js context
+    if (c === "`") { stack.push({ kind: "template" }); out += c; i++; continue; }
+    if (c === "'") { stack.push({ kind: "single" }); out += c; i++; continue; }
+    if (c === "\"") { stack.push({ kind: "double" }); out += c; i++; continue; }
+    if (c === "?" && input[i + 1] === "{") {
+      const end = scanBalancedBraceBlock(input, i + 1);
+      if (end < 0) return input;
+      out += `${SQL_REF_MARKER}(${markerLiteral(input.slice(i, end))})`;
+      i = end;
+      changed = true;
+      continue;
+    }
+    if (c === "!" && input[i + 1] === "{" && /[A-Za-z0-9_$)\]}`'"]/.test(lastNonWs(out))) {
+      const end = scanBalancedBraceBlock(input, i + 1);
+      if (end < 0) return input;
+      out += ` .${GUARD_MARKER}(${markerLiteral(input.slice(i, end))})`;
+      i = end;
+      changed = true;
+      continue;
+    }
+    if (c === "{") { top.depth++; out += c; i++; continue; }
+    if (c === "}") {
+      top.depth--;
+      out += c; i++;
+      if (top.depth === 0 && stack.length > 1) stack.pop(); // close of a template `${ … }`
+      continue;
+    }
+    out += c; i++;
+  }
+  return changed ? out : input;
+}
+
+/**
+ * The inverse of extractHandledOperands: rewrite every placeholder in `text`
+ * back to its source (`__scrml_sql_ref__("?{…}")` → `?{…}`,
+ * ` .__scrml_guard__("!{…}")` → ` !{…}`). Used for every escape-hatch raw and
+ * template-literal raw sliced out of the preprocessed text, so an opaque
+ * region (an arrow's block body, a function expression) carries the author's
+ * source — which the escape-hatch consumers (the E-SQL-009 arrow-body scan, the
+ * text rewriters) were written against — never a placeholder.
+ */
+export function restoreHandledOperands(text: string): string {
+  if (!text || (text.indexOf(SQL_REF_MARKER) === -1 && text.indexOf(GUARD_MARKER) === -1)) return text;
+  const re = new RegExp(`(\\s*\\.\\s*${GUARD_MARKER}|${SQL_REF_MARKER})\\s*\\(\\s*"`, "g");
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const litStart = m.index + m[0].length - 1; // the opening `"`
+    let j = litStart + 1;
+    while (j < text.length && text[j] !== "\"") j += text[j] === "\\" ? 2 : 1;
+    let close = j + 1;
+    while (close < text.length && /\s/.test(text[close])) close++;
+    if (j >= text.length || text[close] !== ")") continue;
+    let value: string;
+    try { value = JSON.parse(text.slice(litStart, j + 1)); } catch { continue; }
+    out += text.slice(last, m.index) + (m[1] === SQL_REF_MARKER ? value : ` ${value}`);
+    last = close + 1;
+    re.lastIndex = last;
+  }
+  return out + text.slice(last);
+}
+
+/**
+ * When `node` is an expression-position handler placeholder
+ * (`<operand> .__scrml_guard__("!{ … }")`), return the handler's source text
+ * (`"!{ … }"`); otherwise null. The operand is `node.callee.object`.
+ */
+export function guardCallArmsRaw(node: ExprNode | null | undefined): string | null {
+  if (!node || node.kind !== "call") return null;
+  const callee = node.callee;
+  if (!callee || callee.kind !== "member" || callee.property !== GUARD_MARKER || callee.optional) return null;
+  if (node.args.length !== 1) return null;
+  const arg = node.args[0] as ExprNode;
+  if (!arg || arg.kind !== "lit" || typeof arg.value !== "string") return null;
+  return arg.value.startsWith("!{") ? arg.value : null;
+}
+
+// ---------------------------------------------------------------------------
 // Parse utilities
 // ---------------------------------------------------------------------------
 
@@ -2586,7 +2790,7 @@ export function esTreeToExprNode(
       let templateRaw = "";
       if (typeof tplStart === "number" && typeof tplEnd === "number"
           && rawSource && tplStart >= 0 && tplEnd <= rawSource.length && tplStart < tplEnd) {
-        templateRaw = rawSource.slice(tplStart, tplEnd);
+        templateRaw = restoreHandledOperands(rawSource.slice(tplStart, tplEnd));
       }
       // Defensive fallback: if we couldn't slice the source, reconstruct from
       // quasis + expressions via astring (best-effort) so `raw` is at least
@@ -2780,6 +2984,11 @@ export function esTreeToExprNode(
         // `raw: "not"`. The gauntlet-phase3 walker already suppresses direct
         // operands of these absence operators (isAbsenceOp check), so the
         // synthetic RHS is never inspected as a forbidden-source-token.
+        // §19.8.3 — an expression-position `?{…}` (extractHandledOperands). The
+        // sql-ref keeps its source text so codegen can lower it to a real query.
+        if (calleeName === SQL_REF_MARKER && rawArgs.length === 1 && (rawArgs[0] as ESNode).type === "Literal" && typeof (rawArgs[0] as ESNode).value === "string") {
+          return { kind: "sql-ref", span, nodeId: -1, raw: (rawArgs[0] as ESNode).value as string } satisfies SqlRefExpr;
+        }
         if (calleeName === "__scrml_is_not_not__") {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
@@ -3114,7 +3323,9 @@ function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): Escap
     kind: "escape-hatch",
     span,
     nativeKind: node.type,
-    raw: rawSource,
+    // S454 — an opaque region carries the author's `?{}` / `!{}` source, not
+    // the extractHandledOperands placeholders.
+    raw: restoreHandledOperands(rawSource),
   } satisfies EscapeHatchExpr;
 }
 
@@ -3233,6 +3444,11 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
 
   // Apply scrml-specific preprocessing to convert `is`/`match` etc.
   let processed = trimmed;
+
+  // §19.8.3 / §19.4.3 — a `?{}` query and a postfix `!{}` handler written
+  // INSIDE an expression become placeholder calls carrying their source text,
+  // BEFORE the scrml operator preprocessing can rewrite their contents.
+  processed = extractHandledOperands(processed);
 
   // Preprocessing for scrml-specific operators
   processed = preprocessForAcorn(processed, { tildeActive: opts?.tildeActive }, _notDetector);
@@ -3556,6 +3772,13 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "call": {
+      // §19.8.3 / §19.4.3 — a handled operand `X !{ … }` in an expression
+      // position (see extractHandledOperands) round-trips to its source form,
+      // so a re-parse of this text yields the same guard.
+      const guardRaw = guardCallArmsRaw(node);
+      if (guardRaw !== null && node.callee.kind === "member") {
+        return `${emitReceiverRT(node.callee.object)} ${guardRaw}`;
+      }
       const callee = emitReceiverRT(node.callee);
       const args = node.args.map(a => emitStringFromTree(a as ExprNode)).join(", ");
       const sep = node.optional ? "?." : "";
@@ -3608,7 +3831,9 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "sql-ref":
-      return `?{ /* sql */ }`;
+      // A sql-ref built from an expression-position `?{…}` carries its source
+      // text (extractHandledOperands); round-trip it so a re-parse keeps the query.
+      return typeof node.raw === "string" && node.raw.length > 0 ? node.raw : `?{ /* sql */ }`;
 
     case "input-state-ref":
       return `<#${node.name}>`;

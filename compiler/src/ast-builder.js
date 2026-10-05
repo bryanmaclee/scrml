@@ -18309,6 +18309,32 @@ function handlerStmtsContainGuard(node, seen = new Set()) {
 
 const _handlerCheckStmtIds = { next: HANDLER_STMT_ID_BASE + 750_000_000 };
 
+const _guardArmStmtIds = { next: HANDLER_STMT_ID_BASE + 800_000_000 };
+
+/**
+ * §19.4.3 / §19.8.3 (S454) — the arms of a `!{ … }` handler that sits INSIDE an
+ * expression (a `match` scrutinee, an `if` condition, a parenthesized operand).
+ * The expression parser carries such a handler as its exact source text
+ * (expression-parser `extractHandledOperands`); codegen recovers the arms here
+ * with the SAME statement parser that builds a statement-level guard, so the
+ * arm grammar (patterns, payload binders, block bodies, `fail` re-raise) is one
+ * grammar, not two. `rawBang` is the handler text, `!{ … }`. Returns the
+ * `LogicArm[]`, or null when the handler does not parse as one guard (the
+ * caller then refuses the site loudly). The nodes are fresh (their own id range).
+ */
+export function parseGuardArmsFromRaw(rawBang, filePath) {
+  if (typeof rawBang !== "string" || !rawBang.trim().startsWith("!{")) return null;
+  const res = parseHandlerStatementListCore(
+    { kind: "expr", raw: `_scrml_guard_operand ${rawBang.trim()}`, span: { file: filePath, start: 0, end: 0, line: 1, col: 1 } },
+    filePath, _guardArmStmtIds, null, 0, 1, 1,
+  );
+  if (!res || !Array.isArray(res.stmts) || res.stmts.length !== 1) return null;
+  if (res.parseErrors.some(isFatalHandlerParseError)) return null;
+  const g = res.stmts[0];
+  if (!g || g.kind !== "guarded-expr" || !Array.isArray(g.arms) || g.arms.length === 0) return null;
+  return g.arms;
+}
+
 /**
  * §19.4.3 (S440) — the statement view of an event-handler value FOR CHECKING
  * ONLY, independent of which codegen path the value takes. A one-statement,
