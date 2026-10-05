@@ -38,7 +38,8 @@
  * arm, a handler REFERENCE (`onclick=f`), a handled call whose `!{}` covers neither `.Transport` nor
  * a catch-all (a `! E` callee's handler naming only E's variants), a `match` on such a call, a
  * `?` on one (§19.9.10: the enclosing enum must declare `Transport(t: ServerCallError)`), and a
- * call in a FUNCTION of a module / route file (not an application entry): §19.9.10 F5 makes
+ * call in a FUNCTION of a module / route file (not an application entry, or any file that declares
+ * an `export` — stdlib modules are `<program>`-rooted and export): §19.9.10 F5 makes
  * "remote" a whole-program fact, and the importing program may place that function on the server.
  *
  * Not touched: a server→server call (the caller is server-placed), a `<request>` body's call, a
@@ -291,6 +292,19 @@ export function armsCoverTransport(arms) {
   return false;
 }
 
+/** Visit every object node once. */
+function walkObjects(root, fn) {
+  const seen = new WeakSet();
+  const stack = [root];
+  while (stack.length) {
+    const n = stack.pop();
+    if (!n || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    if (!Array.isArray(n)) fn(n);
+    for (const k of Object.keys(n)) if (k !== "parent" && n[k] && typeof n[k] === "object") stack.push(n[k]);
+  }
+}
+
 /** Is the identifier `name` read anywhere in the ExprNode? */
 function mentionsIdent(node, name) {
   let hit = false;
@@ -520,7 +534,11 @@ export function fixClientServerCall(source, opts = {}) {
       if (/\bfunction\b|\bserver\b|\bimport\b/.test(source)) block(0, `${before.error ?? "impl#1 built no tree for this file"} — calls of server functions here are not located; check by hand`);
       return none;
     }
-    const isEntry = opts.entry !== false;
+    // A file that exports anything is a module whatever its root: its functions can be called by
+    // an importing program (stdlib modules are `<program>`-rooted and export).
+    let exportsSomething = false;
+    walkObjects(before.ast, (n) => { if (n.kind === "export-decl") exportsSomething = true; });
+    const isEntry = opts.entry !== false && !exportsSomething;
     const sites = collectSites(before.ast, before.ri, before.files, isEntry);
     const edits = [];
     const listed = new Set();

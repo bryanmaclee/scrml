@@ -224,6 +224,18 @@ describe("client-server-call — sites LISTED for a human (never rewritten)", ()
     expect(reasons(r).some((x) => /module \/ route file.*whole-program/.test(x))).toBe(true);
   });
 
+  test("a `<program>`-rooted file that EXPORTS is a module too (stdlib's shape): function bodies are listed", () => {
+    const src = program([
+      "  ${ export function go() {",
+      "      touch()",
+      "  } }",
+      "  <button onclick=go()>Go</button>",
+    ]);
+    const r = fix(src);
+    expect(r.changed).toBe(false);
+    expect(reasons(r).some((x) => /module \/ route file/.test(x))).toBe(true);
+  });
+
   test("a `${…}` handler value that reads `event` stays as written", () => {
     const r = fix(program(["  <button onclick=${ @count = getN() + event.detail }>A</button>"]));
     expect(r.changed).toBe(false);
