@@ -40,7 +40,7 @@
       <noteBody>    = ""
 
       function lookupUser(email) {
-        return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get()
+        return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get() !{ _ :> not }
       }
 
       // postNote is server-side (writes to DB). Returns nothing —

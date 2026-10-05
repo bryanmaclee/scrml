@@ -128,7 +128,7 @@
                     AND (${@selectedCategory} IS NULL OR c.id = ${@selectedCategory})
                 ORDER BY p.created_at DESC
                 LIMIT ${@pageSize} OFFSET ${(@page - 1) * @pageSize}
-            `}.all()
+            `}.all() !{ _ :> [] }
             @products = rows
         }
 
@@ -142,7 +142,7 @@
         // Every loadProducts() call re-prepares. This is a performance gap.
 
         server function loadCategories() {
-            let rows = ?{`SELECT id, name, slug FROM categories ORDER BY name ASC`}.all()
+            let rows = ?{`SELECT id, name, slug FROM categories ORDER BY name ASC`}.all() !{ _ :> [] }
             @categories = rows
         }
 
@@ -153,7 +153,7 @@
                 WHERE
                     (${@searchQuery} IS NULL OR ${@searchQuery} = '' OR p.name LIKE '%' || ${@searchQuery} || '%')
                     AND (${@selectedCategory} IS NULL OR c.id = ${@selectedCategory})
-            `}.get()
+            `}.get() !{ _ :> not }
             return row.total
         }
     }

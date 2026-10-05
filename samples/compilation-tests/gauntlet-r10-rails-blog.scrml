@@ -100,7 +100,7 @@
                 LEFT JOIN tags t ON t.id = pt.tag_id
                 WHERE (${tagFilter} IS NULL OR t.name = ${tagFilter})
                 ORDER BY p.created_at DESC
-            `}.all()
+            `}.all() !{ _ :> [] }
             return rows
         }
 
@@ -120,13 +120,13 @@
                 INNER JOIN post_tags pt ON pt.tag_id = t.id
                 WHERE pt.post_id = ${postId}
                 ORDER BY t.name ASC
-            `}.all()
+            `}.all() !{ _ :> [] }
             return tags
         }
 
         // Load all tags for the sidebar/filter — Rails: Tag.all.order(:name)
         server function loadAllTags() {
-            let tags = ?{`SELECT id, name FROM tags ORDER BY name ASC`}.all()
+            let tags = ?{`SELECT id, name FROM tags ORDER BY name ASC`}.all() !{ _ :> [] }
             return tags
         }
 

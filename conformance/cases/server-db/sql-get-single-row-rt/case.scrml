@@ -3,7 +3,7 @@ ${
     type User:struct = { id: number, name: string }
     <current> = not
     function loadOne() : User {
-        return ?{`SELECT id, name FROM users`}.get()
+        return ?{`SELECT id, name FROM users`}.get() !{ _ :> not }
     }
 }
 <button id="load" onclick={ @current = loadOne() !{ .Transport(_) :> { return } } }>Load</>

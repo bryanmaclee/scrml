@@ -3,7 +3,7 @@ ${
     type Widget:struct = { id: number, label: string }
     <rows> : Widget[] = []
     function loadAll() : Widget[] {
-        return ?{`SELECT id, label FROM widgets`}.all()
+        return ?{`SELECT id, label FROM widgets`}.all() !{ _ :> [] }
     }
 }
 <button id="load" onclick={ @rows = loadAll() !{ .Transport(_) :> { return } } }>Load</>

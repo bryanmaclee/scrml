@@ -4,7 +4,7 @@
 < db src="./test.db" protect="password_hash" tables="users">
 ${
   server function getUser(id) {
-    return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get()
+    return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get() !{ _ :> not }
   }
 }
 <div>

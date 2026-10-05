@@ -352,7 +352,11 @@ describe("§7 E2E — examples/17-schema-migrations.scrml", () => {
         // inline SELECT (closes W-DEAD-FUNCTION on lookupUser; richer
         // example showing cross-function call). lookupUser's body emits a
         // real tagged template for `?{`SELECT id, display_name ...`}.get()`.
-        expect(output.serverJs).toContain("(await _scrml_sql`SELECT id, display_name FROM users WHERE email = ${email}`)[0] ?? null");
+        // S455 (scrml fix sql-failable, §19.8.3 R11): the query is now handled
+        // (`.get() !{ _ :> not }`), so it lowers through `_scrml_sql_attempt`
+        // (#1305) — still a real tagged template, its bound value passed as a
+        // parameter, with the `.get()` projection `[0] ?? null`.
+        expect(output.serverJs).toContain("_scrml_sql_attempt((_scrml_p) => _scrml_sql`SELECT id, display_name FROM users WHERE email = ${_scrml_p[0]}`, [email], (_scrml_rows) => (_scrml_rows)[0] ?? null)");
       }
       if (output.clientJs) {
         expect(output.clientJs).not.toMatch(/sql-ref:-?\d+/);

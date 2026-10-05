@@ -48,19 +48,19 @@
         // scrml's Promise.all compilation is genuinely good here.
 
         server function fetchUsers() {
-            return ?{`SELECT id, name, email, created_at FROM users ORDER BY created_at DESC LIMIT 50`}.all()
+            return ?{`SELECT id, name, email, created_at FROM users ORDER BY created_at DESC LIMIT 50`}.all() !{ _ :> [] }
         }
 
         server function fetchOrders() {
             return ?{`SELECT o.id, o.product, o.qty, o.status, u.name as customer
                       FROM orders o JOIN users u ON o.user_id = u.id
-                      ORDER BY o.created_at DESC LIMIT 50`}.all()
+                      ORDER BY o.created_at DESC LIMIT 50`}.all() !{ _ :> [] }
         }
 
         server function fetchMetrics() {
-            let totalUsers = ?{`SELECT COUNT(*) as count FROM users`}.get()
-            let totalOrders = ?{`SELECT COUNT(*) as count FROM orders`}.get()
-            let pendingOrders = ?{`SELECT COUNT(*) as count FROM orders WHERE status = 'pending'`}.get()
+            let totalUsers = ?{`SELECT COUNT(*) as count FROM users`}.get() !{ _ :> not }
+            let totalOrders = ?{`SELECT COUNT(*) as count FROM orders`}.get() !{ _ :> not }
+            let pendingOrders = ?{`SELECT COUNT(*) as count FROM orders WHERE status = 'pending'`}.get() !{ _ :> not }
             return { totalUsers: totalUsers.count, totalOrders: totalOrders.count, pendingOrders: pendingOrders.count }
         }
 
@@ -70,7 +70,7 @@
                VALUES (${product}, ${qty}, 'pending', 1, datetime('now'))`}.run()
             return ?{`SELECT o.id, o.product, o.qty, o.status, u.name as customer
                       FROM orders o JOIN users u ON o.user_id = u.id
-                      ORDER BY o.created_at DESC LIMIT 50`}.all()
+                      ORDER BY o.created_at DESC LIMIT 50`}.all() !{ _ :> [] }
         }
 
         // --- Load all three sources on mount ---

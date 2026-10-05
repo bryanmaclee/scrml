@@ -2,7 +2,7 @@
 ${
     <top> = []
     function topTwo() {
-        return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all()
+        return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all() !{ _ :> [] }
     }
     function onLoad() {
         @top = topTwo() !{ .Transport(_) :> { return } }

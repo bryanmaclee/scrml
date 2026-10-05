@@ -4,7 +4,7 @@
 < db src="./test.db" tables="posts">
 ${
   server function getPosts(category) {
-    return ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all()
+    return ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all() !{ _ :> [] }
   }
 }
 <div>

@@ -4,7 +4,7 @@ ${
     <userId> = 1
     <userData> : User | not = not
     function loadUser(id: number) : User | not {
-        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
     }
     function pick(id: number) : User | not {
         return loadUser(id)

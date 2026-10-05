@@ -5,7 +5,7 @@
   <db src="app.db" protect="passwordHash, pin" tables="users">
     ${
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         const r = u.reveal("pin")
         return r.pin * 3
       }

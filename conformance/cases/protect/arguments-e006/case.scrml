@@ -8,7 +8,7 @@
         return arguments[0]
       }
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return first(u.passwordHash)
       }
     }

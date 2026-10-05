@@ -2,7 +2,7 @@
 ${
     <totals> = []
     function regionTotals() {
-        return ?{`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region`}.all()
+        return ?{`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region`}.all() !{ _ :> [] }
     }
     function onLoad() {
         @totals = regionTotals() !{ .Transport(_) :> { return } }

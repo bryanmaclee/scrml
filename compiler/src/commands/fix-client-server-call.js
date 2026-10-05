@@ -141,7 +141,7 @@ function skipComment(src, i) {
 }
 
 /** Index just past the bracket group opening at `i` (`(` / `[` / `{`), or -1 when unclosed. */
-function skipBalanced(src, i) {
+export function skipBalanced(src, i) {
   const stack = [];
   let k = i;
   while (k < src.length) {
@@ -213,7 +213,7 @@ function locateCall(src, node, name, from, limit, filePath) {
 }
 
 /** Does the statement end right after `end`? (only spaces/tabs, then a newline, `;`, `}`, a comment or EOF.) */
-function endsStatement(src, end) {
+export function endsStatement(src, end) {
   let k = end;
   while (src[k] === " " || src[k] === "\t") k++;
   if (k >= src.length) return true;
@@ -222,7 +222,7 @@ function endsStatement(src, end) {
   return c === "/" && (src[k + 1] === "/" || src[k + 1] === "*");
 }
 
-function lineOf(src, off) {
+export function lineOf(src, off) {
   let n = 1;
   for (let i = 0; i < off && i < src.length; i++) if (src[i] === "\n") n++;
   return n;
@@ -247,7 +247,7 @@ function commonDir(paths) {
 }
 
 /** Build the scratch project once per file: `{ dir, target, run(text) }`. */
-function scratchProject(filePath, source, auxSources) {
+export function scratchProject(filePath, source, auxSources) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-csc-"));
   const self = resolve(filePath);
   const files = new Map([[self, source]]);
@@ -270,7 +270,7 @@ function scratchProject(filePath, source, auxSources) {
  * Compile `text` (at the scratch target) and capture Route Inference. Returns `{ codes, ri, ast }`
  * — `ast` is the target file's AST as RI saw it — or `{ error }`.
  */
-function compileWithRI(proj, text) {
+export function compileWithRI(proj, text) {
   writeFileSync(proj.target, text);
   const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
   let cap = null;
@@ -381,7 +381,7 @@ export function armsCoverTransport(arms) {
 }
 
 /** Visit every object node once. */
-function walkObjects(root, fn) {
+export function walkObjects(root, fn) {
   const seen = new WeakSet();
   const stack = [root];
   while (stack.length) {

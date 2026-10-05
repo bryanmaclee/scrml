@@ -94,7 +94,7 @@ ${
     // There is no unified "receive" with pattern matching across all events.
     ${
         server function loadRooms() {
-            let rows = ?{`SELECT id, name, description FROM rooms ORDER BY name ASC`}.all()
+            let rows = ?{`SELECT id, name, description FROM rooms ORDER BY name ASC`}.all() !{ _ :> [] }
             return rows
         }
 
@@ -110,7 +110,7 @@ ${
                 WHERE m.room_id = ${roomId}
                 ORDER BY m.inserted_at ASC
                 LIMIT 100
-            `}.all()
+            `}.all() !{ _ :> [] }
             return rows
         }
 
@@ -158,7 +158,7 @@ ${
                 SELECT username FROM typing_status
                 WHERE room_id = ${roomId}
                 AND last_typed > datetime('now', '-5 seconds')
-            `}.all()
+            `}.all() !{ _ :> [] }
             return rows
         }
 

@@ -44,7 +44,7 @@
         // imported across files when it uses `?{}`. The `server` modifier is
         // not needed — the `?{}` block escalates the fn structurally.
         function loginServer(emailArg, passwordArg) {
-            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${emailArg}`}.get()
+            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${emailArg}`}.get() !{ _ :> not }
             if (row is not) return { error: "Invalid email or password" }
 
             const ok = verifyPassword(passwordArg, row.password_hash)

@@ -27,6 +27,12 @@
  *                   calls from impl#1's Route Inference + AST and gates each file (re-parse, same
  *                   codes); a site it cannot rewrite is listed. It reports an INFO (`infos`) at each
  *                   client-function-body site: callers no longer abort.
+ *   sql-failable    §19.8.3 (S451 R11, item 5(a)): an UNHANDLED `?{}` outside a `!` function →
+ *                   `?{…}.get() !{ _ :> not }` / `.all() !{ _ :> [] }` / `.run() !{ _ :> {} }` (the
+ *                   superseded silent meaning written out). Chained fourth; its own module
+ *                   (fix-sql-failable.js) locates the queries from impl#1's AST + Route Inference and
+ *                   gates each file (re-parse, same codes); a site it cannot rewrite is listed. It
+ *                   reports an INFO at every rewritten site: on impl#1 a failure there used to throw.
  *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
  *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
  *                   only when the cell is never written AND its initializer reads no cell;
@@ -83,6 +89,7 @@ import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
 import { fixArmPipe } from "./fix-arm-pipe.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
+import { fixSqlFailable } from "./fix-sql-failable.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -100,7 +107,7 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
@@ -108,6 +115,7 @@ export const S66_RULES = Object.freeze([
   "pre-migrate",
   "arm-pipe",
   "client-server-call",
+  "sql-failable",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -1291,7 +1299,7 @@ export function fixS66(source, opts = {}) {
     blockers.push(...ap.blockers);
   }
 
-  /** INFO lines (not blockers): today only client-server-call's "callers no longer abort". */
+  /** INFO lines (not blockers): client-server-call's "callers no longer abort", sql-failable's "a failure used to throw". */
   const infos = [];
   if (enabled.has("client-server-call")) {
     // §19.9.10 (S454 F8) — an unhandled client call of a server function → a local `.Transport`
@@ -1301,6 +1309,15 @@ export function fixS66(source, opts = {}) {
     applied.push(...cs.applied);
     blockers.push(...cs.blockers);
     infos.push(...cs.infos);
+  }
+  if (enabled.has("sql-failable")) {
+    // §19.8.3 (S451 R11) — an unhandled `?{}` outside a `!` function → the superseded silent
+    // meaning written out. Chained like client-server-call: its own location + per-file gate.
+    const sf = fixSqlFailable(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    if (sf.changed) src = sf.output;
+    applied.push(...sf.applied);
+    blockers.push(...sf.blockers);
+    infos.push(...sf.infos);
   }
 
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).

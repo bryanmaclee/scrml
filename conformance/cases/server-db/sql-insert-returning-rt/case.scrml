@@ -11,7 +11,7 @@
         return ?{`INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`}.all()
     }
     function countNotes() {
-        return ?{`SELECT COUNT(*) AS n FROM notes`}.get()
+        return ?{`SELECT COUNT(*) AS n FROM notes`}.get() !{ _ :> not }
     }
     function onAdd() {
         @inserted = addNote("second") !{ .Transport(_) :> { return } }

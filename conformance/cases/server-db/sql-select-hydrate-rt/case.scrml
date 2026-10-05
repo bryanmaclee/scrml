@@ -3,7 +3,7 @@ ${
     type User:struct = { id: number, name: string }
     <users> : User[] = []
     function loadUsers() : User[] {
-        return ?{`SELECT id, name FROM users`}.all()
+        return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
     }
 }
 <button id="load" onclick={ @users = loadUsers() !{ .Transport(_) :> { return } } }>Load</>

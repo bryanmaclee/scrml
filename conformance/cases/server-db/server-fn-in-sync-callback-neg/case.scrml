@@ -2,12 +2,12 @@
   <db src="./app.db" protect="password_hash" tables="users">
     ${
       function lookupOne(h) {
-        const r = ?{`SELECT id FROM users WHERE password_hash = ${h}`}.all()
+        const r = ?{`SELECT id FROM users WHERE password_hash = ${h}`}.all() !{ _ :> [] }
         return r.length > 0
       }
 
       function loginServer(emailArg) {
-        const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all()
+        const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all() !{ _ :> [] }
         const ranked = []
         for (const row of rows) {
           if (lookupOne(row.password_hash)) { ranked.push(row) }
