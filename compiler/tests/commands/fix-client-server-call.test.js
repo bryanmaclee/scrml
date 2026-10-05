@@ -3,7 +3,7 @@
  * S454 F8). change-id: s454-scrml-fix-f8-r11.
  *
  * An UNHANDLED client call of a server function not declared `!` gets the local handler
- * `!{ .Transport(t) :> { return } }` (braced arm body, §18.2); an unbraced / `${…}` handler value is
+ * `!{ .Transport(_) :> { return } }` (braced arm body, §18.2); an unbraced / `${…}` handler value is
  * written braced; a client-function-body site carries an INFO (callers no longer abort). Sites the
  * rule cannot rewrite are LISTED. Every rewritten file passes a gate (re-parse + same impl#1 codes).
  */
@@ -89,7 +89,7 @@ describe("client-server-call — rewrites", () => {
   });
 
   test("the arm body is BRACED — never a bare `:> return` (§18.2 arm-body ::= expression | block-body)", () => {
-    expect(H).toBe("!{ .Transport(t) :> { return } }");
+    expect(H).toBe("!{ .Transport(_) :> { return } }"); // `_`: both implementations accept it (S454 fix round)
     const r = fix(program(["  <button onclick=touch()>A</button>"]));
     expect(r.output).not.toMatch(/:>\s*return\b/);
   });
@@ -213,19 +213,101 @@ describe("client-server-call — sites LISTED for a human (never rewritten)", ()
     expect(rs.some((x) => /handler \/ match arm/.test(x))).toBe(true);
   });
 
-  test("a module / route file (entry: false): function bodies are listed (placement is whole-program, F5); handler values are still rewritten", () => {
-    const src = program([
+  // A file with no top-level `<program>` (body of a route page): DECLS without the wrapper.
+  const bare = (lines) => [...DECLS, ...lines, ""].join("\n");
+
+  test("a route file with no parsed `<program>`: function bodies are listed (placement is whole-program, F5); handler values are still rewritten", () => {
+    const src = bare([
       "  ${ function go() {",
       "      touch()",
       "  } }",
       "  <button onclick=go()>Go</button>",
       "  <button onclick=touch()>T</button>",
     ]);
-    const r = fix(src, { entry: false });
+    const r = fixClientServerCall(src, { filePath: "/virtual/pages/home.scrml" });
     expect(r.output).toContain("      touch()\n  } }");
     expect(r.output).toContain(`<button onclick={ touch() ${H} }>T</button>`);
     expect(r.infos).toEqual([]);
     expect(reasons(r).some((x) => /module \/ route file.*whole-program/.test(x))).toBe(true);
+  });
+
+  test("a `<program` inside a COMMENT does not make a route file an entry (decided from the parsed tree)", () => {
+    const src = ["// mounted inside the app's <program> — see app.scrml", bare([
+      "  ${ function go() {",
+      "      touch()",
+      "  } }",
+      "  <button onclick=go()>Go</button>",
+    ])].join("\n");
+    const r = fixClientServerCall(src, { filePath: "/virtual/pages/home.scrml", entry: true });
+    expect(r.changed).toBe(false);
+    expect(reasons(r).some((x) => /module \/ route file/.test(x))).toBe(true);
+  });
+
+  test("a guarded declaration inside a loop, or captured by a closure, is listed (impl#1 lowers it to a shared `var`)", () => {
+    const r = fix(program([
+      "  <out> = \"\"",
+      "  ${ function loop() {",
+      "      const fns = []",
+      "      for (const i of [1, 2, 3]) {",
+      "          const v = getN()",
+      "          fns.push(() => v)",
+      "      }",
+      "      @out = fns.map((f) => f()).join(\",\")",
+      "  } }",
+      "  ${ function cap() {",
+      "      const w = getN()",
+      "      const g = () => w",
+      "      @out = \"\" + g()",
+      "  } }",
+      "  <button onclick=loop()>L</button>",
+      "  <button onclick=cap()>C</button>",
+    ]));
+    expect(r.changed).toBe(false);
+    const rs = reasons(r).filter((x) => /lowers a guarded declaration to `var`/.test(x));
+    expect(rs.some((x) => /`v` inside a nested block/.test(x))).toBe(true);
+    expect(rs.some((x) => /`w` which a closure captures/.test(x))).toBe(true);
+  });
+
+  test("calls impl#1 batches with Promise.all are listed (a `.Transport` return would serialize the batch)", () => {
+    // The corpus shape (conformance server-fn/cell-assign-independent-writes-batched): two provably
+    // read-only server functions written in sibling statements — impl#1 emits one Promise.all.
+    const src = [
+      "${",
+      "    <a> : number = 0",
+      "    <b> : number = 0",
+      "    server fn one(n: number) : number {",
+      "        return n",
+      "    }",
+      "    server fn two(n: number) : number {",
+      "        return n",
+      "    }",
+      "    function indep() {",
+      "        @a = one(1)",
+      "        @b = two(2)",
+      "    }",
+      "}",
+      "<button id=\"indep\" onclick=indep()>i</>",
+      "",
+    ].join("\n");
+    const r = fix(src);
+    expect(r.changed).toBe(false);
+    expect(reasons(r).filter((x) => /Promise\.all batch/.test(x)).length).toBe(2);
+  });
+
+  test("a call inside a statement-position `match` arm is listed (arms are found structurally)", () => {
+    const r = fix(program([
+      "  type K:enum = { One, Two }",
+      "  <k>: K = .One",
+      "  ${ function pick() {",
+      "      match @k {",
+      "          .One :> { touch() }",
+      "          .Two :> { @msg = \"two\" }",
+      "      }",
+      "  } }",
+      "  <button onclick=pick()>P</button>",
+    ]));
+    expect(r.changed).toBe(false);
+    expect(reasons(r).some((x) => /handler \/ match arm/.test(x))).toBe(true);
   });
 
   test("a `<program>`-rooted file that EXPORTS is a module too (stdlib's shape): function bodies are listed", () => {

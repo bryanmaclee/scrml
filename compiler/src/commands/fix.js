@@ -11,7 +11,7 @@
  * does NOT implement the §66 opener dialect. So:
  *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, arm-pipe (§19.4.5, the
  *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), client-server-call (§19.9.10, an
- *     unhandled client call of a server function → `!{ .Transport(t) :> { return } }` —
+ *     unhandled client call of a server function → `!{ .Transport(_) :> { return } }` —
  *     commands/fix-client-server-call.js), program-wrap, program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
  *     (entry + resolved imports) and withdrawn on any diagnostic change.
  *   - `--s66` — adds the §66 declaration rules (rhs-decl, const-cell, engine-simple). Their output
@@ -53,7 +53,7 @@ const HELP = `scrml fix <file|dir> [options]
 
 Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; arm-pipe: a
 \`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; client-server-call: an
-unhandled client call of a server function → \`f() !{ .Transport(t) :> { return } }\`, §19.9.10).
+unhandled client call of a server function → \`f() !{ .Transport(_) :> { return } }\`, §19.9.10).
 A construct that is not mechanically rewritable is left untouched and reported; an "info" line
 marks a rewrite whose meaning differs (a client function's callers no longer abort).
 

@@ -22,7 +22,7 @@
  *                   own lines). Chained second; its own module (fix-arm-pipe.js) locates the arms
  *                   from impl#1's arm records and verifies each file (identical artifacts).
  *   client-server-call  §19.9.10 (S451; S454 F8): an UNHANDLED client call of a server function
- *                   not declared `!` → `f(…) !{ .Transport(t) :> { return } }` (an event-handler value
+ *                   not declared `!` → `f(…) !{ .Transport(_) :> { return } }` (an event-handler value
  *                   braced). Chained third; its own module (fix-client-server-call.js) locates the
  *                   calls from impl#1's Route Inference + AST and gates each file (re-parse, same
  *                   codes); a site it cannot rewrite is listed. It reports an INFO (`infos`) at each

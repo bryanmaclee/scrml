@@ -12,14 +12,14 @@
  * At an UNHANDLED client call `f(…)` of a server-placed `f` that is not declared `!`, the rule writes
  * the old behaviour out — a failed call stopped the rest of the code from running:
  *
- *     f(…)            →  f(…) !{ .Transport(t) :> { return } }
- *     @x = f(…)       →  @x = f(…) !{ .Transport(t) :> { return } }
- *     const v = f(…)  →  const v = f(…) !{ .Transport(t) :> { return } }
+ *     f(…)            →  f(…) !{ .Transport(_) :> { return } }
+ *     @x = f(…)       →  @x = f(…) !{ .Transport(_) :> { return } }
+ *     const v = f(…)  →  const v = f(…) !{ .Transport(_) :> { return } }
  *
  * The arm body is BRACED: §18.2 `arm-body ::= expression | block-body`, and `return` is a statement,
  * not an expression (the bootstrap rejects a bare `:> return` — E-SCOPE-001; measured S454 Phase 0,
  * docs/changes/s454-scrml-fix-f8-r11/progress.md). An event-handler value is written in the BRACED
- * form: `onclick=f()` → `onclick={ f() !{ .Transport(t) :> { return } } }` (impl#1 silently drops a
+ * form: `onclick=f()` → `onclick={ f() !{ .Transport(_) :> { return } } }` (impl#1 silently drops a
  * `!{}` written after an UNBRACED handler call — §19.4.3 carried gap). `return` is legal in a braced
  * handler: §5.2.3 makes it "the same statement grammar as a function body (§7.3)".
  *
@@ -40,7 +40,12 @@
  * arm, a handler REFERENCE (`onclick=f`), a handled call whose `!{}` covers neither `.Transport` nor
  * a catch-all (a `! E` callee's handler naming only E's variants), a `match` on such a call, a
  * `?` on one (§19.9.10: the enclosing enum must declare `Transport(t: ServerCallError)`), and a
- * call in a FUNCTION of a module / route file (not an application entry, or any file that declares
+ * guarded `const`/`let` inside a nested block / loop or captured by a closure (impl#1 lowers it to a
+ * shared function-scoped `var`), a call impl#1 runs in a Promise.all batch (read from its own
+ * emitted client JS — a `.Transport` return would serialize the batch and change what a partial
+ * failure writes), a call inside a statement-position `match` arm (`match-arm-*` nodes), and a
+ * call in a FUNCTION of a module / route file (no top-level `<program>` in the PARSED tree and a
+ * route path, or any file that declares
  * an `export` — stdlib modules are `<program>`-rooted and export): §19.9.10 F5 makes
  * "remote" a whole-program fact, and the importing program may place that function on the server.
  *
@@ -80,13 +85,16 @@ import { buildAST } from "../ast-builder.js";
 import { parseExprToNode, deepEqualExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "../expression-parser.ts";
 import { compileScrml } from "../api.js";
 import { runRI } from "../route-inference.ts";
+import { parse as acornParse } from "acorn";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
 
 export const CLIENT_SERVER_CALL_RULE = "client-server-call";
 /** The handler the rule writes after the call (S454 F8; braced arm body — §18.2). */
-export const TRANSPORT_HANDLER = "!{ .Transport(t) :> { return } }";
+// The binder is `_`: the arm does not read the ServerCallError (both implementations accept
+// `.Transport(_)` — measured S454 fix round; impl#1 then emits no unused binding).
+export const TRANSPORT_HANDLER = "!{ .Transport(_) :> { return } }";
 
 const LIFECYCLE_TAGS = new Set(["onMount", "onmount", "effect", "timer", "poll", "timeout", "engine", "onDismount"]);
 const DECL_KINDS = new Set(["state-decl", "const-decl", "let-decl", "tilde-decl"]);
@@ -284,7 +292,76 @@ function compileWithRI(proj, text) {
   if (!cap) return { error: "impl#1 stopped before Route Inference on this file", codes };
   const files = cap.args.files ?? [];
   const me = files.find((f) => resolve(f.filePath ?? f.ast?.filePath ?? "") === resolve(proj.target));
-  return { codes, ri: cap.res, files, ast: me ? (me.ast ?? me) : null };
+  let clientJs = null;
+  for (const [k, v] of r?.outputs ?? new Map()) if (resolve(k) === resolve(proj.target) && typeof v?.clientJs === "string") clientJs = v.clientJs;
+  return { codes, ri: cap.res, files, ast: me ? (me.ast ?? me) : null, clientJs };
+}
+
+/**
+ * impl#1's OWN batching decision (codegen/scheduling.ts `scheduleStatements`, §13.2): which server
+ * calls it emitted as members of a `Promise.all([...])` batch. Read from the emitted client JS of
+ * the BEFORE compile — not re-derived. Returns `{ inFn: Set<"fn::callee">, inHandler: Set<callee> }`,
+ * or null when the client JS cannot be parsed (the caller then rewrites nothing in the file).
+ */
+export function promiseAllBatches(clientJs) {
+  const out = { inFn: new Set(), inHandler: new Set() };
+  // No batch can exist in output that never calls Promise.all (also covers client JS impl#1 emitted
+  // malformed — that file fails impl#1's own emit gate whatever this rule does).
+  if (!clientJs || !clientJs.includes("Promise.all")) return out;
+  let ast;
+  try { ast = acornParse(clientJs, { ecmaVersion: "latest", sourceType: "script", allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }); }
+  catch { try { ast = acornParse(clientJs, { ecmaVersion: "latest", sourceType: "module" }); } catch { return null; } }
+  const calleeOf = (n) => {
+    const names = [];
+    (function w(x) {
+      if (!x || typeof x !== "object") return;
+      if (Array.isArray(x)) { x.forEach(w); return; }
+      if (x.type === "CallExpression" && x.callee?.type === "Identifier") {
+        const m = /^_scrml_(?:fetch|cps)_(.+)_\d+$/.exec(x.callee.name);
+        if (m) names.push(m[1]);
+      }
+      if (/Function/.test(x.type ?? "")) return;
+      for (const k of Object.keys(x)) if (k !== "loc" && k !== "start" && k !== "end") w(x[k]);
+    })(n);
+    return names;
+  };
+  (function walk(x, ctx) {
+    if (!x || typeof x !== "object") return;
+    if (Array.isArray(x)) { for (const y of x) walk(y, ctx); return; }
+    let here = ctx;
+    if (x.type === "FunctionDeclaration" && x.id?.name) {
+      const m = /^_scrml_(.+)_\d+$/.exec(x.id.name);
+      here = m ? { fn: m[1] } : ctx;
+    } else if (x.type === "Property" && /^_scrml_attr_/.test(String(x.key?.value ?? x.key?.name ?? ""))) {
+      here = { handler: true };
+    }
+    if (x.type === "CallExpression" && x.callee?.type === "MemberExpression" && x.callee.object?.name === "Promise" && x.callee.property?.name === "all") {
+      const arr = x.arguments?.[0];
+      for (const el of arr?.type === "ArrayExpression" ? arr.elements : []) {
+        for (const c of calleeOf(el)) {
+          if (here?.fn) out.inFn.add(`${here.fn}::${c}`);
+          else out.inHandler.add(c);
+        }
+      }
+    }
+    for (const k of Object.keys(x)) if (k !== "loc" && k !== "start" && k !== "end") walk(x[k], here);
+  })(ast, null);
+  return out;
+}
+
+/** Is the identifier `name` read inside a closure (lambda / nested function) anywhere under `scope`? */
+function capturedByClosure(scope, name, self) {
+  let hit = false;
+  const seen = new WeakSet();
+  (function w(x, inClosure) {
+    if (hit || !x || typeof x !== "object" || seen.has(x)) return;
+    seen.add(x);
+    if (Array.isArray(x)) { for (const y of x) w(y, inClosure); return; }
+    const closure = inClosure || ((x.kind === "lambda" || x.kind === "function-decl") && x !== self);
+    if (closure && (x.kind === "ident" || x.kind === "variable-ref") && x.name === name) { hit = true; return; }
+    for (const k of Object.keys(x)) if (k !== "parent" && k !== "span") w(x[k], closure);
+  })(scope, false);
+  return hit;
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +436,7 @@ function wholeExprOf(stmt) {
  * Walk the file's AST; classify every call of a server-placed function.
  * Returns `{ sites }`; a site is `{ action: "rewrite" | "list" | "skip", ... }`.
  */
-function collectSites(ast, ri, files, isEntry = true) {
+function collectSites(ast, ri, files, isEntry = true, batches = { inFn: new Set(), inHandler: new Set() }) {
   const boundary = new Map(); // name -> "server" | "client" | "mixed"
   for (const [, f] of ri?.routeMap?.functions ?? []) {
     if (!f?.functionName) continue;
@@ -408,7 +485,7 @@ function collectSites(ast, ri, files, isEntry = true) {
       if (armsCoverTransport(guard.arms)) return { ...base, action: "skip", why: "handled" };
       return {
         ...base, action: "list", kind: "handled-not-covering",
-        reason: `the \`!{}\` on this call of \`${name}\` names neither \`.Transport(t)\` nor a catch-all — a client call of a server function also fails with \`Transport(t: ServerCallError)\` (§19.9.10); add the arm you want (e.g. \`.Transport(t) :> { return }\`)`,
+        reason: `the \`!{}\` on this call of \`${name}\` names neither \`.Transport(t)\` nor a catch-all — a client call of a server function also fails with \`Transport(t: ServerCallError)\` (§19.9.10); add the arm you want (e.g. \`.Transport(_) :> { return }\`)`,
       };
     }
     if (parent && (parent.kind === "match-expr" || parent.kind === "match-stmt" || parent.kind === "match-block")) {
@@ -427,7 +504,7 @@ function collectSites(ast, ri, files, isEntry = true) {
     if (special) {
       return { ...base, action: "list", kind: "special-body", reason: `a call of server function \`${name}\` inside a \`${special.kind}\` body — a \`return\` there does not mean "stop here" (e.g. E-DEFER-CONTROL-FLOW); handle it by hand (§19.9.10)` };
     }
-    if (local.some((a) => a.__cscArm)) {
+    if (local.some((a) => a.__cscArm || /^match-arm/.test(a.kind ?? ""))) {
       return { ...base, action: "list", kind: "arm", reason: `a call of server function \`${name}\` inside a handler / match arm — handle it by hand (§19.9.10)` };
     }
     if (attr && !attr.__cscHandler) {
@@ -467,6 +544,24 @@ function collectSites(ast, ri, files, isEntry = true) {
     if (stmt.kind === "return-stmt" || stmt.kind === "tilde-decl" || (stmt.kind === "bare-expr" && stmt.exprNode?.kind === "assign")) {
       const what = stmt.kind === "return-stmt" ? "a `return`'s expression" : "a reassignment";
       return { ...base, action: "list", kind: "impl1-lowering", reason: `a call of server function \`${name}\` as ${what}: impl#1 lowers a \`!{}\` there wrongly (${stmt.kind === "return-stmt" ? "the success value is not returned" : "the variable is re-declared"}), so it is not rewritten — handle it by hand (§19.9.10)` };
+    }
+    // impl#1 lowers a guarded `const`/`let` to `var` (function-scoped): inside a loop or a nested
+    // block, or captured by a closure, every iteration / closure would share ONE binding (S239
+    // review: `for (…) { const v = save(i); fns.push(() => v.n) }` → "1,2,3" becomes "3,3,3" on
+    // the success path). Such declarations are listed.
+    if (stmt.kind === "const-decl" || stmt.kind === "let-decl") {
+      const nested = local.indexOf(stmt) > 0;
+      const scope = fn ?? attr?.__cscValue ?? null;
+      if (nested || (scope && typeof stmt.name === "string" && capturedByClosure(scope, stmt.name, fn))) {
+        return { ...base, action: "list", kind: "decl-var-scoping", reason: `a call of server function \`${name}\` as the initializer of \`${stmt.name}\` ${nested ? "inside a nested block / loop" : "which a closure captures"}: impl#1 lowers a guarded declaration to \`var\`, so the binding would be shared — handle it by hand (§19.9.10)` };
+      }
+    }
+    // impl#1 BATCHES independent server calls with Promise.all (§13.2, codegen/scheduling.ts). A
+    // `.Transport` arm's `return` makes the statements a control dependency: the batch is lost, a
+    // later call is never sent when an earlier one fails, and an earlier write lands when a later
+    // one fails (S239 review). A call impl#1 batched is listed.
+    if (fn ? batches.inFn.has(`${fn.name}::${name}`) : batches.inHandler.has(name)) {
+      return { ...base, action: "list", kind: "batched", reason: `a call of server function \`${name}\` that impl#1 runs in a Promise.all batch with its independent siblings (§13.2): a \`.Transport\` arm's \`return\` would serialize them and change what is written when one fails — handle the batch by hand (§19.9.10)` };
     }
     if (fn && !isEntry) {
       // §19.9.10 F5: "remote" is a WHOLE-PROGRAM placement fact. A function in a module / route
@@ -563,8 +658,16 @@ export function fixClientServerCall(source, opts = {}) {
     // an importing program (stdlib modules are `<program>`-rooted and export).
     let exportsSomething = false;
     walkObjects(before.ast, (n) => { if (n.kind === "export-decl") exportsSomething = true; });
-    const isEntry = opts.entry !== false && !exportsSomething;
-    const sites = collectSites(before.ast, before.ri, before.files, isEntry);
+    // Entry vs module from the PARSED tree (Rule 7): a top-level `<program>` node makes an entry; a
+    // file without one is an entry only when the caller classified it so AND it is not a route
+    // file (under pages/ or routes/). A `<program` inside a comment decides nothing.
+    const topNodes = Array.isArray(before.ast?.nodes) ? before.ast.nodes : [];
+    const hasProgram = topNodes.some((n) => n && n.kind === "markup" && n.tag === "program");
+    const routeFile = /(^|[\\/])(pages|routes)[\\/]/.test(filePath);
+    const isEntry = !exportsSomething && (hasProgram || (opts.entry !== false && !routeFile));
+    const batches = promiseAllBatches(before.clientJs);
+    if (batches === null) { block(0, "impl#1's client output for this file could not be read to find its Promise.all batches — no call in this file rewritten"); return none; }
+    const sites = collectSites(before.ast, before.ri, before.files, isEntry, batches);
     const edits = [];
     const listed = new Set();
     for (const s of sites) {
@@ -668,7 +771,7 @@ export function fixClientServerCall(source, opts = {}) {
         block(uniq[0].start, `impl#1 reports different codes after the rewrite (${before.codes.join(",") || "none"} → ${after.codes.join(",") || "none"}) — no call in this file rewritten`);
         return none;
       }
-      const left = collectSites(after.ast, after.ri, after.files, isEntry).filter((s) => s.action === "rewrite").length;
+      const left = collectSites(after.ast, after.ri, after.files, isEntry, batches).filter((s) => s.action === "rewrite").length;
       const had = sites.filter((s) => s.action === "rewrite").length;
       if (left !== had - uniq.length) { block(uniq[0].start, `after the rewrite impl#1 still reads ${left} unhandled call(s) where ${had - uniq.length} were expected — no call in this file rewritten`); return none; }
     }
