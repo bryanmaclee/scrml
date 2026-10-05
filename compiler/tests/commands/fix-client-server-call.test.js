@@ -39,7 +39,7 @@ const fix = (src, opts = {}) => fixClientServerCall(src, { filePath: "/virtual/a
 const reasons = (r) => r.blockers.map((b) => b.reason);
 
 describe("client-server-call — rewrites", () => {
-  test("a client function body: statement, cell write, declaration, return — each gets the handler + an INFO", () => {
+  test("a client function body: statement, cell write, declaration — each gets the handler + an INFO; `return f()` and `x = f()` are listed (impl#1 mis-lowers them)", () => {
     const src = program([
       "  ${ function go() {",
       "      touch()",
@@ -48,6 +48,8 @@ describe("client-server-call — rewrites", () => {
       "      @msg = \"done \" + v",
       "  } }",
       "  ${ function again() {",
+      "      let w = 0",
+      "      w = getN()",
       "      return getN()",
       "  } }",
       "  <button onclick=go()>Go</button>",
@@ -58,9 +60,11 @@ describe("client-server-call — rewrites", () => {
     expect(r.output).toContain(`      touch() ${H}\n`);
     expect(r.output).toContain(`      @count = getN() ${H}\n`);
     expect(r.output).toContain(`      const v = getN() ${H}\n`);
-    expect(r.output).toContain(`      return getN() ${H}\n`);
-    expect(r.applied.length).toBe(4);
-    expect(r.infos.length).toBe(4);
+    expect(r.output).toContain(`      return getN()\n`);
+    expect(r.output).toContain(`      w = getN()\n`);
+    expect(r.applied.length).toBe(3);
+    expect(r.infos.length).toBe(3);
+    expect(reasons(r).filter((x) => /impl#1 lowers a `!\{\}` there wrongly/.test(x)).length).toBe(2);
     expect(r.infos.every((i) => i.rule === CLIENT_SERVER_CALL_RULE && /callers no longer abort/.test(i.message))).toBe(true);
     expect(r.infos.map((i) => i.line)).toEqual(r.applied.map((a) => a.line));
   });
@@ -234,6 +238,16 @@ describe("client-server-call — sites LISTED for a human (never rewritten)", ()
     const r = fix(src);
     expect(r.changed).toBe(false);
     expect(reasons(r).some((x) => /module \/ route file/.test(x))).toBe(true);
+  });
+
+  test("a bare `onsubmit=f()` is listed (impl#1 adds preventDefault only to the bare form); a braced one is rewritten", () => {
+    const r = fix(program([
+      "  <form onsubmit=touch()><button>Go</button></form>",
+      "  <form onsubmit={ touch() }><button>Go2</button></form>",
+    ]));
+    expect(r.output).toContain("<form onsubmit=touch()>");
+    expect(r.output).toContain(`<form onsubmit={ touch() ${H} }>`);
+    expect(reasons(r).some((x) => /preventDefault/.test(x))).toBe(true);
   });
 
   test("a `${…}` handler value that reads `event` stays as written", () => {

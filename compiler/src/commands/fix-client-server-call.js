@@ -23,8 +23,10 @@
  * `!{}` written after an UNBRACED handler call — §19.4.3 carried gap). `return` is legal in a braced
  * handler: §5.2.3 makes it "the same statement grammar as a function body (§7.3)".
  *
- * Positions rewritten — the call is a whole STATEMENT (an expression statement, the right-hand side
- * of a declaration / cell write / assignment, or a `return`'s expression):
+ * Positions rewritten — the call is a whole STATEMENT (an expression statement, or the right-hand
+ * side of a `const` / `let` declaration or a cell write `@x =`). NOT a `return`'s expression or a
+ * plain reassignment `x = f()`: impl#1 mis-lowers a `!{}` there (it drops the success return /
+ * re-declares the variable), so those are listed:
  *   - in the body of a CLIENT-placed function — plus an INFO per site: the local rewrite is not
  *     meaning-identical (before, the failure also aborted every awaiting caller; after, the callers
  *     continue — §19.9.10 "Migration");
@@ -62,9 +64,11 @@
  *
  *   1. impl#1's front end re-reads the rewritten file: it must build a tree, with no new block
  *      splitter error.
- *   2. impl#1 re-compiles it in its project: the diagnostic codes must be identical to before (the
- *      emitted artifacts change by design — the handler's lowering), except that
- *      W-CPS-NEEDS-FAILABLE — the lint for exactly this unhandled call — may drop.
+ *   2. impl#1 re-compiles it in its project: the diagnostic codes (errors, warnings AND the lint
+ *      channel) must be identical to before (the emitted artifacts change by design — the
+ *      handler's lowering), except that W-/E-CPS-NEEDS-FAILABLE — the lint for exactly this
+ *      unhandled call — may drop, and I-FN-PROMOTABLE (an impl#1 false positive, see
+ *      TOLERATED_NEW_CODES) may appear.
  *   3. The rewritten sites are no longer unhandled (the re-read finds `edits` fewer sites).
  * Any failure reverts the WHOLE file and reports why.
  *
@@ -90,7 +94,14 @@ const DECL_KINDS = new Set(["state-decl", "const-decl", "let-decl", "tilde-decl"
 // (impl#1 lowers a `defer { }` block to a try-stmt's `finallyNode`; the walk marks it `defer-stmt`.)
 const SPECIAL_BODY_KINDS = new Set(["defer-stmt", "when-effect", "transaction-block", "cleanup-registration", "each-block", "for-expr", "if-expr", "lift-expr"]);
 /** Codes the rewrite exists to clear (allowed to DROP after it, never to appear). */
-const CLEARED_CODES = new Set(["W-CPS-NEEDS-FAILABLE"]);
+const CLEARED_CODES = new Set(["W-CPS-NEEDS-FAILABLE", "E-CPS-NEEDS-FAILABLE"]);
+/**
+ * Codes allowed to APPEAR after the rewrite: I-FN-PROMOTABLE (an Info nudge). impl#1's purity probe
+ * does not see a server call or a cell write inside a `!{}`-guarded statement, so after the rewrite
+ * it suggests `fn` for a function that calls a server function — an impl#1 false positive, not a
+ * change the rewrite makes to the program (measured S454 Phase 2: 25 corpus files).
+ */
+const TOLERATED_NEW_CODES = new Set(["I-FN-PROMOTABLE"]);
 
 // ---------------------------------------------------------------------------
 // Source scanning (locates a span the AST names; never decides anything)
@@ -269,7 +280,7 @@ function compileWithRI(proj, text) {
     console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
     process.stdout.write = saved.out; process.stderr.write = saved.err;
   }
-  const codes = [...(r?.errors ?? []), ...(r?.warnings ?? [])].map((d) => d?.code).filter((c) => typeof c === "string").sort();
+  const codes = [...(r?.errors ?? []), ...(r?.warnings ?? []), ...(r?.lintDiagnostics ?? [])].map((d) => d?.code).filter((c) => typeof c === "string").sort();
   if (!cap) return { error: "impl#1 stopped before Route Inference on this file", codes };
   const files = cap.args.files ?? [];
   const me = files.find((f) => resolve(f.filePath ?? f.ast?.filePath ?? "") === resolve(proj.target));
@@ -329,6 +340,7 @@ function sameCodes(before, after) {
     const y = b.get(c) ?? 0;
     if (x === y) continue;
     if (CLEARED_CODES.has(c) && y < x) continue;
+    if (TOLERATED_NEW_CODES.has(c) && y > x) continue;
     return false;
   }
   return true;
@@ -438,10 +450,23 @@ function collectSites(ast, ri, files, isEntry = true) {
       if (top !== call) {
         return { ...base, action: "list", kind: "value-position", reason: `a call of server function \`${name}\` inside a larger handler expression — handle it by hand (§19.9.10)` };
       }
+      // impl#1 adds `event.preventDefault()` only to a BARE `onsubmit=f()` (the call-ref path,
+      // emit-event-wiring.ts); written braced, the form would submit natively (measured S454
+      // Phase 2: examples/19-lin-token, two samples). Not rewritten.
+      if (v.kind === "call-ref" && /^onsubmit$/i.test(attr.__cscName ?? "")) {
+        return { ...base, action: "list", kind: "onsubmit-bare", reason: `a bare \`onsubmit=${name}(…)\` handler: impl#1 calls \`event.preventDefault()\` only for this bare form, so writing it braced would let the form submit natively — handle it by hand (§19.9.10)` };
+      }
       return { ...base, action: "rewrite", kind: "handler-unbraced", call, value: v };
     }
     if (!whole) {
       return { ...base, action: "list", kind: "value-position", reason: `a call of server function \`${name}\` inside a larger expression — a value position: load it with a \`<request>\` (§13.7) or handle it by hand` };
+    }
+    // impl#1 mis-lowers a `!{}` on two statement shapes (measured S454 Phase 2): on a `return`'s
+    // expression it DROPS the success return (the function returns nothing — silent-wrong), and on
+    // a plain reassignment `x = f()` it re-declares `x` (`var x`, invalid JS). Neither is rewritten.
+    if (stmt.kind === "return-stmt" || stmt.kind === "tilde-decl" || (stmt.kind === "bare-expr" && stmt.exprNode?.kind === "assign")) {
+      const what = stmt.kind === "return-stmt" ? "a `return`'s expression" : "a reassignment";
+      return { ...base, action: "list", kind: "impl1-lowering", reason: `a call of server function \`${name}\` as ${what}: impl#1 lowers a \`!{}\` there wrongly (${stmt.kind === "return-stmt" ? "the success value is not returned" : "the variable is re-declared"}), so it is not rewritten — handle it by hand (§19.9.10)` };
     }
     if (fn && !isEntry) {
       // §19.9.10 F5: "remote" is a WHOLE-PROGRAM placement fact. A function in a module / route
@@ -468,7 +493,7 @@ function collectSites(ast, ri, files, isEntry = true) {
         if (typeof a.name === "string" && /^onserver:/i.test(a.name)) continue;
         const handler = typeof a.name === "string" && /^on/i.test(a.name);
         const braced = !!(v.handlerBlock && Array.isArray(v.handlerBlock.stmts));
-        const marker = { kind: "attr", __cscAttr: true, __cscHandler: handler, __cscBraced: braced, __cscValue: v, span: v.span };
+        const marker = { kind: "attr", __cscAttr: true, __cscHandler: handler, __cscBraced: braced, __cscValue: v, __cscName: a.name, span: v.span };
         if (handler && v.kind === "variable-ref" && typeof v.name === "string" && isServer(v.name)) {
           sites.push({ name: v.name, at: v.span?.start ?? 0, action: "list", kind: "handler-reference", reason: `a handler reference to server function \`${v.name}\` — write the call braced and handled, e.g. \`{ ${v.name}() ${TRANSPORT_HANDLER} }\` (§19.9.10)` });
           continue;
