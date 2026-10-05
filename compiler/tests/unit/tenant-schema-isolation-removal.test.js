@@ -347,11 +347,11 @@ describe("view / trigger bodies — FROM inside a call's arguments is not a tabl
     "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN SELECT substring('a' FROM evil(1)); END",
     "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN SELECT trim(BOTH FROM evil(NEW.msg)); END",
     "CREATE TRIGGER tl AFTER INSERT ON logs BEGIN SELECT lower(substring(NEW.msg FROM evil.fn(1))); END",
-  ]) test(`trigger charged: ${s}`, () => expect(bodyKinds(s)).toEqual(["trigger*"]));
+  ]) test(`trigger charged: ${s}`, () => expect(bodyKinds(s)).toEqual(["body outside the tenant SQL subset*"]));
   for (const s of [
     "CREATE VIEW v AS SELECT substring(msg FROM evil(1)) AS s FROM logs",
     "CREATE VIEW v AS SELECT trim(BOTH FROM match(msg)) FROM logs",
-  ]) test(`view charged: ${s}`, () => expect(bodyKinds(s)).toEqual(["view*"]));
+  ]) test(`view charged: ${s}`, () => expect(bodyKinds(s)).toEqual(["body outside the tenant SQL subset*"]));
   for (const s of [
     "CREATE VIEW v AS SELECT l.id, k.label FROM logs l JOIN kinds k ON k.k = l.msg WHERE l.id IN (SELECT id FROM logs WHERE msg IS NOT NULL)",
     "CREATE VIEW v AS SELECT id, (SELECT label FROM kinds WHERE k = msg) AS lab, substring(msg FROM 2 FOR 3) AS s, lower(trim(msg)) FROM logs",
@@ -475,7 +475,13 @@ describe("S239 r2 of 077b22b8 — items 1–4", () => {
   clean("1 subscript / bracket name", [
     "CREATE INDEX i ON assets ((arr[1:2]))",
     "CREATE TABLE c (a INTEGER[] CHECK (a[1] > 0), [weird name] TEXT)",
+  ]);
+  // S455 "yes, both": a view / trigger BODY is read in the tenant SQL subset, whose closed
+  // token set has no `[`, `]` or `::` — once clean here, now outside the subset (charged).
+  // Expression regions (an index / CHECK, above) keep the expression reader, which models them.
+  charged("1 subscript / bracket name in a BODY (S455 subset)", [
     "CREATE VIEW v AS SELECT [id], arr[2] FROM other",
+    "CREATE VIEW v AS SELECT id::text FROM other",
   ]);
   charged("2 body types", [
     "CREATE VIEW v AS SELECT 'x'::evil_t FROM other",
@@ -483,7 +489,7 @@ describe("S239 r2 of 077b22b8 — items 1–4", () => {
     "CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT CAST(NEW.id AS evil_t); END",
   ]);
   clean("2 body types", [
-    "CREATE VIEW v AS SELECT id::text, CAST(id AS integer), DATE '2020-01-01' FROM other WHERE id > 0 AND arr IS NOT NULL",
+    "CREATE VIEW v AS SELECT CAST(id AS text), CAST(id AS integer), DATE '2020-01-01' FROM other WHERE id > 0 AND arr IS NOT NULL",
     "CREATE TRIGGER t AFTER INSERT ON other BEGIN SELECT RAISE(ABORT, 'no') WHERE NEW.id < 0; END",
   ]);
   charged("3 system objects", [

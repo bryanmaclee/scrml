@@ -110,11 +110,28 @@ function describeChar(c: string): string {
   return `\`${c}\``;
 }
 
+/** Options for `lexTenantSubset`. */
+export interface SubsetLexOptions {
+  /**
+   * Admit `;` as a statement SEPARATOR token (`punct` `;`). Off for a query — a
+   * query is exactly one statement, so `;` is outside its subset. On ONLY for a
+   * `<schema>` trigger body (§14.8.10, S455 "yes, both"), whose `BEGIN stmt; …;
+   * END` is a statement LIST: the separator is then a token the reader sees, and
+   * the statement grammar over the tokens (`tenant-schema-hazards.ts`) holds each
+   * statement to the subset's leaders. Every other character stays outside.
+   */
+  statementSeparator?: boolean;
+}
+
 /**
  * Lex a raw `?{}` body into the closed subset token set. Fails (with the offset
  * and a reason naming the offending form) on anything outside it.
+ *
+ * ONE subset for queries AND `<schema>` bodies (§14.8.10, ruling:user-voice-scrml.md
+ * S455 "yes, both"): the tenant floor reads a query with this lexer, and
+ * `tenant-schema-hazards.ts` reads every view / trigger / rule / policy body with it.
  */
-export function lexTenantSubset(raw: string): SubsetLex {
+export function lexTenantSubset(raw: string, opts: SubsetLexOptions = {}): SubsetLex {
   const src = typeof raw === "string" ? raw : "";
   const toks: SqlTok[] = [];
   const n = src.length;
@@ -201,7 +218,7 @@ export function lexTenantSubset(raw: string): SubsetLex {
       i += 2;
       continue;
     }
-    if (PUNCT1.has(c)) {
+    if (PUNCT1.has(c) || (c === ";" && opts.statementSeparator === true)) {
       toks.push({ kind: "punct", text: c, up: c, start: i, end: i + 1 });
       i++;
       continue;

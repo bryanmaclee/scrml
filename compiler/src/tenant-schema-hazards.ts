@@ -55,13 +55,20 @@
  * tenant-scoped by the `<db>` registry rather than by `<schema>`).
  */
 
-import { TENANT_ROW_FUNCTIONS, TENANT_GROUP_AGGREGATES } from "./codegen/tenant-sql-subset.ts";
+import { TENANT_ROW_FUNCTIONS, TENANT_GROUP_AGGREGATES, lexTenantSubset } from "./codegen/tenant-sql-subset.ts";
 import { schemaTableDeclarations, DBAUTH_ROLE } from "./schema-differ.js";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
 export type SchemaHazardKind =
   | "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy" | "isolation removal"
-  | "statement not admitted in a tenant schema";
+  | "statement not admitted in a tenant schema" | "body outside the tenant SQL subset";
+
+/**
+ * The columns the compilation's `<schema>` declares, per table (lowercased name → column
+ * keys: an unquoted name lowercased, a quoted one exact). Read by the `rel.f` rule: a
+ * qualified reference must name one of these (`schemaColumnKnowledge`).
+ */
+export type SchemaColumns = ReadonlyMap<string, ReadonlySet<string>>;
 
 export interface SchemaHazard {
   kind: SchemaHazardKind;
@@ -75,6 +82,10 @@ export interface SchemaHazard {
   unattributable: boolean;
   /** Offset of the declaration in the `<schema>` body. */
   offset: number;
+  /** "body outside the tenant SQL subset": what the body belongs to (`view`, `trigger`, `policy`, …). */
+  declKind?: string;
+  /** "body outside the tenant SQL subset": the offset of the first offending token. */
+  tokenOffset?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +98,8 @@ export interface SchemaHazard {
  */
 interface Tok {
   k: "w" | "q" | "s" | "n" | "p" | "b"; t: string; up: string; at: number; sql: boolean;
+  /** Offset just past the token in the `<schema>` body (a body's raw text is sliced by it). */
+  end: number;
   /**
    * A quoted form whose extent depends on the dialect, so this lexer cannot model it
    * exactly: a backslash inside a quote (MySQL escapes it; SQLite and Postgres do not)
@@ -121,8 +134,11 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
   let wrap = sql0 ? 1 : 0;      // `?{` wrappers open
   let braces = 0;               // `{` opened inside the current wrapper (a `${`)
   const push = (k: Tok["k"], t: string, at: number, odd = false): void => {
-    out.push({ k, t, up: k === "w" ? t.toUpperCase() : t, at, sql: wrap > 0, ...(odd ? { odd: true } : {}) });
+    out.push({ k, t, up: k === "w" ? t.toUpperCase() : t, at, end: -1, sql: wrap > 0, ...(odd ? { odd: true } : {}) });
   };
+  // A token's end is where the scan resumes after it (set before the next step reads on).
+  let ended = 0;
+  const fin = (): void => { for (; ended < out.length; ended++) if (out[ended].end < 0) out[ended].end = i; };
   const comment = (start: number, end: number, cFrom: number, cTo: number): void => {
     // `content` mode reads a comment's text as declarations (a commented-out one counts).
     if (mode === "content" && cTo > cFrom) {
@@ -132,6 +148,7 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
     void start;
   };
   while (i < to) {
+    fin();
     const c = text[i];
     const c2 = text[i + 1];
     if (/\s/.test(c)) { i++; continue; }
@@ -261,6 +278,7 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
     push("p", c, i);
     i++;
   }
+  fin();
   return out;
 }
 
@@ -397,7 +415,7 @@ const ALLOWED_CALLS: ReadonlySet<string> = new Set([...TENANT_ROW_FUNCTIONS, ...
  * extension's — side-effect-free, kept. EXCLUDED: anything that can write, lock,
  * notify or run arbitrary code (`dblink*`, `pg_advisory*`, `set_config`, `lo_*`,
  * `pg_notify`, any user function). `nextval` advances a sequence — a write — and is
- * allowed ONLY directly as a column `DEFAULT` (`readRegion` `columnDefault`): that is
+ * allowed ONLY directly as a column `DEFAULT` (`expressionRegionCode` `columnDefault`): that is
  * how `serial` expands, the advance happens on an INSERT into that column's own table,
  * and a sequence counter carries no tenant's row; anywhere else it is charged.
  */
@@ -419,20 +437,6 @@ const EXPRESSION_ALLOWED_CALLS: ReadonlySet<string> = new Set([
   "sqrt", "overlay", "reverse", "repeat", "starts_with", "ascii", "chr",
 ]);
 
-interface RegionRead {
-  /** Tainted names (tenant tables, views over them) the region names. */
-  names: string[];
-  /** Calls off the allow-list. */
-  calls: string[];
-  /** A `${…}` interpolation (JavaScript — the checker cannot read it). */
-  interp: boolean;
-  /**
-   * Casts (`::t`, `CAST(… AS t)`) and typed literals (`t '…'`) whose type is not built in —
-   * a type's input function is code (S239 r2 review: the type rule is region-independent).
-   */
-  types: string[];
-}
-
 /** Whole-word occurrences of `names` inside a string literal. */
 function stringMentions(s: string, names: Iterable<string>): string[] {
   const out: string[] = [];
@@ -444,35 +448,454 @@ function stringMentions(s: string, names: Iterable<string>): string[] {
   return out;
 }
 
-/** What the tokens `[from, to)` name and call. */
-function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>): RegionRead {
+/**
+ * What a STATEMENT's tokens `[from, to)` name (tenant tables, views over them — an
+ * identifier, or a whole word inside a string literal) and whether they hold a `${…}`.
+ * For statement-level reads only (a `GRANT`'s objects, an `ALTER TABLE`); a BODY is read
+ * by `lexBody` / `bodyIssue` in the tenant SQL subset.
+ */
+function namesAndInterp(toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>): { names: string[]; interp: boolean } {
   const names = new Set<string>();
-  const calls: string[] = [];
   let interp = false;
-  // EVERY `identifier (` is a CALL unless it is one of the closed syntactic forms
-  // (`isSyntacticParen`) — at any depth, in any clause. A table reference never takes
-  // `(`: `FROM evil(1)`, `JOIN evil(1) ON true`, `(SELECT * FROM evil())` are table
-  // FUNCTIONS (S239 review of d4c4d4ac, executed: `CREATE VIEW v AS SELECT * FROM evil(1)`
-  // passed), and inside a call FROM / ON / JOIN introduce nothing (`substring('a' FROM
-  // evil(1))`, S455 PA probe of 50150700). A callee may be QUOTED (`"query_to_xml"(…)` is a
-  // call in Postgres; `[f](…)` in SQLite) — a quoted name is never a keyword, and is case-exact.
-  const types: string[] = [];
-  const castAs = castAsTokens(toks, from, to);
   for (let k = from; k < to; k++) {
     const t = toks[k];
-    if (t.k === "p" && t.t === "${") interp = true;
+    if (isP(t, "${")) interp = true;
     if ((t.k === "w" || t.k === "q") && tainted.has(t.t.toLowerCase())) names.add(t.t.toLowerCase());
     if (t.k === "s") for (const n of stringMentions(t.t, tainted)) names.add(n);
-    if (isDoubleColonAt(toks, k)) { const why = castTargetIssue(toks, k + 2); if (why) types.push(why); continue; }
-    if (castAs.has(k)) { const why = castTargetIssue(toks, k + 1); if (why) types.push(why); continue; }
-    { const why = typedLiteralIssue(toks, k); if (why) types.push(why); }
-    if (!((t.k === "w" || t.k === "q") && isP(toks[k + 1], "("))) continue;
-    if (isSyntacticParen(toks, k)) continue;
-    if (t.k === "w" && SIZED_TYPES.has(t.t.toLowerCase()) && typePositionAt(toks, k, castAs)) continue;
-    if (isP(toks[k - 1], ".")) { calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`); continue; }
-    if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
   }
-  return { names: [...names], calls, interp, types };
+  return { names: [...names], interp };
+}
+
+// ---------------------------------------------------------------------------
+// BODIES — read in the tenant SQL subset (§14.8.10, ruling:user-voice-scrml.md S455
+// "yes, both").
+//
+// A view / trigger / rule / policy body — and the query of a `CREATE TABLE … AS` — is SQL
+// the database runs on its own. Seven review rounds beat a hand-rolled reader of these
+// bodies one spelling at a time (a quoted callee, a keyword-spelled column, `FROM` inside a
+// call, a subscript holding a call, a cast to a user type, `rel.f`); the S452 durable
+// applies: after three rounds on one text classifier, change the boundary. So a body is
+// lexed by THE SAME closed token set the floor reads tenant queries in
+// (`codegen/tenant-sql-subset.ts` `lexTenantSubset`): plain identifiers, numbers, plain
+// `'…'` strings and a closed punctuation set — no quoted identifier, comment, `::`, `[`,
+// `$`, `\`, `${…}`, prefixed literal or non-ASCII character. A body that does not lex is
+// charged ("body outside the tenant SQL subset", naming the first offending token), and
+// so is one whose tokens leave the subset's reading:
+//   - a call off the function allow-list (every `identifier (` is a call unless it is one
+//     of `isSyntacticParen`'s closed syntactic forms; a qualified callee never is);
+//   - a cast / typed literal of a type that is not built in (its input function is code);
+//   - a qualified reference `rel.f` that is not a column the compilation's `<schema>`
+//     declares on `rel` — Postgres reads `rel.f` as the CALL `f(rel)` when `f` is not a
+//     column (attribute notation), so a qualified reference must resolve, through the
+//     body's own FROM bindings (or a trigger's NEW / OLD, a policy's table), to a declared
+//     column; anything else is refused (fail-closed: S455 "yes, both" residual `rel.f`);
+//   - in a trigger, anything but `BEGIN` + `;`-separated SELECT / INSERT / UPDATE / DELETE
+//     statements + `END` (the subset's statement leaders).
+// The existing hazard rules (a trigger on / naming a tenant table, a view reading one, …)
+// apply to a body INSIDE the subset; the subset decides only whether a body is readable.
+// ---------------------------------------------------------------------------
+
+/** The hazard kind for a body the subset does not read. */
+const OUTSIDE_SUBSET = "body outside the tenant SQL subset" as const;
+
+/** Where, and why, a body leaves the subset: the body offset and text of the first offending token. */
+interface OutsideSubset { at: number; token: string; why: string }
+
+/** A body lexed by the subset lexer (as schema tokens) — or the first place it leaves the subset. */
+type LexedBody = { ok: true; toks: Tok[] } | { ok: false; outside: OutsideSubset };
+
+/** The text of the token at `at` in `raw` (for the message: "first offending token `…`"). */
+function offendingText(raw: string, at: number): string {
+  const m = /^(?:--|\/\*|::|\$\$|\$\{[^}\n]{0,40}\}?|[A-Za-z_][A-Za-z0-9_]*'?|[0-9][A-Za-z0-9_.]*|[\s\S])/.exec(raw.slice(at));
+  return m ? m[0] : "";
+}
+
+/**
+ * Lex the body text `raw[from, to)` with the tenant subset's lexer. `statementList` admits
+ * `;` as a separator (a trigger's `BEGIN … END` statement list — nowhere else). A `${…}`
+ * is a bound PARAMETER in a query; in a `<schema>` it is SQL text spliced in — outside.
+ */
+function lexBody(raw: string, from: number, to: number, statementList: boolean): LexedBody {
+  const text = raw.slice(from, Math.max(from, to));
+  const lx = lexTenantSubset(text, { statementSeparator: statementList });
+  if (!lx.ok) return { ok: false, outside: { at: from + lx.at, token: offendingText(text, lx.at), why: lx.why } };
+  const toks: Tok[] = [];
+  for (const s of lx.toks) {
+    const at = from + s.start;
+    if (s.kind === "param") {
+      return { ok: false, outside: { at, token: s.text.length > 40 ? `${s.text.slice(0, 40)}…` : s.text,
+        why: "a `${…}` interpolation — in a `<schema>` it is SQL text spliced in, not a bound parameter" } };
+    }
+    const k: Tok["k"] = s.kind === "ident" ? "w" : s.kind === "str" ? "s" : s.kind === "num" ? "n" : "p";
+    const t = s.kind === "str" ? s.text.slice(1, -1).replace(/''/g, "'") : s.text;
+    toks.push({ k, t, up: k === "w" ? t.toUpperCase() : t, at, end: from + s.end, sql: true });
+  }
+  return { ok: true, toks };
+}
+
+/**
+ * SQL keywords — never an implicit alias, never a relation in a FROM position (Postgres
+ * reserved words, plus the SQLite / Postgres operator words a select item may END with:
+ * `a ISNULL` is an expression, not a column named `isnull`).
+ */
+const SQL_KEYWORDS = new Set([
+  "ALL", "ANALYSE", "ANALYZE", "AND", "ANY", "ARRAY", "AS", "ASC", "ASYMMETRIC", "BOTH", "CASE", "CAST", "CHECK",
+  "COLLATE", "COLUMN", "CONSTRAINT", "CREATE", "CURRENT_CATALOG", "CURRENT_DATE", "CURRENT_ROLE", "CURRENT_TIME",
+  "CURRENT_TIMESTAMP", "CURRENT_USER", "DEFAULT", "DEFERRABLE", "DESC", "DISTINCT", "DO", "ELSE", "END", "EXCEPT",
+  "FALSE", "FETCH", "FOR", "FOREIGN", "FROM", "GRANT", "GROUP", "HAVING", "IN", "INITIALLY", "INTERSECT", "INTO",
+  "LATERAL", "LEADING", "LIMIT", "LOCALTIME", "LOCALTIMESTAMP", "NOT", "NULL", "OFFSET", "ON", "ONLY", "OR",
+  "ORDER", "PLACING", "PRIMARY", "REFERENCES", "RETURNING", "SELECT", "SESSION_USER", "SOME", "SYMMETRIC",
+  "SYSTEM_USER", "TABLE", "THEN", "TO", "TRAILING", "TRUE", "UNION", "UNIQUE", "USER", "USING", "VARIADIC",
+  "WHEN", "WHERE", "WINDOW", "WITH", "JOIN", "LEFT", "RIGHT", "FULL", "INNER", "CROSS", "NATURAL", "OUTER",
+  "IS", "ISNULL", "NOTNULL", "LIKE", "ILIKE", "GLOB", "MATCH", "REGEXP", "SIMILAR", "BETWEEN", "ESCAPE",
+  "EXISTS", "OVER", "FILTER", "WITHIN", "NULLS", "FIRST", "LAST", "AT", "TIME", "ZONE", "SET", "VALUES",
+  "UPDATE", "DELETE", "INSERT", "BEGIN", "RAISE", "INDEXED", "TABLESAMPLE", "OF", "BY", "CONFLICT", "NOTHING",
+  "EACH", "ROW", "ROWS", "RECURSIVE", "MATERIALIZED",
+]);
+/** Words that END a FROM list at their paren depth (the next `,` is no longer a table separator). */
+const FROM_LIST_ENDERS = new Set([
+  "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "WINDOW", "SET",
+  "VALUES", "RETURNING", "SELECT", "FETCH", "FOR", "DO", "BEGIN", "END", "INSERT", "UPDATE", "DELETE", "WITH",
+  "WHEN", "THEN", "ELSE", "CASE", "CHECK",
+]);
+/** What may follow a relation (and its alias) in a FROM position — anything else means the "relation" was an expression. */
+const AFTER_RELATION = new Set([
+  "ON", "USING", "JOIN", "LEFT", "RIGHT", "FULL", "INNER", "CROSS", "NATURAL", "OUTER", "WHERE", "GROUP", "ORDER",
+  "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "WINDOW", "SET", "VALUES", "RETURNING", "SELECT",
+  "DEFAULT", "FOR", "FETCH", "END", "WITH", "INDEXED", "NOT", "TABLESAMPLE",
+]);
+
+/**
+ * The relations a body binds: alias / relation name → the relations it may denote
+ * (`null` = a relation whose columns are unknown — a three-part name, an unreadable CTE or
+ * derived table). `tablePos` = the token indices that start a relation in a FROM-list
+ * position (`FROM` / `JOIN` / `INTO` / `UPDATE` / `USING` / a `,` inside a FROM list).
+ * `columnsOf` = a bound relation's columns: a CTE's or derived table's read from its own
+ * select list (or explicit column list), anything else from the caller's `relColumns`.
+ */
+interface BodyBindings {
+  bind: Map<string, Array<string | null>>;
+  tablePos: Set<number>;
+  columnsOf: (rel: string) => ReadonlySet<string> | null;
+}
+
+/** A CTE's / derived table's relation key (never a SQL identifier: it holds NUL). */
+const LOCAL_REL = "\u0000";
+/** How a relation key reads in a message. */
+const relShown = (rel: string): string =>
+  rel.startsWith(`${LOCAL_REL}cte:`) ? `the CTE \`${rel.slice(5)}\`` : rel.startsWith(LOCAL_REL) ? "a derived table" : `\`${rel}\``;
+
+function bodyBindings(
+  toks: Tok[],
+  presets: ReadonlyArray<readonly [string, string]>,
+  relColumns: (rel: string) => ReadonlySet<string> | null,
+  shadow: ReadonlySet<string> = new Set(),
+): BodyBindings {
+  const bind = new Map<string, Array<string | null>>();
+  const add = (alias: string, rel: string | null): void => {
+    const key = alias.toLowerCase();
+    const list = bind.get(key) ?? [];
+    if (!list.includes(rel)) list.push(rel);
+    bind.set(key, list);
+  };
+  for (const [alias, rel] of presets) add(alias, rel);
+  // CTEs: `name [(cols)] AS [[NOT] MATERIALIZED] (…)`. A CTE shadows a table of its name
+  // (`WITH other AS (…) SELECT o.f FROM other o` reads the CTE), so its columns are its OWN
+  // — read from its explicit column list or its select list (the first SELECT names them).
+  const local = new Map<string, Set<string> | null>();
+  const ctes = new Map<string, string>();
+  const cteBodies: Array<[string, string[] | null, number, number]> = [];
+  for (let k = 0; k < toks.length; k++) {
+    if (toks[k].k !== "w" || SQL_KEYWORDS.has(toks[k].up)) continue;
+    let j = k + 1;
+    let explicit: string[] | null = null;
+    if (isP(toks[j], "(")) {
+      const c = closeParen(toks, j);
+      if (c === -1) continue;
+      explicit = toks.slice(j + 1, c - 1).filter((t) => t.k === "w").map((t) => t.t.toLowerCase());
+      j = c;
+    }
+    if (!isW(toks[j], "AS")) continue;
+    let o = j + 1;
+    if (isW(toks[o], "NOT") && isW(toks[o + 1], "MATERIALIZED")) o += 2;
+    else if (isW(toks[o], "MATERIALIZED")) o += 1;
+    if (!isP(toks[o], "(")) continue;
+    const name = toks[k].t.toLowerCase();
+    const key = `${LOCAL_REL}cte:${name}`;
+    ctes.set(name, key);
+    cteBodies.push([key, explicit, o, closeParen(toks, o)]);
+  }
+  // Inside a CTE body every CTE name is unknown (a recursive reference names the CTE being
+  // defined, whose columns its own first SELECT decides — never a table of that name).
+  const allShadow = new Set([...shadow, ...ctes.keys()]);
+  const shadowed = (r: string): ReadonlySet<string> | null => (allShadow.has(r) ? null : relColumns(r));
+  for (const [key, explicit, open, close] of cteBodies) {
+    local.set(key, explicit ? new Set(explicit) : close === -1 ? null : viewOutputColumns(toks.slice(open + 1, close - 1), shadowed, allShadow));
+  }
+  const columnsOf = (rel: string): ReadonlySet<string> | null =>
+    local.has(rel) ? local.get(rel)! : shadow.has(rel) ? null : relColumns(rel);
+  const inScope = (r: string): ReadonlySet<string> | null => (ctes.has(r) ? local.get(ctes.get(r)!) ?? null : columnsOf(r));
+  // FROM-list positions, per paren depth.
+  const tablePos = new Set<number>();
+  const clause: Array<"from" | null> = [null];
+  let depth = 0;
+  let next = false;
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (next) {
+      if (isW(t, "ONLY") || isW(t, "LATERAL")) continue;
+      next = false;
+      if (isP(t, "(") || (t.k === "w" && !SQL_KEYWORDS.has(t.up))) tablePos.add(k);
+    }
+    if (isP(t, "(")) { depth++; clause[depth] = null; continue; }
+    if (isP(t, ")")) { clause[depth] = null; depth = Math.max(0, depth - 1); continue; }
+    if (isP(t, ";")) { depth = 0; clause.length = 1; clause[0] = null; continue; }
+    if (isP(t, ",")) { if (clause[depth] === "from") next = true; continue; }
+    if (t.k !== "w") continue;
+    // `a IS [NOT] DISTINCT FROM b` is a comparison, not a FROM clause
+    if (t.up === "FROM" && !isW(toks[k - 1], "DISTINCT")) { clause[depth] = "from"; next = true; continue; }
+    if (t.up === "JOIN" || t.up === "USING") { clause[depth] = "from"; next = true; continue; }
+    if ((t.up === "INTO" || t.up === "UPDATE") && !isW(toks[k - 1], "DO")) { next = true; continue; }
+    if (FROM_LIST_ENDERS.has(t.up)) clause[depth] = null;
+  }
+  const aliasAt = (j: number): string | null => {
+    if (isW(toks[j], "AS") && toks[j + 1]?.k === "w") return toks[j + 1].t;
+    if (toks[j]?.k === "w" && !SQL_KEYWORDS.has(toks[j].up) && !AFTER_RELATION.has(toks[j].up)) return toks[j].t;
+    return null;
+  };
+  for (const i of tablePos) {
+    if (isP(toks[i], "(")) {
+      // a derived table / subquery in FROM: its alias denotes the subquery's own columns
+      const c = closeParen(toks, i);
+      const alias = c === -1 ? null : aliasAt(c);
+      if (alias !== null) {
+        const key = `${LOCAL_REL}sub:${i}`;
+        local.set(key, viewOutputColumns(toks.slice(i + 1, c - 1), inScope, allShadow));
+        add(alias, key);
+      }
+      continue;
+    }
+    let j = i;
+    const parts = [toks[i].t.toLowerCase()];
+    while (isP(toks[j + 1], ".") && toks[j + 2]?.k === "w") { j += 2; parts.push(toks[j].t.toLowerCase()); }
+    const rel = parts[parts.length - 1];
+    const known: string | null = parts.length > 2 ? null : parts.length === 1 && ctes.has(rel) ? ctes.get(rel)! : rel;
+    add(rel, known);
+    const alias = aliasAt(j + 1);
+    if (alias !== null) add(alias, known);
+  }
+  // `excluded.col` in an upsert names the row proposed for the INSERT target
+  for (let k = 0; k + 1 < toks.length; k++) {
+    if (isW(toks[k], "INTO") && toks[k + 1].k === "w" && toks.some((t) => isW(t, "CONFLICT"))) {
+      let j = k + 1;
+      while (isP(toks[j + 1], ".") && toks[j + 2]?.k === "w") j += 2;
+      add("excluded", toks[j].t.toLowerCase());
+    }
+  }
+  return { bind, tablePos, columnsOf };
+}
+
+/** Is the token run starting at `i` (a relation and its alias) followed by something a FROM list allows? */
+function relationEndsCleanly(toks: Tok[], i: number): boolean {
+  let j = i;
+  while (isP(toks[j + 1], ".") && toks[j + 2]?.k === "w") j += 2;
+  j++;
+  if (isW(toks[j], "AS") && toks[j + 1]?.k === "w") j += 2;
+  else if (toks[j]?.k === "w" && !SQL_KEYWORDS.has(toks[j].up) && !AFTER_RELATION.has(toks[j].up)) j++;
+  const t = toks[j];
+  return t === undefined || isP(t, ",") || isP(t, ")") || isP(t, ";") || isP(t, "(") || (t.k === "w" && AFTER_RELATION.has(t.up));
+}
+
+/** How a body is read: its call allow-list, statement grammar and preset relation bindings. */
+interface BodyRules {
+  allowed: ReadonlySet<string>;
+  /** A trigger: the raw offset of the `BEGIN` that opens its statement list. */
+  triggerBeginAt?: number;
+  /** Relation bindings the body has without a FROM: a trigger's NEW / OLD, a policy's table. */
+  presets: ReadonlyArray<readonly [string, string]>;
+  /** The declared columns of a relation (a table, or a view of this `<schema>`), or null when unknown. */
+  relColumns: (rel: string) => ReadonlySet<string> | null;
+}
+
+const BODY_LEADERS = new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]);
+
+/**
+ * The FIRST place (by position) a lexed body leaves the subset's reading, or null. See the
+ * section comment: the statement grammar (triggers), calls, types, and `rel.f`.
+ */
+function bodyIssue(toks: Tok[], rules: BodyRules): OutsideSubset | null {
+  const issues: OutsideSubset[] = [];
+  const at = (k: number, token: string, why: string): void => {
+    issues.push({ at: toks[k]?.at ?? toks[toks.length - 1]?.at ?? 0, token, why });
+  };
+  // ── a trigger's statement list ────────────────────────────────────────────────
+  if (rules.triggerBeginAt !== undefined) {
+    const semis = toks.flatMap((t, k) => (isP(t, ";") ? [k] : []));
+    const b = toks.findIndex((t) => t.at === rules.triggerBeginAt && isW(t, "BEGIN"));
+    if (b === -1) {
+      at(0, toks[0]?.t ?? "", "the trigger's `BEGIN` is not where the subset reads it");
+    } else {
+      const last = toks.length - 1;
+      if (semis.some((k) => k < b)) at(semis.find((k) => k < b)!, ";", "a `;` before the trigger's `BEGIN`");
+      if (!(isW(toks[last], "END") && last > b && isP(toks[last - 1], ";"))) {
+        at(last, toks[last]?.t ?? "", "the trigger body does not close with `; END`");
+      } else {
+        let s = b + 1;
+        for (let k = b + 1; k < last; k++) {
+          if (!isP(toks[k], ";")) continue;
+          if (k === s) at(k, ";", "an empty statement in the trigger body");
+          else if (!(toks[s].k === "w" && BODY_LEADERS.has(toks[s].up))) {
+            at(s, toks[s].t, `a statement led by \`${toks[s].t}\` — a trigger body in the subset is a list of SELECT / INSERT / UPDATE / DELETE statements`);
+          }
+          s = k + 1;
+        }
+      }
+    }
+  }
+  // ── calls and types ───────────────────────────────────────────────────────────
+  // EVERY `identifier (` is a CALL unless it is one of the closed syntactic forms
+  // (`isSyntacticParen`) — at any depth, in any clause. A table reference never takes `(`:
+  // `FROM evil(1)` is a table FUNCTION; inside a call FROM / ON / JOIN introduce nothing
+  // (`substring('a' FROM evil(1))`).
+  const castAs = castAsTokens(toks, 0, toks.length);
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (castAs.has(k)) {
+      const why = castTargetIssue(toks, k + 1);
+      if (why) at(k + 1, toks[k + 1]?.t ?? "", `it ${why}`);
+      continue;
+    }
+    { const why = typedLiteralIssue(toks, k); if (why) at(k, t.t, `it ${why}`); }
+    if (!(t.k === "w" && isP(toks[k + 1], "("))) continue;
+    if (isSyntacticParen(toks, k)) continue;
+    if (SIZED_TYPES.has(t.t.toLowerCase()) && typePositionAt(toks, k, castAs)) continue;
+    if (isP(toks[k - 1], ".")) {
+      at(k - 2, `${toks[k - 2]?.t ?? ""}.${t.t}`, `a call to the qualified function \`${toks[k - 2]?.t ?? ""}.${t.t}\` — a qualified callee is never on the allow-list`);
+      continue;
+    }
+    if (!rules.allowed.has(t.t.toLowerCase())) {
+      at(k, t.t, `a call to \`${t.t}\`, which is not on the subset's function allow-list (it may read or write any table)`);
+    }
+  }
+  // ── qualified references: `rel.f` must be a declared column of `rel` ───────────
+  const { bind, tablePos, columnsOf } = bodyBindings(toks, rules.presets, rules.relColumns);
+  for (let k = 0; k < toks.length; k++) {
+    if (!isP(toks[k], ".")) continue;
+    const x = toks[k - 1];
+    const y = toks[k + 1];
+    if (x === undefined || x.k !== "w") {
+      at(k, `${x?.t ?? ""}.${y?.t ?? ""}`, "a field selection on an expression (`(…).f`) — Postgres reads it as the call `f(…)` when `f` is not a field");
+      continue;
+    }
+    if (isP(toks[k - 2], ".")) continue;                       // the 2nd dot of a chain — judged at its first
+    const s = k - 1;
+    if (tablePos.has(s) && relationEndsCleanly(toks, s)) continue;   // a (qualified) relation name in a FROM list
+    if (y === undefined) { at(k, `${x.t}.`, "a dangling `.`"); continue; }
+    if (isP(y, "*")) continue;                                  // `rel.*` names no function
+    if (y.k !== "w") { at(k, `${x.t}.${y.t}`, "a qualified reference the subset does not read"); continue; }
+    if (isP(toks[k + 2], "(")) continue;                         // a qualified call — charged above
+    const ref = `${x.t}.${y.t}`;
+    if (isP(toks[k + 2], ".")) {
+      at(s, `${ref}.…`, `a three-part reference \`${ref}.…\` — the subset admits only \`rel.column\` (Postgres reads \`rel.f\` as the call \`f(rel)\` when \`f\` is not a column)`);
+      continue;
+    }
+    const rels = bind.get(x.t.toLowerCase());
+    if (!rels) {
+      at(s, ref, `a qualified reference \`${ref}\` whose \`${x.t}\` is not a relation this body binds (a FROM table or alias, NEW / OLD, the policy's table) — Postgres reads \`rel.f\` as the call \`f(rel)\` when \`f\` is not a column`);
+      continue;
+    }
+    const col = y.t.toLowerCase();
+    for (const rel of rels) {
+      const cols = rel === null ? null : columnsOf(rel);
+      if (cols === null || !cols.has(col)) {
+        at(s, ref, rel === null || cols === null
+          ? `a qualified reference \`${ref}\` into ${rel === null ? "a relation" : relShown(rel)} whose columns the compiler cannot read exactly (a three-part name, a \`*\` over a join, a table the \`<schema>\` does not declare) — Postgres reads \`rel.f\` as the call \`f(rel)\` when \`f\` is not a column`
+          : `a qualified reference \`${ref}\`: \`${y.t}\` is not a column ${rel.startsWith(LOCAL_REL) ? relShown(rel) + " has" : `the compilation's \`<schema>\` declares on \`${rel}\``} — Postgres reads \`rel.f\` as the call \`f(rel)\` when \`f\` is not a column`);
+        break;
+      }
+    }
+  }
+  if (issues.length === 0) return null;
+  return issues.reduce((a, b) => (b.at < a.at ? b : a));
+}
+
+/**
+ * The output columns of a view whose body lexed (lowercased), or null when they cannot be
+ * read exactly: the first top-level SELECT's items — `expr AS name`, a bare column, `rel.col`,
+ * `expr name`, `*` / `rel.*` over relations of known columns. An item with no readable name
+ * contributes none (a qualified reference to it is then refused — fail-closed).
+ */
+function viewOutputColumns(
+  toks: Tok[], relColumns: (rel: string) => ReadonlySet<string> | null, shadow: ReadonlySet<string> = new Set(),
+): Set<string> | null {
+  let depth = 0;
+  let sel = -1;
+  for (let k = 0; k < toks.length; k++) {
+    if (isP(toks[k], "(")) depth++;
+    else if (isP(toks[k], ")")) depth--;
+    else if (depth === 0 && isW(toks[k], "SELECT")) { sel = k; break; }
+  }
+  if (sel === -1) return null;
+  let k = sel + 1;
+  while (isW(toks[k], "DISTINCT") || isW(toks[k], "ALL")) {
+    k++;
+    if (isW(toks[k - 1], "DISTINCT") && isW(toks[k], "ON") && isP(toks[k + 1], "(")) { const c = closeParen(toks, k + 1); if (c === -1) return null; k = c; }
+  }
+  const items: Tok[][] = [[]];
+  depth = 0;
+  for (; k < toks.length; k++) {
+    const t = toks[k];
+    if (isP(t, "(")) depth++;
+    else if (isP(t, ")")) depth--;
+    if (depth === 0 && t.k === "w" && (t.up === "FROM" || t.up === "UNION" || t.up === "INTERSECT" || t.up === "EXCEPT" ||
+        t.up === "WHERE" || t.up === "GROUP" || t.up === "ORDER" || t.up === "LIMIT" || t.up === "WINDOW")) break;
+    if (depth === 0 && isP(t, ",")) { items.push([]); continue; }
+    items[items.length - 1].push(t);
+  }
+  const { bind, tablePos, columnsOf } = bodyBindings(toks, [], relColumns, shadow);
+  // the relations of the TOP-LEVEL FROM (depth 0 of this token list — not a CTE's or a subquery's)
+  const top: number[] = [];
+  depth = 0;
+  for (let j = 0; j < toks.length; j++) {
+    if (tablePos.has(j) && depth === 0) top.push(j);
+    if (isP(toks[j], "(")) depth++;
+    else if (isP(toks[j], ")")) depth--;
+  }
+  const cols = new Set<string>();
+  const nameOk = (t: Tok | undefined): boolean => !!t && t.k === "w" && !SQL_KEYWORDS.has(t.up);
+  for (const it of items) {
+    const n = it.length;
+    if (n === 0) return null;
+    const last = it[n - 1];
+    if (n === 1 && isP(last, "*")) {
+      // read exactly only over ONE top-level relation (a `*` over a join is not attributed —
+      // its columns are then unknown)
+      if (top.length !== 1 || toks[top[0]].k !== "w") return null;
+      const rels = bind.get(toks[top[0]].t.toLowerCase());
+      if (!rels || rels.length !== 1 || rels[0] === null) return null;
+      const c = columnsOf(rels[0]);
+      if (c === null) return null;
+      c.forEach((x) => cols.add(x));
+      continue;
+    }
+    if (n === 3 && it[0].k === "w" && isP(it[1], ".") && isP(it[2], "*")) {
+      const rels = bind.get(it[0].t.toLowerCase());
+      if (!rels || rels.length !== 1 || rels[0] === null) return null;
+      const c = columnsOf(rels[0]);
+      if (c === null) return null;
+      c.forEach((x) => cols.add(x));
+      continue;
+    }
+    if (n >= 2 && isW(it[n - 2], "AS") && nameOk(last)) { cols.add(last.t.toLowerCase()); continue; }
+    if (n === 1 && nameOk(last)) { cols.add(last.t.toLowerCase()); continue; }
+    if (n === 3 && it[0].k === "w" && isP(it[1], ".") && nameOk(last)) { cols.add(last.t.toLowerCase()); continue; }
+    const prev = it[n - 2];
+    if (n >= 2 && nameOk(last) && prev !== undefined &&
+        ((prev.k === "w" && !SQL_KEYWORDS.has(prev.up)) || isP(prev, ")") || prev.k === "s" || prev.k === "n")) {
+      cols.add(last.t.toLowerCase());
+    }
+  }
+  return cols;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +927,12 @@ interface Decl {
   flags: Set<string>;
   /** "other": the object keyword (`FUNCTION`, `TABLE` for a virtual table, …). */
   object?: string;
+  /** view: the explicit column list `CREATE VIEW v (a, b) AS …` (lowercased), when written. */
+  viewCols?: string[];
+  /** trigger: the token index of the `BEGIN` that opens its body (a `BEGIN … END` trigger only). */
+  beginAt?: number;
+  /** table: the token index just past `AS` when the table is created from a query (`CREATE TABLE t AS SELECT …`). */
+  queryAt?: number;
 }
 
 /** Parse the CREATE statement at token `i`. */
@@ -547,6 +976,15 @@ function parseCreate(toks: Tok[], i: number): Decl {
   if (obj.up === "VIEW") {
     base.kind = "view";
     if (!nm) { base.unreadable = "its name could not be read"; return base; }
+    // An explicit column list names the view's columns (a qualified `v.col` is checked against them).
+    if (isP(toks[k], "(")) {
+      const c = closeParen(toks, k);
+      if (c !== -1) {
+        const cols: string[] = [];
+        for (let x = k + 1; x < c - 1; x++) if (isName(toks[x])) cols.push(toks[x].k === "q" ? toks[x].t : toks[x].t.toLowerCase());
+        base.viewCols = cols;
+      }
+    }
     // The definition: everything after AS (the column list and WITH options precede it).
     let a = k;
     let depth = 0;
@@ -630,6 +1068,7 @@ function parseCreate(toks: Tok[], i: number): Decl {
       }
       base.end = e + 1;
       base.region = [head[0], e + 1];
+      base.beginAt = b;
       return base;
     }
     // MySQL `FOR EACH ROW <statement>`: the statement runs to the `;` found above.
@@ -657,16 +1096,32 @@ function parseCreate(toks: Tok[], i: number): Decl {
     base.kind = "table";
     base.on = base.name;
     if (!nm) { base.unreadable = "its name could not be read"; return base; }
+    // `CREATE TABLE t [(names)] AS <query>`: the query is a BODY the database runs at
+    // migration — read in the tenant SQL subset like a view's (S455 "yes, both").
+    const queryAfter = (from: number): void => {
+      let depth = 0;
+      for (let a = from; a < end0; a++) {
+        if (isP(toks[a], "(")) depth++;
+        else if (isP(toks[a], ")")) depth = Math.max(0, depth - 1);
+        else if (depth === 0 && isW(toks[a], "AS") &&
+          (isW(toks[a + 1], "SELECT") || isW(toks[a + 1], "WITH") || isW(toks[a + 1], "VALUES") || isW(toks[a + 1], "TABLE") || isP(toks[a + 1], "("))) {
+          base.queryAt = a + 1;
+          return;
+        }
+      }
+    };
     if (isP(toks[k], "(")) {
       const close = closeParen(toks, k);
       if (close === -1) { base.unreadable = "its column list is not closed"; return base; }
       base.cols = [k, close];
       // Names / calls are read OUTSIDE the column list only (INHERITS, PARTITION OF, …).
       base.region = [close, end0];
+      queryAfter(close);
       return base;
     }
     // `AS SELECT …`, `LIKE …`, `PARTITION OF …`, `OF type`: the rest is read.
     base.region = [k, end0];
+    queryAfter(k);
     return base;
   }
 
@@ -810,16 +1265,22 @@ const COLUMN_CONSTRAINT_WORDS = new Set([
  * S239 review #6 — an EXEMPT statement still runs code: an index expression or partial-
  * index predicate, a column DEFAULT, a GENERATED expression or a CHECK is evaluated by
  * the database per row, at migration, as the migrating role. Every expression in an
- * exempt statement is held to the SAME function allow-list a view or trigger body is;
+ * exempt statement is held to the function allow-list (`EXPRESSION_ALLOWED_CALLS`);
  * returns why the statement is charged (a call off the list, or a `${…}`), or null.
+ * `own` = the statement's own table and its declared columns (the `rel.f` rule below).
  */
-function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>, columnDefault = false): string | null {
+function exemptStatementCode(
+  toks: Tok[], regions: Array<[number, number]>, columnDefault = false, own: OwnTable | null = null,
+): string | null {
   for (const [a, b] of regions) {
-    const why = expressionRegionCode(toks, a, b, columnDefault);
+    const why = expressionRegionCode(toks, a, b, columnDefault, own);
     if (why) return why;
   }
   return null;
 }
+
+/** The table an expression region belongs to (its CREATE / ALTER / INDEX target) and that table's declared columns. */
+interface OwnTable { table: string; cols: ReadonlySet<string> | null }
 
 // ---------------------------------------------------------------------------
 // EXPRESSION mode — the token-level allow-list (S239 review of 8d1e18b6).
@@ -832,6 +1293,17 @@ function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>, colu
 // operator class or access method not built in, and an operator outside
 // `BUILTIN_OPERATORS` are charged too (a user type runs its input function; a user
 // operator, opclass or access method runs its functions).
+//
+// WHY THESE REGIONS ARE NOT READ IN THE TENANT SQL SUBSET (S455 "yes, both", decided in
+// docs/changes/s455-tenant-schema-body-subset/progress.md): a column definition, an index
+// expression and a `DEFAULT` / `GENERATED` / `CHECK` are written, in ordinary Postgres, with
+// forms the subset's closed token set does not have — a `::` cast (`DEFAULT '{}'::jsonb`,
+// `'active'::text`, pg_dump's `nextval('s'::regclass)`), an array type or literal (`text[]`,
+// `DEFAULT ARRAY[]::text[]`, `CHECK (s = ANY (ARRAY['a'::text]))`), a quoted column
+// (`CHECK ("order" > 0)`). Reading them in the subset would refuse nearly every real
+// Postgres table; this reader models exactly those forms and holds every call, cast,
+// operator and type in them to closed lists. They are expressions, not bodies: no FROM,
+// no statement, no table but their own — so `rel.f` here is only `own.f` (below).
 // ---------------------------------------------------------------------------
 
 /** Index access methods — the word after `USING` (an index, an `EXCLUDE` constraint). */
@@ -1025,17 +1497,24 @@ function typedLiteralIssue(toks: Tok[], k: number): string | null {
   return `writes a literal of the type \`${t.t}\`, which is not a built-in type (its input function is code)`;
 }
 
-/** Is `k` the first `:` of an adjacent `::`? */
-const isDoubleColonAt = (toks: Tok[], k: number): boolean =>
-  isP(toks[k], ":") && isP(toks[k + 1], ":") && toks[k + 1].at === toks[k].at + 1;
+/** A name token's key: an unquoted name folds to lower case, a quoted one is case-exact. */
+const nameKey = (t: Tok): string => (t.k === "q" ? t.t : t.t.toLowerCase());
 
-function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: boolean): string | null {
+function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: boolean, own: OwnTable | null = null): string | null {
   const offList = (what: string): string =>
     `it ${what} — the database evaluates it per row, at migration, as the migrating role, and it may read or write any table`;
   const castAs = castAsTokens(toks, a, b);
   for (let k = a; k < b; k++) {
     const t = toks[k];
     if (isP(t, "${")) return "it holds a `${…}` interpolation the checker cannot read";
+    // `rel.f` (S455 "yes, both" residual): Postgres reads a qualified reference whose `f` is
+    // not a column as the CALL `f(rel)`. The only row an expression region can name is its
+    // own table's, so `own.f` must be a column the compilation's `<schema>` declares on it.
+    if (own !== null && isP(t, ".") && isName(toks[k - 1]) && isName(toks[k + 1]) && !isP(toks[k + 2], "(") &&
+        nameKey(toks[k - 1]) === own.table && !(own.cols?.has(nameKey(toks[k + 1])) ?? false)) {
+      return offList(`reads \`${toks[k - 1].t}.${toks[k + 1].t}\`, and \`${toks[k + 1].t}\` is not a column the compilation's ` +
+        `\`<schema>\` declares on \`${own.table}\` — Postgres reads \`rel.f\` as the call \`f(rel)\` when \`f\` is not a column`);
+    }
     // operators: a run of adjacent operator characters
     if (t.k === "p" && OPERATOR_CHARS.has(t.t)) {
       let op = t.t;
@@ -1078,8 +1557,11 @@ function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: 
   return null;
 }
 
-/** The expression regions of a `CREATE INDEX` statement: everything after `ON <table> [USING <method>]`. */
-function indexExpressionRegions(toks: Tok[], start: number, end: number): Array<[number, number]> {
+/**
+ * The expression regions of a `CREATE INDEX` statement: everything after `ON <table> [USING
+ * <method>]` — and the indexed table (null when unreadable).
+ */
+function indexExpressionRegions(toks: Tok[], start: number, end: number): { regions: Array<[number, number]>; table: string | null } {
   let depth = 0;
   for (let k = start; k < end; k++) {
     if (isP(toks[k], "(")) depth++;
@@ -1088,12 +1570,12 @@ function indexExpressionRegions(toks: Tok[], start: number, end: number): Array<
       let j = k + 1;
       if (isW(toks[j], "ONLY") && isName(toks[j + 1])) j++;
       const nm = readName(toks, j);
-      if (!nm) return [[k + 1, end]];
+      if (!nm) return { regions: [[k + 1, end]], table: null };
       // the region includes `USING <access method>` — the method is checked too
-      return [[nm.next, end]];
+      return { regions: [[nm.next, end]], table: nm.name };
     }
   }
-  return [[start, end]];   // no readable ON: read it all (fail-closed)
+  return { regions: [[start, end]], table: null };   // no readable ON: read it all (fail-closed)
 }
 
 /**
@@ -1283,7 +1765,7 @@ function isolationRemoval(
       if (grantees.includes(APP_ROLE)) return everyTable(`it grants a role to \`${APP_ROLE}\`, the bounded role the §14.8.11 tier's requests run as`);
       return null;
     }
-    const objs = readRegion(toks, onAt + 1, toAt === -1 ? g.end : toAt, tainted);
+    const objs = namesAndInterp(toks, onAt + 1, toAt === -1 ? g.end : toAt, tainted);
     const allTables = isW(toks[onAt + 1], "ALL");
     // the admitted kind (S455 "your rec on the allow-list", narrowed by the PA reading below)
     if (onlyApp && !objs.interp && toAt !== -1 && grantAdmitted(toks, g.start + 1, onAt, toAt, g.end)) return "exempt";
@@ -1308,7 +1790,9 @@ const lineAt = (body: string, at: number): number => body.slice(0, Math.max(0, a
  * reading) charges CREATE-led declarations and foreign keys, not other statements:
  * comment prose that merely mentions a table is not a statement.
  */
-function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): SchemaHazard[] {
+function analyze(
+  body: string, toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean, columns: SchemaColumns,
+): SchemaHazard[] {
   const out: SchemaHazard[] = [];
   const allTenant = [...tenant];
   const decls: Decl[] = [];
@@ -1391,21 +1875,115 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     }
   }
 
-  // 2. Views over tenant tables, to a fixpoint (a view over a view over `assets`).
-  const tainted = new Set<string>(tenant);
-  const viewHits = new Map<Decl, string[]>();
+  // 2. BODIES — every view / trigger / rule body, restrictive-policy body and `CREATE TABLE
+  //    … AS` query is read ONCE in the tenant SQL subset (S455 "yes, both"; see `lexBody`).
   const views = decls.filter((d) => d.kind === "view");
+  /** The token index where a policy's body starts (just past `ON <table>`), and its table. */
+  const policyBody = new Map<Decl, { from: number; table: string }>();
+  for (const d of decls) {
+    if (d.kind !== "other" || d.object !== "POLICY") continue;
+    let p = d.start;
+    while (p < d.end && !isW(toks[p], "POLICY")) p++;
+    const pname = readName(toks, p + 1);
+    const tbl = pname && isW(toks[pname.next], "ON") ? readName(toks, pname.next + 1) : null;
+    if (tbl) policyBody.set(d, { from: tbl.next, table: tbl.name });
+  }
+  /** The token range of a declaration's body, or null when it has none the subset reads. */
+  const bodyTokens = (d: Decl): [number, number] | null => {
+    if (d.unreadable !== null) return null;
+    if (d.kind === "view" || d.kind === "trigger" || d.kind === "rule") return d.region;
+    if (d.kind === "table" && d.queryAt !== undefined) return [d.queryAt, d.end];
+    const pb = policyBody.get(d);
+    return pb ? [pb.from, d.end] : null;
+  };
+  const lexedCache = new Map<Decl, LexedBody | null>();
+  const lexedOf = (d: Decl): LexedBody | null => {
+    if (lexedCache.has(d)) return lexedCache.get(d)!;
+    const r = bodyTokens(d);
+    let lx: LexedBody | null = null;
+    if (r !== null) {
+      const [a, b] = r;
+      lx = b > a ? lexBody(body, toks[a].at, toks[b - 1].end, d.kind === "trigger") : { ok: true, toks: [] };
+    }
+    lexedCache.set(d, lx);
+    return lx;
+  };
+  // The declared columns of a relation: a table's (the compilation's `<schema>`), or a view's
+  // output columns read from its own body. A name that is both, or two views of one name,
+  // keeps only what every reading agrees on (fail-closed: fewer columns refuse more).
+  const viewColsCache = new Map<Decl, Set<string> | null>();
+  const computing = new Set<Decl>();
+  const viewColumns = (v: Decl): Set<string> | null => {
+    if (viewColsCache.has(v)) return viewColsCache.get(v)!;
+    if (computing.has(v)) return null;
+    computing.add(v);
+    let cols: Set<string> | null = null;
+    if (v.viewCols) cols = new Set(v.viewCols);
+    else {
+      const lx = lexedOf(v);
+      cols = lx !== null && lx.ok ? viewOutputColumns(lx.toks, relColumns) : null;
+    }
+    computing.delete(v);
+    viewColsCache.set(v, cols);
+    return cols;
+  };
+  const relColumns = (rel: string): ReadonlySet<string> | null => {
+    const table = columns.get(rel) ?? null;
+    const vs = views.filter((v) => v.name === rel);
+    if (vs.length === 0) return table;
+    if (vs.length > 1) return null;
+    const vc = viewColumns(vs[0]);
+    if (table === null || vc === null) return table === null ? vc : null;
+    return new Set([...vc].filter((c) => table.has(c)));
+  };
+  const rulesOf = (d: Decl): BodyRules => {
+    if (d.kind === "trigger" || d.kind === "rule") {
+      const on = d.on ?? "";
+      return {
+        allowed: ALLOWED_CALLS, relColumns, presets: [["new", on], ["old", on]],
+        ...(d.kind === "trigger" ? { triggerBeginAt: d.beginAt !== undefined ? toks[d.beginAt].at : -1 } : {}),
+      };
+    }
+    const pb = policyBody.get(d);
+    // A policy's USING / WITH CHECK is an expression over its table's row: the expression
+    // allow-list (`current_setting(…)`, the §14.8.11 tenant pattern, is on it).
+    if (pb) return { allowed: EXPRESSION_ALLOWED_CALLS, relColumns, presets: [[pb.table, pb.table]] };
+    return { allowed: ALLOWED_CALLS, relColumns, presets: [] };
+  };
+  /** A body's reading: where it leaves the subset (or null), and the tenant tables / tainted views it names. */
+  const bodyRead = (d: Decl, tainted: ReadonlySet<string>): { outside: OutsideSubset | null; names: string[] } => {
+    if (d.kind === "trigger" && d.unreadable === null && d.beginAt === undefined) {
+      // No `BEGIN … END` and no `EXECUTE FUNCTION` (that one is unreadable already): MySQL's
+      // single-statement `FOR EACH ROW <statement>` — not a SQLite or Postgres form, and not a
+      // statement list the subset reads.
+      const first = toks[d.region[0]];
+      return { outside: { at: first?.at ?? d.at, token: first?.t ?? "(end of statement)",
+        why: "a trigger whose body is not `BEGIN … END` (the subset reads a trigger body as `BEGIN`, SELECT / INSERT / UPDATE / DELETE statements, `END`)" },
+      names: [] };
+    }
+    const lx = lexedOf(d);
+    if (lx === null) return { outside: null, names: [] };
+    if (!lx.ok) return { outside: lx.outside, names: [] };
+    return { outside: bodyIssue(lx.toks, rulesOf(d)), names: namesAndInterp(lx.toks, 0, lx.toks.length, tainted).names };
+  };
+  const outsideHazard = (what: string, d: Decl, o: OutsideSubset): SchemaHazard => ({
+    kind: OUTSIDE_SUBSET, object: d.shown || "?", declKind: what, tables: allTenant, unattributable: true, offset: d.at,
+    tokenOffset: o.at, why: `${o.why} — first offending token \`${o.token}\``,
+  });
+
+  // 3. Views over tenant tables, to a fixpoint (a view over a view over `assets`). A view
+  //    whose body the subset does not read is charged against every tenant table.
+  const tainted = new Set<string>(tenant);
   let grew = true;
   while (grew) {
     grew = false;
     for (const v of views) {
-      const r = readRegion(toks, v.region[0], v.region[1], tainted);
-      const unattributable = v.unreadable !== null || r.calls.length > 0 || r.types.length > 0 || r.interp;
+      const r = bodyRead(v, tainted);
+      const unattributable = v.unreadable !== null || r.outside !== null;
       if ((r.names.length > 0 || unattributable) && v.name && !tainted.has(v.name)) {
         tainted.add(v.name);
         grew = true;
       }
-      viewHits.set(v, r.names);
     }
   }
   const viewSources = (names: string[]): string => {
@@ -1426,30 +2004,23 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       if (tenant.has(n)) { res.add(n); return; }
       const v = views.find((x) => x.name === n);
       if (!v) return;
-      const r = readRegion(toks, v.region[0], v.region[1], tainted);
-      if (v.unreadable !== null || r.calls.length > 0 || r.types.length > 0 || r.interp) for (const t of allTenant) res.add(t);
+      const r = bodyRead(v, tainted);
+      if (v.unreadable !== null || r.outside !== null) for (const t of allTenant) res.add(t);
       for (const m of r.names) visit(m);
     };
     for (const n of names) visit(n);
     return res.size ? [...res] : allTenant;
   };
 
-  const unattributableWhy = (d: Decl, r: RegionRead): string | null => {
-    if (d.unreadable) return d.unreadable;
-    if (r.interp) return "it holds a `${…}` interpolation the checker cannot read";
-    if (r.calls.length) return `it calls \`${r.calls[0]}\`, which is not on the floor's function allow-list and may read or write any table`;
-    if (r.types.length) return `it ${r.types[0]}`;
-    return null;
-  };
-
   for (const d of decls) {
-    const r = readRegion(toks, d.region[0], d.region[1], tainted);
+    const r = bodyRead(d, tainted);
     const shown = d.shown || "?";
     if (d.kind === "view") {
-      const un = unattributableWhy(d, r);
-      if (un) {
+      if (d.unreadable) {
         out.push({ kind: "view", object: shown, tables: allTenant, unattributable: true, offset: d.at,
-          why: `the checker cannot tell which tables it reads: ${un}` });
+          why: `the checker cannot tell which tables it reads: ${d.unreadable}` });
+      } else if (r.outside) {
+        out.push(outsideHazard("view", d, r.outside));
       } else if (r.names.length) {
         out.push({ kind: "view", object: shown, tables: tenantsUnder(r.names), unattributable: false, offset: d.at,
           why: `it ${viewSources(r.names)}, and reading a view is never scoped to the active tenant` });
@@ -1460,7 +2031,6 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       const what = d.kind;
       const before = out.length;
       const onTainted = d.on !== undefined && tainted.has(d.on);
-      const un = unattributableWhy(d, r);
       if (onTainted) {
         const viaView = !tenant.has(d.on!);
         out.push({ kind: what, object: shown, tables: tenantsUnder([d.on!]), unattributable: false, offset: d.at,
@@ -1468,9 +2038,11 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
             ? `it is declared on \`${d.on}\`, a view over a tenant-scoped table — the database runs its body on every write the floor scoped`
             : `it is declared on the tenant-scoped table \`${d.on}\` — the database runs its body on writes the floor scoped, and that body is not scoped` });
       }
-      if (un) {
+      if (d.unreadable) {
         out.push({ kind: what, object: shown, tables: allTenant, unattributable: true, offset: d.at,
-          why: `the checker cannot tell which tables its body reads or writes: ${un}` });
+          why: `the checker cannot tell which tables its body reads or writes: ${d.unreadable}` });
+      } else if (r.outside) {
+        out.push(outsideHazard(what, d, r.outside));
       } else if (r.names.length) {
         out.push({ kind: what, object: shown, tables: tenantsUnder(r.names), unattributable: false, offset: d.at,
           why: `its body names ${r.names.map((n) => `\`${n}\``).join(", ")}${r.names.every((n) => tenant.has(n)) ? "" : " (a view over a tenant-scoped table)"} — ` +
@@ -1488,6 +2060,10 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     }
     if (d.kind === "table") {
       if (d.unreadable) continue; // E-SCHEMA-012/013/014 own unreadable table heads
+      const own: OwnTable = { table: d.name, cols: columns.get(d.name) ?? null };
+      // `CREATE TABLE … AS <query>`: the query is a body, read in the subset (above); the
+      // expression regions stop where it starts.
+      const exprEnd = d.queryAt !== undefined ? d.queryAt - 1 : d.end;
       // A column DEFAULT / GENERATED / CHECK (or a table CHECK) is evaluated by the database
       // per row, as whatever role writes it — held to the same function allow-list (S455,
       // the review #6 class), on any table.
@@ -1495,22 +2071,23 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
         // (a `${…}` in a table declaration is already charged by the interpolation rule below)
         // the column list, AND everything after it (PARTITION BY, WITH (…), INHERITS, …)
         const code = exemptStatementCode(toks,
-          [...createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1), [d.cols[1], d.end]], true) ??
+          [...createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1), [d.cols[1], exprEnd]], true, own) ??
           createTableTypeIssue(toks, d.cols[0] + 1, d.cols[1] - 1);
         if (code && !code.includes("interpolation")) {
           out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
         }
       } else if (!declsOnly) {
-        // no column list — `AS SELECT …`, `PARTITION OF … FOR VALUES FROM (…)`, `OF type`: the
-        // rest is read in expression mode too, so the checker does not lean on E-SCHEMA-014 (S239 r2).
+        // no column list — `PARTITION OF … FOR VALUES FROM (…)`, `OF type`: the rest is read
+        // in expression mode too, so the checker does not lean on E-SCHEMA-014 (S239 r2).
         // Not in the comment-content reading, where comment text splices into a live head
         // (`CREATE TABLE t /* live */ (…)` reads as `t live (…)`); the live readings own it.
-        const code = exemptStatementCode(toks, [d.region]);
+        const code = exemptStatementCode(toks, [[d.region[0], exprEnd]], false, own);
         if (code && !code.includes("interpolation")) {
           out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
         }
       }
-      const hits = r.names.filter((n) => n !== d.name);
+      if (r.outside && !(declsOnly && d.cols === undefined)) out.push(outsideHazard("CREATE TABLE … AS query", d, r.outside));
+      const hits = namesAndInterp(toks, d.region[0], d.region[1], tainted).names.filter((n) => n !== d.name);
       if (hits.length) {
         out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: tenantsUnder(hits), unattributable: false, offset: d.at,
           why: `outside its column list it names ${hits.map((n) => `\`${n}\``).join(", ")} (\`AS SELECT\`, \`INHERITS\`, \`PARTITION OF\`, …) — ` +
@@ -1520,10 +2097,11 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     }
     if (d.kind === "index") {
       // exempt (closed list) — unless an expression in it runs code off the allow-list (S239 #6)
-      const regions = indexExpressionRegions(toks, d.start, d.end);
+      const { regions, table } = indexExpressionRegions(toks, d.start, d.end);
       let listAt = regions[0][0];
       if (isW(toks[listAt], "USING")) listAt += 2;
-      const code = exemptStatementCode(toks, regions) ?? indexOpclassIssue(toks, listAt, d.end);
+      const own: OwnTable | null = table === null ? null : { table, cols: columns.get(table) ?? null };
+      const code = exemptStatementCode(toks, regions, false, own) ?? indexOpclassIssue(toks, listAt, d.end);
       if (code) {
         out.push({ kind: "statement", object: `CREATE INDEX ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
       }
@@ -1563,14 +2141,12 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
           why: "the checker cannot read which table it is declared on" });
         continue;
       }
-      // A RESTRICTIVE policy's USING / WITH CHECK expressions run per row — held to the
-      // expression allow-list (S239 review of d4c4d4ac; `current_setting(…)` is on it).
-      if (isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE")) {
-        const code = exemptStatementCode(toks, [[tbl.next + 2, d.end]]);
-        if (code) {
-          out.push({ kind: "statement", object: `CREATE POLICY ${pShown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
-          continue;
-        }
+      // A RESTRICTIVE policy's body (its USING / WITH CHECK expressions, run per row) is read
+      // in the tenant SQL subset (S455 "yes, both"), its calls held to the expression
+      // allow-list (`current_setting(…)` is on it). A permissive one is charged below anyway.
+      if (isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE") && r.outside) {
+        out.push(outsideHazard("policy", { ...d, shown: pShown }, r.outside));
+        continue;
       }
       let mode: string | null = "PERMISSIVE (the default when `AS` is omitted)";
       if (!tainted.has(tbl.name)) {
@@ -1620,7 +2196,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       if (ADMITTED_PLAIN_LEADERS.has(g.leader)) {
         // COMMENT ON / ANALYZE / REINDEX / VACUUM evaluate no expression of their own
         // (`ANALYZE t (col)` is a column list); a `${…}` is still SQL the checker cannot read
-        if (readRegion(toks, g.start + 1, g.end, new Set()).interp) {
+        if (namesAndInterp(toks, g.start + 1, g.end, new Set()).interp) {
           out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: interpWhy });
         }
         continue;
@@ -1642,7 +2218,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       if (removal !== null) { out.push(removal); continue; }
       // ALTER TABLE — admitted only when EVERY action is an admitted one.
       if (g.leader === "ALTER" && g.target !== null && g.targetEnd !== -1) {
-        if (readRegion(toks, g.start + 1, g.end, new Set()).interp) {
+        if (namesAndInterp(toks, g.start + 1, g.end, new Set()).interp) {
           out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: interpWhy });
           continue;
         }
@@ -1652,7 +2228,7 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
           continue;
         }
         // …and its DEFAULT / GENERATED / CHECK expressions are held to the allow-list (S239 #6)
-        const code = exemptStatementCode(toks, adm, true);
+        const code = exemptStatementCode(toks, adm, true, { table: g.target, cols: columns.get(g.target) ?? null });
         if (code) out.push({ kind: "statement", object: label, tables: allTenant, unattributable: true, offset: g.at, why: code });
         continue;
       }
@@ -1754,14 +2330,19 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
  * tenant-scoped tables (lowercased or not — compared case-insensitively). Empty
  * when no table is tenant-scoped (the floor is off; nothing to protect).
  */
-export function findSchemaTenantHazards(body: string, tenantTables: Iterable<string>): SchemaHazard[] {
+export function findSchemaTenantHazards(
+  body: string, tenantTables: Iterable<string>, columns?: SchemaColumns,
+): SchemaHazard[] {
   const tenant = new Set<string>();
   for (const t of tenantTables) if (typeof t === "string" && t.length) tenant.add(t.toLowerCase());
   if (tenant.size === 0 || typeof body !== "string" || body.trim().length === 0) return [];
+  // The declared columns `rel.f` is checked against: the caller's (the compilation's), or
+  // — standalone — this body's own.
+  const cols = columns ?? schemaColumnKnowledge([body]);
   const all = [
-    ...analyze(lex(body, "skip"), tenant, false),
-    ...analyze(lex(body, "skip-nested"), tenant, false),
-    ...analyze(lex(body, "content"), tenant, true),
+    ...analyze(body, lex(body, "skip"), tenant, false, cols),
+    ...analyze(body, lex(body, "skip-nested"), tenant, false, cols),
+    ...analyze(body, lex(body, "content"), tenant, true, cols),
   ];
   // The three readings overlap; keep one hazard per (kind, object, why).
   const seen = new Set<string>();
@@ -1789,6 +2370,133 @@ export function schemaTenantTableNames(bodies: Iterable<string>): Set<string> {
   const out = new Set<string>();
   for (const b of bodies) for (const d of schemaTableDeclarations(b)) if (d.tenant) out.add(d.key);
   return out;
+}
+
+/** The column keys of a `CREATE TABLE` column list `[from, to)` (table constraints and `LIKE` skipped). */
+function createTableColumnKeys(toks: Tok[], from: number, to: number): Set<string> {
+  const out = new Set<string>();
+  let depth = 0;
+  let s = from;
+  const item = (a: number): void => {
+    const t = toks[a];
+    if (!isName(t) || (t.k === "w" && (TABLE_CONSTRAINT_LEADERS.has(t.up) || t.up === "LIKE"))) return;
+    out.add(nameKey(t));
+  };
+  for (let k = from; k < to; k++) {
+    if (isP(toks[k], "(")) depth++;
+    else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
+    else if (isP(toks[k], ",") && depth === 0) { if (k > s) item(s); s = k + 1; }
+  }
+  if (to > s) item(s);
+  return out;
+}
+
+/**
+ * THE COLUMNS THE COMPILATION'S `<schema>` DECLARES — what the `rel.f` rule checks a
+ * qualified reference against (S455 "yes, both" residual: Postgres reads `rel.f` as the
+ * call `f(rel)` when `f` is not a column of `rel`, so the compiler must KNOW the columns).
+ *
+ * FAIL-CLOSED in every direction that matters, since a column wrongly believed to exist
+ * would admit a call: a table's columns are what EVERY reading of the bodies agrees on —
+ * the SQLite comment model (non-nesting) AND the Postgres one (nesting); within a reading,
+ * the INTERSECTION of the table's declarations (two `CREATE TABLE` of one name, in any
+ * file, keep only their common columns); plus `ALTER TABLE … ADD [COLUMN]`; minus EVERY
+ * column renamed away (`RENAME [COLUMN] a TO b` removes `a`) or dropped, in any reading. A
+ * DSL table (`name { … }` — scrml, not SQL comments) counts in every reading; a
+ * commented-out one does not. A table the `<schema>` does not declare (only the `<db
+ * tables=>` registry, a live database) has NO known columns.
+ */
+export function schemaColumnKnowledge(bodies: Iterable<string>): Map<string, Set<string>> {
+  const list = [...bodies].filter((b): b is string => typeof b === "string" && b.length > 0);
+  const dsl: Array<[string, Set<string>]> = [];
+  for (const b of list) {
+    for (const d of schemaTableDeclarations(b)) {
+      if (d.form === "declarative" && !d.commented) dsl.push([d.key, new Set(d.columns.map((c) => c.name.toLowerCase()))]);
+    }
+  }
+  const removed = new Map<string, Set<string>>();
+  const readings: Array<Map<string, Set<string>>> = [];
+  for (const mode of ["skip", "skip-nested"] as const) {
+    const decl = new Map<string, Set<string>>();
+    const added = new Map<string, Set<string>>();
+    const put = (t: string, cols: Set<string>): void => {
+      const prev = decl.get(t);
+      decl.set(t, prev ? new Set([...prev].filter((c) => cols.has(c))) : new Set(cols));
+    };
+    const addTo = (m: Map<string, Set<string>>, t: string, c: string): void => {
+      const s = m.get(t) ?? new Set<string>();
+      s.add(c);
+      m.set(t, s);
+    };
+    for (const [t, cols] of dsl) put(t, cols);
+    for (const b of list) {
+      const toks = lex(b, mode);
+      for (let i = 0; i < toks.length; i++) {
+        if (isW(toks[i], "CREATE")) {
+          const d = parseCreate(toks, i);
+          if (d.kind === "table" && d.name && d.cols && d.unreadable === null) put(d.name, createTableColumnKeys(toks, d.cols[0] + 1, d.cols[1] - 1));
+          i = Math.max(d.end, i + 1) - 1;
+          continue;
+        }
+        if (!(isW(toks[i], "ALTER") && isW(toks[i + 1], "TABLE"))) continue;
+        let k = i + 2;
+        if (isW(toks[k], "IF") && isW(toks[k + 1], "EXISTS")) k += 2;
+        if (isW(toks[k], "ONLY") && isName(toks[k + 1]) && !isW(toks[k + 1], "ADD")) k++;
+        const nm = readName(toks, k);
+        const end = statementEnd(toks, i);
+        if (!nm) { i = Math.max(end, i + 1) - 1; continue; }
+        const t = nm.name;
+        let depth = 0;
+        let a = isP(toks[nm.next], "*") ? nm.next + 1 : nm.next;
+        const actions: Array<[number, number]> = [];
+        for (let j = a; j < end; j++) {
+          if (isP(toks[j], "(")) depth++;
+          else if (isP(toks[j], ")")) depth = Math.max(0, depth - 1);
+          else if (isP(toks[j], ",") && depth === 0) { actions.push([a, j]); a = j + 1; }
+        }
+        actions.push([a, end]);
+        for (const [x] of actions) {
+          let j = x + 1;
+          if (isW(toks[x], "ADD")) {
+            if (isW(toks[j], "COLUMN")) j++;
+            else if (toks[j]?.k === "w" && ADD_NOT_A_COLUMN.has(toks[j].up)) continue;
+            if (isW(toks[j], "IF") && isW(toks[j + 1], "NOT") && isW(toks[j + 2], "EXISTS")) j += 3;
+            if (isName(toks[j])) addTo(added, t, nameKey(toks[j]));
+          } else if (isW(toks[x], "RENAME")) {
+            if (isW(toks[j], "COLUMN")) j++;
+            if (isName(toks[j]) && isW(toks[j + 1], "TO") && isName(toks[j + 2])) {
+              addTo(removed, t, nameKey(toks[j]));
+              addTo(added, t, nameKey(toks[j + 2]));
+            }
+          } else if (isW(toks[x], "DROP")) {
+            if (isW(toks[j], "COLUMN")) j++;
+            if (isW(toks[j], "IF") && isW(toks[j + 1], "EXISTS")) j += 2;
+            if (isName(toks[j])) addTo(removed, t, nameKey(toks[j]));
+          }
+        }
+        i = Math.max(end, i + 1) - 1;
+      }
+    }
+    const merged = new Map<string, Set<string>>();
+    for (const [t, s] of decl) merged.set(t, new Set(s));
+    for (const [t, s] of added) { const m = merged.get(t) ?? new Set<string>(); s.forEach((c) => m.add(c)); merged.set(t, m); }
+    readings.push(merged);
+  }
+  const out = new Map<string, Set<string>>();
+  for (const [t, s] of readings[0]) {
+    const other = readings[1].get(t);
+    if (!other) continue;
+    const gone = removed.get(t);
+    out.set(t, new Set([...s].filter((c) => other.has(c) && !(gone?.has(c) ?? false))));
+  }
+  return out;
+}
+
+/** `schemaColumnKnowledge` over every (expanded) `<schema>` block of every file compiled together. */
+export function compilationSchemaColumns(files: Iterable<unknown>): Map<string, Set<string>> {
+  const bodies: string[] = [];
+  for (const f of files) for (const b of schemaBlocksOf(f)) bodies.push(b.body);
+  return schemaColumnKnowledge(bodies);
 }
 
 /** A `<schema>` block as the compiler will finally see it: its text children, after expansion. */
@@ -1839,6 +2547,7 @@ export interface SchemaHazardDiagnostic { code: "E-TENANT-SCHEMA-HAZARD"; messag
 export function fileTenantSchemaHazards(
   fileAST: unknown,
   floorTenantTables: Iterable<string>,
+  compilationColumns?: SchemaColumns,
 ): SchemaHazardDiagnostic[] {
   const blocks = schemaBlocksOf(fileAST);
   if (blocks.length === 0) return [];
@@ -1846,11 +2555,14 @@ export function fileTenantSchemaHazards(
   for (const t of floorTenantTables) if (typeof t === "string") tenant.add(t.toLowerCase());
   for (const t of schemaTenantTableNames(blocks.map((b) => b.body))) tenant.add(t);
   if (tenant.size === 0) return [];
+  // `rel.f` is checked against the columns the WHOLE compilation declares (api.js passes
+  // `compilationSchemaColumns`); called alone, against this file's own `<schema>` blocks.
+  const columns = compilationColumns ?? schemaColumnKnowledge(blocks.map((b) => b.body));
   const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
   const out: SchemaHazardDiagnostic[] = [];
   for (const { body, span } of blocks) {
     const sp = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-    for (const h of findSchemaTenantHazards(body, tenant)) {
+    for (const h of findSchemaTenantHazards(body, tenant, columns)) {
       out.push({ code: "E-TENANT-SCHEMA-HAZARD", message: schemaHazardMessage(h, body), span: sp, severity: "error" });
     }
   }
@@ -1862,6 +2574,19 @@ export function schemaHazardMessage(h: SchemaHazard, body: string): string {
   const tables = h.unattributable
     ? `every tenant-scoped table (${h.tables.map((t) => `\`${t}\``).join(", ")})`
     : `the tenant-scoped table${h.tables.length > 1 ? "s" : ""} ${h.tables.map((t) => `\`${t}\``).join(", ")}`;
+  if (h.kind === OUTSIDE_SUBSET) {
+    return (
+      `E-TENANT-SCHEMA-HAZARD: the body of the ${h.declKind ?? "declaration"} \`${h.object}\` (line ${lineAt(body, h.offset)} of the ` +
+      `\`<schema>\` body) is outside the tenant SQL subset: ${h.why} (line ${lineAt(body, h.tokenOffset ?? h.offset)}). In a ` +
+      `compilation with a tenant-scoped table, a view, trigger, rule or policy body — and a \`CREATE TABLE … AS\` query — must ` +
+      `lie inside the token-level SQL subset the floor reads tenant queries in: plain identifiers, numbers, plain \`'…'\` ` +
+      `strings and the subset's punctuation (no quoted identifier, comment, \`::\` cast, \`[…]\`, \`$\` / dollar quote or ` +
+      `\`\${…}\`); calls only to the allow-listed functions; a qualified \`rel.col\` only to a column the compilation's ` +
+      `\`<schema>\` declares on \`rel\`; a trigger body is \`BEGIN\`, SELECT / INSERT / UPDATE / DELETE statements, \`END\`. ` +
+      `The compiler cannot tell what SQL the database runs for a body it does not read exactly, so it is charged against ` +
+      `${tables}. Rewrite the body inside the subset (\`CAST(x AS t)\` for \`x::t\`), or remove it. (See SPEC §14.8.10.)`
+    );
+  }
   if (h.kind === NOT_ADMITTED) {
     return (
       `E-TENANT-SCHEMA-HAZARD: this \`<schema>\` holds \`${h.object}\` (line ${lineAt(body, h.offset)} of the \`<schema>\` ` +
