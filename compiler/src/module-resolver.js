@@ -24,7 +24,7 @@
  */
 
 import { resolve, dirname, join, posix } from "path";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { fileURLToPath } from "url";
 import { toPosix, PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { collectMarkupReturningFnNames, resolveImportedMarkupLocalNames } from "./markup-return-scan.js";
@@ -1069,6 +1069,43 @@ export function isStdlibFilePath(absPath) {
   if (normPath === normRoot) return true;
   const prefix = normRoot.endsWith("/") ? normRoot : normRoot + "/";
   return normPath.startsWith(prefix);
+}
+
+/**
+ * §47.1.1 (S440 ruling #9) — is `filePath` a source file of the scrml standard
+ * library (the `stdlib/` tree this compiler ships with)?
+ *
+ * The `_scrml_` reserved-prefix rule exempts stdlib source BY PATH. This is
+ * `isStdlibFilePath` made robust for that use:
+ *   - a relative input is `resolve()`d first (the lexical check needs absolute);
+ *   - separators are POSIX-canonicalized by `isStdlibFilePath` (Windows `\`,
+ *     docs/cross-os-invariants.md invariant 1);
+ *   - symlinks are resolved on BOTH sides — the file's real path is compared
+ *     against the stdlib root's real path, so a stdlib file reached through a
+ *     symlinked install (or a symlinked checkout) is still recognized.
+ * A user file whose path merely CONTAINS a `stdlib` segment (`/app/stdlib/x.scrml`)
+ * is NOT exempt — the comparison is against this compiler's absolute stdlib root,
+ * never a substring match.
+ *
+ * @param {string | null | undefined} filePath
+ * @returns {boolean}
+ */
+export function isStdlibSourceFile(filePath) {
+  if (typeof filePath !== "string" || filePath.length === 0) return false;
+  const abs = resolve(filePath);
+  if (isStdlibFilePath(abs)) return true;
+  let realFile;
+  let realRoot;
+  try {
+    realFile = realpathSync(abs);
+    realRoot = realpathSync(STDLIB_ROOT);
+  } catch {
+    return false; // a path that does not exist cannot be a stdlib source file
+  }
+  const normFile = toPosix(realFile);
+  const normRoot = toPosix(realRoot);
+  if (normFile === normRoot) return true;
+  return normFile.startsWith(normRoot.endsWith("/") ? normRoot : normRoot + "/");
 }
 
 /**
