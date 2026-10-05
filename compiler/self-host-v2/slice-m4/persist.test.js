@@ -228,6 +228,23 @@ describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", 
     expect(inst2.fields[2].peek()).toEqual([]);
   });
 
+  test("s454 rule 2: a PAYLOAD enum round-trips through the §57.8 codec (keyed `data` on the wire, positional at run time); a malformed stored value → the default", async () => {
+    const src = P(`    type Shape:enum = { Dot, Box(w: int, label: string | not) }\n    let <s:Shape=.Dot persist="local" key="c12p.s"/>\n    function mk()! Shape {\n        fail .Box(3, not)\n    }\n    function grow() {\n        mk() !{ _ e :> @s = e }\n    }`,
+      `        <button onclick=grow()>grow</button>`);
+    const core = coreOf(src);
+    await loadProgram(core, "persist-payload");
+    click(btn("grow"));
+    // §57.8: {"variant": "V", "data": {<declared field>: …}}; absence in a `T | not` field is the §57.2 envelope
+    expect(localStorage.getItem("c12p.s")).toBe('{"variant":"Box","data":{"w":3,"label":{"__scrml_absent":true}}}');
+    const field0 = (r) => [...r.rt.devtools.instances.values()].find((i) => i.decl.name === "program").fields[0].peek();
+    expect(field0(await loadProgram(core, "persist-payload-reload"))).toEqual({ variant: "Box", data: [3, null] });
+    // not coerced: an ill-typed field, the RUNTIME (positional) shape stored as if it were the wire shape, a bare payload name
+    for (const bad of ['{"variant":"Box","data":{"w":"3","label":"x"}}', '{"variant":"Box","data":[3,null]}', '"Box"', '{"variant":"Dot","data":{}}']) {
+      localStorage.setItem("c12p.s", bad);
+      expect([bad, field0(await loadProgram(core, "persist-payload-bad"))]).toEqual([bad, "Dot"]);
+    }
+  });
+
   test("rule 3 (S447 call 6 (i)): validators are NOT part of the restore contract — an invalid stored value is restored, not touched", async () => {
     const src = P(`    let <email:string="" persist="local" key="c13.email" req length(>=5)/>`,
       `        <form><input id="e" bind:value=@email/></form>\n        <p class="v">\${@email.isValid}|\${@email.touched}</p>`);
@@ -379,8 +396,8 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
     expect(codes(engine("session"))).toEqual([]);
   });
 
-  test("a type with no §57 wire form (a payload enum) and a FIXED-length sequence", () => {
-    one(`    type Shape:enum = { Dot, Box(w: int) }\n    let <s:Shape=.Dot persist="local" key="r5"/>`, "payload");
+  test("a FIXED-length sequence has no restorable length; a payload enum (s454, §57.8) is NOT refused", () => {
+    expect(codes(P(`    type Shape:enum = { Dot, Box(w: int) }\n    let <s:Shape=.Dot persist="local" key="r5"/>`, `        <p>x</p>`))).toEqual([]);
     one(`    <xs:int[replace]=([1, 2]) persist="local" key="r6"/>`, "FIXED-length");
   });
 

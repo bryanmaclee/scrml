@@ -222,7 +222,14 @@ describe("§4: empty event bindings", () => {
 // ---------------------------------------------------------------------------
 
 describe("§5: server-escalated handler name resolution", () => {
-  test("fnNameMap resolved name appears in the registry entry", () => {
+  test("the call-ref wrapper carries the AUTHOR name; the post-pass mangles it (S454)", () => {
+    // S454 (bryan: "a yes, b yes, root fix") — this stage used to substitute
+    // `fnNameMap.get(name)` into the wrapper BEFORE async colouring, which hid
+    // an async callee from it (the colouring resolves author names). The
+    // wrapper now carries the author name, exactly as the `${fn()}` form does,
+    // and emit-client's post-fn-name-mangle pass rewrites it to the mangled
+    // name. The end-to-end mangled output is pinned in
+    // s454-callref-handler-rejection.test.js ("sync callee — byte-identical").
     const fnNameMap = new Map([["saveData", "_scrml_saveData_42"]]);
     const out = run(
       [makeBinding("_scrml_attr_onclick_10", "onclick", "saveData")],
@@ -232,9 +239,9 @@ describe("§5: server-escalated handler name resolution", () => {
 
     // S96 Bug 14 — SPEC §5.2.2: server-escalated bare-call still emits `fn()`
     // in wrapper body (no event auto-thread).
-    expect(out).toContain("_scrml_saveData_42();");
+    expect(out).toContain("function(event) { saveData(); }");
+    expect(out).not.toContain("_scrml_saveData_42");
     expect(out).not.toContain("saveData(event)");
-    expect(out).not.toContain("_scrml_saveData_42(event)");
   });
 
   test("original name used as fallback when not in fnNameMap", () => {

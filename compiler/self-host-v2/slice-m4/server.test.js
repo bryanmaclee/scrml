@@ -300,9 +300,9 @@ describe("§12.5.3 — E-ROUTE-003 / E-ROUTE-004 via the §57 codec", () => {
     expect(codes(P("", `${T}\n    server function f(p: Pt, k: Kind, xs: int[], s: string | not) -> Pt {\n        return p\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
   });
 
-  test("a payload enum (S451 R8 — not in the codec yet) is REFUSED, not called non-serializable", () => {
-    const src = P("", `${T}\n    server function f(s: Shape) {\n        return\n    }`);
-    expect(sorted(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "W-DEPRECATED-SERVER-MODIFIER"]);
+  test("s454: a payload enum has a wire form (§57.8, S451 R8) — clean as a parameter and as the return type", () => {
+    expect(sorted(P("", `${T}\n    server function f(s: Shape) {\n        return\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
+    expect(sorted(P("", `${T}\n    server function g(s: Shape) -> Shape | not {\n        return s\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
   });
 });
 
