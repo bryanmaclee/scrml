@@ -1141,9 +1141,12 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // chunk scope too.
     const groupNames = liftScopeDeclaredNames(fileScopeNames);
     seedOwnConsts(fileScopeNames, groupNames, true); // chunk scope, if the group lands there (declared-name-marks.ts)
+    // boundary: top-level `${}` logic is client module-init code (this file IS the
+    // client wiring) — "client" by construction. It was previously left unset and
+    // defaulted to "client" by emitLogicNode's _ensureBoundary.
     const groupEmitOpts = groupTildeCtx
-      ? { ...emitOpts, ...whenEmitSpread, tildeContext: groupTildeCtx, declaredNames: groupNames }
-      : { ...emitOpts, ...whenEmitSpread, declaredNames: groupNames };
+      ? { ...emitOpts, ...whenEmitSpread, boundary: "client" as const, tildeContext: groupTildeCtx, declaredNames: groupNames }
+      : { ...emitOpts, ...whenEmitSpread, boundary: "client" as const, declaredNames: groupNames };
     // Per-statement ranges of the side-channel lists a statement's emission appends
     // to, so a statement re-emitted by the mixed-hoist guard below leaves no
     // duplicate behind.

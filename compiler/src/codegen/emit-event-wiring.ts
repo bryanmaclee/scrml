@@ -98,6 +98,8 @@ interface LogicBinding {
    * while only the first two were declared. Nothing caught it: no tsconfig
    * covers `compiler/`, so this interface is unchecked documentation. Keep it
    * complete by hand — it is the only description of the shape this file reads.
+   * (S454: `scripts/types-gate.ts`, now a BLOCKING CI step, does type-check this
+   * file — a read of an undeclared field is a NEW TS2339 there.)
    */
   isReactiveValueAttr?: boolean;
   valueAttrName?: string;
@@ -129,7 +131,10 @@ interface LogicBinding {
    * A1c C11: `errors-element` discriminates the `<errors of=expr/>` first-class
    * element binding (SPEC §55.8 / L13).
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "errors-element" | "render-element";
+  // The full discriminator set binding-registry.ts declares (this file branches on every one).
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content" | "lift-host";
+  /** `kind === "lift-host"` — the host-parameterised lift group fn name. See binding-registry.ts. */
+  liftMountFn?: string;
   chainId?: string;
   branchId?: string;
   branchIndex?: number;
