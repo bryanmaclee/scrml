@@ -43,8 +43,11 @@
 //       — E-LIFECYCLE-007), and its body writes NO cell: no Write / Commit in
 //       the body or its continuations, and no Call of a function that writes,
 //       transitively (§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE)
-//   C12 (s449) a Suspend stands only at the tail of an effect body (an Effect
-//       body, or the `then` of another Suspend) — the CPS split point
+//   C12 (s449; s454 widened) a Suspend stands only at the tail of a client
+//       owner's continuation (an Effect body, a handler block, a client Fn
+//       body, a Suspend's `then`, a Join body, or a branch of an If that ends
+//       one) — the CPS split point; a Join precedes the If that ends its block
+//       and each Jump ends a continuation inside that If
 //   C13 (s449) a ResetOn has ≥ 1 trigger, each a MUTABLE field (C11's rule);
 //       its reset is exactly ONE Write, to a cell that is not one of its own
 //       triggers (§6.8.4 rules 1-3; C3 / C6 judge that Write's contract)
@@ -65,6 +68,8 @@
 //       `replace` grant and no `rule=` graph (O-061-5); an Unpersist names a
 //       persisted field and follows its reset Write (§6.14.2 rule 9)
 //   C-SQL1, C-S1..C-S4 (s451, U1a) — the server boundary: see checkServer.
+//   C-S3 (s454 extended), C-S7, C-S8, C-E2 (extended) — the client half of a
+//       server call (U1b): see checkClientCalls.
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -100,7 +105,7 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p)).concat(checkClientCalls(p))
     }
 
     // =========================================================================
@@ -126,9 +131,22 @@ ${
     // =========================================================================
     fn checkFailures(p: CoreProgram) -> string[] {
         let out: string[] = []
+        // s454 (U1b): a failable Call stands as a Suspend's `on` too (a WAITING client
+        // function declared `!` — its outcome is inspected by the Attempt that begins
+        // the `then`, C-S7); everywhere else it is C-E1
+        let failCalls: int = 0
+        let failOn: int = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            failCalls = failCalls + callFailable(p, n).length
+            const sp: SuspendParts | not = nodeSuspendParts(n)
+            if (sp is some) {
+                const oc: Sym | not = calledSym(sp.on)
+                if (oc is some) { if (fnErr(p, oc) is some) failOn = failOn + 1 }
+            }
+        }
+        if (failCalls != failOn) out = out.concat(["C-E1: " + (failCalls - failOn) + " plain call(s) of a function declared `!` — a failable call stands only as an Attempt's call (§19.4.3), or as the `on` of a Suspend whose Attempt inspects it (C-S7)"])
         for (const d of p.decls) {
             for (const n of allNodes(Node.NDecl(d))) {
-                out = out.concat(callFailable(p, n))
                 if (nodeFailErr(n) is some) out = out.concat(["C-E4: a Fail inside <" + d.sym.hint + "> — a Fail stands only in the body of a function declared `!`"])
             }
         }
@@ -144,7 +162,6 @@ ${
     fn fnFailures(p: CoreProgram, root: Node, name: string, err: Sym | not) -> string[] {
         let out: string[] = []
         for (const n of allNodes(root)) {
-            out = out.concat(callFailable(p, n))
             const fe: FailAt | not = nodeFailErr(n)
             if (fe is some) out = out.concat(checkFail(p, name, err, fe))
         }
@@ -212,6 +229,8 @@ ${
     fn stmtFail(s: Stmt) -> FailAt | not {
         return match s {
             .Fail(err: e, idx: i, args: args) :> { err: e, idx: i, args: args.length }
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
             .Attempt(result: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
@@ -335,6 +354,8 @@ ${
         return match s {
             .Return(e: x) :> true
             .Fail(err: x) :> true
+            .Join(k: x) :> false
+            .Jump(k: x) :> true
             .If(thenB: t, elseB: el) :> ifDiverges(t, el)
             .Attempt(result: x) :> false
             .Let(sym: x) :> false
@@ -378,8 +399,9 @@ ${
     //          awaits in place. (§12.4 R2's E-ROUTE-002, restated over Core.)
     //   C-S2   a query (an Attempt's FSql) stands only in a ServerFn body — never in a Fn (a
     //          pure `fn` included) or a declaration's initializers / views
-    //   C-S3   client code (a Fn, a declaration) never calls a ServerFn as a
-    //          plain Call — a client→server call is a suspension (unit U1b)
+    //   C-S3   client code never calls a ServerFn as a plain Call — a
+    //          client→server call is a suspension (s454: checkClientCalls,
+    //          with Trigger 5 re-derived from Core)
     //   C-S4   every ServerFn's parameter and declared return types have a
     //          §57 wire descriptor (codec.scrml — E-ROUTE-003 / E-ROUTE-004 are
     //          analyze's reports; this is their Core restatement)
@@ -440,12 +462,33 @@ ${
         let out: string[] = []
         for (const n of allNodes(root)) {
             if (nodeIsSql(n)) out = out.concat(["C-S2: a `" + sqlSigil() + "}` query in client code (" + where + ") — a query stands only in a server function"])
+            // (s454: C-S3's plain-call rule is checkClientCalls' — a Fn only client
+            // code reaches; a declaration's own nodes are client code by construction)
             const callee: Sym | not = nodeCallee(n)
-            if (callee is some) {
+            if (callee is some && !isFnRoot(root)) {
                 if (findServerFn(p, callee) is some) out = out.concat(["C-S3: client code (" + where + ") calls the server function " + callee.hint + "() as a plain call"])
             }
         }
         return out
+    }
+
+    fn isFnRoot(n: Node) -> boolean {
+        return match n {
+            .NFn(f: x) :> true
+            .NStmt(s: x) :> false
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
     }
 
     // The Fns that touch client state, directly or through a Fn they call (a
@@ -515,6 +558,8 @@ ${
             .Unpersist(decl: x) :> "removes a persisted cell's storage"
             .Attempt(result: x) :> ""
             .Fail(err: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .If(cond: x) :> ""
@@ -529,6 +574,7 @@ ${
             .Handle(inst: x) :> "names an instance"
             .InitOf(decl: d) :> "re-evaluates an initializer of <" + d.hint + ">"
             .Validity(of: x) :> "reads a validity surface"
+            .ServerCall(fn: x) :> "makes a client call of a server function (a server body calls one in place, §13.4)"
             .Lit(lit: x) :> ""
             .Local(sym: x) :> ""
             .Read(place: x) :> ""
@@ -578,12 +624,15 @@ ${
             .Defer(body: x) :> not
             .Unpersist(decl: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
     fn failableSql(c: Failable) -> SqlQuery | not {
         return match c {
             .FSql(q: q) :> q
+            .FSettled(outcome: x) :> not
             .FCall(fn: x) :> not
         }
     }
@@ -605,6 +654,8 @@ ${
             .Defer(body: x) :> not
             .Unpersist(decl: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
@@ -612,6 +663,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSql(q: x) :> not
+            .FSettled(outcome: x) :> not
         }
     }
 
@@ -650,6 +702,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -729,6 +782,8 @@ ${
             .Unpersist(decl: x) :> ["C8: a bind's write is not a Write"]
             .Attempt(result: x) :> ["C8: a bind's write is not a Write"]
             .Fail(err: x) :> ["C8: a bind's write is not a Write"]
+            .Join(k: x) :> ["C8: a bind's write is not a Write"]
+            .Jump(k: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -779,6 +834,7 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -799,6 +855,7 @@ ${
             .Lambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
+            .ServerCall(fn: x) :> "(not a cell read)"
         }
     }
 
@@ -990,6 +1047,8 @@ ${
             .Unpersist(decl: x) :> false
             .Attempt(result: x) :> false
             .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -1007,6 +1066,8 @@ ${
             .Unpersist(decl: x) :> true
             .Attempt(result: x) :> false
             .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
             .ResetSurface(of: v) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
@@ -1082,6 +1143,8 @@ ${
             .Unpersist(decl: d, idx: x) :> d.hint + "#" + d.id + "." + x
             .Attempt(result: x) :> ""
             .Fail(err: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
             .ResetSurface(of: v) :> ""
             .Write(cap: x) :> ""
             .Let(sym: x) :> ""
@@ -1118,6 +1181,8 @@ ${
             .Unpersist(decl: x) :> not
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
@@ -1289,6 +1354,8 @@ ${
             .Unpersist(decl: x) :> ""
             .Attempt(result: x) :> ""
             .Fail(err: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
         }
     }
 
@@ -1339,113 +1406,626 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
     // -------------------------------------------------------------------------
-    // C12 (s449) — a Suspend is a CPS split point: its continuation is its
-    // `then`, so nothing may follow it in its block, and it stands only at the
-    // TAIL of an effect body — an Effect body, or (a chain) the `then` of
-    // another Suspend. In an If branch the statements after the If would run
-    // before the branch's continuation; in a function, handler or bind there is
-    // no owning effect task to cancel it on teardown or re-run.
+    // C12 (s449; s454 U1b widened) — a Suspend is a CPS split point: its
+    // continuation is its `then`, so nothing may follow it in its block. It
+    // stands at the TAIL of a block that is a CLIENT OWNER'S CONTINUATION: an
+    // Effect body, an event-handler block (Attr.On), a client Fn body, a
+    // Suspend's `then`, a Join body — or a branch of an If that is itself the
+    // last statement of such a block (design §2.6 "plus the If-branch form").
+    // A Join stands immediately before an If that ends its block, and every
+    // Jump(k) is the last statement of a tail block inside THAT If. Nowhere
+    // else: not in an Attempt's arms or success branch, a Defer body (C16), a
+    // Commit, a ServerFn (a server body calls in place), a bind's write.
     // -------------------------------------------------------------------------
     fn checkSuspends(p: CoreProgram) -> string[] {
-        let total: int = 0
-        let legal: int = 0
-        for (const n of allNodes(Node.NProgram(p))) {
-            total = total + suspendAt(n)
-            legal = legal + effectTails(n)
-        }
-        if (total == legal) return []
-        return ["C12: " + (total - legal) + " Suspend(s) stand outside the tail of an effect body (an Effect body or a Suspend's continuation, and last in that block)"]
+        let out: string[] = []
+        for (const n of allNodes(Node.NProgram(p))) { out = out.concat(ownerTails(n)) }
+        for (const f of p.fns) { out = out.concat(tailBlock(f.body, true, [], f.sym.hint + "()")) }
+        for (const s of p.server) { out = out.concat(tailBlock(s.body, false, [], "server function " + s.sym.hint + "()")) }
+        return out
     }
 
-    fn suspendAt(n: Node) -> int {
+    // An Effect body / a handler block: a tail owner. (Every other block is
+    // walked by tailBlock from its root, or holds no statement a client owns.)
+    fn ownerTails(n: Node) -> string[] {
         return match n {
-            .NStmt(s: s) :> suspendThenCount(s)
-            .NProgram(p: q) :> 0
-            .NDecl(d: d) :> 0
-            .NField(f: f) :> 0
-            .NFn(f: f) :> 0
-            .NServerFn(f: f) :> 0
-            .NBlock(b: b) :> 0
-            .NExpr(e: e) :> 0
-            .NPlace(pl: pl) :> 0
-            .NInst(i: i) :> 0
-            .NPattern(pat: pat) :> 0
-            .NEdit(k: k) :> 0
-            .NView(v: v) :> 0
-            .NAttr(a: a) :> 0
+            .NView(v: v) :> viewOwnerTails(v)
+            .NAttr(a: a) :> attrOwnerTails(a)
+            .NProgram(p: q) :> []
+            .NDecl(d: d) :> []
+            .NField(f: f) :> []
+            .NFn(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NStmt(s: s) :> []
+            .NExpr(e: e) :> []
+            .NPlace(pl: pl) :> []
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> []
         }
     }
 
-    fn suspendThenCount(s: Stmt) -> int {
-        const t: Block | not = suspendThen(s)
-        if (t is some) return 1
-        return 0
+    fn viewOwnerTails(v: View) -> string[] {
+        return match v {
+            .Effect(body: b) :> tailBlock(b, true, [], "an effect body")
+            .ResetOn(reset: b) :> tailBlock(b, false, [], "a reset-on reset")
+            .Errors(of: x) :> []
+            .El(tag: x) :> []
+            .Text(text: x) :> []
+            .Dyn(e: x) :> []
+            .Cond(arms: x) :> []
+            .Each(src: x) :> []
+            .Instance(decl: x) :> []
+            .Slot :> []
+            .Star(decl: x) :> []
+        }
     }
 
-    fn suspendThen(s: Stmt) -> Block | not {
+    fn attrOwnerTails(a: Attr) -> string[] {
+        return match a {
+            .On(event: ev, body: b) :> tailBlock(b, true, [], "the `" + ev + "` handler")
+            .Bind(kind: k, write: w) :> tailBlock(w, false, [], "a bind's write")
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .Show(test: x) :> []
+            .Gate(values: x) :> []
+        }
+    }
+
+    // `tail`: the block is a continuation a Suspend / Jump may end; `joins`: the
+    // Join continuations a Jump here may name (those of the enclosing Ifs).
+    fn tailBlock(b: Block, tail: boolean, joins: int[], where: string) -> string[] {
+        let out: string[] = []
+        const n: int = b.stmts.length
+        let i: int = 0
+        for (const s of b.stmts) {
+            const last: boolean = i == n - 1
+            out = out.concat(tailStmt(b, i, s, tail, last, joins, where))
+            i = i + 1
+        }
+        return out
+    }
+
+    fn tailStmt(b: Block, i: int, s: Stmt, tail: boolean, last: boolean, joins: int[], where: string) -> string[] {
         return match s {
-            .Suspend(then: t) :> t
-            .ResetSurface(of: x) :> not
-            .Unpersist(decl: x) :> not
+            .Suspend(bind: x, then: t) :> suspendTail(tail, last, where).concat(tailBlock(t, true, joins, where))
+            .Join(k: k, body: jb) :> joinShape(b, i, k, tail, where).concat(tailBlock(jb, true, joins, where))
+            .Jump(k: k) :> jumpTail(k, tail, last, joins, where)
+            .If(thenB: t, elseB: el) :> ifTails(b, i, t, el, tail, last, joins, where)
+            .Attempt(ok: ok, arms: arms) :> attemptTails(ok, arms, where)
+            .Defer(body: d) :> tailBlock(d, false, [], where)
+            .Commit(writes: ws) :> []
+            .Let(sym: x) :> []
+            .Assign(local: x) :> []
+            .Write(cap: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .ResetSurface(of: x) :> []
+            .Unpersist(decl: x) :> []
+            .Fail(err: x) :> []
+        }
+    }
+
+    fn suspendTail(tail: boolean, last: boolean, where: string) -> string[] {
+        if (!tail) return ["C12: a Suspend in " + where + " stands outside a client owner's continuation (an effect body, a handler block, a client function body, a Suspend's `then`, a Join body, or a branch of an If that ends one)"]
+        if (!last) return ["C12: a Suspend in " + where + " is not the last statement of its block — what follows it must be its continuation (`then`)"]
+        return []
+    }
+
+    // A Join stands immediately before an If that is the LAST statement of a tail block.
+    fn joinShape(b: Block, i: int, k: Sym, tail: boolean, where: string) -> string[] {
+        if (!tail) return ["C12: a Join in " + where + " stands outside a client owner's continuation"]
+        if (i != b.stmts.length - 2 || !isIfStmt(b.stmts[i + 1])) return ["C12: Join `" + k.hint + "` in " + where + " is not immediately followed by the If that ends its block"]
+        return []
+    }
+
+    fn jumpTail(k: Sym, tail: boolean, last: boolean, joins: int[], where: string) -> string[] {
+        if (joins.indexOf(k.id) < 0) return ["C12: a Jump in " + where + " names `" + k.hint + "`, which is not the Join of an enclosing If"]
+        if (!tail || !last) return ["C12: a Jump in " + where + " is not the last statement of a continuation block"]
+        return []
+    }
+
+    // An If's branches are tail blocks when it ENDS a tail block; the Join just
+    // before it (if any) is the one its branches may Jump to.
+    fn ifTails(b: Block, i: int, t: Block, el: Block | not, tail: boolean, last: boolean, joins: int[], where: string) -> string[] {
+        const branchTail: boolean = tail && last
+        let js: int[] = joins
+        if (i > 0) {
+            const k: Sym | not = joinSym(b.stmts[i - 1])
+            if (k is some) js = joins.concat([k.id])
+        }
+        let out: string[] = tailBlock(t, branchTail, js, where)
+        if (el is some) out = out.concat(tailBlock(el, branchTail, js, where))
+        return out
+    }
+
+    fn attemptTails(ok: OkArm, arms: ErrArm[], where: string) -> string[] {
+        let out: string[] = tailBlock(ok.body, false, [], where)
+        for (const a of arms) { out = out.concat(tailBlock(a.body, false, [], where)) }
+        return out
+    }
+
+    fn isIfStmt(s: Stmt) -> boolean {
+        return match s {
+            .If(cond: x) :> true
+            .Suspend(bind: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Attempt(result: x) :> false
+            .Defer(body: x) :> false
+            .Commit(writes: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Unpersist(decl: x) :> false
+            .Fail(err: x) :> false
+        }
+    }
+
+    fn joinSym(s: Stmt) -> Sym | not {
+        return match s {
+            .Join(k: k) :> k
+            .If(cond: x) :> not
+            .Suspend(bind: x) :> not
+            .Jump(k: x) :> not
             .Attempt(result: x) :> not
-            .Fail(err: x) :> not
+            .Defer(body: x) :> not
+            .Commit(writes: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
             .Write(cap: x) :> not
-            .Commit(writes: x) :> not
-            .If(cond: x) :> not
             .Return(e: x) :> not
             .Eval(e: x) :> not
-            .Defer(body: x) :> not
+            .ResetSurface(of: x) :> not
+            .Unpersist(decl: x) :> not
+            .Fail(err: x) :> not
         }
     }
 
-    fn effectTails(n: Node) -> int {
+    // =========================================================================
+    // s454 (U1b) — THE CLIENT HALF OF A SERVER CALL, IN CORE (design §2.6):
+    //   C-S3  an Expr.ServerCall names a ServerFn and stands ONLY as a
+    //         Suspend's `on` in client code (never in a ServerFn — C-S1 says
+    //         so too); a CLIENT-REACHABLE Fn (one a declaration's views /
+    //         handlers / effects reach, through calls) never calls a ServerFn as
+    //         a plain call — a Fn that does is server-only (§12.2 Trigger 5,
+    //         re-derived here from Core) and no client root reaches it.
+    //   C-S7  a Suspend on a FAILABLE call — a ServerCall, or a Call of a Fn
+    //         whose `err` is some — has a `then` whose FIRST statement is an
+    //         Attempt over FSettled(its bind), and that bind is read nowhere
+    //         else (no Expr.Local / LocalPath of it, no other FSettled): the raw
+    //         outcome (a value or a Failure) reaches no other expression. An
+    //         FSettled stands only there. (The Core restatement of §19.9.10's
+    //         E-ERROR-002, as C-E1 is for a declared `!` call.)
+    //   C-S8  Fn.waits is true iff the Fn's body holds a Suspend (any depth);
+    //         a Call of a waiting Fn stands only as a Suspend's `on` (its value
+    //         arrives later — it is never read in place).
+    //   C-E2 (extended) an Attempt over FSettled of a ServerCall handles the
+    //         CLIENT failure set of the callee: its declared enum's variants
+    //         (names, arities) in order, then ONE `Transport(t: ServerCallError)`
+    //         — or the declared enum itself when it declares that variant — or,
+    //         for a callee not declared `!`, exactly `{ Transport(t:
+    //         ServerCallError) }`; over FSettled of a Call, the callee's `err`.
+    // =========================================================================
+    fn checkClientCalls(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        // where may a ServerCall / FSettled stand? (every Suspend's own `on` / first Attempt is legal)
+        let legalOn: int = 0
+        let legalSettled: int = 0
+        let calls: int = 0
+        let settled: int = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            if (nodeServerCallSym(n) is some) calls = calls + 1
+            if (nodeSettled(n) is some) settled = settled + 1
+            const sp: SuspendParts | not = nodeSuspendParts(n)
+            if (sp is some) {
+                const on: Sym | not = exprServerCallSym(sp.on)
+                if (on is some) {
+                    legalOn = legalOn + 1
+                    if (findServerFn(p, on) is not) out = out.concat(["C-S3: a ServerCall names `" + on.hint + "`, which is not a server function of the program"])
+                }
+                out = out.concat(checkSuspendCall(p, sp))
+                const first: Stmt | not = firstStmt(sp.then)
+                if (first is some) {
+                    const fs: Sym | not = stmtSettled(first)
+                    if (fs is some) {
+                        if (fs.id == sp.bind.id) legalSettled = legalSettled + 1
+                    }
+                }
+            }
+        }
+        if (calls != legalOn) out = out.concat(["C-S3: " + (calls - legalOn) + " ServerCall(s) stand outside a Suspend's `on` (a client call of a server function is a suspension point, §12.3 / §19.9.10)"])
+        if (settled != legalSettled) out = out.concat(["C-S7: " + (settled - legalSettled) + " FSettled outcome(s) are not the call of the Attempt that begins their Suspend's `then`"])
+        for (const s of p.server) {
+            for (const n of allNodes(Node.NServerFn(s))) {
+                if (nodeSuspendParts(n) is some) out = out.concat(["C-S3: server function " + s.sym.hint + "() suspends — a server body calls in place (§13.4)"])
+            }
+        }
+        // C-S3: client code never plain-calls a ServerFn — a Fn a client root
+        // reaches, or one that touches client state itself (client by its own body)
+        const reach: int[] = clientReachableFns(p).concat(clientTouchingFns(p))
+        for (const f of p.fns) {
+            if (reach.indexOf(f.sym.id) >= 0) {
+                for (const n of allNodes(Node.NFn(f))) {
+                    const c: Sym | not = nodePlainCall(n)
+                    if (c is some) {
+                        if (findServerFn(p, c) is some) out = out.concat(["C-S3: client code (" + f.sym.hint + "()) calls the server function " + c.hint + "() as a plain call"])
+                    }
+                }
+            }
+            // C-S8
+            const holds: boolean = blockHoldsSuspend(f.body)
+            if (holds && !f.waits) out = out.concat(["C-S8: " + f.sym.hint + "() holds a Suspend but is not `waits`"])
+            if (!holds && f.waits) out = out.concat(["C-S8: " + f.sym.hint + "() is `waits` but holds no Suspend"])
+        }
+        // C-S8: a Call of a waiting Fn stands only as a Suspend's `on`
+        let waitCalls: int = 0
+        let waitOn: int = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            const c: Sym | not = nodePlainCall(n)
+            if (c is some) {
+                const fd: Fn | not = findFn(p, c)
+                if (fd is some) { if (fd.waits) waitCalls = waitCalls + 1 }
+            }
+            const sp2: SuspendParts | not = nodeSuspendParts(n)
+            if (sp2 is some) {
+                const oc: Sym | not = calledSym(sp2.on)
+                if (oc is some) {
+                    const fd2: Fn | not = findFn(p, oc)
+                    if (fd2 is some) { if (fd2.waits) waitOn = waitOn + 1 }
+                }
+            }
+        }
+        if (waitCalls != waitOn) out = out.concat(["C-S8: " + (waitCalls - waitOn) + " call(s) of a waiting function stand outside a Suspend's `on` (its value arrives later)"])
+        return out
+    }
+
+    // C-S7 + C-E2 (extended) for one Suspend.
+    fn checkSuspendCall(p: CoreProgram, sp: SuspendParts) -> string[] {
+        const sc: Sym | not = exprServerCallSym(sp.on)
+        let failErr: Sym | not = not
+        let remote = false
+        let callee: Sym | not = not
+        if (sc is some) {
+            remote = true
+            callee = sc
+        } else {
+            const c: Sym | not = calledSym(sp.on)
+            if (c is some) {
+                const fd: Fn | not = findFn(p, c)
+                if (fd is some) {
+                    failErr = fd.err
+                    callee = c
+                }
+            }
+        }
+        if (callee is not) return []
+        if (!remote && failErr is not) return []        // a non-failable waiting call: its value is the bind
+        const first: Stmt | not = firstStmt(sp.then)
+        let at: AttemptParts | not = not
+        if (first is some) at = attemptParts(first)
+        if (at is not) return ["C-S7: a Suspend on a failable call of " + callee.hint + "() does not begin its `then` with the Attempt that inspects the outcome"]
+        let out: string[] = []
+        const fs: Sym | not = failableSettled(at.call)
+        if (fs is not) {
+            out = out.concat(["C-S7: the Attempt after a Suspend on " + callee.hint + "() does not inspect the settled outcome (FSettled)"])
+        } else if (fs.id != sp.bind.id) {
+            out = out.concat(["C-S7: the Attempt after a Suspend on " + callee.hint + "() inspects another outcome than the Suspend's"])
+        }
+        if (bindReadElsewhere(sp)) out = out.concat(["C-S7: the raw outcome of " + callee.hint + "() is read outside its Attempt"])
+        // C-E2 (extended): the failure set
+        if (remote) {
+            const sf: ServerFn | not = findServerFn(p, callee)
+            if (sf is some) out = out.concat(checkClientSet(p, sf, at.err))
+        } else if (failErr is some) {
+            if (failErr.id != at.err.id) out = out.concat(["C-E2: the Attempt over " + callee.hint + "()'s outcome handles `" + at.err.hint + "`, but it fails with `" + failErr.hint + "`"])
+        }
+        return out
+    }
+
+    // The client failure set of server function `sf` (§19.9.10): `set` is it?
+    fn checkClientSet(p: CoreProgram, sf: ServerFn, set: Sym) -> string[] {
+        const sce: Sym | not = p.serverCallError
+        if (sce is not) return ["C-E2: a client call of " + sf.sym.hint + "() but the program has no ServerCallError enum"]
+        const t: TypeDef | not = findTypeDef(p, set)
+        if (t is not) return ["C-E2: the client failure set `" + set.hint + "` of " + sf.sym.hint + "() is not a type of the program"]
+        const vs: VariantDef[] = enumVariantDefs(t)
+        const e: Sym | not = sf.err
+        let own: VariantDef[] = []
+        if (e is some) {
+            if (e.id == set.id) {
+                if (hasTransport(vs, sce)) return []
+                return ["C-E2: " + sf.sym.hint + "()'s client failure set is its declared `" + e.hint + "`, which lacks `Transport(t: ServerCallError)`"]
+            }
+            const et: TypeDef | not = findTypeDef(p, e)
+            if (et is some) own = enumVariantDefs(et)
+        }
+        if (vs.length != own.length + 1) return ["C-E2: the client failure set of " + sf.sym.hint + "() has " + vs.length + " variant(s); the declared ones plus ONE Transport make " + (own.length + 1)]
+        let i: int = 0
+        while (i < own.length) {
+            if (vs[i].sym.hint != own[i].sym.hint || vs[i].fields.length != own[i].fields.length) return ["C-E2: variant #" + i + " of " + sf.sym.hint + "()'s client failure set is not its declared `" + own[i].sym.hint + "`"]
+            i = i + 1
+        }
+        if (!isTransport(vs[own.length], sce)) return ["C-E2: the last variant of " + sf.sym.hint + "()'s client failure set is not `Transport(t: ServerCallError)`"]
+        return []
+    }
+
+    fn hasTransport(vs: VariantDef[], sce: Sym) -> boolean {
+        for (const v of vs) { if (isTransport(v, sce)) return true }
+        return false
+    }
+
+    fn isTransport(v: VariantDef, sce: Sym) -> boolean {
+        if (v.sym.hint != "Transport" || v.fields.length != 1) return false
+        return v.fields[0].ty == Type.Named(sce)
+    }
+
+    // Is the Suspend's bind read anywhere in its `then` but the first Attempt's call?
+    fn bindReadElsewhere(sp: SuspendParts) -> boolean {
+        let reads: int = 0
+        for (const n of allNodes(Node.NBlock(sp.then))) {
+            if (nodeReadsSym(n, sp.bind)) reads = reads + 1
+        }
+        return reads > 0
+    }
+
+    fn nodeReadsSym(n: Node, s: Sym) -> boolean {
         return match n {
-            .NView(v: v) :> viewEffectTails(v)
-            .NProgram(p: q) :> 0
-            .NDecl(d: d) :> 0
-            .NField(f: f) :> 0
-            .NFn(f: f) :> 0
-            .NServerFn(f: f) :> 0
-            .NBlock(b: b) :> 0
-            .NStmt(s: s) :> 0
-            .NExpr(e: e) :> 0
-            .NPlace(pl: pl) :> 0
-            .NInst(i: i) :> 0
-            .NPattern(pat: pat) :> 0
-            .NEdit(k: k) :> 0
-            .NAttr(a: a) :> 0
+            .NExpr(e: e) :> exprLocalSym(e, s)
+            .NPlace(pl: pl) :> placeLocalSym(pl, s)
+            .NStmt(s: st) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
         }
     }
 
-    fn viewEffectTails(v: View) -> int {
-        return match v {
-            .Effect(body: b) :> tailChain(b)
-            .ResetOn(triggers: x) :> 0
-            .Errors(of: x) :> 0
-            .El(tag: x) :> 0
-            .Text(text: x) :> 0
-            .Dyn(e: x) :> 0
-            .Cond(arms: x) :> 0
-            .Each(src: x) :> 0
-            .Instance(decl: x) :> 0
-            .Slot :> 0
-            .Star(decl: x) :> 0
+    fn exprLocalSym(e: Expr, s: Sym) -> boolean {
+        return match e {
+            .Local(sym: y) :> y.id == s.id
+            .Lit(lit: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
-    // The legally placed Suspends of a chain: the block's LAST statement, if a
-    // Suspend, and those of its continuation.
-    fn tailChain(b: Block) -> int {
-        if (b.stmts.length == 0) return 0
-        const t: Block | not = suspendThen(b.stmts[b.stmts.length - 1])
-        if (t is not) return 0
-        return 1 + tailChain(t)
+    fn placeLocalSym(pl: Place, s: Sym) -> boolean {
+        return match pl {
+            .LocalPath(sym: y) :> y.id == s.id
+            .Cell(decl: x) :> false
+        }
+    }
+
+    type SuspendParts:struct = { bind: Sym, on: Expr, then: Block }
+    type AttemptParts:struct = { call: Failable, err: Sym }
+
+    fn nodeSuspendParts(n: Node) -> SuspendParts | not {
+        return match n {
+            .NStmt(s: s) :> stmtSuspendParts(s)
+            .NExpr(e: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn stmtSuspendParts(s: Stmt) -> SuspendParts | not {
+        return match s {
+            .Suspend(bind: b, on: on, then: t) :> { bind: b, on: on, then: t }
+            .If(cond: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Attempt(result: x) :> not
+            .Defer(body: x) :> not
+            .Commit(writes: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Unpersist(decl: x) :> not
+            .Fail(err: x) :> not
+        }
+    }
+
+    fn attemptParts(s: Stmt) -> AttemptParts | not {
+        return match s {
+            .Attempt(call: c, err: e) :> { call: c, err: e }
+            .Suspend(bind: x) :> not
+            .If(cond: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Defer(body: x) :> not
+            .Commit(writes: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Unpersist(decl: x) :> not
+            .Fail(err: x) :> not
+        }
+    }
+
+    fn firstStmt(b: Block) -> Stmt | not {
+        if (b.stmts.length == 0) return not
+        return b.stmts[0]
+    }
+
+    fn stmtSettled(s: Stmt) -> Sym | not {
+        const a: AttemptParts | not = attemptParts(s)
+        if (a is not) return not
+        return failableSettled(a.call)
+    }
+
+    fn failableSettled(c: Failable) -> Sym | not {
+        return match c {
+            .FSettled(outcome: o) :> o
+            .FCall(fn: x) :> not
+            .FSql(q: x) :> not
+        }
+    }
+
+    fn nodeSettled(n: Node) -> Sym | not {
+        return match n {
+            .NStmt(s: s) :> stmtSettled(s)
+            .NExpr(e: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn nodeServerCallSym(n: Node) -> Sym | not {
+        return match n {
+            .NExpr(e: e) :> exprServerCallSym(e)
+            .NStmt(s: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn exprServerCallSym(e: Expr) -> Sym | not {
+        return match e {
+            .ServerCall(fn: f) :> f
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+        }
+    }
+
+    // A plain call node's callee: an Expr.Call, or an Attempt's FCall.
+    fn nodePlainCall(n: Node) -> Sym | not {
+        return match n {
+            .NExpr(e: e) :> calledSym(e)
+            .NStmt(s: s) :> stmtFCall(s)
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn stmtFCall(s: Stmt) -> Sym | not {
+        const a: AttemptParts | not = attemptParts(s)
+        if (a is not) return not
+        return failableFn(a.call)
+    }
+
+    fn blockHoldsSuspend(b: Block) -> boolean {
+        for (const n of allNodes(Node.NBlock(b))) {
+            if (nodeSuspendParts(n) is some) return true
+        }
+        return false
+    }
+
+    // The Fns a client root reaches: a declaration's fields / views / handlers /
+    // effects name them (calls, Suspend `on`s, Attempt calls), then the Fns those
+    // reach — a fixed point. (§12.2 Trigger 5 re-derived from Core: a Fn nothing
+    // on the client reaches is server-only.)
+    fn clientReachableFns(p: CoreProgram) -> int[] {
+        let out: int[] = []
+        for (const d of p.decls) {
+            for (const n of allNodes(Node.NDecl(d))) {
+                const c: Sym | not = nodePlainCall(n)
+                if (c is some) { if (findFn(p, c) is some && out.indexOf(c.id) < 0) out = out.concat([c.id]) }
+            }
+        }
+        let changed = true
+        while (changed) {
+            changed = false
+            for (const f of p.fns) {
+                if (out.indexOf(f.sym.id) >= 0) {
+                    for (const n of allNodes(Node.NFn(f))) {
+                        const c: Sym | not = nodePlainCall(n)
+                        if (c is some) {
+                            if (findFn(p, c) is some && out.indexOf(c.id) < 0) {
+                                out = out.concat([c.id])
+                                changed = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out
     }
 
     fn checkStar(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef) -> string[] {
@@ -1473,6 +2053,8 @@ ${
             .Unpersist(decl: d, inst: i, idx: x) :> checkUnpersist(p, encl, d, i, x)
             .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> checkAttempt(p, r, c, e, ok, arms)
             .Fail(err: x) :> []
+            .Join(k: x) :> []
+            .Jump(k: x) :> []
         }
     }
 
@@ -1522,6 +2104,8 @@ ${
             .Unpersist(decl: x) :> ""
             .Attempt(result: x) :> ""
             .Fail(err: x) :> "a Fail"
+            .Join(k: x) :> "a Join"
+            .Jump(k: x) :> "a Jump"
         }
     }
 
@@ -1555,6 +2139,8 @@ ${
             .Unpersist(decl: x) :> "an Unpersist inside a Commit"
             .Attempt(result: x) :> "an Attempt inside a Commit"
             .Fail(err: x) :> "a Fail inside a Commit"
+            .Join(k: x) :> "a Join inside a Commit"
+            .Jump(k: x) :> "a Jump inside a Commit"
         }
     }
 
@@ -1574,6 +2160,7 @@ ${
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .ServerCall(fn: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -1655,6 +2242,7 @@ ${
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .ServerCall(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -1922,6 +2510,8 @@ ${
             .Unpersist(decl: x) :> not
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
@@ -1946,6 +2536,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -1966,6 +2557,7 @@ ${
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
+            .ServerCall(fn: x) :> []
         }
     }
 
@@ -2033,6 +2625,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 

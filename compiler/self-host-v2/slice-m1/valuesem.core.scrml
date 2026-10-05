@@ -56,7 +56,7 @@ ${
         }
 
         const log: Fn = {
-            sym: sLog, params: [], pure: false, err: not,
+            sym: sLog, params: [], pure: false, err: not, waits: false,
             body: block([
                 Stmt.Let(sBefore, readField(sProgram, shared, AUDIT)),
                 Stmt.Write(wAudit, shared, EditKind.Append, litStr("x"), Check.Static),
@@ -82,6 +82,6 @@ ${
             sym: sProgram, kind: DeclKind.Program, single: true,
             fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
         }
-        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not }
+        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not }
     }
 }

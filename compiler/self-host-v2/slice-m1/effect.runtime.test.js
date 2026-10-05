@@ -316,7 +316,9 @@ describe("the suspendable task layer (Core Stmt.Suspend)", () => {
     expect(steps).toEqual([1]);
   });
 
-  test("a rejection on a cancelled task is dropped; on a live task it is re-raised, not swallowed", async () => {
+  // s454 (U1b, design §2.4 item 3): a live task's rejection is no longer re-raised as an
+  // UNHANDLED rejection — it goes to the runtime's ONE host-error reporter (never swallowed).
+  test("a rejection on a cancelled task is dropped; on a live task it reaches the host-error reporter, not swallowed", async () => {
     const scope = rt.root.child();
     const dep = rt.cell(0);
     const dead = held();
@@ -328,11 +330,12 @@ describe("the suspendable task layer (Core Stmt.Suspend)", () => {
     await tick();
     expect(ran).toBe(false);
 
-    // The live case is an UNHANDLED rejection by design, which fails a bun test
-    // process — so it runs in a child process that observes it.
+    // The live case runs in a child process that also watches for an unhandled
+    // rejection (which must NOT happen any more).
     const script = `
       import * as rt from ${JSON.stringify(import.meta.dir + "/runtime/runtime.js")};
-      process.on("unhandledRejection", (e) => { console.log("RAISED " + e.message); process.exit(0); });
+      process.on("unhandledRejection", (e) => { console.log("UNHANDLED " + e.message); process.exit(1); });
+      rt.setHostErrorReporter((e) => { console.log("REPORTED " + e.message); process.exit(0); });
       const scope = rt.root.child();
       const dep = rt.cell(0);
       let reject;
@@ -343,7 +346,7 @@ describe("the suspendable task layer (Core Stmt.Suspend)", () => {
       setTimeout(() => { console.log("SWALLOWED"); process.exit(1); }, 50);
     `;
     const r = Bun.spawnSync(["bun", "-e", script]);
-    expect(r.stdout.toString().trim()).toBe("RAISED server said no");
+    expect(r.stdout.toString().trim()).toBe("REPORTED server said no");
   });
 
   test("a plain (non-promise) value still suspends to a later microtask", async () => {

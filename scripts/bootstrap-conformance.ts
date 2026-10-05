@@ -21,8 +21,10 @@
  *
  *   PASS         codes half holds AND the runtime half (if the case has one) executed and held.
  *   CODES-ONLY   codes half holds; the case HAS a runtime half the bootstrap cannot execute — a
- *                server (serverStub / serverDb / firstPaint / ssr) or tool (stdout) run. The
- *                bootstrap emits no server or tool artifact, so that half is not attempted.
+ *                server (serverDb / firstPaint / ssr) or tool (stdout) run. The bootstrap emits
+ *                no server or tool artifact, so that half is not attempted. (s454 U1b: a
+ *                `serverStub` case IS executed — the stub answers the bootstrap's own client
+ *                calls over its route manifest; see `stubFetch`.)
  *   FAIL         the bootstrap handled the case and got it WRONG: a required code missing, a
  *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch —
  *                or (a §66 twin only) it emitted an E- code the case does not assert
@@ -413,10 +415,60 @@ export function codeUnitCmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** The runtime half's server/tool selectors — halves the bootstrap emits no artifact for. */
+/** The runtime half's server/tool selectors — halves the bootstrap emits no artifact for.
+ *  (s454 U1b: `serverStub` is not one — its stub answers the client artifact's calls.) */
 export function nonClientRuntimeKeys(c: LoadedCase): string[] {
   const e = c.expected.expect as Record<string, unknown>;
-  return ["serverStub", "serverDb", "firstPaint", "stdout", "ssr"].filter((k) => e[k] !== undefined && e[k] !== false);
+  return ["serverDb", "firstPaint", "stdout", "ssr"].filter((k) => e[k] !== undefined && e[k] !== false);
+}
+
+/** A route of the bootstrap's client artifact (print.scrml `Output.routes` — the manifest). */
+export type BootRoute = { fn: string; path: string; value: boolean };
+
+const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+const own = (v: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(v, k);
+
+/**
+ * s454 (U1b, design Item 3.4) — the bootstrap's `serverStub` adapter: a `fetch` that answers the
+ * client artifact's calls (`rt.call` POSTs to a route of the manifest) with HTTP-shaped responses,
+ * keyed — like impl#1's adapter — by the IMPL-NEUTRAL scrml-source function name. The bootstrap's
+ * client decodes STRICTLY (§57.4 R10), so the stub's values are read under impl#2's wire rules:
+ *   - a plain value → 200 + its JSON (a raw `null` is not absence: the §57.2 envelope is);
+ *   - `null` / no stub, for a function that yields no value → 204 (the no-value contract); no stub
+ *     for a value function → 200 `null` (impl#1's "deterministic empty 200" — which a strict
+ *     client reads as Malformed);
+ *   - `{ "__serverError": { type, variant, data?, status? } }` → `status` (default 500, §19.9.2) + the
+ *     §57.8 `fail` envelope `{ __scrml_error: true, type, variant, data }` (`data` absent → `{}`, the
+ *     §57.8 shape of a variant with no fields);
+ *   - `{ "__httpError": { status, body? } }` → that status + the raw body (no envelope);
+ *   - `{ "__batches": [r0, …] }` → batch 0 (the bootstrap has no body split — U1d — so a route is
+ *     one batch).
+ * An impl#1-shaped error stub (`type: "CpsError"`) answering a function with another declared enum
+ * is therefore `Transport(Malformed)` on the bootstrap — the case's `_` arm still catches it.
+ */
+export function stubFetch(stub: Record<string, unknown>, routes: BootRoute[]) {
+  const response = (status: number, text: string) => ({ status, text: () => Promise.resolve(text) });
+  return async (input: unknown): Promise<unknown> => {
+    const url = typeof input === "string" ? input : String((input as { url?: string })?.url ?? input);
+    const r = routes.find((x) => x.path === url);
+    let body: unknown = r && own(stub, r.fn) ? stub[r.fn] : undefined;
+    if (isObj(body) && Array.isArray(body.__batches)) body = (body.__batches as unknown[])[0];
+    if (isObj(body) && own(body, "__serverError")) {
+      const e = body.__serverError as { type?: unknown; variant?: unknown; data?: unknown; status?: unknown };
+      const status = typeof e.status === "number" ? e.status : 500;
+      return response(status, JSON.stringify({ __scrml_error: true, type: e.type, variant: e.variant, data: e.data === undefined ? {} : e.data }));
+    }
+    if (isObj(body) && own(body, "__httpError")) {
+      const h = body.__httpError as { status?: unknown; body?: unknown };
+      const status = typeof h.status === "number" ? h.status : 500;
+      return response(status, JSON.stringify(h.body === undefined ? { error: "Internal server error", detail: "" } : h.body));
+    }
+    if (body === undefined || body === null) {
+      if (r && !r.value) return response(204, "");
+      return response(200, "null");
+    }
+    return response(200, JSON.stringify(body));
+  };
 }
 
 function between(html: string, open: string, close: string): string {
@@ -432,9 +484,12 @@ function between(html: string, open: string, close: string): string {
  * (compiler/self-host-v2/slice-m3/substitute.js `executeClient`) does — duplicated here rather than
  * imported because importing that module builds the M3 ingest bundle as a side effect.
  */
-async function runBootstrapArtifact(html: string, js: string, input: InputStep[]) {
+async function runBootstrapArtifact(html: string, js: string, input: InputStep[], serverStub: Record<string, unknown> | undefined, routes: BootRoute[]) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   GlobalRegistrator.register();
+  // s454 (U1b): the client artifact's server calls are answered by the case's stub (none: every call 501-free empty)
+  const realFetch = (globalThis as any).fetch;
+  (globalThis as any).fetch = stubFetch(serverStub ?? {}, routes);
   const clock = new FakeClock();
   const dir = mkdtempSync(join(tmpdir(), "scrml-bootconf-"));
   try {
@@ -472,6 +527,7 @@ async function runBootstrapArtifact(html: string, js: string, input: InputStep[]
     return { dom: normalizeDom(doc.body), state: hook.snapshot(), body: doc.body };
   } finally {
     clock.restore();
+    (globalThis as any).fetch = realFetch;
     delete (globalThis as any).__scrml_conformance;
     rmSync(dir, { recursive: true, force: true });
   }
@@ -695,12 +751,12 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   let rtFailures: string[];
   try {
     const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
-    // s451 (U1a): the printer REFUSES a program with server functions (no server artifact
-    // until unit U1c) — an unsupported construct, not a verdict on the case.
+    // s451 (U1a): a printer refusal is an unsupported construct, not a verdict on the case.
+    // (s454 U1b: a program with server functions prints its client artifact.)
     if (out.refused && out.refused.length > 0) {
       return v("UNSUPPORTED", "bootstrap-unsupported", { ...base, failures: out.refused });
     }
-    const r = await runBootstrapArtifact(out.html, out.js, (ex.input ?? []) as InputStep[]);
+    const r = await runBootstrapArtifact(out.html, out.js, (ex.input ?? []) as InputStep[], ex.serverStub as Record<string, unknown> | undefined, (out.routes ?? []) as BootRoute[]);
     rtFailures = runtimeHalfFailures(ex, r);
   } catch (e) {
     return v("CRASH", "runtime half threw", {

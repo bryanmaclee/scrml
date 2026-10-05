@@ -309,12 +309,9 @@ describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fa
     expect(codes(P(`    function go() {\n        @n = nope(1) !{ _ :> 0 }\n    }`))).toEqual(["E-SCOPE-001"]);
   });
 
-  test("a function whose body can place it on the server: a client call of it is failable (§19.9.10) — refused (U1b), never E-ERROR-013", () => {
+  test("a function whose body can place it on the server: a client call of it is failable (§19.9.10) — s454: VALID, never E-ERROR-013", () => {
     const src = `<program db="./app.db">\n    let <n:int=0/>\n    function count() -> int {\n        const r = ${SQ}\`SELECT 1 AS a\`}.get() !{ _ :> not }\n        return 1\n    }\n    function go() {\n        @n = count() !{ _ :> 0 }\n    }\n    <main><button onclick=go()>go</button></main>\n</program>\n`;
-    const cs = codes(src);
-    expect(cs).not.toContain("E-ERROR-013");
-    expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("§19.9.10");
+    expect(codes(src)).toEqual([]);
   });
 
   test("a `match` on a non-failable value is not affected (the §18 `match` unit — refused as before)", () => {
@@ -431,11 +428,12 @@ describe("§8.1.1 (S451) — `<db src>` database scopes: the nearest scope wins;
     expect(codes(`<program>\n    <db><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
-  test("the printer still refuses a program whose queries need the server artifact (U1c)", () => {
+  test("s454: the printer prints the client artifact of a program whose queries run on the server — no SQL, no connection string", () => {
     const r = clean(`<program>\n    <db src="./app.db"><p>a</p></db>\n${FN()}\n    <main><p>x</p></main>\n</program>\n`);
     const out = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js");
-    expect(out.js).toBe("");
-    expect(out.refused.join("\n")).toContain("U1c");
+    expect(out.refused).toEqual([]);
+    expect(out.js).not.toContain("app.db");
+    expect(out.js).not.toContain("SELECT");
   });
 
   test("near-miss: a `<db src>` direct-child program with no query compiles and RUNS; its children render in place; no connection string reaches the client (runtime)", async () => {

@@ -67,6 +67,8 @@ ${
             .Unpersist(decl: x) :> "Unpersist"
             .Attempt(result: x) :> "Attempt"
             .Fail(err: x) :> "Fail"
+            .Join(k: x) :> "Join"
+            .Jump(k: x) :> "Jump"
         }
     }
 
@@ -86,6 +88,7 @@ ${
             .Lambda(params: x) :> "Lambda"
             .SeqCall(op: x) :> "SeqCall"
             .Validity(of: x) :> "Validity"
+            .ServerCall(fn: x) :> "ServerCall"
         }
     }
 

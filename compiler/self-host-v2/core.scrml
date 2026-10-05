@@ -198,6 +198,14 @@ ${
         SeqCall(op: SeqFn, seq: Expr, f: Expr),
         // s449: a read of the validity surface (§55.5 / §55.6) — read-only.
         Validity(of: ValidityOf, prop: SurfaceProp),
+        // s454 (U1b) — a CLIENT call of a server function (§12.3 "a client fetch
+        // call", §19.9.10): `fn` names a ServerFn, `args` its arguments (encoded
+        // by the §57 codec against its parameter types). Legal ONLY as the `on`
+        // of a Suspend in client code (check.scrml C-S3): the call is a round
+        // trip the client waits on, and its outcome — a value, or a failure of
+        // the call's failure enum (§19.9.10) — is inspected by the Attempt that
+        // begins the Suspend's `then` (C-S7), never read raw.
+        ServerCall(fn: Sym, args: Expr[]),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 
@@ -217,9 +225,16 @@ ${
     // is no node that can carry a runtime value into SQL text, so E-SQL-001
     // (§8.1) is unrepresentable rather than checked.
     // -------------------------------------------------------------------------
+    // s454 (U1b) — FSettled: the SETTLED outcome of the enclosing Suspend
+    // (`outcome` = that Suspend's `bind`) — a server call's (design §2.1 "Suspend
+    // waits, Attempt inspects"), or a waiting client function's that is declared
+    // `!`. Only as the call of the Attempt that is the first statement of the
+    // Suspend's `then`, and the outcome is read nowhere else (check.scrml C-S7):
+    // a raw outcome (a value or a Failure) reaches no other expression.
     export type Failable:enum = {
         FCall(fn: Sym, args: Expr[]),
         FSql(q: SqlQuery),
+        FSettled(outcome: Sym),
     }
     // The success branch: the result is bound to `bind`, `body` runs, and
     // `value` is the branch's value (when the Attempt has a `result`).
@@ -379,6 +394,15 @@ ${
         // an error value: no failure value exists in Core outside a Fail.
         // Legal only in a function whose `err` is this enum (check.scrml C-E4).
         Fail(err: Sym, idx: int, args: Expr[]),
+        // s454 (U1b) — the if-join continuation (U1 design §1, design §2.2
+        // "inside an `If` branch with statements after the `If`"): `body` is the
+        // rest of the block after an If one of whose branches suspends; it runs
+        // when a branch reaches its Jump(k). Join stands immediately before that
+        // If, which is the last statement of its block; every path through the
+        // If that does not leave ends in Jump(k) — after the suspension, inside
+        // the Suspend's `then` (check.scrml C12).
+        Join(k: Sym, body: Block),
+        Jump(k: Sym),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -540,7 +564,12 @@ ${
     // declared `! E`, or the built-in `Error` for a bare `!`); `not` for a
     // function that cannot fail. A call of a function with an `err` exists only
     // as an Attempt's call (check.scrml C-E1); a Fail only in its body (C-E4).
-    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not }
+    // s454 (U1b): `waits` — the function is ASYNC-COLOURED on the client (§13.2:
+    // it calls, directly or transitively, a server function): its body holds a
+    // Suspend at some depth (check.scrml C-S8), so a call of it is itself a
+    // suspension point (a caller's Suspend `on: Call(fn, …)`). Attached by
+    // lower from the effect summary's `waits` (design §2.5); check re-verifies.
+    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not, waits: boolean }
     // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its
     // body holds the program's SQL and no client state (check.scrml C-S1/C-S2);
     // `ret` is its declared return type (`not`: none written). Placement lives
@@ -564,6 +593,10 @@ ${
         // s451 (Ue): the built-in `SqlError` enum (§19.8.1) — the error type
         // of every query (an Attempt's FSql); `not` when the program has none.
         sqlError: Sym | not,
+        // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10) — the
+        // payload of every client call's `Transport` variant; `not` when no
+        // client call is made.
+        serverCallError: Sym | not,
     }
 
     // -------------------------------------------------------------------------

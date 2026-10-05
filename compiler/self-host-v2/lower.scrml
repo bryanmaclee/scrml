@@ -31,7 +31,7 @@ ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
-             ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm,
+             ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              block, litStr, mkSym, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
@@ -41,9 +41,9 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
-             SqlInfo, HandledFact, FailFact, Retag,
+             SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
-             failFact, builtinFile, blockReference } from "./analyze.scrml"
+             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -191,6 +191,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -218,6 +219,7 @@ ${
             .Lambda(params: x) :> op
             .SeqCall(op: x) :> op
             .Validity(of: x) :> op
+            .ServerCall(fn: x) :> op
         }
     }
 
@@ -275,6 +277,7 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -299,6 +302,21 @@ ${
     // emits an absence check, never JS truthiness") lowers to `IsSome(x)`.
     // (s442 — additive; the decision is the typer's `Typing.presence`.)
     export fn lowerExpr(c: LC, e: AExpr) -> Expr {
+        // s454 (U1b) — the suspension plan: an expression evaluated into a
+        // temporary before a suspension (ANF) reads the temporary; a call that
+        // suspends (a waiting client function's) reads the Suspend's bind. (A
+        // handling form that suspends reads its Attempt's result — handledRead.)
+        const plan: SuspendPlan = c.t.server.plan
+        if (plan.at.length > 0) {
+            const tmp: Sym | not = tempOf(plan, e.nid)
+            if (tmp is some) return Expr.Local(tmp)
+            const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
+            if (sa is some && handledOfK(e.k) is not) return Expr.Local(sa.bind)
+        }
+        return lowerExprAt(c, e)
+    }
+
+    fn lowerExprAt(c: LC, e: AExpr) -> Expr {
         if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [presenceOperand(c, e)])
         return lowerExprK(c, e)
     }
@@ -502,6 +520,7 @@ ${
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
+            .ServerCall(fn: x) :> missing()
         }
     }
 
@@ -567,14 +586,14 @@ ${
     fn lowerStmt(c: LC, s: AStmt) -> Stmt[] {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> evalStmt(c, e)                                       // s451 (Ue): + the Attempt a handled value needs
-            .Local(name: n, mutable: m, init: i) :> attemptsFor(c, i).concat(letStmt(c, s, i))
-            .Return(e: e) :> attemptsFor(c, e).concat([Stmt.Return(returnValue(c, e))])
-            .If(cond: x, thenB: t, elseB: el) :> [Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))]
+            .Eval(e: e) :> hoistStmtExpr(c, e).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
+            .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(letStmt(c, s, i))
+            .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat([Stmt.Return(returnValue(c, e))])
+            .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
             .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
-            .Fail(f: f) :> failStmt(c, s, f)                     // s451 (Ue, §19.3)
+            .Fail(f: f) :> hoistExprs(c, f.args).concat(failStmt(c, s, f))   // s451 (Ue, §19.3)
         }
     }
 
@@ -607,10 +626,9 @@ ${
     fn givenStmts(c: LC, s: AStmt, body: ABlock) -> Stmt[] {
         const f: BindFact | not = bindFact(c.t.binds, s.nid)
         return match f {
-            .BGiven(sym: sym, inst: i) :> [
-                Stmt.Let(sym, Expr.Handle(i)),
+            .BGiven(sym: sym, inst: i) :> [Stmt.Let(sym, Expr.Handle(i))].concat(joinMark(c, s)).concat([
                 Stmt.If(Expr.Prim(PrimOp.IsSome, [Expr.Local(sym)]), lowerBlock(c, body), not),
-            ]
+            ])
             .BBind(sym: x) :> []
             .BParam(sym: x) :> []
             not :> []
@@ -828,6 +846,7 @@ ${
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
+            .ServerCall(fn: x) :> missing()
         }
     }
 
@@ -1082,7 +1101,7 @@ ${
     fn effectView(c: LC, w: AEffect) -> View {
         let deps: EffectDep[] = []
         for (const d of w.deps) { deps = deps.concat(effectDep(c, nameFact(c.t.names, d.nid))) }
-        return View.Effect(deps, lowerBlock(c, w.body))
+        return View.Effect(deps, cpsBody(lowerBlock(c, w.body), []))   // s454 (U1b): explicit continuations
     }
 
     fn effectDep(c: LC, f: NameFact | not) -> EffectDep[] {
@@ -1294,13 +1313,14 @@ ${
 
     // A handler value is one statement (`f()`, `(@x = …)`) or a braced block.
     fn handlerBlock(c: LC, v: AAttrValue) -> Block {
-        return match v {
+        const b0: Block = match v {
             .Bare(e: e) :> block(handlerStmt(c, e))
             .Paren(e: e) :> block(handlerStmt(c, e))
             .Braced(b: b) :> bracedHandlerBlock(c, b)
             .Quoted(v: s) :> block([])
             .NoValue :> block([])
         }
+        return cpsBody(b0, [])     // s454 (U1b): a handler that suspends — explicit continuations
     }
 
     // s451 (Ue, review HIGH-2): an event-handler REFERENCE `onclick=f` /
@@ -1308,6 +1328,9 @@ ${
     // parameterless function that cannot fail). Before, the name was lowered
     // as a value — `null` — and the handler did nothing.
     fn handlerStmt(c: LC, e: AExpr) -> Stmt[] {
+        // s454 (U1b): a reference / call that suspends was hoisted (handlerBlock)
+        const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
+        if (sa is some) return hoistExpr(c, e)
         const f: NameFact | not = nameFact(c.t.names, e.nid)
         const s: Sym | not = match f {
             .NFn(sym: x) :> x
@@ -1320,7 +1343,7 @@ ${
             not :> not
         }
         if (s is some) return [Stmt.Eval(Expr.Call(s, []))]
-        return evalStmt(c, e)
+        return hoistStmtExpr(c, e).concat(evalStmt(c, e))
     }
 
     fn bracedHandlerBlock(c: LC, b: ABlock) -> Block {
@@ -1600,7 +1623,13 @@ ${
                 const c: LC = { t: t, file: info.file, subst: not, snap: not }
                 let params: Param[] = []
                 for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
-                return { sym: info.sym, params: params, body: lowerBlock(c, s.f.body), pure: info.pure, err: info.err }
+                // s454 (U1b): a WAITING function (the suspension plan's `waiting`) — its
+                // body in explicit continuations, every path ending in a Return (its
+                // Promise settles on every exit, print.scrml waiting functions)
+                const waits: boolean = t.server.plan.waiting.indexOf(info.sym.id) >= 0
+                let body: Block = lowerBlock(c, s.f.body)
+                if (waits) body = cpsBody(body, [Stmt.Return(Expr.Lit(Literal.Absent))])
+                return { sym: info.sym, params: params, body: body, pure: info.pure, err: info.err, waits: waits }
             }
         }
         return not
@@ -1612,7 +1641,11 @@ ${
     fn lowerServerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> ServerFn | not {
         const f: Fn | not = lowerFn(t, fs, info)
         if (f is not) return not
-        return { sym: f.sym, params: f.params, ret: info.ret, body: f.body, err: f.err }
+        // s454 (U1b): the wire type of its answer — declared, or (a `!` function has no
+        // success-type slot, §19.4.1) the one its returns prove (the plan's `rets`)
+        let ret: Type | not = info.ret
+        if (ret is not) ret = retOf(t.server.plan, info.sym.id)
+        return { sym: f.sym, params: f.params, ret: ret, body: f.body, err: f.err }
     }
 
     // =========================================================================
@@ -1646,6 +1679,7 @@ ${
         if (e is not) return []
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
         if (h is not) return []
+        if (suspendAtOf(c.t.server.plan, e.nid) is some) return []    // s454: hoisted with its Suspend (hoistExpr)
         return [attemptOf(c, e, h)]
     }
 
@@ -1655,14 +1689,42 @@ ${
         const hd: AHandled | not = handledOfK(e.k)
         if (hd is not) {
             // an implicit `?{}` propagation (§19.8.2): the query is the call
-            return Stmt.Attempt(result, failableOf(c, e), h.err, plainOk(h), retagArms(h))
+            return Stmt.Attempt(result, failableOf(c, e), h.err, plainOk(h), retagArms(c, h))
         }
+        // s454 (U1b): a handling form that suspends inspects the SETTLED outcome
+        // (design §2.1 "Suspend waits, Attempt inspects"); its failure set is the
+        // client call's, or — the call turned out server→server — the callee's own
+        const err: Sym = effErr(c, h)
+        let call: Failable = failableOf(c, hd.subject)
+        const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
+        if (sa is some) call = Failable.FSettled(sa.bind)
         const how: AHow = hd.how
         return match how {
-            .Propagate :> Stmt.Attempt(result, failableOf(c, hd.subject), h.err, plainOk(h), retagArms(h))
-            .Guard(arms: arms) :> Stmt.Attempt(result, failableOf(c, hd.subject), h.err, plainOk(h), errArms(c, h, arms, false))
-            .MatchOn(arms: arms) :> Stmt.Attempt(result, failableOf(c, hd.subject), h.err, matchOk(c, h, arms), errArms(c, h, arms, true))
+            .Propagate :> Stmt.Attempt(result, call, err, plainOk(h), retagArms(c, h))
+            .Guard(arms: arms) :> Stmt.Attempt(result, call, err, plainOk(h), errArms(c, h, arms, false))
+            .MatchOn(arms: arms) :> Stmt.Attempt(result, call, err, matchOk(c, h, arms), errArms(c, h, arms, true))
         }
+    }
+
+    // s454 (U1b) — the failure set an Attempt handles: a handling form on a call
+    // of a server function made where the caller turned out SERVER-placed
+    // (§19.9.10 "Not affected: A server→server call") fails with the callee's
+    // own enum (RemoteFact.local); otherwise the binder's (the client set).
+    fn effErr(c: LC, h: HandledFact) -> Sym {
+        const rf: RemoteFact | not = h.remote
+        if (rf is not) return h.err
+        if (remoteCaller(c.t, rf.caller)) return h.err
+        const l: Sym | not = rf.local
+        if (l is some) return l
+        return h.err
+    }
+
+    // Is this handling form's call a CLIENT call of a server function (so `?`
+    // also re-fails the trailing `Transport`)?
+    fn clientCall(c: LC, h: HandledFact) -> boolean {
+        const rf: RemoteFact | not = h.remote
+        if (rf is not) return false
+        return remoteCaller(c.t, rf.caller)
     }
 
     // The success branch of `?` / `!{}`: the value itself.
@@ -1722,14 +1784,19 @@ ${
 
     // `?` (§19.5.2): one arm per callee variant, re-failing as the enclosing
     // enum's variant with the same payload (analyze's Retag map).
-    fn retagArms(h: HandledFact) -> ErrArm[] {
+    fn retagArms(c: LC, h: HandledFact) -> ErrArm[] {
         const into: Sym | not = h.into
         if (into is not) return []
+        const err: Sym = effErr(c, h)
+        // s454 (U1b): a client call also re-fails its trailing `Transport` (§19.9.10)
+        let rs: Retag[] = h.retag
+        const rf: RemoteFact | not = h.remote
+        if (rf is some && clientCall(c, h)) rs = rs.concat(rf.retagT)
         let out: ErrArm[] = []
-        for (const r of h.retag) {
+        for (const r of rs) {
             let vals: Expr[] = []
             for (const b of r.binds) { vals = vals.concat([Expr.Local(b)]) }
-            out = out.concat([{ pat: Pattern.PVariant(h.err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not, whole: not }])
+            out = out.concat([{ pat: Pattern.PVariant(err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not, whole: not }])
         }
         return out
     }
@@ -1764,7 +1831,7 @@ ${
             } else if (idx == -4) {
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }])
             } else if (idx >= 0) {
-                out = out.concat([{ pat: Pattern.PVariant(h.err, idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
+                out = out.concat([{ pat: Pattern.PVariant(effErr(c, h), idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
             }
         }
         return out
@@ -1879,6 +1946,7 @@ ${
     // An expression statement, with the Attempt its whole value — or its
     // assigned value — needs before it.
     fn evalStmt(c: LC, e: AExpr) -> Stmt[] {
+        if (suspendAtOf(c.t.server.plan, e.nid) is some) return []    // s454: the whole statement was its hoisted Suspend
         const pre: Stmt[] = attemptsFor(c, e)
         if (pre.length > 0) {
             const h: HandledFact | not = handledFactOf(c.t, e.nid)
@@ -2054,6 +2122,346 @@ ${
         }
     }
 
+    // s454 (U1b) — the types a shipped built-in enum's payloads NAME (the
+    // client-call failure enum's `Transport(t: ServerCallError)` names the
+    // built-in `ServerCallError`, which then ships too).
+    fn namedIn(t: Tables, used: int[]) -> int[] {
+        let out: int[] = []
+        for (const ti of t.types) {
+            const ts: Sym = typeDefSym(ti.def)
+            if (used.indexOf(ts.id) >= 0) {
+                for (const v of enumVariantsOfDef(ti.def)) {
+                    for (const fd of v.fields) { out = out.concat(namedSyms(fd.ty)) }
+                }
+            }
+        }
+        return out
+    }
+
+    fn enumVariantsOfDef(td: TypeDef) -> VariantDef[] {
+        return match td {
+            .EnumDef(variants: vs) :> vs
+            .StructDef(sym: x) :> []
+        }
+    }
+
+    fn namedSyms(ty: Type) -> int[] {
+        return match ty {
+            .Named(sym: s) :> [s.id]
+            .Seq(elem: e) :> namedSyms(e)
+            .Maybe(inner: i) :> namedSyms(i)
+            .Int :> []
+            .Num :> []
+            .Str :> []
+            .Bool :> []
+        }
+    }
+
+    // =========================================================================
+    // s454 (U1b) — HOISTING (design §2.2, ANF): before a statement, in
+    // evaluation order, every temporary the plan named (`Let tmp = <expr>`) and
+    // every suspension point (`Suspend(bind, <call>, [])` — then, for a handling
+    // form, its Attempt over the settled outcome). The statement itself then
+    // reads the temporaries / binds / results (lowerExpr, handledRead). The walk
+    // order is the planner's (analyze.scrml planExpr) — they must agree.
+    // =========================================================================
+    fn hoistMaybe(c: LC, e: AExpr | not) -> Stmt[] {
+        if (e is not) return []
+        return hoistExpr(c, e)
+    }
+
+    fn hoistExprs(c: LC, es: AExpr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const e of es) { out = out.concat(hoistExpr(c, e)) }
+        return out
+    }
+
+    // An expression statement: an assignment hoists its VALUE (its target is written after).
+    fn hoistStmtExpr(c: LC, e: AExpr) -> Stmt[] {
+        if (c.t.server.plan.at.length == 0) return []
+        const v: AExpr | not = assignedValueOf(e.k)
+        if (v is some) return hoistExpr(c, v)
+        return hoistExpr(c, e)
+    }
+
+    fn hoistExpr(c: LC, e: AExpr) -> Stmt[] {
+        const plan: SuspendPlan = c.t.server.plan
+        if (plan.at.length == 0) return []
+        const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
+        if (sa is some) return hoistKids(c, suspendArgsOf(e)).concat(suspendStmts(c, e, sa))
+        return hoistKids(c, hoistOrder(e))
+    }
+
+    fn hoistKids(c: LC, ks: AExpr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const k of ks) {
+            out = out.concat(hoistExpr(c, k))
+            const t: Sym | not = tempOf(c.t.server.plan, k.nid)
+            if (t is some) out = out.concat([Stmt.Let(t, lowerExprAt(c, k))])
+        }
+        return out
+    }
+
+    // The planner's evaluation order (analyze.scrml planExpr): the branches of
+    // `&&` / `||` / `? :`, a lambda body and a handling form's arms hold no
+    // lowered suspension point (refused there), so they are not walked.
+    fn hoistOrder(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .Binary(op: o, l: l, r: r) :> [l, r]
+            .Ternary(test: t) :> [t]
+            .Lambda(params: lp) :> []
+            .Handled(h: h) :> [h.subject]
+            .Member(obj: o) :> [o]
+            .Call(callee: x, args: a) :> a
+            .Unary(op: o, e: x) :> [x]
+            .Assign(target: t, value: v) :> [v]
+            .ArrayLit(elems: es) :> es
+            .ObjectLit(props: ps) :> propValues(ps)
+            .Spread(e: x) :> [x]
+            .Index(obj: o, idx: i) :> [o, i]
+            .Sql(q: q) :> q.params
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+        }
+    }
+
+    fn propValues(ps: AProp[]) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const p of ps) { out = out.concat([p.value]) }
+        return out
+    }
+
+    // A suspension point's own arguments (evaluated before it suspends).
+    fn suspendArgsOf(e: AExpr) -> AExpr[] {
+        const h: AHandled | not = handledOfK(e.k)
+        if (h is some) return callArgsOf(h.subject)
+        return callArgsOf(e)
+    }
+
+    fn callArgsOf(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: x, args: a) :> a
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+        }
+    }
+
+    // The Suspend (and, for a handling form, its Attempt). Its `then` is filled
+    // by the continuation pass (cpsBody) with the rest of the block.
+    fn suspendStmts(c: LC, e: AExpr, sa: SuspendAt) -> Stmt[] {
+        const args: Expr[] = lowerExprs(c, suspendArgsOf(e))
+        const kd: SuspendK = sa.kind
+        const on: Expr = match kd {
+            .SRemote(callee: f) :> Expr.ServerCall(f, args)
+            .SWaits(callee: f) :> Expr.Call(f, args)
+        }
+        const sus: Stmt = Stmt.Suspend(sa.bind, on, block([]))
+        const h: HandledFact | not = handledFactOf(c.t, e.nid)
+        if (h is some && handledOfK(e.k) is some) return [sus, attemptOf(c, e, h)]
+        return [sus]
+    }
+
+    // An `if` / `given` that suspends in a branch with statements after it: a
+    // Join marker (filled by cpsBody with the rest of the block).
+    fn joinMark(c: LC, s: AStmt) -> Stmt[] {
+        const k: Sym | not = joinOf(c.t.server.plan, s.nid)
+        if (k is not) return []
+        return [Stmt.Join(k, block([]))]
+    }
+
+    // =========================================================================
+    // s454 (U1b) — THE CONTINUATION PASS. Lowering leaves each Suspend with an
+    // empty `then` and each Join with an empty body (markers); this moves the
+    // rest of the block into them, so a Suspend stands at the tail of its block
+    // and everything after it is its continuation (check.scrml C12):
+    //   Suspend(b, on, [])  s…   →  Suspend(b, on, [s…])
+    //   Join(k, []) If(…)   s…   →  Join(k, [s…])  If(…, [… Jump(k)], [… Jump(k)])
+    // `tail`: what ends every path that falls off the block — [] for a handler or
+    // an effect body; `[Return(not)]` for a waiting function (its Promise settles
+    // on every exit). A body with no suspension point is returned unchanged.
+    // =========================================================================
+    fn cpsBody(b: Block, tail: Stmt[]) -> Block {
+        if (!holdsSuspension(b.stmts)) return b
+        return block(cpsStmts(b.stmts, tail))
+    }
+
+    fn cpsStmts(ss: Stmt[], tail: Stmt[]) -> Stmt[] {
+        let i: int = 0
+        while (i < ss.length) {
+            const s: Stmt = ss[i]
+            const sus: SuspendParts | not = suspendParts(s)
+            if (sus is some) {
+                const rest: Stmt[] = ss.slice(i + 1)
+                return ss.slice(0, i).concat([Stmt.Suspend(sus.bind, sus.on, block(cpsStmts(sus.then.stmts.concat(rest), tail)))])
+            }
+            const jk: Sym | not = joinMarkOf(s)
+            if (jk is some && i + 1 < ss.length) {
+                const ip: IfParts | not = ifParts(ss[i + 1])
+                if (ip is some) {
+                    const body: Stmt[] = cpsStmts(ss.slice(i + 2), tail)
+                    const jump: Stmt[] = [Stmt.Jump(jk)]
+                    return ss.slice(0, i).concat([Stmt.Join(jk, block(body)), Stmt.If(ip.cond, block(cpsStmts(ip.thenB.stmts, jump)), block(cpsStmts(elseStmts(ip.elseB), jump)))])
+                }
+            }
+            const ip2: IfParts | not = ifParts(s)
+            if (ip2 is some && i == ss.length - 1 && holdsSuspension([s])) {
+                // the last statement: its branches end the block — each gets the tail
+                let eb: Block | not = not
+                if (ip2.elseB is some || tail.length > 0) eb = block(cpsStmts(elseStmts(ip2.elseB), tail))
+                return ss.slice(0, i).concat([Stmt.If(ip2.cond, block(cpsStmts(ip2.thenB.stmts, tail)), eb)])
+            }
+            i = i + 1
+        }
+        if (tail.length == 0) return ss
+        if (ss.length > 0 && endsPath(ss[ss.length - 1])) return ss
+        return ss.concat(tail)
+    }
+
+    fn elseStmts(b: Block | not) -> Stmt[] {
+        if (b is not) return []
+        return b.stmts
+    }
+
+    type SuspendParts:struct = { bind: Sym, on: Expr, then: Block }
+    type IfParts:struct = { cond: Expr, thenB: Block, elseB: Block | not }
+
+    fn suspendParts(s: Stmt) -> SuspendParts | not {
+        return match s {
+            .Suspend(bind: b, on: on, then: t) :> { bind: b, on: on, then: t }
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    fn ifParts(s: Stmt) -> IfParts | not {
+        return match s {
+            .If(cond: c, thenB: t, elseB: e) :> { cond: c, thenB: t, elseB: e }
+            .Suspend(bind: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    fn joinMarkOf(s: Stmt) -> Sym | not {
+        return match s {
+            .Join(k: k, body: b) :> k
+            .If(cond: x) :> not
+            .Suspend(bind: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    // A path through the block ends here (nothing after it would run).
+    fn endsPath(s: Stmt) -> boolean {
+        return match s {
+            .Return(e: x) :> true
+            .Fail(err: x) :> true
+            .Jump(k: x) :> true
+            .Suspend(bind: x) :> true
+            .If(cond: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Join(k: x) :> false
+        }
+    }
+
+    fn holdsSuspension(ss: Stmt[]) -> boolean {
+        for (const s of ss) {
+            for (const n of allNodes(Node.NStmt(s))) {
+                if (nodeSuspends(n)) return true
+            }
+        }
+        return false
+    }
+
+    fn nodeSuspends(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> suspendParts(s) is some || joinMarkOf(s) is some
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
     // s451 — §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole
     // `reset` layer." analyze accepts `reset="none"` and refuses any other value,
     // so here the program's opener has either no `reset=` or exactly that one.
@@ -2089,10 +2497,13 @@ ${
         // s451 (Ue): a built-in error enum ships only when the Core names it
         const used: int[] = usedErrs(t)
         let sqlError: Sym | not = not
+        let serverCallError: Sym | not = not
+        const used2: int[] = used.concat(namedIn(t, used))
         for (const ti of t.types) {
             const ts: Sym = typeDefSym(ti.def)
-            if (ti.file != builtinFile() || used.indexOf(ts.id) >= 0) types = types.concat([ti.def])
-            if (ti.file == builtinFile() && ti.name == "SqlError" && used.indexOf(ts.id) >= 0) sqlError = ts
+            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0) types = types.concat([ti.def])
+            if (ti.file == builtinFile() && ti.name == "SqlError" && used2.indexOf(ts.id) >= 0) sqlError = ts
+            if (ti.file == builtinFile() && ti.name == serverCallErrorName() && used2.indexOf(ts.id) >= 0) serverCallError = ts
         }
         const fsx: FnSyntax[] = fnSyntaxes(tp.files)
         let fns: Fn[] = []
@@ -2108,8 +2519,8 @@ ${
         }
         const dbs: Db[] = t.server.dbs
         const reset: boolean = resetShips(tp.files, t)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError }
         return { core: core, diags: tp.diags }
     }
 
@@ -2283,6 +2694,7 @@ ${
             .Lambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
+            .ServerCall(fn: x) :> []
         }
     }
 

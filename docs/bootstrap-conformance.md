@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1312 of 1312 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1315 of 1315 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
 | PASS | 121 | 9.2% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 48 | 3.7% |
+| FAIL | 58 | 4.4% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 514 | 39.2% |
-| UNSUPPORTED | 629 | 47.9% |
+| NOT-TWINNED | 514 | 39.1% |
+| UNSUPPORTED | 622 | 47.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 169; of those, 121 hold (71.6%). Runtime half executed on the bootstrap for 43 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 179; of those, 121 hold (67.6%). Runtime half executed on the bootstrap for 43 case(s).
 
 - **Vacuous** passes: 11 of 121 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **110**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 48; the other 21 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 58; the other 31 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 436 · parse-reject 193.
+UNSUPPORTED by reason: bootstrap-unsupported 426 · parse-reject 196.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **584** — PASS 76 · FAIL 44 · UNSUPPORTED 464. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **585** — PASS 76 · FAIL 54 · UNSUPPORTED 455. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -103,7 +103,7 @@ NOT-TWINNED by reason (514 cases; a case counts once per distinct reason):
 | codegen | 2 | · | · | · | · | 1 | 1 | · | · |
 | components | 32 | · | · | 2 | · | 29 | 1 | · | · |
 | control-flow | 67 | 12 | · | 2 | · | 18 | 35 | · | · |
-| defer | 51 | 8 | · | 3 | · | 4 | 36 | · | · |
+| defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
@@ -138,20 +138,20 @@ NOT-TWINNED by reason (514 cases; a case counts once per distinct reason):
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 69 | · | · | · | · | 44 | 25 | · | · |
-| reactive | 88 | 25 | · | 3 | · | 40 | 20 | · | · |
+| reactive | 89 | 25 | · | 3 | · | 40 | 21 | · | · |
 | refinement | 10 | · | · | · | · | 3 | 7 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 58 | · | · | · | · | 18 | 40 | · | · |
-| server-fn | 24 | · | · | · | · | 8 | 16 | · | · |
+| server-db | 60 | · | · | 2 | · | 18 | 40 | · | · |
+| server-fn | 24 | · | · | 7 | · | 8 | 9 | · | · |
 | sql | 15 | 1 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | · | · | 1 | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (48)
+### FAIL (58)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -162,6 +162,9 @@ NOT-TWINNED by reason (514 cases; a case counts once per distinct reason):
   - severity: E-CTRL-004 did not fire (expected error)
 - `control-flow/s437-braceless-else-in-failable-arm` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-ERROR-012, E-SCOPE-001)
+- `defer/deferred-server-call-completes` (twin · codes+runtime)
+  - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
+  - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
 - `defer/fail-path` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
 - `defer/fn-prohibition-applies-neg` (twin · codes)
@@ -258,6 +261,24 @@ NOT-TWINNED by reason (514 cases; a case counts once per distinct reason):
 - `reactive/reset-reserved-identifier` (twin · codes; not in the bootstrap: E-RESERVED-IDENTIFIER)
   - missing E-RESERVED-IDENTIFIER
   - severity: E-RESERVED-IDENTIFIER did not fire (expected error)
+- `server-db/sql-configured-db-no-e-sql-004` (twin · codes)
+  - forbidden family E-* fired: E-ERROR-002
+- `server-db/sql-missing-db-e-sql-004-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002
+- `server-fn/cell-assign-failable-arm-return-live` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-080)
+- `server-fn/cell-assign-failable-recovery-value` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-080)
+- `server-fn/cell-assign-failable-success-then-read` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE, E-TYPE-080)
+- `server-fn/e-route-002-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002, E-SCOPE-001, E-SQL-004
+- `server-fn/e-route-002-pos` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002, E-SCOPE-001, E-SQL-004
+- `server-fn/e-route-005-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002, E-SCOPE-001, E-SQL-004
+- `server-fn/e-route-005-pos` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-ERROR-002, E-SQL-004
 - `style/style-001-style-block-pos` (codes; not in the bootstrap: E-STYLE-001)
   - missing E-STYLE-001
 - `type-state-codes/e-type-any-forbidden-neg` (twin · twin-extra-error)
@@ -398,7 +419,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (629)
+### UNSUPPORTED (622)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -555,7 +576,6 @@ none
 - `defer/cps-batch0-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/cps-batch1-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/deferred-host-error-runs-rest` — twin · bootstrap-unsupported: an unannotated parameter `o` — bootstrap slice M2 needs `o: Type` (Core parameters are typed)
-- `defer/deferred-server-call-completes` — twin · bootstrap-unsupported: `work()` calls the server function `ping()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
 - `defer/duplicate-function-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
 - `defer/duplicate-function-no-defer-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
 - `defer/function-hoist-across-defer` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `"H"`
@@ -901,6 +921,7 @@ none
 - `reactive/no-write-unproven-pos` — bootstrap-unsupported: `one` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `one(…)`
 - `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/reactivity-attr-conflict` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
+- `reactive/reserved-prefix-declaration-pos` — twin · bootstrap-unsupported: an unannotated parameter `_scrml_by` — bootstrap slice M2 needs `_scrml_by: Type` (Core parameters are typed)
 - `reactive/reset-init-after-assignment-rt` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `reactive/reset-to-default` — twin · bootstrap-unsupported: `default` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/s437-r5-template-cell-read-value-attr` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `color: `
@@ -979,25 +1000,18 @@ none
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
+- `server-db/reserved-prefix-raw-driver-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
+- `server-db/reserved-prefix-raw-driver-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/server-fn-writes-reactive-cell-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `server-db/sql-configured-db-no-e-sql-004` — twin · bootstrap-unsupported: the `onclick=` handler on `<button>` calls the server function `getUsers()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives wit
-- `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: the `onclick=` handler on `<button>` calls the server function `getUsers()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives wit
 - `server-fn/branch-declared-server-fn-routes-to-server` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `fn`
-- `server-fn/cell-assign-failable-arm-return-live` — twin · bootstrap-unsupported: `load()` calls the server function `risky()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/cell-assign-failable-recovery-value` — twin · bootstrap-unsupported: `go()` calls the server function `risky()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/cell-assign-failable-success-then-read` — twin · bootstrap-unsupported: `load()` calls the server function `risky()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/cell-assign-independent-writes-batched` — twin · bootstrap-unsupported: `indep()` calls the server function `one()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/cell-assign-read-after-write` — twin · bootstrap-unsupported: `go()` calls the server function `double()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/cell-assign-successive-writes-ordered` — twin · bootstrap-unsupported: `seq()` calls the server function `double()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/e-route-002-neg` — twin · bootstrap-unsupported: `refresh()` calls the server function `auditName()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/e-route-002-pos` — twin · bootstrap-unsupported: the `onclick=` handler on `<button>` calls the server function `auditAndFlash()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrive
+- `server-fn/cell-assign-independent-writes-batched` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
+- `server-fn/cell-assign-read-after-write` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
+- `server-fn/cell-assign-successive-writes-ordered` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
 - `server-fn/e-route-003-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `Item`
 - `server-fn/e-route-003-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `function`
 - `server-fn/e-route-004-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `function`
 - `server-fn/e-route-004-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `function`
-- `server-fn/e-route-005-neg` — twin · bootstrap-unsupported: `flash()` calls the server function `persist()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b
-- `server-fn/e-route-005-pos` — twin · bootstrap-unsupported: the `onclick=` handler on `<button>` calls the server function `saveAndPaint()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
 - `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored

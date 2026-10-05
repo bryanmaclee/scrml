@@ -140,6 +140,8 @@ ${
             .Unpersist(inst: i) :> [Node.NInst(i)]
             .Attempt(result: r, call: c, ok: ok, arms: arms) :> failableKids(c).concat(okKids(ok)).concat(errArmKids(arms))
             .Fail(args: args) :> exprNodes(args)
+            .Join(k: k, body: b) :> [Node.NBlock(b)]          // s454 (U1b)
+            .Jump(k: k) :> []
         }
     }
 
@@ -149,6 +151,7 @@ ${
         return match c {
             .FCall(fn: f, args: args) :> exprNodes(args)
             .FSql(q: q) :> exprNodes(q.params)
+            .FSettled(outcome: o) :> []                 // s454 (U1b): a local, read where it settled
         }
     }
 
@@ -178,6 +181,7 @@ ${
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
+            .ServerCall(fn: f, args: args) :> exprNodes(args)   // s454 (U1b)
         }
     }
 
@@ -355,6 +359,7 @@ ${
             .Host(call: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
+            .ServerCall(fn: x) :> []
         }
     }
 
@@ -397,6 +402,8 @@ ${
             .Unpersist(decl: x) :> []
             .Attempt(result: r, ok: ok, arms: arms) :> maybeSym(r).concat([ok.bind]).concat(wholeSyms(arms))
             .Fail(err: x) :> []
+            .Join(k: k) :> [k]                           // s454 (U1b): the continuation is a named local
+            .Jump(k: x) :> []
         }
     }
 
@@ -481,6 +488,8 @@ ${
             .Unpersist(decl: x) :> -1
             .Attempt(result: r) :> -1
             .Fail(err: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
         }
     }
 }

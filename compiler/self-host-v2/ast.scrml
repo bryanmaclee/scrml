@@ -294,7 +294,9 @@ ${
     // file, used to resolve import sources).
     // `errs`: the spans the parser reported an error at — a declaration or
     // signature containing one is not trusted by the typer (no check against it).
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[] }
+    // s454 (U1b): `lines` — the offset where each line starts (lines[0] = 0), so a
+    // diagnostic can name "file and line" (§19.9.10 the client-caller cause).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[] }
 
     // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
     // message text.)

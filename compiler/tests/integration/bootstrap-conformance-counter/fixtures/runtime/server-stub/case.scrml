@@ -1,0 +1,15 @@
+<program db="./app.db">
+    let <n:int=0/>
+    let <seen:string=""/>
+
+    function count() -> int {
+        const r = ?{`SELECT n FROM t`}.get() !{ _ :> not }
+        return 5
+    }
+
+    <main>
+        <p id="out">${@n}</p>
+        <p id="seen">${@seen}</p>
+        <button id="go" onclick={ @n = count() !{ .Transport(t) :> { @seen = "failed"; 0 } } }>go</button>
+    </main>
+</program>

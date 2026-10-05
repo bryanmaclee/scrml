@@ -577,7 +577,8 @@ describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
     const notLast = clone(ok);
     const e2 = effects(notLast)[0];
     e2.body.stmts = [...e2.body.stmts, ...e2.body.stmts[0].data.then.stmts];
-    expect(mods.check.checkCore(notLast).join("\n")).toMatch(/C12: 1 Suspend/);
+    // s454: C12 widened (U1b) names the block and the rule
+    expect(mods.check.checkCore(notLast).join("\n")).toMatch(/C12: a Suspend in an effect body is not the last statement/);
   });
 });
 

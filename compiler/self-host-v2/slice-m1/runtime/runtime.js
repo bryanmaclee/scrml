@@ -362,11 +362,21 @@ export function effectOn(scope, deps, body) {
 
 /**
  * Suspend `task` on `value` (Core Stmt.Suspend — the CPS split, §19.9.8):
- * when it settles, run the continuation `k(v)` untracked — unless the task was
- * cancelled meanwhile (a newer run started, or the effect was unregistered),
- * in which case nothing runs. A rejection reaching a live task is re-raised
- * (never swallowed); an effect body's §19 error context arrives with server
- * calls. A rejection on a cancelled task is dropped with its result.
+ * when it settles, run the continuation `k(v)` — unless the task was cancelled
+ * meanwhile (a newer effect run started, or its owner was torn down), in which
+ * case nothing runs and the value is dropped (§19.9.10 / §6.7.7.1: "an abort
+ * sets no error, and the call's continuation does not run").
+ *
+ * s454 (U1b, design §2.4):
+ *  - the continuation runs as ONE `batch` (untracked): a handler's continuation
+ *    writes (`@version = r; @status = "saved"`) and its writes flush once — the
+ *    U1 design's assumption, which did not hold before (an effect body cannot
+ *    write, so it was harmless there);
+ *  - a HOST exception thrown in a continuation (a scrml bug, never a scrml
+ *    failure — a failure is a value, `rt.call` never rejects) and a rejection of
+ *    `value` on a live task go to ONE reporter (`reportHostError`), never to an
+ *    unhandled rejection — the bootstrap twin of impl#1's handler-rejection
+ *    logging fix (#1283 / #1296).
  */
 export function suspend(task, value, k) {
   task.pending++;
@@ -375,18 +385,73 @@ export function suspend(task, value, k) {
       task.pending--;
       if (task.cancelled) return;
       try {
-        untrack(() => k(v));
+        batch(() => untrack(() => k(v)));
+      } catch (e) {
+        reportHostError(e);
+        abandonWaiting(task);
       } finally {
         task.owner.settled(task);
       }
     },
     (e) => {
       task.pending--;
-      if (task.cancelled) return;
+      if (!task.cancelled && e !== REPORTED) reportHostError(e);
       task.owner.settled(task);
-      throw e;
     },
   );
+}
+
+/**
+ * s454 (U1b) — a WAITING function's result (Core Fn.waits, §13.2 async colour;
+ * design §2.3 "a return continuation"): `executor(ret$)` runs the body now;
+ * every exit — from the body or from any continuation — calls `ret$(value)`
+ * (a `fail` resolves with its Failure, never a rejection). A host error thrown
+ * by the synchronous part rejects, and the caller's `suspend` reports it.
+ */
+export function waiting(task, executor) {
+  return new Promise((resolve, reject) => {
+    // s454 fix round F2: registered on the task, so a host error in one of this body's
+    // continuations (reported by `suspend`) abandons the Promise — its caller's continuation
+    // does not run as if it succeeded, and the caller's suspension is settled (no leaked task).
+    const w = { reject };
+    if (task) {
+      if (!task.waiting) task.waiting = new Set();
+      task.waiting.add(w);
+    }
+    const done = () => { if (task && task.waiting) task.waiting.delete(w); };
+    try {
+      executor((v) => { done(); resolve(v); });
+    } catch (e) {
+      done();
+      reject(e);
+    }
+  });
+}
+
+// The rejection a waiting function's Promise is abandoned with after its host error was REPORTED
+// (the caller's suspend settles its task and does not report it a second time).
+const REPORTED = Symbol("scrml: host error already reported");
+
+function abandonWaiting(task) {
+  if (!task || !task.waiting) return;
+  const ws = [...task.waiting];
+  task.waiting.clear();
+  for (const w of ws) w.reject(REPORTED);
+}
+
+// s454 (U1b) — THE ONE REPORTER of host errors that surface asynchronously (a
+// throw in a continuation, a rejected suspension value). Default: the console.
+// `setHostErrorReporter` (tests, devtools) replaces it and returns the old one.
+let hostErrorReporter = (e) => {
+  try { console.error("scrml: a host error in a continuation —", e); } catch { /* nothing to do */ }
+};
+export function setHostErrorReporter(fn) {
+  const prev = hostErrorReporter;
+  hostErrorReporter = fn;
+  return prev;
+}
+export function reportHostError(e) {
+  try { hostErrorReporter(e); } catch { /* a throwing reporter must not escape */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,13 +1069,39 @@ export function visibility(scope, el, fn) {
   });
 }
 
-/** An event listener owned by `scope`; the handler runs as one batch. */
+/**
+ * An event listener owned by `scope`; the handler runs as one batch.
+ * s454 (U1b, design §2.3): each invocation runs in its OWN task, passed as the
+ * handler's first argument — a handler that suspends (it calls a server
+ * function, or a waiting function) continues in it. Teardown of the scope
+ * cancels every live task (their continuations are dropped; nothing aborts).
+ * A second event does NOT cancel the first's task: supersede is `<request>`
+ * semantics (§6.7.7), not a handler's (design reading, flagged).
+ */
+class HandlerTasks {
+  constructor() { this.tasks = new Set(); }
+  settled(task) { if (task.pending === 0) this.tasks.delete(task); }
+  cancelAll() {
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+  }
+}
+
 export function on(scope, el, event, handler) {
   requireScope(scope, "a listener");
-  const h = (e) => batch(() => handler(e));
+  const owner = new HandlerTasks();
+  const h = (e) => {
+    const task = new Task(owner);
+    owner.tasks.add(task);
+    try {
+      batch(() => handler(task, e));
+    } finally {
+      owner.settled(task);
+    }
+  };
   el.addEventListener(event, h);
   stats.listeners++;
-  scope.own(() => { el.removeEventListener(event, h); stats.listeners--; });
+  scope.own(() => { el.removeEventListener(event, h); owner.cancelAll(); stats.listeners--; });
 }
 
 /**
@@ -1845,4 +1936,175 @@ export function unpersist(cell) {
 export function persistOf(cell) {
   const p = persistedCells.get(cell);
   return p === undefined ? null : { store: p.store, key: p.key, failed: p.failed };
+}
+
+// ---------------------------------------------------------------------------
+// s454 (U1b) — THE CLIENT HALF OF A CALL TO A SERVER FUNCTION (SPEC §19.9.10,
+// §57.4 / §57.5 / §57.8; design Items 2.4 and 3).
+//
+// `call(route, args, task)` → a Promise that RESOLVES — never rejects — with
+// the call's outcome: the decoded success value, or a Failure whose error is
+// either a variant of the callee's declared enum (decoded from its §57.8
+// `fail` envelope) or `Transport(t)` with `t` a `ServerCallError` value built
+// HERE, on the client (§19.9.10: "Never sent by the server"; "No variant SHALL
+// carry server-written text"). Every row of the classification is a value;
+// nothing is coerced into a success (§57.4 "SHALL NOT silently coerce"):
+//
+//   2xx  200…299 but 204, a body that decodes STRICTLY (canonicalOnly — R10)
+//        against the declared return type          → the value
+//        (the design table names 200; ANY 2xx other than 204 is a success per HTTP,
+//        so 201…299 with a decodable body are accepted as one — a reading, flagged)
+//   204  for a function that yields no value       → success (no value: null)
+//   2xx  anything else — a body for a no-value function, 204 for one that
+//        returns a value, text that is not JSON, a body that does not decode,
+//        a `__scrml_error` envelope on a 2xx status  → Transport(Malformed)
+//   non-2xx  an object with own `__scrml_error`: decoded strictly against the
+//        callee's declared enum (`type` equal to its name, a known `variant`,
+//        `data` strict per §57.8)                  → that declared variant
+//   non-2xx  an envelope failing any check, or a callee not declared `!`
+//                                                  → Transport(Malformed)
+//   4xx  not an envelope                           → Transport(Refused(status))
+//   5xx  not an envelope                           → Transport(ServerFault(status))
+//   (other statuses — 1xx / 3xx reaching the client: not a route's answer)
+//                                                  → Transport(Malformed)
+//   `fetch` rejects, the body cannot be read, or the DEADLINE passes before an
+//   answer is read                                 → Transport(Unreachable)
+//
+// THE DEADLINE (§19.9.10 S454): "The client runtime SHALL apply a deadline to
+// every client call of a server function. A call that has not produced a
+// response when its deadline passes SHALL fail with `Unreachable`". The VALUE is
+// not ruled ("⚑ OPEN (not ruled): the deadline's value / configurability"):
+// SERVER_CALL_DEADLINE_MS is a PLACEHOLDER pending that ruling — one named
+// constant, so the ruling changes one line.
+//
+// ABORT (§6.7.7.1, design §2.3): nothing aborts an in-flight call. A call whose
+// task was cancelled (teardown) still settles here; its continuation is
+// dropped by `suspend`. `task` is accepted for the READ-abort slot U3 may use.
+//
+// Runtime value shapes (Ue DESIGN §5): a unit variant is its tag string, a
+// payload variant `{ variant, data: [positional] }`; the transport wrapper is
+// `{ variant: "Transport", data: [<ServerCallError value>] }` (design Item 1 B).
+// ---------------------------------------------------------------------------
+export const SERVER_CALL_DEADLINE_MS = 30000;
+
+const transportFailure = (sce) => failure({ variant: "Transport", data: [sce] });
+const unreachable = () => transportFailure("Unreachable");
+const refused = (status) => transportFailure({ variant: "Refused", data: [status] });
+const serverFault = (status) => transportFailure({ variant: "ServerFault", data: [status] });
+const malformed = (reason) => transportFailure({ variant: "Malformed", data: [reason] });
+
+// A codec failure `{ kind, path, reason }` as Malformed's reason — written from
+// the client's own check (the codec bounds anything it quotes).
+const codecReason = (what, err) => `${what}: malformed at ${err.path}: ${err.reason}`;
+
+export function call(route, args, task) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    // s454 fix round F3 — resource hygiene ONLY: when the deadline passes the call has already FAILED
+    // (Unreachable); aborting the fetch stops holding the socket (the abort also errors a body read in
+    // progress — no separate `body.cancel()`: the body is locked by `text()`, and cancelling a locked
+    // stream returns a REJECTED promise, an unhandled rejection; re-review N1). It is
+    // not the supersede / teardown abort (§6.7.7.1) — that stays "nothing aborts, the result is dropped".
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const settle = (v) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve(v);
+    };
+    timer = setTimeout(() => {
+      if (settled) return;
+      settle(unreachable());
+      try { if (controller) controller.abort(); } catch { /* best effort */ }
+    }, SERVER_CALL_DEADLINE_MS);
+    // the request: a JSON ARRAY of the arguments, each encoded against its parameter's type (Item 3.1)
+    let body;
+    try {
+      const wire = [];
+      for (let i = 0; i < args.length; i++) {
+        const r = encode(route.params[i], args[i]);
+        if (!r.ok) {
+          // a value that does not inhabit its declared type — a compiler defect, reported, and the call fails as a value
+          reportHostError(new Error(`scrml: argument ${i + 1} of the call to ${route.path} does not encode (${r.error.reason})`));
+          settle(malformed(`the request could not be encoded (argument ${i + 1})`));
+          return;
+        }
+        wire.push(r.wire);
+      }
+      body = JSON.stringify(wire);
+    } catch (e) {
+      reportHostError(e);
+      settle(malformed("the request could not be encoded"));
+      return;
+    }
+    let pending;
+    try {
+      const init = { method: "POST", headers: { "Content-Type": "application/json" }, body };
+      if (controller) init.signal = controller.signal;
+      pending = globalThis.fetch(route.path, init);
+    } catch {
+      settle(unreachable());
+      return;
+    }
+    Promise.resolve(pending).then(
+      (resp) => {
+        let status;
+        try { status = resp.status; } catch { settle(unreachable()); return; }
+        Promise.resolve()
+          .then(() => resp.text())
+          .then((text) => settle(classifySafely(route, status, text)), () => settle(unreachable()));
+      },
+      () => settle(unreachable()),
+    );
+  });
+}
+
+// s454 fix round F1 — `classify` throws only on a COMPILER defect (a CodecDefect: a descriptor of an
+// unknown kind, an error table whose root is not an enum). Reported once, and the call settles NOW as a
+// value — never an unhandled rejection, never a hang to the deadline mislabelled Unreachable.
+function classifySafely(route, status, text) {
+  try {
+    return classify(route, status, text);
+  } catch (e) {
+    reportHostError(e);
+    return malformed("the answer could not be classified (a compiler defect in the route's descriptor)");
+  }
+}
+
+function parseJson(text) {
+  try { return { ok: true, value: JSON.parse(text) }; } catch { return { ok: false, value: undefined }; }
+}
+
+function isErrorEnvelope(x) {
+  return x !== null && typeof x === "object" && !Array.isArray(x) && Object.prototype.hasOwnProperty.call(x, ERROR_KEY);
+}
+
+// One response, classified by the table above. Pure (tested directly).
+export function classify(route, status, text) {
+  if (typeof status !== "number" || !Number.isInteger(status)) return unreachable();
+  if (status >= 200 && status <= 299) {
+    if (route.result === null) {
+      if (status === 204 && (text === "" || text === undefined || text === null)) return null;
+      if (status === 204) return malformed("a 204 answer with a body");
+      return malformed(`a ${status} answer for a function that yields no value (its answer is 204, no body)`);
+    }
+    if (status === 204) return malformed("a 204 (no value) answer, for a function that returns a value");
+    const j = parseJson(text);
+    if (!j.ok) return malformed(`the ${status} answer is not JSON`);
+    if (isErrorEnvelope(j.value)) return malformed(`an error envelope on a ${status} (success) status`);
+    const r = decode(route.result, j.value, { canonicalOnly: true });
+    if (!r.ok) return malformed(codecReason("the answer", r.error));
+    return r.value;
+  }
+  const j = parseJson(text);
+  if (j.ok && isErrorEnvelope(j.value)) {
+    if (route.error === null) return malformed("an error envelope from a function not declared `!`");
+    const r = decodeError(route.error, j.value, { canonicalOnly: true });
+    if (!r.ok) return malformed(codecReason("the error envelope", r.error));
+    return failure(r.value);
+  }
+  if (status >= 400 && status <= 499) return refused(status);
+  if (status >= 500 && status <= 599) return serverFault(status);
+  return malformed(`an unexpected status ${status}`);
 }
