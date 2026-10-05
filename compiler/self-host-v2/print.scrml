@@ -457,8 +457,8 @@ ${
     // `data` or `__proto__` cannot overwrite or reroute anything): the shape
     // holds by construction. The R8 wire form (§19.9.1 / §57.8) is
     // `{"variant": "V", "data": {<field>: …}}` — the same discriminant key; the
-    // codec maps `data` index i ↔ declared field i (U1c, when payload enums
-    // cross the wire). (The runtime's own ValidationError records — §55, read
+    // codec maps `data` index i ↔ declared field i (s454: runtime.js
+    // `encEnum` / `decEnum`, against codec.scrml's `WireVariant` field list). (The runtime's own ValidationError records — §55, read
     // only by the runtime — keep their `{ tag, … }` shape; no Core pattern
     // reads them.)
     fn variantTest(ctx: Ctx, es: Sym, idx: int, on: JsExpr) -> JsExpr {
