@@ -130,3 +130,22 @@ SPEC §19.9.10 (as amended by #1298), §19.9.5, §19.4.3, §19.5.3, §13.7, §57
 - Counter after S2: PASS 121 · FAIL 58 · UNSUPPORTED 619 (10 moved UNSUPPORTED → FAIL, every one the stale-corpus
   shape design Item 5.1 predicted: E-ERROR-002 on an unhandled client call — 7; E-TYPE-080 on a handler that lacks
   `.Transport` — 3 (cell-assign-failable-*); E-DEFER-UNHANDLED-FAILABLE — defer/deferred-server-call-completes).
+
+## S3 — DONE (Core checks, each proven to bite)
+- check.scrml: C12 REWRITTEN as a block walk (`tailBlock`): a Suspend / Jump must be the last statement of a client
+  owner's continuation block — an Effect body, a handler block (Attr.On), a client Fn body, a Suspend's `then`, a Join
+  body, or a branch of an If that ends such a block; a Join immediately precedes the If that ends its block; a Jump
+  names the Join of an enclosing If. Never in an Attempt's branches, a Defer body, a ServerFn, a bind's write, a
+  reset-on reset.
+- `checkClientCalls`: C-S3 (a ServerCall names a ServerFn and stands only as a Suspend's `on`; a ServerFn never
+  suspends; client code — a Fn a client root reaches, or one that touches client state — never plain-calls a ServerFn:
+  Trigger 5 re-derived from Core); C-S7 (a Suspend on a failable call — a ServerCall, or a Call of a `!` Fn — begins
+  its `then` with Attempt(FSettled(bind)); the bind is read nowhere else; FSettled stands only there); C-S8 (Fn.waits
+  ⟺ the body holds a Suspend; a waiting Fn's call stands only as a Suspend's `on`); C-E2 extended (`checkClientSet`:
+  the Attempt over a ServerCall handles the callee's CLIENT set — its declared variants in order then ONE
+  `Transport(t: ServerCallError)`, or the declared enum when it declares the wrapper, or `{ Transport }` for a
+  non-`!` callee). C-E1 now exempts a failable Call that is a Suspend's `on` (count-based).
+- U1a's per-Fn C-S3 in `clientSide` is superseded for Fn roots by the reachability rule above.
+- Tests: NEW `slice-m4/server-call-check.test.js` (16: the worked program's Core is clean; 15 bites, one per rule,
+  each a corrupted Core the check reports by its own tag). Shared sources moved to `slice-m4/server-call-fixtures.js`.
+  effect.test.js's C12 message assertion migrated to the widened message. self-host-v2 1972 pass / 0 fail.
