@@ -397,6 +397,8 @@ function scanBalancedBraceBlock(input: string, openIdx: number): number {
     if (c === "`") { stack.push({ kind: "template" }); i++; continue; }
     if (c === "'") { stack.push({ kind: "single" }); i++; continue; }
     if (c === "\"") { stack.push({ kind: "double" }); i++; continue; }
+    const skipTo = opaqueSlashSpanEnd(input, i);
+    if (skipTo > i) { i = skipTo; continue; }
     if (c === "{") { top.depth++; i++; continue; }
     if (c === "}") {
       top.depth--;
@@ -410,6 +412,30 @@ function scanBalancedBraceBlock(input: string, openIdx: number): number {
     i++;
   }
   return -1;
+}
+
+/**
+ * When `input[i]` opens a comment (`//`, `/*`) or a REGEX literal, the index
+ * just past it; otherwise `i`. Regex-vs-division is `regexAllowedAfter` — the
+ * same preceding-token decision the shared code-segment fence and
+ * rewriteIsPredicates use — and the literal's end is `scanRegexLiteralEnd`.
+ */
+function opaqueSlashSpanEnd(input: string, i: number): number {
+  if (input[i] !== "/") return i;
+  if (input[i + 1] === "/") {
+    let j = i + 2;
+    while (j < input.length && input[j] !== "\n") j++;
+    return j;
+  }
+  if (input[i + 1] === "*") {
+    const end = input.indexOf("*/", i + 2);
+    return end === -1 ? input.length : end + 2;
+  }
+  if (regexAllowedAfter(input.slice(0, i))) {
+    const end = scanRegexLiteralEnd(input, i);
+    if (end !== -1) return end;
+  }
+  return i;
 }
 
 /**
@@ -463,6 +489,11 @@ export function extractHandledOperands(input: string): string {
     if (c === "`") { stack.push({ kind: "template" }); out += c; i++; continue; }
     if (c === "'") { stack.push({ kind: "single" }); out += c; i++; continue; }
     if (c === "\"") { stack.push({ kind: "double" }); out += c; i++; continue; }
+    // S454 fix round (F2) — a regex literal / comment interior is opaque:
+    // `/a!{2}/` is a quantifier, not a handler. The regex-vs-division decision is
+    // the shared fence's own (`regexAllowedAfter`, the GITI-017 / S252 twin).
+    const skipTo = opaqueSlashSpanEnd(input, i);
+    if (skipTo > i) { out += input.slice(i, skipTo); i = skipTo; continue; }
     if (c === "?" && input[i + 1] === "{") {
       const end = scanBalancedBraceBlock(input, i + 1);
       if (end < 0) return input;

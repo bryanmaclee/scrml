@@ -41,12 +41,30 @@ export const SQL_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]
 ];
 
 /**
- * Wrap an emitted query expression (which already carries its own `await`) so a
- * failure becomes a `SqlError` envelope instead of a throw. The result is an
- * expression; it needs an async context, which every server function body is.
+ * The `SqlError` variants a handler on a `?{}` must cover to be exhaustive
+ * (E-TYPE-080 / E-TYPE-020, §19.7): §19.8.1's three, plus the variant the SPEC
+ * itself adds — §8.9.4's `BatchPrepareFailed` ("surface as a single variant
+ * `SqlError::BatchPrepareFailed`"). §19.8.3: "The handler is checked for
+ * exhaustiveness against `SqlError` like any other `!{}` handler. Because the
+ * compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed`
+ * is one — a `_ :>` arm keeps a handler total as the enum grows."
  */
-export function wrapSqlAttempt(queryExpr: string): string {
-  return `await ${SQL_ATTEMPT_FN}(async () => ${queryExpr})`;
+export const SQL_ERROR_EXHAUSTIVE_VARIANTS: readonly string[] = [
+  "QueryFailed", "ConstraintViolation", "ConnectionLost", "BatchPrepareFailed",
+];
+
+/**
+ * The statement emitted on the branch where a handler on a failable result
+ * matched NO arm (S454 fix round, F1 — FAIL CLOSED). A handler the type checker
+ * accepted is exhaustive, so this branch is unreachable for every variant the
+ * checker knows; if a failure the checker did not know still arrives, the error
+ * is re-raised as a host error (the route's error path / the §19.6.8 backstop),
+ * never yielded as the expression's value — an error envelope is a truthy
+ * object, so letting it through as a value fails OPEN (`if (q() !{ … })`).
+ * `resultVar` names the envelope.
+ */
+export function unhandledFailureThrow(resultVar: string): string {
+  return `throw new Error("scrml: no handler arm matched the failure " + ${resultVar}.type + "." + ${resultVar}.variant + " (§19.4.3)");`;
 }
 
 /** The SQL chain methods that can follow a `?{}` in an expression (§44.3, §8.9.5, §14.8.10). */
@@ -91,13 +109,18 @@ export const SERVER_SQL_ATTEMPT_HELPER: string = [
   "// --- §19.8.3 (S451 R11): a ?{} query handled by !{} or match (compiler-generated) ---",
   "// A query that FAILS TO RUN becomes a SqlError value that the handler's arms match on,",
   "// instead of a throw. A query that runs and matches no row is not a failure: its value",
-  "// (not / []) passes through unchanged.",
-  "async function _scrml_sql_attempt(run) {",
+  "// (not / []) passes through unchanged. `args` (the query's parameters) were evaluated",
+  "// by the caller and `then` (row shaping, tenant / protect wrappers) runs after the",
+  "// try, so ONLY the driver call is attempted: a host error in a parameter, or a floor",
+  "// refusal, keeps its own identity instead of becoming QueryFailed.",
+  "async function _scrml_sql_attempt(run, args, then) {",
+  "  let rows;",
   "  try {",
-  "    return await run();",
+  "    rows = await run(args);",
   "  } catch (err) {",
   "    return _scrml_sql_error(err);",
   "  }",
+  "  return then(rows);",
   "}",
   "// Map a driver error to a SqlError variant (§19.8.1): QueryFailed(message),",
   "// ConstraintViolation(field), ConnectionLost.",

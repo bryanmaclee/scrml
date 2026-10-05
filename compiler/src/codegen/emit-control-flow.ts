@@ -2,7 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
+import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -11,7 +11,7 @@ import { isDestructurePattern, emitDestructurePatternText } from "./emit-destruc
 import { CGError } from "./errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
-import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, wrapSqlAttempt } from "./sql-attempt.ts";
+import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow } from "./sql-attempt.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -2713,7 +2713,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // §19.8.3 — a `match` on a `?{}` query's result IS its handler: a query that
   // fails to run must reach the arms as a SqlError variant, not throw past them.
   const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
-  const header = _handlesSql ? wrapSqlAttempt(headerRaw) : headerRaw;
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
   // The arms' error type is SqlError (released before this function returns).
   if (_handlesSql) enterSqlErrorSchema();
 
@@ -2876,6 +2876,11 @@ export function emitMatchExpr(node: any, opts?: any): string {
       iifeLines.push(`  ${prefix} (${condition}) ${emitResult}`);
       conditionIndex++;
     }
+  }
+  // S454 fix round (F1) — FAIL CLOSED: a match on a `?{}` with no catch-all re-raises
+  // a failure none of its arms names, rather than evaluating to `undefined`.
+  if (_handlesSql && conditionIndex > 0 && !arms.some((a) => a.kind === "wildcard")) {
+    iifeLines.push(`  else if (${tagVar} !== "Ok") { ${unhandledFailureThrow(tmpVar)} }`);
   }
 
   iifeLines.push(`})()`);
