@@ -116,7 +116,7 @@ describe("S4 — `call`: never rejects; the request; the deadline", () => {
   });
 
   test("THE DEADLINE (§19.9.10 S454): a hung server → Transport(Unreachable) when SERVER_CALL_DEADLINE_MS passes", async () => {
-    expect(rtUnit.SERVER_CALL_DEADLINE_MS).toBe(30000);     // the PA placeholder — the value is not ruled
+    expect(rtUnit.SERVER_CALL_DEADLINE_MS).toBe(30000);     // ruled S454: 30 s, fixed, not configurable
     const timers = [];
     globalThis.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
     globalThis.fetch = () => new Promise(() => {});          // never answers

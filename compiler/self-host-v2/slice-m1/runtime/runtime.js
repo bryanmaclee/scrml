@@ -1973,9 +1973,9 @@ export function persistOf(cell) {
 // THE DEADLINE (§19.9.10 S454): "The client runtime SHALL apply a deadline to
 // every client call of a server function. A call that has not produced a
 // response when its deadline passes SHALL fail with `Unreachable`". The VALUE is
-// not ruled ("⚑ OPEN (not ruled): the deadline's value / configurability"):
-// SERVER_CALL_DEADLINE_MS is a PLACEHOLDER pending that ruling — one named
-// constant, so the ruling changes one line.
+// RULED (S454 "your recs on both, then go on F8"): "The deadline is 30 seconds,
+// fixed" — not configurable. SERVER_CALL_DEADLINE_MS is that ruled value, one
+// named constant.
 //
 // ABORT (§6.7.7.1, design §2.3): nothing aborts an in-flight call. A call whose
 // task was cancelled (teardown) still settles here; its continuation is

@@ -19328,8 +19328,33 @@ type ServerCallError:enum = {
 has not produced a response when its deadline passes SHALL fail with `Unreachable` — there is no separate timeout
 variant, so the variant set stays closed and an exhaustive inner `match t` does not break when a deadline is added to
 a runtime. A request the client itself aborts on supersede or teardown (§6.7.7.1) is still not a failure: an abort
-sets no error, and the call's continuation does not run. **⚑ OPEN (not ruled): the deadline's value / configurability**
-— S454 ruled THAT every server call has a deadline, not how long it is or whether an author can change it.
+sets no error, and the call's continuation does not run. **The deadline is 30 seconds, fixed:** a client call of a
+server function that has not produced a response 30 seconds after it was made SHALL fail with `Unreachable`. The value
+is not configurable (per-program configuration is not provided now; it is added only if an adopter asks).
+
+> **Provenance:** ruling:user-voice-scrml.md S454 "your recs on both, then go on F8" — *"**Deadline value = 30
+> seconds, fixed** (not configurable for now; per-program configuration only if an adopter asks). Closes §19.9.10's
+> "⚑ OPEN (not ruled): the deadline's value / configurability" (configurability: not now)."* · **supersedes:** *"**⚑
+> OPEN (not ruled): the deadline's value / configurability** — S454 ruled THAT every server call has a deadline, not
+> how long it is or whether an author can change it."* · **Direction of change (pa-base §8): semantics-changed** — a
+> number is fixed where none was; no source is newly rejected or accepted.
+
+**A handler's server call and a second event (handler tasks).** Each dispatch of an event handler is its own task. A
+second event while an earlier invocation of the handler is waiting on a server call SHALL NOT cancel the earlier
+invocation: each invocation runs to completion, every statement of each in source order (§5.2.3), and a cell written
+by both holds the value written LAST — the response that completes last, which need not be the last event's. An
+author who needs one invocation at a time disables the trigger while a call is in flight, or models it as a state
+machine. Newest-wins cancellation of a superseded run is `<effect>` / `<request>` semantics only (§6.7.4, §6.7.7.1):
+those are reads; an event handler is an action, and cancelling it would drop writes the user intended.
+
+> **Provenance:** ruling:user-voice-scrml.md S454 "your recs on both, then go on F8" — *"**Handler double-click =
+> both continue.** A second event while the first handler's server call is in flight does NOT cancel the first; each
+> invocation is its own task and both run to completion (a click is an action; cancelling would drop writes the user
+> intended). Newest-wins stays `<effect>` / `<request>` semantics only (they are reads). Accepted cost, to be stated in
+> SPEC: the final state is the LAST-TO-COMPLETE response, not the last click — an author who needs serialization
+> disables the trigger or models it as a state machine."* · **supersedes:** nothing (the SPEC was silent for handlers;
+> design OQ6) · **Direction of change (pa-base §8): inert** — states the semantics the bootstrap's U1b runtime already
+> builds (per-invocation handler tasks).
 
 **The failure set of a client call (S454).** At a client call site (scope above) of a server-placed function `f`, the
 call fails with:
@@ -19486,8 +19511,11 @@ reached only through an alias or a cell is not counted, and nor is a call inside
   redefine it, and the compiler MAY add variants. No variant SHALL carry server-written text. *(S454 — supersedes
   "Its exact type is OPEN (U1b).")*
 - The client runtime SHALL apply a deadline to every client call of a server function; a call that exceeds it SHALL
-  fail with `Unreachable`. An abort on supersede or teardown SHALL NOT be a failure. *(The deadline's value is not
-  ruled.)*
+  fail with `Unreachable`. An abort on supersede or teardown SHALL NOT be a failure. The deadline SHALL be 30 seconds
+  and is not configurable. *(S454 "your recs on both, then go on F8" — supersedes "(The deadline's value is not
+  ruled.)")*
+- A second event while an earlier invocation of an event handler waits on a server call SHALL NOT cancel that
+  invocation; each invocation SHALL run to completion. *(S454 "your recs on both, then go on F8".)*
 - The client call of a server function declared `! E` SHALL fail with a variant of `E` (as the server sent it) or with
   `Transport(t: ServerCallError)`; the client call of a server function not declared `!` SHALL fail with
   `Transport(t: ServerCallError)` only. A handler on either SHALL cover the whole set. A declared variant
