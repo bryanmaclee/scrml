@@ -83,3 +83,50 @@ SPEC §19.9.10 (as amended by #1298), §19.9.5, §19.4.3, §19.5.3, §13.7, §57
   compiled to `_scrml_known_907` — the mangled name of the top-level `fn known(ty)` in the same module. impl#1
   resolves a local that shares a module function's name to the FUNCTION in that position (a silent mis-bind). Worked
   around by renaming the local (`prior`). Proposed id: `g-impl1-narrowed-local-shadowed-by-module-fn`.
+
+## S2 — DONE (Core, the site judgement, lowering positions)
+- Core: `Expr.ServerCall(fn, args)`, `Failable.FSettled(outcome)`, `Stmt.Join(k, body)` / `Stmt.Jump(k)`,
+  `Fn.waits`, `CoreProgram.serverCallError`. walk / measure / ingest / check / print totality arms.
+- Binder (analyze): FailCtx += fnSym / serverOwn. A call of a server-triggered callee is judged by SITE
+  (`siteOf`): own-triggered server caller = SiteLocal (server→server, the callee's own set); handler / effect =
+  SiteRemote; a function with no own trigger = SitePending → `PendRule.RemoteOr(caller, remote, local)` decided in
+  rulesPass from the WHOLE-PROGRAM placement (F5 a); a value position = SiteValue (E-VALUE-SERVER-CALL only, "not
+  reported a second time as E-ERROR-002"). `remoteHandled` resolves arms against the client set (E's variants first,
+  then Transport); totality (`coverDiags`) per set; server→server: a non-`!` callee's handler is E-ERROR-013, a `!`
+  callee's `.Transport` arm is reported dead (E-ERROR-013 code, message names the callee + server→server — the SPEC
+  wording). `?`: E-ERROR-010 with the SPEC message naming `Transport(t: ServerCallError)` + the enclosing enum; no
+  E-ERROR-004 on a client call of a non-`!` callee. `remoteUnhandled`: E-ERROR-002 (E-DEFER-UNHANDLED-FAILABLE in a
+  deferred statement). A handler REFERENCE to a server function: E-ERROR-002. PendRule.ServerOrDead + the U1a
+  `u1bText` refusals are gone (the binder judges every client call).
+- Summary: Trigger 5 (`inheritedFns`, greatest fixpoint over the reference graph; client positions — handlers,
+  effects, value positions — and constructions / formulas disqualify); `waits` edges of an inherited function cut;
+  `clientCauses` — the client referrer of a helper a server function also calls, named with file:line (FileAst gains
+  `lines`, parse.scrml `lineStarts`) and appended to every remote diagnostic RemoteOr raises in that helper.
+- A server function (or an inherited one) calling a client function that WAITS → E-BOOTSTRAP-UNSUPPORTED naming U1c
+  (per-side emission of an ambient function).
+- The SUSPENSION PLAN (`planPass`, post-summary, per site — not transitive): suspension points (remote handled forms,
+  calls / handled calls / handler references of waiting client functions), position verdicts (lowered: whole value,
+  argument, operand, element, condition, `if`/`given` branch → Join; refused, named: `&&`/`||` right operand, ternary
+  branch, `!{}`/`match` arm, `defer` body, any `defer` in a waiting function, lambda, indexed-write value), minted
+  temps (ANF: every non-literal sibling evaluated before a later suspension) and join continuations; `waiting` = the
+  client functions with a suspension point (Fn.waits); `rets` = the wire type of a routed callee that declares none.
+- READING (flagged): a `!` function has no success-type slot (§19.4.1 "its success type is inferred from its
+  returns", §19.4.2), so the client's decode type for a routed `!` callee is the ONE type all its `return`s carry by
+  the typer's proven types (`provenReturn`); not provable → refused at the client call site, named. A non-`!` callee
+  with no `-> T` gets the same inference; a no-value callee is the 204 contract.
+- Lower: `lowerExpr` substitutes temps / binds; `hoistExpr` emits Lets + `Suspend(bind, ServerCall|Call, [])` (+ the
+  `Attempt(FSettled)`) before the statement in the planner's order; `attemptOf` picks the effective set (`effErr`:
+  the callee's own enum when the caller turned out server-placed) and adds the Transport retag on a client call;
+  `cpsBody` moves each block's rest into its Suspend / Join markers (Join before the If, Jump(k) at every branch end;
+  a waiting function's paths all end in `Return(not)`). ServerFn.ret = declared or the plan's proven type.
+- Print (needed for S2 to compile; exercised in S4): Return / Fail through `ret$` in a waiting function, Join / Jump,
+  `rt.call(route$f, [args], task$)`, a waiting function takes `task$` and returns `rt.waiting((ret$) => …)`, handlers
+  that suspend take `task$`, route constants + `Output.routes` (manifest), the U1c refusal of a program with server
+  functions lifted (client artifact only), server-only (T5) functions omitted.
+- Tests: NEW `slice-m4/server-call-core.test.js` (28). Migrated (U1b lifted them — each was the old refusal):
+  server.test.js (the e-route-002-neg twin now E-ERROR-002 ×2; the §13.7 fixture's `label()` handles its client call;
+  the "→ U1b" refusals are now E-ERROR-002; the printer prints the client artifact), error-rulings.test.js (a client
+  call of a server-triggered function with a handler is VALID; the `<db src>` program prints). self-host-v2 1956 pass.
+- Counter after S2: PASS 121 · FAIL 58 · UNSUPPORTED 619 (10 moved UNSUPPORTED → FAIL, every one the stale-corpus
+  shape design Item 5.1 predicted: E-ERROR-002 on an unhandled client call — 7; E-TYPE-080 on a handler that lacks
+  `.Transport` — 3 (cell-assign-failable-*); E-DEFER-UNHANDLED-FAILABLE — defer/deferred-server-call-completes).

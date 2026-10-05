@@ -3871,6 +3871,17 @@ ${
         // nor closes the diagnostics gate.
         let errs: ASpan[] = []
         for (const d of r.mp.diags) { if (d.severity == Severity.Error) errs = errs.concat([d.span]) }
-        return { ast: { path: path, items: r.items, errs: errs }, diags: r.mp.diags, nextId: r.mp.nid }
+        return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src) }, diags: r.mp.diags, nextId: r.mp.nid }
+    }
+
+    // The offset where each line of `src` starts (s454 — FileAst.lines).
+    fn lineStarts(src: string) -> int[] {
+        let out: int[] = []
+        let at: int = 0
+        for (const ln of src.split("\n")) {
+            out = out.concat([at])
+            at = at + ln.length + 1
+        }
+        return out
     }
 }

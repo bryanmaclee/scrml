@@ -281,7 +281,22 @@ ${
     // the payload locals it binds (§19.5.2: "`::ErrorVariant(args) :> fail
     // EnclosingErrorType::ErrorVariant(args)`").
     export type Retag:struct = { from: int, to: int, binds: Sym[] }
-    export type HandledFact:struct = { err: Sym, result: Sym, ok: Sym, stmt: boolean, into: Sym | not, retag: Retag[] }
+    // s454 (U1b): `outcome` — the local a Suspend binds the call's SETTLED
+    // outcome to, when the call suspends (a client call of a server function, a
+    // call of a waiting client function — the suspension plan decides; design
+    // §2.1 "Suspend waits, Attempt inspects"); `remote` — the call names a
+    // server-triggered function from a site that is (or may be) on the client:
+    // then `err` is the CLIENT call's failure set (FnInfo.rerr) and RemoteFact
+    // says what the call is when the site turns out server→server.
+    export type HandledFact:struct = { err: Sym, result: Sym, ok: Sym, stmt: boolean, into: Sym | not, retag: Retag[],
+                                       outcome: Sym, remote: RemoteFact | not }
+    // s454 (U1b) — `callee`: the server function; `caller`: the enclosing
+    // function's Sym id (-1: an event handler / effect body — a client site by
+    // position); `local`: the callee's own error enum (`not`: not declared `!`)
+    // — the Attempt's `err` when the call is server→server; `retagT`: for `?`,
+    // the re-fail of the client set's trailing `Transport` (owed only by a
+    // client call; `retag` holds the callee's own variants).
+    export type RemoteFact:struct = { callee: Sym, caller: int, local: Sym | not, retagT: Retag[] }
     export type FailFact:enum = {
         FHandled(h: HandledFact),
         FArm(idx: int),
@@ -358,9 +373,23 @@ ${
     // placeholder (parse.scrml sqlSigil).
     fn sqlSigil() -> string { return "?" + "{" }
     export type PlaceFact:struct = { sym: int, name: string, place: PlaceK }
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[] }
+    // s454 (U1b): `inherited` — the functions server-placed by inheritance
+    // (§12.2 Trigger 5): their calls of server functions are made in place;
+    // `plan` — the suspension plan (planPass) lower reads.
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [] } }
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan() } }
+
+    // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
+    // a CLIENT call — the caller is not server-placed, by its own body or by
+    // inheritance (§19.9.10 "placement is whole-program")?
+    export fn remoteCaller(t: Tables, caller: int) -> boolean {
+        if (caller < 0) return true
+        for (const p of t.server.places) {
+            if (p.sym == caller && p.place == PlaceK.Server) return false
+        }
+        return t.server.inherited.indexOf(caller) < 0
+    }
 
     export fn sqlInfo(t: Tables, nid: int) -> SqlInfo | not {
         for (const s of t.server.sqls) {
@@ -3379,9 +3408,13 @@ ${
     // calling it here — a direct call's callee, or an event-handler reference.
     // `wholeWhat` (s452): what position `whole` is, for E-ERROR-012's message
     // ("the initializer of `x`", "a `return` operand", …; "" — not named).
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string }
+    // s454 (U1b): `fnSym` — the enclosing function's Sym id (-1: not in a
+    // function); `serverOwn` — its own body places it on the server (§12.2
+    // T1/T4), so a call made in it is server→server whatever the rest of the
+    // program does (§19.9.10 "Not affected: A server→server call").
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "" } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -3390,7 +3423,7 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
@@ -3401,17 +3434,17 @@ ${
     // (named in E-ERROR-012's message).
     fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn })
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -3990,7 +4023,9 @@ ${
         if (cf is some) {
             const sp: AS = callPurity(env, e, cf, st)
             // s451 (Ue): a `!` function's call is handled only as a handling form's subject (§19.4.3)
-            if (cf.failable && env.fx.subject != e.nid) return plain(not, unhandledCall(env, e, cf.name, sp))
+            if (cf.failable && env.fx.subject != e.nid) return plain(not, bySite(env, siteOf(env), conflictDiags(env, cf, e), [], unhandledCall(env, e, cf.name, sp)))
+            // s454 (U1b): a server function's call made on the client is failable (§19.9.10)
+            if (cf.serverOwn && env.fx.subject != e.nid) return plain(not, remoteUnhandled(env, e, cf, sp))
             return plain(not, sp)
         }
         return plain(not, st)
@@ -5994,6 +6029,11 @@ ${
         if (exprName(e) == "") return st
         const f: FnInfo | not = calledFn(env, nameFactIn(st, e.nid))
         if (f is not) return st
+        // s454 (U1b) — §19.9.10 scope 2: "in an event-handler value, as a call or
+        // as a handler reference (§19.4.3 … apply unchanged — a server function is
+        // now a failable function for both)"; design §2.2: "a handler REFERENCE
+        // `onclick=saveNote` → E-ERROR-002 … the dispatcher discards the result".
+        if (f.serverOwn && !f.failable) return addDiag(st, env.file, e.span, "E-ERROR-002", "Server function '" + f.name + "' is passed as an event-handler reference: the event would call it on the client and discard the result, but a client call of a server function can fail on the wire (§19.9.10). Call it in a handler that handles it (e.g. '{ " + f.name + "() !{ .Transport(t) :> … } }'), or wire a function that handles it (§19.4.3)")
         if (!f.failable) {
             if (f.arity == 0) return st
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an event-handler reference to `" + f.name + "`, which takes parameters — the event would be its argument, which the bootstrap does not model; write the call: `{ " + f.name + "(…) }`")
@@ -6024,10 +6064,25 @@ ${
 
     // `subject?` / `subject !{ … }` / `match subject { … }`. `stmt`: the form
     // stands as a statement (its arms yield no value).
+    // s454 (U1b): a subject that calls a server-triggered function (§12.2 T1/T4,
+    // FnInfo.serverOwn) from a site that is (or may be) on the client is judged
+    // against the CLIENT call's failure set (§19.9.10) — remoteHandled.
     fn resolveHandled(env: Env, e: AExpr, h: AHandled, stmt: boolean, st0: AS) -> RX {
         let st: AS = st0
-        if (!stmt && env.fx.whole != e.nid) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable (`?`, `!{ … }`, `match`) " + ue2Reason())
         const subj: AExpr = h.subject
+        const sc: FnInfo | not = serverCalleeNamed(env, subj)
+        const site: SiteK = siteOf(env)
+        if (sc is some && site != SiteK.SiteLocal) {
+            const rs0: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
+            const hm: AHow = h.how
+            const ty: Type | not = match hm {
+                .Propagate :> rs0.x.ty
+                .Guard(arms: x) :> rs0.x.ty
+                .MatchOn(arms: x) :> not
+            }
+            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, rs0.st))
+        }
+        if (!stmt && env.fx.whole != e.nid) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable (`?`, `!{ … }`, `match`) " + ue2Reason())
         const rs: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
         st = rs.st
         const f: FnInfo | not = failableCallee(env, st, subj)
@@ -6052,13 +6107,19 @@ ${
     // "`?` SHALL be valid only when applied to a call to a `!` function …
     // E-ERROR-004"; §19.5.3 compatibility (E-ERROR-010).
     fn propagate(env: Env, e: AExpr, subj: AExpr, failable: boolean, err: Sym | not, stmt: boolean, st0: AS) -> AS {
-        if (!failable) return addDiag(st0, env.file, e.span, "E-ERROR-004", "'?' applied to " + subjectName(subj) + ", which is not a call of a failable function. Only '!' functions (and `" + sqlSigil() + "}` queries) can be propagated with '?' (§19.5.4)")
-        if (!env.fx.failable) {
-            let where: string = "this handler or markup, which is not a function"
-            if (env.fx.inFn) where = "function '" + env.fx.fnName + "', which is not declared as failable"
-            return addDiag(st0, env.file, e.span, "E-ERROR-003", "'?' propagation operator used in " + where + ". Add '!' to the function signature or handle the error with 'match' or '!{}' (§19.5.4)")
-        }
+        if (!failable) return addDiag(st0, env.file, e.span, "E-ERROR-004", e004Msg(subj))
+        if (!env.fx.failable) return addDiag(st0, env.file, e.span, "E-ERROR-003", e003Msg(env))
         return propagationFact(env, e, err, stmt, st0)
+    }
+
+    fn e004Msg(subj: AExpr) -> string {
+        return "'?' applied to " + subjectName(subj) + ", which is not a call of a failable function. Only '!' functions (and `" + sqlSigil() + "}` queries) can be propagated with '?' (§19.5.4)"
+    }
+
+    fn e003Msg(env: Env) -> string {
+        let where: string = "this handler or markup, which is not a function"
+        if (env.fx.inFn) where = "function '" + env.fx.fnName + "', which is not declared as failable"
+        return "'?' propagation operator used in " + where + ". Add '!' to the function signature or handle the error with 'match' or '!{}' (§19.5.4)"
     }
 
     // The re-fail of a propagation: each variant of `err` re-fails as the
@@ -6070,31 +6131,44 @@ ${
     fn propagationFact(env: Env, e: AExpr, err: Sym | not, stmt: boolean, st0: AS) -> AS {
         const into: Sym | not = env.fx.err
         if (err is not || into is not) return st0          // an error type that is not an enum: E-ERROR-011 reported
+        const rt: RRetag = retagInto(env, err, into, 0, -1, st0)
+        if (rt.bad.length > 0) return addDiag(rt.st, env.file, e.span, "E-ERROR-010", e010Msg(env, err, into, rt.bad))
+        return handledFact(env, e, err, stmt, into, rt.retag, not, rt.st)
+    }
+
+    fn e010Msg(env: Env, err: Sym, into: Sym, bad: string[]) -> string {
+        return "propagating `" + err.hint + "` into `" + env.fx.fnName + "(…)! " + into.hint + "` would drop the variant(s) " + bad.join(", ") + " — every variant the callee can fail with must exist in the enclosing function's error type with the same payload (§19.5.3). Add them to `" + into.hint + "`, or handle the call with `!{ … }` / `match`"
+    }
+
+    // The retag of variants [from, upto) of `err` into `into` (upto -1: all),
+    // and the names of those `into` cannot take (missing, or another payload).
+    type RRetag:struct = { retag: Retag[], bad: string[], st: AS }
+
+    fn retagInto(env: Env, err: Sym, into: Sym, from: int, upto: int, st0: AS) -> RRetag {
         let st: AS = st0
-        const from: VariantDef[] = enumVariantsOf(env.g, err)
+        const vs: VariantDef[] = enumVariantsOf(env.g, err)
         const to: VariantDef[] = enumVariantsOf(env.g, into)
         let bad: string[] = []
         let retag: Retag[] = []
         let i = 0
-        for (const v of from) {
-            const j: int = variantIndex(env.g.types, into, v.sym.hint)
-            if (j < 0 || !samePayload(v, to[j])) {
-                bad = bad.concat([v.sym.hint])
-            } else {
-                let binds: Sym[] = []
-                for (const fd of v.fields) {
-                    const rb: RSym = mint(st, fd.sym.hint)
-                    st = rb.st
-                    binds = binds.concat([rb.s])
+        for (const v of vs) {
+            if (i >= from && (upto < 0 || i < upto)) {
+                const j: int = variantIndex(env.g.types, into, v.sym.hint)
+                if (j < 0 || !samePayload(v, to[j])) {
+                    bad = bad.concat([v.sym.hint])
+                } else {
+                    let binds: Sym[] = []
+                    for (const fd of v.fields) {
+                        const rb: RSym = mint(st, fd.sym.hint)
+                        st = rb.st
+                        binds = binds.concat([rb.s])
+                    }
+                    retag = retag.concat([{ from: i, to: j, binds: binds }])
                 }
-                retag = retag.concat([{ from: i, to: j, binds: binds }])
             }
             i = i + 1
         }
-        if (bad.length > 0) {
-            return addDiag(st, env.file, e.span, "E-ERROR-010", "propagating `" + err.hint + "` into `" + env.fx.fnName + "(…)! " + into.hint + "` would drop the variant(s) " + bad.join(", ") + " — every variant the callee can fail with must exist in the enclosing function's error type with the same payload (§19.5.3). Add them to `" + into.hint + "`, or handle the call with `!{ … }` / `match`")
-        }
-        return handledFact(env, e, err, stmt, into, retag, st)
+        return { retag: retag, bad: bad, st: st }
     }
 
     fn samePayload(a: VariantDef, b: VariantDef) -> boolean {
@@ -6114,10 +6188,15 @@ ${
     }
 
     // The fact lower reads: the result / raw-result locals, minted here.
-    fn handledFact(env: Env, e: AExpr, err: Sym, stmt: boolean, into: Sym | not, retag: Retag[], st0: AS) -> AS {
+    // s454 (U1b): `outcome` — the Suspend's bind when the call turns out to
+    // suspend (a client call of a server function, or a call of a waiting
+    // client function, design §2.1); `remote` — the client-call facts.
+    fn handledFact(env: Env, e: AExpr, err: Sym, stmt: boolean, into: Sym | not, retag: Retag[], remote: RemoteFact | not, st0: AS) -> AS {
         const rr: RSym = mint(st0, "handled")
         const ro: RSym = mint(rr.st, "outcome")
-        return addFail(ro.st, e.nid, FailFact.FHandled({ err: err, result: rr.s, ok: ro.s, stmt: stmt, into: into, retag: retag }))
+        const rs: RSym = mint(ro.st, "settled")
+        return addFail(rs.st, e.nid, FailFact.FHandled({ err: err, result: rr.s, ok: ro.s, stmt: stmt, into: into, retag: retag,
+                                                           outcome: rs.s, remote: remote }))
     }
 
     // `!{ arms }` / `match subject { arms }`.
@@ -6130,10 +6209,28 @@ ${
             return deadHandler(env, e, subj, st)
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
+        if (isMatch && variantIndex(env.g.types, err, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(err))
+        const ra: RArms = resolveArms(env, subj, arms, err, isMatch, stmt, st)
+        st = ra.st
+        for (const d of coverDiags(env, e, subj, err, isMatch, ra, -1, err.hint)) { st = withDiag(st, d) }
+        return handledFact(env, e, err, stmt, not, [], not, st)
+    }
+
+    fn okVariantMsg(err: Sym) -> string {
+        return "`" + err.hint + "` has a variant named `Ok`, which a `match` on a failable result reserves for the success value (§19.7.3) — rename the variant"
+    }
+
+    // The arms of a `!{}` / `match`, resolved against enum `err` — what does
+    // not depend on WHICH failure set the call has: every arm's pattern,
+    // binders and body, a duplicate (E-TYPE-023), an arm after the wildcard
+    // (E-SYNTAX-010). `covered`: the variant indices named; `wild`: a
+    // wildcard arm (plain `_` / `else`, or `_ err`); `okSeen`: `.Ok`, or a
+    // PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`).
+    type RArms:struct = { st: AS, covered: int[], wild: boolean, okSeen: boolean }
+
+    fn resolveArms(env: Env, subj: AExpr, arms: AArm[], err: Sym, isMatch: boolean, stmt: boolean, st0: AS) -> RArms {
+        let st: AS = st0
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
-        if (isMatch && variantIndex(env.g.types, err, "Ok") >= 0) {
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + err.hint + "` has a variant named `Ok`, which a `match` on a failable result reserves for the success value (§19.7.3) — rename the variant")
-        }
         let covered: int[] = []
         let wild = false          // a wildcard arm: plain `_` / `else`, or `_ err` — every remaining ERROR
         let okSeen = false        // `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`)
@@ -6166,25 +6263,238 @@ ${
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
+        return { st: st, covered: covered, wild: wild, okSeen: okSeen }
+    }
+
+    // What the failure set decides about resolved arms: totality over the
+    // FIRST `upto` variants of `err` (-1: all of them) — E-TYPE-080 (`!{}`) /
+    // E-TYPE-020 (`match`, which also owes `.Ok`) — and, in a deferred
+    // statement, the catch-all §19.16.3 rule 3 requires.
+    fn coverDiags(env: Env, e: AExpr, subj: AExpr, err: Sym, isMatch: boolean, ra: RArms, upto: int, label: string) -> Diag[] {
+        const vs: VariantDef[] = enumVariantsOf(env.g, err)
         let missing: string[] = []
-        if (isMatch && !okSeen) missing = ["Ok"]
-        if (!wild) {
+        if (isMatch && !ra.okSeen) missing = ["Ok"]
+        if (!ra.wild) {
             let i = 0
             for (const v of vs) {
-                if (covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
+                if ((upto < 0 || i < upto) && ra.covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
                 i = i + 1
             }
         }
-        if (!wild && !isMatch && env.fx.defer) {
-            st = addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + err.hint + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`")
-        } else if (missing.length > 0) {
-            if (isMatch) {
-                st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + err.hint + "`, or ends with `else :>` / `_ :>` (§19.7.1)")
-            } else {
-                st = addDiag(st, env.file, e.span, "E-TYPE-080", "this `!{ … }` handler on " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " of `" + err.hint + "` — add those arms, or a catch-all `| _ :> …` (§19.7)")
+        if (!ra.wild && !isMatch && env.fx.defer) {
+            return [newDiag("E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + label + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`", env.file, e.span)]
+        }
+        if (missing.length == 0) return []
+        if (isMatch) return [newDiag("E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + label + "`, or ends with `else :>` / `_ :>` (§19.7.1)", env.file, e.span)]
+        return [newDiag("E-TYPE-080", "this `!{ … }` handler on " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " of `" + label + "` — add those arms, or a catch-all `| _ :> …` (§19.7)", env.file, e.span)]
+    }
+
+    // How a client call's failure set is named in a message: the minted enum's
+    // hint already reads `E + Transport` (`Transport` alone for a callee not
+    // declared `!`); the wrapper's payload is spelled out. A declared enum that
+    // IS the set (it declares the wrapper) is named as written.
+    fn setLabel(env: Env, f: FnInfo, rset: Sym) -> string {
+        const e: Sym | not = f.err
+        if (e is some) {
+            if (e.id == rset.id) return rset.hint
+        }
+        return rset.hint + "(t: ServerCallError)"
+    }
+
+    fn ownLabel(f: FnInfo) -> string {
+        const e: Sym | not = f.err
+        if (e is some) return e.hint
+        return f.name
+    }
+
+    // =========================================================================
+    // s454 (U1b) — A CALL OF A SERVER FUNCTION, JUDGED BY ITS SITE (§19.9.10).
+    // "The rule applies to a call when both hold: 1. The callee is server-
+    // placed … 2. The call is evaluated on the client". The callee half is
+    // known here: its OWN body places it on the server (FnInfo.serverOwn —
+    // §12.2 T1/T4; a callee placed only by Trigger 5 calls in place wherever
+    // it is called from, so it is never the callee of a client call — design
+    // §1.6). The caller half — the SITE:
+    //   SiteLocal    a function whose own body places it on the server: the
+    //                call is server→server ("Not affected"), judged as a local
+    //                call (its failure set is the callee's own);
+    //   SiteRemote   an event handler, an `<effect>` body: client by position;
+    //   SitePending  a function with no server trigger of its own: whether it
+    //                is client-placed is a WHOLE-PROGRAM fact (§19.9.10 "An
+    //                implementation SHALL decide 'remote' from the resolved
+    //                whole-program placement" — Trigger 5) — decided after the
+    //                effect summary (rulesPass, PendRule.RemoteOr);
+    //   SiteValue    a value position (an initializer, markup, an attribute
+    //                value): E-VALUE-SERVER-CALL (§13.7), "not reported a
+    //                second time as E-ERROR-002" — nothing here.
+    // =========================================================================
+    type SiteK:enum = { SiteLocal, SiteRemote, SitePending, SiteValue }
+
+    fn siteOf(env: Env) -> SiteK {
+        const h: HostCtx = env.host
+        if (h == HostCtx.HostNo) return SiteK.SiteValue
+        if (!env.fx.inFn) return SiteK.SiteRemote
+        if (env.fx.serverOwn) return SiteK.SiteLocal
+        return SiteK.SitePending
+    }
+
+    // The server-triggered function a call subject names, else not — by the
+    // binder's own name rule (a local of that name shadows it; resolveName),
+    // so it is known BEFORE the subject is resolved.
+    fn serverCalleeNamed(env: Env, e: AExpr) -> FnInfo | not {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return not
+        const n: string = exprName(c)
+        if (n == "") return not
+        if (lookupLocal(env, n) is some) return not
+        const f: FnInfo | not = fnNamed(env.g, n)
+        if (f is not) return not
+        if (!f.serverOwn) return not
+        return f
+    }
+
+    // Report diagnostics that hold only when the site is a CLIENT call
+    // (`remote`) or only when it is server→server (`local`), by the site.
+    fn bySite(env: Env, site: SiteK, remote: Diag[], local: Diag[], st: AS) -> AS {
+        if (site == SiteK.SiteRemote) return withDiags(st, remote)
+        if (site == SiteK.SiteLocal) return withDiags(st, local)
+        if (site == SiteK.SitePending) {
+            if (remote.length == 0 && local.length == 0) return st
+            return addPending(st, PendRule.RemoteOr(env.fx.fnSym, remote, local))
+        }
+        return st
+    }
+
+    fn withDiags(st: AS, ds: Diag[]) -> AS {
+        let out: AS = st
+        for (const d of ds) { out = withDiag(out, d) }
+        return out
+    }
+
+    // A server function called and NOT handled: on the client it "SHALL be
+    // E-ERROR-002" (§19.9.10 the rule) — in a deferred statement
+    // E-DEFER-UNHANDLED-FAILABLE (§19.16.3 rule 3 "REPLACES E-ERROR-002"); a
+    // server→server call of a function not declared `!` is valid ("An
+    // unhandled server→server call stays valid"). (A `!` callee's unhandled
+    // call is E-ERROR-002 everywhere — unhandledCall.)
+    fn remoteUnhandled(env: Env, e: AExpr, f: FnInfo, st: AS) -> AS {
+        const site: SiteK = siteOf(env)
+        return bySite(env, site, [unhandledRemoteDiag(env, e, f)].concat(conflictDiags(env, f, e)), [], st)
+    }
+
+    fn unhandledRemoteDiag(env: Env, e: AExpr, f: FnInfo) -> Diag {
+        if (env.fx.defer) return newDiag("E-DEFER-UNHANDLED-FAILABLE", "`" + f.name + "(…)` is a server function and this call is made on the client, so it can fail on the wire (§19.9.10) — and this is a deferred statement: handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3)", env.file, e.span)
+        if (env.fx.inFn) return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled: '" + f.name + "' is a server function and this call is made on the client, so it can fail on the wire (§19.9.10). Handle it: '" + f.name + "(…) !{ .Transport(t) :> … }', a 'match' on the result, or '?' inside a '!' function whose error enum declares 'Transport(t: ServerCallError)'", env.file, e.span)
+        return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled here: '" + f.name + "' is a server function and an event handler runs on the client, so the call can fail on the wire (§19.9.10). Catch it with '!{}' (e.g. '{ " + f.name + "(…) !{ .Transport(t) :> … } }'), match the result, or call it from a function that handles it (§19.4.3)", env.file, e.span)
+    }
+
+    // E-ERROR-016 at a client call site (transportConflict's rule), as a diagnostic list.
+    fn conflictDiags(env: Env, f: FnInfo, e: AExpr) -> Diag[] {
+        const st: AS = transportConflict(env.g, f, env.file, e.span, emptyAS())
+        return st.diags
+    }
+
+    fn emptyAS() -> AS {
+        return { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [] }
+    }
+
+    // `f(…)?` / `f(…) !{ … }` / `match f(…) { … }` where `f` is server-
+    // triggered and the site is (or may be) a client call. The failure set of
+    // a client call is `f`'s declared variants plus `Transport(t:
+    // ServerCallError)` (FnInfo.rerr — E's variants first, so an arm resolved
+    // against it reads the same in E); of a server→server call, `f`'s own.
+    fn remoteHandled(env: Env, e: AExpr, h: AHandled, subj: AExpr, f: FnInfo, site: SiteK, stmt: boolean, st0: AS) -> AS {
+        let st: AS = st0
+        const rset: Sym | not = f.rerr
+        const how: AHow = h.how
+        if (rset is not) {
+            // no client failure set: E's `Transport` collides (E-ERROR-016 on a client
+            // call), or E is not an enum (E-ERROR-011, reported). Judged as the local call.
+            st = bySite(env, site, conflictDiags(env, f, e), [], st)
+            return match how {
+                .Propagate :> propagate(env, e, subj, f.failable, f.err, stmt, st)
+                .Guard(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, false, stmt, st)
+                .MatchOn(arms: arms) :> guarded(env, e, subj, arms, f.failable, f.err, true, stmt, st)
             }
         }
-        return handledFact(env, e, err, stmt, not, [], st)
+        // Ue2 (a handled form nested in a larger expression): on a client call the
+        // suspension plan lowers it (ANF, design §2.2) or refuses it by position; a
+        // server→server call stays a local handled form, which this slice keeps whole.
+        if (!stmt && env.fx.whole != e.nid) st = bySite(env, site, [], [newDiag("E-BOOTSTRAP-UNSUPPORTED", "a handled failable (`?`, `!{ … }`, `match`) " + ue2Reason(), env.file, e.span)], st)
+        const nE: int = localCount(env, f)
+        return match how {
+            .Propagate :> remotePropagate(env, e, subj, f, rset, nE, site, stmt, st)
+            .Guard(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, false, site, stmt, st)
+            .MatchOn(arms: arms) :> remoteGuarded(env, e, subj, arms, f, rset, nE, true, site, stmt, st)
+        }
+    }
+
+    // How many leading variants of the client set are `f`'s own: all of them
+    // when `f`'s enum IS the set (it declares the wrapper), else its enum's
+    // count (0 for a callee not declared `!`).
+    fn localCount(env: Env, f: FnInfo) -> int {
+        const e: Sym | not = f.err
+        const r: Sym | not = f.rerr
+        if (e is not || r is not) return 0
+        if (e.id == r.id) return enumVariantsOf(env.g, r).length
+        return enumVariantsOf(env.g, e).length
+    }
+
+    fn remoteFact(env: Env, f: FnInfo, retagT: Retag[]) -> RemoteFact {
+        return { callee: f.sym, caller: env.fx.fnSym, local: f.err, retagT: retagT }
+    }
+
+    // `?` on the call — §19.9.10 "`?` on a client server call": "the enclosing
+    // function's enum SHALL declare `Transport(t: ServerCallError)` — plus `f`'s
+    // declared variants, as for any `?` — or the `?` is **E-ERROR-010**. For an
+    // `f` not declared `!` this is `?` on a failable call (the call is failable
+    // by this section), so E-ERROR-004 does not apply to it. The E-ERROR-010
+    // message SHALL name the line to add". Server→server, the set is `f`'s own:
+    // E-ERROR-004 for a callee not declared `!`.
+    fn remotePropagate(env: Env, e: AExpr, subj: AExpr, f: FnInfo, rset: Sym, nE: int, site: SiteK, stmt: boolean, st0: AS) -> AS {
+        if (!env.fx.failable) return addDiag(st0, env.file, e.span, "E-ERROR-003", e003Msg(env))
+        const into: Sym | not = env.fx.err
+        if (into is not) return st0                        // E-ERROR-011 reported
+        // the callee's own variants: owed by both sets
+        const own: RRetag = retagInto(env, rset, into, 0, nE, st0)
+        let st: AS = own.st
+        if (own.bad.length > 0) return addDiag(st, env.file, e.span, "E-ERROR-010", e010Msg(env, rset, into, own.bad))
+        // the wire's `Transport`: owed by a client call only
+        const tr: RRetag = retagInto(env, rset, into, nE, -1, st)
+        st = tr.st
+        let remote: Diag[] = []
+        if (tr.bad.length > 0) remote = [newDiag("E-ERROR-010", "`" + f.name + "` is a server function: a call to it from the client can also fail on the wire. Add `Transport(t: ServerCallError)` to `" + into.hint + "`, or handle the call with `!{ … .Transport(t) :> … }` (§19.9.10, §19.5.3)", env.file, e.span)]
+        let local: Diag[] = []
+        if (!f.failable) local = [newDiag("E-ERROR-004", e004Msg(subj) + " — `" + f.name + "` is a server function called server→server here, so the call cannot fail on the wire (§19.9.10)", env.file, e.span)]
+        st = bySite(env, site, remote.concat(conflictDiags(env, f, e)), local, st)
+        return handledFact(env, e, rset, stmt, into, own.retag, remoteFact(env, f, tr.retag), st)
+    }
+
+    // `!{}` / `match` on the call: the arms resolve against the CLIENT set (the
+    // maximal one — design F5 a); its totality is owed on a client call, the
+    // callee's own on a server→server call — where a `.Transport` arm handles
+    // nothing (§19.9.10: "When the callee is not declared `!`, the whole handler
+    // is attached to a call that cannot fail and is **E-ERROR-013**. When the
+    // callee is declared `!`, only the `.Transport` arm is dead; it SHALL be
+    // reported as dead handling in the manner of E-ERROR-013 (the message names
+    // the callee and says the call is server→server)").
+    fn remoteGuarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], f: FnInfo, rset: Sym, nE: int, isMatch: boolean, site: SiteK, stmt: boolean, st0: AS) -> AS {
+        let st: AS = st0
+        if (isMatch && variantIndex(env.g.types, rset, "Ok") >= 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", okVariantMsg(rset))
+        const ra: RArms = resolveArms(env, subj, arms, rset, isMatch, stmt, st)
+        st = ra.st
+        const remote: Diag[] = coverDiags(env, e, subj, rset, isMatch, ra, -1, setLabel(env, f, rset)).concat(conflictDiags(env, f, e))
+        let local: Diag[] = []
+        if (!f.failable) {
+            local = [newDiag("E-ERROR-013", "'!{}' handler on '" + f.name + "(…)', which cannot fail here: '" + f.name + "' is a server function, but this call is made on the SERVER (server→server, §19.9.10 \"Not affected\") — the callee runs in place, nothing crosses the wire, and '" + f.name + "' is not declared '!', so none of the handler's arms can run. Remove the handler", env.file, e.span)]
+        } else {
+            local = coverDiags(env, e, subj, rset, isMatch, ra, nE, ownLabel(f))
+            if (nE < enumVariantsOf(env.g, rset).length && ra.covered.indexOf(nE) >= 0) {
+                local = local.concat([newDiag("E-ERROR-013", "the `.Transport` arm handles nothing: `" + f.name + "` is called server→server here (§19.9.10 \"Not affected\": the callee runs in place, nothing crosses the wire), so the call fails only with `" + f.name + "`'s declared variants. Remove the `.Transport` arm", env.file, e.span)])
+            }
+        }
+        st = bySite(env, site, remote, local, st)
+        return handledFact(env, e, rset, stmt, not, [], remoteFact(env, f, []), st)
     }
 
     // s452 — §19.4.3 ruling 3: "A `!{}` handler SHALL be attached only to an
@@ -6208,11 +6518,12 @@ ${
         const nf: NameFact | not = nameFactIn(st, c.nid)
         const f: FnInfo | not = calledFn(env, nf)
         if (f is some) {
-            // whether its own body places it on the server is the effect
-            // summary's `server` fact — decided by rulesPass (dpa-066 M3)
-            return addPending(st, PendRule.ServerOrDead(f.sym.id,
-                newDiag("E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here", env.file, e.span),
-                newDiag("E-ERROR-013", deadHandlerMsg(f.name), env.file, e.span)))
+            // s454 (U1b): a server-triggered callee reaches here only from a
+            // server→server site (a client site is remoteHandled's) — §19.9.10:
+            // "When the callee is not declared `!`, the whole handler is attached
+            // to a call that cannot fail and is **E-ERROR-013**"
+            if (f.serverOwn) return addDiag(st, env.file, e.span, "E-ERROR-013", "'!{}' handler on '" + f.name + "(…)', which cannot fail here: '" + f.name + "' is a server function, but this call is made on the SERVER (server→server, §19.9.10 \"Not affected\") — the callee runs in place, nothing crosses the wire, and '" + f.name + "' is not declared '!', so none of the handler's arms can run. Remove the handler")
+            return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(f.name))
         }
         const n: string = exprName(c)
         if (n != "" && nf is not) return st               // the name did not resolve: reported where it stands
@@ -8135,7 +8446,8 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "" }
+            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
+                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
@@ -13008,7 +13320,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -14001,15 +14313,15 @@ ${
             } else if (pk == PlaceK.Server) {
                 servers = servers.concat([f.sym])
                 st = serverBodyDiags(cx, f, all, places, sum, st)
-            } else {
-                // client / ambient code calling a server function: a suspension (U1b)
-                for (const r of fnRefs(all, f)) {
-                    if (placeOf(places, r.sym) == PlaceK.Server) {
-                        st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText("`" + f.name + "()`", r))
-                        st = refConflict(g, r, st)
-                    }
-                }
+            } else if (sum.inherited.indexOf(f.sym) >= 0) {
+                // s454 (U1b): server-placed by inheritance (§12.2 T5) — its calls
+                // run in place on the server: a waiting client function there is
+                // an ambient function emitted per side (U1c)
+                st = waitingCallees(f, all, places, sum, st)
             }
+            // (s454: a client function's call of a server function is judged by the
+            // binder — §19.9.10, remoteHandled / remoteUnhandled — and lowered by
+            // the suspension plan; the U1a refusal is gone)
             // the queries in its body: database, facts, the failable rule
             for (const s of f.sqls) {
                 if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
@@ -14031,7 +14343,7 @@ ${
         // value positions (§13.7) and action positions
         st = valueServerDiags(g, t, all, places, sum, rd, st)
         st = actionServerDiags(g, t, all, places, rd, st)
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan() }, doms: doms, st: st }
     }
 
     fn serverTrigger(f: FnFacts) -> string {
@@ -14053,16 +14365,20 @@ ${
         return addDiag(st, file, span, "E-ERROR-016", "`" + f.name + "` is a server function and this call is made on the client, so it can also fail on the wire — the call's failure set is `" + e.hint + "`'s variants plus `Transport(t: ServerCallError)` (§19.9.10). But `" + e.hint + "` already declares a variant named `Transport` with a different payload, and the call's `Transport` cannot be both. Declare it as exactly `Transport(t: ServerCallError)` (then it IS the wrapper), or rename it")
     }
 
-    fn refConflict(g: Globals, r: FnRef, st: AS) -> AS {
-        if (r.asValue) return st
-        const fs: FnSrc | not = fnSrcOf(g, r.sym)
-        if (fs is not) return st
-        return transportConflict(g, fs.info, r.file, r.span, st)
-    }
-
-    fn u1bText(caller: string, r: FnRef) -> string {
-        if (r.asValue) return caller + " hands the server function `" + r.name + "` on as a value — a client-side reference to a server function is a server round trip (§12.3), and the client→server call arrives with unit U1b"
-        return caller + " calls the server function `" + r.name + "` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b"
+    // s454 (U1b) — a function that runs on the server (wholly, or by
+    // inheritance) calling a client function that WAITS (it makes a client
+    // call of a server function): on the server that callee would have to run
+    // its server calls in place, which is the per-side emission of an ambient
+    // function (unit U1c). Refused, fail closed.
+    fn waitingCallees(f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
+        let st: AS = st0
+        for (const r of fnRefs(all, f)) {
+            if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
+                const w: Reach | not = waitsOf(sum, r.sym)
+                if (w is some) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + [r.name + "()"].concat(w.chain).join(" → ") + "`) — on the server that call would be made in place, which needs `" + r.name + "` emitted for each side (the bootstrap's unit U1c). Until then call the server function directly")
+            }
+        }
+        return st
     }
 
     // A wholly-server function's own body and call graph (§6.6.9, §12.4, §12.5.3).
@@ -14093,6 +14409,7 @@ ${
         for (const u2 of f.scan.unproven) {
             st = addDiag(st, u2.file, u2.span, "E-ROUTE-001", "server function `" + f.name + "()` cannot be fully analyzed for route placement: " + u2.what + " (§12.4: \"SHALL be a compile error\"). Call a declared scrml function by its name")
         }
+        st = waitingCallees(f, all, ps, sum, st)
         return wireDiags(cx, f, st)
     }
 
@@ -14266,13 +14583,6 @@ ${
                 st = positionDb(g, rd, a.file, s, st)
                 st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
             }
-            const scan: BodyScan = scanValue({ t: t, file: a.file }, a.v, emptyScan())
-            for (const r of scan.refs) {
-                if (placeOf(ps, r.sym) == PlaceK.Server) {
-                    st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText(a.what, r))
-                    st = refConflict(g, r, st)
-                }
-            }
         }
         return st
     }
@@ -14328,6 +14638,10 @@ ${
         waits: FxAtom[][],
         clock: FxAtom[][],
         noValue: FxAtom[][],
+        // s454 (U1b): the functions server-placed by INHERITANCE (§12.2 Trigger 5),
+        // and why each still client-placed helper a server function calls is so
+        inherited: int[],
+        causes: Cause[],
     }
 
     fn summarize(g: Globals, t: Tables) -> Summary {
@@ -14399,6 +14713,11 @@ ${
             if (pk == PlaceK.Ambient && client[nodeIdx(nodes, p.sym)].length > 0) pk = PlaceK.Client
             places = places.concat([{ sym: p.sym, name: p.name, place: pk }])
         }
+        // s454 (U1b) — §12.2 Trigger 5 (inheritance) and the client cause (below)
+        const prefs: PosRef[] = positionRefs(g, t)
+        const rev: int[][] = referrers(nodes, all)
+        const inherited: int[] = inheritedFns(nodes, places, rev, prefs)
+        const causes: Cause[] = clientCauses(g, nodes, places, rev, prefs, inherited)
         // routeOpen / waits / clock / noValue — functions only
         let ownR: FxAtom[][] = []
         let edgeR: int[][] = []
@@ -14417,7 +14736,13 @@ ${
                 let a: FxAtom[] = []
                 if (pk == PlaceK.Server || pk == PlaceK.Split) a = [ownAtom("s", i, 0)]
                 ownA = ownA.concat([a])
-                edgeF = edgeF.concat([fnE[i]])
+                // s454 (U1b): a function server-placed by inheritance calls in place
+                // (§13.4) — its calls make nothing wait (they are not client calls)
+                if (inherited.indexOf(c.f.sym) >= 0) {
+                    edgeF = edgeF.concat([[]])
+                } else {
+                    edgeF = edgeF.concat([fnE[i]])
+                }
                 let k: FxAtom[] = []
                 if (c.clock) k = [ownAtom("c", i, 0)]
                 ownK = ownK.concat([k])
@@ -14440,7 +14765,187 @@ ${
         }
         return { nodes: nodes, writes: closeDim(ownW, all), writesOpen: closeDim(ownU, all), places: places,
                  client: client, routeOpen: closeDim(ownR, edgeR), waits: closeDim(ownA, edgeF),
-                 clock: closeDim(ownK, edgeK), noValue: closeDim(ownV, edgeV) }
+                 clock: closeDim(ownK, edgeK), noValue: closeDim(ownV, edgeV), inherited: inherited, causes: causes }
+    }
+
+    // =========================================================================
+    // s454 (U1b) — §12.2 TRIGGER 5 (INHERITANCE), over the summary's reference
+    // graph. §19.9.10 "Which call sites are remote — placement is whole-
+    // program": "a helper with no server trigger of its own is server-placed by
+    // inheritance (Trigger 5) when every caller is server-placed, and a call
+    // inside it is then server→server and not failable on the wire … An
+    // implementation SHALL decide 'remote' from the resolved whole-program
+    // placement — not from the caller's own body alone."
+    //
+    // A function is INHERITED when its own body is ambient (no server trigger,
+    // no client-only access — PlaceK.Ambient after client reach), it has at
+    // least one referrer other than itself, and EVERY referrer is a function
+    // that is server-placed or itself inherited — a greatest fixpoint (a cycle
+    // of helpers called only from the server is server-placed). Disqualified
+    // by any CLIENT referrer: an event handler, an `<effect>` body, a value
+    // position (markup, an initializer, an attribute value — positionRefs), a
+    // construction or a formula (evaluated on the client), or a function that
+    // is not server-placed. A function nobody references is client (§12.1 "The
+    // default is client-side execution").
+    // =========================================================================
+    // A client position's reference to a function: what the position is, where.
+    type PosRef:struct = { sym: int, what: string, file: string, span: ASpan }
+    // Why a function is client-placed although a server function calls it.
+    type Cause:struct = { sym: int, note: string }
+
+    fn positionRefs(g: Globals, t: Tables) -> PosRef[] {
+        let out: PosRef[] = []
+        for (const a of actionPositions(g)) {
+            for (const r of scanValue({ t: t, file: a.file }, a.v, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: a.what, file: r.file, span: r.span }]) }
+        }
+        for (const p of valuePositions(g, t)) {
+            for (const r of scanValue({ t: t, file: p.file }, p.v, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: p.what, file: r.file, span: r.span }]) }
+        }
+        return out
+    }
+
+    // rev[j]: the callables whose references name callable j, in node order.
+    fn referrers(nodes: Callable[], all: int[][]) -> int[][] {
+        let rev: int[][] = []
+        let j: int = 0
+        for (const c of nodes) {
+            let rs: int[] = []
+            let i: int = 0
+            for (const es of all) {
+                if (es.indexOf(j) >= 0) rs = rs.concat([i])
+                i = i + 1
+            }
+            rev = rev.concat([rs])
+            j = j + 1
+        }
+        return rev
+    }
+
+    fn posRefTo(prefs: PosRef[], sym: int) -> PosRef | not {
+        for (const r of prefs) {
+            if (r.sym == sym) return r
+        }
+        return not
+    }
+
+    fn inheritedFns(nodes: Callable[], places: PlaceFact[], rev: int[][], prefs: PosRef[]) -> int[] {
+        let inh: int[] = []
+        let j: int = 0
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn && placeOf(places, c.f.sym) == PlaceK.Ambient && posRefTo(prefs, c.f.sym) is not) {
+                let others = false
+                let fnsOnly = true
+                for (const i of rev[j]) {
+                    if (i != j) others = true
+                    if (nodes[i].kind != CallableK.KFn) fnsOnly = false
+                }
+                if (others && fnsOnly) inh = inh.concat([c.f.sym])
+            }
+            j = j + 1
+        }
+        let changed = true
+        while (changed) {
+            changed = false
+            let keep: int[] = []
+            for (const sym of inh) {
+                const k: int = nodeIdx(nodes, sym)
+                let ok = true
+                for (const i of rev[k]) {
+                    const isym: int = nodes[i].f.sym
+                    if (i != k && placeOf(places, isym) != PlaceK.Server && inh.indexOf(isym) < 0) ok = false
+                }
+                if (ok) {
+                    keep = keep.concat([sym])
+                } else {
+                    changed = true
+                }
+            }
+            inh = keep
+        }
+        return inh
+    }
+
+    // §19.9.10: "When a helper's placement flips because a client caller was
+    // added — the helper was server-placed by inheritance, and a new client
+    // call to it makes it client-placed, so its own server calls become client
+    // calls — any diagnostic this rule then raises inside the helper … SHALL
+    // name that client caller (file and line) as the cause". A helper whose own
+    // body is ambient, that a server-placed (or inherited) function calls, and
+    // that is still client-placed: the FIRST client referrer is the cause.
+    fn clientCauses(g: Globals, nodes: Callable[], places: PlaceFact[], rev: int[][], prefs: PosRef[], inh: int[]) -> Cause[] {
+        let out: Cause[] = []
+        let j: int = 0
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn && placeOf(places, c.f.sym) == PlaceK.Ambient && inh.indexOf(c.f.sym) < 0) {
+                let serverSide = false
+                let who: string = ""
+                let at: string = ""
+                for (const i of rev[j]) {
+                    const n: Callable = nodes[i]
+                    const isym: int = n.f.sym
+                    const onServer: boolean = n.kind == CallableK.KFn && (placeOf(places, isym) == PlaceK.Server || inh.indexOf(isym) >= 0)
+                    if (i != j && onServer) serverSide = true
+                    if (i != j && !onServer && who == "") {
+                        who = "`" + n.label + "`"
+                        at = refSiteIn(g, n.f.scan.refs, c.f.sym)
+                    }
+                }
+                const pr: PosRef | not = posRefTo(prefs, c.f.sym)
+                if (pr is some && who == "") {
+                    who = pr.what
+                    at = pr.file + ":" + lineOf(g, pr.file, pr.span.start)
+                }
+                if (serverSide && who != "") {
+                    out = out.concat([{ sym: c.f.sym, note: " — `" + c.f.name + "()` is client-placed because " + who + " calls it (" + at + "); called only from server functions it would be server-placed (§12.2 Trigger 5) and this call would be made in place on the server (§19.9.10 \"placement is whole-program\")" }])
+                }
+            }
+            j = j + 1
+        }
+        return out
+    }
+
+    // "file:line" of the first reference in `refs` to function `sym`.
+    fn refSiteIn(g: Globals, refs: FnRef[], sym: int) -> string {
+        for (const r of refs) {
+            if (r.sym == sym) return r.file + ":" + lineOf(g, r.file, r.span.start)
+        }
+        return ""
+    }
+
+    // The 1-based line of `offset` in `file` (parse.scrml records each file's line starts).
+    fn lineOf(g: Globals, file: string, offset: int) -> int {
+        for (const f of g.files) {
+            if (f.path == file) {
+                let n: int = 0
+                for (const st of f.lines) {
+                    if (st <= offset) n = n + 1
+                }
+                return n
+            }
+        }
+        return 0
+    }
+
+    // ---- the rules pass's client-call queries --------------------------------------
+    // Is a call made in function `caller` a CLIENT call? (-1: an event handler or
+    // an effect body — client by position.) Server-placed by its own body, or by
+    // inheritance: no.
+    fn callerRemote(s: Summary, caller: int) -> boolean {
+        if (caller < 0) return true
+        if (placeOf(s.places, caller) == PlaceK.Server) return false
+        return s.inherited.indexOf(caller) < 0
+    }
+
+    fn remoteOr(s: Summary, caller: int, r: Diag[], l: Diag[]) -> Diag[] {
+        if (!callerRemote(s, caller)) return l
+        let note: string = ""
+        for (const c of s.causes) {
+            if (c.sym == caller) note = c.note
+        }
+        if (note == "") return r
+        let out: Diag[] = []
+        for (const d of r) { out = out.concat([newDiag(d.code, d.message + note, d.file, d.span)]) }
+        return out
     }
 
     // The own facts of a construction / a formula: its scan only.
@@ -14677,16 +15182,19 @@ ${
     //   IfNoValue    §19.4.3 ruling 1a — E-ERROR-012 when the arm's callee
     //                yields no value (noValue: transitive through `return <call>`,
     //                which closes G7; fail closed: an unknown callee yields none)
-    //   ServerOrDead §19.4.3 ruling 3 / §19.9.10 — a handler on a function
-    //                whose own body is server-triggered (the summary's `server`
-    //                fact) is the U1b refusal; otherwise E-ERROR-013
+    //   RemoteOr     s454 (U1b) §19.9.10 — a call of a server function in a
+    //                function with no server trigger of its own: `remote` when
+    //                that function is client-placed in the WHOLE program (not
+    //                inherited onto the server, §12.2 Trigger 5), else `local`;
+    //                a remote diagnostic names the client caller that made it so
+    //                (clientCause — "SHALL name that client caller (file and line)")
     //   IfClock      a call of a clock reader where the clock is not in the
     //                bootstrap (the summary's `clock`, through calls)
     //   PureCall     E-FN-003, its message naming the clock when the callee reads it
     // =========================================================================
     type PendRule:enum = {
         IfNoValue(fnSym: int, diag: Diag),
-        ServerOrDead(fnSym: int, onServer: Diag, notFailable: Diag),
+        RemoteOr(caller: int, remote: Diag[], local: Diag[]),
         IfClock(fnSym: int, diag: Diag),
         PureCall(fnSym: int, bare: Diag, clocked: Diag),
     }
@@ -14711,7 +15219,7 @@ ${
     fn decide(s: Summary, r: PendRule) -> Diag[] {
         return match r {
             .IfNoValue(fnSym: f, diag: d) :> onlyIf(yieldsNoValue(s, f), d)
-            .ServerOrDead(fnSym: f, onServer: a, notFailable: b) :> either(serverTriggeredFn(s, f), a, b)
+            .RemoteOr(caller: c, remote: r, local: l) :> remoteOr(s, c, r, l)
             .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d)
             .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a)
         }
@@ -14748,6 +15256,678 @@ ${
         const i: int = nodeIdx(s.nodes, sym)
         if (i < 0) return false
         return s.clock[i].length > 0
+    }
+
+    // =========================================================================
+    // s454 (U1b) — THE SUSPENSION PLAN (design §2.2 "Where a ServerCall can
+    // stand — ANF with refusal positions"). Per SITE, after the summary (it
+    // reads the whole-program placement and the async colour — no transitive
+    // question is answered here; those are the summary's). For every CLIENT
+    // body — a client-placed function, an event handler, an `<effect>` body —
+    // it finds the SUSPENSION POINTS:
+    //   - a handling form (`!{}` / `match` / `?`) on a call of a server
+    //     function made on the client (HandledFact.remote, caller remote);
+    //   - a call of a WAITING client function (§13.2 async colour: the
+    //     summary's `waits`) — a handled one, a plain one, or a handler
+    //     reference that names one;
+    // and decides each by POSITION, lowering the ones with a statement boundary
+    // to suspend at and refusing (fail closed, naming the lifting slice) the
+    // ones without:
+    //   lowered   a statement's whole value; a call argument, an operand, an
+    //             array element, an object value, a member / index operand, an
+    //             `if` condition, a `return` / `let` value — ANF: everything
+    //             evaluated BEFORE the point (left to right) is evaluated into a
+    //             temporary first (TempFact), so order is kept; a point inside an
+    //             `if` / `given` branch with statements after it — a Join
+    //             (JoinFact) the branches jump to.
+    //   refused   the right operand of `&&` / `||`, a ternary branch (it runs on
+    //             one path only); a `!{}` / `match` arm; a `defer` body (and any
+    //             `defer` in a function that waits — its body would run at the
+    //             synchronous exit, §19.16.2); a lambda body (an awaited
+    //             combinator, §13.2); the value of an indexed write.
+    // The binder minted the Suspend's bind for a handling form
+    // (HandledFact.outcome); a plain call's bind, the temporaries and the join
+    // continuations are minted here. `waiting`: the client functions whose
+    // body holds a suspension point — Core's Fn.waits (check.scrml C-S8).
+    // =========================================================================
+    export type SuspendK:enum = { SRemote(callee: Sym), SWaits(callee: Sym) }
+    export type SuspendAt:struct = { nid: int, bind: Sym, kind: SuspendK }
+    export type TempFact:struct = { nid: int, sym: Sym }
+    export type JoinFact:struct = { nid: int, k: Sym }
+    // `rets`: the WIRE type of a server function's answer that declares none — a
+    // `!` function cannot (§19.4.1: "its success type is inferred from its
+    // returns", §19.4.2), so the client decodes against the type its `return`s
+    // prove (routedChecks).
+    export type RetFact:struct = { sym: int, ty: Type }
+    export type SuspendPlan:struct = { at: SuspendAt[], temps: TempFact[], joins: JoinFact[], waiting: int[], rets: RetFact[] }
+
+    export fn noPlan() -> SuspendPlan { return { at: [], temps: [], joins: [], waiting: [], rets: [] } }
+
+    export fn retOf(p: SuspendPlan, sym: int) -> Type | not {
+        for (const r of p.rets) {
+            if (r.sym == sym) return r.ty
+        }
+        return not
+    }
+
+    export fn suspendAtOf(p: SuspendPlan, nid: int) -> SuspendAt | not {
+        for (const a of p.at) {
+            if (a.nid == nid) return a
+        }
+        return not
+    }
+
+    export fn tempOf(p: SuspendPlan, nid: int) -> Sym | not {
+        for (const x of p.temps) {
+            if (x.nid == nid) return x.sym
+        }
+        return not
+    }
+
+    export fn joinOf(p: SuspendPlan, nid: int) -> Sym | not {
+        for (const j of p.joins) {
+            if (j.nid == nid) return j.k
+        }
+        return not
+    }
+
+    // The planner's running state.
+    type PS:struct = { st: AS, plan: SuspendPlan }
+    // A client body being planned: its file, and what it is (for messages).
+    type PCx:struct = { g: Globals, t: Tables, s: Summary, file: string, inFn: boolean }
+    // `found`: the expression holds a suspension point (lowered or refused).
+    type PX:struct = { found: boolean, ps: PS }
+    // Why a position cannot suspend ("" — it can).
+    type Pos:struct = { refused: string }
+
+    fn okPos() -> Pos { return { refused: "" } }
+
+    fn planPass(g: Globals, t: Tables, s: Summary, st0: AS) -> PS {
+        let ps: PS = { st: st0, plan: noPlan() }
+        for (const fs of g.fns) {
+            const sym: int = fs.info.sym.id
+            const pk: PlaceK = placeOf(s.places, sym)
+            if ((pk == PlaceK.Client || pk == PlaceK.Ambient) && s.inherited.indexOf(sym) < 0) {
+                const cx: PCx = { g: g, t: t, s: s, file: fs.info.file, inFn: true }
+                const before: int = ps.plan.at.length
+                ps = planBlock(cx, fs.f.body, ps)
+                if (ps.plan.at.length > before) {
+                    ps = withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins, waiting: ps.plan.waiting.concat([sym]), rets: ps.plan.rets })
+                    // a `defer` in a function that waits (§19.16.2 exit timing)
+                    for (const d of defersIn(fs.f.body)) {
+                        ps = pdiag(ps, cx, d, "a `defer` in a function that waits for the server (`" + fs.info.name + "()` suspends on a server call) — its body would run when the function's synchronous part ends, BEFORE the server answers, not at the function's exit (§19.16.2). It arrives with the §19.16.6 async-`defer` slice; until then move the cleanup after the call's handling")
+                    }
+                }
+            }
+        }
+        for (const a of actionPositions(g)) {
+            const cx2: PCx = { g: g, t: t, s: s, file: a.file, inFn: false }
+            ps = planValue(cx2, a.v, ps)
+        }
+        return ps
+    }
+
+    fn withPlan(ps: PS, p: SuspendPlan) -> PS { return { st: ps.st, plan: p } }
+
+    fn pdiag(ps: PS, cx: PCx, span: ASpan, msg: string) -> PS {
+        return { st: addDiag(ps.st, cx.file, span, "E-BOOTSTRAP-UNSUPPORTED", msg), plan: ps.plan }
+    }
+
+    fn pmint(ps: PS, hint: string) -> RPSym {
+        const r: RSym = mint(ps.st, hint)
+        return { s: r.s, ps: { st: r.st, plan: ps.plan } }
+    }
+    type RPSym:struct = { s: Sym, ps: PS }
+
+    // An event-handler value (a reference, an expression, a block) or an effect body.
+    fn planValue(cx: PCx, v: AAttrValue, ps: PS) -> PS {
+        return match v {
+            .Bare(e: e) :> planHandlerExpr(cx, e, ps)
+            .Paren(e: e) :> planHandlerExpr(cx, e, ps)
+            .Braced(b: b) :> planBraced(cx, b, ps)
+            .Quoted(v: x) :> ps
+            .NoValue :> ps
+        }
+    }
+
+    fn planBraced(cx: PCx, b: ABlock, ps: PS) -> PS {
+        const r: AExpr | not = blockReference(b)
+        if (r is some) return planReference(cx, r, ps)
+        return planBlock(cx, b, ps)
+    }
+
+    fn planHandlerExpr(cx: PCx, e: AExpr, ps: PS) -> PS {
+        if (exprName(e) != "") return planReference(cx, e, ps)
+        return planExpr(cx, e, okPos(), ps).ps
+    }
+
+    // `onclick=save` / `onclick={ save }` — the event CALLS the function: a
+    // suspension point when it waits.
+    fn planReference(cx: PCx, e: AExpr, ps: PS) -> PS {
+        const f: Sym | not = fnSymOf(nameFact(cx.t.names, e.nid))
+        if (f is not) return ps
+        if (!waitingClientFn(cx, f.id)) return ps
+        const rb: RPSym = pmint(ps, "settled")
+        return addAt(rb.ps, { nid: e.nid, bind: rb.s, kind: SuspendK.SWaits(f) })
+    }
+
+    fn addAt(ps: PS, a: SuspendAt) -> PS {
+        return withPlan(ps, { at: ps.plan.at.concat([a]), temps: ps.plan.temps, joins: ps.plan.joins, waiting: ps.plan.waiting, rets: ps.plan.rets })
+    }
+
+    // Is function `sym` a client function that waits (§13.2 async colour)?
+    fn waitingClientFn(cx: PCx, sym: int) -> boolean {
+        const pk: PlaceK = placeOf(cx.s.places, sym)
+        if (pk == PlaceK.Server || pk == PlaceK.Split) return false
+        if (cx.s.inherited.indexOf(sym) >= 0) return false
+        return waitsOf(cx.s, sym) is some
+    }
+
+    fn planBlock(cx: PCx, b: ABlock, ps0: PS) -> PS {
+        let ps: PS = ps0
+        let i: int = 0
+        for (const s of b.stmts) {
+            const rest: boolean = i < b.stmts.length - 1
+            ps = planStmt(cx, s, rest, ps)
+            i = i + 1
+        }
+        return ps
+    }
+
+    fn planStmt(cx: PCx, s: AStmt, rest: boolean, ps: PS) -> PS {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> planStmtExpr(cx, e, ps)
+            .Local(name: n, init: i) :> planExpr(cx, i, okPos(), ps).ps
+            .Return(e: e) :> planMaybe(cx, e, ps)
+            .If(cond: c, thenB: tb, elseB: eb) :> planBranches(cx, s, [tb].concat(maybeBlockList(eb)), rest, planExpr(cx, c, okPos(), ps).ps)
+            .Given(name: n, subject: x, body: b) :> planBranches(cx, s, [b], rest, planExpr(cx, x, okPos(), ps).ps)
+            .EffectStmt(w: w) :> ps
+            .Defer(body: b) :> planDeferBody(cx, b, ps)
+            .Fail(f: f) :> planExprs(cx, failExprs(f), ps)
+        }
+    }
+
+    fn maybeBlockList(b: ABlock | not) -> ABlock[] {
+        if (b is not) return []
+        return [b]
+    }
+
+    fn planMaybe(cx: PCx, e: AExpr | not, ps: PS) -> PS {
+        if (e is not) return ps
+        return planExpr(cx, e, okPos(), ps).ps
+    }
+
+    fn planExprs(cx: PCx, es: AExpr[], ps0: PS) -> PS {
+        let ps: PS = ps0
+        for (const e of es) { ps = planExpr(cx, e, okPos(), ps).ps }
+        return ps
+    }
+
+    // An expression statement: an assignment's TARGET is written after its
+    // value; an indexed target's index is evaluated in the write (refused).
+    fn planStmtExpr(cx: PCx, e: AExpr, ps: PS) -> PS {
+        const k: AExprK = e.k
+        const t: AExpr | not = assignTargetOf(k)
+        const v: AExpr | not = assignedValue(e)
+        if (t is some && v is some) {
+            let pos: Pos = okPos()
+            if (isIndexTarget(t)) pos = { refused: "the value of an indexed write (`@xs[i] = …`) — its index is evaluated in the write, after the value; it arrives with the U1b ANF follow-up. Evaluate the call into a `const` first" }
+            return planExpr(cx, v, pos, ps).ps
+        }
+        return planExpr(cx, e, okPos(), ps).ps
+    }
+
+    fn assignTargetOf(k: AExprK) -> AExpr | not {
+        return match k {
+            .Assign(target: t) :> t
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+        }
+    }
+
+    fn isIndexTarget(t: AExpr) -> boolean {
+        const k: AExprK = t.k
+        return match k {
+            .Index(obj: o) :> true
+            .Member(obj: o) :> isIndexTarget(o)
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    // An `if` / `given`: plan each branch; when one suspends and statements
+    // follow, the statement gets a join continuation.
+    fn planBranches(cx: PCx, s: AStmt, bs: ABlock[], rest: boolean, ps0: PS) -> PS {
+        let ps: PS = ps0
+        const before: int = ps.plan.at.length
+        for (const b of bs) { ps = planBlock(cx, b, ps) }
+        if (ps.plan.at.length > before && rest) {
+            const rk: RPSym = pmint(ps, "join")
+            ps = rk.ps
+            ps = withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins.concat([{ nid: s.nid, k: rk.s }]), waiting: ps.plan.waiting, rets: ps.plan.rets })
+        }
+        return ps
+    }
+
+    // A deferred body: no suspension point may stand in it (check.scrml C16).
+    fn planDeferBody(cx: PCx, b: ABlock, ps0: PS) -> PS {
+        let ps: PS = ps0
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { ps = planExpr(cx, e, { refused: "a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)" }, ps).ps }
+        }
+        return ps
+    }
+
+    // The expressions a statement evaluates directly (not its nested blocks').
+    fn stmtExprs(s: AStmt) -> AExpr[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> [e]
+            .Local(name: n, init: i) :> [i]
+            .Return(e: e) :> maybeExprList(e)
+            .If(cond: c) :> [c]
+            .Given(name: n, subject: x) :> [x]
+            .EffectStmt(w: w) :> []
+            .Defer(body: b) :> []
+            .Fail(f: f) :> failExprs(f)
+        }
+    }
+
+    fn maybeExprList(e: AExpr | not) -> AExpr[] {
+        if (e is not) return []
+        return [e]
+    }
+
+    // The `defer` statements of a function body, at any depth (their spans).
+    fn defersIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const sub: ASpan[] = match k {
+                .Defer(body: d) :> [s.span]
+                .If(cond: c, thenB: tb, elseB: eb) :> defersIn(tb).concat(defersInMaybe(eb))
+                .Given(name: n, body: gb) :> defersIn(gb)
+                .Eval(e: x) :> []
+                .Local(name: n) :> []
+                .Return(e: x) :> []
+                .EffectStmt(w: w) :> []
+                .Fail(f: x) :> []
+            }
+            out = out.concat(sub)
+        }
+        return out
+    }
+
+    fn defersInMaybe(b: ABlock | not) -> ASpan[] {
+        if (b is not) return []
+        return defersIn(b)
+    }
+
+    // ---- an expression -------------------------------------------------------------
+    // Walk `e` in evaluation order. A child that holds a suspension point makes
+    // every EARLIER sibling a temporary (unless it is a literal), so it is
+    // evaluated before the suspension (left-to-right order kept).
+    fn planExpr(cx: PCx, e: AExpr, pos: Pos, ps0: PS) -> PX {
+        let ps: PS = ps0
+        const sp: SuspendK | not = suspendKindAt(cx, e)
+        if (sp is some) {
+            // the point's own arguments are evaluated before it suspends
+            ps = planKids(cx, suspendArgs(e), pos, ps).ps
+            if (pos.refused != "") return { found: true, ps: pdiag(ps, cx, e.span, suspendWhat(sp) + " in " + pos.refused) }
+            ps = routedChecks(cx, e, sp, ps)
+            // a suspending handling form's arms run in its continuation: none may suspend (first cut)
+            const hh: AHandled | not = handledOf(e.k)
+            if (hh is some) ps = planArms(cx, hh, ps)
+            const bind: Sym | not = handledOutcome(cx, e)
+            if (bind is some) return { found: true, ps: addAt(ps, { nid: e.nid, bind: bind, kind: sp }) }
+            const rb: RPSym = pmint(ps, "settled")
+            return { found: true, ps: addAt(rb.ps, { nid: e.nid, bind: rb.s, kind: sp }) }
+        }
+        const k: AExprK = e.k
+        return match k {
+            .Binary(op: o, l: l, r: r) :> planBinary(cx, o, l, r, pos, ps)
+            .Ternary(test: t, yes: y, no: n) :> planTernary(cx, t, y, n, pos, ps)
+            .Lambda(params: lp, body: b) :> planExpr(cx, b, { refused: "a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice. Call it in a statement" }, ps)
+            .Handled(h: h) :> planHandledArms(cx, h, pos, ps)
+            .Member(obj: o) :> planKids(cx, [o], pos, ps)
+            .Call(callee: c, args: a) :> planKids(cx, a, pos, ps)
+            .Unary(op: o, e: x) :> planKids(cx, [x], pos, ps)
+            .Assign(target: t, value: v) :> planKids(cx, [v], pos, ps)
+            .ArrayLit(elems: es) :> planKids(cx, es, pos, ps)
+            .ObjectLit(props: pr) :> planKids(cx, propValueList(pr), pos, ps)
+            .Spread(e: x) :> planKids(cx, [x], pos, ps)
+            .Index(obj: o, idx: i) :> planKids(cx, [o, i], pos, ps)
+            .Sql(q: q) :> planKids(cx, q.params, pos, ps)
+            .Name(name: n) :> { found: false, ps: ps }
+            .At(name: n) :> { found: false, ps: ps }
+            .AtItem :> { found: false, ps: ps }
+            .Num(raw: r) :> { found: false, ps: ps }
+            .Str(v: s) :> { found: false, ps: ps }
+            .Bool(v: b) :> { found: false, ps: ps }
+            .NotLit :> { found: false, ps: ps }
+            .Recovered :> { found: false, ps: ps }
+            .Variant(name: n) :> { found: false, ps: ps }
+        }
+    }
+
+    // Children in evaluation order; a temporary for each non-literal child
+    // evaluated before a later child that holds a suspension point.
+    fn planKids(cx: PCx, kids: AExpr[], pos: Pos, ps0: PS) -> PX {
+        let ps: PS = ps0
+        let found = false
+        let i: int = 0
+        for (const k of kids) {
+            const r: PX = planExpr(cx, k, pos, ps)
+            ps = r.ps
+            if (r.found) {
+                found = true
+                let j: int = 0
+                for (const prev of kids) {
+                    if (j < i && !isLiteralExpr(prev) && tempOf(ps.plan, prev.nid) is not && suspendAtOf(ps.plan, prev.nid) is not) {
+                        const rt: RPSym = pmint(ps, "tmp")
+                        ps = rt.ps
+                        ps = withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps.concat([{ nid: prev.nid, sym: rt.s }]), joins: ps.plan.joins, waiting: ps.plan.waiting, rets: ps.plan.rets })
+                    }
+                    j = j + 1
+                }
+            }
+            i = i + 1
+        }
+        return { found: found, ps: ps }
+    }
+
+    fn isLiteralExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> true
+            .Str(v: s) :> true
+            .Bool(v: b) :> true
+            .NotLit :> true
+            .Variant(name: n) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Recovered :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    // `a && f()` / `a || f()`: the right operand runs on one path only.
+    fn planBinary(cx: PCx, o: BinOp, l: AExpr, r: AExpr, pos: Pos, ps: PS) -> PX {
+        if (o == BinOp.And || o == BinOp.Or) {
+            const rl: PX = planExpr(cx, l, pos, ps)
+            const rr: PX = planExpr(cx, r, condPos(pos, "the right operand of `&&` / `||`"), rl.ps)
+            return { found: rl.found || rr.found, ps: rr.ps }
+        }
+        return planKids(cx, [l, r], pos, ps)
+    }
+
+    fn planTernary(cx: PCx, t: AExpr, y: AExpr, n: AExpr, pos: Pos, ps: PS) -> PX {
+        const rt: PX = planExpr(cx, t, pos, ps)
+        const ry: PX = planExpr(cx, y, condPos(pos, "a branch of `? :`"), rt.ps)
+        const rn: PX = planExpr(cx, n, condPos(pos, "a branch of `? :`"), ry.ps)
+        return { found: rt.found || ry.found || rn.found, ps: rn.ps }
+    }
+
+    fn condPos(pos: Pos, what: string) -> Pos {
+        if (pos.refused != "") return pos
+        return { refused: what + " — it runs on one path only, and lifting it out would run it on both; it arrives with the U1b conditional-lowering follow-up. Write an `if` statement: a call in an `if` branch suspends" }
+    }
+
+    // A handling form that is NOT a suspension point: its subject's arguments
+    // are evaluated in place; its arms cannot suspend in this slice.
+    fn planHandledArms(cx: PCx, h: AHandled, pos: Pos, ps0: PS) -> PX {
+        const r: PX = planKids(cx, [h.subject], pos, ps0)
+        return { found: r.found, ps: planArms(cx, h, r.ps) }
+    }
+
+    fn planArms(cx: PCx, h: AHandled, ps0: PS) -> PS {
+        let ps: PS = ps0
+        const armPos: Pos = { refused: "a `!{}` / `match` arm — an arm that waits needs a continuation out of the arm, which arrives with the U1b arm-continuation follow-up. Handle the outer call, then make this call in the statement after it" }
+        for (const a of handledArms(h)) {
+            const b: AArmBody = a.body
+            for (const x of armExprOf(b)) { ps = planExpr(cx, x, armPos, ps).ps }
+            for (const blk of armBlockOf(b)) {
+                for (const s of blk.stmts) {
+                    for (const e of stmtExprs(s)) { ps = planExpr(cx, e, armPos, ps).ps }
+                }
+            }
+        }
+        return ps
+    }
+
+    // Is `e` a suspension point (and of which kind)?
+    fn suspendKindAt(cx: PCx, e: AExpr) -> SuspendK | not {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is some) {
+            const hf: HandledFact | not = handledFactIn(cx.t, e.nid)
+            if (hf is some) {
+                const rf: RemoteFact | not = hf.remote
+                if (rf is some) {
+                    if (callerRemote(cx.s, rf.caller)) return SuspendK.SRemote(rf.callee)
+                    return not
+                }
+            }
+            const f: Sym | not = callSym(cx.t, h.subject)
+            if (f is some) {
+                if (waitingClientFn(cx, f.id)) return SuspendK.SWaits(f)
+            }
+            return not
+        }
+        const c: Sym | not = callSym(cx.t, e)
+        if (c is some) {
+            if (waitingClientFn(cx, c.id)) return SuspendK.SWaits(c)
+        }
+        return not
+    }
+
+    // The scrml function a call expression names, else not.
+    fn callSym(t: Tables, e: AExpr) -> Sym | not {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return not
+        return fnSymOf(nameFact(t.names, c.nid))
+    }
+
+    fn handledFactIn(t: Tables, nid: int) -> HandledFact | not {
+        const f: FailFact | not = failFact(t.fails, nid)
+        return match f {
+            .FHandled(h: h) :> h
+            .FArm(idx: x) :> not
+            .FFail(err: x) :> not
+            not :> not
+        }
+    }
+
+    fn handledOutcome(cx: PCx, e: AExpr) -> Sym | not {
+        if (handledOf(e.k) is not) return not
+        const hf: HandledFact | not = handledFactIn(cx.t, e.nid)
+        if (hf is not) return not
+        return hf.outcome
+    }
+
+    // The expressions a suspension point evaluates before it suspends: its call's arguments.
+    fn suspendArgs(e: AExpr) -> AExpr[] {
+        const h: AHandled | not = handledOf(e.k)
+        let call: AExpr = e
+        if (h is some) call = h.subject
+        const k: AExprK = call.k
+        return match k {
+            .Call(callee: c, args: a) :> a
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: x) :> []
+            .Assign(target: x) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+        }
+    }
+
+    fn suspendWhat(k: SuspendK) -> string {
+        return match k {
+            .SRemote(callee: f) :> "a client call of the server function `" + f.hint + "` (§19.9.10) stands"
+            .SWaits(callee: f) :> "a call of `" + f.hint + "`, which waits for the server (§13.2: it calls a server function), stands"
+        }
+    }
+
+    // A client call's route needs a wire type at both ends (§57.4 R10: the
+    // client decodes strictly against the declared return type).
+    fn routedChecks(cx: PCx, e: AExpr, k: SuspendK, ps0: PS) -> PS {
+        const f: Sym | not = match k {
+            .SRemote(callee: c) :> c
+            .SWaits(callee: c) :> not
+        }
+        if (f is not) return ps0
+        let ps: PS = ps0
+        const fs: FnSrc | not = fnSrcOf(cx.g, f.id)
+        if (fs is not) return ps
+        if (fs.info.arity < 0) ps = pdiag(ps, cx, e.span, "a client call of `" + fs.info.name + "`, whose parameters are not all typed — the call's arguments cross the wire, encoded against each parameter's declared type (§57); declare every parameter's type")
+        if (fs.info.ret is some || retOf(ps.plan, f.id) is some) return ps
+        if (!fs.info.failable && yieldsNoValue(cx.s, f.id)) return ps          // no value: the 204 contract
+        const rt: RetType = provenReturn(cx, fs.f.body)
+        const ty: Type | not = rt.ty
+        if (ty is not) return pdiag(ps, cx, e.span, "a client call of `" + fs.info.name + "`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `" + fs.info.name + "` declares none and its returns do not prove one (" + rt.why + ")" + declareHint(fs.info))
+        const pc: PlaceCx = { t: cx.t, g: cx.g }
+        const state: string = stateTypeIn(cx.g, ty)
+        if (state != "") return pdiag(ps, cx, e.span, "a client call of `" + fs.info.name + "`, whose answer holds `" + state + "`, a declaration's instance — a live state object with no wire form (§12.5.3)")
+        if (wireBuild(typesProgram(cx.g), ty).table is not) return pdiag(ps, cx, e.span, "a client call of `" + fs.info.name + "`, whose answer's type has no wire descriptor in the bootstrap's codec")
+        return withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins, waiting: ps.plan.waiting, rets: ps.plan.rets.concat([{ sym: f.id, ty: ty }]) })
+    }
+
+    fn declareHint(f: FnInfo) -> string {
+        if (f.failable) return "; a `!` function has no success-type annotation (§19.4.1), so make every `return` carry a value of one known type"
+        return "; declare it (`-> T`)"
+    }
+
+    // The ONE type every `return` in a body carries (§19.4.2 "inferred from its
+    // returns"), by the typer's proven types — else why not.
+    type RetType:struct = { ty: Type | not, why: string }
+
+    fn provenReturn(cx: PCx, b: ABlock) -> RetType {
+        const rs: ReturnSite[] = returnSites(b)
+        if (rs.length == 0) return { ty: not, why: "it has no `return`" }
+        let ty: Type | not = not
+        for (const r of rs) {
+            const x: AExpr | not = r.e
+            if (x is not) return { ty: not, why: "a `return` without a value" }
+            const vt: VType = exprType(cx.t, x.nid)
+            const t: Type | not = knownType(vt)
+            if (t is not) return { ty: not, why: "the type of a returned value is not proven" }
+            if (ty is some) {
+                if (!(ty == t)) return { ty: not, why: "its returns carry different types" }
+            }
+            ty = t
+        }
+        return { ty: ty, why: "" }
+    }
+
+    fn knownType(vt: VType) -> Type | not {
+        return match vt {
+            .Known(t: t) :> t
+            .Absent :> not
+            .Unknown :> not
+        }
+    }
+
+    type ReturnSite:struct = { e: AExpr | not }
+
+    // Every `return` in a body, at any depth (an `if` / `given` branch, a
+    // handling form's arm block — whose `return` leaves the function).
+    fn returnSites(b: ABlock) -> ReturnSite[] {
+        let out: ReturnSite[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const sub: ReturnSite[] = match k {
+                .Return(e: x) :> [{ e: x }].concat(returnSitesIn(x))
+                .If(cond: c, thenB: tb, elseB: eb) :> returnSitesIn(c).concat(returnSites(tb)).concat(returnSitesMaybe(eb))
+                .Given(name: n, subject: x, body: gb) :> returnSites(gb)
+                .Eval(e: x) :> returnSitesIn(x)
+                .Local(name: n, init: i) :> returnSitesIn(i)
+                .EffectStmt(w: w) :> []
+                .Defer(body: d) :> []
+                .Fail(f: x) :> []
+            }
+            out = out.concat(sub)
+        }
+        return out
+    }
+
+    fn returnSitesMaybe(b: ABlock | not) -> ReturnSite[] {
+        if (b is not) return []
+        return returnSites(b)
+    }
+
+    // `return`s inside a handling form's arm blocks in an expression.
+    fn returnSitesIn(e: AExpr | not) -> ReturnSite[] {
+        if (e is not) return []
+        let out: ReturnSite[] = []
+        for (const b of exprBlocks(e)) { out = out.concat(returnSites(b)) }
+        for (const x of exprKids(e)) { out = out.concat(returnSitesIn(x)) }
+        return out
     }
 
     // =========================================================================
@@ -14788,11 +15968,20 @@ ${
         const typed: RTyping = typeProgram(files, bound)
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)
+        // s454 (U1b): the suspension plan — per client site, after placement (it
+        // reads the typer's proven types: a server function's inferred success type)
+        const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
+                                 names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
+                                 elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts }
+        const pl: PS = planPass(ra.g, typedT, sum, pp.st)
+        const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
+                                  inherited: pp.facts.inherited, plan: pl.plan }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts }
-        return { files: files, tables: t, diags: domScopeDropped(pp.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf }
+        return { files: files, tables: t, diags: domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
                  infos: gatedInfos(vp.gated) }
     }
 

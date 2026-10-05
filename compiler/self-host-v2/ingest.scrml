@@ -1055,6 +1055,7 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -1196,7 +1197,7 @@ ${
 
     export fn ingest(files: IFile[]) -> Ingested {
         const prog: Sym = mkSym(0, "program")
-        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
+        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not, serverCallError: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
         const ast: INode = files[0].ast
         // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
@@ -1241,7 +1242,7 @@ ${
             }
             const body: LS = lowerStmts(fcx, nodesAt(f.n, "body"))
             why = why.concat(pi.why).concat(body.why)
-            fns = fns.concat([{ sym: fnInfos[j].sym, params: pi.params, body: block(body.stmts), pure: strAt(f.n, "fnKind") == "fn", err: not }])
+            fns = fns.concat([{ sym: fnInfos[j].sym, params: pi.params, body: block(body.stmts), pure: strAt(f.n, "fnKind") == "fn", err: not, waits: false }])
             j = j + 1
         }
 
@@ -1254,7 +1255,7 @@ ${
             sym: prog, kind: DeclKind.Program, single: true, fields: fs.fields,
             renders: vs.views, wiring: [], handles: [],
         }
-        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
+        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         return { core: core, why: dedupeStr(why) }
     }
 
@@ -1315,6 +1316,7 @@ ${
             .Lambda(params: x) :> "Expr.Lambda"
             .SeqCall(op: x) :> "Expr.SeqCall"
             .Validity(of: x) :> "Expr.Validity"
+            .ServerCall(fn: x) :> "Expr.ServerCall"
         }
     }
 

@@ -212,6 +212,8 @@ ${
     fn stmtFail(s: Stmt) -> FailAt | not {
         return match s {
             .Fail(err: e, idx: i, args: args) :> { err: e, idx: i, args: args.length }
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
             .Attempt(result: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
@@ -335,6 +337,8 @@ ${
         return match s {
             .Return(e: x) :> true
             .Fail(err: x) :> true
+            .Join(k: x) :> false
+            .Jump(k: x) :> true
             .If(thenB: t, elseB: el) :> ifDiverges(t, el)
             .Attempt(result: x) :> false
             .Let(sym: x) :> false
@@ -515,6 +519,8 @@ ${
             .Unpersist(decl: x) :> "removes a persisted cell's storage"
             .Attempt(result: x) :> ""
             .Fail(err: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .If(cond: x) :> ""
@@ -529,6 +535,7 @@ ${
             .Handle(inst: x) :> "names an instance"
             .InitOf(decl: d) :> "re-evaluates an initializer of <" + d.hint + ">"
             .Validity(of: x) :> "reads a validity surface"
+            .ServerCall(fn: x) :> "makes a client call of a server function (a server body calls one in place, §13.4)"
             .Lit(lit: x) :> ""
             .Local(sym: x) :> ""
             .Read(place: x) :> ""
@@ -578,12 +585,15 @@ ${
             .Defer(body: x) :> not
             .Unpersist(decl: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
     fn failableSql(c: Failable) -> SqlQuery | not {
         return match c {
             .FSql(q: q) :> q
+            .FSettled(outcome: x) :> not
             .FCall(fn: x) :> not
         }
     }
@@ -605,6 +615,8 @@ ${
             .Defer(body: x) :> not
             .Unpersist(decl: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
@@ -612,6 +624,7 @@ ${
         return match c {
             .FCall(fn: f) :> f
             .FSql(q: x) :> not
+            .FSettled(outcome: x) :> not
         }
     }
 
@@ -650,6 +663,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -729,6 +743,8 @@ ${
             .Unpersist(decl: x) :> ["C8: a bind's write is not a Write"]
             .Attempt(result: x) :> ["C8: a bind's write is not a Write"]
             .Fail(err: x) :> ["C8: a bind's write is not a Write"]
+            .Join(k: x) :> ["C8: a bind's write is not a Write"]
+            .Jump(k: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -779,6 +795,7 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -799,6 +816,7 @@ ${
             .Lambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
+            .ServerCall(fn: x) :> "(not a cell read)"
         }
     }
 
@@ -990,6 +1008,8 @@ ${
             .Unpersist(decl: x) :> false
             .Attempt(result: x) :> false
             .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -1007,6 +1027,8 @@ ${
             .Unpersist(decl: x) :> true
             .Attempt(result: x) :> false
             .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
             .ResetSurface(of: v) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
@@ -1082,6 +1104,8 @@ ${
             .Unpersist(decl: d, idx: x) :> d.hint + "#" + d.id + "." + x
             .Attempt(result: x) :> ""
             .Fail(err: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
             .ResetSurface(of: v) :> ""
             .Write(cap: x) :> ""
             .Let(sym: x) :> ""
@@ -1118,6 +1142,8 @@ ${
             .Unpersist(decl: x) :> not
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
@@ -1289,6 +1315,8 @@ ${
             .Unpersist(decl: x) :> ""
             .Attempt(result: x) :> ""
             .Fail(err: x) :> ""
+            .Join(k: x) :> ""
+            .Jump(k: x) :> ""
         }
     }
 
@@ -1339,6 +1367,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -1393,6 +1422,8 @@ ${
             .Unpersist(decl: x) :> not
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
             .Write(cap: x) :> not
@@ -1473,6 +1504,8 @@ ${
             .Unpersist(decl: d, inst: i, idx: x) :> checkUnpersist(p, encl, d, i, x)
             .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> checkAttempt(p, r, c, e, ok, arms)
             .Fail(err: x) :> []
+            .Join(k: x) :> []
+            .Jump(k: x) :> []
         }
     }
 
@@ -1522,6 +1555,8 @@ ${
             .Unpersist(decl: x) :> ""
             .Attempt(result: x) :> ""
             .Fail(err: x) :> "a Fail"
+            .Join(k: x) :> "a Join"
+            .Jump(k: x) :> "a Jump"
         }
     }
 
@@ -1555,6 +1590,8 @@ ${
             .Unpersist(decl: x) :> "an Unpersist inside a Commit"
             .Attempt(result: x) :> "an Attempt inside a Commit"
             .Fail(err: x) :> "a Fail inside a Commit"
+            .Join(k: x) :> "a Join inside a Commit"
+            .Jump(k: x) :> "a Jump inside a Commit"
         }
     }
 
@@ -1574,6 +1611,7 @@ ${
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .ServerCall(fn: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -1655,6 +1693,7 @@ ${
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .ServerCall(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -1922,6 +1961,8 @@ ${
             .Unpersist(decl: x) :> not
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
         }
     }
 
@@ -1946,6 +1987,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -1966,6 +2008,7 @@ ${
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
+            .ServerCall(fn: x) :> []
         }
     }
 
@@ -2033,6 +2076,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 

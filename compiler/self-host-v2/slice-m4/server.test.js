@@ -257,12 +257,13 @@ describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-002"]);
   });
 
-  test("twin (mirror: server-fn/e-route-002-neg): client → server is the allowed direction — no E-ROUTE-002 (the call itself is U1b's)", () => {
+  test("twin (mirror: server-fn/e-route-002-neg): client → server is the allowed direction — no E-ROUTE-002 (s454: the unhandled client call is E-ERROR-002, §19.9.10)", () => {
     const src = P(DB, `    let <n:int=0/>\n    function refresh(name: string) {\n        @n = 1\n        auditName(name)\n    }\n    function auditName(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }`, `        <button onclick=refresh("hi")>Go</button>`);
     const c = codes(src);
     expect(c).not.toContain("E-ROUTE-002");
-    expect(c.sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-002"]);
-    expect(diag(src, "E-BOOTSTRAP-UNSUPPORTED").message).toContain("U1b");
+    // one for the query (R11), one for the client call of the server function (§19.9.10)
+    expect(c.sort()).toEqual(["E-ERROR-002", "E-ERROR-002"]);
+    expect(run(src).diags.some((d) => d.code === "E-ERROR-002" && d.message.includes("§19.9.10"))).toBe(true);
   });
 
   test("a pure helper called from a server function is fine (ambient)", () => {
@@ -307,7 +308,8 @@ describe("§12.5.3 — E-ROUTE-003 / E-ROUTE-004 via the §57 codec", () => {
 });
 
 describe("§13.7 (S451 R1) — a value position that would wait is E-VALUE-SERVER-CALL", () => {
-  const S = `    let <n:int=0/>\n    server function count() -> int {\n        return 3\n    }\n    function label() -> int {\n        return count() + 1\n    }`;
+  // s454: label()'s call of count() is a CLIENT call (label is client-placed), so it is handled (§19.9.10)
+  const S = `    let <n:int=0/>\n    server function count() -> int {\n        return 3\n    }\n    function label() -> int {\n        const c = count() !{ .Transport(t) :> 0 }\n        return c + 1\n    }`;
   const ok = (c) => c.filter((x) => x !== "W-DEPRECATED-SERVER-MODIFIER" && x !== "E-BOOTSTRAP-UNSUPPORTED");
 
   test("item 1 — an initializer calls a server function", () => {
@@ -343,16 +345,18 @@ describe("§13.7 (S451 R1) — a value position that would wait is E-VALUE-SERVE
 });
 
 describe("refusals at the edge of U1a — each names the slice that lifts it", () => {
-  test("a client function calling a server function → U1b", () => {
+  // s454 (U1b lifted these): an unhandled client call of a server function is E-ERROR-002 (§19.9.10)
+  test("a client function calling a server function, unhandled → E-ERROR-002 (§19.9.10), no U1b refusal", () => {
     const src = P("", `    let <n:int=0/>\n    server function count() -> int {\n        return 3\n    }\n    function go() {\n        @n = count()\n    }`, `        <button onclick=go()>go</button>`);
-    const d = run(src).diags.filter((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d.length).toBe(1);
-    expect(d[0].message).toContain("U1b");
+    const c = codes(src).filter((x) => x !== "W-DEPRECATED-SERVER-MODIFIER");
+    expect(c).toEqual(["E-ERROR-002"]);
+    expect(diag(src, "E-ERROR-002").message).toContain("§19.9.10");
   });
 
-  test("a handler calling a server function → U1b", () => {
+  test("a handler calling a server function, unhandled → E-ERROR-002 (§19.9.10), no U1b refusal", () => {
     const src = P("", `    server function ping() {\n        return\n    }`, `        <button onclick=ping()>go</button>`);
-    expect(diag(src, "E-BOOTSTRAP-UNSUPPORTED").message).toContain("U1b");
+    expect(codes(src).filter((x) => x !== "W-DEPRECATED-SERVER-MODIFIER")).toEqual(["E-ERROR-002"]);
+    expect(diag(src, "E-ERROR-002").message).toContain("event handler");
   });
 
   test("a `?{}` written in a handler → U1d (client code doing server work is split)", () => {
@@ -374,13 +378,14 @@ describe("refusals at the edge of U1a — each names the slice that lifts it", (
     expect(c).not.toContain("E-SQL-004");
   });
 
-  test("the printer refuses a program with a server function, naming U1c — nothing is printed", () => {
+  // s454 (U1b): the client artifact of a program with server functions is printed (design Item 4)
+  test("the printer prints the CLIENT artifact of a program with a server function — the server function is not in it", () => {
     const r = run(P("", `    server function bump(n: int) -> int {\n        return n + 1\n    }`));
     const out = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js");
-    expect(out.js).toBe("");
-    expect(out.html).toBe("");
-    expect(out.refused.length).toBe(1);
-    expect(out.refused[0]).toContain("U1c");
+    expect(out.refused).toEqual([]);
+    expect(out.js.length).toBeGreaterThan(0);
+    expect(out.js).not.toContain("bump");
+    expect(out.routes).toEqual([]);
   });
 
   test("twin: a program with no server function prints (refused is empty)", () => {
@@ -531,9 +536,12 @@ describe("the lowered query in Core (s451 Ue: handled in the source, an Attempt'
     expect(q.slots).toEqual([0, 1, 0]);
   });
 
-  test("the printer refuses the lowered program (U1c)", () => {
+  test("s454: the printer prints the client artifact — no SQL text reaches it", () => {
     const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not }\n        return 1\n    }`)));
-    expect(mods.print.printProgram(core, "t.client.js", "scrml-runtime.js").refused[0]).toContain("U1c");
+    const out = mods.print.printProgram(core, "t.client.js", "scrml-runtime.js");
+    expect(out.refused).toEqual([]);
+    expect(out.js).not.toContain("SELECT");
+    expect(out.js).not.toContain("app.db");
   });
 });
 
