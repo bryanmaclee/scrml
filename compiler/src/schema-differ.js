@@ -872,6 +872,140 @@ function allSchemaCreateTableDecls(text) {
 }
 
 /**
+ * `ALTER TABLE` statements in a `< schema>` body that give a table a `tenant_id`
+ * column (§14.8.10, S455 — gap g-tenant-floor-alter-add-tenant-column-not-scoped-s455).
+ *
+ * SPEC §14.8.10: *"A table whose `< schema>` carries a `tenant_id` column IS
+ * tenant-scoped; the column's presence is the declaration."* A schema that says
+ * `CREATE TABLE notes (id …, body …)` and then `ALTER TABLE notes ADD COLUMN
+ * tenant_id TEXT` carries one. Until S455 only CREATE TABLE column lists and DSL
+ * heads were read, so `notes` was NOT scoped — its reads served every tenant's rows
+ * (executed) and a view over it passed the E-TENANT-SCHEMA-HAZARD checker.
+ *
+ * FAIL-CLOSED READING (deliberately wide, like every recognizer here — over-
+ * declaring only ADDS floor): an `ALTER TABLE [IF EXISTS] [ONLY] <name>` statement
+ * whose text names `tenant_id` as a whole word ANYWHERE — `ADD [COLUMN] tenant_id`,
+ * `RENAME [COLUMN] x TO tenant_id`, MySQL `CHANGE … tenant_id`, several actions in
+ * one statement, a quoted `"tenant_id"`, and also a comment, a string or a `DROP
+ * COLUMN tenant_id` — makes `<name>` tenant-scoped. Strings and comments are NOT
+ * skipped because skipping them is where a reader goes wrong (a `;` or `'` inside a
+ * comment, dialect comment rules); the cost of a false read is a tenant-scoped table
+ * with no `tenant_id` column, whose reads then fail at run time (closed, visible),
+ * never a leak. The statement runs to the next `ALTER` / `CREATE` keyword, the next
+ * `?{` / `` `} `` wrapper edge, or a `{` / `}` outside a `${…}` (a DSL head) —
+ * NOT to a `;`, which can sit inside a string or a comment. COMMENT-AGNOSTIC like
+ * the CREATE reads: a commented-out ALTER counts (`commented` records it).
+ * `ALTER TABLE ONLY <x>` is read both ways (a table may be NAMED `only`).
+ *
+ * @param {string} text a `< schema>` body
+ * @param {string} masked `blankLiteralBodies(text, { comments: true, backtick: false })`
+ * @returns {Array<{name: string, key: string, form: "alter", offset: number, tenant: true, commented: boolean, columns: Array<{name: string}>}>}
+ */
+function alterTableTenantDecls(text, masked) {
+  const out = [];
+  if (typeof text !== "string" || !/\balter\b/i.test(text)) return out;
+  const re = /alter/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const i = m.index;
+    if (i > 0 && SQL_IDENT_CHAR.test(text[i - 1])) continue;
+    const afterAlter = readSqlKeyword(text, i, "ALTER");
+    if (afterAlter === -1) continue;
+    const afterTable = readSqlKeyword(text, skipSqlTrivia(text, afterAlter), "TABLE");
+    if (afterTable === -1) continue;
+    let j = skipSqlTrivia(text, afterTable);
+    {
+      const a = readSqlKeyword(text, j, "IF");
+      if (a !== -1) {
+        const b = readSqlKeyword(text, skipSqlTrivia(text, a), "EXISTS");
+        if (b !== -1) j = skipSqlTrivia(text, b);
+      }
+    }
+    // The name chain at `at`: its last part, and where the chain ends.
+    const readChain = (at) => {
+      const first = readSqlIdentPart(text, at);
+      if (!first) return null;
+      let last = first;
+      let k = skipSqlTrivia(text, first.end);
+      while (text[k] === ".") {
+        const p = readSqlIdentPart(text, skipSqlTrivia(text, k + 1));
+        if (!p) break;
+        last = p;
+        k = skipSqlTrivia(text, p.end);
+      }
+      return { name: last.name, end: last.end };
+    };
+    const names = [];
+    const direct = readChain(j);
+    if (direct) names.push(direct);
+    const afterOnly = readSqlKeyword(text, j, "ONLY");
+    if (afterOnly !== -1) {
+      const viaOnly = readChain(skipSqlTrivia(text, afterOnly));
+      if (viaOnly) names.push(viaOnly);
+    }
+    if (names.length === 0) continue;
+    const from = Math.max(...names.map((n) => n.end));
+    const stop = alterStatementEnd(text, from);
+    const stmt = text.slice(from, stop);
+    if (!/(?:^|[^\p{L}\p{N}_$])tenant_id(?![\p{L}\p{N}_$])/iu.test(stmt)) continue;
+    const commented = masked.slice(i, i + 5).toUpperCase() !== "ALTER";
+    for (const n of names) {
+      out.push({ name: n.name, key: n.name.toLowerCase(), form: "alter", offset: i, tenant: true, commented, columns: [{ name: "tenant_id" }] });
+    }
+  }
+  return out;
+}
+
+/**
+ * Where an `ALTER TABLE` statement read from `from` ends (see `alterTableTenantDecls`):
+ * at the next `ALTER TABLE` / `CREATE` head, the next `?{` / `` `} `` wrapper edge, or a
+ * `{` / `}` outside a `${…}`. A stop is looked for only OUTSIDE `'…'` / `"…"` literals
+ * and `--` / `/* *\/` comments (nesting model — the longest comment), so a keyword
+ * spelled inside one never ends the statement early. Every misreading here makes the
+ * statement LONGER, never shorter: a longer statement can only over-declare.
+ * `ALTER COLUMN` (an action of this same statement) is not a stop.
+ */
+function alterStatementEnd(text, from) {
+  let interp = 0;
+  for (let k = from; k < text.length; k++) {
+    const c = text[k];
+    if (c === "'" || c === '"') {
+      let j = k + 1;
+      while (j < text.length && !(text[j] === c && text[j + 1] !== c)) j += text[j] === c ? 2 : 1;
+      k = j;
+      continue;
+    }
+    if (c === "-" && text[k + 1] === "-") {
+      const nl = text.indexOf("\n", k);
+      k = nl === -1 ? text.length : nl;
+      continue;
+    }
+    if (c === "/" && text[k + 1] === "*") {
+      let depth = 1;
+      let j = k + 2;
+      while (j < text.length && depth > 0) {
+        if (text[j] === "/" && text[j + 1] === "*") { depth++; j += 2; continue; }
+        if (text[j] === "*" && text[j + 1] === "/") { depth--; j += 2; continue; }
+        j++;
+      }
+      k = j - 1;
+      continue;
+    }
+    if (c === "$" && text[k + 1] === "{") { interp++; k++; continue; }
+    if (c === "}" && interp > 0) { interp--; continue; }
+    if (c === "{" || c === "}") return k;
+    if (c === "?" && text[k + 1] === "{") return k;
+    if (c === "`" && /^`\s*\}/.test(text.slice(k, k + 64))) return k;
+    if ((c === "a" || c === "A" || c === "c" || c === "C") && !SQL_IDENT_CHAR.test(text[k - 1] ?? " ")) {
+      if (readSqlKeyword(text, k, "CREATE") !== -1) return k;
+      const afterAlter = readSqlKeyword(text, k, "ALTER");
+      if (afterAlter !== -1 && readSqlKeyword(text, skipSqlTrivia(text, afterAlter), "TABLE") !== -1) return k;
+    }
+  }
+  return text.length;
+}
+
+/**
  * EVERY table declaration in one `< schema>` body that the §14.8.10 tenant floor
  * reads — duplicates INCLUDED, in source order — with whether it carries a
  * `tenant_id` column. The two forms are read by the same recognizers the floor
@@ -881,10 +1015,12 @@ function allSchemaCreateTableDecls(text) {
  * skips too). Both recognizers are COMMENT-AGNOSTIC (the ⊇-base guarantee above),
  * so a commented-out copy is a declaration here exactly as it is to the floor;
  * `commented` records that it sits inside a `--` / closed `/* *\/` comment or a
- * one-line literal, for the E-SCHEMA-015 message only.
+ * one-line literal, for the E-SCHEMA-015 message only. An `ALTER TABLE` that names
+ * `tenant_id` (`alterTableTenantDecls`, S455) is a third form, `"alter"`: it adds
+ * `tenant_id` to every declaration of its table in the body and is listed itself.
  *
  * @param {string} text a `< schema>` body
- * @returns {Array<{name: string, key: string, form: "declarative"|"raw", offset: number, tenant: boolean, commented: boolean, columns: Array<{name: string}>}>}
+ * @returns {Array<{name: string, key: string, form: "declarative"|"raw"|"alter", offset: number, tenant: boolean, commented: boolean, columns: Array<{name: string}>}>}
  */
 export function schemaTableDeclarations(text) {
   const out = [];
@@ -920,6 +1056,21 @@ export function schemaTableDeclarations(text) {
       commented: masked.slice(t.offset, t.offset + 6).toUpperCase() !== "CREATE",
       columns,
     });
+  }
+  // S455 — an `ALTER TABLE <t> … tenant_id …` gives `<t>` the column: every
+  // declaration of `<t>` in this body then carries it (so the floor's union, the
+  // E-TENANT-SCHEMA-HAZARD set and E-SCHEMA-015 move together — a CREATE without
+  // `tenant_id` plus the ALTER that adds it AGREE, they do not disagree), and the
+  // ALTER is itself a declaration of `<t>` (for a `<t>` created in another body or
+  // file — the compilation set unions it).
+  for (const a of alterTableTenantDecls(text, masked)) {
+    for (const d of out) {
+      if (d.key === a.key && !d.tenant) {
+        d.tenant = true;
+        d.columns = [...d.columns, { name: "tenant_id" }];
+      }
+    }
+    out.push(a);
   }
   out.sort((a, b) => a.offset - b.offset);
   return out;

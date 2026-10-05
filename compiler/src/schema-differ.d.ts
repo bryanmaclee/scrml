@@ -91,7 +91,7 @@ export declare function harvestRawCreateTables(text: string, out: Map<string, st
 export declare function schemaTableDeclarations(text: string): Array<{
   name: string;
   key: string;
-  form: "declarative" | "raw";
+  form: "declarative" | "raw" | "alter";
   offset: number;
   tenant: boolean;
   commented: boolean;

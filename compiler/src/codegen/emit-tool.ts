@@ -47,7 +47,7 @@ import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./asy
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
-import { buildTenantContext, SERVER_TENANT_HELPER } from "./tenant-egress.ts";
+import { buildTenantContext, compilationTenantOf, SERVER_TENANT_HELPER } from "./tenant-egress.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 import { extractDesiredSchema } from "./db-authoritative.ts";
 import { setTenantContextForRewriter, drainTenantViolationsFromRewriter } from "./rewrite.ts";
@@ -339,8 +339,9 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
 // request, so (S452 readings) a read of a tenant-scoped table without
 // `.acrossTenants()` sees ZERO rows and a tenant-injected INSERT is refused by
 // name at runtime; the compile-time refusals (E-TENANT-AGG / E-TENANT-WRITE)
-// apply as in a web app. Armed from the file's own `<schema>` declarations
-// around the tool's SQL lowering, then released.
+// apply as in a web app. Armed from the file's own `<schema>` declarations and
+// the compilation's one tenant set (S455) around the tool's SQL lowering, then
+// released.
 // ---------------------------------------------------------------------------
 function beginToolTenantFloor(fileAST: ASTNode): boolean {
   const desired = extractDesiredSchema(fileAST as never);
@@ -350,6 +351,8 @@ function beginToolTenantFloor(fileAST: ASTNode): boolean {
     desired.tenantTables,
     desired.schemaText,
     (ident: string) => dbScopes.get(ident)?.driver,
+    // S455 — the compilation's one tenant set (runCG attaches it to the file AST).
+    compilationTenantOf(fileAST),
   );
   if (ctx.tenantScopedTables.size === 0) return false;
   setTenantContextForRewriter(ctx);

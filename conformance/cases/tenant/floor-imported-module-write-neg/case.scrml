@@ -1,0 +1,10 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+    </>
+    // `assets` is tenant-scoped HERE; the forged write lives in ./writer.scrml.
+    ${
+        import { forge } from './writer.scrml'
+    }
+    <button onclick=${ forge() }>forge</button>
+</program>

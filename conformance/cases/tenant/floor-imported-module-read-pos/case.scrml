@@ -1,0 +1,10 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+    </>
+    // `assets` is tenant-scoped HERE; the read lives in ./admin.scrml, which declares no schema.
+    ${
+        import { listAssets } from './admin.scrml'
+    }
+    <button onclick=${ listAssets() }>list</button>
+</program>

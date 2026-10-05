@@ -1,0 +1,16 @@
+{
+  "id": "tenant-floor-imported-module-read-pos",
+  "description": "§14.8.10 (S455) — the floor's tenant set is the COMPILATION's. `assets` is tenant-scoped by case.scrml's `<schema>`; the read is in the imported ./admin.scrml, which declares no schema. Before S455 the floor read only each file's own `<schema>`, so admin's `SELECT name FROM assets` was emitted unfiltered — served every tenant's rows (executed on e014f20ce, two `<program>` files sharing one database; the same per-file set left this imported module unfiltered) — and no I-TENANT-STRIP fired. Now the read is filtered at the source and named, exactly as if admin.scrml declared the table. Codes-level: the adapter runs only the entry bundle and has no server, so the runtime half (pinned A sees only A's rows) is pinned by compiler/tests/unit/tenant-floor-project-set.test.js.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-floor-project-set.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: \"A table whose `<schema>` carries a `tenant_id` column IS tenant-scoped; the column's presence is the declaration\", and the floor owns the invariant \"a row belonging to tenant A is never observed by code serving a request whose ambient tenant is B\". S455: there is ONE tenant set — the union of the tenant tables of every file compiled together, whatever database each names — and the floor's query scoping reads it (I-TENANT-STRIP names every scoped read).",
+  "expect": {
+    "codes": [
+      "I-TENANT-STRIP"
+    ],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}

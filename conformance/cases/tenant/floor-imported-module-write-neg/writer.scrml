@@ -1,0 +1,4 @@
+export function forge() {
+    ?{`INSERT INTO assets (name, tenant_id) VALUES ('planted', 'B')`}.run()
+    return "ok"
+}

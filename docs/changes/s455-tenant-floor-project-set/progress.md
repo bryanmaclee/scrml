@@ -1,0 +1,58 @@
+# progress — s455-tenant-floor-project-set (append-only)
+
+- start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a533df4b6feb30120, base e014f20ce (== origin/main, #1313).
+- Maps: .claude/maps/primary.map.md read (stamp f38697900, predates #1313); #1313 progress.md read in full.
+
+## Governing sentences (SPEC §14.8.10, read in full; §14.8.11 read in full)
+
+- Isolation invariant (§14.8.10 ¶3): "It owns exactly the **isolation invariant** — *a row belonging to tenant A is never observed by code serving a request whose ambient tenant is B, and so never reaches that request* — and nothing else."
+- Declaration (§14.8.10 "Declaration — the `tenant_id` column convention"): "A table whose `<schema>` carries a `tenant_id` column IS tenant-scoped; the column's **presence is the declaration** … There is no per-table opt-in attribute: a forgettable declaration is isomorphic to the forgettable `WHERE tenant_id=` predicate the floor exists to eliminate — forget to annotate a new `invoices` table and its reads silently leak."
+- Source filter (§14.8.10 Enforcement): "Rows read from a tenant-scoped table SHALL be filtered to the active tenant immediately after the query executes, before any program code observes them … It fires `I-TENANT-STRIP`."
+- Soundness scope: "The guarantee is **complete for reads of statically-declared tenant-scoped tables**".
+- The text being amended (S455 #1313, "The rule reads the schema as it will exist"): "This scopes the declaration rule only — the floor's own query scoping stays per file." and "…and neither is a column added by `ALTER TABLE … ADD COLUMN tenant_id`." (both recorded there as pre-existing gaps, not rulings.)
+- The compilation-scoped set (same paragraph): "there is ONE tenant set — the union of the tenant tables of every file compiled together, whatever database each names".
+
+## Reproductions (EXECUTED at compiler == e014f20ce; harness .tmp/repro1/run.mjs, scratch)
+
+- ITEM 1: app.scrml (`<schema>` CREATE TABLE assets (…, tenant_id)) + admin.scrml (no schema, same `db="app.db"`), compiled together; seeded bun:sqlite with A/B rows; pinned A via session.set in each module; called each read in-process.
+  - app.server.js:   `_scrml_tenant_scope(await _scrml_sql\`SELECT name, assets.tenant_id AS __scrml_tenant_0 FROM assets\`, …)` → `[{"name":"A-asset"}]`
+  - admin.server.js: `return await _scrml_sql\`SELECT name FROM assets\`;` → `[{"name":"A-asset"},{"name":"B-secret-asset"}]`  **LEAK — B's row served to a request pinned to A.** Diags: only I-TENANT-STRIP@app.scrml.
+- ITEM 2: notes.scrml `<schema>` CREATE TABLE notes (id, body) + `ALTER TABLE notes ADD COLUMN tenant_id TEXT`; pinned A → `SELECT body FROM notes` emitted unfiltered → `[{"body":"A-note"},{"body":"B-secret-note"}]` **LEAK**; no diagnostics. noteshaz.scrml adds `CREATE VIEW all_notes AS SELECT * FROM notes` → compiles with NO E-TENANT-SCHEMA-HAZARD (accepted).
+
+## Traced loci (brief hypotheses)
+
+- emit-server.ts `_tenantCtx = buildTenantContext(_protectCtx, extractDesiredSchema(fileAST).tenantTables, …)` — HELD: the `<schema>` half is per file.
+- tenant-egress.ts `buildTenantContext` — REFINED: correct as a merge; the defect is its INPUT (one file's schema). Its `<db tables=>` half (`protectCtx.schemaByTable`) is ALREADY compilation-wide.
+- protect-analyzer.ts — WRONG as a locus for item 1: `paResult.protectAnalysis` is one compilation-wide analysis (its views map spans every file's `<db>`).
+- Additional locus found: emit-tool.ts `beginToolTenantFloor` (a `kind="tool"` program) — same per-file build.
+- Item 2: schema-differ.js `schemaTableDeclarations` (the shared recognizer feeding extractDesiredSchema's tenantTables union, #1313's `schemaTenantTableNames`, and E-SCHEMA-015's `findTenantDeclarationDisagreements`) reads CREATE TABLE column lists and DSL heads only — HELD.
+
+## Fix (8dc988168, code + tests one commit; pre-commit 30901 tests pass)
+
+- tenant-egress.ts: NEW `compilationTenantSet(files, protectCtx)` (registry once + per file `extractDesiredSchema().tenantTables` ∪ `fileSchemaTenantNames`), `COMPILATION_TENANT_KEY` / `compilationTenantOf`; `buildTenantContext(..., compilation?)` unions it (a stale set cannot narrow). Per-write limb keeps its own file's schema text (hazards anywhere are already refused compilation-wide).
+- api.js TENANT-SCHEMA: computes the set ONCE, passes `.tables` to `fileTenantSchemaHazards` and the object to runCG (`compilationTenant`). codegen/index.ts: attaches it to every file AST (recomputes with the same function only when runCG is driven directly). emit-server.ts + emit-tool.ts: `buildTenantContext(..., compilationTenantOf(fileAST))`.
+- schema-differ.js: NEW `alterTableTenantDecls` (fail-closed: `ALTER TABLE [IF EXISTS] [ONLY] <t>` whose text names `tenant_id` anywhere; extent to next ALTER/CREATE / wrapper edge / `{` `}` outside `${}` — NOT `;`); `schemaTableDeclarations` augments every same-key declaration in the body + lists the ALTER (form "alter"). gauntlet E-SCHEMA-015 describeDecl handles "alter". d.ts updated.
+- Found while building the conformance case: the SAME per-file hole hit an IMPORTED library module (`export function listAssets()` reading `assets` declared in the importer) — base emitted it unfiltered; fixed by the same set.
+
+## After (EXECUTED, same harness)
+- ITEM 1: admin.server.js `return _scrml_tenant_scope(await _scrml_sql\`SELECT name, assets.tenant_id AS __scrml_tenant_0 FROM assets\`, …)` → pinned A `[{"name":"A-asset"}]`; I-TENANT-STRIP@admin.scrml.
+- ITEM 2: notes read filtered → pinned A `[{"body":"A-note"}]`; the view over notes → E-TENANT-SCHEMA-HAZARD.
+
+## Measurements (base = e014f20ce compiler sources flipped in place, restored after; same paths)
+- Multi-file projects, base vs head: examples/22-multifile (3), examples/23-trucking-dispatch (36), examples/ (71), stdlib/ (53), flogence/src (28, read-only, output under .tmp): 0 artifact diffs, 0 diagnostic diffs.
+- Single-file corpus (examples/ samples/ conformance/cases/ stdlib/, 2349 files): 0 artifact diffs, 0 diagnostic diffs. Newly filtered reads in real projects: NONE (no corpus program reads a table another file tenant-scopes; no corpus ALTER TABLE names tenant_id — 10 files hold ALTER TABLE, none with tenant_id).
+- Conformance: 4 NEW cases (tenant/floor-imported-module-read-pos, -write-neg, floor-alter-add-tenant-column-pos, -neg) — each FAILS on base, PASSES on head (codes probe). The harness's multi-file `files` convention gathers only IMPORTED siblings and run() has no server, so the two-`<program>` runtime case is not expressible there; the executed two-program pin-A case lives in compiler/tests/unit/tenant-floor-project-set.test.js. `bun conformance/run.ts`: 1283/1333 pass + 50 xfail.
+
+## ITEM 3 — ruling, NOT built
+Searched §14.8.10, §14.8.11 (incl. §14.8.11.1), §34 — no governing sentence says the compiler owns/maintains the tenant policy and RLS state such that an author `<schema>` statement removing it is an error. Closest text (none is that sentence):
+- §14.8.11 "S6 bounded role is MANDATORY, not optional … the per-request principal MUST drop to the bounded `NOBYPASSRLS` `scrml_app` role. A1 without S6 is a silent no-op" — governs what the COMPILER emits, not author statements.
+- §14.8.11.1 "The scrml-managed security objects are roles/policies (never tables) … the idempotent `DROP POLICY IF EXISTS scrml_tenant_iso` re-creates its own policy in place and never touches a hand-authored one" — descriptive, in the never-clobber-fence paragraph; and "The compiler SHALL NOT make the app process able to apply or alter the security DDL" — about the app principal.
+- §14.8.10 fail-closed clause (S455): "…and any other `<schema>` statement that names a tenant-scoped table (or a view over one) — `CREATE TABLE … AS SELECT`, `INHERITS`, a virtual table over it, a rename of it" — LITERALLY covers `DROP POLICY … ON <t>`, `ALTER TABLE <t> DISABLE|NO FORCE ROW LEVEL SECURITY`, `GRANT … ON <t> TO PUBLIC`, `ALTER TABLE <t> OWNER TO …` (4 of the 6), but NOT `SET row_security = off` / `ALTER|CREATE ROLE … BYPASSRLS` (name no table). impl#1 exempts the 4 via `INERT_LEADERS` (DROP/GRANT/SET) and "ALTER TABLE <t> naming its own target is fine" — a #1313 PA reading recorded nowhere in SPEC (SPEC's only stated exemption is "an index"). So SPEC-vs-impl divergence exists on that clause either way; read literally it would also charge `ALTER TABLE <t> ADD COLUMN x`, which no one intends.
+- Also relevant: impl#1's `scrml db-migrate` never executes raw `<schema>` statements (raw DDL is declined; `extractDesiredSchema` tables with `rawDdl` are skipped), so today these statements reach a database only via the author's own process — same model as #1313's hazards ("the schema as it will exist").
+Recommendation for bryan: CHARGE them — new hazard kind "isolation removal" under E-TENANT-SCHEMA-HAZARD, fail-closed, against a tenant-scoped table (or every tenant table when no table is named): `DROP POLICY` on a tenant table (any name — a dropped restrictive policy is also a narrowing removed), `ALTER TABLE <t> DISABLE|NO FORCE ROW LEVEL SECURITY`, `ALTER TABLE <t> OWNER TO`, `GRANT … ON <t>` to PUBLIC or any role other than scrml_app, `ALTER|CREATE ROLE … BYPASSRLS` / `SUPERUSER`, and `SET row_security` / `SET ROLE` in `<schema>`; AND amend the fail-closed clause to state the exemptions impl#1 already applies (ALTER TABLE <t> column/constraint changes on its own target, DROP INDEX, GRANT/REVOKE not listed above, PRAGMA). Rationale: §14.8.11's own text calls an RLS that "looks enforced and isn't" worse than none; the cost is ~0 (corpus has no RLS DDL in any `<schema>`).
+- Verbatim, per the brief: searched §14.8.10, §14.8.11, §34 — no governing sentence. Item 3 not built; surfaced as a ruling for bryan (recommendation above).
+
+## Self-review hardening + gates
+- e9d514cac: `alterStatementEnd` stopped at the inner `ALTER` of `ALTER TABLE notes ALTER COLUMN …, ADD COLUMN tenant_id` (under-scope). Now the stop is only an `ALTER TABLE` / `CREATE` head outside `'…'` / `"…"` and `--` / nesting `/* */` comments; every misreading lengthens (over-declares). Tests added. First commit attempt failed the pre-commit `--bail` gate while commit 1e59ccda8's post-commit full suite was running concurrently; the full gate re-run in isolation was 28597 pass / 0 fail (+ 2239 top-level parser tests, 0 fail) and the retried commit passed the hook — treated as contention, not a defect.
+- Pre-push: types-gate OK (190, unchanged); s34-census --check-new PASS (2 changed §34 rows); regen-spec-index --check OK; facts --check PASS. conformance 1283/1333 + 50 xfail.
+- Residual noted (not built, pre-existing class): a `${…}` table name or column in a `<schema>` ALTER/CREATE is unreadable; with no tenant table elsewhere in the compilation the hazard checker does not run, so a dynamically-spelled `tenant_id` is not seen.

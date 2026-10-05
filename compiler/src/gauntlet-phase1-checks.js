@@ -904,7 +904,7 @@ function checkSchemaDeclarations(ast, filePath, errors) {
     // floor), so a commented-out copy counts and the message says it is commented.
     const lineOf = (off) => (off >= 0 ? body.slice(0, off).split("\n").length : 0);
     const describeDecl = (d) =>
-      `${d.form === "raw" ? `\`CREATE TABLE ${d.name} (…)\`` : `\`${d.name} { … }\``} ` +
+      `${d.form === "raw" ? `\`CREATE TABLE ${d.name} (…)\`` : d.form === "alter" ? `\`ALTER TABLE ${d.name} … tenant_id …\`` : `\`${d.name} { … }\``} ` +
       `(line ${lineOf(d.offset)} of the \`<schema>\` body${d.commented ? ", inside a comment" : ""})`;
     for (const dis of findTenantDeclarationDisagreements(body)) {
       errors.push(new GauntletError(

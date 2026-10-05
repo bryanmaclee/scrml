@@ -1,0 +1,13 @@
+{
+  "id": "tenant-floor-imported-module-write-neg",
+  "description": "§14.8.10 (S455) — a write in an imported module to a table another compiled file declares tenant-scoped is held to the floor. ./writer.scrml INSERTs into `assets` naming `tenant_id` (a forged owner) without `.acrossTenants()`; `assets` is tenant-scoped only by case.scrml's `<schema>`. Before S455 the per-file tenant set left writer.scrml with no tenant table, so the forged INSERT compiled clean. Now it is E-TENANT-WRITE.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-floor-project-set.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 Write bullet: everything other than an injectable subset write on a tenant table without `.acrossTenants()` is E-TENANT-WRITE — among them \"an INSERT that names `tenant_id` (the floor cannot verify the chosen tenant)\". S455: the tenant set is the compilation's, so the table is tenant-scoped in every file compiled together.",
+  "expect": {
+    "codes": [
+      "E-TENANT-WRITE"
+    ]
+  }
+}
