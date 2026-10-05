@@ -62,7 +62,7 @@ const CLI_TOOL = `<program kind="tool" lang="ts" db="./fleet.db">
         const cmd = args[0]
         if cmd == "fail" { return 7 }
         const n = loadCount()
-        _={ console.log(banner(n)) }=
+        _={ in: { banner, n } console.log(banner(n)) }=
         return 0
     }
 </program>`;
@@ -119,7 +119,7 @@ describe("§64 tool target — emit shape", () => {
       type Cmd:enum = { List, Add }
       function main(args: string[]): number {
         const c = Cmd.List
-        _={ console.log(c) }=
+        _={ in: { c } console.log(c) }=
         return 0
       }
     </program>`);
@@ -509,7 +509,7 @@ function main(args: string[]): number {
     const src = `<program kind="tool" lang="ts">
 import { clamp } from "scrml:math"
 function main(args: string[]): number {
-  _={ in: {} console.log("clamped=" + clamp(15, 0, 10)) }=
+  _={ in: { clamp } console.log("clamped=" + clamp(15, 0, 10)) }=
   return 0
 }
 </program>`;
@@ -539,9 +539,12 @@ function main(args: string[]): number {
 </program>`;
     const { out } = compileSource(src, { name: "toolni" });
     expect(out.toolJs).toBeTruthy();
-    // no leading `import` line — the header is empty for a no-import tool.
+    // no leading `import` line — the header is empty for a no-import tool. (The
+    // slice's §23.2.4a seal helper is an inlined runtime helper, which the tool emit
+    // places ahead of the banner like every other one — not an import.)
     expect(out.toolJs.trimStart().startsWith("import ")).toBe(false);
-    expect(out.toolJs.startsWith("// Generated standalone tool")).toBe(true);
+    expect(out.toolJs).not.toMatch(/^import /m);
+    expect(out.toolJs).toContain("// Generated standalone tool");
   });
 
   test("#1 co-resident tool + browser <page> share a pure-fn helper (additive)", () => {
@@ -554,7 +557,7 @@ import { addup } from "./helper.scrml"
       tool: `<program kind="tool" lang="ts">
 import { addup } from "./helper.scrml"
 function main(args: string[]): number {
-  _={ in: {} console.log("sum=" + addup(2, 3)) }=
+  _={ in: { addup } console.log("sum=" + addup(2, 3)) }=
   return 0
 }
 </program>`,
@@ -623,7 +626,7 @@ describe("§64 tool imports — fix-round hardening (#3/#4/#5/#6-7)", () => {
       tool: `<program kind="tool" lang="ts">
 import { addup } from "./pagehelper.scrml"
 function main(args: string[]): number {
-  _={ in: {} console.log("s=" + addup(1, 2)) }=
+  _={ in: { addup } console.log("s=" + addup(1, 2)) }=
   return 0
 }
 </program>`,

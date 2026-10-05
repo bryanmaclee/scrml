@@ -21,6 +21,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 // to travel with the emit or the reference is a ReferenceError at import time.
 import { SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 // §59 value-native map/set runtime — the SAME marker-delimited slice of
 // `runtime-template.js` that `emit-server.ts` injects (g-value-native-map-set-
@@ -69,6 +70,9 @@ const LIB_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
   // §19.8.3 (S451 R11) — a `?{}` handled by `!{}` / `match` (sql-attempt.ts).
   { sig: `${SQL_ATTEMPT_FN}(`, src: SERVER_SQL_ATTEMPT_HELPER },
+  // §23.2.4a — a `<foreign lang>` library fn's `_={ }=` slice is built in its
+  // sealed scope by this helper (foreign-seal.ts).
+  { sig: `${FOREIGN_SEAL_FN}(`, src: SERVER_FOREIGN_SEAL_HELPER },
 ];
 
 /**

@@ -1,0 +1,21 @@
+<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        const greeting = "hello"
+        const n = 2
+        const sum = _={ in: { n } await Promise.resolve(n + 40) }=
+        const joined = _={ in: { greeting, n }
+            const parts = [greeting];
+            for (let i = 0; i < n; i++) parts.push("x");
+            return parts.join("-");
+        }=
+        const host = _={ [typeof Bun, typeof process, typeof fetch, typeof globalThis].join("/") }=
+        const nothing = _={ in: { n }
+            const unused = n + 1;
+        }=
+        println(sum, joined, host)
+        if (nothing is not) {
+            println("absent")
+        }
+        return 0
+    }
+</program>

@@ -1,0 +1,12 @@
+<program lang="js">
+    ${
+        function f(x) {
+            const out = _={ in: { x }
+                const y = x +;
+                return y;
+            }=
+            return out
+        }
+    }
+    <button onclick=f(1)>go</button>
+</program>

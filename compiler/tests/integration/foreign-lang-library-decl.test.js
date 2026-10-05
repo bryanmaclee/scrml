@@ -117,9 +117,11 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     const r = compile("lanes", src);
     expect(r.errorCodes).toEqual([]);
     expect(r.libExists).toBe(true);
-    // The `_={ … }=` no longer leaks — it lowered to the §23.2.4a async IIFE.
+    // The `_={ … }=` no longer leaks — it lowered to the §23.2.4a SEALED slice.
     expect(r.libraryJs).not.toContain("_={");
-    expect(r.libraryJs).toContain("await (async (model, prompt) =>");
+    expect(r.libraryJs).toContain("`async function (model, prompt) {");
+    expect(r.libraryJs).toContain("(model, prompt);");
+    expect(r.libraryJs).toContain("function _scrml_foreign_seal(site, source)");
     // The enclosing fn was async-marked (the injected boundary await needs it).
     expect(r.libraryJs).toContain("export async function runOpen");
     // And the emitted module is valid ES.
@@ -218,7 +220,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     expect(r.serverExists).toBe(true);
     expect(r.serverJs).not.toContain("_={");
     expect(r.serverJs).toContain("SELECT id, name FROM fsp_task");
-    expect(r.serverJs).toContain("await (async (frame) =>");
+    expect(r.serverJs).toContain("`async function (frame) {");
   });
 
   // -------------------------------------------------------------------------

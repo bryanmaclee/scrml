@@ -1,0 +1,13 @@
+{
+  "id": "foreign-slice-no-free-capture-neg",
+  "description": "§23.2.4a no free lexical capture — a `_={ … }=` slice cannot see an enclosing scrml local it does not cross (`hidden`) nor a module-level scrml binding (`banner`). Probed with `typeof`, which reads an unbound name as \"undefined\" instead of throwing, so the observable is the slice's view of its own scope: the first slice crosses nothing and sees neither name; the second crosses `n` and sees `n` but still not `hidden`. Run as a `kind=\"tool\"` program so the slice EXECUTES (a foreign slice is host code; its scope is a runtime property, not a diagnostic).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-sealed-scope.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a crossing grammar: \"The named values are the ONLY things that cross — there is NO free lexical capture (the slice sees only what `in:{}` names).\" An implementation that lowers the slice in place (an in-process closure over the enclosing scope) prints \"string,string\" and \"number,string\" — the escape g-foreign-iife-captures-module-scope-s454 recorded, where the same leak reached the compiler's raw database handle. The seal removes scrml-scope and compiler-owned bindings only; host globals stay reachable (see foreign-slice-sealed-crossings-pos).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-FOREIGN-", "E-TOOL-"],
+    "stdout": "undefined,undefined\nnumber,undefined\n"
+  }
+}

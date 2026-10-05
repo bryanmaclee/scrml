@@ -1,0 +1,13 @@
+{
+  "id": "foreign-slice-sealed-crossings-pos",
+  "description": "§23.2.4a positive, executed — what DOES reach a sealed slice. The `in:{}` crossings (`n`, `greeting`) arrive as values; a single-expression slice may `await` internally and the boundary await settles it (`sum` = 42); a multi-statement slice runs verbatim and returns through its own `return` (`joined` = \"hello-x-x\"); host globals stay reachable (`Bun`, `process`, `fetch`, `globalThis`); a multi-statement slice with no `return` settles to `not` (\"absent\"). The twin of foreign-slice-no-free-capture-neg: the seal takes away scrml scope, not host capability.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-sealed-scope.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: the `in:{}` names are the values that cross; the slice body is a verbatim ts/js slice in either the single-expression shape (codegen supplies the `return`) or the multi-statement shape (the slice SHALL carry its own `return`; one that never returns settles to `undefined`, which crosses the §13180 boundary as `not` per §42); the slice MAY use `await` internally and the boundary `await` is injected by codegen. §23.2.3: foreign code is author-trusted host code — sealing its scope against scrml bindings is not a sandbox, so host globals remain reachable.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-FOREIGN-", "E-TOOL-"],
+    "stdout": "42 hello-x-x object/object/function/object\nabsent\n"
+  }
+}

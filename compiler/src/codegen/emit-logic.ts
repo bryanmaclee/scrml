@@ -18,6 +18,8 @@ import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
+import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax } from "./foreign-seal.ts";
+import { resolveLogLoc } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, type SqlQueryExprShape } from "./sql-attempt.ts";
@@ -3490,12 +3492,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
     case "foreign": {
       // dpa-003 (S216) — inline value-returning `_={ … }=` foreign-code block.
-      // SPEC §23.2 / §13180: codegen wraps the OPAQUE verbatim slice in an
-      // async IIFE so its settled value flows back to the enclosing scrml
-      // expression with the await INJECTED at the boundary (no source-level
+      // SPEC §23.2 / §13180: codegen turns the OPAQUE verbatim slice into a
+      // SEALED async function (built once, in global scope — see the end of this
+      // arm and foreign-seal.ts) so its settled value flows back to the enclosing
+      // scrml expression with the await INJECTED at the boundary (no source-level
       // await needed on the scrml side — mirrors `case "sql"`). The `in:{}`
-      // crossing names become the IIFE params and are called with the same-named
-      // enclosing locals — the ONLY values that cross (no free lexical capture).
+      // crossing names are its parameters and it is called with the same-named
+      // enclosing locals — the ONLY values that cross (no free lexical capture,
+      // §23.2.4a).
       //
       // ts/js ONLY (the value crosses NATIVELY — same Bun runtime, no
       // marshaling). A non-ts/js `lang=` is rejected upstream (E-FOREIGN-005,
@@ -3506,7 +3510,6 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const crossings: string[] = Array.isArray((node as any).crossings)
         ? (node as any).crossings
         : [];
-      const params = crossings.join(", ");
       const argList = crossings.join(", ");
       // The slice is verbatim foreign ts/js. Value-flow rule (§23.2.4a):
       //   - SINGLE EXPRESSION (no top-level `;` statement separator and no
@@ -3555,7 +3558,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `names` (the crossing set). Same depth/string/comment/template skipping as
       // scanForeignSliceShape — a binding keyword inside a nested `{}`/`()`/`[]`,
       // a string, a comment, or a template literal is NOT top-level and does not
-      // collide with the IIFE parameter (only the IIFE-body's own top level does).
+      // collide with the slice parameter (only the slice body's own top level does).
       // Recognised binding heads: `const`/`let`/`var`/`function`/`class <name>`.
       // (`function`/`class` may carry intervening `*`/whitespace before the name.)
       const scanForeignSliceTopLevelBindings = (src: string, names: Set<string>): string[] => {
@@ -3601,10 +3604,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         return [...found];
       };
       // CROSSING-SHADOW guard (E-FOREIGN-006). The `in:{}` crossing names become
-      // the async-IIFE PARAMETERS (above). If the verbatim slice ALSO declares a
-      // TOP-LEVEL binding of the same name (`const`/`let`/`var`/`function`/`class`),
-      // the emitted IIFE redeclares an identifier already bound by the parameter —
-      // e.g. `(async (x) => { const x = … })(x)` — which is invalid JS. Without
+      // the sealed slice function's PARAMETERS (below). If the verbatim slice ALSO
+      // declares a TOP-LEVEL binding of the same name (`const`/`let`/`var`/
+      // `function`/`class`), the slice redeclares an identifier already bound by
+      // the parameter — e.g. `async function (x) { const x = … }` — which is
+      // invalid JS (and for `var`/`function`, a silent overwrite of the crossing). Without
       // this guard the failure surfaces post-emit as the MISLEADING
       // E-CODEGEN-INVALID-LOGIC ("compiler defect — please report it"), even though
       // it is AUTHOR error: the author chose a crossing name that collides with a
@@ -3628,13 +3632,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             "E-FOREIGN-006",
             `E-FOREIGN-006: the inline foreign block crosses ${singular ? "a name" : "names"} ` +
             `(${names}) that the slice ${singular ? "also declares" : "also declare"} ` +
-            `at its top level. The \`in:{}\` crossing ${singular ? "name becomes an async-IIFE parameter" : "names become async-IIFE parameters"}, ` +
+            `at its top level. The \`in:{}\` crossing ${singular ? "name becomes a parameter of the sealed slice" : "names become parameters of the sealed slice"}, ` +
             `so a same-named \`const\`/\`let\`/\`var\`/\`function\`/\`class\` inside the slice ` +
             `redeclares the parameter — invalid JS. Rename the crossing ${singular ? "name" : "names"} ` +
             `or the slice-local binding so they do not collide. See SPEC §23.2.4a.`,
             span,
           ));
-          // Decline to emit the redeclaring IIFE — the error stops the build, and
+          // Decline to emit the redeclaring slice — the error stops the build, and
           // a defensive `null` keeps the surrounding expression syntactically
           // well-formed (no cascade into the misleading E-CODEGEN-INVALID-LOGIC).
           return `null /* E-FOREIGN-006: crossing-shadow (${names}) */`;
@@ -3642,8 +3646,40 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
       const { topLevelReturn, topLevelStmtSep } = scanForeignSliceShape(slice);
       const singleExpression = !topLevelReturn && !topLevelStmtSep;
-      const inner = singleExpression ? `return (${slice});` : slice;
-      return `await (async (${params}) => { ${inner} })(${argList});`;
+      // The newline before `)` keeps a trailing `//` comment in a one-expression
+      // slice from swallowing the paren.
+      const inner = singleExpression ? `return (${slice}\n);` : slice;
+      // §23.2.4a — NO free lexical capture. The slice is NOT spliced in place
+      // (an in-place IIFE closes over every enclosing local and every module
+      // binding, the raw db handle included — g-foreign-iife-captures-module-
+      // scope-s454). It is carried as source text and built ONCE, in global
+      // scope, by the `_scrml_foreign_seal` runtime helper (foreign-seal.ts):
+      // the crossings are its parameters and are passed at the call, which keeps
+      // the codegen-injected boundary `await` here at the call site.
+      const sliceSource = foreignSliceSource(crossings, inner);
+      const span = (node as any).span ?? { start: 0, end: 0 };
+      const site = foreignSiteLabel(resolveLogLoc(span));
+      // The artifact's syntax gate cannot see inside a string, so the slice is
+      // checked HERE, as the helper will build it — an author error at the slice
+      // (E-FOREIGN-007), not the old post-emit "compiler defect" framing.
+      const syntaxProblem = checkForeignSliceSyntax(sliceSource);
+      if (syntaxProblem) {
+        const sink = (opts as any).foreignCrossingErrors as CGError[] | undefined;
+        if (sink) {
+          const where = syntaxProblem.sliceLine !== null ? ` (line ${syntaxProblem.sliceLine} of the slice)` : "";
+          sink.push(new CGError(
+            "E-FOREIGN-007",
+            `E-FOREIGN-007: the inline foreign slice at ${site} is not valid JavaScript as written: ` +
+            `${syntaxProblem.message}${where}. A slice is evaluated as the body of a sealed async ` +
+            `function — not a module — so \`import.meta\` and static \`import\` are unavailable ` +
+            `(use \`__dirname\` / \`__filename\` / \`require\` / \`await import(…)\`), and the compiler ` +
+            `does not strip TypeScript type syntax from a slice. See SPEC §23.2.4a.`,
+            span,
+          ));
+        }
+        return `null /* E-FOREIGN-007: the foreign slice at ${site.replace(/\*\//g, "* /")} does not parse */`;
+      }
+      return `await ${FOREIGN_SEAL_FN}(${JSON.stringify(site)}, ${templateLiteralOf(sliceSource)})(${argList});`;
     }
 
     case "sql": {
