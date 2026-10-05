@@ -284,3 +284,14 @@ base: 500, nothing logged). Pre-ruling measurement (from the rule's own classifi
   changes, 0 diagnostic-code changes, syntax 0/0, bare server-fn sites 197 = 197; 464 of 11456 artifacts differ —
   347 noise (hash / renumbering / work-dir path) + 117 server.js read lowering (`_scrml_sql_attempt` + the `not` /
   `[]` arm). No client batching change.
+
+## S239 r2 (LAND-WITH-NITS) — MED F1 + LOW F2 fixed (9a49a449f)
+- A READ is now allowlisted, fail closed: one statement; SELECT / VALUES lead; no write keyword; NO locking clause
+  (any `FOR`); every function call in PURE_FUNCTIONS (aggregates, coalesce/ifnull/nullif/iif/cast/greatest/least,
+  string, abs/round, date/time, json_extract/object/array); no unmodelled string form (`E'…'`, `U&'…'`/`X'…'`,
+  `$…$`, a backslash in quoted text) — else WRITE. `sqlWriteReason` names the cause ("a call of `nextval(…)`, which
+  may have side effects"; "a locking clause"). Tests 23 (F1 / F2 shapes listed; allowlisted aggregate / scalar
+  reads rewritten; idempotence). commands 517/517; types gate unchanged; pre-commit 30700/0.
+- Re-applied from the base corpus: the output is BYTE-IDENTICAL to a78351c06's corpus (same 150 sites / 117 files;
+  no site moved to listed). Corpus and compiler/src outside commands/ unchanged, so conformance (case by case),
+  the bootstrap counter and the emit differential are as measured at a78351c06.
