@@ -61,7 +61,8 @@
  * ═══ THE GATE (transactional, per file) ═══
  *   1. impl#1's front end re-reads the rewritten file with the same block-splitter error codes.
  *   2. impl#1 re-compiles it in its project: diagnostic codes (errors, warnings, lint) identical.
- *   3. The rewritten sites are no longer unhandled (the re-read finds `edits` fewer sites).
+ *   3. impl#1 batches the file's server calls (§13.2 Promise.all, read from its client JS) the same.
+ *   4. The rewritten sites are no longer unhandled (the re-read finds `edits` fewer sites).
  * Any failure reverts the WHOLE file and reports why.
  *
  * Idempotent: a rewritten `?{}` is handled, so a second run makes no edit.
@@ -70,9 +71,9 @@
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { captureTrailingContentWarnings, guardCallArmsRaw } from "../expression-parser.ts";
-import { rmSync } from "node:fs";
-import { resolve } from "node:path";
-import { skipBalanced, endsStatement, lineOf, scratchProject, compileWithRI } from "./fix-client-server-call.js";
+import { rmSync, readdirSync, copyFileSync, existsSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { skipBalanced, endsStatement, lineOf, scratchProject, compileWithRI, promiseAllBatches } from "./fix-client-server-call.js";
 
 export const SQL_FAILABLE_RULE = "sql-failable";
 
@@ -249,6 +250,14 @@ export function fixSqlFailable(source, opts = {}) {
   const block = (off, reason) => blockers.push({ rule: SQL_FAILABLE_RULE, line: typeof off === "number" ? lineOf(source, off) : 0, reason, snippet: typeof off === "number" ? snippetAt(off) : "" });
 
   const proj = scratchProject(filePath, source, opts.auxSources);
+  // The verify compile reads a `<db src=…>` database beside the file when one exists (its schema
+  // decides e.g. `SELECT *` expansion under `protect=`, I-PROTECT-STRIP-001). Mirror the file's
+  // sibling database files into the scratch project so before/after see what an in-place compile
+  // sees (measured S455 Phase 2: a gate blind to `test.db` passed a file whose in-place codes changed).
+  try {
+    const here = dirname(resolve(filePath));
+    if (existsSync(here)) for (const f of readdirSync(here)) if (/\.(db|sqlite3?)$/i.test(f)) copyFileSync(join(here, f), join(dirname(proj.target), f));
+  } catch { /* best effort: the gate then compiles without the database, as before */ }
   try {
     const before = compileWithRI(proj, source);
     if (before.error || !before.ast) {
@@ -331,6 +340,17 @@ export function fixSqlFailable(source, opts = {}) {
       if (after.error || !after.ast) { block(uniq[0].start, `${after.error ?? "impl#1 built no tree"} after the rewrite — no \`?{}\` in this file rewritten`); return none; }
       if (!sameCodes(before.codes, after.codes)) {
         block(uniq[0].start, `impl#1 reports different codes after the rewrite (${before.codes.join(",") || "none"} → ${after.codes.join(",") || "none"}) — no \`?{}\` in this file rewritten`);
+        return none;
+      }
+      // impl#1 stops batching a CALLER's independent calls (§13.2 Promise.all) of a function that
+      // now holds a handled `?{}` (measured S455 Phase 2: sql-transaction-*-rt). Sequential calls
+      // change what a partial failure writes, so a file whose own client batches change is
+      // reverted — read from impl#1's emitted client JS on both sides, not re-derived.
+      const batchesBefore = promiseAllBatches(before.clientJs);
+      const batchesAfter = promiseAllBatches(after.clientJs);
+      const key = (b) => (b ? [...b.inFn, ...[...b.inHandler].map((c) => `handler::${c}`)].sort().join("|") : "(unreadable)");
+      if (key(batchesBefore) !== key(batchesAfter)) {
+        block(uniq[0].start, "impl#1 batches this file's server calls differently after the rewrite (its Promise.all batching, §13.2, would change what a partial failure writes) — no `?{}` in this file rewritten");
         return none;
       }
       const had = sites.filter((s) => s.action === "rewrite").length;

@@ -22,7 +22,7 @@
         }
     }
     function balanceOf(id: number) {
-        return ?{`SELECT balance FROM accounts WHERE id = ${id}`}.get() !{ _ :> not }
+        return ?{`SELECT balance FROM accounts WHERE id = ${id}`}.get()
     }
     function onOk() {
         transfer(4) !{

@@ -253,6 +253,23 @@ describe("sql-failable — listed, never rewritten", () => {
     expect(r.infos).toEqual([]);
     expect(reasons(r).some((x) => /different codes after the rewrite/.test(x) && /E-FN-001/.test(x))).toBe(true);
   });
+  test("the gate: a rewrite that changes impl#1's Promise.all batching of a caller reverts the file (§13.2)", () => {
+    const src = program([
+      "  <b1> = not",
+      "  <b2> = not",
+      "  ${ function balanceOf(id: number) {",
+      `      return ${q("SELECT n FROM t WHERE id = ${id}")}.get()`,
+      "  } }",
+      "  ${ function onRead() {",
+      "      @b1 = balanceOf(1)",
+      "      @b2 = balanceOf(2)",
+      "  } }",
+      "  <button onclick=onRead()>read</button>",
+    ]);
+    const r = fix(src);
+    expect(r.changed).toBe(false);
+    expect(reasons(r).some((x) => /batches this file's server calls differently/.test(x))).toBe(true);
+  });
   test("a listed site does not stop the other sites in the file", () => {
     const src = program([
       "  ${ function a() {",
