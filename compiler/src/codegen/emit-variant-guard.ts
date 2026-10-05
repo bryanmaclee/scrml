@@ -95,6 +95,7 @@
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
+import { colorActiveHandler } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1274,7 +1275,20 @@ function emitArmWireFunction(
     if (lowered !== null) {
       return `function(event) { ${preventLine}${lowered}; }`;
     }
-    return `function(event) { ${preventLine}${handlerName}(${callArgs}); }`;
+    // S454 (bryan: "a yes, b yes, root fix") — §19.6.8: a call-ref handler's
+    // rejection reaches the logging surface whatever site registers it. This
+    // in-arm, non-delegable registration never coloured its handler, so an
+    // async callee was fired unobserved. Colour it under the active client
+    // emission exactly as the row / lift emitters do (`colorActiveHandler`):
+    // an async callee is awaited inside the S453 rejection arm; a sync callee
+    // is returned verbatim (byte-identical). `handlerName` is the AUTHOR name
+    // (the post-fn-name-mangle pass renames it), which is what the colouring
+    // resolves.
+    return colorActiveHandler(
+      `function(event) { ${preventLine}${handlerName}(${callArgs}); }`,
+      binding.span,
+      { boundaryId: `${binding.eventName} ${binding.placeholderId}` },
+    );
   }
 
   for (const binding of wireableEvents) {
