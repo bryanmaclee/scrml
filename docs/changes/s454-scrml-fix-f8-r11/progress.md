@@ -80,3 +80,15 @@ now). Rules NOT built; corpus NOT rewritten.
 - SPEC-INDEX + FACTS regenerated; `regen-spec-index.ts --check` OK 72/72; `facts.ts --check` PASS.
 - Pre-commit gate on that commit: 30642 pass / 0 fail.
 - Scratch `.tmp/p0` deleted.
+
+## PA decision (after the STOP) — OPTION 2
+Build ONLY `client-server-call` (§19.9.10) with `!{ .Transport(t) :> { return } }`; `sql-failable` (R11) NOT built,
+pending an operator ruling. SPEC bare-`:> return` examples NOT edited (separate question). BRIEF.md left as is.
+
+### New evidence for the EXISTING gap `g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454` (no duplicate filed)
+- Reach: 257 declaration-RHS sites of 602 unhandled R11 sites (43%) — every `!{}`-handled spelling of them fails impl#1
+  (all arm forms, `_ e :>`, named arms, parenthesized, plain assignment `x = ?{}… !{…}`; `.get()` as well as `.all()`).
+- SPEC §19.8.3 example 1 (`const row = ?{…}.get() !{ .QueryFailed(m) :> {…} … _ :> {…} }`) → exit 1, E-CODEGEN-INVALID-LOGIC.
+- SILENT-WRONG variant: `const row = match ?{…}.get() { ::Ok(r) :> r  _ :> not }` compiles at EXIT 0 but impl#1 moves
+  the function to the CLIENT and emits `null /* sql-ref unresolved: nodeId=-1 … */.get()` (runtime TypeError; no route).
+- `if (?{…}.get() !{ _ :> not })` emits a raw `!{ _ :> null }` into server JS (exit 1); `for (const r of ?{…}.all() !{…})` → E-PARSE-001.
