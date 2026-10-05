@@ -127,8 +127,20 @@ ${
     // (the declared `! E`, or the built-in `Error` for a bare `!`, §19.4.2);
     // `not` when it cannot fail, or when the declared type is not an enum
     // (E-ERROR-011 — then nothing is checked against it).
+    // s454 (U1b): `serverOwn` — its OWN body places it on the server (§12.2 T1 /
+    // T4: a `?{}` in it, or the deprecated `server` modifier) — syntactic, known
+    // in phase A, before any body is bound (design §2.5: "compute the
+    // own-trigger fact … ONCE in phaseA per function"); a Split function
+    // (§19.9.5) has it too. `rerr` — the failure enum of a CLIENT call of it
+    // (§19.9.10 "The failure set of a client call"): its declared enum plus ONE
+    // variant `Transport(t: ServerCallError)` (minted `E + Transport`; `E`
+    // itself when it already declares exactly that variant), or the shared
+    // `Transport` enum for a callee not declared `!`. `not`: not serverOwn, or
+    // its enum has a `Transport` variant of another shape (E-ERROR-016 at each
+    // client call site), or its error type is not an enum (E-ERROR-011).
     export type FnInfo:struct = { nid: int, span: ASpan, sym: Sym, name: string, file: string, exported: boolean,
-                                  pure: boolean, arity: int, ret: Type | not, failable: boolean, err: Sym | not }
+                                  pure: boolean, arity: int, ret: Type | not, failable: boolean, err: Sym | not,
+                                  serverOwn: boolean, rerr: Sym | not }
 
     // A classified write (§6.2): the capability, the instance, the edit, the check.
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
@@ -613,6 +625,7 @@ ${
         files: FileAst[],
         errorSym: Sym,          // s451 (Ue): the built-in `Error` enum (§19.4.2 — a bare `!`'s error type)
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
+        sceSym: Sym,            // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10)
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -676,11 +689,34 @@ ${
     // compiler MAY add additional variants").
     export fn builtinFile() -> string { return "scrml:builtin" }
 
+    // s454 (U1b) — §19.9.10 "The error type — `ServerCallError` (S454)": "The
+    // three kinds are carried by one built-in enum, **`ServerCallError`**. It is
+    // provided by the compiler, as `SqlError` is (§19.8.1): the developer SHALL
+    // NOT redefine it, it SHALL have at least the four variants below" —
+    // `Unreachable`, `Refused(status: int)`, `ServerFault(status: int)`,
+    // `Malformed(reason: string)`. Each variant's `renders` clause (§19.2) is
+    // not modelled: the bootstrap's AST carries no `renders` on a variant (as for
+    // `SqlError`), and the one route that displays one — the `<formFor>` submit
+    // dispatch (§19.6.6) into an `<errorBoundary>` — is not in the bootstrap.
+    export fn serverCallErrorName() -> string { return "ServerCallError" }
+
     fn builtinTypeDecls() -> ATypeDecl[] {
         return [
             builtinEnum("Error", [builtinVariant("Generic", ["message"])]),
             builtinEnum("SqlError", [builtinVariant("QueryFailed", ["message"]), builtinVariant("ConstraintViolation", ["field"]), builtinVariant("ConnectionLost", [])]),
+            builtinEnum(serverCallErrorName(), [builtinTyped("Unreachable", "", ""), builtinTyped("Refused", "status", "int"),
+                                                builtinTyped("ServerFault", "status", "int"), builtinTyped("Malformed", "reason", "string")]),
         ]
+    }
+
+    // A built-in variant with at most one field, of the named type ("" — none).
+    fn builtinTyped(name: string, field: string, ty: string) -> AVariant {
+        let fs: ATypeField[] = []
+        if (field != "") {
+            const at: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName(ty) }
+            fs = [{ nid: -1, span: mkSpan(0, 0), isLet: false, name: field, ty: at }]
+        }
+        return { nid: -1, span: mkSpan(0, 0), name: name, fields: fs }
     }
 
     fn builtinEnum(name: string, vs: AVariant[]) -> ATypeDecl {
@@ -2674,7 +2710,8 @@ ${
                 st = re.st
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
                                        exported: af.exported, pure: af.pure, arity: arity, ret: ret,
-                                       failable: af.failable, err: re.err }
+                                       failable: af.failable, err: re.err,
+                                       serverOwn: af.server || sqlsInBlock(af.body).length > 0, rerr: not }
                 st = addBind(st, af.nid, BindFact.BBind(r.s))
                 out = out.concat([{ info: info, f: af }])
             }
@@ -2699,6 +2736,143 @@ ${
         const es: Sym | not = enumStubSym(te, rt.t)
         if (es is some) return { err: es, st: rt.st }
         return { err: not, st: addDiag(rt.st, f.path, at.span, "E-ERROR-011", "the error type of `" + af.name + "(…)!` is not an enum — §19.4.4.1: \"The error type after `!` SHALL be an enum type\" (a `:enum` declaration, or the built-in `Error` when it is omitted). Declare the failures as variants: `type " + af.name + "Error:enum = { … }`") }
+    }
+
+    // =========================================================================
+    // s454 (U1b) — THE FAILURE ENUM OF A CLIENT CALL (§19.9.10 "The failure set
+    // of a client call (S454)"): "At a client call site … of a server-placed
+    // function `f`, the call fails with: `f`'s declared error enum's variants
+    // (when `f` is declared `! E`) … **plus** ONE variant, **`Transport(t:
+    // ServerCallError)`** … For an `f` not declared `!`, the failure set is
+    // `Transport(t: ServerCallError)` alone." and "A declared variant named
+    // `Transport`": "If `f`'s declared enum has a variant `Transport` whose
+    // payload is exactly `(t: ServerCallError)`, that variant IS the wrapper …
+    // A declared variant named `Transport` with any other payload (or none)
+    // SHALL be a compile error at the client call site — **`E-ERROR-016`**".
+    //
+    // Design Item 1 B "Core shape": "Lower mints one EnumDef per declared error
+    // enum used at a remote site — `E+Transport` = `E`'s variants followed by
+    // `Transport(t: ServerCallError)` (merged when `E` already has it) — plus one
+    // shared `{ Transport(t: ServerCallError) }` for non-`!` callees." Minted HERE
+    // (phase A, before any arm is resolved against it), once per declared enum,
+    // for every function whose own body places it on the server — a callee
+    // that may be called from the client (whether a site is a client call is
+    // decided per site, §19.9.10 "placement is whole-program"). The minted enums
+    // live in the built-in file: one ships in Core only when Core names it.
+    // E's variants come FIRST, in order, so a variant's index is the same in `E`
+    // and in `E + Transport` (an arm resolved against either reads the same).
+    // =========================================================================
+    type RRemoteEnums:struct = { fs: FnSrc[], minted: TypeInfo[], st: AS }
+    // A declared enum's id (-1: the shared enum of a non-`!` callee) → its remote enum.
+    type RemoteMemo:struct = { enumId: int, remote: Sym }
+    type RMintedEnum:struct = { ti: TypeInfo, st: AS }
+
+    fn remoteEnums(fs: FnSrc[], ts: TypeInfo[], sce: Sym, st0: AS) -> RRemoteEnums {
+        let st: AS = st0
+        let minted: TypeInfo[] = []
+        let memo: RemoteMemo[] = []
+        let out: FnSrc[] = []
+        for (const f of fs) {
+            let rerr: Sym | not = not
+            if (f.info.serverOwn) {
+                const e: Sym | not = f.info.err
+                let key: int = -1
+                let make = true
+                if (f.info.failable) {
+                    if (e is some) {
+                        key = e.id
+                        const shape: int = transportShape(ts, e, sce)
+                        if (shape == 0) {
+                            rerr = e              // E declares `Transport(t: ServerCallError)`: E IS the set
+                            make = false
+                        } else if (shape == 1) {
+                            make = false          // another `Transport`: E-ERROR-016 at each client call site
+                        }
+                    } else {
+                        make = false              // not an enum: E-ERROR-011 reported
+                    }
+                }
+                if (make) {
+                    // (named `prior`, not `known`: impl#1 resolves a narrowed local that shares
+                    // a top-level function's name to that FUNCTION — dogfood finding, progress.md)
+                    const prior: Sym | not = remoteMemoOf(memo, key)
+                    if (prior is some) {
+                        rerr = prior
+                    } else {
+                        const rm: RMintedEnum = mintRemoteEnum(ts, e, key, sce, st)
+                        st = rm.st
+                        minted = minted.concat([rm.ti])
+                        const ms: Sym = typeDefSym(rm.ti.def)
+                        memo = memo.concat([{ enumId: key, remote: ms }])
+                        rerr = ms
+                    }
+                }
+            }
+            out = out.concat([{ info: withRemoteErr(f.info, rerr), f: f.f }])
+        }
+        return { fs: out, minted: minted, st: st }
+    }
+
+    fn remoteMemoOf(memo: RemoteMemo[], key: int) -> Sym | not {
+        for (const m of memo) {
+            if (m.enumId == key) return m.remote
+        }
+        return not
+    }
+
+    fn withRemoteErr(i: FnInfo, rerr: Sym | not) -> FnInfo {
+        return { nid: i.nid, span: i.span, sym: i.sym, name: i.name, file: i.file, exported: i.exported,
+                 pure: i.pure, arity: i.arity, ret: i.ret, failable: i.failable, err: i.err,
+                 serverOwn: i.serverOwn, rerr: rerr }
+    }
+
+    // Does enum `e` declare a variant named `Transport`: -1 none; 0 exactly
+    // `Transport(t: ServerCallError)` (§19.9.10 "that variant IS the wrapper");
+    // 1 any other payload, or none (E-ERROR-016).
+    export fn transportShape(ts: TypeInfo[], e: Sym, sce: Sym) -> int {
+        const t: TypeInfo | not = typeInfoOf(ts, e)
+        if (t is not) return -1
+        for (const v of enumVariants(t.def)) {
+            if (v.sym.hint == "Transport") {
+                if (v.fields.length == 1 && v.fields[0].sym.hint == "t" && v.fields[0].ty == Type.Named(sce)) return 0
+                return 1
+            }
+        }
+        return -1
+    }
+
+    // `E + Transport` (or, key -1, the shared `Transport` enum): fresh Syms for
+    // every variant and payload field (one declaration site per Sym).
+    fn mintRemoteEnum(ts: TypeInfo[], e: Sym | not, key: int, sce: Sym, st0: AS) -> RMintedEnum {
+        let st: AS = st0
+        let name: string = "Transport"
+        let vs: VariantDef[] = []
+        if (key >= 0 && e is some) {
+            name = e.hint + " + Transport"
+            const t: TypeInfo | not = typeInfoOf(ts, e)
+            if (t is some) {
+                for (const v of enumVariants(t.def)) {
+                    const rv: RSym = mint(st, v.sym.hint)
+                    st = rv.st
+                    let fds: FieldDef[] = []
+                    for (const fd of v.fields) {
+                        const rf: RSym = mint(st, fd.sym.hint)
+                        st = rf.st
+                        fds = fds.concat([{ sym: rf.s, ty: fd.ty, grants: noGrants() }])
+                    }
+                    vs = vs.concat([{ sym: rv.s, fields: fds }])
+                }
+            }
+        }
+        const re: RSym = mint(st, name)
+        st = re.st
+        const rt: RSym = mint(st, "Transport")
+        st = rt.st
+        const rtf: RSym = mint(st, "t")
+        st = rtf.st
+        vs = vs.concat([{ sym: rt.s, fields: [{ sym: rtf.s, ty: Type.Named(sce), grants: noGrants() }] }])
+        const ti: TypeInfo = { nid: -1, span: mkSpan(0, 0), name: name, file: builtinFile(), exported: false, def: TypeDef.EnumDef(re.s, vs) }
+        return { ti: ti, st: st }
     }
 
     // The enum a resolved type names (a `type … :enum` or a built-in one), else not.
@@ -3015,8 +3189,13 @@ ${
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: entry }
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
-        const rf: RFns = fnsOf(files, te0, st)
-        st = rf.st
+        const rf0: RFns = fnsOf(files, te0, st)
+        st = rf0.st
+        // s454 (U1b): the failure enum of a client call of each server-triggered function
+        const rr: RRemoteEnums = remoteEnums(rf0.fs, rt.ts, builtinSym(rs.stubs, serverCallErrorName()), st)
+        st = rr.st
+        const rf: RFns = { fs: rr.fs, st: st }
+        const allTypes: TypeInfo[] = rt.ts.concat(rr.minted)
         // fields + handles per declaration
         let decls: DeclSrc[] = []
         let handles: HandleInfo[] = []
@@ -3050,8 +3229,9 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files,
-                             errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError") }
+        const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
+                             errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()) }
         return { g: g, st: st }
     }
 
@@ -8133,6 +8313,10 @@ ${
         for (const ti of t.types) {
             if (ti.file != builtinFile() && ti.name == "SqlError") {
                 out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "`SqlError` is the built-in enum of query failures (§19.8.1) — \"The developer SHALL NOT redefine it\" (§19.8.4); name this type something else")])
+            }
+            // s454 (U1b) — §19.9.10: "the developer SHALL NOT redefine it"
+            if (ti.file != builtinFile() && ti.name == serverCallErrorName()) {
+                out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "`ServerCallError` is the built-in enum of a client call's boundary failures (§19.9.10: `Unreachable`, `Refused(status)`, `ServerFault(status)`, `Malformed(reason)`) — \"the developer SHALL NOT redefine it\"; name this type something else")])
             }
         }
         return out
@@ -13820,7 +14004,10 @@ ${
             } else {
                 // client / ambient code calling a server function: a suspension (U1b)
                 for (const r of fnRefs(all, f)) {
-                    if (placeOf(places, r.sym) == PlaceK.Server) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText("`" + f.name + "()`", r))
+                    if (placeOf(places, r.sym) == PlaceK.Server) {
+                        st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText("`" + f.name + "()`", r))
+                        st = refConflict(g, r, st)
+                    }
                 }
             }
             // the queries in its body: database, facts, the failable rule
@@ -13850,6 +14037,27 @@ ${
     fn serverTrigger(f: FnFacts) -> string {
         if (f.sqls.length > 0) return "a `" + sqlSigil() + "}` query"
         return "the `server` modifier"
+    }
+
+    // s454 (U1b) — E-ERROR-016 (§19.9.10 "A declared variant named
+    // `Transport`"): "A declared variant named `Transport` with any other
+    // payload (or none) SHALL be a compile error at the client call site …
+    // The message names `f`, its enum, and the payload `(t: ServerCallError)`."
+    // At a CLIENT call site of `f` only (a server→server call has no transport
+    // half, so nothing collides there).
+    fn transportConflict(g: Globals, f: FnInfo, file: string, span: ASpan, st: AS) -> AS {
+        if (!f.serverOwn || !f.failable) return st
+        const e: Sym | not = f.err
+        if (e is not) return st
+        if (transportShape(g.types, e, g.sceSym) != 1) return st
+        return addDiag(st, file, span, "E-ERROR-016", "`" + f.name + "` is a server function and this call is made on the client, so it can also fail on the wire — the call's failure set is `" + e.hint + "`'s variants plus `Transport(t: ServerCallError)` (§19.9.10). But `" + e.hint + "` already declares a variant named `Transport` with a different payload, and the call's `Transport` cannot be both. Declare it as exactly `Transport(t: ServerCallError)` (then it IS the wrapper), or rename it")
+    }
+
+    fn refConflict(g: Globals, r: FnRef, st: AS) -> AS {
+        if (r.asValue) return st
+        const fs: FnSrc | not = fnSrcOf(g, r.sym)
+        if (fs is not) return st
+        return transportConflict(g, fs.info, r.file, r.span, st)
     }
 
     fn u1bText(caller: string, r: FnRef) -> string {
@@ -14060,7 +14268,10 @@ ${
             }
             const scan: BodyScan = scanValue({ t: t, file: a.file }, a.v, emptyScan())
             for (const r of scan.refs) {
-                if (placeOf(ps, r.sym) == PlaceK.Server) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText(a.what, r))
+                if (placeOf(ps, r.sym) == PlaceK.Server) {
+                    st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText(a.what, r))
+                    st = refConflict(g, r, st)
+                }
             }
         }
         return st

@@ -62,3 +62,24 @@ SPEC §19.9.10 (as amended by #1298), §19.9.5, §19.4.3, §19.5.3, §13.7, §57
 - check: C-S3 (+ T5 re-derived from Core), C-S7, C-S8, C-E1/C-E2 extended, C12 widened.
 - print + runtime: rt.call (deadline, Item-3.2 classification, never rejects), suspend in batch + one reporter,
   handler tasks, waiting functions return a Promise; the client artifact of a program with server functions.
+
+## S1 — DONE (ServerCallError, the client-call failure enums, E-ERROR-016)
+- analyze `builtinTypeDecls` + `builtinTyped`: the built-in `ServerCallError` = `Unreachable` · `Refused(status: int)`
+  · `ServerFault(status: int)` · `Malformed(reason: string)` (§19.9.10 S454). A user `type ServerCallError` is
+  E-BOOTSTRAP-REDECLARE (the `SqlError` precedent; "the developer SHALL NOT redefine it"). `renders` NOT modelled —
+  the bootstrap AST has no `renders` on a variant (same as SqlError), and no bootstrap surface displays one (no
+  `<errorBoundary>` / `<formFor>`). OWED with the boundary unit; flagged in the report.
+- FnInfo += `serverOwn` (§12.2 T1/T4, syntactic, phase A — the design §2.5 own-trigger fact) and `rerr` (the remote
+  failure enum). `remoteEnums` (phase A, after the functions): per declared enum ONE minted `E + Transport` (E's
+  variants first, same indices, fresh Syms; then `Transport(t: ServerCallError)`), `E` itself when it declares exactly
+  `Transport(t: ServerCallError)` ("that variant IS the wrapper"), ONE shared `Transport` enum for every non-`!`
+  callee; `not` (and E-ERROR-016 at the client site) for a `Transport` of another payload or none. Minted enums live
+  in the built-in file, so Core ships one only when it names it.
+- E-ERROR-016 (`transportConflict`), at the client call site; message names f, its enum and `(t: ServerCallError)`.
+  The bootstrap's code; `severity.scrml` regenerated (`bun scripts/gen-bootstrap-severity.ts`) — "E-ERROR-016 — no §34
+  row" (fail-closed Error). In S1 it rides the existing U1b refusal loops; S2 moves it to the binder's site judgement.
+- Tests: NEW `slice-m4/server-call.test.js` (11). `bun test ./compiler/self-host-v2/` 1928 pass / 0 fail.
+- DOGFOOD FINDING (impl#1, file a gap): a narrowed local `const known: Sym | not` read after `if (known is some)`
+  compiled to `_scrml_known_907` — the mangled name of the top-level `fn known(ty)` in the same module. impl#1
+  resolves a local that shares a module function's name to the FUNCTION in that position (a silent mis-bind). Worked
+  around by renaming the local (`prior`). Proposed id: `g-impl1-narrowed-local-shadowed-by-module-fn`.
