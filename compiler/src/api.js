@@ -42,7 +42,7 @@ import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion).
-import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
+import { fileTenantSchemaHazards, fileSchemaTenantNames, fileDbIdentities, projectTenantSets } from "./tenant-schema-hazards.ts";
 import { buildTenantContext } from "./codegen/tenant-egress.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
 import { extractDesiredSchema } from "./codegen/db-authoritative.ts";
@@ -2973,15 +2973,27 @@ function _compileScrmlImpl(options = {}) {
   // consumes. Its tenant set is the floor's own — `buildTenantContext` over the
   // `<db tables=>` registry and the expanded `<schema>`, exactly as emit-server builds
   // it — so a table the floor scopes can never escape the declaration rule.
+  //
+  // PROJECT-SCOPED (S455 review round 3, PA-reproduced): a trigger in one file's
+  // `<schema>` over a tenant table another file of the same project declares writes
+  // the same database. So the set each file is charged against is the UNION of the
+  // tenant tables of every compiled file that may share its database — two files are
+  // kept apart only when both declare SQLite files and no path is shared
+  // (`provablyDistinctDbs`); anything else is treated as one database (fail-closed).
   {
     const _tsProtectCtx = buildProtectContext(paResult.protectAnalysis);
-    for (const fileAST of metaFiles) {
-      const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
+    const perFile = metaFiles.map((fileAST) => {
       const desired = extractDesiredSchema(fileAST);
-      const floorSet = buildTenantContext(_tsProtectCtx, desired.tenantTables, desired.schemaText).tenantScopedTables;
-      const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, floorSet));
+      const tenant = new Set(buildTenantContext(_tsProtectCtx, desired.tenantTables, desired.schemaText).tenantScopedTables);
+      for (const t of fileSchemaTenantNames(fileAST)) tenant.add(t);
+      return { fileAST, dbs: fileDbIdentities(fileAST), tenant };
+    });
+    const sets = projectTenantSets(perFile);
+    perFile.forEach(({ fileAST }, k) => {
+      const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
+      const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, sets[k]));
       collectErrors("TENANT-SCHEMA", diags, fp);
-    }
+    });
   }
 
   // Stage 7: DG (all files — sees post-meta-expansion AST)

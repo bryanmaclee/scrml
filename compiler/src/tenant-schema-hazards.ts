@@ -50,6 +50,7 @@
 
 import { TENANT_ROW_FUNCTIONS, TENANT_GROUP_AGGREGATES } from "./codegen/tenant-sql-subset.ts";
 import { schemaTableDeclarations } from "./schema-differ.js";
+import { dbAttrValue, sqliteFileTarget } from "./db-ownership.ts";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
 export type SchemaHazardKind = "trigger" | "rule" | "foreign key" | "view" | "function" | "statement" | "permissive policy";
@@ -1001,6 +1002,83 @@ function schemaBlocksOf(fileAST: unknown): Array<{ body: string; span: any }> {
   };
   walk(fileAST, 0);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Project scope (S455 review round 3): one tenant set per DATABASE, across files
+// ---------------------------------------------------------------------------
+
+/** A database a file declares: a resolved SQLite FILE, or something whose identity is unknown. */
+export type DbIdentity = { kind: "file"; path: string } | { kind: "unknown"; raw: string };
+
+/**
+ * Every database a file declares — its `<program db=>` values and its `<db src=>`
+ * values, each resolved the way §8.1.1 resolves them (`sqliteFileTarget`: a relative
+ * SQLite path against the declaring file's directory). Anything else — a Postgres /
+ * MySQL URI, `:memory:`, a non-literal value, or a file that declares no database —
+ * is `unknown`. ALL of them are returned, not just the default handle's: a file's
+ * `<schema>` is charged against every database it might describe (fail-closed).
+ */
+export function fileDbIdentities(fileAST: unknown): DbIdentity[] {
+  const filePath: string = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
+  const out: DbIdentity[] = [];
+  const seen = new WeakSet<object>();
+  const add = (raw: string | null): void => {
+    if (raw === null || raw.length === 0) { out.push({ kind: "unknown", raw: String(raw) }); return; }
+    const path = sqliteFileTarget(raw, filePath);
+    out.push(path === null ? { kind: "unknown", raw } : { kind: "file", path });
+  };
+  const walk = (v: unknown, depth: number): void => {
+    if (v === null || typeof v !== "object" || depth > 64 || seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    const n = v as Record<string, any>;
+    if (n.kind === "markup" && n.tag === "program" && hasAttrNamed(n, "db")) add(dbAttrValue(n as never, "db"));
+    if (n.kind === "state" && n.stateType === "db" && hasAttrNamed(n, "src")) add(dbAttrValue(n as never, "src"));
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k.startsWith("_")) continue;
+      walk(n[k], depth + 1);
+    }
+  };
+  walk(fileAST, 0);
+  if (out.length === 0) out.push({ kind: "unknown", raw: "(no database declared)" });
+  return out;
+}
+
+function hasAttrNamed(node: Record<string, any>, name: string): boolean {
+  const attrs = (node.attributes ?? node.attrs ?? []) as Array<{ name?: unknown }>;
+  return Array.isArray(attrs) && attrs.some((a) => a && a.name === name);
+}
+
+/**
+ * True only when two files' databases are PROVABLY different: every database each
+ * declares is a resolved SQLite file, and no path is shared. Anything unknown — a
+ * network URI (two URIs may name one server), `:memory:`, an expression, no database
+ * at all — is treated as the SAME database (fail-closed).
+ */
+export function provablyDistinctDbs(a: DbIdentity[], b: DbIdentity[]): boolean {
+  if (a.some((x) => x.kind !== "file") || b.some((x) => x.kind !== "file")) return false;
+  const pa = new Set(a.map((x) => (x as { path: string }).path));
+  return !b.some((x) => pa.has((x as { path: string }).path));
+}
+
+/**
+ * The per-file tenant set the declaration rule charges against: the union of the
+ * tenant tables of EVERY compiled file that may share a database with it (itself
+ * included). `files[i].tenant` is that file's own set (the floor's + its `<schema>`'s).
+ */
+export function projectTenantSets(files: Array<{ dbs: DbIdentity[]; tenant: Iterable<string> }>): Set<string>[] {
+  const own = files.map((f) => new Set([...f.tenant].map((t) => String(t).toLowerCase())));
+  return files.map((f) => {
+    const s = new Set<string>();
+    files.forEach((g, j) => { if (!provablyDistinctDbs(f.dbs, g.dbs)) for (const t of own[j]) s.add(t); });
+    return s;
+  });
+}
+
+/** The tenant tables a file's own (expanded) `<schema>` blocks declare. */
+export function fileSchemaTenantNames(fileAST: unknown): Set<string> {
+  return schemaTenantTableNames(schemaBlocksOf(fileAST).map((b) => b.body));
 }
 
 export interface SchemaHazardDiagnostic { code: "E-TENANT-SCHEMA-HAZARD"; message: string; span: any; severity: "error" }

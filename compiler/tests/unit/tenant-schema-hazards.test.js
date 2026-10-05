@@ -29,6 +29,7 @@ import {
   findSchemaTenantHazards,
   schemaTenantTableNames,
   schemaHazardMessage,
+  provablyDistinctDbs,
 } from "../../src/tenant-schema-hazards.ts";
 import { compileScrml } from "../../src/api.js";
 
@@ -476,6 +477,63 @@ ${extra}  <p>x</p>
 `;
     const r = compileSrc(src);
     expectBoth(r);
+  });
+});
+
+// S455 review round 3 (PA-reproduced on 0cdab4100: exit 0, A's go() rewrote B's row): the
+// tenant set was PER FILE, so a trigger in admin.scrml's <schema> over a tenant table that
+// app.scrml declares compiled clean. The set is now per DATABASE across the project.
+describe("project scope — a hazard in one file over a tenant table another file declares", () => {
+  const compileFiles = (files) => {
+    const dir = mkdtempSync(join(tmpdir(), "tenant-schema-proj-"));
+    _tmp.push(dir);
+    const paths = Object.entries(files).map(([name, src]) => { const p = join(dir, name); writeFileSync(p, src); return p; });
+    return compileScrml({ inputFiles: paths, write: false, outputDir: join(dir, "out"), log: () => {} });
+  };
+  const app = (db) => `<program db="${db}">
+  <schema>
+    ${w(ASSETS)}
+    ${w("CREATE TABLE config (k TEXT, v TEXT)")}
+  </schema>
+  \${
+    function go() {
+      ?{${BT}INSERT INTO config (k, v) VALUES ('a', 'b')${BT}}.run()
+      return "ok"
+    }
+  }
+  <button onclick=\${ go() }>go</button>
+</program>
+`;
+  const admin = (db) => `<program db="${db}">
+  <schema>
+    ${w("CREATE TABLE config (k TEXT, v TEXT)")}
+    ${w("CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN UPDATE assets SET name = 'pwned'; END")}
+    ${w("CREATE VIEW va AS SELECT * FROM assets")}
+  </schema>
+  <p>admin</p>
+</program>
+`;
+  const msgs = (r) => (r.errors ?? []).filter((e) => e.code === "E-TENANT-SCHEMA-HAZARD").map((e) => e.message);
+  test("the round-3 repro: same database → the trigger AND the view in admin.scrml are refused", () => {
+    const m = msgs(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./app.db") }));
+    expect(m.some((x) => x.includes("trigger `t_cfg`"))).toBe(true);
+    expect(m.some((x) => x.includes("view `va`"))).toBe(true);
+  });
+  test("the same file reached through a different spelling (`sqlite:` prefix) is the same database", () => {
+    expect(msgs(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("sqlite:app.db") })).length).toBe(2);
+  });
+  test("two DIFFERENT SQLite files → admin.scrml's assets is not tenant-scoped → nothing charged", () => {
+    expect(msgs(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./admin.db") }))).toEqual([]);
+  });
+  test("a database whose identity cannot be resolved (network URIs) is treated as the same one → charged", () => {
+    expect(msgs(compileFiles({ "app.scrml": app("postgres://h/one"), "admin.scrml": admin("postgres://h/two") })).length).toBe(2);
+  });
+  test("provablyDistinctDbs is true only for disjoint resolved SQLite files", () => {
+    const f = (p) => ({ kind: "file", path: p });
+    expect(provablyDistinctDbs([f("/a.db")], [f("/b.db")])).toBe(true);
+    expect(provablyDistinctDbs([f("/a.db")], [f("/a.db")])).toBe(false);
+    expect(provablyDistinctDbs([f("/a.db"), f("/c.db")], [f("/b.db"), f("/c.db")])).toBe(false);
+    expect(provablyDistinctDbs([f("/a.db")], [{ kind: "unknown", raw: "postgres://x" }])).toBe(false);
   });
 });
 
