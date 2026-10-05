@@ -31,3 +31,12 @@ handOffs/delta-log.md merge=union
 # differing `core.autocrlf` settings, so it is the one that must not depend on
 # the committer's local setting.
 hand-off.md text eol=lf
+
+# scripts/ shell tooling + the git hooks — pin stored AND checked-out line endings to LF (S453).
+# A CRLF checkout breaks a shebang on Linux ("bad interpreter: No such file or directory"), and
+# `core.autocrlf=true` on the Windows clones makes that the DEFAULT checkout form. The hooks are
+# extensionless, so they are listed explicitly. Surfaced while committing merge-on-green.sh, whose
+# own working copy git warned it would convert on the next touch; the exposure is pre-existing and
+# repo-wide for these files, not introduced by that script.
+scripts/*.sh text eol=lf
+scripts/git-hooks/* text eol=lf
