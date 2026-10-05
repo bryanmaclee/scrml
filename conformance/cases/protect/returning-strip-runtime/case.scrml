@@ -10,5 +10,5 @@
     }
   </db>
   <user> = not
-  <button id="rename" onclick=${ @user = renameUser(1) }>rename</button>
+  <button id="rename" onclick={ @user = renameUser(1) !{ .Transport(t) :> { return } } }>rename</button>
 </program>

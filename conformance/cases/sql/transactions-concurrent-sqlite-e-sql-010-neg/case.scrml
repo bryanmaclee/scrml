@@ -5,5 +5,5 @@
             return 1
         }
     }
-    <button id="add" onclick=record("hello")>Add</>
+    <button id="add" onclick={ record("hello") !{ .Transport(t) :> { return } } }>Add</>
 </program>

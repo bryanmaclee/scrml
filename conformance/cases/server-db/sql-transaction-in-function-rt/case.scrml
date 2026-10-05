@@ -35,8 +35,8 @@
         }
     }
     function onRead() {
-        @b1 = balanceOf(1)
-        @b2 = balanceOf(2)
+        @b1 = balanceOf(1) !{ .Transport(t) :> { return } }
+        @b2 = balanceOf(2) !{ .Transport(t) :> { return } }
     }
     <button id="ok" onclick=onOk()>ok</button>
     <button id="toomuch" onclick=onTooMuch()>too much</button>

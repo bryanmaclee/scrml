@@ -11,4 +11,4 @@ ${
         document.title = name
     }
 }
-<button id="go" onclick=saveAndPaint("hi")>Go</button>
+<button id="go" onclick={ saveAndPaint("hi") !{ .Transport(t) :> { return } } }>Go</button>

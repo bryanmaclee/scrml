@@ -6,6 +6,6 @@ function logout() {
     @session.destroy()
 }
 <p id="who">${@session.current}</p>
-<button id="save" onclick=saveNote("hi")>Save</>
+<button id="save" onclick={ saveNote("hi") !{ .Transport(t) :> { return } } }>Save</>
 <button id="out" onclick=logout()>Log out</>
 </program>

@@ -4,5 +4,5 @@ ${
     }
 }
 <program db="./app.db">
-    <button id="load" onclick=loadRows("SELECT id FROM tasks")>Load</>
+    <button id="load" onclick={ loadRows("SELECT id FROM tasks") !{ .Transport(t) :> { return } } }>Load</>
 </program>

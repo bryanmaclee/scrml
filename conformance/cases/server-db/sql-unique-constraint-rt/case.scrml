@@ -13,10 +13,10 @@
         return ?{`SELECT COUNT(*) AS n FROM members`}.get()
     }
     function onAdd() {
-        tryAdd("a@x.com")
+        tryAdd("a@x.com") !{ .Transport(t) :> { return } }
     }
     function onCount() {
-        @total = memberCount()
+        @total = memberCount() !{ .Transport(t) :> { return } }
     }
     <button id="add" onclick=onAdd()>Add duplicate</button>
     <button id="count" onclick=onCount()>Count</button>

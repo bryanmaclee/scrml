@@ -8,6 +8,6 @@
       return _scrml_sql.unsafe("SELECT body FROM notes")
     }
   }
-  <main><button id="go" onclick=everyNote()>load</button></main>
+  <main><button id="go" onclick={ everyNote() !{ .Transport(t) :> { return } } }>load</button></main>
 </db>
 </program>

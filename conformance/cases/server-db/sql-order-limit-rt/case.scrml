@@ -5,7 +5,7 @@ ${
         return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all()
     }
     function onLoad() {
-        @top = topTwo()
+        @top = topTwo() !{ .Transport(t) :> { return } }
     }
 }
 <button id="load" onclick=onLoad()>Top two</>

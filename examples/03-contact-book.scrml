@@ -55,7 +55,7 @@
     }
 
     function addContact() {
-      const row = persistContact(@name, @email, @phone)
+      const row = persistContact(@name, @email, @phone) !{ .Transport(t) :> { return } }
       @contacts = [...@contacts, row]
       reset(@name)
       reset(@email)
@@ -63,7 +63,7 @@
     }
 
     function deleteContact(id) {
-      removeContact(id)
+      removeContact(id) !{ .Transport(t) :> { return } }
       @contacts = @contacts.filter(c => c.id != id)
     }
 

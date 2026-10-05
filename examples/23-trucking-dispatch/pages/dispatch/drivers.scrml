@@ -73,7 +73,7 @@
 
         function refresh() {
             const tok = getSessionToken()
-            const data = fetchDriversServer(tok)
+            const data = fetchDriversServer(tok) !{ .Transport(t) :> { return } }
             if (data.unauthorized) {
                 window.location.href = "/auth/login?reason=unauthorized"
                 return

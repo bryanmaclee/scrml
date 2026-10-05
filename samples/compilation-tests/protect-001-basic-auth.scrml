@@ -42,7 +42,7 @@ ${
 
         function handleSubmit() {
             @error = ""
-            let result = authenticate(@email, @password)
+            let result = authenticate(@email, @password) !{ .Transport(t) :> { return } }
             if (result == "") {
                 navigate("/dashboard")
             } else {

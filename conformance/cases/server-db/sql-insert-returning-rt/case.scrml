@@ -14,10 +14,10 @@
         return ?{`SELECT COUNT(*) AS n FROM notes`}.get()
     }
     function onAdd() {
-        @inserted = addNote("second")
+        @inserted = addNote("second") !{ .Transport(t) :> { return } }
     }
     function onCount() {
-        @total = countNotes()
+        @total = countNotes() !{ .Transport(t) :> { return } }
     }
     <button id="add" onclick=onAdd()>Add note</button>
     <button id="count" onclick=onCount()>Count</button>

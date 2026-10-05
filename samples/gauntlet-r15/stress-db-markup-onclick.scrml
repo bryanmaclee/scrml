@@ -31,7 +31,7 @@
     <h1>Item Manager</>
     <div class="controls">
         <input type="text" bind:value=@newName placeholder="New item name"/>
-        <button onclick=addItem()>Add Item</>
+        <button onclick={ addItem() !{ .Transport(t) :> { return } } }>Add Item</>
         <button onclick=clearFilter()>Show All</>
     </div>
     <ul>

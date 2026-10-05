@@ -8,6 +8,6 @@ ${
   }
 }
 <div>
-  <button onclick=deleteItem(5)>Delete</>
+  <button onclick={ deleteItem(5) !{ .Transport(t) :> { return } } }>Delete</>
 </div>
 </>

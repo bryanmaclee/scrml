@@ -7,7 +7,7 @@
         @log = ?{`UPDATE prices SET n = ${@sc} + 1 RETURNING n`}.all()
       }
     }
-    <button on:click=bump()>Bump</button>
+    <button on:click={ bump() !{ .Transport(t) :> { return } } }>Bump</button>
     <ul>${ for (let r of @log) { lift <li>${r.n}</li> } }</ul>
   </db>
 </program>

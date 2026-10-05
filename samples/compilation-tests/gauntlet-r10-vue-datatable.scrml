@@ -131,7 +131,7 @@
         }
 
         function bulkDelete() {
-            let refreshed = doDeleteSelected(@selectedIds)
+            let refreshed = doDeleteSelected(@selectedIds) !{ .Transport(t) :> { return } }
             @employees = refreshed
             @selectedIds = []
         }
@@ -171,7 +171,7 @@
         }
 
         function addEmployee() {
-            let refreshed = doInsertEmployee(@newName, @newDepartment, @newRole, @newSalary)
+            let refreshed = doInsertEmployee(@newName, @newDepartment, @newRole, @newSalary) !{ .Transport(t) :> { return } }
             @employees = refreshed
             @showModal = false
         }
@@ -203,7 +203,7 @@
 
         // Initial data load — client calls server function to populate @employees
         function loadInitialData() {
-            @employees = loadEmployees()
+            @employees = loadEmployees() !{ .Transport(t) :> { return } }
         }
     }
 

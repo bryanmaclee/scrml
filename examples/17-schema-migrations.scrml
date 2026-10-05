@@ -71,7 +71,7 @@
       // (E-RI-002 separation).
       function publish() {
         if (@authorEmail == "" || @noteTitle == "" || @noteBody == "") return
-        postNote(@authorEmail, @noteTitle, @noteBody)
+        postNote(@authorEmail, @noteTitle, @noteBody) !{ .Transport(t) :> { return } }
         reset(@noteTitle)
         reset(@noteBody)
       }

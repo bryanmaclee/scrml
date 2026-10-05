@@ -8,7 +8,7 @@ server function check(pw, hash) {
   return setTimeout(verifyPassword, pw, hash) ? "accepted" : "rejected"
 }
 function go() {
-  @verdict = check("wrong", "not-a-real-hash")
+  @verdict = check("wrong", "not-a-real-hash") !{ .Transport(t) :> { return } }
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>

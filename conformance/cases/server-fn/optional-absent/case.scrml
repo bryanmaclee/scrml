@@ -7,5 +7,5 @@ ${
         return rows[0]
     }
 }
-<button id="load" onclick=@user = loadUser()>Load</>
+<button id="load" onclick={ @user = loadUser() !{ .Transport(t) :> { return } } }>Load</>
 <p id="who">Current: ${@userLabel}</>

@@ -35,7 +35,7 @@
     <div class="add-form">
         <input type="text" bind:value=@newTitle placeholder="Title"/>
         <input type="text" bind:value=@newBody placeholder="Body"/>
-        <button onclick=createEntry()>Create</>
+        <button onclick={ createEntry() !{ .Transport(t) :> { return } } }>Create</>
     </div>
     <table>
         <tbody>

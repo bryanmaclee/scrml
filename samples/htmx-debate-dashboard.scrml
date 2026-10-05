@@ -88,13 +88,13 @@
             @ordersError = ""
             @metricsError = ""
 
-            @users = fetchUsers()
+            @users = fetchUsers() !{ .Transport(t) :> { return } }
             @usersLoading = false
 
-            @orders = fetchOrders()
+            @orders = fetchOrders() !{ .Transport(t) :> { return } }
             @ordersLoading = false
 
-            @metrics = fetchMetrics()
+            @metrics = fetchMetrics() !{ .Transport(t) :> { return } }
             @metricsLoading = false
         }
 
@@ -127,7 +127,7 @@
 
             // Server call confirms and returns authoritative list
             // Replaces the optimistic row automatically (no manual reconciliation loop)
-            @orders = createOrder(product, qty)
+            @orders = createOrder(product, qty) !{ .Transport(t) :> { return } }
             @orderSubmitting = false
         }
 

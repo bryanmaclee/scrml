@@ -14,4 +14,4 @@ ${
         document.title = name
     }
 }
-<button id="go" onclick=auditAndFlash("hi")>Go</button>
+<button id="go" onclick={ auditAndFlash("hi") !{ .Transport(t) :> { return } } }>Go</button>

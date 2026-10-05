@@ -79,7 +79,7 @@
             if (!@registerForm.isValid) return
 
             @submitting = true
-            const result = registerServer(@registerForm.email, @registerForm.password, @registerForm.companyName, @registerForm.contactPhone, @registerForm.billingAddress)
+            const result = registerServer(@registerForm.email, @registerForm.password, @registerForm.companyName, @registerForm.contactPhone, @registerForm.billingAddress) !{ .Transport(t) :> { return } }
             if (result.error) {
                 @errorMessage = result.error
                 @submitting = false

@@ -8,7 +8,7 @@
       }
     }
     <input bind:value=@draft>
-    <button on:click=add()>Add</button>
+    <button on:click={ add() !{ .Transport(t) :> { return } } }>Add</button>
     <ul>${ for (let t of @items) { lift <li>${t.text}</li> } }</ul>
   </db>
 </program>

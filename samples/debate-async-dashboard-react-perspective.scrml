@@ -145,9 +145,9 @@ ${
         @ordersState  = OrdersState.Loading
         @metricsState = MetricsState.Loading
 
-        let usersResult   = fetchUsers()
-        let ordersResult  = fetchOrders()
-        let metricsResult = fetchMetrics()
+        let usersResult   = fetchUsers() !{ .Transport(t) :> { return } }
+        let ordersResult  = fetchOrders() !{ .Transport(t) :> { return } }
+        let metricsResult = fetchMetrics() !{ .Transport(t) :> { return } }
 
         @usersState   = UsersState.Loaded(usersResult)
         @ordersState  = OrdersState.Loaded(ordersResult)
@@ -183,7 +183,7 @@ ${
                 let amount  = @newOrderAmount
                 @newOrderProduct = ""
                 @newOrderAmount  = ""
-                let freshOrders = createOrder(product, amount)
+                let freshOrders = createOrder(product, amount) !{ .Transport(t) :> { return } }
                 @ordersOp    = OrdersOp.Saved(freshOrders)
                 @ordersState = OrdersState.Loaded(freshOrders)
                 @ordersOp    = OrdersOp.Idle

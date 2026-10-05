@@ -82,7 +82,7 @@
             @errorMessage = ""
             @submitting = true
 
-            const result = loginServer(@loginForm.email, @loginForm.password)
+            const result = loginServer(@loginForm.email, @loginForm.password) !{ .Transport(t) :> { return } }
             if (result.error) {
                 @errorMessage = result.error
                 @submitting = false

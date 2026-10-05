@@ -109,19 +109,19 @@ ${
 
     function loadUsers() {
         @usersState = UsersRemote.Loading
-        let result = fetchUsers()
+        let result = fetchUsers() !{ .Transport(t) :> { return } }
         @usersState = UsersRemote.Ready(result)
     }
 
     function loadOrders() {
         @ordersState = OrdersRemote.Loading
-        let result = fetchOrders()
+        let result = fetchOrders() !{ .Transport(t) :> { return } }
         @ordersState = OrdersRemote.Ready(result)
     }
 
     function loadMetrics() {
         @metricsState = MetricsRemote.Loading
-        let result = fetchMetrics()
+        let result = fetchMetrics() !{ .Transport(t) :> { return } }
         @metricsState = MetricsRemote.Ready(result)
     }
 
@@ -141,7 +141,7 @@ ${
         @newOrderItem   = ""
         @newOrderAmount = ""
 
-        let confirmed = createOrder(item, amount)
+        let confirmed = createOrder(item, amount) !{ .Transport(t) :> { return } }
 
         // Server returned the real row — transition to Committed
         // then immediately refresh the orders list so everything is consistent

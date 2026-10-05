@@ -6,6 +6,6 @@ ${
         return ?{`SELECT id, label FROM widgets`}.all()
     }
 }
-<button id="load" onclick=@rows = loadAll()>Load</>
+<button id="load" onclick={ @rows = loadAll() !{ .Transport(t) :> { return } } }>Load</>
 <p id="count">${@rows.length}</>
 </program>

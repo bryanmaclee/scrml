@@ -9,7 +9,7 @@
         @items = ?{`SELECT username FROM users`}.prepare()
     }
   }
-  <button id="load" onclick=load()>Load</button>
+  <button id="load" onclick={ load() !{ .Transport(t) :> { return } } }>Load</button>
   <ul><each in=@items key=@.id><li : @.username></each></ul>
 </db>
 </program>

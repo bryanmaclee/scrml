@@ -186,7 +186,7 @@ ${
             if (@userName.trim().length == 0) {
                 return
             }
-            let result = joinRoom(@currentRoomId, @userName)
+            let result = joinRoom(@currentRoomId, @userName) !{ .Transport(t) :> { return } }
             if (result.ok) {
                 @hasJoined = true
             }
@@ -198,16 +198,16 @@ ${
             }
             @isSending = true
             // Clear typing status when sending
-            setTypingStatus(@currentRoomId, @userName, false)
+            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(t) :> { return } }
             @isTyping = false
 
-            let result = sendMessage(@currentRoomId, @userName, @messageText)
+            let result = sendMessage(@currentRoomId, @userName, @messageText) !{ .Transport(t) :> { return } }
             if (result.ok) {
                 @messageText = ""
                 // Immediately refresh messages after send.
                 // In LiveView, the server pushes the update. No polling lag.
                 // Here we manually trigger a reload.
-                @messages = loadMessages(@currentRoomId)
+                @messages = loadMessages(@currentRoomId) !{ .Transport(t) :> { return } }
             }
             @isSending = false
         }
@@ -217,10 +217,10 @@ ${
             // Updates socket.assigns.current_room_id, reloads messages, re-subscribes to PubSub topic.
             // All happens server-side. New DOM diff pushed to client.
             // In scrml: update client state, manually reload messages.
-            setTypingStatus(@currentRoomId, @userName, false)
+            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(t) :> { return } }
             @currentRoomId = roomId
             @currentRoomName = roomName
-            @messages = loadMessages(roomId)
+            @messages = loadMessages(roomId) !{ .Transport(t) :> { return } }
         }
 
         function handleTyping() {
@@ -230,7 +230,7 @@ ${
             // with debouncing built into phx-debounce attribute.
             if (!@isTyping) {
                 @isTyping = true
-                setTypingStatus(@currentRoomId, @userName, true)
+                setTypingStatus(@currentRoomId, @userName, true) !{ .Transport(t) :> { return } }
             }
         }
 
@@ -238,7 +238,7 @@ ${
             // When input is cleared/blurred, remove typing indicator
             if (@isTyping) {
                 @isTyping = false
-                setTypingStatus(@currentRoomId, @userName, false)
+                setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(t) :> { return } }
             }
         }
 

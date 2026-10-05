@@ -6,5 +6,5 @@ ${
         return ?{`SELECT id, name FROM users`}.get()
     }
 }
-<button id="load" onclick=@current = loadOne()>Load</>
+<button id="load" onclick={ @current = loadOne() !{ .Transport(t) :> { return } } }>Load</>
 </program>

@@ -10,5 +10,5 @@
   </db>
   <h1>Notes</h1>
   <p>${@notes}</p>
-  <button onclick=${seedNotes()}>Seed</button>
+  <button onclick={ seedNotes() !{ .Transport(t) :> { return } } }>Seed</button>
 </page>

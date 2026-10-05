@@ -9,5 +9,5 @@ ${
     }
 }
 <program db="test.db">
-    <button id="load" onclick=@items = loadPair(1)>Load</>
+    <button id="load" onclick={ @items = loadPair(1) !{ .Transport(t) :> { return } } }>Load</>
 </program>

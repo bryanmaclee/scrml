@@ -69,7 +69,7 @@
         @errorMessage = ""
         @submitting = true
 
-        const result = loginServer(@email, @password)
+        const result = loginServer(@email, @password) !{ .Transport(t) :> { return } }
         if (result.error is some) {
           @errorMessage = result.error
           @submitting = false

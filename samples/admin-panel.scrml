@@ -84,9 +84,9 @@ ${
 
     function loadAdminData() {
         @loading = true
-        @users    = fetchUsers()
-        @apiKeys  = fetchApiKeys()
-        @adminLog = fetchAdminLog()
+        @users    = fetchUsers() !{ .Transport(t) :> { return } }
+        @apiKeys  = fetchApiKeys() !{ .Transport(t) :> { return } }
+        @adminLog = fetchAdminLog() !{ .Transport(t) :> { return } }
         @loading  = false
     }
 
@@ -99,15 +99,15 @@ ${
         let action = @confirmAction
         @confirmAction = not
         match (action) {
-            .ResetPassword(userId) :> { doResetPassword(userId) }
+            .ResetPassword(userId) :> { doResetPassword(userId) !{ .Transport(t) :> { return } } }
             .DeleteUser(userId)    :> {
-                doDeleteUser(userId)
+                doDeleteUser(userId) !{ .Transport(t) :> { return } }
                 // Refresh user list after delete — client assigns (E-RI-002 correct).
-                @users = fetchUsers()
+                @users = fetchUsers() !{ .Transport(t) :> { return } }
             }
             .RevokeKey(keyId) :> {
-                doRevokeKey(keyId)
-                @apiKeys = fetchApiKeys()
+                doRevokeKey(keyId) !{ .Transport(t) :> { return } }
+                @apiKeys = fetchApiKeys() !{ .Transport(t) :> { return } }
             }
         }
     }

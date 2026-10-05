@@ -10,6 +10,6 @@
     loadOwner(id)
   }
 
-  <button onclick=loadOwner(1)>Load</button>
+  <button onclick={ loadOwner(1) !{ .Transport(t) :> { return } } }>Load</button>
 
 </program>

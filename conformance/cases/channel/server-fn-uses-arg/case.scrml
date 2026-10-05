@@ -9,6 +9,6 @@
   </channel>
 
   <p>${@count}</p>
-  <button onclick=tally(1)>Tally</button>
+  <button onclick={ tally(1) !{ .Transport(t) :> { return } } }>Tally</button>
 
 </program>

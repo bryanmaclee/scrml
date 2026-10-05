@@ -34,9 +34,9 @@
                 }
             }
         </select>
-        <button onclick=addTask()>Add</>
+        <button onclick={ addTask() !{ .Transport(t) :> { return } } }>Add</>
     </div>
-    <button onclick=deleteCompleted()>Clear Completed</>
+    <button onclick={ deleteCompleted() !{ .Transport(t) :> { return } } }>Clear Completed</>
     <ul>
         ${
             for (let task of @tasks) {

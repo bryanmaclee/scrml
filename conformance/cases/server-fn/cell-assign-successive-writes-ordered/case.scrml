@@ -5,8 +5,8 @@ ${
         return n * 2
     }
     function seq() {
-        @out = double(1)
-        @out = double(2)
+        @out = double(1) !{ .Transport(t) :> { return } }
+        @out = double(2) !{ .Transport(t) :> { return } }
         @out = @out + 100
         @final = @out
     }

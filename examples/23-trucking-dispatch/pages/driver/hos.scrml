@@ -252,7 +252,7 @@
 
         function refresh() {
             const tok = getSessionToken()
-            const data = fetchHosData(tok)
+            const data = fetchHosData(tok) !{ .Transport(t) :> { return } }
             if (data.unauthorized) {
                 window.location.href = "/auth/login?reason=unauthorized"
                 return
@@ -271,7 +271,7 @@
 
         function setStatus(target) {
             const tok = getSessionToken()
-            const result = changeHosServer(tok, target)
+            const result = changeHosServer(tok, target) !{ .Transport(t) :> { return } }
             if (result.unauthorized) {
                 window.location.href = "/auth/login?reason=unauthorized"
                 return

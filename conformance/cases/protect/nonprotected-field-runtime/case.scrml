@@ -11,5 +11,5 @@
     }
   </db>
   <name> = ""
-  <button id="load" onclick=${ @name = getName(1) }>load</button>
+  <button id="load" onclick={ @name = getName(1) !{ .Transport(t) :> { return } } }>load</button>
 </program>

@@ -11,8 +11,8 @@ ${
         return ?{`SELECT id, title FROM posts`}.all()
     }
 }
-<button id="lu" onclick=@users = loadUsers()>LoadUsers</>
-<button id="lp" onclick=@posts = loadPosts()>LoadPosts</>
+<button id="lu" onclick={ @users = loadUsers() !{ .Transport(t) :> { return } } }>LoadUsers</>
+<button id="lp" onclick={ @posts = loadPosts() !{ .Transport(t) :> { return } } }>LoadPosts</>
 <p id="uc">${@users.length}</>
 <p id="pc">${@posts.length}</>
 </program>
