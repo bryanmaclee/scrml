@@ -571,6 +571,7 @@ function structuredScanCreateTables(text) {
       statement,
       body: text.slice(h.parenAt + 1, h.bodyEnd),
       offset: h.start,
+      end: h.bodyEnd + 1,
     });
   }
   return found;
@@ -891,9 +892,14 @@ function allSchemaCreateTableDecls(text) {
  * skipped because skipping them is where a reader goes wrong (a `;` or `'` inside a
  * comment, dialect comment rules); the cost of a false read is a tenant-scoped table
  * with no `tenant_id` column, whose reads then fail at run time (closed, visible),
- * never a leak. The statement runs to the next `ALTER` / `CREATE` keyword, the next
- * `?{` / `` `} `` wrapper edge, or a `{` / `}` outside a `${…}` (a DSL head) —
- * NOT to a `;`, which can sit inside a string or a comment. COMMENT-AGNOSTIC like
+ * never a leak. The statement runs to the next `ALTER TABLE` head or `?{` / `` `} ``
+ * wrapper edge found outside the quote / comment forms the reader models — NOT to a
+ * `;`, a `CREATE` or a brace, any of which can sit inside a string, an identifier or a
+ * comment. When the statement holds a form the reader does NOT model exactly (SQLite
+ * `[ident]`, Postgres `$$…$$` / `E'…\'…'`, a MySQL `\'` escape or `#` comment, a
+ * backtick, a `${…}`), it is read to its wrapper edge instead (S455 review F1: a
+ * `CREATE` inside `[org create]` cut the statement short and left `notes` unscoped —
+ * executed). COMMENT-AGNOSTIC like
  * the CREATE reads: a commented-out ALTER counts (`commented` records it).
  * `ALTER TABLE ONLY <x>` is read both ways (a table may be NAMED `only`).
  *
@@ -945,9 +951,12 @@ function alterTableTenantDecls(text, masked) {
     }
     if (names.length === 0) continue;
     const from = Math.max(...names.map((n) => n.end));
-    const stop = alterStatementEnd(text, from);
+    // The statement as modelled; when it holds a quote / comment form the reader does not
+    // model exactly, the statement is read to its wrapper edge instead (fail-closed).
+    let stop = alterStatementEnd(text, from);
+    if (UNMODELED_SQL_FORM.test(text.slice(i, stop))) stop = Math.max(stop, sqlWrapperEdge(text, from));
     const stmt = text.slice(from, stop);
-    if (!/(?:^|[^\p{L}\p{N}_$])tenant_id(?![\p{L}\p{N}_$])/iu.test(stmt)) continue;
+    if (!namesTenantId(stmt)) continue;
     const commented = masked.slice(i, i + 5).toUpperCase() !== "ALTER";
     for (const n of names) {
       out.push({ name: n.name, key: n.name.toLowerCase(), form: "alter", offset: i, tenant: true, commented, columns: [{ name: "tenant_id" }] });
@@ -957,16 +966,43 @@ function alterTableTenantDecls(text, masked) {
 }
 
 /**
- * Where an `ALTER TABLE` statement read from `from` ends (see `alterTableTenantDecls`):
- * at the next `ALTER TABLE` / `CREATE` head, the next `?{` / `` `} `` wrapper edge, or a
- * `{` / `}` outside a `${…}`. A stop is looked for only OUTSIDE `'…'` / `"…"` literals
- * and `--` / `/* *\/` comments (nesting model — the longest comment), so a keyword
- * spelled inside one never ends the statement early. Every misreading here makes the
- * statement LONGER, never shorter: a longer statement can only over-declare.
- * `ALTER COLUMN` (an action of this same statement) is not a stop.
+ * A quote or comment form the tenant readers here do not model exactly — SQLite
+ * `[ident]`, Postgres `$tag$…$tag$` / `E'…'` (its `\'` escape), a MySQL `\` escape or
+ * `#` comment, a backtick identifier, a `${…}` interpolation. A statement holding one
+ * is read to its wrapper edge (`sqlWrapperEdge`), never to a modelled stop that the
+ * form may have hidden or faked (S455 review F1).
+ */
+const UNMODELED_SQL_FORM = /[[$\\#`]/;
+
+/** Whether `s` names `tenant_id` as a whole word (anywhere — literals and comments included). */
+function namesTenantId(s) {
+  return /(?:^|[^\p{L}\p{N}_$])tenant_id(?![\p{L}\p{N}_$])/iu.test(s);
+}
+
+/**
+ * The end of the `?{ … }` wrapper text from `from` lies in: the next `` `} `` close or
+ * `?{` open, or the end of the body. Inside a template literal a backtick cannot occur
+ * unescaped, so `` `} `` is the wrapper's own close.
+ */
+function sqlWrapperEdge(text, from) {
+  for (let k = from; k < text.length; k++) {
+    if (text[k] === "?" && text[k + 1] === "{") return k;
+    if (text[k] === "`" && /^`\s*\}/.test(text.slice(k, k + 64))) return k;
+  }
+  return text.length;
+}
+
+/**
+ * Where an `ALTER TABLE` statement read from `from` ends as MODELLED (see
+ * `alterTableTenantDecls`): at the next `ALTER TABLE` head or `?{` / `` `} `` wrapper
+ * edge found outside `'…'` / `"…"` literals and `--` / `/* *\/` comments (nesting model).
+ * Not at a `CREATE`, a brace or a `;` — each can sit inside an identifier, a string or a
+ * comment form this reader does not model (S455 review F1: `[org create]`). The caller
+ * reads to the wrapper edge instead when the statement holds an unmodelled form
+ * (`UNMODELED_SQL_FORM`), so a stop this function finds inside such a form cannot cut
+ * the statement short. `ALTER COLUMN` (an action of this same statement) is not a stop.
  */
 function alterStatementEnd(text, from) {
-  let interp = 0;
   for (let k = from; k < text.length; k++) {
     const c = text[k];
     if (c === "'" || c === '"') {
@@ -991,13 +1027,9 @@ function alterStatementEnd(text, from) {
       k = j - 1;
       continue;
     }
-    if (c === "$" && text[k + 1] === "{") { interp++; k++; continue; }
-    if (c === "}" && interp > 0) { interp--; continue; }
-    if (c === "{" || c === "}") return k;
     if (c === "?" && text[k + 1] === "{") return k;
     if (c === "`" && /^`\s*\}/.test(text.slice(k, k + 64))) return k;
-    if ((c === "a" || c === "A" || c === "c" || c === "C") && !SQL_IDENT_CHAR.test(text[k - 1] ?? " ")) {
-      if (readSqlKeyword(text, k, "CREATE") !== -1) return k;
+    if ((c === "a" || c === "A") && !SQL_IDENT_CHAR.test(text[k - 1] ?? " ")) {
       const afterAlter = readSqlKeyword(text, k, "ALTER");
       if (afterAlter !== -1 && readSqlKeyword(text, skipSqlTrivia(text, afterAlter), "TABLE") !== -1) return k;
     }
@@ -1045,8 +1077,19 @@ export function schemaTableDeclarations(text) {
     });
   });
   for (const t of allSchemaCreateTableDecls(text)) {
-    const columns = columnsFromDdlBody(t.body);
+    let columns = columnsFromDdlBody(t.body);
     if (columns.length === 0) continue;
+    // S455 review F1 — the column-list read models `'…'` / `"…"` / backtick literals and
+    // `--` / `/* */` comments only. A statement holding a form it does not model
+    // (`$$)$$`, `[ident]`, an `E'\''` / MySQL `\'` escape, `#`) may have closed the list
+    // early and dropped a `tenant_id` after it: the statement is then read to its wrapper
+    // edge, and naming `tenant_id` anywhere there scopes the table (fail-closed).
+    if (!carriesTenant(columns) && typeof t.end === "number") {
+      const own = text.slice(t.offset, t.end);
+      if (UNMODELED_SQL_FORM.test(own) && namesTenantId(text.slice(t.offset, Math.max(t.end, sqlWrapperEdge(text, t.offset))))) {
+        columns = [...columns, { name: "tenant_id" }];
+      }
+    }
     out.push({
       name: t.name,
       key: t.key,
@@ -1055,6 +1098,23 @@ export function schemaTableDeclarations(text) {
       tenant: carriesTenant(columns),
       commented: masked.slice(t.offset, t.offset + 6).toUpperCase() !== "CREATE",
       columns,
+    });
+  }
+  // …and a head whose column list never closes as modelled (`DEFAULT $$($$`) is no
+  // declaration to the readers above at all: when its statement names `tenant_id`, it
+  // declares a tenant-scoped table here.
+  for (const h of scanCreateTableHeads(text)) {
+    if (h.parenAt === -1 || h.bodyEnd !== -1 || h.modifiers.length !== 0 || h.parts.length === 0) continue;
+    if (!namesTenantId(text.slice(h.parenAt, sqlWrapperEdge(text, h.parenAt)))) continue;
+    const name = h.parts[h.parts.length - 1].name;
+    out.push({
+      name,
+      key: name.toLowerCase(),
+      form: "raw",
+      offset: h.start,
+      tenant: true,
+      commented: masked.slice(h.start, h.start + 6).toUpperCase() !== "CREATE",
+      columns: [{ name: "tenant_id" }],
     });
   }
   // S455 — an `ALTER TABLE <t> … tenant_id …` gives `<t>` the column: every
