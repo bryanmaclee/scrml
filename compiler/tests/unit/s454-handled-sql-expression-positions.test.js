@@ -28,9 +28,9 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname, join } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
+import { resolve, join } from "path";
+import { writeFileSync, rmSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "fs";
+import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import {
@@ -41,16 +41,22 @@ import {
   emitStringFromTree,
 } from "../../src/expression-parser.ts";
 
-const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_s454_handled_sql");
+// Scratch lives under os.tmpdir() — the S448 per-process temp root the test
+// preload owns (compiler/tests/helpers/tmp-root-preload.js) — never in the repo.
+let TMP_ROOT = "";
 let counter = 0;
 
 beforeAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-  mkdirSync(TMP_ROOT, { recursive: true });
+  TMP_ROOT = mkdtempSync(join(tmpdir(), "s454-handled-sql-"));
 });
 afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
+  // Every bun:sqlite handle THIS file opens is closed before its route runs. The
+  // executed server modules, however, keep their own lazily-opened driver handle
+  // (`_scrml_sql`, module-private, no teardown export) for the life of the
+  // process, and Windows refuses to delete an open file (EBUSY). So cleanup is
+  // best-effort: a still-held db file is left for the preload, which removes the
+  // whole per-process temp root when the run ends.
+  try { rmSync(TMP_ROOT, { recursive: true, force: true }); } catch (_e) { /* EBUSY on Windows — preload cleans up */ }
 });
 
 const SCHEMA = `
@@ -103,7 +109,9 @@ function compile(src) {
 /** Run route `fnName` with JSON `body`; returns { status, text } or { threw }. */
 async function runRouteRaw(c, fnName, state, body = "{}") {
   const dbFile = join(c.dir, "app.db");
-  for (const s of ["", "-wal", "-shm"]) if (existsSync(dbFile + s)) rmSync(dbFile + s);
+  // One run per compile: a previous run's server module may still hold app.db
+  // open (Windows: EBUSY on delete), so a compiled program is never re-seeded.
+  if (state !== "none" && existsSync(dbFile)) throw new Error("runRoute needs a fresh compile per run (app.db already exists)");
   const db = new Database(dbFile, { create: true });
   if (state === "row" || state === "norow") {
     db.run("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)");
@@ -127,7 +135,9 @@ async function runRouteRaw(c, fnName, state, body = "{}") {
 
 async function runRoute(c, fnName, state) {
   const dbFile = join(c.dir, "app.db");
-  for (const s of ["", "-wal", "-shm"]) if (existsSync(dbFile + s)) rmSync(dbFile + s);
+  // One run per compile: a previous run's server module may still hold app.db
+  // open (Windows: EBUSY on delete), so a compiled program is never re-seeded.
+  if (state !== "none" && existsSync(dbFile)) throw new Error("runRoute needs a fresh compile per run (app.db already exists)");
   const db = new Database(dbFile, { create: true });
   if (state === "row" || state === "norow") {
     db.run("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)");
@@ -513,7 +523,7 @@ describe("§6 F1 — a non-total handler is refused; an unmatched failure is nev
   });
 
   test("a TOTAL handler listing every SqlError variant still compiles and runs", async () => {
-    const c = compile(program(`
+    const src = program(`
     function total() {
         const row = ?{\`SELECT id FROM notes\`}.get() !{
             .QueryFailed(m)         :> "QF"
@@ -522,10 +532,11 @@ describe("§6 F1 — a non-total handler is refused; an unmatched failure is nev
             .BatchPrepareFailed     :> "BP"
         }
         return row
-    }`, `@a = total()`));
+    }`, `@a = total()`);
+    const c = compile(src);
     expect(c.codes).toEqual([]);
     expect(await runRoute(c, "total", "row")).toEqual({ id: 7 });
-    expect(await runRoute(c, "total", "fail")).toBe("QF");
+    expect(await runRoute(compile(src), "total", "fail")).toBe("QF");
   });
 
   test("defence in depth: an expression-position handler re-raises a variant no arm names", () => {
