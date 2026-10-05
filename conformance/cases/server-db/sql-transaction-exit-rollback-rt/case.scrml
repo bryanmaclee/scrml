@@ -20,7 +20,7 @@
         return 1
     }
     function balanceOf(id: number) {
-        return ?{`SELECT balance FROM accounts WHERE id = ${id}`}.get()
+        return ?{`SELECT balance FROM accounts WHERE id = ${id}`}.get() !{ _ :> not }
     }
     function onCommit() {
         transfer(4, false) !{

@@ -21,7 +21,7 @@
         // body-content inference (§12.2 T1) escalates recordHit to server
         // automatically — `server` modifier deprecated per Insight 26 (2026-05-08).
         function recordHit() {
-            ?{`INSERT INTO hits (when_ts) VALUES (${Date.now()})`}
+            ?{`INSERT INTO hits (when_ts) VALUES (${Date.now()})`} !{ _ :> [] }
         }
     }
 

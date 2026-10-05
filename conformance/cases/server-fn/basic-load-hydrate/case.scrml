@@ -2,7 +2,7 @@ ${
     type Task:struct = { id: number, text: string }
     <items> : Task[] = []
     function loadTasks() : Task[] {
-        result = ?{`SELECT id, text FROM tasks`}
+        result = ?{`SELECT id, text FROM tasks`} !{ _ :> [] }
         return result
     }
 }

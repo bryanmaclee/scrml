@@ -8,7 +8,7 @@
 <div>
     ${
         server function loadData() {
-            return ?{`SELECT title FROM articles LIMIT 5`}
+            return ?{`SELECT title FROM articles LIMIT 5`} !{ _ :> [] }
         }
     }
     <h1>Articles</>

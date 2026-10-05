@@ -30,18 +30,18 @@ ${
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
     }
 
     server function deleteFiles(ids) {
         for (let id of ids) {
-            ?{`DELETE FROM files WHERE id = ${id}`}.run()
+            ?{`DELETE FROM files WHERE id = ${id}`}.run() !{ _ :> {} }
         }
         return ?{`
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
     }
 }
 

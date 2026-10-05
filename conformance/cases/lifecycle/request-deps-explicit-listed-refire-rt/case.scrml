@@ -5,7 +5,7 @@ ${
     <ver> = 0
     <userData> : User | not = not
     function loadUser(id: number) : User | not {
-        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
     }
 }
 <request id="userReq" deps=[@ver]>

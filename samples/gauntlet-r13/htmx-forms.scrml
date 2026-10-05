@@ -25,7 +25,7 @@
 
         server function submitForm() {
             if (validateForm()) {
-                ?{`INSERT INTO messages (name, email, body) VALUES (${@name}, ${@email}, ${@message})`}
+                ?{`INSERT INTO messages (name, email, body) VALUES (${@name}, ${@email}, ${@message})`} !{ _ :> [] }
                 @submitted = true
             }
         }

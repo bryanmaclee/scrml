@@ -287,7 +287,7 @@ ${
             INSERT INTO users (email, password_hash, role)
             VALUES ('dispatcher@dispatch.example', ${demoHash}, 'dispatcher')
             ON CONFLICT(email) DO NOTHING
-        `}.run()
+        `}.run() !{ _ :> {} }
 
         // -------- customers + their user rows --------
         for (let i = 0; i < _customers.length; i = i + 1) {
@@ -296,7 +296,7 @@ ${
                 INSERT INTO users (email, password_hash, role)
                 VALUES (${c.email}, ${demoHash}, 'customer')
                 ON CONFLICT(email) DO NOTHING
-            `}.run()
+            `}.run() !{ _ :> {} }
 
             const u = ?{`SELECT id FROM users WHERE email = ${c.email}`}.get()
             if (u) {
@@ -304,7 +304,7 @@ ${
                     INSERT INTO customers (user_id, name, contact_name, contact_email, contact_phone, billing_address, payment_terms, account_status)
                     SELECT ${u.id}, ${c.name}, ${c.contact_name}, ${c.email}, ${c.contact_phone}, ${c.billing_address}, ${c.payment_terms}, 'active'
                     WHERE NOT EXISTS (SELECT 1 FROM customers WHERE user_id = ${u.id})
-                `}.run()
+                `}.run() !{ _ :> {} }
             }
         }
 
@@ -315,7 +315,7 @@ ${
                 INSERT INTO users (email, password_hash, role)
                 VALUES (${d.email}, ${demoHash}, 'driver')
                 ON CONFLICT(email) DO NOTHING
-            `}.run()
+            `}.run() !{ _ :> {} }
 
             const u = ?{`SELECT id FROM users WHERE email = ${d.email}`}.get()
             if (u) {
@@ -323,7 +323,7 @@ ${
                     INSERT INTO drivers (user_id, name, phone, cdl_number, cdl_state, cdl_expires, current_status, current_location)
                     SELECT ${u.id}, ${d.name}, ${d.phone}, ${d.cdl_number}, ${d.cdl_state}, ${d.cdl_expires}, 'OffDuty', NULL
                     WHERE NOT EXISTS (SELECT 1 FROM drivers WHERE user_id = ${u.id})
-                `}.run()
+                `}.run() !{ _ :> {} }
             }
         }
 
@@ -334,7 +334,7 @@ ${
                 INSERT INTO tractors (unit_number, year, make, model, vin, license_plate, status)
                 VALUES (${t.unit_number}, ${t.year}, ${t.make}, ${t.model}, ${t.vin}, ${t.license_plate}, ${t.status})
                 ON CONFLICT(unit_number) DO NOTHING
-            `}.run()
+            `}.run() !{ _ :> {} }
         }
 
         // -------- trailers --------
@@ -344,7 +344,7 @@ ${
                 INSERT INTO trailers (unit_number, type, length_ft, capacity_lbs)
                 VALUES (${tr.unit_number}, ${tr.type}, ${tr.length_ft}, ${tr.capacity_lbs})
                 ON CONFLICT(unit_number) DO NOTHING
-            `}.run()
+            `}.run() !{ _ :> {} }
         }
 
         // -------- loads --------
@@ -364,7 +364,7 @@ ${
                           AND commodity = ${ld.commodity}
                           AND pickup_at = ${ld.pickup_at}
                     )
-                `}.run()
+                `}.run() !{ _ :> {} }
             }
         }
     }

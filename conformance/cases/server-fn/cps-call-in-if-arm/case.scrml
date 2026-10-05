@@ -3,7 +3,7 @@ ${
     <items> : Task[] = []
     <mode> : string = "all"
     function loadTasks() : Task[] {
-        rows = ?{`SELECT id, text FROM tasks`}
+        rows = ?{`SELECT id, text FROM tasks`} !{ _ :> [] }
         return rows
     }
     function refresh() {

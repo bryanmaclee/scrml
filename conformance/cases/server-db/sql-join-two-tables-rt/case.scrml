@@ -2,7 +2,7 @@
 ${
     <list> = []
     function booksByAuthor(name: string) {
-        return ?{`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = ${name} ORDER BY b.id`}.all()
+        return ?{`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = ${name} ORDER BY b.id`}.all() !{ _ :> [] }
     }
     function onLoad() {
         @list = booksByAuthor("Ada") !{ .Transport(_) :> { return } }

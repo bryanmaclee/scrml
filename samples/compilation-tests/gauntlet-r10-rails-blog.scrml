@@ -100,7 +100,7 @@
                 LEFT JOIN tags t ON t.id = pt.tag_id
                 WHERE (${tagFilter} IS NULL OR t.name = ${tagFilter})
                 ORDER BY p.created_at DESC
-            `}.all()
+            `}.all() !{ _ :> [] }
             return rows
         }
 
@@ -120,13 +120,13 @@
                 INNER JOIN post_tags pt ON pt.tag_id = t.id
                 WHERE pt.post_id = ${postId}
                 ORDER BY t.name ASC
-            `}.all()
+            `}.all() !{ _ :> [] }
             return tags
         }
 
         // Load all tags for the sidebar/filter — Rails: Tag.all.order(:name)
         server function loadAllTags() {
-            let tags = ?{`SELECT id, name FROM tags ORDER BY name ASC`}.all()
+            let tags = ?{`SELECT id, name FROM tags ORDER BY name ASC`}.all() !{ _ :> [] }
             return tags
         }
 
@@ -142,7 +142,7 @@
             }
             // Rails: Post.create! raises. scrml: you handle errors manually.
             let publishedInt = published ? 1 : 0
-            ?{`INSERT INTO posts (title, body, published) VALUES (${title}, ${body}, ${publishedInt})`}.run()
+            ?{`INSERT INTO posts (title, body, published) VALUES (${title}, ${body}, ${publishedInt})`}.run() !{ _ :> {} }
             let newPost = ?{`SELECT id FROM posts ORDER BY id DESC LIMIT 1`}.first()
             let newId = newPost.id
 
@@ -152,9 +152,9 @@
                 for (let tagName of tagNames) {
                     let trimmed = tagName.trim()
                     if (trimmed != "") {
-                        ?{`INSERT OR IGNORE INTO tags (name) VALUES (${trimmed})`}.run()
+                        ?{`INSERT OR IGNORE INTO tags (name) VALUES (${trimmed})`}.run() !{ _ :> {} }
                         let tag = ?{`SELECT id FROM tags WHERE name = ${trimmed}`}.first()
-                        ?{`INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (${newId}, ${tag.id})`}.run()
+                        ?{`INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (${newId}, ${tag.id})`}.run() !{ _ :> {} }
                     }
                 }
             }
@@ -172,19 +172,19 @@
                 return { ok: false, error: "Body can't be blank" }
             }
             let publishedInt = published ? 1 : 0
-            ?{`UPDATE posts SET title = ${title}, body = ${body}, published = ${publishedInt}, updated_at = datetime('now') WHERE id = ${postId}`}.run()
+            ?{`UPDATE posts SET title = ${title}, body = ${body}, published = ${publishedInt}, updated_at = datetime('now') WHERE id = ${postId}`}.run() !{ _ :> {} }
 
             // Re-sync tags: delete old, insert new
             // Rails: @post.tags = new_tags (handles the join table automatically)
             // Friction: this whole block is 4 SQL calls. Rails: one assignment.
-            ?{`DELETE FROM post_tags WHERE post_id = ${postId}`}.run()
+            ?{`DELETE FROM post_tags WHERE post_id = ${postId}`}.run() !{ _ :> {} }
             if (tagNames && tagNames.length > 0) {
                 for (let tagName of tagNames) {
                     let trimmed = tagName.trim()
                     if (trimmed != "") {
-                        ?{`INSERT OR IGNORE INTO tags (name) VALUES (${trimmed})`}.run()
+                        ?{`INSERT OR IGNORE INTO tags (name) VALUES (${trimmed})`}.run() !{ _ :> {} }
                         let tag = ?{`SELECT id FROM tags WHERE name = ${trimmed}`}.first()
-                        ?{`INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (${postId}, ${tag.id})`}.run()
+                        ?{`INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (${postId}, ${tag.id})`}.run() !{ _ :> {} }
                     }
                 }
             }
@@ -194,7 +194,7 @@
         // DESTROY action — Rails: def destroy; @post.destroy
         // No dependent: :destroy cascade at ORM layer — we rely on SQL FK ON DELETE CASCADE.
         server function deletePost(postId) {
-            ?{`DELETE FROM posts WHERE id = ${postId}`}.run()
+            ?{`DELETE FROM posts WHERE id = ${postId}`}.run() !{ _ :> {} }
             return { ok: true }
         }
 
@@ -203,13 +203,13 @@
             if (!name || name.trim() == "") {
                 return { ok: false, error: "Tag name can't be blank" }
             }
-            ?{`INSERT OR IGNORE INTO tags (name) VALUES (${name})`}.run()
+            ?{`INSERT OR IGNORE INTO tags (name) VALUES (${name})`}.run() !{ _ :> {} }
             return { ok: true }
         }
 
         // Remove a tag from a post — Rails: @post.tags.delete(tag)
         server function removeTagFromPost(postId, tagId) {
-            ?{`DELETE FROM post_tags WHERE post_id = ${postId} AND tag_id = ${tagId}`}.run()
+            ?{`DELETE FROM post_tags WHERE post_id = ${postId} AND tag_id = ${tagId}`}.run() !{ _ :> {} }
             return { ok: true }
         }
     }

@@ -111,22 +111,22 @@ ${
 
 ${
     server function loadTasks() {
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all()
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
     }
 
     server function createTask(title, status, priority) {
-        ?{`INSERT INTO tasks (title, status, priority) VALUES (${title}, ${status}, ${priority})`}.run()
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all()
+        ?{`INSERT INTO tasks (title, status, priority) VALUES (${title}, ${status}, ${priority})`}.run() !{ _ :> {} }
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
     }
 
     server function updateTask(id, title, status, priority) {
-        ?{`UPDATE tasks SET title = ${title}, status = ${status}, priority = ${priority} WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all()
+        ?{`UPDATE tasks SET title = ${title}, status = ${status}, priority = ${priority} WHERE id = ${id}`}.run() !{ _ :> {} }
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
     }
 
     server function deleteTask(id) {
-        ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all()
+        ?{`DELETE FROM tasks WHERE id = ${id}`}.run() !{ _ :> {} }
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
     }
 }
 

@@ -7,10 +7,10 @@
 <db src="app.db" tables="orders,invoices,widgets"></db>
 ${
   server function loadAllOrders() {
-    return ?{`SELECT * FROM orders`}.all()
+    return ?{`SELECT * FROM orders`}.all() !{ _ :> [] }
   }
   server function loadAllInvoices() {
-    return ?{`SELECT * FROM invoices`}.all()
+    return ?{`SELECT * FROM invoices`}.all() !{ _ :> [] }
   }
   <orders server> = loadAllOrders()
   <invoices server> = loadAllInvoices()

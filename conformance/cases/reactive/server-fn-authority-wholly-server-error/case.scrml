@@ -1,7 +1,7 @@
 <program db="sqlite:./orders.db">
 <price server> = 10
 function bump() : number {
-    result = ?{`UPDATE prices SET n = ${@price} + 1 RETURNING n`}
+    result = ?{`UPDATE prices SET n = ${@price} + 1 RETURNING n`} !{ _ :> [] }
     return result
 }
 <button id="b" onclick={ @price = bump() !{ .Transport(_) :> { return } } }>Bump</>

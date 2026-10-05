@@ -1,6 +1,6 @@
 ${
     function loadRows(q) {
-        return ?{`/* dynamic */${q}`}.all()
+        return ?{`/* dynamic */${q}`}.all() !{ _ :> [] }
     }
 }
 <program db="./app.db">

@@ -4,7 +4,7 @@
 < db src="./test.db" protect="password_hash" tables="users">
 ${
   server function getAllUsers() {
-    return ?{`SELECT * FROM users`}.all()
+    return ?{`SELECT * FROM users`}.all() !{ _ :> [] }
   }
 }
 <div>

@@ -5,7 +5,7 @@
 </>
 <program>
 function add(body) {
-    ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
+    ?{`INSERT INTO notes (body) VALUES (${body})`}.run() !{ _ :> {} }
 }
 <button onclick={ add("x") !{ .Transport(_) :> { return } } }>add</button>
 </>

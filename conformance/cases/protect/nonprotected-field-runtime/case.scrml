@@ -5,7 +5,7 @@
   <db src="app.db" protect="passwordHash" tables="users">
     ${
       function getName(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return u.name
       }
     }

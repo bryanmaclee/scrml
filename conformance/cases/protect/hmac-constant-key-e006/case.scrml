@@ -6,7 +6,7 @@
     ${
       import { hmac } from "scrml:crypto"
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return hmac("public-key", String(u.pin))
       }
     }

@@ -8,10 +8,10 @@
     <inserted> = []
     <total> = not
     function addNote(body: string) {
-        return ?{`INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`}.all()
+        return ?{`INSERT INTO notes (body) VALUES (${body}) RETURNING id, body`}.all() !{ _ :> [] }
     }
     function countNotes() {
-        return ?{`SELECT COUNT(*) AS n FROM notes`}.get()
+        return ?{`SELECT COUNT(*) AS n FROM notes`}.get() !{ _ :> not }
     }
     function onAdd() {
         @inserted = addNote("second") !{ .Transport(_) :> { return } }

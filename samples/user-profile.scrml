@@ -29,7 +29,7 @@ ${
         ?{`
             UPDATE users SET display_name = ${name}, email = ${email}
             WHERE id = ${id}
-        `}.run()
+        `}.run() !{ _ :> {} }
     }
 
     function loadUser(id) {

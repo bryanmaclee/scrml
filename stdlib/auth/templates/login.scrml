@@ -38,7 +38,7 @@
       // hit F-AUTH-002 (E-SQL-004). The `server` modifier is not needed —
       // the ?{} block escalates the fn structurally.
       function loginServer(emailArg, passwordArg) {
-        const row = ?{`SELECT id, email, password_hash FROM users WHERE email = ${emailArg}`}.get()
+        const row = ?{`SELECT id, email, password_hash FROM users WHERE email = ${emailArg}`}.get() !{ _ :> not }
         if (row is not) {
           return { error: "Invalid email or password" }
         }
@@ -48,7 +48,7 @@
           return { error: "Invalid email or password" }
         }
 
-        ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
+        ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run() !{ _ :> {} }
 
         // Establish the session (SPEC §20.5.1). This is what a
         // <program auth="required"> gate checks: without it the user is

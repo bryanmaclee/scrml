@@ -83,11 +83,11 @@ ${
     // ─── Server functions ──────────────────────────────────────────────────────
 
     server function fetchUsers() {
-        return ?{`SELECT id, name, email FROM users ORDER BY name`}.all()
+        return ?{`SELECT id, name, email FROM users ORDER BY name`}.all() !{ _ :> [] }
     }
 
     server function fetchOrders() {
-        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC`}.all()
+        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC`}.all() !{ _ :> [] }
     }
 
     server function fetchMetrics() {
@@ -97,12 +97,12 @@ ${
                 SUM(amount) as total_revenue,
                 AVG(amount) as avg_order
             FROM orders
-        `}.get()
+        `}.get() !{ _ :> not }
     }
 
     server function createOrder(item, amount) {
-        ?{`INSERT INTO orders (item, amount) VALUES (${item}, ${amount})`}.run()
-        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 1`}.get()
+        ?{`INSERT INTO orders (item, amount) VALUES (${item}, ${amount})`}.run() !{ _ :> {} }
+        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 1`}.get() !{ _ :> not }
     }
 
     // ─── Load functions — each transitions its own state machine ──────────────

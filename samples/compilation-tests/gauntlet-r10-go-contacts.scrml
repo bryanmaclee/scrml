@@ -43,7 +43,7 @@ ${
                 phone TEXT NOT NULL DEFAULT '',
                 category TEXT NOT NULL DEFAULT 'Other'
             )
-        `}.run()
+        `}.run() !{ _ :> {} }
     }
     initDB()
 }
@@ -98,7 +98,7 @@ ${
                 (${searchQuery} = '' OR name LIKE '%' || ${searchQuery} || '%')
                 AND (${filterCategory} = '' OR category = ${filterCategory})
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
         return rows
     }
 
@@ -111,7 +111,7 @@ ${
         ?{`
             INSERT INTO contacts (name, email, phone, category)
             VALUES (${name}, ${email}, ${phone}, ${category})
-        `}.run()
+        `}.run() !{ _ :> {} }
     }
 
     // updateContact: UPDATE by id
@@ -125,12 +125,12 @@ ${
             UPDATE contacts
             SET name = ${name}, email = ${email}, phone = ${phone}, category = ${category}
             WHERE id = ${id}
-        `}.run()
+        `}.run() !{ _ :> {} }
     }
 
     // deleteContact: DELETE by id
     server function deleteContact(id) {
-        ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
+        ?{`DELETE FROM contacts WHERE id = ${id}`}.run() !{ _ :> {} }
     }
 }
 
