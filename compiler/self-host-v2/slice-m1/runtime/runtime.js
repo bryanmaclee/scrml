@@ -1190,15 +1190,18 @@ function reconcile(scope, anchor, oldRows, items, key, render) {
 // codec.scrml (`wireTableJs`) resolves from a Core type at compile time:
 //
 //   table = { defs: [def…], root: ty }
-//   def   = { k: "struct", name, fields: [{ name, ty }] } | { k: "enum", name, tags: [string] }
+//   def   = { k: "struct", name, fields: [{ name, ty }] }
+//         | { k: "enum", name, variants: [{ name, fields: [{ name, ty }] }] }   (fields [] = a unit variant)
 //   ty    = { k: "int" | "num" | "str" | "bool" } | { k: "maybe", inner: ty }
 //         | { k: "seq", elem: ty, bound: { k: "free" | "fixed" } | { k: "bounded", min, max } }
 //         | { k: "ref", def: index into defs }
 //
 // Runtime values are the bootstrap's (print.scrml): Int/Num = number, Str =
 // string, Bool = boolean, a struct = a plain object keyed by declared field
-// names, a payload-free enum value = its tag string, a sequence = an array, and
-// `not` = `null` (§42.8; `undefined` is treated as `not`, §42.9).
+// names, a unit enum value = its tag string, a payload enum value =
+// `{ variant: "V", data: [v0, …] }` (payload POSITIONAL in declared field
+// order — Ue DESIGN §5, print.scrml `variantValueJs`), a sequence = an array,
+// and `not` = `null` (§42.8; `undefined` is treated as `not`, §42.9).
 //
 // SPEC — what this file implements (quoted in docs/changes/s446-bootstrap-uc-codec/progress.md):
 //   §57.2  envelope `{"__scrml_absent": true}` — "exactly one own property named
@@ -1228,7 +1231,19 @@ function reconcile(scope, anchor, oldRows, items, key, render) {
 //          treated as a malformed payload"; "SHALL NOT silently coerce".
 //   §57.5  canonical-only decoding (raw `null` malformed) — selectable with
 //          `{ canonicalOnly: true }`; the default is the v0.x dual-decoder.
-//   §12.5.1 a (payload-free) enum value is its variant name string.
+//   §57.8  (S451 R8; s454) "An enum value whose variant carries NO payload SHALL
+//          be encoded as the variant name, a JSON string"; "An enum value whose
+//          variant carries a payload SHALL be encoded as a JSON object with
+//          exactly two own properties: `"variant"` … and `"data"`, a JSON object
+//          whose keys are the variant's DECLARED field names". The runtime's
+//          positional `data` array maps to/from the keyed wire object through
+//          the descriptor's field list. Decoding is exact in both directions:
+//          an unknown variant, a missing / extra / ill-typed field, a unit
+//          variant written as an object (or a payload variant as a bare string),
+//          or any top-level key besides `variant` / `data` is "malformed".
+//          `decodeError` reads the §57.8 / §19.9.1 `fail` envelope (the same
+//          `variant` / `data` plus `"__scrml_error": true` and `"type"`; `data`
+//          is `{}` for a unit variant) into the same runtime value.
 //   §6.14.2 r3 decode against the current type AND its contract; never coerced —
 //          a failure is a VALUE the caller maps to "take the default" (U5) or to
 //          its deserialization-error path (U1, §57.4).
@@ -1346,16 +1361,12 @@ function enc(table, ty, v, path, opts) {
     }
     case "ref": {
       const d = defOf(table, ty);
-      if (d.k === "enum") {
-        // §12.5.1: an enum value serializes as its variant name string.
-        if (typeof v === "string" && d.tags.includes(v)) return { ok: true, wire: v };
-        return fail("value", path, `expected a ${d.name} variant, got ${show(v)}`);
-      }
+      if (d.k === "enum") return encEnum(table, d, v, path, opts);
       if (!isPlainObject(v)) return fail("value", path, `expected a ${d.name}, got ${show(v)}`);
       // An undeclared own key is refused, not dropped — the decoder refuses it too.
       const declared = new Set(d.fields.map((f) => f.name));
       for (const k of Object.keys(v)) {
-        if (!declared.has(k)) return fail("value", `${path}.${k}`, `${d.name} has no field ${k}`);
+        if (!declared.has(k)) return fail("value", keyPath(path, k), `${d.name} has no field ${keyText(k)}`);
       }
       const out = {};
       for (const f of d.fields) {
@@ -1369,6 +1380,49 @@ function enc(table, ty, v, path, opts) {
     default:
       throw new CodecDefect(`codec: unknown descriptor kind ${JSON.stringify(ty.k)}`);
   }
+}
+
+// The variant of enum def `d` named `name` (a string compared, never a key
+// looked up — a foreign `"__proto__"` / `"toString"` names nothing), or undefined.
+function variantOf(d, name) {
+  if (!Array.isArray(d.variants)) throw new CodecDefect(`codec: enum descriptor ${JSON.stringify(d.name)} has no variants list`);
+  if (typeof name !== "string") return undefined;
+  return d.variants.find((x) => x.name === name);
+}
+
+// §57.8: a unit variant is its name; a payload variant `{ variant, data: [v0, …] }`
+// becomes `{"variant": "V", "data": {<declared field>: <encoded value>, …}}`.
+function encEnum(table, d, v, path, opts) {
+  if (typeof v === "string") {
+    const u = variantOf(d, v);
+    if (u === undefined) return fail("value", path, `${d.name} has no variant ${show(v)}`);
+    if (u.fields.length > 0) return fail("value", path, `${d.name}.${u.name} carries a payload; a bare name is not a value of it`);
+    return { ok: true, wire: v };
+  }
+  if (!isPlainObject(v)) return fail("value", path, `expected a ${d.name} variant, got ${show(v)}`);
+  for (const k of Object.keys(v)) {
+    if (k !== "variant" && k !== "data") return fail("value", keyPath(path, k), `a ${d.name} value has no key ${keyText(k)}`);
+  }
+  // OWN properties only, as the decoder reads them — an inherited `variant` /
+  // `data` (a polluted Object.prototype) is not part of the value.
+  if (!hasOwn(v, "variant")) return fail("value", `${path}.variant`, `missing the variant name of a ${d.name} value`);
+  const p = variantOf(d, v.variant);
+  if (p === undefined) return fail("value", `${path}.variant`, `${d.name} has no variant ${show(v.variant)}`);
+  if (p.fields.length === 0) return fail("value", path, `${d.name}.${p.name} carries no payload; its value is the name ${JSON.stringify(p.name)}`);
+  if (!hasOwn(v, "data")) return fail("value", `${path}.data`, `missing the payload of ${d.name}.${p.name}`);
+  const data = v.data;
+  if (!Array.isArray(data)) return fail("value", `${path}.data`, `expected the payload array of ${d.name}.${p.name}, got ${show(data)}`);
+  if (data.length !== p.fields.length) {
+    return fail("value", `${path}.data`, `${d.name}.${p.name} has ${p.fields.length} field(s), the payload holds ${data.length}`);
+  }
+  const out = {};
+  for (let i = 0; i < p.fields.length; i++) {
+    const f = p.fields[i];
+    const r = enc(table, f.ty, data[i], `${path}.data.${f.name}`, opts);
+    if (!r.ok) return r;
+    setField(out, f.name, r.wire);
+  }
+  return { ok: true, wire: { variant: p.name, data: out } };
 }
 
 /**
@@ -1444,15 +1498,12 @@ function dec(table, ty, w, path, opts) {
     }
     case "ref": {
       const d = defOf(table, ty);
-      if (d.k === "enum") {
-        if (typeof w === "string" && d.tags.includes(w)) return { ok: true, value: w };
-        return fail("malformed", path, `expected a ${d.name} variant name, got ${show(w)}`);
-      }
+      if (d.k === "enum") return decEnum(table, d, w, path, opts);
       if (!isPlainObject(w)) return fail("malformed", path, `expected a ${d.name} object, got ${show(w)}`);
       const declared = new Set(d.fields.map((f) => f.name));
       for (const k of Object.keys(w)) {
         // A key the type does not declare is refused, not dropped (no coercion).
-        if (!declared.has(k)) return fail("malformed", `${path}.${k}`, `${d.name} has no field ${k}`);
+        if (!declared.has(k)) return fail("malformed", keyPath(path, k), `${d.name} has no field ${keyText(k)}`);
       }
       const out = {};
       for (const f of d.fields) {
@@ -1468,6 +1519,104 @@ function dec(table, ty, w, path, opts) {
     default:
       throw new CodecDefect(`codec: unknown descriptor kind ${JSON.stringify(ty.k)}`);
   }
+}
+
+// §57.8, read side. A string must name a UNIT variant; an object must be
+// exactly `{ variant, data }` naming a PAYLOAD variant. Anything else is
+// malformed — never coerced (§57.4).
+function decEnum(table, d, w, path, opts) {
+  if (typeof w === "string") {
+    const u = variantOf(d, w);
+    if (u === undefined) return fail("malformed", path, `${d.name} has no variant ${show(w)}`);
+    if (u.fields.length > 0) return fail("malformed", path, `${d.name}.${u.name} carries a payload; its wire form is {"variant", "data"}, not a bare name (§57.8)`);
+    return { ok: true, value: w };
+  }
+  if (!isPlainObject(w)) return fail("malformed", path, `expected a ${d.name} variant name or {"variant", "data"} object, got ${show(w)}`);
+  for (const k of Object.keys(w)) {
+    if (k !== "variant" && k !== "data") return fail("malformed", keyPath(path, k), `a ${d.name} value has no key ${keyText(k)} (§57.8: exactly "variant" and "data")`);
+  }
+  if (!hasOwn(w, "variant")) return fail("malformed", `${path}.variant`, `missing the variant name of a ${d.name} value`);
+  const p = variantOf(d, w.variant);
+  if (p === undefined) return noVariant(d, w.variant, path);
+  if (p.fields.length === 0) {
+    return fail("malformed", path, `${d.name}.${p.name} carries no payload; its wire form is the string ${JSON.stringify(p.name)} (§57.8)`);
+  }
+  if (!hasOwn(w, "data")) return fail("malformed", `${path}.data`, `missing the payload of ${d.name}.${p.name}`);
+  const r = decPayload(table, d, p, w.data, `${path}.data`, opts);
+  if (!r.ok) return r;
+  return { ok: true, value: { variant: p.name, data: r.value } };
+}
+
+// The failure for a wire `variant` that names none of d's variants (decEnum, decError).
+function noVariant(d, name, path) {
+  if (typeof name !== "string") return fail("malformed", `${path}.variant`, `expected a ${d.name} variant name, got ${show(name)}`);
+  return fail("malformed", `${path}.variant`, `${d.name} has no variant ${show(name)}`);
+}
+
+// A variant's `data` object (keys = its declared field names, exactly) → the
+// positional payload array, in descriptor field order. Shared by decEnum and
+// decodeError: "One decoder therefore reads a variant's payload the same way
+// whether it arrived as a value or as an error" (§57.8).
+function decPayload(table, d, p, data, path, opts) {
+  if (!isPlainObject(data)) return fail("malformed", path, `expected the payload object of ${d.name}.${p.name}, got ${show(data)}`);
+  const declared = new Set(p.fields.map((f) => f.name));
+  for (const k of Object.keys(data)) {
+    if (!declared.has(k)) return fail("malformed", keyPath(path, k), `${d.name}.${p.name} has no field ${keyText(k)}`);
+  }
+  const out = [];
+  for (const f of p.fields) {
+    // as for a struct: omission is not an admitted absence form (§57.4)
+    if (!hasOwn(data, f.name)) return fail("malformed", `${path}.${f.name}`, `missing field ${f.name} of ${d.name}.${p.name}`);
+    const r = dec(table, f.ty, data[f.name], `${path}.${f.name}`, opts);
+    if (!r.ok) return r;
+    out.push(r.value);
+  }
+  return { ok: true, value: out };
+}
+
+const ERROR_KEY = "__scrml_error";
+
+// The §57.8 / §19.9.1 `fail` envelope against enum def `d`: exactly the four
+// own keys `__scrml_error` (=== true), `type` (=== d.name), `variant` (one of
+// d's variants) and `data` (that variant's payload object; `{}` for a unit
+// variant). An extra key is refused, as everywhere in this codec.
+function decError(table, d, w, opts) {
+  const path = "$";
+  if (!isPlainObject(w)) return fail("malformed", path, `expected a ${ERROR_KEY} envelope object, got ${show(w)}`);
+  for (const k of Object.keys(w)) {
+    if (k !== ERROR_KEY && k !== "type" && k !== "variant" && k !== "data") {
+      return fail("malformed", keyPath(path, k), `an error envelope has no key ${keyText(k)} (§57.8: ${ERROR_KEY}, type, variant, data)`);
+    }
+  }
+  if (!hasOwn(w, ERROR_KEY) || w[ERROR_KEY] !== true) return fail("malformed", `${path}.${ERROR_KEY}`, `not an error envelope: ${ERROR_KEY} is not true`);
+  if (!hasOwn(w, "type")) return fail("malformed", `${path}.type`, `missing the error type (expected ${JSON.stringify(d.name)})`);
+  if (w.type !== d.name) return fail("malformed", `${path}.type`, `error type ${show(w.type)} is not the declared ${JSON.stringify(d.name)}`);
+  if (!hasOwn(w, "variant")) return fail("malformed", `${path}.variant`, `missing the variant name of a ${d.name} error`);
+  const p = variantOf(d, w.variant);
+  if (p === undefined) return noVariant(d, w.variant, path);
+  if (!hasOwn(w, "data")) return fail("malformed", `${path}.data`, `missing the payload of ${d.name}.${p.name} ({} for a variant with no fields)`);
+  const r = decPayload(table, d, p, w.data, `${path}.data`, opts);
+  if (!r.ok) return r;
+  // the same runtime value a decoded enum VALUE has: a unit variant is its name
+  if (p.fields.length === 0) return { ok: true, value: p.name };
+  return { ok: true, value: { variant: p.name, data: r.value } };
+}
+
+/**
+ * Decode a §57.8 `fail` error envelope (a parsed JSON value) against `table`,
+ * whose root must be an enum ref (the callee's declared error type) →
+ * `{ ok, value }` (the declared variant's runtime value) or a "malformed"
+ * failure. `opts.canonicalOnly` as for `decode` (it governs `T | not`
+ * payload fields). No call path uses this yet (U1b `rt.call` will).
+ */
+export function decodeError(table, wire, opts) {
+  return guarded("malformed", () => {
+    const root = table.root;
+    if (root === null || typeof root !== "object" || root.k !== "ref") throw new CodecDefect("codec: decodeError needs a table whose root is an enum ref");
+    const d = defOf(table, root);
+    if (d.k !== "enum") throw new CodecDefect(`codec: decodeError against ${JSON.stringify(d.name)}, which is not an enum`);
+    return decError(table, d, wire, { canonicalOnly: flag(opts, "canonicalOnly") });
+  });
 }
 
 /**
@@ -1520,6 +1669,18 @@ function message(e) {
   } catch {
     return "an unprintable error";
   }
+}
+
+// A foreign object KEY in a failure (path and reason): a short plain identifier
+// verbatim (`$.data.zzz`); anything else — long, control characters, punctuation —
+// through `show`'s bounded (40-char), JSON-escaped form (`$["KKKK…"]`). A failure
+// never carries an unbounded or raw foreign key.
+const PLAIN_KEY = /^[A-Za-z_$][A-Za-z0-9_$]{0,39}$/;
+function keyText(k) {
+  return PLAIN_KEY.test(k) ? k : show(k);
+}
+function keyPath(path, k) {
+  return PLAIN_KEY.test(k) ? `${path}.${k}` : `${path}[${show(k)}]`;
 }
 
 function show(x) {

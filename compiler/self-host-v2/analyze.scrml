@@ -13890,8 +13890,9 @@ ${
 
     // §12.5.3 E-ROUTE-003 / E-ROUTE-004 against the §57 codec: a declaration's
     // instance (a live state object) is not serializable; a type the codec
-    // cannot yet describe (a payload enum — S451 R8 ruled its wire shape, the
-    // codec does not have it yet) is refused, not called non-serializable.
+    // refuses to describe (codec.scrml `WireBuild.why` — e.g. a struct field
+    // named `__scrml_absent`) is refused, not called non-serializable. (s454:
+    // payload enums are described — §57.8, S451 R8.)
     fn wireDiags(cx: PlaceCx, f: FnFacts, st0: AS) -> AS {
         let st: AS = st0
         const fs: FnSrc | not = fnSrcOf(cx.g, f.sym)
@@ -13914,7 +13915,7 @@ ${
         const state: string = stateTypeIn(cx.g, ty)
         if (state != "") return addDiag(st, f.file, span, code, "server function `" + f.name + "()`'s " + what + " is not serializable: it holds `" + state + "`, a declaration's instance — a live state object (it has identity; it is not a value), with no wire form (§12.5.3). Pass the values it holds instead")
         const wb: WireBuild = wireBuild(typesProgram(cx.g), ty)
-        if (wb.table is not) return addDiag(st, f.file, span, "E-BOOTSTRAP-UNSUPPORTED", "server function `" + f.name + "()`'s " + what + " has no wire descriptor in the bootstrap's codec: " + wb.why.join("; ") + " — the payload-enum wire shape (S451 R8, §57.8) is not in the codec yet (it lands with the server artifact, unit U1c)")
+        if (wb.table is not) return addDiag(st, f.file, span, "E-BOOTSTRAP-UNSUPPORTED", "server function `" + f.name + "()`'s " + what + " has no wire descriptor in the bootstrap's codec: " + wb.why.join("; "))
         return st
     }
 
