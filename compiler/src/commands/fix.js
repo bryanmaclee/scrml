@@ -12,7 +12,8 @@
  *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, arm-pipe (§19.4.5, the
  *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), client-server-call (§19.9.10, an
  *     unhandled client call of a server function → `!{ .Transport(_) :> { return } }` —
- *     commands/fix-client-server-call.js), program-wrap, program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
+ *     commands/fix-client-server-call.js), sql-failable (§19.8.3, an unhandled `?{}` outside a `!`
+ *     function → `!{ _ :> not }` / `!{ _ :> [] }` / `!{ _ :> {} }` — commands/fix-sql-failable.js), program-wrap, program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
  *     (entry + resolved imports) and withdrawn on any diagnostic change.
  *   - `--s66` — adds the §66 declaration rules (rhs-decl, const-cell, engine-simple). Their output
  *     is the §66 dialect, which impl#1 CANNOT compile; `--s66` is dry-run unless `--write` is also
@@ -53,9 +54,12 @@ const HELP = `scrml fix <file|dir> [options]
 
 Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; arm-pipe: a
 \`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; client-server-call: an
-unhandled client call of a server function → \`f() !{ .Transport(_) :> { return } }\`, §19.9.10).
+unhandled client call of a server function → \`f() !{ .Transport(_) :> { return } }\`, §19.9.10;
+sql-failable: an unhandled \`?{}\` outside a \`!\` function → \`?{…}.get() !{ _ :> not }\` /
+\`.all() !{ _ :> [] }\` / \`.run() !{ _ :> {} }\`, §19.8.3).
 A construct that is not mechanically rewritable is left untouched and reported; an "info" line
-marks a rewrite whose meaning differs (a client function's callers no longer abort).
+marks a rewrite whose meaning differs (a client function's callers no longer abort; a failed query
+no longer throws on today's compiler).
 
 DEFAULT rules (${IMPL1_SAFE_RULES.join(", ")}): their output still compiles with
 today's compiler, and each rewrite is verified by compiling the file in its project — a rewrite
