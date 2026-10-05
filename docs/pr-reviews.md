@@ -2124,3 +2124,4 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1307 verdict=carve-out by=S454-bryan date=2026-10-05 probe=maps refresh — .claude/maps/ only -->
 <!-- @review pr=1308 verdict=finding by=S454-bryan date=2026-10-05 probe=S239 r1 at e17b7cc59 LAND-WITH-FIXES (HIGH loop/closure const→var; MED batched-sibling partial write; MED raw-text entry regex; LOW-MED match arms) → fixed + corpus regenerated → r2 at e4219d7e9 LAND-WITH-NITS (all variants executed; .Transport(_) compiled on both impls; idempotent over 2338 files) -->
 <!-- @review pr=1306 verdict=carve-out by=S454-bryan date=2026-10-05 probe=S454 wrap PR — docs/continuity + SPEC text on bryan rulings (bare-return examples, §34 row) -->
+<!-- @review pr=1309 verdict=carve-out by=S455-bryan date=2026-10-05 probe=S454 post-wrap docs PR — hand-off/delta-log/pr-reviews only, no code path -->
