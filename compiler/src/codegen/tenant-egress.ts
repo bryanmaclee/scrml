@@ -140,8 +140,9 @@ export function schemaWriteHazards(schemaText: string, tenantTables: Set<string>
   let attributedActions = 0;
   const fkRe = new RegExp(`\\bREFERENCES\\s+${NAME}\\s*(?:\\([^)]*\\))?((?:\\s+(?:ON\\s+(?:DELETE|UPDATE)\\s+(?:CASCADE|SET\\s+NULL|SET\\s+DEFAULT|NO\\s+ACTION|RESTRICT)|MATCH\\s+\\w+|NOT\\s+DEFERRABLE|DEFERRABLE|INITIALLY\\s+\\w+))*)`, "gi");
   for (const m of text.matchAll(fkRe)) {
-    const actions = m[2].match(ACTION) ?? [];
-    if (actions.length === 0) continue;
+    // ACTION is /g: String.prototype.match returns null or a NON-EMPTY array.
+    const actions = m[2].match(ACTION);
+    if (!actions) continue;
     attributedActions += actions.length;
     add(bareName(m[1]), `a foreign key with \`${actions[0].replace(/\s+/g, " ").toUpperCase()}\` referencing it`);
   }

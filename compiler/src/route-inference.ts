@@ -7191,7 +7191,7 @@ export function runRI(input: RIInput): RIOutput {
         if (!rec || rec.filePath !== epFilePath) return false;
         const nm = rec.fnNode.name;
         if (!nm || exportedFnNames.has(nm)) return false;
-        if ((rec.fnNode as Record<string, unknown>).isGenerator === true) return false;
+        if (rec.fnNode.isGenerator === true) return false;
         const route = functions.get(id);
         if (route && route.boundary !== "client") return false;
         return true;

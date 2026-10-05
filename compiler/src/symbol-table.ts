@@ -1550,7 +1550,7 @@ function reportLocalNameCollidesState(
   name: string,
   declDisplay: string,
   isLet: boolean,
-  span: Span | undefined,
+  span: Span,
   currentScope: Scope,
   errors: SYMDiagnostic[],
 ): void {

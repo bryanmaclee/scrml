@@ -84,6 +84,7 @@ import {
   harvestCreateTables,
   harvestRawCreateTables,
 } from "./schema-differ.js";
+import type { SchemaTableDecl } from "./schema-differ.js";
 
 // ---------------------------------------------------------------------------
 // PA-internal types
@@ -742,9 +743,9 @@ function extractSchemaCreateTableStatements(nodes: ASTNode[]): Map<string, strin
     if (node.kind === "state" && node.stateType === "schema") {
       const body = collectSchemaBodyText(node as unknown as ASTNode);
       if (body.trim().length > 0) {
-        let parsed: { tables: Array<{ name: string; columns: unknown[] }> };
+        let parsed: { tables: SchemaTableDecl[] };
         try {
-          parsed = parseSchemaBlock(body) as typeof parsed;
+          parsed = parseSchemaBlock(body);
         } catch {
           parsed = { tables: [] };
         }
@@ -933,9 +934,9 @@ function extractSchemaForCreateTableStatements(nodes: ASTNode[]): Map<string, st
     const tableName = paPluralizeStructName(structName);
     // A `< schema>`-shaped table block: `< plural> {\n  field: type preds\n  ... }`.
     const schemaBody = `${tableName} {\n${fields.join("\n")}\n}`;
-    let parsed: { tables: Array<{ name: string; columns: unknown[] }> };
+    let parsed: { tables: SchemaTableDecl[] };
     try {
-      parsed = parseSchemaBlock(schemaBody) as typeof parsed;
+      parsed = parseSchemaBlock(schemaBody);
     } catch {
       return null;
     }
