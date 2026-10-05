@@ -1,6 +1,10 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-04T17:38:00-06:00  commit: 7ce905ac2
+# generated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900` (12 commits: #1294 #1295 #1296 #1297 #1298 #1300 #1299 #1301 #1302 #1303
+# #1304 #1305), incremental; scan mode INCREMENTAL (in-window changed docs + SPEC grep cross-check + 2 executed
+# reproducers). New section `## Summary — S454 pass` below.**
+# ━━━━━━━ BELOW IS THE S452-WRAP HEADER (stamp `7ce905ac2`), CARRIED. ━━━━━━━
 # ⛑ **S452-WRAP STAMP — `fd2f757d0` -> `7ce905ac2` (5 commits: #1281 #1290 #1292 #1285 #1293), incremental; scan
 # mode INCREMENTAL (in-window changed docs + SPEC grep cross-check). New section `## Summary — S452-WRAP pass` below.
 # ━━━━━━━ BELOW IS THE S453 HEADER (stamp `fd2f757d0`), CARRIED. ━━━━━━━
@@ -451,6 +455,81 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S454 pass (this pass, stamp `f38697900`)
+
+Window `7ce905ac2..f38697900` (12 commits). Docs scanned: the in-window changed `.md` set (`compiler/SPEC.md`,
+`compiler/SPEC-INDEX.md`, `docs/{FACTS,known-gaps,bootstrap-conformance,changelog,pr-reviews}.md`, `master-list.md`,
+`hand-off.md`, `docs/changes/s454-*/`) + a grep cross-check of every new code / symbol against SPEC + two executed
+compiles (the reproducers named below). Non-compliant: 4 · Uncertain: 3 · Prior findings closed: 2 (one with residue).
+
+### N-S454-1 — `E-NAME-COLLIDES-RESERVED-PREFIX` is emitted by impl#1; the SPEC says it is not, and §34 has no row
+**Reason:** grep-mismatch (code ahead of SPEC)
+**Detail:** #1301 emits it (`validators/reserved-prefix.ts:76` / :532, stage `api.js:1968`; executed this pass —
+`conformance/cases/server-db/reserved-prefix-raw-driver-pos` fails with it). `grep -c E-NAME-COLLIDES-RESERVED-PREFIX
+compiler/SPEC.md` = **2**, both in §47.1.1 (`:30775`, `:30778`) and both say **"Nominal / spec-ahead — not yet
+emitted"**; `:30775` adds "its §34 catalog row lands WITH the implementation (house rule)". The implementation
+landed; the row did not. Same class as N-S452W-1, which took one window to fix.
+**Suggested disposition:** update to match current — a §34 row (Error, §47.1.1) + strike the two "not yet emitted" clauses.
+
+### N-S454-2 — `docs/known-gaps.md` keeps two gaps `open` that this window's code fixes, one more with a false premise
+**Reason:** content-heuristic (ledger status contradicted by executed behaviour)
+**Detail:**
+- `g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454` (`:22987`, `status=open`) — its exact
+  reproducer (`const rows = ?{…}.all() !{ _ :> [] }` in a function called from a handler) **compiles at
+  `f38697900`** and the server module lowers it through `_scrml_sql_attempt` (executed this pass). #1305's D1 is
+  this defect. Filed by #1298, fixed by #1305, never closed.
+- `g-tenant-floor-raw-driver-handle-callable-s452` (`:22973`, `status=open`, "the `_scrml_` prefix is not
+  reserved") — the prefix is reserved since #1301 and `_scrml_sql.unsafe(...)` is refused (executed). Computed access
+  was not probed, so "resolved" needs that one check first.
+- `g-sql-error-surface-unwired` (`:10042`, `status=open`) states "`grep -rn SqlError compiler/src` = 0" — it is 4
+  files now (`codegen/sql-attempt.ts` maps a HANDLED query's driver throw to `QueryFailed` / `ConstraintViolation`
+  / `ConnectionLost`). Unhandled queries still throw, so the gap is narrowed, not closed; its premise text is false.
+**Suggested disposition:** update to match current (resolve the first, verify-then-resolve the second, rescope the third).
+
+### N-S454-3 — `docs/bootstrap-conformance.md` STALE for the FIFTH consecutive window (carries N-S452W-3)
+**Reason:** content-heuristic (generated doc vs live run)
+**Detail:** #1303 regenerated it (1315 cases); #1305 then added 3 conformance cases without regenerating. Live
+`bun scripts/bootstrap-conformance.ts --check` at `f38697900`: STALE; 1318 attempted, PASS 121 · FAIL 58 ·
+NOT-TWINNED 514 · UNSUPPORTED 625 · CRASH 0. The pattern is now structural: any PR that adds a conformance case
+stales this file, and its `--check` sits in the non-blocking `tracking` job.
+**Suggested disposition:** update to match current (`--write`) + make `--check` blocking for PRs touching `conformance/cases/**` or `compiler/self-host-v2/**`.
+
+### N-S454-4 — SPEC `:19377` says no compiler emits `E-ERROR-016`; the bootstrap does
+**Reason:** grep-mismatch (minor — the bootstrap is impl#2)
+**Detail:** "*E-ERROR-016 is **Nominal — reserved, §34 row lands with the implementation**: no compiler emits it
+yet.*" The bootstrap emits it since #1303 (`self-host-v2/analyze.scrml` :2818 / :2860; generated `severity.scrml:36`
+records "no §34 row"). impl#1 does not emit it.
+**Suggested disposition:** update to match current — "impl#1 does not emit it; the bootstrap does" (and decide whether the bootstrap's emission triggers the row).
+
+## Uncertain docs (needs human review) — S454 pass
+
+### `compiler/SPEC.md:25004` — the `E-CG-003` §34 row
+**Reason:** its trigger reads "Codegen: unsupported AST node kind in emission"; since #1305 the code also fires for an
+expression-position `!{}` whose arm leaves (`emit-logic.ts:1242`), which is a supported node in an unlowerable position.
+**What to check:** whether the row's trigger should name the new path, or the new path should get its own code.
+
+### `compiler/SPEC.md:12459` — "`UPDATE`/`DELETE` … fires `E-TENANT-WRITE`" (carried from S452-WRAP, still present)
+**Reason:** since #1293 an UPDATE / DELETE inside the tenant subset is filtered, not refused. Not executed this pass.
+**What to check:** compile a `db-authoritative` tenant table with `UPDATE … WHERE id = ${x}`; if it compiles, the sentence is stale.
+
+### `hand-off.md:41` and `:317`
+**Reason:** carries N-S452W-1/2 and N-S453-2 as open items; both are closed at `f38697900` (below). `hand-off.md` is the PA's live doc.
+**What to check:** the PA's S454 wrap hand-off should drop or close them.
+
+## Prior findings CLOSED at `f38697900`
+- **N-S452W-1** (`E-TENANT-SQL-SUBSET` has no SPEC text) — CLOSED by #1298: §34 row `SPEC.md:24831`, §14.8.10 prose
+  `:12154` / `:12353`, `OR ABORT` (3 mentions), schema-trigger limb `:12148`.
+- **N-S452W-2** (four SPEC sentences say the arm-pipe rule is not landed / corpus unmigrated) — CLOSED by #1298:
+  `:18349` ("The rule has LANDED (#1285 …)"), `:18388` census past-tensed ("the rule landed and the corpus was
+  migrated with it in #1285"), `:43237` (§63 registry), `:35583` (the §51.0.S.2.3 "not yet emitted" struck with an
+  S454 currency note); the "(never emitted under either name)" residue is superseded in the `:19838` / `:25083`
+  rows. Residue: `:35570` still reads "impl#1 today MISCOMPILES the canonical form silently" in the present tense;
+  the struck-through note 13 lines later says it is fixed. The `:19839` E-ARM-PIPE-LEGACY "Nominal / not yet
+  emitted" is CORRECT (the E- code is reserved).
+- CARRIED, still true at `f38697900`: `master-list.md` `@generated:recent-sessions` FAIL in `state.ts --check`;
+  known-gaps heading/marker drift **61**. The `*.generated.md` companion maps cited in prior passes are untracked —
+  absent from this clean worktree, so not re-verified.
 
 ## Summary — S452-WRAP pass (this pass, stamp `7ce905ac2`)
 

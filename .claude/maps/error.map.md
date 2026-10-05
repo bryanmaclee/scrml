@@ -1,6 +1,55 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-04T17:38:00-06:00  commit: 7ce905ac2
+# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
+# bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
+# U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
+# #1302 Types gate BLOCKING, #1303 bootstrap U1b, #1304 scheduled @generated regen, #1305 handled `?{}` in
+# expressions), incremental refresh in an isolated worktree @ `f38697900` = `origin/main`.** MAP-STAMP RULE:
+# `git log --oneline 7ce905ac2..HEAD` -> 12; `bun scripts/state.ts --check` at pass start: `maps: 12 commits behind
+# HEAD (watermark 7ce905ac2, HEAD f38697900)` — matches exactly.
+# Source-relevant in THIS window, grep-verified at `f38697900`:
+#   impl#1 (`compiler/src`, **236 files** = +2 `.ts` + 8 `.d.ts`):
+#   #1296 — §5.2.2 / §19.6.8 B7: the call-ref `onclick=fn()` listener is built with the AUTHOR name (not
+#     `fnNameMap.get`) so `colorHandlerAsync` sees an async callee; the formFor submit wrapper and the bare-ref
+#     `onclick=handler` (when async) now go through colouring too. `colorHandlerAsync` (`emit-event-wiring.ts:484`,
+#     module-local) is now called TWICE (:1229 bare-ref, :1386 main). `emit-variant-guard.ts` `emitArmWireFunction`
+#     :436 — the in-arm non-delegable registration — is the **16th listener-registration site**, now coloured via
+#     `colorActiveHandler` at :1299. Async `<errorBoundary>` render: re-throw -> `return`, both render calls gain
+#     `.catch(-> _scrml_error_boundary_log)` (:2492-:2497).
+#   #1299 — §14.8.9 (SECURITY): `codegen/protect-egress.ts` (1224 -> **1597** lines) fails CLOSED:
+#     `resolveProtectedOutputColumns` :641 returns `null` only on a POSITIVE proof; NEW `lexProtectSql` :287,
+#     `classifyProtectStatement` :417 (exported), `analyzeProtectStatement` :428, `writeTargetFromOriginal` :619,
+#     `nestedSelectReadsUnknownSource` :844, `holePayloadMayDisagree` :255, `ProtectStatementKind` :220. RETIRED:
+#     `isRowProducingQuery` (grep 0).
+#   #1301 — §47.1.1 (SECURITY): NEW `validators/reserved-prefix.ts` (545 lines) — `E-NAME-COLLIDES-RESERVED-PREFIX`,
+#     `runReservedPrefixCheck` :532, stage `RESERVED-PREFIX` at `api.js:1968` (post-TAB, after `SCOPE-REDECLARE`);
+#     stdlib exempt by REAL path via NEW `module-resolver.js` `isStdlibSourceFile`. Added to `pipeline-seam.ts`'s
+#     buildAST re-entry list (now TEN files). `expression-parser.ts` now exports `tokenizeTemplateInterpolations`.
+#   #1302 — `scripts/types-gate.ts --check` is a BLOCKING step in CI `gate` (placed right after Install deps).
+#     8 NEW `.d.ts`: `ast-builder`, `ast-if-chain`, `attribute-registry`, `codegen/emit-lift`, `host-import`,
+#     `markup-return-scan`, `runtime-template`, `schema-differ`.
+#   #1305 — §19.8.3 / §19.8.4: a handled `?{}` lowers in every expression position. `expression-parser.ts`
+#     `extractHandledOperands` :464 / `restoreHandledOperands` :534 (`SQL_REF_MARKER = "__scrml_sql_ref__"` :367,
+#     `GUARD_MARKER = "__scrml_guard__"` :369); `SqlRefExpr.raw` (types/ast.ts:2049); NEW `codegen/sql-attempt.ts` (141
+#     lines; `_scrml_sql_attempt`); `emit-logic.ts` `emitSqlQueryShape` :1183 / `emitNestedGuardExpr` :1230;
+#     `ast-builder.js` `parseGuardArmsFromRaw` :18325; `type-system.ts` E-TYPE-080 on every handler (:12676, :15181);
+#     `route-inference.ts:1797` walks a decl's `matchExpr` / `ifExpr` / `forExpr`.
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1295 codec payload enums (`codec.scrml`, runtime
+#     `encEnum` / `decEnum` / `decodeError`); #1303 U1b — `ServerCallError`, `Expr.ServerCall` / `Failable.FSettled`
+#     / `Stmt.Join` / `Stmt.Jump` (core.scrml), `check.scrml` C-S1..C-S4 + C-S7 + C-S8, runtime `call(route, args, task)` :2000
+#     (never rejects), `SERVER_CALL_DEADLINE_MS = 30000` :1988, `E-ERROR-016` (bootstrap-only, no §34 row).
+#   tooling: #1297 NEW `scripts/merge-on-green.sh` (257 lines) + `.gitattributes` LF pin for `scripts/*.sh` + hooks.
+#   SPEC-only: #1298 (§19.9.10 U1b closed; §14.8.10 subset text + `E-TENANT-SQL-SUBSET` §34 row; arm-pipe currency).
+# ⛑ FIGURES RE-EXECUTED AT `f38697900`: `facts.ts --check` PASS · `compiler/src` **292,596 lines / 236 files** ·
+# test files **1,597** (+6) · `compiler/SPEC.md` **46,135** lines (+352; `regen-spec-index.ts --check` OK 72/72) ·
+# conformance **1318** (+6); `bun conformance/run.ts` -> **1268 pass + 50 xfail** · known-gaps open **HIGH 242** ·
+# **MED 506** · **LOW 268** · Nominal 8; drift 61 · slice-m4 **1229 pass / 1 todo / 0 fail** across 38 files ·
+# `self-host-v2` 21 `.scrml` modules, **36,127** lines · bootstrap counter (live) 1318 attempted: PASS **121** ·
+# FAIL **58** · NOT-TWINNED **514** · UNSUPPORTED **625** · CRASH 0; graded 179, 121 hold (67.6%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 5th window (1315 cases; `--check` STALE). `types-gate.ts --check` NOT
+# executed this pass (no `tsc` in the available node_modules).
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S452-WRAP HEADER (stamp `7ce905ac2`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S452-WRAP STAMP — `fd2f757d0` -> `7ce905ac2`. 5 COMMITS (#1281 SPEC security forks, #1290 bootstrap effect
 # summary, #1292 the S453 maps refresh itself, #1285 W-ARM-PIPE-LEGACY + `scrml fix arm-pipe`, #1293 tenant SQL
 # subset), incremental refresh. Checkout `wrap/s452` @ `7ce905ac2`; untracked `spotLightReply.txt` NOT mapped.**
@@ -971,6 +1020,21 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S454 — DIAGNOSTIC DELTA (`7ce905ac2..f38697900`)
+
+| code | status at `f38697900` | emit site |
+|---|---|---|
+| `E-NAME-COLLIDES-RESERVED-PREFIX` | **NOW EMITTED by impl#1** (#1301), Error. A user-authored file may neither declare nor reference a `_scrml_`-prefixed name; stdlib source exempt by real path. ⚠ **NO §34 row; SPEC §47.1.1 (`SPEC.md:30775` / `:30778`) still says "Nominal / spec-ahead — not yet emitted"** (non-compliance N-S454-1) | `validators/reserved-prefix.ts` `runReservedPrefixCheck` :532 (`RESERVED_PREFIX_CODE` :76, message `reservedPrefixMessage` :104); stage `RESERVED-PREFIX` `api.js:1968` |
+| `E-TYPE-080` | **WIDENED** (#1305): non-exhaustive handler is now checked on EVERY handler — an expression-position `!{}` (`_checkExpressionPositionHandlers` :15248) and a `!{}` on a `?{}` against `SqlError` (:12676, variants `SQL_ERROR_EXHAUSTIVE_VARIANTS`). §34 row `SPEC.md:25037` unchanged | `type-system.ts` `_checkHandlerExhaustive` :15220 |
+| `E-CG-003` | **NEW FIRE PATH** (#1305): an expression-position `!{}` whose arm LEAVES (return/fail/…) cannot be lowered to a value -> refused, never a silent value. The §34 row's trigger text (`SPEC.md:25004`, "unsupported AST node kind") does not describe this path | `codegen/emit-logic.ts` `emitNestedGuardExpr` :1242, recorded via `emit-expr.ts` `recordExprGuardError`, drained in `codegen/index.ts` |
+| `E-TENANT-SQL-SUBSET` | §34 row now EXISTS (`SPEC.md:24831`, #1298) — closes N-S452W-1 | unchanged (`tenant-egress.ts`) |
+| `E-ERROR-016` | **bootstrap-only** (#1303): a client call whose enum declares `Transport` with a payload other than `ServerCallError`. Generated `severity.scrml:36` records "no §34 row" (fail-closed Error). SPEC `:19377` says "no compiler emits it yet" | `self-host-v2/analyze.scrml` (:2818 / :2860) |
+| `E-BOOTSTRAP-REDECLARE` | bootstrap: redefining the built-in `ServerCallError` (SqlError precedent) | `self-host-v2/analyze.scrml` |
+
+No impl#1 diagnostic code was removed. The #1296 handler-colouring change and the #1299 protect fail-closed change
+add NO codes: a protect statement the floor cannot prove safe is stripped wholesale at runtime (`{ all: true }`),
+not refused at compile time.
 
 ## S452-WRAP — DIAGNOSTIC DELTA (`fd2f757d0..7ce905ac2`)
 

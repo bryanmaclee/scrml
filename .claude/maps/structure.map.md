@@ -1,6 +1,55 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-10-04T17:38:00-06:00  commit: 7ce905ac2
+# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
+# bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
+# U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
+# #1302 Types gate BLOCKING, #1303 bootstrap U1b, #1304 scheduled @generated regen, #1305 handled `?{}` in
+# expressions), incremental refresh in an isolated worktree @ `f38697900` = `origin/main`.** MAP-STAMP RULE:
+# `git log --oneline 7ce905ac2..HEAD` -> 12; `bun scripts/state.ts --check` at pass start: `maps: 12 commits behind
+# HEAD (watermark 7ce905ac2, HEAD f38697900)` — matches exactly.
+# Source-relevant in THIS window, grep-verified at `f38697900`:
+#   impl#1 (`compiler/src`, **236 files** = +2 `.ts` + 8 `.d.ts`):
+#   #1296 — §5.2.2 / §19.6.8 B7: the call-ref `onclick=fn()` listener is built with the AUTHOR name (not
+#     `fnNameMap.get`) so `colorHandlerAsync` sees an async callee; the formFor submit wrapper and the bare-ref
+#     `onclick=handler` (when async) now go through colouring too. `colorHandlerAsync` (`emit-event-wiring.ts:484`,
+#     module-local) is now called TWICE (:1229 bare-ref, :1386 main). `emit-variant-guard.ts` `emitArmWireFunction`
+#     :436 — the in-arm non-delegable registration — is the **16th listener-registration site**, now coloured via
+#     `colorActiveHandler` at :1299. Async `<errorBoundary>` render: re-throw -> `return`, both render calls gain
+#     `.catch(-> _scrml_error_boundary_log)` (:2492-:2497).
+#   #1299 — §14.8.9 (SECURITY): `codegen/protect-egress.ts` (1224 -> **1597** lines) fails CLOSED:
+#     `resolveProtectedOutputColumns` :641 returns `null` only on a POSITIVE proof; NEW `lexProtectSql` :287,
+#     `classifyProtectStatement` :417 (exported), `analyzeProtectStatement` :428, `writeTargetFromOriginal` :619,
+#     `nestedSelectReadsUnknownSource` :844, `holePayloadMayDisagree` :255, `ProtectStatementKind` :220. RETIRED:
+#     `isRowProducingQuery` (grep 0).
+#   #1301 — §47.1.1 (SECURITY): NEW `validators/reserved-prefix.ts` (545 lines) — `E-NAME-COLLIDES-RESERVED-PREFIX`,
+#     `runReservedPrefixCheck` :532, stage `RESERVED-PREFIX` at `api.js:1968` (post-TAB, after `SCOPE-REDECLARE`);
+#     stdlib exempt by REAL path via NEW `module-resolver.js` `isStdlibSourceFile`. Added to `pipeline-seam.ts`'s
+#     buildAST re-entry list (now TEN files). `expression-parser.ts` now exports `tokenizeTemplateInterpolations`.
+#   #1302 — `scripts/types-gate.ts --check` is a BLOCKING step in CI `gate` (placed right after Install deps).
+#     8 NEW `.d.ts`: `ast-builder`, `ast-if-chain`, `attribute-registry`, `codegen/emit-lift`, `host-import`,
+#     `markup-return-scan`, `runtime-template`, `schema-differ`.
+#   #1305 — §19.8.3 / §19.8.4: a handled `?{}` lowers in every expression position. `expression-parser.ts`
+#     `extractHandledOperands` :464 / `restoreHandledOperands` :534 (`SQL_REF_MARKER = "__scrml_sql_ref__"` :367,
+#     `GUARD_MARKER = "__scrml_guard__"` :369); `SqlRefExpr.raw` (types/ast.ts:2049); NEW `codegen/sql-attempt.ts` (141
+#     lines; `_scrml_sql_attempt`); `emit-logic.ts` `emitSqlQueryShape` :1183 / `emitNestedGuardExpr` :1230;
+#     `ast-builder.js` `parseGuardArmsFromRaw` :18325; `type-system.ts` E-TYPE-080 on every handler (:12676, :15181);
+#     `route-inference.ts:1797` walks a decl's `matchExpr` / `ifExpr` / `forExpr`.
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1295 codec payload enums (`codec.scrml`, runtime
+#     `encEnum` / `decEnum` / `decodeError`); #1303 U1b — `ServerCallError`, `Expr.ServerCall` / `Failable.FSettled`
+#     / `Stmt.Join` / `Stmt.Jump` (core.scrml), `check.scrml` C-S1..C-S4 + C-S7 + C-S8, runtime `call(route, args, task)` :2000
+#     (never rejects), `SERVER_CALL_DEADLINE_MS = 30000` :1988, `E-ERROR-016` (bootstrap-only, no §34 row).
+#   tooling: #1297 NEW `scripts/merge-on-green.sh` (257 lines) + `.gitattributes` LF pin for `scripts/*.sh` + hooks.
+#   SPEC-only: #1298 (§19.9.10 U1b closed; §14.8.10 subset text + `E-TENANT-SQL-SUBSET` §34 row; arm-pipe currency).
+# ⛑ FIGURES RE-EXECUTED AT `f38697900`: `facts.ts --check` PASS · `compiler/src` **292,596 lines / 236 files** ·
+# test files **1,597** (+6) · `compiler/SPEC.md` **46,135** lines (+352; `regen-spec-index.ts --check` OK 72/72) ·
+# conformance **1318** (+6); `bun conformance/run.ts` -> **1268 pass + 50 xfail** · known-gaps open **HIGH 242** ·
+# **MED 506** · **LOW 268** · Nominal 8; drift 61 · slice-m4 **1229 pass / 1 todo / 0 fail** across 38 files ·
+# `self-host-v2` 21 `.scrml` modules, **36,127** lines · bootstrap counter (live) 1318 attempted: PASS **121** ·
+# FAIL **58** · NOT-TWINNED **514** · UNSUPPORTED **625** · CRASH 0; graded 179, 121 hold (67.6%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 5th window (1315 cases; `--check` STALE). `types-gate.ts --check` NOT
+# executed this pass (no `tsc` in the available node_modules).
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S452-WRAP HEADER (stamp `7ce905ac2`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S452-WRAP STAMP — `fd2f757d0` -> `7ce905ac2`. 5 COMMITS (#1281 SPEC security forks, #1290 bootstrap effect
 # summary, #1292 the S453 maps refresh itself, #1285 W-ARM-PIPE-LEGACY + `scrml fix arm-pipe`, #1293 tenant SQL
 # subset), incremental refresh. Checkout `wrap/s452` @ `7ce905ac2`; untracked `spotLightReply.txt` NOT mapped.**
@@ -895,6 +944,76 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S454 — STRUCTURE DELTA (`7ce905ac2..f38697900`)
+
+| path | change |
+|---|---|
+| `compiler/src/validators/reserved-prefix.ts` | **NEW** (545 lines) — §47.1.1 `E-NAME-COLLIDES-RESERVED-PREFIX` checker, post-TAB (#1301) |
+| `compiler/src/codegen/sql-attempt.ts` | **NEW** (141 lines) — §19.8.3 handled-`?{}` helper `_scrml_sql_attempt` + the `SqlError` variant tables (#1305) |
+| `compiler/src/{ast-builder,ast-if-chain,attribute-registry,host-import,markup-return-scan,runtime-template,schema-differ}.d.ts`, `compiler/src/codegen/emit-lift.d.ts` | **NEW** 8 type-declaration siblings for `.js` modules (`export declare` form) — the Types-gate TS7016 fix (#1302). 226 -> **236** files |
+| `scripts/merge-on-green.sh` | **NEW** (257 lines) — merges a PR only when `gate` + `windows` pass on the current head and `tracking`'s failure-name set equals main's; never `--auto` (#1297) |
+| `.gitattributes` | +`scripts/*.sh text eol=lf`, +`scripts/git-hooks/* text eol=lf` (#1297) |
+| `compiler/self-host-v2/slice-m4/` | +4 test files (`server-call.test.js`, `server-call-check.test.js`, `server-call-core.test.js`, `server-call-runtime.test.js`) + `server-call-fixtures.js` (not a test). **38** test files |
+| `compiler/tests/` | +6 — `unit/s454-callref-handler-rejection.test.js`, `browser/callref-handler-rejection-log-s454.browser.test.js`, `conformance/conf-PROTECT-EGRESS-FLOOR.test.js`, `unit/protect-failclosed-classify.test.js`, `unit/reserved-prefix-e-name-collides.test.js`, `unit/s454-handled-sql-expression-positions.test.js`. **1,597** |
+| `compiler/tests/integration/bootstrap-conformance-counter/fixtures/runtime/server-stub/` | **NEW** fixture dir (#1303) |
+| `conformance/cases/{reactive,server-db}/` | +6 — `reactive/reserved-prefix-declaration-pos`, `server-db/reserved-prefix-raw-driver-{neg,pos}`, `server-db/sql-handled-{decl-rhs,in-condition,match-scrutinee}-rt`. **1318** |
+| `docs/changes/s454-*/` | dispatch BRIEF / progress dirs (historical by design — compliant) |
+
+No directory removed. No file deleted. `self-host-v2` stays 21 `.scrml` modules (**36,127** lines; `analyze.scrml` 16,495, `parse.scrml` 3,887, `lower.scrml` 2,744, `check.scrml` 2,710, `print.scrml` 2,103); `slice-m1/runtime/runtime.js` 2,110.
+
+### ⛑ FILE INVENTORY — THE LISTENER-REGISTRATION SURFACE, RE-COUNTED (supersedes the S453 inventory's "15 sites")
+
+**The S453 inventory missed one site.** `emit-variant-guard.ts`'s in-arm non-delegable wiring registered listeners
+with NO colouring at all; #1296 found it and coloured it. **There are SIXTEEN listener-registration call sites
+into the colouring module, plus one more `colorHandlerAsync` call for the bare-ref form.** Re-grep before scoping:
+`grep -rn -e 'colorActiveHandler(' -e 'colorHandlerAsync(' compiler/src | grep -v js-async-analysis`.
+
+| file | L | symbols / sites |
+|---|---|---|
+| `codegen/js-async-analysis.ts` | 1671 | unchanged this window — `colorAsyncFunctionExpr` :1645, `colorActiveHandler` :1398, `wrapHandlerRejectionLog` :1539 (local), `DEFAULT_HANDLER_BOUNDARY_ID` :1505 |
+| `codegen/emit-event-wiring.ts` | 2927 | `colorHandlerAsync` :484 (module-LOCAL). Called at **:1229** (bare-ref `onclick=handler`: colours `function(event) { handler(event); }`; keeps the direct reference when nothing is async) and **:1386** (every other form, incl. formFor submit since #1296; ONE call covering delegated registry :1605-:1613, non-delegable Approach A :1629 + `_scrml_nav_rewire` :1640, arm factory `armFactoryLines` :1415/:1426/:1443). Call-ref listener text now uses the AUTHOR name (`handlerName`), mangled later by emit-client's `post-fn-name-mangle` pass; `resolvedHandler` survives only for the bare-ref direct reference. `<errorBoundary>` async render: log then `return` (:2442 / :2463), `renderCall` with `.catch` :2492-:2497 |
+| `codegen/emit-variant-guard.ts` | 1951 | **the 16th site** — `emitArmWireFunction` :436 colours each in-arm non-delegable handler ONCE with `colorActiveHandler` :1299 (statement-list opts from `activeHandlerStatementListColor`, ``boundaryId: `${eventName} ${placeholderId}` ``); `buildHandlerExpr` :1157 stays a pure lowering. NEW import of `js-async-analysis.ts` :98 |
+| `codegen/emit-each.ts` | — | 1 `colorActiveHandler` site (:2536), unchanged |
+| `codegen/emit-lift.js` | — | 13 `colorActiveHandler` sites, unchanged; typed now by NEW `emit-lift.d.ts` |
+
+Open, filed by #1296 (known-gaps): `g-channel-onclient-handler-rejection-unobserved-s454`,
+`g-channel-onserver-open-close-rejection-unlogged-s454`, `g-markup-interp-server-call-emitted-twice-s454` (MED),
+`g-errorboundary-string-fallback-silently-dropped-s454`, `g-errorboundary-nested-propagation-unimplemented-s454`
+(MED), `g-inarm-callref-handler-passes-event-s454`.
+
+### ⛑ FILE INVENTORY — THE §14.8.9 PROTECT FLOOR'S COLUMN RESOLVER (re-walked at `f38697900`)
+
+| file | L | symbols |
+|---|---|---|
+| `codegen/protect-egress.ts` | 1597 | `ProtectContext` :77, `buildProtectContext` :100, `ProtectedColumns` :142, `ProtectStatementKind` :220 (`select`/`write`/`no-rows`/`unknown`), `PROTECT_NO_ROW_LEADERS` :223, `PROTECT_WRITE_LEADERS` :229, `ProtectTok` :232, `holePayloadMayDisagree` :255, `lexProtectSql` :287, **`classifyProtectStatement` :417 (export)**, `analyzeProtectStatement` :428, `foldIdent` :459, `returningAsSelect` :575, `writeTargetFromOriginal` :619, **`resolveProtectedOutputColumns` :641** (every exit labelled `[proof]` -> `null` or `[unknown]` -> `{ all: true }`), `lexSqlEntry` :745, `opaqueColumnMayCarryProtected` :815 (now takes `known` tables), `nestedSelectReadsUnknownSource` :844, `SERVER_PROTECT_HELPER` :886 (`_scrml_protect_mediated` :916, `_scrml_protect_opaque_refusal` :925), `wrapWithProtectTag` :1152, `detectProtectedRawEgress` :1225, `findAuthoredResponseConstruction` :1530 |
+| `codegen/rewrite.ts` | — | the resolver's caller: `resolveProtectedOutputColumns` :214 -> `wrapWithProtectTag` :225 |
+
+⚠ The older protect routing row in primary.map.md cites `protect-egress.ts:449/:754/:221/:245` — those are
+pre-#1299 positions; use the lines above.
+
+### ⛑ FILE INVENTORY — THE RESERVED `_scrml_` PREFIX (new at `f38697900`)
+
+| file | L | symbols |
+|---|---|---|
+| `validators/reserved-prefix.ts` | 545 | `RESERVED_NAME_PREFIX` :74, `RESERVED_PREFIX_CODE` :76, `ReservedPrefixDiagnostic` :78, `isReservedPrefixName` :86, `isReservedPrefixExemptPath` :96, `reservedPrefixMessage` :104, `isTabDesugaredReference` :217 (TAB-desugared `_scrml_worker_*` / `_scrml_input_*_` refs are not author names), **`runReservedPrefixCheck` :532**. Local: `walk` :305, `reparseMarkupBody` :448, `scanMatchArms` :478, `scanEngineRules` :497 — raw-captured regions are re-parsed with the SAME sub-parser the compiler uses later (no regex over source) |
+| `api.js` | 4430 | import :78; stage `RESERVED-PREFIX` :1968, per TAB result, after `TRANSACTION-CHECKS` :1947 and `SCOPE-REDECLARE` :1956 |
+| `module-resolver.js` | 1164 | NEW `isStdlibSourceFile(filePath)` (real-path compare against the stdlib root; a `/app/stdlib/` user dir is NOT exempt) + local `realPathOrNearest` |
+| `pipeline-seam.ts` | 694 | `reserved-prefix.ts` added to the buildAST re-entry list (ten files) |
+
+### ⛑ FILE INVENTORY — THE HANDLED-`?{}`-IN-AN-EXPRESSION SURFACE (new at `f38697900`)
+
+| file | L | symbols |
+|---|---|---|
+| `expression-parser.ts` | 5302 | `SQL_REF_MARKER` :367, `GUARD_MARKER` :369, `extractHandledOperands` :464 (runs first in preprocessing, :3482), `restoreHandledOperands` :534; `TemplateSegment` / `tokenizeTemplateInterpolations` now exported |
+| `codegen/sql-attempt.ts` | 141 | `SQL_ATTEMPT_FN` :29, `SQL_ERROR_VARIANT_FIELDS` :37, `SQL_ERROR_EXHAUSTIVE_VARIANTS` :52, `unhandledFailureThrow` :66, `SqlQueryExprShape` :73, `sqlQueryExprShape` :87, `SERVER_SQL_ATTEMPT_HELPER` :107 |
+| `codegen/emit-logic.ts` | 6399 | `emitSqlQueryShape(shape, ctx, attempt)` :1183 (the ONE `case "sql"` lowering, reused), `emitNestedGuardExpr` :1230 (statement guard machinery in an IIFE; an arm that LEAVES -> `E-CG-003` :1242) |
+| `codegen/emit-expr.ts` | 4712 | `resetExprGuardErrors` :212 / `drainExprGuardErrors` :217 (drained in `codegen/index.ts`); imports `emitSqlQueryShape` / `emitNestedGuardExpr` from `./emit-logic.js` :53 |
+| `ast-builder.js` | 23,394 | `parseGuardArmsFromRaw(rawBang, filePath)` :18325 (declared in `ast-builder.d.ts`) |
+| `type-system.ts` | 30,807 | `_guardedNodeHandlesSql` :15201, `_checkHandlerExhaustive` :15220 (E-TYPE-080), `_operandErrorVariants` :15236, `_checkExpressionPositionHandlers` :15248 (run :15181); SQL limb :12676 |
+| `codegen/emit-server.ts` / `emit-tool.ts` / `emit-library.ts` | — | inject `SERVER_SQL_ATTEMPT_HELPER` iff `_scrml_sql_attempt(` is emitted |
+| `route-inference.ts` | 7695 | :1797 walks `matchExpr` / `ifExpr` / `forExpr` of a decl (a `?{}` in a `match` scrutinee server-escalates) |
+| `types/ast.ts` | 2183 | `SqlRefExpr.raw?` :2049 |
 
 ## S452-WRAP — STRUCTURE DELTA (`fd2f757d0..7ce905ac2`)
 

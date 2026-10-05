@@ -1,6 +1,56 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-10-04T16:05:00-06:00  commit: fd2f757d0
+# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
+# bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
+# U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
+# #1302 Types gate BLOCKING, #1303 bootstrap U1b, #1304 scheduled @generated regen, #1305 handled `?{}` in
+# expressions), incremental refresh in an isolated worktree @ `f38697900` = `origin/main`.** MAP-STAMP RULE:
+# `git log --oneline 7ce905ac2..HEAD` -> 12; `bun scripts/state.ts --check` at pass start: `maps: 12 commits behind
+# HEAD (watermark 7ce905ac2, HEAD f38697900)` — matches exactly.
+# Source-relevant in THIS window, grep-verified at `f38697900`:
+#   impl#1 (`compiler/src`, **236 files** = +2 `.ts` + 8 `.d.ts`):
+#   #1296 — §5.2.2 / §19.6.8 B7: the call-ref `onclick=fn()` listener is built with the AUTHOR name (not
+#     `fnNameMap.get`) so `colorHandlerAsync` sees an async callee; the formFor submit wrapper and the bare-ref
+#     `onclick=handler` (when async) now go through colouring too. `colorHandlerAsync` (`emit-event-wiring.ts:484`,
+#     module-local) is now called TWICE (:1229 bare-ref, :1386 main). `emit-variant-guard.ts` `emitArmWireFunction`
+#     :436 — the in-arm non-delegable registration — is the **16th listener-registration site**, now coloured via
+#     `colorActiveHandler` at :1299. Async `<errorBoundary>` render: re-throw -> `return`, both render calls gain
+#     `.catch(-> _scrml_error_boundary_log)` (:2492-:2497).
+#   #1299 — §14.8.9 (SECURITY): `codegen/protect-egress.ts` (1224 -> **1597** lines) fails CLOSED:
+#     `resolveProtectedOutputColumns` :641 returns `null` only on a POSITIVE proof; NEW `lexProtectSql` :287,
+#     `classifyProtectStatement` :417 (exported), `analyzeProtectStatement` :428, `writeTargetFromOriginal` :619,
+#     `nestedSelectReadsUnknownSource` :844, `holePayloadMayDisagree` :255, `ProtectStatementKind` :220. RETIRED:
+#     `isRowProducingQuery` (grep 0).
+#   #1301 — §47.1.1 (SECURITY): NEW `validators/reserved-prefix.ts` (545 lines) — `E-NAME-COLLIDES-RESERVED-PREFIX`,
+#     `runReservedPrefixCheck` :532, stage `RESERVED-PREFIX` at `api.js:1968` (post-TAB, after `SCOPE-REDECLARE`);
+#     stdlib exempt by REAL path via NEW `module-resolver.js` `isStdlibSourceFile`. Added to `pipeline-seam.ts`'s
+#     buildAST re-entry list (now TEN files). `expression-parser.ts` now exports `tokenizeTemplateInterpolations`.
+#   #1302 — `scripts/types-gate.ts --check` is a BLOCKING step in CI `gate` (placed right after Install deps).
+#     8 NEW `.d.ts`: `ast-builder`, `ast-if-chain`, `attribute-registry`, `codegen/emit-lift`, `host-import`,
+#     `markup-return-scan`, `runtime-template`, `schema-differ`.
+#   #1305 — §19.8.3 / §19.8.4: a handled `?{}` lowers in every expression position. `expression-parser.ts`
+#     `extractHandledOperands` :464 / `restoreHandledOperands` :534 (`SQL_REF_MARKER = "__scrml_sql_ref__"` :367,
+#     `GUARD_MARKER = "__scrml_guard__"` :369); `SqlRefExpr.raw` (types/ast.ts:2049); NEW `codegen/sql-attempt.ts` (141
+#     lines; `_scrml_sql_attempt`); `emit-logic.ts` `emitSqlQueryShape` :1183 / `emitNestedGuardExpr` :1230;
+#     `ast-builder.js` `parseGuardArmsFromRaw` :18325; `type-system.ts` E-TYPE-080 on every handler (:12676, :15181);
+#     `route-inference.ts:1797` walks a decl's `matchExpr` / `ifExpr` / `forExpr`.
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1295 codec payload enums (`codec.scrml`, runtime
+#     `encEnum` / `decEnum` / `decodeError`); #1303 U1b — `ServerCallError`, `Expr.ServerCall` / `Failable.FSettled`
+#     / `Stmt.Join` / `Stmt.Jump` (core.scrml), `check.scrml` C-S1..C-S4 + C-S7 + C-S8, runtime `call(route, args, task)` :2000
+#     (never rejects), `SERVER_CALL_DEADLINE_MS = 30000` :1988, `E-ERROR-016` (bootstrap-only, no §34 row).
+#   tooling: #1297 NEW `scripts/merge-on-green.sh` (257 lines) + `.gitattributes` LF pin for `scripts/*.sh` + hooks.
+#   SPEC-only: #1298 (§19.9.10 U1b closed; §14.8.10 subset text + `E-TENANT-SQL-SUBSET` §34 row; arm-pipe currency).
+# ⛑ FIGURES RE-EXECUTED AT `f38697900`: `facts.ts --check` PASS · `compiler/src` **292,596 lines / 236 files** ·
+# test files **1,597** (+6) · `compiler/SPEC.md` **46,135** lines (+352; `regen-spec-index.ts --check` OK 72/72) ·
+# conformance **1318** (+6); `bun conformance/run.ts` -> **1268 pass + 50 xfail** · known-gaps open **HIGH 242** ·
+# **MED 506** · **LOW 268** · Nominal 8; drift 61 · slice-m4 **1229 pass / 1 todo / 0 fail** across 38 files ·
+# `self-host-v2` 21 `.scrml` modules, **36,127** lines · bootstrap counter (live) 1318 attempted: PASS **121** ·
+# FAIL **58** · NOT-TWINNED **514** · UNSUPPORTED **625** · CRASH 0; graded 179, 121 hold (67.6%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 5th window (1315 cases; `--check` STALE). `types-gate.ts --check` NOT
+# executed this pass (no `tsc` in the available node_modules).
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S453 HEADER (stamp `fd2f757d0`), CARRIED. THIS MAP SKIPPED THE S452-WRAP
+# PASS; that window (`fd2f757d0..7ce905ac2`) is covered by this map's `## S454` section and by the S452-WRAP header in primary.map.md. ━━━━━━━
 # ⛑ **S453 STAMP — `d3e660a08` -> `fd2f757d0`. 17 COMMITS (#1269 SPEC whole-error binder, #1271 S451 wrap, #1270
 # bootstrap §34 severity, S452-bryan #1272/#1273/#1274/#1275/#1276/#1277/#1278/#1279/#1280, S453-peter #1283/#1286
 # + the S453 bookkeeping commit `b6a43445e`, and #1287 brought in by the merge commit `fd2f757d0`), incremental
@@ -820,6 +870,36 @@
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
+
+## S454 — DOMAIN DELTA (`fd2f757d0..f38697900`, two windows; the S452-WRAP window's domain content — tenant SQL subset, `|`-led arm deprecation, bootstrap effect summary — is mapped in structure / auth / error `## S452-WRAP` and summarized here)
+
+- **S452-WRAP (`fd2f757d0..7ce905ac2`), carried in brief:** §14.8.10 tenant queries are legal only inside an
+  allow-listed SQL subset (`E-TENANT-SQL-SUBSET` otherwise), UPDATE/DELETE get an injected tenant filter, SQLite
+  writes `OR ABORT`; `W-ARM-PIPE-LEGACY` is emitted by impl#1 and `scrml fix --rules=arm-pipe` is a default rule;
+  the bootstrap's placement / write rules read ONE effect summary per callable (`effects.scrml`).
+- **§19.6.8 B7 (#1296, SPEC + impl#1):** every rejection from an ASYNC event handler reaches the logging surface,
+  whatever the handler's FORM (`onclick=fn()`, `onclick=handler`, `onclick=${…}`, formFor submit, an in-arm
+  handler) and whatever site registers it. A sync throw is OPEN in the SPEC. Each error is logged exactly once.
+  §5.2.1 / §5.2.2 now state handler forms as MEANING, not as emitted JS.
+- **§19.6.8 B3 async render (#1296):** an async `<errorBoundary>` render with no fallback logs and returns; it no
+  longer re-throws into a promise nobody observes. Nested-boundary propagation is a carried impl#1 divergence
+  (`g-errorboundary-nested-propagation-unimplemented-s454`, MED).
+- **§19.8.3 / §19.8.4 handled `?{}` (#1305, impl#1 freeze exception):** a `?{}` handled by `!{}` or `match` is a
+  failable expression in EVERY position — declaration / assignment RHS, `match` scrutinee, `if` condition. A
+  driver throw becomes a `SqlError` envelope (`QueryFailed(message)` / `ConstraintViolation(field)` /
+  `ConnectionLost`) via `_scrml_sql_attempt`; "no row" is NOT a failure (`.get()` -> `not`, `.all()` -> `[]`). An
+  UNHANDLED query is emitted exactly as before (throws into the route's error path —
+  `g-impl1-sql-unhandled-outside-failable-s451`). Handlers are exhaustive everywhere (E-TYPE-080). Executed this
+  pass: the `g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454` reproducer compiles at `f38697900`
+  and lowers through `_scrml_sql_attempt` — the ledger still says `open`.
+- **§47.1.1 (#1301):** the `_scrml_` identifier namespace belongs to the compiler and runtime; author code may
+  neither declare nor reference it. Standard-library source is exempt by REAL path.
+- **§19.9.10 U1b (SPEC #1298, bootstrap #1303):** a client -> server call is failable; its failure set is the
+  callee's declared enum plus `Transport(t: ServerCallError)` (client-built, never server text); a client deadline
+  exists (bootstrap `SERVER_CALL_DEADLINE_MS`, placeholder value); `CpsError` is RETIRED from the SPEC (survives
+  only as a carried-divergence mention). `rt.call` RESOLVES, never rejects. A declared `Transport` of another
+  payload is `E-ERROR-016` (Nominal in SPEC; the bootstrap emits it).
+- **§19.10.3 (SPEC #1298):** the S453 transaction readings ratified; a defer x transaction composition note added.
 
 ## S453 — DOMAIN DELTA (`d3e660a08..fd2f757d0`)
 
