@@ -51,6 +51,8 @@
 
 import { normalizeSqlText } from "../sql-projection.ts";
 import type { ProtectContext } from "./protect-egress.ts";
+import { extractDesiredSchema } from "./db-authoritative.ts";
+import { fileSchemaTenantNames } from "../tenant-schema-hazards.ts";
 import {
   analyzeTenantSql,
   tenantTableMentioned,
@@ -225,20 +227,101 @@ export function buildTenantContext(
   schemaTables?: Array<{ name?: unknown; columns?: unknown }>,
   schemaText?: string,
   driverFor?: (dbVar: string) => string | undefined,
+  compilation?: CompilationTenantSet,
 ): TenantContext {
   const tenantScopedTables = new TenantTableSet();
+  addRegistryTenantTables(tenantScopedTables, protectCtx);
+  addSchemaTenantTables(tenantScopedTables, schemaTables);
+  // §14.8.10 (S455) — the compilation's ONE tenant set (see `compilationTenantSet`).
+  // It is computed by the same reading over every file compiled together, so it
+  // already holds this file's own tables; the file's own reading above is kept so
+  // a caller can never NARROW the floor by passing a stale set.
+  if (compilation) for (const t of compilation.tables) tenantScopedTables.add(t);
+  if (tenantScopedTables.size === 0) return { tenantScopedTables };
+  // The S452 r4 per-write limb keeps reading THIS file's `<schema>` text ("the
+  // program's `<schema>`"): a hazard in any compiled file's `<schema>` is already
+  // refused, compilation-wide, at the declaration (E-TENANT-SCHEMA-HAZARD), and
+  // joining every file's text would only spread this regex reader's
+  // unattributable over-fire across files.
+  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor };
+}
+
+/**
+ * The `<db tables=>` registry's tenant tables (`protectCtx.schemaByTable` — already
+ * compilation-wide: the PA stage runs ONE analysis over every file).
+ */
+function addRegistryTenantTables(into: Set<string>, protectCtx: ProtectContext): void {
   for (const [table, cols] of protectCtx.schemaByTable) {
-    if (cols.some((c) => c.toLowerCase() === TENANT_COLUMN)) tenantScopedTables.add(table);
+    if (cols.some((c) => c.toLowerCase() === TENANT_COLUMN)) into.add(table);
   }
+}
+
+/** ONE file's `<schema>`-declared tenant tables (`extractDesiredSchema(fileAST).tenantTables`). */
+function addSchemaTenantTables(
+  into: Set<string>,
+  schemaTables?: Array<{ name?: unknown; columns?: unknown }>,
+): void {
   for (const t of schemaTables ?? []) {
     if (typeof t?.name !== "string" || !Array.isArray(t?.columns)) continue;
     const carriesTenant = (t.columns as Array<{ name?: unknown }>).some(
       (c) => typeof c?.name === "string" && c.name.toLowerCase() === TENANT_COLUMN,
     );
-    if (carriesTenant) tenantScopedTables.add(t.name);
+    if (carriesTenant) into.add(t.name);
   }
-  if (tenantScopedTables.size === 0) return { tenantScopedTables };
-  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor };
+}
+
+/**
+ * The compilation's ONE tenant set (§14.8.10, S455): every table tenant-scoped by
+ * ANY file compiled together — whatever database each file names.
+ *
+ * ⚑ WHY ONE SET FOR THE WHOLE COMPILATION. Until S455 the floor built its set per
+ * file, from that file's own `<schema>`. A project of two `<program>` files sharing a
+ * database — `app.scrml` declaring `assets (…, tenant_id)`, `admin.scrml` with no
+ * `<schema>` — emitted admin's `SELECT name FROM assets` UNFILTERED and served every
+ * tenant's rows to a request pinned to one (executed, S455). Whether two files reach
+ * one database cannot be decided from their `db=` strings (S455 #1313 review round
+ * 4: a symlink, a `?mode=` URI, two `SCRML_DATA_DIR` roots, a hardlink or a
+ * case-insensitive filesystem each make two spellings one file), so the set is the
+ * union over every compiled file, any database. Accepted cost (SPEC §14.8.10): two
+ * genuinely different databases compiled together share it.
+ *
+ * ⚑ ONE SOURCE OF TRUTH. `api.js` computes this ONCE (stage TENANT-SCHEMA) and hands
+ * the SAME object to the `<schema>` declaration rule (`fileTenantSchemaHazards`) and
+ * to codegen (`runCG` input `compilationTenant` → every file's `buildTenantContext`,
+ * web app, headless and tool alike). `runCG` computes it with this same function only
+ * when it is driven directly (unit tests) without one.
+ *
+ * The set is the `<db tables=>` registry's tenant tables, and per file the floor's
+ * own `<schema>` reading (`addSchemaTenantTables`) UNION every `<schema>`
+ * declaration that carries `tenant_id` (`fileSchemaTenantNames` — the recognizer
+ * E-SCHEMA-015 reads, which also sees a `tenant_id` added by `ALTER TABLE`).
+ */
+export interface CompilationTenantSet {
+  /** The tenant-scoped tables (case-insensitive membership; entries lowercased). */
+  tables: ReadonlySet<string>;
+}
+
+/**
+ * The file-AST key `runCG` carries the compilation's set on (underscore-led: AST
+ * walkers skip it). Read with `compilationTenantOf`.
+ */
+export const COMPILATION_TENANT_KEY = "_scrmlCompilationTenant";
+
+/** The compilation's tenant set `runCG` attached to this file AST, if any. */
+export function compilationTenantOf(fileAST: unknown): CompilationTenantSet | undefined {
+  if (fileAST === null || typeof fileAST !== "object") return undefined;
+  const v = (fileAST as Record<string, unknown>)[COMPILATION_TENANT_KEY] as CompilationTenantSet | undefined;
+  return v && v.tables instanceof Set ? v : undefined;
+}
+
+export function compilationTenantSet(files: Iterable<unknown>, protectCtx: ProtectContext): CompilationTenantSet {
+  const tables = new TenantTableSet();
+  addRegistryTenantTables(tables, protectCtx);
+  for (const fileAST of files) {
+    addSchemaTenantTables(tables, extractDesiredSchema(fileAST).tenantTables);
+    for (const t of fileSchemaTenantNames(fileAST)) tables.add(t);
+  }
+  return { tables };
 }
 
 /**

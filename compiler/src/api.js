@@ -41,11 +41,11 @@ import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
-// §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion).
-import { fileTenantSchemaHazards, fileSchemaTenantNames } from "./tenant-schema-hazards.ts";
-import { buildTenantContext } from "./codegen/tenant-egress.ts";
+// §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
+// and the compilation's ONE tenant set it shares with the floor in CG.
+import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
+import { compilationTenantSet } from "./codegen/tenant-egress.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
-import { extractDesiredSchema } from "./codegen/db-authoritative.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
@@ -2970,9 +2970,10 @@ function _compileScrmlImpl(options = {}) {
   // user-voice-scrml.md S455 "go, comp-time schema"). The ONE evaluation of the
   // schema-declaration rule, placed after every compile-time expansion of `<schema>`
   // (TS: `${ schemaFor(T) }`; ME: meta splices) and before CG, over the same AST CG
-  // consumes. Its tenant set is the floor's own — `buildTenantContext` over the
-  // `<db tables=>` registry and the expanded `<schema>`, exactly as emit-server builds
-  // it — so a table the floor scopes can never escape the declaration rule.
+  // consumes. Its tenant set IS the floor's — `compilationTenantSet` over the
+  // `<db tables=>` registry and every expanded `<schema>` — the one object CG's
+  // `buildTenantContext` also receives, so a table the floor scopes can never escape
+  // the declaration rule, and the two cannot drift.
   //
   // COMPILATION-SCOPED (S455 review rounds 3–4, PA decision): ONE tenant set — the
   // union of every compiled file's tenant tables, whatever database each names — and
@@ -2982,19 +2983,18 @@ function _compileScrmlImpl(options = {}) {
   // from a `db=` string (symlinks, `?mode=` URIs, SCRML_DATA_DIR roots, hardlinks,
   // case-insensitive filesystems — each executed by the reviewer). Accepted cost: two
   // genuinely different databases compiled together share the set.
-  {
-    const _tsProtectCtx = buildProtectContext(paResult.protectAnalysis);
-    const projectTenant = new Set();
-    for (const fileAST of metaFiles) {
-      const desired = extractDesiredSchema(fileAST);
-      for (const t of buildTenantContext(_tsProtectCtx, desired.tenantTables, desired.schemaText).tenantScopedTables) projectTenant.add(t);
-      for (const t of fileSchemaTenantNames(fileAST)) projectTenant.add(t);
-    }
-    for (const fileAST of metaFiles) {
-      const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
-      const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, projectTenant));
-      collectErrors("TENANT-SCHEMA", diags, fp);
-    }
+  //
+  // THE SAME SET IS THE FLOOR'S (S455, g-tenant-floor-per-file-tenant-set-s455): it is
+  // computed ONCE here and handed to CG (`compilationTenant`), so a file whose reads
+  // touch a table tenant-scoped anywhere in the compilation is filtered at the source
+  // exactly as if it declared the table itself. Before, the floor read only its own
+  // file's `<schema>`: admin.scrml's `SELECT name FROM assets` (assets declared in
+  // app.scrml) was emitted unfiltered and served every tenant's rows (executed).
+  const compilationTenant = compilationTenantSet(metaFiles, buildProtectContext(paResult.protectAnalysis));
+  for (const fileAST of metaFiles) {
+    const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
+    const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables));
+    collectErrors("TENANT-SCHEMA", diags, fp);
   }
 
   // Stage 7: DG (all files — sees post-meta-expansion AST)
@@ -3113,6 +3113,8 @@ function _compileScrmlImpl(options = {}) {
     routeMap: riResult.routeMap,
     depGraph: dgResult.depGraph,
     protectAnalysis: paResult.protectAnalysis,
+    // §14.8.10 (S455) — the compilation's ONE tenant set (stage TENANT-SCHEMA above).
+    compilationTenant,
     batchPlan: bpResult.batchPlan,
     batchPlannerErrors: bpResult.errors,
     embedRuntime,

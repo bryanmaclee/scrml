@@ -59,6 +59,8 @@ import { generateHtml, augmentHtmlForChunks, buildChunksBootJs } from "./emit-ht
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
+import { compilationTenantSet, COMPILATION_TENANT_KEY, type CompilationTenantSet } from "./tenant-egress.ts";
+import { buildProtectContext } from "./protect-egress.ts";
 import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
@@ -165,6 +167,13 @@ export interface CgInput {
   routeMap?: CgRouteMap;
   depGraph?: CgDepGraph;
   protectAnalysis?: CgProtectAnalysis;
+  /**
+   * §14.8.10 (S455) — the compilation's ONE tenant set, computed once by the api.js
+   * TENANT-SCHEMA stage (`compilationTenantSet`) and shared with the `<schema>`
+   * declaration rule. When absent (runCG driven directly), runCG computes it from
+   * `files` + `protectAnalysis` with the same function.
+   */
+  compilationTenant?: CompilationTenantSet;
   sourceMap?: boolean;
   embedRuntime?: boolean;
   mode?: "browser" | "library";
@@ -1191,6 +1200,7 @@ export function runCG(input: CgInput): CgOutput {
     routeMap,
     depGraph,
     protectAnalysis,
+    compilationTenant: compilationTenantInput,
     embedRuntime = false,
     sourceMap = false,
     mode = "browser",
@@ -2318,6 +2328,18 @@ export function runCG(input: CgInput): CgOutput {
         _transitionUnionOwner = fp;
       }
     }
+  }
+
+  // §14.8.10 (S455) — the compilation's ONE tenant set reaches every file's floor
+  // (web-app, headless and tool emit alike) on the file AST, the same carrier as
+  // `_asyncImportedLocals` (the emitters have no `files` handle). A file whose reads
+  // touch a table tenant-scoped ANYWHERE in the compilation is filtered at the source
+  // exactly as if it declared the table — the per-file set served every tenant's rows
+  // through a second `<program>` sharing the database (executed, S455).
+  const compilationTenant: CompilationTenantSet =
+    compilationTenantInput ?? compilationTenantSet(files, buildProtectContext(protectAnalysis));
+  for (const fileAST of files) {
+    if (fileAST && typeof fileAST === "object") (fileAST as any)[COMPILATION_TENANT_KEY] = compilationTenant;
   }
 
   // Process each file

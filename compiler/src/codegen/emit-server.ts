@@ -56,6 +56,7 @@ import { registerProtectModule } from "./protect-flow.ts";
 import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
+  compilationTenantOf,
   detectTenantRawEgress,
   SERVER_TENANT_HELPER,
   tenantRequestScopeLines,
@@ -1960,6 +1961,9 @@ export function generateServerJs(
   // byte-identically (every redaction site below is a no-op / absent).
   // `tenantTables` = the UNION over every same-name `<schema>` declaration (S447
   // "stamp all" (i)); disagreeing declarations are rejected at GCP1 (E-SCHEMA-015).
+  // S455 — plus the COMPILATION's one tenant set (`compilationTenantOf`, attached by
+  // runCG from the api.js TENANT-SCHEMA stage): a table tenant-scoped by ANY file
+  // compiled together is scoped here, exactly as if this file declared it.
   const _desiredForTenant = extractDesiredSchema(fileAST);
   const _tenantCtx: TenantContext = buildTenantContext(
     _protectCtx,
@@ -1968,6 +1972,7 @@ export function generateServerJs(
     // §14.8.10 (S452 r4) — the dialect of the handle a query runs on: an injected
     // SQLite write carries `OR ABORT` (it overrides a table-level ON CONFLICT REPLACE).
     (ident: string) => _dbScopesForFile.get(ident)?.driver,
+    compilationTenantOf(fileAST),
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
   // Tier-1 `SELECT * FROM <tenant table>` + SSR seed reads are hand-emitted (not
