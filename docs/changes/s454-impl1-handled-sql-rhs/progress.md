@@ -36,3 +36,37 @@
 5. guarded-expr: decl-with-sqlNode init; rebind → assignment; `return f() !{…}` → `return resultVar` after the arms.
 
 Committed c127acf52 (code + tests + 3 conformance cases + FACTS regen).
+
+## Evidence (executed; real bun:sqlite; route handler called directly)
+
+States: `row` = table with row id 7, `norow` = empty table, `fail` = table absent ("no such table").
+| shape | base 3261a4423 | head row | head norow | head fail |
+|---|---|---|---|---|
+| D1 `const row = ?{}.get() !{ _ :> "FALLBACK" }` | E-CODEGEN-INVALID-LOGIC (no build) | {id:7} | null | "FALLBACK" |
+| D1 `.all() !{ _ :> ["FALLBACK"] }` | no build | [{id:7}] | [] | ["FALLBACK"] |
+| D1 `let … !{ .QueryFailed(m) :> "QF:"+m … }` | no build | {id:7} | null | "QF:no such table: notes" |
+| D1 `row = ?{}.get() !{…}` (reassign) | no build | {id:7} | null | "FALLBACK" |
+| D1 `( ?{}.get() !{…} )` | no build | {id:7} | null | "FALLBACK" |
+| `return ?{}.get() !{…}` | builds; returns undefined (return dropped) | {id:7} | null | "FALLBACK" |
+| D2 `match ?{}.get() { ::Ok(x) :> x  _ :> "FALLBACK" }` | exit 0, CLIENT-placed; `null.get()` → TypeError | {id:7} | null | "FALLBACK" |
+| D2 `match ?{}.all() { ::Ok(f) :> f  ::QueryFailed(m) :> ["QF:"+m] … }` | client, TypeError | [{id:7}] | [] | ["QF:no such table: notes"] |
+| D3 `if (?{}.get() !{ _ :> not })` | no build (raw `!{`) | "truthy…" | "falsy" | "falsy"/arm value |
+| SPEC §19.8.3 ex.1 (`userName(1)`) | no build | "ada" | "(none)" | QueryFailed arm runs; its `log(…)` throws ReferenceError (pre-existing, see gap 1 below); with `{ return "QF:"+m }` → "QF:no such table: users" |
+
+## Differential (corpus-emit-differential, base 3261a4423 vs head c127acf52, separate worktrees, root-normalized)
+
+2342 common sources; compile-failure delta 0/0; diagnostic code changes 0; effective syntax-failure set identical (75/75).
+Root-normalized artifacts: 11438 compared, 9 changed, 18 head-only (the 3 new conformance cases). The 9:
+- stdlib/crypto/index.scrml `index.client.js`, stdlib/auth/jwt.scrml + auth/index `jwt.client.js`, stdlib/oauth/google.scrml + oauth/index `google.client.js` — each `return safeCall(…) !{ … }`: `+ return _scrml__scrml_result_N;` (the dropped-return fix; base `verifyHash("argon2", …)`, `decodeJwt`, the google payload parse returned undefined).
+- stdlib/store/kv.scrml + store/index `kv.server.js` / `kv.client.js` — syntax-failing on BOTH sides; message changed (`Unexpected token '!'` → `','`): the object literal now parses past its `!{`, and its method-shorthand values hit the pre-existing empty-escape-hatch conversion (`{ m() {…} }` → `{m: }`, reproduced on base without any `!{`).
+No corpus file contains a D1/D2/D3 site (they never built / never ran).
+
+## Residual / pre-existing gaps surfaced (entry text for the PA)
+
+1. g-bang-arm-block-body-log-builtin-unlowered-s454 — `log(…)` inside a `!{}` BLOCK arm body (`.V(m) :> { log(m); … }`) is emitted verbatim (`log ( … )`), so the arm throws `ReferenceError: log is not defined` when it runs. Any failable (base-reproduced with a plain `!` fn); SPEC §19.8.3 example 1's own QueryFailed arm hits it. Locus: emit-logic `emitArmBody` → `rewriteBlockBody` (string path, client mode). MED (silent until the failure path).
+2. g-markup-interp-guard-renders-trailing-statement-s454 — `<p>${ f() !{ _ :> 0 } + 10 }</p>` lowers the guard as a top-level statement and renders `+10`; `<p>${ f() !{ _ :> 0 } }</p>` renders nothing. Byte-identical base/head. Silent-wrong. MED.
+3. g-expr-position-guard-leaving-arm-e-cg-003-s454 — a `!{}` inside an expression whose arm LEAVES (`return`/`fail`/`break`/`continue`) is refused with E-CG-003 (loud); §19.4.3 item 2 allows leaving arms in every value position. Workaround: hoist to `const v = … !{…}`. LOW.
+4. g-handler-arrow-block-body-nested-guard-raw-s454 — `onclick=${ () => { @n = (f() !{…}) } }`: a block-body arrow is text-lowered, so a guard nested in an expression inside it reaches the JS raw (E-CODEGEN-INVALID-LOGIC). Base-identical. LOW.
+5. for-of header `for (const r of ?{…}.all() !{…})` → E-PARSE-001 (unchanged; out of scope per brief). LOW.
+6. Object-literal method shorthand converts to an EMPTY escape-hatch (`{ close() { … } }` → `{close: }`), pre-existing (expression-parser ObjectExpression). Surfaced in stdlib/store/kv. MED.
+7. Expression-position `?{}` still bypasses buildBlock, so E-SQL-003 (runtime-expr body) does not fire there (g-sqlref-direct-call-arg-unresolved's diagnostic half). Its RUNTIME half is now closed: `out.push(?{…}.all())` emits the real query (base: `null /* sql-ref unresolved */.all()`).
