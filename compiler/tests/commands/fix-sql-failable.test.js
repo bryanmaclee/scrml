@@ -222,6 +222,16 @@ describe("sql-failable — listed, never rewritten", () => {
       "  } }",
       "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>",
     ], /captured by a closure/);
+    listedOnly([
+      "  ${ function a(id) {",
+      "      if (id > 1) {",
+      `          rows = ${q("SELECT n FROM t")}`,
+      "          return rows",
+      "      }",
+      "      return []",
+      "  } }",
+      "  <button onclick={ @out = a(2) !{ .Transport(_) :> { return } } }>a</button>",
+    ], /nested block \/ loop/);
   });
   test("a body-split function (it also writes a cell)", () => {
     listedOnly([

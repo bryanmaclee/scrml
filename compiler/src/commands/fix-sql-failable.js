@@ -200,12 +200,14 @@ export function collectSqlSites(ast, ri) {
     // const / let (impl#1 records a plain reassignment `x = …` as a const-decl with `_bareAssign`).
     if (parent.sqlNode !== sql) return { ...base, action: "list", kind: "expression", reason: "an unhandled `?{}` inside a declaration's initializer expression — handle it by hand (§19.8.3)" };
     if (term === "run") return { ...base, action: "list", kind: "run-value", reason: "`.run()` as a value — it has no superseded value; handle it by hand (§19.8.3)" };
-    if (parent._bareAssign) return { ...base, action: "rewrite", kind: "reassign", term, fn, stmt: parent };
+    // A keywordless `x = ?{…}` is a reassignment when `x` is already bound, and impl#1's implicit
+    // declaration otherwise (base emits `const x = …`); handled, impl#1 emits `var x` for the
+    // latter (measured S455 Phase 2), so the same nested / captured hazard applies to both.
     const nested = between.length > 0;
     if (nested || (typeof parent.name === "string" && capturedByClosure(fn, parent.name))) {
       return { ...base, action: "list", kind: "decl-var-scoping", reason: `\`${parent.name}\` = ?{…} ${nested ? "inside a nested block / loop" : "captured by a closure"}: impl#1 lowers a handled declaration to \`var\`, so the binding would be shared — handle it by hand (§19.8.3)` };
     }
-    return { ...base, action: "rewrite", kind: "decl", term, fn, stmt: parent };
+    return { ...base, action: "rewrite", kind: parent._bareAssign ? "reassign" : "decl", term, fn, stmt: parent };
   };
   const walk = (x, path) => {
     if (!x || typeof x !== "object" || seen.has(x)) return;
