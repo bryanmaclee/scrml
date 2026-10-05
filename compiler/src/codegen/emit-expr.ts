@@ -48,7 +48,9 @@ import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
-import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
+import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw } from "../expression-parser.ts";
+import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { emitSqlQueryShape, emitNestedGuardExpr } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
@@ -193,6 +195,31 @@ export function drainTildeUnresolvedErrors(): CGError[] {
   return out;
 }
 
+// §19.4.3 (S454) — module-level sink for an expression-position `!{}` handler
+// that cannot be lowered (an arm that LEAVES from inside an expression; arms
+// that do not parse): E-CG-003. Same reason and lifecycle as the `~` sink above —
+// the handler is reached through expression contexts built without an error
+// channel (an `if` condition, a `match` scrutinee, a handler arrow), in every
+// emit path — so it is reset once at the top of `runCG` and drained beside it.
+let _exprGuardErrors: CGError[] = [];
+
+/** Record an unlowerable expression-position `!{}` handler (emit-logic emitNestedGuardExpr). */
+export function recordExprGuardError(err: CGError): void {
+  _exprGuardErrors.push(err);
+}
+
+/** Reset the expression-position `!{}` sink (called once at the start of `runCG`). */
+export function resetExprGuardErrors(): void {
+  _exprGuardErrors = [];
+}
+
+/** Drain + clear the accumulated expression-position `!{}` diagnostics. */
+export function drainExprGuardErrors(): CGError[] {
+  const out = _exprGuardErrors;
+  _exprGuardErrors = [];
+  return out;
+}
+
 // §20.7 (shadowing) — PER-FILE set: which of the `print` / `println` builtins
 // does the current file shadow via a top-level `function print` / `fn println`?
 // A shadowed name yields to the user binding across the whole file (mirrors
@@ -329,6 +356,15 @@ export interface EmitExprContext {
   dbVar?: string;
   /** Error accumulator for diagnostics. */
   errors?: any[];
+  /**
+   * S454 — the statement-emitter options this context was made from
+   * (emit-logic `_makeExprCtx`). An expression-position `?{}` query and an
+   * expression-position `!{}` handler lower through the statement emitter with
+   * THESE options (the db handle, the peer-await sets, the error sinks), so the
+   * query is lowered exactly as the same query in statement position. Absent on
+   * contexts built elsewhere; the lowering then derives options from this context.
+   */
+  logicOpts?: unknown;
   /**
    * C13 (§51.0.G) — engine variable names in the file's scope. When set and
    * the call shape is `@<name>.advance(<arg>)` with `<name>` in this set,
@@ -3093,6 +3129,21 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
+  // §19.4.3 / §19.8.3 (S454) — an expression-position `!{ … }` handler
+  // (`<operand> .__scrml_guard__("!{ … }")`, expression-parser
+  // extractHandledOperands). Lowered by the statement emitter's guard machinery.
+  const guardRaw = guardCallArmsRaw(node);
+  if (guardRaw !== null && node.callee.kind === "member") {
+    return emitExpressionGuard(node.callee.object, guardRaw, ctx);
+  }
+  // §19.8.3 (S454) — an expression-position `?{}` query with its chain
+  // (`?{…}.get()`). Server boundary: lowered exactly as the same query in
+  // statement position. Client: unchanged placeholder (a query never ships
+  // to the client; route inference server-places the function).
+  if (ctx.mode === "server") {
+    const sqlShape = sqlQueryExprShape(node);
+    if (sqlShape !== null) return emitExpressionSqlQuery(sqlShape, ctx);
+  }
   // §14.12.6.3 (S131 — HU-2 hybrid) — `transition(<ident>)` is a compile-time-
   // only marker for lifecycle progression. The type-system walker consumes it
   // symbolically (per checkLifecycleBindingAccess); codegen emits ZERO runtime
@@ -4548,7 +4599,31 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   return emitStructuredMatchExpr(bridgedNode, { errors: ctx.errors });
 }
 
+/**
+ * §19.8.3 (S454) — lower an expression-position `?{}` query through the
+ * statement emitter's `case "sql"` (the ONE query lowering: db handle, param
+ * rendering + peer awaits, §14.8.10 tenant floor, §14.8.9 protect tags, §39.4
+ * bool coercion). Server boundary only (callers check `ctx.mode`).
+ */
+function emitExpressionSqlQuery(shape: SqlQueryExprShape, ctx: EmitExprContext): string {
+  return emitSqlQueryShape(shape, ctx);
+}
+
+/**
+ * §19.4.3 / §19.8.3 (S454) — lower an expression-position `<operand> !{ … }`
+ * handler to an expression (emit-logic `emitNestedGuardExpr`).
+ */
+function emitExpressionGuard(operand: ExprNode, rawArms: string, ctx: EmitExprContext): string {
+  return emitNestedGuardExpr(operand, rawArms, ctx);
+}
+
 function emitSqlRef(node: SqlRefExpr, _ctx: EmitExprContext): string {
+  // §19.8.3 (S454) — a bare expression-position `?{…}` (no terminator) that
+  // carries its source: lower it like the same bare query in statement position.
+  if (_ctx.mode === "server") {
+    const sqlShape = sqlQueryExprShape(node);
+    if (sqlShape !== null) return emitExpressionSqlQuery(sqlShape, _ctx);
+  }
   // TODO(Phase 3 Slice 4): structured SQL ref emission
   // SqlRefExpr carries a nodeId referencing the SQLNode — codegen resolves this
   // at the file level. For now, return a placeholder that the outer emitter

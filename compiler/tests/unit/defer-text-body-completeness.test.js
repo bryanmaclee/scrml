@@ -96,6 +96,7 @@ const CLASSIFIED = {
   "string-literal.sourceText": "notStatement",
   "expr.sourceText": "notStatement",
   "lit.raw": "notStatement",
+  "sql-ref.raw": "notStatement", // S454: an expression-position `?{…}` query's SQL source (§19.8.3) — never statement text
   "each-block.ifRaw": "notStatement",
   "each-block.inExprRaw": "notStatement",
   "each-block.keyExprRaw": "notStatement",

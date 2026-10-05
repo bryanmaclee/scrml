@@ -80,7 +80,7 @@ import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
 import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
 import { setServerSessionUserCell, resetServerAmbientSessionRefusals, drainServerAmbientSessionRefusalErrors, fileScopeDeclaresSessionCell, fileNodesOf } from "./server-session-guard.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
   setChunkNamespaceState,
@@ -1315,6 +1315,7 @@ export function runCG(input: CgInput): CgOutput {
   // sink from a PREVIOUS `runCG` in the same process (every test file does this)
   // would otherwise attribute one compile's orphan to the next compile.
   resetTildeUnresolvedErrors();
+  resetExprGuardErrors();
   // S91 A-4.1 — per-file CompileContext map, populated during the per-
   // file Plan/Emit phase. Passed to the route-splitter when
   // `emitPerRoute` is set so future A-4.2+ sub-phases can read per-file
@@ -3236,6 +3237,7 @@ export function runCG(input: CgInput): CgOutput {
     // a WRONG OFFSET upstream, which no amount of line/col resolution can repair.
     // Filed; not fixed here. Do not restore the stronger claim.
     for (const e of drainTildeUnresolvedErrors()) errors.push(e);
+    for (const e of drainExprGuardErrors()) errors.push(e);
   }
 
   // -------------------------------------------------------------------------
@@ -4285,6 +4287,7 @@ export function runCG(input: CgInput): CgOutput {
   // returns. Draining is idempotent (it clears), so the first drain having already
   // run costs nothing here.
   for (const e of drainTildeUnresolvedErrors()) errors.push(e);
+  for (const e of drainExprGuardErrors()) errors.push(e);
   for (const e of drainServerAmbientSessionRefusalErrors(null, resolveSpanLineCol)) errors.push(e);
 
   return {

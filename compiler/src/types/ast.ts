@@ -2051,6 +2051,13 @@ export interface SqlRefExpr {
   span: ExprSpan;
   /** The SQLNode this expression-position SQL block resolves to. */
   nodeId: number;
+  /**
+   * The block's exact source text (`?{`…`}`), when the ref was built from an
+   * expression-position query (expression-parser `extractHandledOperands`,
+   * S454). Codegen lowers such a ref to a real query (§19.8.3); a ref without
+   * `raw` keeps the unresolved placeholder.
+   */
+  raw?: string;
 }
 
 // ---- Input State Reference ----

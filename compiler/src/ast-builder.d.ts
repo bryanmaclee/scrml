@@ -50,6 +50,8 @@ export declare function parseLogicBody(
  * only; `null` when there is nothing to check (unparseable, callable or opaque).
  */
 export declare function parseHandlerStatementsForCheck(value: unknown, filePath: string): LogicStatement[] | null;
+/** The arms of an expression-position `!{ … }` handler, parsed from its source text (S454). */
+export declare function parseGuardArmsFromRaw(rawBang: string, filePath: string): Array<Record<string, unknown>> | null;
 
 /** Attach handler statement lists to an already-built markup tree (mutates it in place). */
 export declare function attachHandlerStatementListsInTree(
