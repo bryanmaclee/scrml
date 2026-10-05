@@ -4035,7 +4035,7 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
  *   surrounding `${` and `}`); `exprOffset` is the offset of the FIRST
  *   character of the expression text within the full `raw` string.
  */
-interface TemplateSegment {
+export interface TemplateSegment {
   kind: "quasi" | "expr";
   text: string;
   /** Offset of `text[0]` within the original `raw` string. */
@@ -4061,7 +4061,7 @@ interface TemplateSegment {
  *            If the input does not look like a backtick template, returns
  *            a single quasi covering the whole string.
  */
-function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
+export function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
   const segments: TemplateSegment[] = [];
   if (!raw || typeof raw !== "string") return segments;
 

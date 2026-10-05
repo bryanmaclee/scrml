@@ -176,8 +176,18 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(cols("SELECT count(*) AS n FROM users")).toBeNull();
     // A `*` that is not a projection (COUNT(*), multiplication) inside a
     // subquery is not a hidden column list (trucking-dispatch customers.scrml).
-    expect(cols("SELECT c.id, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) AS n FROM users c")).toBeNull();
-    expect(cols("SELECT id, (SELECT id * 2 FROM products LIMIT 1) AS n FROM users")).toBeNull();
+    // ⚑ S454: a subquery's sources must be tables whose columns the compile
+    // KNOWS (as in the real app, where `invoices` / `products` are declared) —
+    // over an unknown source it may project a protected column under any name
+    // (a view), so it strips wholesale; both halves are pinned.
+    const known = ctxOf(
+      new Map([["users", new Set(["passwordHash"])]]),
+      new Map([["invoices", ["id", "customer_id"]], ["products", ["id", "name"]]]),
+    );
+    const colsKnown = (sql) => { const r = resolveProtectedOutputColumns(sql, known); return r && "cols" in r ? r.cols : r; };
+    expect(colsKnown("SELECT c.id, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) AS n FROM users c")).toBeNull();
+    expect(colsKnown("SELECT id, (SELECT id * 2 FROM products LIMIT 1) AS n FROM users")).toBeNull();
+    expect(cols("SELECT c.id, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) AS n FROM users c")).toEqual({ all: true });
     // …but a nested projection star is.
     expect(cols("SELECT id, (SELECT DISTINCT * FROM products LIMIT 1) AS x FROM users")).toEqual({ all: true });
     expect(cols("SELECT id, (SELECT p.* FROM products p LIMIT 1) AS x FROM users")).toEqual({ all: true });
@@ -226,8 +236,12 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(cols("UPDATE users SET name = 'RETURNING *' WHERE id = 1")).toBeNull();
     // UPDATE … FROM joins another table in: fail closed.
     expect(cols("UPDATE users SET name = o.n FROM other o WHERE o.id = users.id RETURNING *")).toBe("*");
-    // A target the resolver cannot read fails closed.
-    expect(cols('UPDATE "users" SET name = 1 RETURNING *')).toBe("*");
+    // ⚑ S454 r2: a quoted target is read from the ORIGINAL text and folded
+    // (it was read as the blanked placeholder `q` — which strip-all'd here only
+    // because no table `q` was known; with one, the row shipped).
+    expect(cols('UPDATE "users" SET name = 1 RETURNING *')).toEqual(["passwordHash"]);
+    // A target the resolver cannot read exactly fails closed.
+    expect(cols('UPDATE "my users" SET name = 1 RETURNING *')).toBe("*");
   });
 
   // S443 round 6 (P2) — `users . *` (whitespace around the dot) fell to an opaque

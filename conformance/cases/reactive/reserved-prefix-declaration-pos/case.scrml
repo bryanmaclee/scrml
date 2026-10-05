@@ -1,0 +1,9 @@
+<program>
+<_scrml_count> = 0
+${
+  function _scrml_bump(_scrml_by) {
+    @_scrml_count = @_scrml_count + _scrml_by
+  }
+}
+<main><button id="go" onclick=_scrml_bump(1)>+</button></main>
+</program>

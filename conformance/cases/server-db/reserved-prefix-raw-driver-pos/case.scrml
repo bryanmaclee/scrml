@@ -1,0 +1,13 @@
+<program db="sqlite:./notes.db">
+<db src="sqlite:./notes.db" tables="notes">
+  ${
+    ?{`CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)`}.run()
+    // The compiler names its raw database handle `_scrml_sql`. Calling it
+    // directly would skip every check the compiler applies to `?{}` queries.
+    server function everyNote() {
+      return _scrml_sql.unsafe("SELECT body FROM notes")
+    }
+  }
+  <main><button id="go" onclick=everyNote()>load</button></main>
+</db>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "reactive-reserved-prefix-declaration-pos",
+  "description": "§47.1.1 (S439 #7) — a state cell, a function and a parameter declared with the reserved `_scrml_` prefix, then referenced. Each declaration and each reference is E-NAME-COLLIDES-RESERVED-PREFIX. (-pos: the code fires.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/reserved-prefix-e-name-collides.test.js",
+  "spec": "§47.1.1",
+  "rationale": "§47.1.1 S439 ruling (#7): a user-authored scrml program SHALL NOT declare a binding whose name begins with `_scrml_`; that prefix names compiler/runtime identifiers. Such a declaration is a compile error, E-NAME-COLLIDES-RESERVED-PREFIX.",
+  "expect": {
+    "codes": ["E-NAME-COLLIDES-RESERVED-PREFIX"],
+    "severity": { "E-NAME-COLLIDES-RESERVED-PREFIX": "error" }
+  }
+}

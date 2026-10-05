@@ -297,7 +297,7 @@ export interface StageSeam {
 }
 
 /**
- * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Nine files re-enter (seven at s430-stage-swap; +1 S430 defer; +1 S433 implied-lift) the TS block splitter / AST builder
+ * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Ten files re-enter (seven at s430-stage-swap; +1 S430 defer; +1 S433 implied-lift; +1 S454 reserved-prefix) the TS block splitter / AST builder
  * directly — re-parsing a synthesized snippet mid-stage — instead of going through the pipeline's
  * BS / TAB call. A hybrid with BS or TAB substituted still parses THOSE snippets with TS, so its
  * FileASTs are of mixed provenance. Every other stage has exactly one caller (api.js).
@@ -326,6 +326,10 @@ export const PARSE_REENTRY_FILES: readonly string[] = [
   // native parser keeps the markup tree, and THAT path re-parses nothing — so
   // this re-entry is the live pipeline's cost, not the pass's.)
   "compiler/src/implied-lift-desugar.ts",
+  // S454 §47.1.1 reserved `_scrml_` prefix — a NESTED `<engine>` survives TAB only
+  // as raw text inside its parent's rules; the check re-parses it with buildAST
+  // (the same parse the engine emitter applies) so its names are seen structurally.
+  "compiler/src/validators/reserved-prefix.ts",
 ];
 
 const recheckFiles = (label: string, pick: (args: SeamArgs) => unknown): ((args: SeamArgs) => Divergence) =>
