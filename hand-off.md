@@ -266,8 +266,10 @@ a pipe, and make every wait loop print why it is still waiting.**
 ## Gate at close
 - **Cloud `gate` is the authority and was green on every landing:** #1283, #1286, #1289 each merged only
   with `gate` + `windows` + `tracking` **all passing on the PR's current head**, checked by hand with
-  `gh pr checks`. ⚑ `scripts/merge-on-green.sh` does **not** exist on this box (scripted S438 on the
-  laptop, never committed) — worth committing it, or the check stays manual here.
+  `gh pr checks`. ⚑ **SUPERSEDED by the addendum below** — this read *"`scripts/merge-on-green.sh` does
+  not exist on this box (scripted S438 on the laptop, never committed) — worth committing it, or the
+  check stays manual here."* It was committed post-wrap as **#1297** and now exists on every clone;
+  #1291, #1292 and #1297 itself were the last landings checked by hand.
 - **Local full suite NOT run at close, and it would be red if it were** — this box carries ~96–100
   pre-existing failing names (S436-measured; counts are noise, name sets are the only valid read). This
   is why every landing went up as a **NEW REF**: the pre-push hook (line 101) skips the suite for a new
@@ -340,6 +342,73 @@ Full report: `.claude/maps/non-compliance.report.md`. Routed to bryan in a follo
 `compareCore` text-node diffs of the shape `a="\r\n    "` vs `b="\n    "`, i.e. `core.autocrlf=true`
 CRLF fixtures against `\n` oracles (4 in `lower.test.js`, 1 `tables.test.js`, 1 `typer.test.js`). The
 S451 stamp's 462/0 was a different host. Judge that tier by its failure NAME SET.
+## ⊕ ADDENDUM (post-wrap) — the routed family is CLOSED by S454 · `jq` installed · `merge-on-green.sh` committed
+Landed AFTER the S453 wrap anchor (#1291), as #1297. **Three statements in the §S453 block above are
+now FALSE** and are corrected here, because a wrapped assertion that has gone false is worse for the
+next boot than a missing one — it sends the session off to do work that is already done.
+
+### ⚑ 1. PICKUP ITEM 0 IS DISCHARGED — do NOT open on it. S454 built the whole family.
+The §S453 pickup opens *"two things are waiting on bryan, and they are ONE arc"*. Both are **resolved
+on main at `55c5d348c`**, verified by marker:
+- `g-handler-callref-auto-wrap-drops-async-callee-rejection` → **resolved** (`s454-handler-rejection-root-fix`,
+  `callref-handler-rejection-log-s454.browser.test.js`, `unit/s454-callref-handler-rejection.test.js`)
+- `g-handler-level-rejection-bypasses-scrml-logging` (the parent) → **resolved** — both limbs now shut,
+  so S453's narrowing is retired
+- `g-errorboundary-async-render-rejection-unobserved-s453` → **resolved**
+
+**The route note worked as designed and that is the transferable lesson:** both were filed
+ruling-gated with the §5.2.2 mandate quoted, both fork directions costed, the traced root recorded
+(the mangled-name/author-name mismatch, after a two-form differential falsified the first hypothesis),
+and the recommended shape named — the `.catch(→ _scrml_error_boundary_log)` arm §13.2 already uses.
+It was then **fixed as ONE family within hours**, which is exactly what "fix the family once" asked
+for. Gift-wrapping to the point where the only thing left is the authority call is what bought that.
+
+**Still open, and correctly so:** `g-each-row-whitespace-only-text-dropped` (BOOTSTRAP-OWED by
+ruling) · `g-s453-row-boundary-id-not-per-site` (LOW nit) ·
+`g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline` (filed; needs the
+runtime proof its entry names).
+
+### 2. The two "this box" hazards are fixed
+
+- **`jq` is INSTALLED on AdiPDesk** — 1.8.2 via `winget install jqlang.jq`, and the installer added
+  its package dir to the **user PATH**, so a new shell resolves a bare `jq`. (A shell created before
+  the install keeps the old environment; that is a session artifact, not a missing install.)
+- **`scripts/merge-on-green.sh` EXISTS and is committed** (#1297) — the by-hand `gh pr checks` ritual
+  this session used for all five landings is no longer needed on any clone.
+  ⚑ **It is a RE-AUTHORING from the recorded contract, not the S438 original**, which was written on
+  P-Tech1 and never committed and is unrecoverable from here. Contract source:
+  `user-voice-pjoliver11.md` §S438/§S446/§S450/§S453. Review it rather than trust it.
+  - `tracking` is compared as a failed-**STEP NAME SET** read from the API — that job is
+    `continue-on-error` at BOTH job and step level, so its conclusion is `success` even when steps
+    inside it fail, i.e. its pass/fail carries no signal at all. Reference = the newest **COMPLETED**
+    run on the base, never the newest *successful* one.
+  - **No external `jq`** (uses `gh -q`), deliberately: a tool that needed jq would have been useless
+    on this box an hour before it was installed, and may be on the next clone.
+  - Never `--auto` (S327: a parked arm fired against an explicit merge hold).
+  - **Bite-proven**, and the bite found a real defect: the first cut refused genuinely-open PRs on a
+    first-read `mergeStateStatus=UNKNOWN`, which means *"GitHub has not computed it yet"* (it is
+    computed lazily, by the act of asking), **not** "not mergeable". Now re-asked up to 5× over ~20 s,
+    bounded, with the timeout reported **as a timeout, not as a verdict**.
+  - Proven refusals: nonexistent PR → 4 · MERGED → 2 · conflicting (#1176) → 2 · **BEHIND → 2, hit
+    live on its own PR** (bryan landed mid-gate), which is also how its green path got exercised.
+  - `.gitattributes` now pins `scripts/*.sh` + `scripts/git-hooks/*` to `eol=lf`: a CRLF checkout
+    breaks a shebang on Linux and `core.autocrlf=true` makes CRLF the default checkout form here.
+
+### Convention this session needed TWICE, so it is written down (scrml-side)
+**Work that lands after the wrap anchor does NOT get a second `/wrap`.** The contract has no
+`/wrap amend`, and it does not need one: *the wrap is the anchor, the delta-log is the live stream
+between anchors.* So post-anchor work lands as its own ordinary PR, titled in the existing idiom
+(`maps(sNNN): …`, `tool(sNNN): …`, `wrap(sNNN): addendum — …`), and:
+- if it only **ADDS** facts → delta-log entries are sufficient; leave the wrapped hand-off alone;
+- if it **FALSIFIES** something the wrap asserted → it MUST correct the hand-off (and board) in place,
+  because the next boot reads them as current truth.
+Re-running `/wrap` would re-execute all eight steps and rotate the anchor for no gain, and there
+should be exactly one anchor per session. Precedent set twice in S453: #1292 (the maps pass finished
+after #1291 and corrected the hand-off's "NOT REFRESHED, and that is owed" section, true at wrap time
+and false an hour later) and #1297 (this addendum).
+⚑ The **generalized** form of this rule belongs in the flobase `continuity` module, not here — routed
+to bryan rather than written into scrml's own contract.
+
 ## Worktrees + branches
 Removed: the spent A/B compile tree, both frozen review trees, both agent trees, and the
 cross-session `agent-a17aa5322771d6ebc` (audited first — its one unlanded-looking commit's test passes
