@@ -21,15 +21,14 @@
  * supplement for a table only the `<db>` registry makes tenant-scoped.
  */
 import { describe, test, expect, afterAll } from "bun:test";
-import { writeFileSync, mkdtempSync, rmSync } from "fs";
-import { join } from "path";
+import { writeFileSync, mkdtempSync, rmSync, mkdirSync, symlinkSync } from "fs";
+import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import {
   findSchemaTenantHazards,
   schemaTenantTableNames,
   schemaHazardMessage,
-  provablyDistinctDbs,
 } from "../../src/tenant-schema-hazards.ts";
 import { compileScrml } from "../../src/api.js";
 
@@ -480,14 +479,29 @@ ${extra}  <p>x</p>
   });
 });
 
-// S455 review round 3 (PA-reproduced on 0cdab4100: exit 0, A's go() rewrote B's row): the
-// tenant set was PER FILE, so a trigger in admin.scrml's <schema> over a tenant table that
-// app.scrml declares compiled clean. The set is now per DATABASE across the project.
-describe("project scope — a hazard in one file over a tenant table another file declares", () => {
-  const compileFiles = (files) => {
+// S455 review rounds 3–4 (both PA-reproduced). Round 3: a per-FILE tenant set let a
+// trigger in admin.scrml's <schema> over app.scrml's tenant table compile clean. Round 4: a
+// per-DATABASE set keyed on the lexical `db=` string was beaten by every alias the runtime
+// resolves — a symlinked directory, a symlinked file, two roots under SCRML_DATA_DIR,
+// `sqlite:app.db?mode=rwc`. PA decision (fail-closed; a list of "these are different"
+// enumerates forever): ONE tenant set for the compilation — the union over every file
+// compiled together, whatever database it names.
+describe("compilation scope — one tenant set over every file compiled together, any database", () => {
+  const compileFiles = (files, links = {}) => {
     const dir = mkdtempSync(join(tmpdir(), "tenant-schema-proj-"));
     _tmp.push(dir);
-    const paths = Object.entries(files).map(([name, src]) => { const p = join(dir, name); writeFileSync(p, src); return p; });
+    for (const [link, target] of Object.entries(links)) {
+      mkdirSync(dirname(join(dir, link)), { recursive: true });
+      // A platform without symlink rights (Windows CI) still runs the case: the charge
+      // does not depend on resolving the database at all.
+      try { symlinkSync(target, join(dir, link)); } catch { /* not resolvable here — fine */ }
+    }
+    const paths = Object.entries(files).map(([name, src]) => {
+      const p = join(dir, name);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, src);
+      return p;
+    });
     return compileScrml({ inputFiles: paths, write: false, outputDir: join(dir, "out"), log: () => {} });
   };
   const app = (db) => `<program db="${db}">
@@ -514,26 +528,34 @@ describe("project scope — a hazard in one file over a tenant table another fil
 </program>
 `;
   const msgs = (r) => (r.errors ?? []).filter((e) => e.code === "E-TENANT-SCHEMA-HAZARD").map((e) => e.message);
-  test("the round-3 repro: same database → the trigger AND the view in admin.scrml are refused", () => {
-    const m = msgs(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./app.db") }));
+  const both = (r) => {
+    const m = msgs(r);
     expect(m.some((x) => x.includes("trigger `t_cfg`"))).toBe(true);
     expect(m.some((x) => x.includes("view `va`"))).toBe(true);
+  };
+  test("round 3: two files, one database — the trigger AND the view in admin.scrml are refused", () => {
+    both(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./app.db") }));
   });
-  test("the same file reached through a different spelling (`sqlite:` prefix) is the same database", () => {
-    expect(msgs(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("sqlite:app.db") })).length).toBe(2);
+  test("round 4 alias: a symlinked directory (`./lnk/app.db`, lnk -> .)", () => {
+    both(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./lnk/app.db") }, { lnk: "." }));
   });
-  test("two DIFFERENT SQLite files → admin.scrml's assets is not tenant-scoped → nothing charged", () => {
-    expect(msgs(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./admin.db") }))).toEqual([]);
+  test("round 4 alias: a symlinked file (`ops/app.db -> ../app.db`)", () => {
+    both(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./ops/app.db") }, { "ops/app.db": "../app.db" }));
   });
-  test("a database whose identity cannot be resolved (network URIs) is treated as the same one → charged", () => {
-    expect(msgs(compileFiles({ "app.scrml": app("postgres://h/one"), "admin.scrml": admin("postgres://h/two") })).length).toBe(2);
+  test("round 4 alias: two project roots, both `./app.db` (the SCRML_DATA_DIR Docker/Fly shape)", () => {
+    both(compileFiles({ "web/app.scrml": app("./app.db"), "worker/admin.scrml": admin("./app.db") }));
   });
-  test("provablyDistinctDbs is true only for disjoint resolved SQLite files", () => {
-    const f = (p) => ({ kind: "file", path: p });
-    expect(provablyDistinctDbs([f("/a.db")], [f("/b.db")])).toBe(true);
-    expect(provablyDistinctDbs([f("/a.db")], [f("/a.db")])).toBe(false);
-    expect(provablyDistinctDbs([f("/a.db"), f("/c.db")], [f("/b.db"), f("/c.db")])).toBe(false);
-    expect(provablyDistinctDbs([f("/a.db")], [{ kind: "unknown", raw: "postgres://x" }])).toBe(false);
+  test("round 4 alias: `sqlite:app.db?mode=rwc`", () => {
+    both(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("sqlite:app.db?mode=rwc") }));
+  });
+  test("network URIs naming different databases → charged", () => {
+    both(compileFiles({ "app.scrml": app("postgres://h/one"), "admin.scrml": admin("postgres://h/two") }));
+  });
+  test("ACCEPTED OVER-INCLUSION: two genuinely different SQLite files compiled together are still charged", () => {
+    both(compileFiles({ "app.scrml": app("./app.db"), "admin.scrml": admin("./admin.db") }));
+  });
+  test("compiled SEPARATELY, admin.scrml alone declares no tenant table → not charged (the stated Limit)", () => {
+    expect(msgs(compileFiles({ "admin.scrml": admin("./app.db") }))).toEqual([]);
   });
 });
 

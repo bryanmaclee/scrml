@@ -42,7 +42,7 @@ import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion).
-import { fileTenantSchemaHazards, fileSchemaTenantNames, fileDbIdentities, projectTenantSets } from "./tenant-schema-hazards.ts";
+import { fileTenantSchemaHazards, fileSchemaTenantNames } from "./tenant-schema-hazards.ts";
 import { buildTenantContext } from "./codegen/tenant-egress.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
 import { extractDesiredSchema } from "./codegen/db-authoritative.ts";
@@ -2974,26 +2974,27 @@ function _compileScrmlImpl(options = {}) {
   // `<db tables=>` registry and the expanded `<schema>`, exactly as emit-server builds
   // it — so a table the floor scopes can never escape the declaration rule.
   //
-  // PROJECT-SCOPED (S455 review round 3, PA-reproduced): a trigger in one file's
-  // `<schema>` over a tenant table another file of the same project declares writes
-  // the same database. So the set each file is charged against is the UNION of the
-  // tenant tables of every compiled file that may share its database — two files are
-  // kept apart only when both declare SQLite files and no path is shared
-  // (`provablyDistinctDbs`); anything else is treated as one database (fail-closed).
+  // COMPILATION-SCOPED (S455 review rounds 3–4, PA decision): ONE tenant set — the
+  // union of every compiled file's tenant tables, whatever database each names — and
+  // every file's hazards are charged against it. A trigger in one file's `<schema>`
+  // over a tenant table another file declares writes the same database whenever the
+  // two names reach one file, and "these databases are different" cannot be proven
+  // from a `db=` string (symlinks, `?mode=` URIs, SCRML_DATA_DIR roots, hardlinks,
+  // case-insensitive filesystems — each executed by the reviewer). Accepted cost: two
+  // genuinely different databases compiled together share the set.
   {
     const _tsProtectCtx = buildProtectContext(paResult.protectAnalysis);
-    const perFile = metaFiles.map((fileAST) => {
+    const projectTenant = new Set();
+    for (const fileAST of metaFiles) {
       const desired = extractDesiredSchema(fileAST);
-      const tenant = new Set(buildTenantContext(_tsProtectCtx, desired.tenantTables, desired.schemaText).tenantScopedTables);
-      for (const t of fileSchemaTenantNames(fileAST)) tenant.add(t);
-      return { fileAST, dbs: fileDbIdentities(fileAST), tenant };
-    });
-    const sets = projectTenantSets(perFile);
-    perFile.forEach(({ fileAST }, k) => {
+      for (const t of buildTenantContext(_tsProtectCtx, desired.tenantTables, desired.schemaText).tenantScopedTables) projectTenant.add(t);
+      for (const t of fileSchemaTenantNames(fileAST)) projectTenant.add(t);
+    }
+    for (const fileAST of metaFiles) {
       const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
-      const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, sets[k]));
+      const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, projectTenant));
       collectErrors("TENANT-SCHEMA", diags, fp);
-    });
+    }
   }
 
   // Stage 7: DG (all files — sees post-meta-expansion AST)
