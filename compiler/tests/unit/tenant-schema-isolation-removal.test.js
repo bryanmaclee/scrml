@@ -202,6 +202,28 @@ describe("review #6 — every expression in an exempt statement is held to the f
   for (const s of fine) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
 });
 
+describe("CREATE TABLE column / table expressions are held to the same allow-list (the #6 class)", () => {
+  for (const s of [
+    "CREATE TABLE t (id INTEGER PRIMARY KEY, x TEXT DEFAULT evil_fn())",
+    "CREATE TABLE t (x TEXT GENERATED ALWAYS AS (evil_fn(1)) STORED)",
+    "CREATE TABLE t (x INTEGER CHECK (evil_fn(x)))",
+    "CREATE TABLE t (x INTEGER, CONSTRAINT c CHECK (evil_fn(x)))",
+    "CREATE TABLE t (x INTEGER, CHECK (dblink_exec('a', 'DELETE FROM assets')))",
+    "CREATE TABLE t (x TEXT DEFAULT now())",                     // not provably pure: not added to the list
+    "CREATE TABLE t (x TEXT DEFAULT public.evil_fn())",
+  ]) test(`charged: ${s}`, () => expect(kindsOf(s)).toEqual(["statement*"]));
+  for (const s of [
+    "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(64) NOT NULL DEFAULT 'a')",
+    "CREATE TABLE t (n NUMERIC(10, 2) CHECK (n > 0), c TEXT DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE t (d TEXT DEFAULT (datetime('now')), u TEXT DEFAULT (lower('X')))",
+    "CREATE TABLE t (aid INTEGER REFERENCES public.config(k), UNIQUE (aid), PRIMARY KEY (aid), FOREIGN KEY (aid) REFERENCES config(k))",
+    "CREATE TABLE t (x TIMESTAMP(3) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, y TEXT COLLATE NOCASE)",
+  ]) test(`exempt: ${s}`, () => expect(kindsOf(s)).toEqual([]));
+  test("a `${…}` in a column default is charged once (by the interpolation rule)", () => {
+    expect(kindsOf("CREATE TABLE t (x TEXT DEFAULT ${d})")).toEqual(["statement*"]);
+  });
+});
+
 describe("reporting — every hazard is reported, not one per table", () => {
   test("an ADD CONSTRAINT CHECK and a DROP COLUMN on the same table are both reported", () => {
     const hs = findSchemaTenantHazards(body(ASSETS, "ALTER TABLE assets ADD CONSTRAINT c CHECK (id > 0)", "ALTER TABLE assets DROP COLUMN name"), ["assets"]);

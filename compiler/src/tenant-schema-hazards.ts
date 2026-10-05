@@ -332,7 +332,11 @@ function stringMentions(s: string, names: Iterable<string>): string[] {
 }
 
 /** What the tokens `[from, to)` name and call. */
-function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>): RegionRead {
+function readRegion(
+  toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>,
+  /** a qualified TABLE name before its column list (`REFERENCES public.assets (id)`) is not a call */
+  qualifiedTables = false,
+): RegionRead {
   const names = new Set<string>();
   const calls: string[] = [];
   let interp = false;
@@ -346,6 +350,8 @@ function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<
     if ((t.k === "w" || t.k === "q") && isP(toks[k + 1], "(") && !(t.k === "w" && NOT_A_CALL.has(t.up))) {
       const prev = toks[k - 1];
       if (isP(prev, ".")) {
+        const head = toks[k - 3];
+        if (qualifiedTables && head && head.k === "w" && TABLE_BEFORE_PAREN.has(head.up)) continue;
         calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`);
         continue;
       }
@@ -641,7 +647,7 @@ const COLUMN_CONSTRAINT_WORDS = new Set([
  */
 function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>): string | null {
   for (const [a, b] of regions) {
-    const r = readRegion(toks, a, b, new Set());
+    const r = readRegion(toks, a, b, new Set(), true);
     if (r.interp) return "it holds a `${…}` interpolation the checker cannot read";
     if (r.calls.length) {
       return `it calls \`${r.calls[0]}\`, which is not on the floor's function allow-list — the database ` +
@@ -686,15 +692,46 @@ function addColumnExpressionRegions(toks: Tok[], from: number, to: number): Arra
     let k = a + 1;                                            // past ADD
     if (isW(toks[k], "COLUMN")) k++;
     if (isW(toks[k], "IF") && isW(toks[k + 1], "NOT") && isW(toks[k + 2], "EXISTS")) k += 3;
-    k++;                                                      // the column name
-    // the type: words (and a parenthesized size after one) up to the first constraint word
-    while (k < b && toks[k].k === "w" && !COLUMN_CONSTRAINT_WORDS.has(toks[k].up)) {
-      k++;
-      if (isP(toks[k], "(")) { const c = closeParen(toks, k); if (c === -1 || c > b) break; k = c; }
-    }
-    out.push([k, b]);
+    out.push([columnExpressionsStart(toks, k, b), b]);
   }
   return out;
+}
+
+/**
+ * In a column definition starting at its NAME (token `k`), the index where its
+ * constraints / expressions begin: past the name and the TYPE — words, and a
+ * parenthesized size after one (`VARCHAR(64)`, `NUMERIC(10, 2)`, `TIMESTAMP(3) WITH TIME
+ * ZONE`) — up to the first constraint word. A type size is not a call.
+ */
+function columnExpressionsStart(toks: Tok[], k: number, b: number): number {
+  k++;                                                        // the column name
+  while (k < b && toks[k].k === "w" && !COLUMN_CONSTRAINT_WORDS.has(toks[k].up)) {
+    k++;
+    if (isP(toks[k], "(")) { const c = closeParen(toks, k); if (c === -1 || c > b) break; k = c; }
+  }
+  return k;
+}
+
+/** Words that open a TABLE-level constraint in a `CREATE TABLE` column list. */
+const TABLE_CONSTRAINT_LEADERS = new Set(["CONSTRAINT", "CHECK", "PRIMARY", "UNIQUE", "FOREIGN", "EXCLUDE", "KEY", "INDEX"]);
+
+/**
+ * The expression regions of a `CREATE TABLE` column list (tokens `[from, to)`, inside the
+ * parentheses): each column's constraints (DEFAULT / GENERATED / CHECK / …) past its
+ * type, and each table-level constraint whole (a table `CHECK`).
+ */
+function createTableExpressionRegions(toks: Tok[], from: number, to: number): Array<[number, number]> {
+  const items: Array<[number, number]> = [];
+  let depth = 0;
+  let s = from;
+  for (let k = from; k < to; k++) {
+    if (isP(toks[k], "(")) depth++;
+    else if (isP(toks[k], ")")) depth = Math.max(0, depth - 1);
+    else if (isP(toks[k], ",") && depth === 0) { items.push([s, k]); s = k + 1; }
+  }
+  items.push([s, to]);
+  return items.filter(([a, b]) => b > a).map(([a, b]): [number, number] =>
+    toks[a].k === "w" && TABLE_CONSTRAINT_LEADERS.has(toks[a].up) ? [a, b] : [columnExpressionsStart(toks, a, b), b]);
 }
 
 /** The grantees of `GRANT … TO a, b [WITH …] [GRANTED BY …]`, from the token after `TO`. */
@@ -996,6 +1033,16 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
     }
     if (d.kind === "table") {
       if (d.unreadable) continue; // E-SCHEMA-012/013/014 own unreadable table heads
+      // A column DEFAULT / GENERATED / CHECK (or a table CHECK) is evaluated by the database
+      // per row, as whatever role writes it — held to the same function allow-list (S455,
+      // the review #6 class), on any table.
+      if (d.cols) {
+        // (a `${…}` in a table declaration is already charged by the interpolation rule below)
+        const code = exemptStatementCode(toks, createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1));
+        if (code && !code.includes("interpolation")) {
+          out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
+        }
+      }
       const hits = r.names.filter((n) => n !== d.name);
       if (hits.length) {
         out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: tenantsUnder(hits), unattributable: false, offset: d.at,

@@ -12184,7 +12184,11 @@ columns, and that asymmetry drives the mechanism split:
       predicate, a column `DEFAULT`, `GENERATED` expression or `CHECK` is evaluated by the database
       per row, at migration, as the migrating role — so every expression in an exempt statement is
       held to the function allow-list a view or trigger body is (below), on any table; a call off it,
-      or a `${…}`, charges the statement *unattributable* (S239 review of the S455 "yes both" build). **Isolation removal** (S455 "yes
+      or a `${…}`, charges the statement *unattributable* (S239 review of the S455 "yes both" build).
+      The same holds for a `CREATE TABLE`'s column `DEFAULT` / `GENERATED` / `CHECK` expressions and
+      its table-level `CHECK`: a call off the allow-list charges the declaration (a type size, a
+      literal and a keyword such as `CURRENT_TIMESTAMP` are not calls; `now()` and other
+      non-pure functions are not on the list). **Isolation removal** (S455 "yes
       both") is charged as its own kind (*isolation removal*), fail-closed, against the tenant-scoped
       table it names — or, when it names none, against every tenant-scoped table of the
       compilation: `DROP POLICY … ON <tenant>` (any policy — `scrml_tenant_iso`, or a restrictive one
