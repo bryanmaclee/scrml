@@ -6072,7 +6072,9 @@ ${
         const subj: AExpr = h.subject
         const sc: FnInfo | not = serverCalleeNamed(env, subj)
         const site: SiteK = siteOf(env)
-        if (sc is some && site != SiteK.SiteLocal) {
+        // (fix round 1: an own-trigger server site too — its arms resolve against the client
+        // set, and SiteLocal reports a `.Transport` arm as dead handling, §19.9.10, as a T5 site does)
+        if (sc is some) {
             const rs0: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
             const hm: AHow = h.how
             const ty: Type | not = match hm {
@@ -6385,7 +6387,9 @@ ${
     fn unhandledRemoteDiag(env: Env, e: AExpr, f: FnInfo) -> Diag {
         if (env.fx.defer) return newDiag("E-DEFER-UNHANDLED-FAILABLE", "`" + f.name + "(…)` is a server function and this call is made on the client, so it can fail on the wire (§19.9.10) — and this is a deferred statement: handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3)", env.file, e.span)
         if (env.fx.inFn) return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled: '" + f.name + "' is a server function and this call is made on the client, so it can fail on the wire (§19.9.10). Handle it: '" + f.name + "(…) !{ .Transport(t) :> … }', a 'match' on the result, or '?' inside a '!' function whose error enum declares 'Transport(t: ServerCallError)'", env.file, e.span)
-        return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled here: '" + f.name + "' is a server function and an event handler runs on the client, so the call can fail on the wire (§19.9.10). Catch it with '!{}' (e.g. '{ " + f.name + "(…) !{ .Transport(t) :> … } }'), match the result, or call it from a function that handles it (§19.4.3)", env.file, e.span)
+        let owner: string = "an event handler"
+        if (env.inEffect) owner = "an `<effect>` body"
+        return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled here: '" + f.name + "' is a server function and " + owner + " runs on the client, so the call can fail on the wire (§19.9.10). Catch it with '!{}' (e.g. '{ " + f.name + "(…) !{ .Transport(t) :> … } }'), match the result, or call it from a function that handles it (§19.4.3)", env.file, e.span)
     }
 
     // E-ERROR-016 at a client call site (transportConflict's rule), as a diagnostic list.
@@ -6486,7 +6490,9 @@ ${
         const remote: Diag[] = coverDiags(env, e, subj, rset, isMatch, ra, -1, setLabel(env, f, rset)).concat(conflictDiags(env, f, e))
         let local: Diag[] = []
         if (!f.failable) {
-            local = [newDiag("E-ERROR-013", "'!{}' handler on '" + f.name + "(…)', which cannot fail here: '" + f.name + "' is a server function, but this call is made on the SERVER (server→server, §19.9.10 \"Not affected\") — the callee runs in place, nothing crosses the wire, and '" + f.name + "' is not declared '!', so none of the handler's arms can run. Remove the handler", env.file, e.span)]
+            let form: string = "'!{}' handler"
+            if (isMatch) form = "'match'"
+            local = [newDiag("E-ERROR-013", form + " on '" + f.name + "(…)', which cannot fail here: '" + f.name + "' is a server function, but this call is made on the SERVER (server→server, §19.9.10 \"Not affected\") — the callee runs in place, nothing crosses the wire, and '" + f.name + "' is not declared '!', so none of the handler's arms can run. Remove the handler", env.file, e.span)]
         } else {
             local = coverDiags(env, e, subj, rset, isMatch, ra, nE, ownLabel(f))
             if (nE < enumVariantsOf(env.g, rset).length && ra.covered.indexOf(nE) >= 0) {
@@ -14375,7 +14381,7 @@ ${
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is some) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + [r.name + "()"].concat(w.chain).join(" → ") + "`) — on the server that call would be made in place, which needs `" + r.name + "` emitted for each side (the bootstrap's unit U1c). Until then call the server function directly")
+                if (w is some) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs `" + r.name + "` emitted for each side (the bootstrap's unit U1c). Until then call the server function directly")
             }
         }
         return st

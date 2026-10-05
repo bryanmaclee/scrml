@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1312 of 1312 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1315 of 1315 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1312 of 1312 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 58 | 4.4% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 514 | 39.2% |
-| UNSUPPORTED | 619 | 47.2% |
+| NOT-TWINNED | 514 | 39.1% |
+| UNSUPPORTED | 622 | 47.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,11 +26,11 @@ Scope: **1312 of 1312 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 58; the other 31 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 423 · parse-reject 196.
+UNSUPPORTED by reason: bootstrap-unsupported 426 · parse-reject 196.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **584** — PASS 76 · FAIL 54 · UNSUPPORTED 454. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **585** — PASS 76 · FAIL 54 · UNSUPPORTED 455. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -138,12 +138,12 @@ NOT-TWINNED by reason (514 cases; a case counts once per distinct reason):
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 69 | · | · | · | · | 44 | 25 | · | · |
-| reactive | 88 | 25 | · | 3 | · | 40 | 20 | · | · |
+| reactive | 89 | 25 | · | 3 | · | 40 | 21 | · | · |
 | refinement | 10 | · | · | · | · | 3 | 7 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 58 | · | · | 2 | · | 18 | 38 | · | · |
+| server-db | 60 | · | · | 2 | · | 18 | 40 | · | · |
 | server-fn | 24 | · | · | 7 | · | 8 | 9 | · | · |
 | sql | 15 | 1 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
@@ -419,7 +419,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (619)
+### UNSUPPORTED (622)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -921,6 +921,7 @@ none
 - `reactive/no-write-unproven-pos` — bootstrap-unsupported: `one` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later "function values" slice; call it directly: `one(…)`
 - `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/reactivity-attr-conflict` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
+- `reactive/reserved-prefix-declaration-pos` — twin · bootstrap-unsupported: an unannotated parameter `_scrml_by` — bootstrap slice M2 needs `_scrml_by: Type` (Core parameters are typed)
 - `reactive/reset-init-after-assignment-rt` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `reactive/reset-to-default` — twin · bootstrap-unsupported: `default` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/s437-r5-template-cell-read-value-attr` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `color: `
@@ -999,6 +1000,8 @@ none
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
+- `server-db/reserved-prefix-raw-driver-neg` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
+- `server-db/reserved-prefix-raw-driver-pos` — bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/server-fn-writes-reactive-cell-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-fn/branch-declared-server-fn-routes-to-server` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `fn`

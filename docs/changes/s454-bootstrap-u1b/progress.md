@@ -236,3 +236,39 @@ server body, no SQL, no database path. `fetch` is stubbed per row; the Save clic
   server-fn/cell-assign-{read-after-write, successive-writes-ordered, independent-writes-batched} — stay parse-reject.)
   The counter's per-case JSON holds no diagnostic naming U1b. `docs/bootstrap-conformance.md` regenerated
   (`--write`); `--check` → current.
+
+## Fix round (two S239 reviews of 72af90193, LAND-WITH-NITS) — merged origin/main (#1299 / #1301) first
+- RUNTIME F1 (MED): `classify` throwing (a CodecDefect — a result descriptor of an unknown kind, an error table whose
+  root is not an enum: compiler defects only) escaped the `.then(onOk, onErr)` (the second argument does not catch a
+  throw from the first) → an unhandled rejection, a 30 s hang, then a wrong `Unreachable`. Now `classifySafely`:
+  reported once, settles Transport(Malformed) at once. Tests: both shapes — no unhandledRejection, one report, < 1 s.
+- F2 (LOW): a waiting function's continuation that throws is reported once, and every waiting Promise registered on
+  that task is abandoned (rejected with an internal REPORTED marker, never re-reported): the caller's continuation
+  does NOT run, the caller's suspension settles (handler task pending 0, removed from its owner). `rt.waiting` now
+  takes the task (`rt.waiting(task$, ret$ => …)` — print.scrml). Test: pending 0, tasks empty, caller not run.
+- F3 (LOW): fetch gets an AbortController signal; when the DEADLINE passes it is aborted and a stalled body is
+  cancelled — resource hygiene only (the call already failed: Unreachable). Supersede / teardown still abort nothing
+  (abort ≠ failure there, §6.7.7.1). Tests: signal present, aborted at the deadline, body cancelled, one outcome; an
+  answer before the deadline is not aborted.
+- F5 (NIT): READING made explicit (runtime comment): the design table names 200, but ANY 2xx other than 204 with a
+  body that decodes strictly is a success (HTTP); 201…299 are accepted.
+- F6 (NIT): a no-value function answered `200 ""` → reason "a 200 answer for a function that yields no value (its
+  answer is 204, no body)" (no longer "with a body").
+- COMPILER 1 (MED): a `.Transport` arm at a server→server site inside a server function placed by its OWN trigger
+  reported E-TYPE-VARIANT; own-trigger sites now take the same client-set path as T5 sites (`resolveHandled` no
+  longer excludes SiteLocal) and `bySite` reports the local judgement: the dead `.Transport` arm (E-ERROR-013, names
+  the callee, "server→server") for `!{}` and `match`; a total handler without it lowers to the callee's own enum.
+- 2 (LOW): E-ERROR-002 in an `<effect>` body says "an `<effect>` body runs on the client".
+- 3 (NIT): the U1c refusal prints the summary's chain once (`hp() → wc2() → wordCount()`).
+- 4 (NIT): E-ERROR-013 on a non-`!` callee names the form — `'match'` for a match.
+- Tests: server-call-runtime.test.js 32 → 38, server-call-core.test.js 28 → 34. self-host-v2 2016 pass / 0 fail;
+  counter tests 42 / 0.
+- Counter after the merge + fix round: 1315 cases (main added 3 — reactive/reserved-prefix-declaration-pos,
+  server-db/reserved-prefix-raw-driver-neg, -pos — all UNSUPPORTED): PASS 121 · FAIL 58 · NOT-TWINNED 514 ·
+  UNSUPPORTED 622 · CRASH 0. The PASS name set is IDENTICAL to 72af90193's (121 = 121, diff empty). docs regenerated,
+  `--check` current.
+- NOTED, not in scope: (a) checkCore does not check a ServerCall / Call's ARITY against the callee's parameters;
+  (b) a user `type Transport:enum` beside the minted shared enum gives two EnumDefs hinted `Transport` (distinct Syms,
+  no runtime clash); (c) for the migration owner — 5 of the 10 moved cases ALSO fail on pre-existing non-U1b errors:
+  server-fn/e-route-002-neg, e-route-002-pos, e-route-005-neg (E-SCOPE-001 `document`, E-SQL-004 no `db=`),
+  e-route-005-pos (E-SQL-004), server-fn/cell-assign-failable-success-then-read (E-OPERATOR-OPERAND-TYPE).

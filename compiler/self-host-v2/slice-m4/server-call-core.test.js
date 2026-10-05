@@ -226,3 +226,53 @@ describe("S2 — design §2.2 positions: lowered (ANF, Join) / refused (named)",
   test("a `defer` body → refused (C16)", () => refused(`        defer {\n            @words = ${H}\n        }`, "`defer` body"));
   test("a `defer` in a function that waits → refused (§19.16.2 exit timing)", () => refused(`        defer {\n            @status = "x"\n        }\n        @words = ${H}`, "function that waits"));
 });
+
+describe("S2 fix round — own-trigger server sites, owner-named messages", () => {
+  const WF = `\n    type E:enum = {\n        Bad\n    }\n    function wf(x: string)! E {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return 1\n    }`;
+  test("1: a `.Transport` arm in a `!{}` at a server→server site inside a server function placed by its OWN trigger is dead handling (E-ERROR-013 naming the callee, server→server) — not E-TYPE-VARIANT", () => {
+    const src = P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        const n = wf("a") !{\n            .Bad :> 1\n            .Transport(t) :> 0\n        }\n        return n\n    }`);
+    const ds = run(src).diags;
+    expect(ds.map((d) => d.code)).not.toContain("E-TYPE-VARIANT");
+    const d = ds.find((x) => x.code === "E-ERROR-013");
+    expect(d).toBeDefined();
+    expect(d.message).toContain("`wf`");
+    expect(d.message).toContain("server→server");
+  });
+
+  test("1: the same for a `match` on the call", () => {
+    const src = P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        return match wf("a") {\n            .Ok(v) :> v\n            .Bad :> 1\n            .Transport(t) :> 0\n        }\n    }`);
+    const ds = run(src).diags;
+    expect(ds.map((d) => d.code)).not.toContain("E-TYPE-VARIANT");
+    expect(ds.find((x) => x.code === "E-ERROR-013").message).toContain("server→server");
+  });
+
+  test("1 (twin): a total handler without `.Transport` at an own-trigger server site is valid and lowers to the callee's own enum", () => {
+    const r = clean(P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        const n = wf("a") !{ .Bad :> 1 }\n        return n\n    }`));
+    const sv = r.core.server.find((x) => x.sym.hint === "sv9");
+    const at = sv.body.stmts.find((x) => v(x) === "Attempt" && x.data.call.data.fn && x.data.call.data.fn.hint === "wf");
+    expect(at.data.err.hint).toBe("E");
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+  });
+
+  test("2: E-ERROR-002 in an `<effect>` body names the effect, not an event handler", () => {
+    const src = P(NOTES, `        <effect deps=[@flag]>\${ wordCount("n1") }</>`);
+    const d = run(src).diags.find((x) => x.code === "E-ERROR-002");
+    expect(d).toBeDefined();
+    expect(d.message).toContain("an `<effect>` body runs on the client");
+    expect(d.message).not.toContain("event handler runs");
+  });
+
+  test("3: the U1c refusal names the chain once (no doubled parens, no repeated head)", () => {
+    const src = P(NOTES + `\n    function wc2() {\n        @words = wordCount("n1") !{ .Transport(t) :> 0 }\n    }\n    function hp() {\n        wc2()\n    }\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        hp()\n        return 1\n    }`);
+    const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("U1c"));
+    expect(d).toBeDefined();
+    expect(d.message).not.toContain("()()");
+    expect(d.message).toContain("`hp() → wc2() → wordCount()`");
+  });
+
+  test("4: E-ERROR-013 on a non-`!` callee names the form: 'match' for a match", () => {
+    const src = P(NOTES + `\n    function sv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return match wordCount("a") {\n            .Ok(v) :> v\n            .Transport(t) :> 0\n        }\n    }`);
+    const d = run(src).diags.find((x) => x.code === "E-ERROR-013");
+    expect(d.message.startsWith("'match' on 'wordCount(…)'")).toBe(true);
+  });
+});

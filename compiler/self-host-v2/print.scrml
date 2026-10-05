@@ -1774,7 +1774,7 @@ ${
         // falls off with an explicit Return). `rt.waiting` never rejects through
         // a scrml failure: a `fail` resolves with the Failure value.
         return JsStmt.SFunc(symName(ctx, f.sym), ["task$"].concat(params),
-            prologue.concat([JsStmt.SReturn(rtCall(ctx, "waiting", [JsExpr.JArrow(["ret$"], blockJs(fctx, f.body))]))]))
+            prologue.concat([JsStmt.SReturn(rtCall(ctx, "waiting", [jid("task$"), JsExpr.JArrow(["ret$"], blockJs(fctx, f.body))]))]))
     }
 
     // -------------------------------------------------------------------------

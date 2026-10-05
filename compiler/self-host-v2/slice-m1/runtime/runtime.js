@@ -388,13 +388,14 @@ export function suspend(task, value, k) {
         batch(() => untrack(() => k(v)));
       } catch (e) {
         reportHostError(e);
+        abandonWaiting(task);
       } finally {
         task.owner.settled(task);
       }
     },
     (e) => {
       task.pending--;
-      if (!task.cancelled) reportHostError(e);
+      if (!task.cancelled && e !== REPORTED) reportHostError(e);
       task.owner.settled(task);
     },
   );
@@ -407,8 +408,35 @@ export function suspend(task, value, k) {
  * (a `fail` resolves with its Failure, never a rejection). A host error thrown
  * by the synchronous part rejects, and the caller's `suspend` reports it.
  */
-export function waiting(executor) {
-  return new Promise((resolve) => executor(resolve));
+export function waiting(task, executor) {
+  return new Promise((resolve, reject) => {
+    // s454 fix round F2: registered on the task, so a host error in one of this body's
+    // continuations (reported by `suspend`) abandons the Promise — its caller's continuation
+    // does not run as if it succeeded, and the caller's suspension is settled (no leaked task).
+    const w = { reject };
+    if (task) {
+      if (!task.waiting) task.waiting = new Set();
+      task.waiting.add(w);
+    }
+    const done = () => { if (task && task.waiting) task.waiting.delete(w); };
+    try {
+      executor((v) => { done(); resolve(v); });
+    } catch (e) {
+      done();
+      reject(e);
+    }
+  });
+}
+
+// The rejection a waiting function's Promise is abandoned with after its host error was REPORTED
+// (the caller's suspend settles its task and does not report it a second time).
+const REPORTED = Symbol("scrml: host error already reported");
+
+function abandonWaiting(task) {
+  if (!task || !task.waiting) return;
+  const ws = [...task.waiting];
+  task.waiting.clear();
+  for (const w of ws) w.reject(REPORTED);
 }
 
 // s454 (U1b) — THE ONE REPORTER of host errors that surface asynchronously (a
@@ -1924,6 +1952,8 @@ export function persistOf(cell) {
 //
 //   2xx  200…299 but 204, a body that decodes STRICTLY (canonicalOnly — R10)
 //        against the declared return type          → the value
+//        (the design table names 200; ANY 2xx other than 204 is a success per HTTP,
+//        so 201…299 with a decodable body are accepted as one — a reading, flagged)
 //   204  for a function that yields no value       → success (no value: null)
 //   2xx  anything else — a body for a no-value function, 204 for one that
 //        returns a value, text that is not JSON, a body that does not decode,
@@ -1971,13 +2001,23 @@ export function call(route, args, task) {
   return new Promise((resolve) => {
     let settled = false;
     let timer = null;
+    // s454 fix round F3 — resource hygiene ONLY: when the deadline passes the call has already FAILED
+    // (Unreachable); aborting the fetch and cancelling a stalled body stops holding the socket. It is
+    // not the supersede / teardown abort (§6.7.7.1) — that stays "nothing aborts, the result is dropped".
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let response = null;
     const settle = (v) => {
       if (settled) return;
       settled = true;
       if (timer !== null) clearTimeout(timer);
       resolve(v);
     };
-    timer = setTimeout(() => settle(unreachable()), SERVER_CALL_DEADLINE_MS);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settle(unreachable());
+      try { if (controller) controller.abort(); } catch { /* best effort */ }
+      try { if (response && response.body && typeof response.body.cancel === "function") response.body.cancel(); } catch { /* best effort */ }
+    }, SERVER_CALL_DEADLINE_MS);
     // the request: a JSON ARRAY of the arguments, each encoded against its parameter's type (Item 3.1)
     let body;
     try {
@@ -2000,22 +2040,37 @@ export function call(route, args, task) {
     }
     let pending;
     try {
-      pending = globalThis.fetch(route.path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      const init = { method: "POST", headers: { "Content-Type": "application/json" }, body };
+      if (controller) init.signal = controller.signal;
+      pending = globalThis.fetch(route.path, init);
     } catch {
       settle(unreachable());
       return;
     }
     Promise.resolve(pending).then(
       (resp) => {
+        response = resp;
         let status;
         try { status = resp.status; } catch { settle(unreachable()); return; }
         Promise.resolve()
           .then(() => resp.text())
-          .then((text) => settle(classify(route, status, text)), () => settle(unreachable()));
+          .then((text) => settle(classifySafely(route, status, text)), () => settle(unreachable()));
       },
       () => settle(unreachable()),
     );
   });
+}
+
+// s454 fix round F1 — `classify` throws only on a COMPILER defect (a CodecDefect: a descriptor of an
+// unknown kind, an error table whose root is not an enum). Reported once, and the call settles NOW as a
+// value — never an unhandled rejection, never a hang to the deadline mislabelled Unreachable.
+function classifySafely(route, status, text) {
+  try {
+    return classify(route, status, text);
+  } catch (e) {
+    reportHostError(e);
+    return malformed("the answer could not be classified (a compiler defect in the route's descriptor)");
+  }
 }
 
 function parseJson(text) {
@@ -2032,7 +2087,8 @@ export function classify(route, status, text) {
   if (status >= 200 && status <= 299) {
     if (route.result === null) {
       if (status === 204 && (text === "" || text === undefined || text === null)) return null;
-      return malformed(status === 204 ? "a 204 answer with a body" : `a ${status} answer with a body, for a function that yields no value`);
+      if (status === 204) return malformed("a 204 answer with a body");
+      return malformed(`a ${status} answer for a function that yields no value (its answer is 204, no body)`);
     }
     if (status === 204) return malformed("a 204 (no value) answer, for a function that returns a value");
     const j = parseJson(text);

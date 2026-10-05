@@ -136,6 +136,78 @@ describe("S4 — `call`: never rejects; the request; the deadline", () => {
   });
 });
 
+describe("S4 fix round — F1 / F3 / F6", () => {
+  // F1: a CodecDefect out of `classify` (a compiler defect in the route's descriptor)
+  const withReporter = async (fn) => {
+    const reported = [];
+    const unhandled = [];
+    const onUnhandled = (e) => unhandled.push(e);
+    process.on("unhandledRejection", onUnhandled);
+    const prev = rtUnit.setHostErrorReporter((e) => reported.push(e));
+    try {
+      await fn();
+      await new Promise((r) => realSetTimeout(r, 10));
+    } finally {
+      rtUnit.setHostErrorReporter(prev);
+      process.off("unhandledRejection", onUnhandled);
+    }
+    return { reported, unhandled };
+  };
+  const shapes = {
+    "a result descriptor of an unknown kind": { path: "/x", params: [], result: { defs: [], root: { k: "bogus" } }, error: null },
+    "an error table whose root is not an enum": { path: "/x", params: [], result: INT, error: { defs: [], root: { k: "int" } } },
+  };
+  const answers = {
+    "a result descriptor of an unknown kind": answer(200, "1"),
+    "an error table whose root is not an enum": answer(500, JSON.stringify({ __scrml_error: true, type: "E", variant: "V", data: {} })),
+  };
+  for (const [name, route] of Object.entries(shapes)) {
+    test(`F1: classify throwing (${name}) is reported once and settles Transport(Malformed) at once — no unhandled rejection, no hang`, async () => {
+      globalThis.fetch = answers[name];
+      let v;
+      const t0 = Date.now();
+      const r = await withReporter(async () => { v = await rtUnit.call(route, [], null); });
+      expect(Date.now() - t0).toBeLessThan(1000);
+      expect(r.unhandled).toEqual([]);
+      expect(r.reported.length).toBe(1);
+      expect(malformedAny(ok(v))).toContain("compiler defect");
+    });
+  }
+
+  test("F3: fetch gets an AbortSignal; it is aborted when the deadline passes (resource hygiene) — still exactly one outcome", async () => {
+    const timers = [];
+    globalThis.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+    let signal;
+    let cancelled = 0;
+    globalThis.fetch = (path, init) => { signal = init.signal; return Promise.resolve({ status: 200, body: { cancel() { cancelled++; } }, text: () => new Promise(() => {}) }); };
+    let outcomes = 0;
+    const p = rtUnit.call(SAVE_ROUTE, ["n1", "x", 1], null).then((v) => { outcomes++; return v; });
+    await new Promise((r) => realSetTimeout(r, 0));
+    expect(signal).toBeDefined();
+    expect(signal.aborted).toBe(false);
+    timers[0].fn();
+    expect(ok(await p)).toEqual(transport("Unreachable"));
+    expect(signal.aborted).toBe(true);
+    expect(cancelled).toBe(1);
+    timers[0].fn();
+    await new Promise((r) => realSetTimeout(r, 0));
+    expect(outcomes).toBe(1);
+  });
+
+  test("F3: an answer before the deadline is not aborted", async () => {
+    let signal;
+    globalThis.fetch = (path, init) => { signal = init.signal; return answer(200, "2")(); };
+    expect(await rtUnit.call(SAVE_ROUTE, ["n1", "x", 1], null)).toBe(2);
+    expect(signal.aborted).toBe(false);
+  });
+
+  test("F6: a no-value function answered `200` with an EMPTY body names the status, not \"a body\"", () => {
+    const r = malformedAny(ok(rtUnit.classify(VOID_ROUTE, 200, "")));
+    expect(r).not.toContain("with a body");
+    expect(r).toContain("204");
+  });
+});
+
 describe("S4 — `suspend`: one batch, one reporter, cancellation drops", () => {
   const owner = () => ({ settledN: 0, settled() { this.settledN++; } });
   const newTask = (o) => ({ owner: o, cancelled: false, pending: 0, cancel() { this.cancelled = true; } });
@@ -195,9 +267,36 @@ describe("S4 — `suspend`: one batch, one reporter, cancellation drops", () => 
     expect(ran).toBe(0);
   });
 
+  test("F2: a waiting function's continuation that throws is reported ONCE; its caller's continuation does not run; the caller's task settles (pending 0, no leaked handler task)", async () => {
+    const seen = [];
+    const prev = rtUnit.setHostErrorReporter((e) => seen.push(String(e.message)));
+    try {
+      const scope = rtUnit.root.child();
+      const el = document.createElement("button");
+      let callerRan = false;
+      let handlerTask;
+      rtUnit.on(scope, el, "click", (task) => {
+        handlerTask = task;
+        // the printed shape: rt.suspend(task$, f(task$), k) with f a waiting function
+        const f = (t) => rtUnit.waiting(t, (ret) => { rtUnit.suspend(t, Promise.resolve(1), () => { throw new Error("bug in f"); }); });
+        rtUnit.suspend(task, f(task), () => { callerRan = true; });
+      });
+      el.dispatchEvent(new window.MouseEvent("click"));
+      expect(handlerTask.pending).toBe(2);
+      await new Promise((r) => realSetTimeout(r, 0));
+      expect(seen).toEqual(["bug in f"]);
+      expect(callerRan).toBe(false);
+      expect(handlerTask.pending).toBe(0);
+      expect(handlerTask.owner.tasks.size).toBe(0);
+      scope.dispose();
+    } finally {
+      rtUnit.setHostErrorReporter(prev);
+    }
+  });
+
   test("`waiting`: the body's ret$ settles the Promise — also from a continuation", async () => {
     const t = newTask(owner());
-    const p = rtUnit.waiting((ret) => { rtUnit.suspend(t, Promise.resolve(41), (v) => ret(v + 1)); });
+    const p = rtUnit.waiting(t, (ret) => { rtUnit.suspend(t, Promise.resolve(41), (v) => ret(v + 1)); });
     expect(await p).toBe(42);
   });
 });
