@@ -12197,7 +12197,21 @@ columns, and that asymmetry drives the mechanism split:
       `serial` expands; it advances on an INSERT into that column's own table and the counter
       carries no tenant's row — and is charged anywhere else. Anything that can write, lock,
       notify or run user code (`dblink*`, `pg_advisory*`, `set_config`, `lo_*`, `pg_notify`, a
-      user function) stays charged. **Isolation removal** (S455 "yes
+      user function) stays charged. The reading is a TOKEN-LEVEL allow-list over every
+      expression region — the column definitions, every table constraint, and everything after the
+      column list (`PARTITION BY`, `EXCLUDE`, `WITH (…)`, `INHERITS`): every `identifier (`,
+      qualified or not, is a call that must be on the list, with no keyword exceptions (a name after
+      `FROM` / `ON` / `JOIN` is not a table inside an expression, and an unreserved word such as
+      `match` or `range` is a legal function name). The only non-call `identifier (` forms are a
+      closed syntactic set: a word reserved in Postgres (`CHECK`, `IN`, `AND`, `AS`, `DEFAULT`, `WITH`,
+      …); `PRIMARY` / `FOREIGN KEY (`; `PARTITION BY RANGE | LIST | HASH (`; `AS IDENTITY (`;
+      `INCLUDE (` / `INHERITS (` after a `)`; `EXCLUDE (` at a constraint's start; an index method
+      (`btree`, `hash`, `gist`, `spgist`, `gin`, `brin`) after `USING`; `REFERENCES <table> (`; and a
+      sized built-in type (`varchar`, `numeric`, `timestamp`, …) in a type position. A cast
+      (`::type`, `CAST(… AS type)`) to a type outside a closed built-in list, and an operator outside
+      a closed built-in set, are charged — a user type's input function and a user operator are code.
+      *(S239 review of the S455 "yes both" build, HIGH: `extract(epoch FROM evil(ts))` in an index
+      passed — executed.)* **Isolation removal** (S455 "yes
       both") is charged as its own kind (*isolation removal*), fail-closed, against the tenant-scoped
       table it names — or, when it names none, against every tenant-scoped table of the
       compilation: `DROP POLICY … ON <tenant>` (any policy — `scrml_tenant_iso`, or a restrictive one

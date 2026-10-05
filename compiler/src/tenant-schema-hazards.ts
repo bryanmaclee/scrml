@@ -332,7 +332,7 @@ const EXPRESSION_ALLOWED_CALLS: ReadonlySet<string> = new Set([
   "now", "current_timestamp", "current_date", "current_time", "clock_timestamp", "statement_timestamp",
   "transaction_timestamp", "localtimestamp", "localtime", "gen_random_uuid", "uuid_generate_v4", "random",
   "md5", "char_length", "octet_length", "to_char", "date_trunc", "extract", "date_part", "make_interval",
-  "unixepoch", "randomblob", "hex",
+  "unixepoch", "randomblob", "hex", "greatest", "least", "position",
 ]);
 
 interface RegionRead {
@@ -356,17 +356,7 @@ function stringMentions(s: string, names: Iterable<string>): string[] {
 }
 
 /** What the tokens `[from, to)` name and call. */
-function readRegion(
-  toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>,
-  /**
-   * EXPRESSION mode (an exempt statement's / a column's expressions): a qualified TABLE
-   * name before its column list (`REFERENCES public.assets (id)`) is not a call, the
-   * allow-list is `EXPRESSION_ALLOWED_CALLS`, and — with `columnDefault` — `nextval(…)`
-   * directly as a column `DEFAULT` is allowed.
-   */
-  qualifiedTables = false,
-  columnDefault = false,
-): RegionRead {
+function readRegion(toks: Tok[], from: number, to: number, tainted: ReadonlySet<string>): RegionRead {
   const names = new Set<string>();
   const calls: string[] = [];
   let interp = false;
@@ -380,21 +370,11 @@ function readRegion(
     if ((t.k === "w" || t.k === "q") && isP(toks[k + 1], "(") && !(t.k === "w" && NOT_A_CALL.has(t.up))) {
       const prev = toks[k - 1];
       if (isP(prev, ".")) {
-        const head = toks[k - 3];
-        if (qualifiedTables && head && head.k === "w" && TABLE_BEFORE_PAREN.has(head.up)) continue;
         calls.push(`${toks[k - 2]?.t ?? ""}.${t.t}`);
         continue;
       }
       if (prev && prev.k === "w" && TABLE_BEFORE_PAREN.has(prev.up)) continue;
-      const callee = t.k === "q" ? t.t : t.t.toLowerCase();
-      if (qualifiedTables) {
-        if (EXPRESSION_ALLOWED_CALLS.has(callee)) continue;
-        if (columnDefault && callee === "nextval" &&
-            (isW(prev, "DEFAULT") || (isP(prev, "(") && isW(toks[k - 2], "DEFAULT")))) continue;
-        calls.push(t.t);
-        continue;
-      }
-      if (!ALLOWED_CALLS.has(callee)) calls.push(t.t);
+      if (!ALLOWED_CALLS.has(t.k === "q" ? t.t : t.t.toLowerCase())) calls.push(t.t);
     }
   }
   return { names: [...names], calls, interp };
@@ -685,12 +665,139 @@ const COLUMN_CONSTRAINT_WORDS = new Set([
  */
 function exemptStatementCode(toks: Tok[], regions: Array<[number, number]>, columnDefault = false): string | null {
   for (const [a, b] of regions) {
-    const r = readRegion(toks, a, b, new Set(), true, columnDefault);
-    if (r.interp) return "it holds a `${…}` interpolation the checker cannot read";
-    if (r.calls.length) {
-      return `it calls \`${r.calls[0]}\`, which is not on the floor's function allow-list — the database ` +
-        "evaluates it per row, at migration, as the migrating role, and it may read or write any table";
+    const why = expressionRegionCode(toks, a, b, columnDefault);
+    if (why) return why;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// EXPRESSION mode — the token-level allow-list (S239 review of 8d1e18b6).
+//
+// Inside an expression region every `identifier (` is a CALL, and a call must be on
+// `EXPRESSION_ALLOWED_CALLS` — with NO keyword exceptions. The keyword exceptions the
+// view/trigger reader uses (`NOT_A_CALL`, "a name after FROM / ON / JOIN is a table")
+// were the hole: `extract(epoch FROM evil(ts))`, `trim(BOTH FROM evil(n))` and
+// `match(name)` / `range(id)` (unreserved in Postgres — legal user functions) passed.
+// The ONLY non-call `identifier (` forms are the closed SYNTACTIC set below, each
+// recognized by its exact neighbours; a cast to a type not on `BUILTIN_TYPES` and an
+// operator outside `BUILTIN_OPERATORS` are charged too (a user type runs its input
+// function; a user operator runs its function).
+// ---------------------------------------------------------------------------
+
+/**
+ * Words reserved in Postgres (and SQLite) that are followed by a parenthesized list or
+ * sub-expression. A reserved word cannot be the name of a function unquoted, so `CHECK (`
+ * / `IN (` / `AND (` / `GENERATED ALWAYS AS (` are syntax, never a call.
+ */
+const RESERVED_BEFORE_PAREN = new Set([
+  "AND", "OR", "NOT", "IN", "CHECK", "DEFAULT", "UNIQUE", "AS", "WHEN", "THEN", "ELSE", "CASE", "WITH",
+  "ANY", "ALL", "SOME", "ARRAY", "FROM", "TO", "ON", "DISTINCT", "USING", "IS", "FOR", "WHERE", "ROW",
+  "BETWEEN",
+]);
+
+/** Index access methods — the word after `USING` (an index, an `EXCLUDE` constraint). */
+const INDEX_METHODS = new Set(["btree", "hash", "gist", "spgist", "gin", "brin"]);
+
+/** Built-in types that take a size / precision: `varchar(64)`, `numeric(10, 2)`, `timestamp(3)`. */
+const SIZED_TYPES = new Set([
+  "varchar", "char", "character", "nchar", "varying", "numeric", "decimal", "timestamp", "timestamptz",
+  "time", "timetz", "interval", "bit", "varbit", "float",
+]);
+
+/** Words that may precede `varying` / `precision` in a multi-word type. */
+const MULTIWORD_TYPE_HEADS = new Set(["character", "bit", "double", "national", "char"]);
+
+/** The built-in types a cast (`::type`, `CAST(… AS type)`) may name — no input-function code of the author's. */
+const BUILTIN_TYPES = new Set([
+  "int", "int2", "int4", "int8", "integer", "smallint", "bigint", "real", "double", "float", "float4", "float8",
+  "numeric", "decimal", "text", "varchar", "char", "character", "bpchar", "bool", "boolean", "date", "time",
+  "timestamp", "timestamptz", "timetz", "interval", "uuid", "json", "jsonb", "bytea", "regclass", "money",
+  "inet", "cidr", "macaddr", "bit", "varbit", "xml", "oid", "name", "blob", "tsrange", "tstzrange",
+  "daterange", "int4range", "int8range", "numrange", "tsvector", "tsquery",
+]);
+
+/** Built-in operators (a user-defined operator runs a user function). */
+const BUILTIN_OPERATORS = new Set([
+  "=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "||", "::", "&&", "~", "~*", "!~",
+  "!~*", "^", "@>", "<@", "->", "->>", "#>", "#>>", "?", "?|", "?&", "<<", ">>", "&<", "&>", "-|-", "|",
+]);
+const OPERATOR_CHARS = new Set(["=", "<", ">", "!", "+", "-", "*", "/", "%", "|", "&", "~", "^", "@", "#", "?", ":"]);
+
+/** Is the token at `k` in a TYPE position — after `::`, after `AS` inside `CAST(`, or a type's second word? */
+function typePositionAt(toks: Tok[], k: number, castAs: ReadonlySet<number>): boolean {
+  const prev = toks[k - 1];
+  if (isP(prev, ":") && isP(toks[k - 2], ":")) return true;
+  if (castAs.has(k - 1)) return true;
+  if (prev && prev.k === "w" && MULTIWORD_TYPE_HEADS.has(prev.t.toLowerCase())) return typePositionAt(toks, k - 1, castAs);
+  return false;
+}
+
+/** Why the expression tokens `[a, b)` run code (a call / cast / operator off the closed lists), or null. */
+function expressionRegionCode(toks: Tok[], a: number, b: number, columnDefault: boolean): string | null {
+  const offList = (what: string): string =>
+    `it ${what} — the database evaluates it per row, at migration, as the migrating role, and it may read or write any table`;
+  // `AS` tokens that sit at depth 1 of a `CAST(` — the type position of a cast.
+  const castAs = new Set<number>();
+  for (let k = a; k < b; k++) {
+    if (!(isW(toks[k], "CAST") && isP(toks[k + 1], "("))) continue;
+    let depth = 0;
+    for (let j = k + 1; j < b; j++) {
+      if (isP(toks[j], "(")) depth++;
+      else if (isP(toks[j], ")")) { depth--; if (depth === 0) break; }
+      else if (depth === 1 && isW(toks[j], "AS")) castAs.add(j);
     }
+  }
+  for (let k = a; k < b; k++) {
+    const t = toks[k];
+    if (isP(t, "${")) return "it holds a `${…}` interpolation the checker cannot read";
+    // operators: a run of adjacent operator characters
+    if (t.k === "p" && OPERATOR_CHARS.has(t.t)) {
+      let op = t.t;
+      let j = k + 1;
+      while (j < b && toks[j].k === "p" && OPERATOR_CHARS.has(toks[j].t) && toks[j].at === toks[j - 1].at + toks[j - 1].t.length) {
+        op += toks[j].t;
+        j++;
+      }
+      if (!BUILTIN_OPERATORS.has(op)) return offList(`uses the operator \`${op}\`, which is not a built-in one`);
+      if (op === "::") {
+        const ty = toks[j];
+        if (!ty || !isName(ty)) return offList("casts to a type the checker cannot read");
+        let name = ty.t.toLowerCase();
+        if (isP(toks[j + 1], ".")) {
+          if (name !== "pg_catalog" || !isName(toks[j + 2])) return offList(`casts to \`${ty.t}.…\`, a type outside the built-in list`);
+          name = toks[j + 2].t.toLowerCase();
+        }
+        if (!BUILTIN_TYPES.has(name) && !MULTIWORD_TYPE_HEADS.has(name)) return offList(`casts to \`${ty.t}\`, a type outside the built-in list (its input function is code)`);
+      }
+      k = j - 1;
+      continue;
+    }
+    if (castAs.has(k)) {
+      const ty = toks[k + 1];
+      const name = ty && isName(ty) ? ty.t.toLowerCase() : "";
+      if (!BUILTIN_TYPES.has(name) && !MULTIWORD_TYPE_HEADS.has(name)) return offList(`casts to \`${ty?.t ?? "?"}\`, a type outside the built-in list (its input function is code)`);
+      continue;
+    }
+    if (!isName(t) || !isP(toks[k + 1], "(")) continue;
+    // ── the closed SYNTACTIC set: an `identifier (` that is not a call ─────────────
+    const prev = toks[k - 1];
+    const up = t.k === "w" ? t.up : "";
+    if (t.k === "w" && RESERVED_BEFORE_PAREN.has(up)) continue;
+    if (up === "KEY" && (isW(prev, "PRIMARY") || isW(prev, "FOREIGN"))) continue;
+    if ((up === "RANGE" || up === "LIST" || up === "HASH") && isW(prev, "BY") && isW(toks[k - 2], "PARTITION")) continue;
+    if (up === "IDENTITY" && isW(prev, "AS")) continue;
+    if ((up === "INCLUDE" || up === "INHERITS") && isP(prev, ")")) continue;
+    if (up === "EXCLUDE" && (isP(prev, ",") || isP(prev, "(") || isW(toks[k - 2], "CONSTRAINT"))) continue;
+    if (t.k === "w" && INDEX_METHODS.has(t.t.toLowerCase()) && isW(prev, "USING")) continue;
+    if (isW(prev, "REFERENCES") || (isP(prev, ".") && isW(toks[k - 3], "REFERENCES"))) continue;   // REFERENCES <table> (
+    if (t.k === "w" && SIZED_TYPES.has(t.t.toLowerCase()) && typePositionAt(toks, k, castAs)) continue;
+    // ── everything else is a CALL ──────────────────────────────────────────────────
+    if (isP(prev, ".")) return offList(`calls \`${toks[k - 2]?.t ?? ""}.${t.t}\`, a qualified function outside the allow-list`);
+    const callee = t.k === "q" ? t.t : t.t.toLowerCase();
+    if (EXPRESSION_ALLOWED_CALLS.has(callee)) continue;
+    if (columnDefault && callee === "nextval" && (isW(prev, "DEFAULT") || (isP(prev, "(") && isW(toks[k - 2], "DEFAULT")))) continue;
+    return offList(`calls \`${t.t}\`, which is not on the floor's function allow-list`);
   }
   return null;
 }
@@ -1076,7 +1183,9 @@ function analyze(toks: Tok[], tenant: ReadonlySet<string>, declsOnly: boolean): 
       // the review #6 class), on any table.
       if (d.cols) {
         // (a `${…}` in a table declaration is already charged by the interpolation rule below)
-        const code = exemptStatementCode(toks, createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1), true);
+        // the column list, AND everything after it (PARTITION BY, WITH (…), INHERITS, …)
+        const code = exemptStatementCode(toks,
+          [...createTableExpressionRegions(toks, d.cols[0] + 1, d.cols[1] - 1), [d.cols[1], d.end]], true);
         if (code && !code.includes("interpolation")) {
           out.push({ kind: "statement", object: `CREATE TABLE ${shown}`, tables: allTenant, unattributable: true, offset: d.at, why: code });
         }
