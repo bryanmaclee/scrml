@@ -10,8 +10,9 @@
  * TWO TIERS (S239 review of 1f9de1f08, HIGH 1). impl#1 is the only compiler adopters run, and it
  * does NOT implement the §66 opener dialect. So:
  *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, arm-pipe (§19.4.5, the
- *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), program-wrap, program-move,
- *     unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
+ *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), client-server-call (§19.9.10, an
+ *     unhandled client call of a server function → `!{ .Transport(t) :> { return } }` —
+ *     commands/fix-client-server-call.js), program-wrap, program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
  *     (entry + resolved imports) and withdrawn on any diagnostic change.
  *   - `--s66` — adds the §66 declaration rules (rhs-decl, const-cell, engine-simple). Their output
  *     is the §66 dialect, which impl#1 CANNOT compile; `--s66` is dry-run unless `--write` is also
@@ -50,9 +51,11 @@ import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from
 
 const HELP = `scrml fix <file|dir> [options]
 
-Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class, and arm-pipe: a
-\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5). A construct that is not
-mechanically rewritable is left untouched and reported.
+Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; arm-pipe: a
+\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; client-server-call: an
+unhandled client call of a server function → \`f() !{ .Transport(t) :> { return } }\`, §19.9.10).
+A construct that is not mechanically rewritable is left untouched and reported; an "info" line
+marks a rewrite whose meaning differs (a client function's callers no longer abort).
 
 DEFAULT rules (${IMPL1_SAFE_RULES.join(", ")}): their output still compiles with
 today's compiler, and each rewrite is verified by compiling the file in its project — a rewrite
@@ -224,9 +227,11 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
       const scan = {};
       if (rules.some((x) => S66_DECL_RULES.includes(x))) for (const f of files) if (f !== file && !(f in project)) scan[f] = readCached(f);
       const r = fixS66(source, { filePath: file, entry: cls.entry, rules, auxSources: project, scanSources: scan });
-      report.push({ file: rel, entry: cls.entry, entryWhy: cls.why, changed: r.changed, applied: r.applied, blockers: r.blockers });
+      report.push({ file: rel, entry: cls.entry, entryWhy: cls.why, changed: r.changed, applied: r.applied, blockers: r.blockers, infos: r.infos ?? [] });
       if (!o.json) {
         for (const b of r.blockers) io.err(`${rel}:${b.line} ${b.rule}: ${b.reason}${b.snippet ? `  [${b.snippet}]` : ""}`);
+        // Only for a file that changes (or would): an info describes a rewrite.
+        if (r.changed) for (const i of r.infos ?? []) io.err(`${rel}:${i.line} ${i.rule}: info — ${i.message}`);
         if (r.applied.some((a) => a.rule === "program-wrap")) {
           io.err(`${rel}: wrapped in <program reset="none"> — ${cls.why}`);
           // impl#1 emits the §65.3.4 reset layer only for a declared <program>; the wrap writes

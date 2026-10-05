@@ -21,6 +21,12 @@
  *                   → the §18.2 match arm (`| .V m :>` → `.V(m) :>`; shared-line arms onto their
  *                   own lines). Chained second; its own module (fix-arm-pipe.js) locates the arms
  *                   from impl#1's arm records and verifies each file (identical artifacts).
+ *   client-server-call  §19.9.10 (S451; S454 F8): an UNHANDLED client call of a server function
+ *                   not declared `!` → `f(…) !{ .Transport(t) :> { return } }` (an event-handler value
+ *                   braced). Chained third; its own module (fix-client-server-call.js) locates the
+ *                   calls from impl#1's Route Inference + AST and gates each file (re-parse, same
+ *                   codes); a site it cannot rewrite is listed. It reports an INFO (`infos`) at each
+ *                   client-function-body site: callers no longer abort.
  *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
  *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
  *                   only when the cell is never written AND its initializer reads no cell;
@@ -76,6 +82,7 @@ import { parseComponentBody } from "../component-expander.ts";
 import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
 import { fixArmPipe } from "./fix-arm-pipe.js";
+import { fixClientServerCall } from "./fix-client-server-call.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,13 +100,14 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
 export const S66_RULES = Object.freeze([
   "pre-migrate",
   "arm-pipe",
+  "client-server-call",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -1283,17 +1291,29 @@ export function fixS66(source, opts = {}) {
     blockers.push(...ap.blockers);
   }
 
+  /** INFO lines (not blockers): today only client-server-call's "callers no longer abort". */
+  const infos = [];
+  if (enabled.has("client-server-call")) {
+    // §19.9.10 (S454 F8) — an unhandled client call of a server function → a local `.Transport`
+    // handler. Chained like arm-pipe: its own location (Route Inference + AST) + per-file gate.
+    const cs = fixClientServerCall(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    if (cs.changed) src = cs.output;
+    applied.push(...cs.applied);
+    blockers.push(...cs.blockers);
+    infos.push(...cs.infos);
+  }
+
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).
   let ast = frontEndMemo(filePath, src)?.ast ?? null;
   if (!ast) try {
     ast = parseAst(filePath, src);
   } catch (e) {
     blockers.push({ rule: "parse", line: 0, reason: `impl#1 front end threw: ${String(e?.message ?? e).split("\n")[0]}`, snippet: "" });
-    return { output: source, changed: false, applied: [], blockers };
+    return { output: source, changed: false, applied: [], blockers, infos };
   }
   if (!ast) {
     blockers.push({ rule: "parse", line: 0, reason: "impl#1 front end built no AST", snippet: "" });
-    return { output: source, changed: false, applied: [], blockers };
+    return { output: source, changed: false, applied: [], blockers, infos };
   }
 
   // The project: every other file (aux / resolved imports). Its ASTs feed the enum lookup AND the
@@ -1620,7 +1640,7 @@ export function fixS66(source, opts = {}) {
   for (let i = 1; i < edits.length; i++) {
     if (edits[i].start < edits[i - 1].end) {
       block("internal", edits[i].start, `overlapping rewrites (${edits[i - 1].rule} / ${edits[i].rule}) — file left untouched`);
-      return { output: source, changed: false, applied: [], blockers };
+      return { output: source, changed: false, applied: [], blockers, infos };
     }
   }
   /** Assemble the output from the edits `keep` admits, restructured when `st` is given. */
@@ -1693,7 +1713,7 @@ export function fixS66(source, opts = {}) {
     if (ed.rule === "unwrap-logic" && ed.detail === "}") continue;
     applied.push({ rule: ed.rule, line: lineOf(src, ed.start), detail: ed.detail });
   }
-  return { output, changed: output !== source, applied, blockers };
+  return { output, changed: output !== source, applied, blockers, infos };
 }
 
 /** Convenience: true when the file has nothing left for a human (every legacy site rewrote). */
