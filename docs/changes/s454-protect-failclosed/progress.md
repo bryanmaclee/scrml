@@ -49,3 +49,23 @@ an archive extract (no git revision), not a content issue.
 Diagnostic delta: I-PROTECT-STRIP-001 49 -> 49; E-PROTECT-003/004/005/006 2/4/4/68 unchanged.
 _scrml_protect_tag( occurrences 174 -> 174 across 102 artifacts. No tagged->untagged change; no
 resolved->wholesale fidelity regression in the corpus.
+
+## Fix round r2 (PA S239 review of 612e8c5ea — two more leaks, both also on base)
+1. Lone CR inside a `--` comment. The received text depends on the lowering: template-literal paths
+   (buildTaggedTemplate, emit-logic Branch A/C) hand the DB a COOKED template in which JS turned CR/CRLF
+   into LF; `.unsafe(JSON.stringify(sql))` paths (rewrite bare, emit-logic Branch B / no-call) keep the
+   CR, which SQLite reads as comment text and Postgres as a line end. No other path transforms the
+   text (escSeg only escapes `\`, backtick, `${`; JSON.stringify is exact). The floor cannot know which
+   text runs, so a lone CR (not followed by LF) inside a `--` comment -> unknown -> wholesale. CRLF
+   reads the same everywhere (the comment ends) and still resolves. Normalizing CR->LF alone would be
+   WRONG on the unsafe/SQLite path (`-- x<CR>'<LF>, passwordHash, '...` hides the column from a
+   normalized reading while SQLite runs it).
+2. A quoted RETURNING target was read as the placeholder `q` from blankSqlNoise. The target is now read
+   from the ORIGINAL text at the matched span (d-flag indices) and folded with foldIdent; a target
+   that does not fold to a plain identifier -> {all}.
+Tenant subset lexer: refuses `--` and `/*` outright; CR is whitespace or string data -> no comment
+disagreement possible. Other normalizeSqlText consumers: tenant-egress
+acrossTenantInsertMissingTenantColumn fallback (non-subset `.acrossTenants()` INSERT head; a CR comment
+could hide the head -> that check not firing; integrity, not confidentiality; NOT fixed, reported);
+type-system.ts + bool-coerce.ts via extractSelectProjection (typing / bool decode, not security).
+Executed: the 9 new conformance cases fail on 612e8c5ea (each body carries SECRET) and on 79bd05028.

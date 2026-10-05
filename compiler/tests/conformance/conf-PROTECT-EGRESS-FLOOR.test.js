@@ -52,6 +52,11 @@ const SEED = [
   // A view the compile does not know (created at runtime, not in `<schema>`):
   // it re-exposes the protected column under another name.
   "CREATE VIEW v AS SELECT id, passwordHash AS p FROM users",
+  // S454 r2 — a KNOWN table named `q` (the placeholder word the RETURNING
+  // target reader used to see for any quoted identifier), and a sacrificial
+  // protected row for the `DELETE … RETURNING *` case.
+  "CREATE TABLE q (id INTEGER PRIMARY KEY, label TEXT)",
+  `INSERT INTO users (id, name, passwordHash) VALUES (2, 'dave', '${SECRET}')`,
 ];
 
 // One program, every shape a server function, compiled + seeded once. The `?{}`
@@ -123,6 +128,22 @@ const SHAPES = {
   // base: wholesale strip [{}] (an over-strip); S454 RESOLVES it — a trailing
   // `;` is not part of the statement
   trailingSemicolon: Q("SELECT id, name, passwordHash FROM users;"),
+
+  // --- S454 r2 (review-found; each LEAKED on 79bd05028 AND on 612e8c5ea).
+  // A lone CR inside a `--` comment: the floor ended the comment at LF only, the
+  // cooked JS template the SQL is lowered into turns the CR into LF, so the
+  // database read the rest of the line as live SQL.
+  crGet: Q("SELECT id, name -- c\r, passwordHash FROM users WHERE id = 1", ".get()"),
+  crAll: Q("SELECT id, name -- c\r, passwordHash FROM users"),
+  crUnion: Q("SELECT id, name FROM users -- c\rUNION SELECT id, passwordHash FROM users"),
+  crUpdateReturning: Q("UPDATE users SET name = 'alice' WHERE id = 1 -- c\rRETURNING *"),
+  crRun: Q("SELECT id, name -- c\r, passwordHash FROM users", ".run()"),
+  // A quoted RETURNING target was read from the blanked view, where every
+  // quoted identifier is the placeholder `q` — a table this program declares.
+  quotedTargetDq: Q('UPDATE "users" SET name = \'alice\' WHERE id = 1 RETURNING *'),
+  quotedTargetBr: Q("UPDATE [users] SET name = 'alice' WHERE id = 1 RETURNING *"),
+  quotedTargetBt: `?{ UPDATE ${B}users${B} SET name = 'alice' WHERE id = 1 RETURNING * }.all()`,
+  quotedTargetDelete: Q('DELETE FROM "users" WHERE id = 2 RETURNING *'),
 };
 
 function buildProgram() {
@@ -134,8 +155,9 @@ function buildProgram() {
   <schema>
     ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
     ?{\`CREATE TABLE notes (id INTEGER PRIMARY KEY, user_id INTEGER, body TEXT)\`}
+    ?{\`CREATE TABLE q (id INTEGER PRIMARY KEY, label TEXT)\`}
   </schema>
-  <db src="app.db" protect="passwordHash" tables="users, notes">
+  <db src="app.db" protect="passwordHash" tables="users, notes, q">
     \${
 ${fns}
     }
@@ -331,6 +353,60 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 resolved: trailing `;`", () => {
       expect(row, "expected a row in the response").toBeTruthy();
       expect("passwordHash" in row).toBe(false);
       expect(row.name).toBe("alice");
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// S454 r2 — a lone CR inside a `--` comment. Where that comment ends depends on
+// the lowering (a cooked JS template turns CR into LF; `.unsafe(…)` keeps it)
+// and on the dialect (Postgres ends `--` at CR, SQLite does not), so the floor
+// cannot know the text the database reads → wholesale strip. Each LEAKED on
+// 79bd05028 and 612e8c5ea (`.get()` body:
+// {"id":1,"name":"alice","passwordHash":"SECRET-HASH-7f3a0b91"}).
+// ---------------------------------------------------------------------------
+describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: lone CR in a `--` comment strips wholesale", () => {
+  const cases = [
+    ["`.get()`", "crGet"],
+    ["`.all()`", "crAll"],
+    ["UNION behind the CR", "crUnion"],
+    ["UPDATE … `-- c<CR>RETURNING *`", "crUpdateReturning"],
+    ["`.run()`", "crRun"],
+  ];
+  for (const [label, name] of cases) {
+    test(`${label} — passwordHash ABSENT`, async () => {
+      const { text, json } = await call(name);
+      expect(text).not.toContain(SECRET);
+      const rows = Array.isArray(json) ? json : [json];
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const row of rows) expect(Object.keys(row)).toEqual([]);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// S454 r2 — a quoted RETURNING target (`"users"`, `[users]`, backticks, and
+// DELETE). It was read from the blanked view as the placeholder `q`; with a
+// table `q` declared that resolved to "no protected column" and the row
+// shipped (executed on 79bd05028 and 612e8c5ea). The target is now read from
+// the original text and folded, so these RESOLVE: the hash is stripped by
+// name and `name` arrives.
+// ---------------------------------------------------------------------------
+describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: quoted RETURNING target resolves to the real table", () => {
+  const cases = [
+    ['UPDATE "users" … RETURNING *', "quotedTargetDq", "alice"],
+    ["UPDATE [users] … RETURNING *", "quotedTargetBr", "alice"],
+    ["UPDATE `users` … RETURNING *", "quotedTargetBt", "alice"],
+    ['DELETE FROM "users" … RETURNING *', "quotedTargetDelete", "dave"],
+  ];
+  for (const [label, name, who] of cases) {
+    test(`${label} — passwordHash ABSENT, name ARRIVES`, async () => {
+      const { text, json } = await call(name);
+      expect(text).not.toContain(SECRET);
+      const row = json[0];
+      expect(row, "expected a row in the response").toBeTruthy();
+      expect("passwordHash" in row).toBe(false);
+      expect(row.name).toBe(who);
     });
   }
 });

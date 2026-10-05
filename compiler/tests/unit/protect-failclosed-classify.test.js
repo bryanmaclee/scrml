@@ -164,6 +164,58 @@ describe("§14.8.9 S454 — a nested SELECT over a source of unknown columns str
   });
 });
 
+describe("§14.8.9 S454 r2 — a lone CR inside a `--` comment is unknown (the received text is path- and dialect-dependent)", () => {
+  const cr = [
+    ["SELECT", "SELECT id, name -- c\r, passwordHash FROM users"],
+    ["SELECT with a lone CR then more comment text", "SELECT id, name -- c\rx\n FROM users"],
+    ["UNION behind the CR", "SELECT id FROM users -- c\rUNION SELECT passwordHash FROM users"],
+    ["a write whose RETURNING hides behind the CR (beats the no-RETURNING proof)", "UPDATE users SET name = 'a' -- c\rRETURNING *"],
+    ["a DELETE with no RETURNING but a CR comment", "DELETE FROM users -- c\r WHERE id = 1"],
+  ];
+  for (const [label, sql] of cr) {
+    test(`${label} → { all: true }`, () => {
+      expect(r(sql)).toEqual(ALL);
+    });
+  }
+  test("CRLF ends a `--` comment identically on every path: still resolved", () => {
+    expect(r("SELECT id, name -- c\r\n, passwordHash FROM users")).toEqual({ cols: ["passwordHash"] });
+    expect(r("SELECT id, name -- c\r\n FROM users")).toBeNull();
+  });
+  test("a CR outside a line comment (whitespace, block comment) is harmless", () => {
+    expect(r("SELECT id,\rname,\rpasswordHash\rFROM users")).toEqual({ cols: ["passwordHash"] });
+    expect(r("SELECT id, name /* c\r */ FROM users")).toBeNull();
+  });
+});
+
+describe("§14.8.9 S454 r2 — a RETURNING target is read from the original text, never the blanked placeholder", () => {
+  const withQ = {
+    ...ctx,
+    schemaByTable: new Map([...ctx.schemaByTable, ["q", ["id", "label"]]]),
+    knownTables: new Set([...ctx.knownTables, "q"]),
+  };
+  const rq = (sql) => resolveProtectedOutputColumns(sql, withQ);
+  const quoted = [
+    ['UPDATE "users"', 'UPDATE "users" SET name = \'a\' WHERE id = 1 RETURNING *'],
+    ["UPDATE [users]", "UPDATE [users] SET name = 'a' WHERE id = 1 RETURNING *"],
+    ["UPDATE `users`", "UPDATE `users` SET name = 'a' WHERE id = 1 RETURNING *"],
+    ['UPDATE "USERS" (case folds)', 'UPDATE "USERS" SET name = \'a\' RETURNING *'],
+    ['DELETE FROM "users"', 'DELETE FROM "users" WHERE id = 2 RETURNING *'],
+    ['INSERT INTO "users"', 'INSERT INTO "users" (name) VALUES (\'a\') RETURNING *'],
+  ];
+  for (const [label, sql] of quoted) {
+    test(`${label} … RETURNING * → tags passwordHash (not table q)`, () => {
+      expect(rq(sql)).toEqual({ cols: ["passwordHash"] });
+    });
+  }
+  test("a quoted target that is not a plain identifier is unreadable → { all: true }", () => {
+    expect(rq('UPDATE "my table" SET name = \'a\' RETURNING *')).toEqual(ALL);
+    expect(rq('UPDATE "us""ers" SET name = \'a\' RETURNING *')).toEqual(ALL);
+  });
+  test("a bare `q` target still resolves to the real table q", () => {
+    expect(rq("UPDATE q SET label = 'a' RETURNING *")).toBeNull();
+  });
+});
+
 describe("classifyProtectStatement", () => {
   test("kinds", () => {
     expect(classifyProtectStatement("select 1")).toBe("select");

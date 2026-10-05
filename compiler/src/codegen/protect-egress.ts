@@ -296,6 +296,18 @@ function lexProtectSql(src: string): ProtectTok[] | null {
       // MySQL reads `--` as a comment only before whitespace (`--x` is `- -x`).
       if (i + 2 < n && !/\s/.test(src[i + 2])) return null;
       const nl = src.indexOf("\n", i);
+      const end = nl === -1 ? n : nl;
+      // ⛔ S454 r2 — a LONE CR (not followed by LF) inside a `--` comment: where
+      // that comment ends depends on text the floor cannot see. The template-
+      // literal lowering hands the database a COOKED template, in which JS has
+      // already turned every CR / CRLF into LF (the comment ends at the CR); the
+      // `.unsafe(JSON.stringify(sql))` lowering keeps the CR, which SQLite reads
+      // as comment text and Postgres as a line end. The floor's views end `--`
+      // at LF only, so `-- c<CR>, passwordHash FROM users` was comment to the
+      // floor and live SQL to the database (executed: the hash shipped). Which
+      // text the database receives is not knowable here → unknown. (A CRLF is
+      // read identically on every path and every dialect: the comment ends.)
+      for (let k = i + 2; k < end; k++) if (src[k] === "\r" && src[k + 1] !== "\n") return null;
       i = nl === -1 ? n : nl + 1;
       continue;
     }
@@ -574,22 +586,56 @@ function returningAsSelect(sqlContent: string): { select: string } | { all: true
   if (list.length === 0) return { all: true };
   const IDENT_RE = "([A-Za-z_][A-Za-z0-9_]*)";
   let m: RegExpExecArray | null;
-  let target: string | null = null;
   const verb = lead[1].toLowerCase();
+  // The `d` flag records group offsets; `blanked` preserves length, so they
+  // index `original` too.
   if (verb === "insert" || verb === "replace") {
-    m = new RegExp(`^(?:insert|replace)(?:\\s+or\\s+\\w+)?\\s+into\\s+${IDENT_RE}(?:\\s+as\\s+${IDENT_RE})?(?=[\\s(]|$)`, "i").exec(blanked);
-    if (m) target = m[1];
+    m = new RegExp(`^(?:insert|replace)(?:\\s+or\\s+\\w+)?\\s+into\\s+${IDENT_RE}(?:\\s+as\\s+${IDENT_RE})?(?=[\\s(]|$)`, "id").exec(blanked);
   } else if (verb === "update") {
-    m = new RegExp(`^update(?:\\s+or\\s+\\w+)?\\s+${IDENT_RE}(?:\\s+(?:as\\s+)?${IDENT_RE})?\\s+set\\b`, "i").exec(blanked);
-    if (m) target = m[1];
+    m = new RegExp(`^update(?:\\s+or\\s+\\w+)?\\s+${IDENT_RE}(?:\\s+(?:as\\s+)?${IDENT_RE})?\\s+set\\b`, "id").exec(blanked);
     // UPDATE … FROM joins other tables into the statement: fail closed.
     if (topLevelKeyword(blanked, "from") !== -1) return { all: true };
   } else {
-    m = new RegExp(`^delete\\s+from\\s+${IDENT_RE}(?:\\s+(?:as\\s+)?${IDENT_RE})?(?=\\s|$)`, "i").exec(blanked);
-    if (m) target = m[1];
+    m = new RegExp(`^delete\\s+from\\s+${IDENT_RE}(?:\\s+(?:as\\s+)?${IDENT_RE})?(?=\\s|$)`, "id").exec(blanked);
   }
+  const target = m ? writeTargetFromOriginal(original, (m as RegExpExecArray & { indices: Array<[number, number]> }).indices[1]) : null;
   if (!target) return { all: true };
   return { select: `SELECT ${list} FROM ${target}` };
+}
+
+/**
+ * ⛔ S454 r2 — read a write's TARGET from the ORIGINAL text, never from the
+ * blanked view. `blankSqlNoise` keeps a quoted identifier visible as the
+ * placeholder word `q`, so `UPDATE "users" … RETURNING *` (and `[users]`,
+ * `` `users` ``, `DELETE FROM "users"`) was resolved as `SELECT * FROM q` —
+ * and where the compile knew a table `q`, that read as "no protected column"
+ * and the row shipped (executed). The span `[start, end)` is where the blanked
+ * view matched the target: a bare word there is taken as written; a quoted
+ * identifier there is read whole from the original and folded (`foldIdent`, as
+ * the SELECT path folds); anything that does not fold to a plain identifier —
+ * so it could not be spliced back into a `FROM` unambiguously — is unreadable
+ * (`null` → the caller strips wholesale).
+ */
+function writeTargetFromOriginal(original: string, span: [number, number] | undefined): string | null {
+  if (!span) return null;
+  const [start, end] = span;
+  const open = original[start];
+  let raw: string;
+  if (open === '"' || open === "`" || open === "[") {
+    const close = open === "[" ? "]" : open;
+    let j = start + 1;
+    while (j < original.length) {
+      if (original[j] === close && close !== "]" && original[j + 1] === close) { j += 2; continue; }
+      if (original[j] === close) break;
+      j++;
+    }
+    if (j >= original.length) return null;
+    raw = original.slice(start, j + 1);
+  } else {
+    raw = original.slice(start, end);
+  }
+  const folded = foldIdent(raw);
+  return /^[a-z_][a-z0-9_]*$/.test(folded) ? folded : null;
 }
 
 export function resolveProtectedOutputColumns(

@@ -236,8 +236,12 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(cols("UPDATE users SET name = 'RETURNING *' WHERE id = 1")).toBeNull();
     // UPDATE … FROM joins another table in: fail closed.
     expect(cols("UPDATE users SET name = o.n FROM other o WHERE o.id = users.id RETURNING *")).toBe("*");
-    // A target the resolver cannot read fails closed.
-    expect(cols('UPDATE "users" SET name = 1 RETURNING *')).toBe("*");
+    // ⚑ S454 r2: a quoted target is read from the ORIGINAL text and folded
+    // (it was read as the blanked placeholder `q` — which strip-all'd here only
+    // because no table `q` was known; with one, the row shipped).
+    expect(cols('UPDATE "users" SET name = 1 RETURNING *')).toEqual(["passwordHash"]);
+    // A target the resolver cannot read exactly fails closed.
+    expect(cols('UPDATE "my users" SET name = 1 RETURNING *')).toBe("*");
   });
 
   // S443 round 6 (P2) — `users . *` (whitespace around the dot) fell to an opaque
