@@ -1,4 +1,5 @@
 import { CGError } from "./errors.ts";
+import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
@@ -1438,6 +1439,22 @@ function emitEndpointServerHelperLines(
  * in OTHER files don't shift (mirrors the route-handler call site).
  */
 export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
+  // ⛑ THIS ENTRY RUNS OUTSIDE `runCG` — api.js calls it AFTER runCG has drained the run-wide
+  // refused-lowering sink (refused-lowering-errors.ts). A refusal recorded while lowering a
+  // value export here (a `.prepare()` in an exported async fn: E-SQL-006, an unbuildable `_{}`
+  // slice: E-FOREIGN-006/007) would otherwise sit in the sink until the next runCG reset wiped
+  // it. Drain it into this call's `errors` on every exit (s456 review F3). The sink's
+  // de-duplication memory is still the run's, so a construct runCG already reported is not
+  // reported twice.
+  try {
+    return _generateValueOnlyServerJs(fileAST, errors);
+  } finally {
+    // With no `errors` channel the refusals stay in the sink for the next drain.
+    if (errors) for (const e of drainRefusedLowerings()) errors.push(e);
+  }
+}
+
+function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   const filePath: string = fileAST.filePath;
 
   // Build the minimal file header (mirrors generateServerJs's first lines so
@@ -1451,9 +1468,9 @@ export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): str
   // Collect the value-export lines (consts + pure fns) via the shared collector.
   // The var-counter is snapshotted/restored so no other file's mangling shifts.
   const _veSnapshot = getVarCounter();
-  // `errors` is threaded so the value-export pass's own diagnostics reach the live
-  // stream. (A `.prepare()` in an exported async fn — E-SQL-006 — no longer depends
-  // on it: emit-logic refuses into the run-wide refused-lowering sink, s456.)
+  // `errors` is threaded so the value-export pass's diagnostics reach the live stream —
+  // its own, and (via the drain in `generateValueOnlyServerJs`) the run-wide refused-lowering
+  // sink's, e.g. E-SQL-006 for a `.prepare()` in an exported async fn (g-esql006, s456 F3).
   const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
   setVarCounter(_veSnapshot);
   if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.

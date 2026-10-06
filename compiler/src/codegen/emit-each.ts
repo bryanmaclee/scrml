@@ -44,6 +44,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2431,8 +2432,14 @@ function renderTemplateAttrToJs(
   }
 
   // ---- (2) event handlers — inline addEventListener -----------------------
+  // A QUOTED (`onclick="hit(it)"`) or bareword event attribute is NOT a handler: SPEC §5.2
+  // rule 1 — "`attr=\"value\"` SHALL produce a static attribute with the literal string
+  // `value`. The compiler SHALL NOT interpret the string contents as an expression." It falls
+  // through to the static-attribute path (4) below, exactly as the same attribute outside an
+  // `<each>` is emitted into the HTML. Until s456 it entered this branch and its listener body
+  // became `/* each: unsupported event handler shape */` — the attribute silently DROPPED.
   const ev = eventNameForAttr(aName);
-  if (ev !== null) {
+  if (ev !== null && valKind !== "string-literal" && valKind !== "absent" && val != null) {
     let handlerBody: string;
     if (valKind === "call-ref") {
       const fnName = String(val.name ?? "");
@@ -2503,7 +2510,17 @@ function renderTemplateAttrToJs(
       const ref = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
       handlerBody = `${ref}(event);`;
     } else {
-      handlerBody = "/* each: unsupported event handler shape */";
+      // §2.2.1 — a handler value kind this emitter cannot lower is REFUSED, never a silent
+      // no-op listener (run-wide sink, refused-lowering-errors.ts; s456 review).
+      recordRefusedLowering(new CGError(
+        "E-CG-003",
+        `E-CG-003: the \`${aName}=\` event handler inside an \`<each>\` row has a value shape ` +
+        `(\`${valKind || "unknown"}\`) the code generator cannot lower. Write it in a §5.2.3 form: ` +
+        `a call (\`${aName}=fn(@.id)\`), a handler reference (\`${aName}=@handler\`), or an inline ` +
+        `block (\`${aName}={ … }\` / \`${aName}=\${…}\`).`,
+        (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+      ), attr);
+      handlerBody = "/* E-CG-003: unsupported event handler shape */";
     }
     // Bug 73 — per-item handler live-keying. If a reconcile ctx is active and
     // the handler reads the iter var, prepend a fire-time re-resolution prelude
@@ -2719,8 +2736,15 @@ function renderTemplateAttrToJs(
     return;
   }
 
-  // Unknown value kind — defensive literal copy with a hint.
-  lines.push(`${indent}// each: per-item attr "${aName}" unhandled value kind="${valKind}"`);
+  // Unknown value kind — REFUSED (§2.2.1; s456 review): the attribute would otherwise be
+  // dropped with only a comment in the artifact.
+  recordRefusedLowering(new CGError(
+    "E-CG-003",
+    `E-CG-003: the \`${aName}=\` attribute inside an \`<each>\` row has a value shape ` +
+    `(\`${valKind || "unknown"}\`) the code generator cannot lower.`,
+    (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+  ), attr);
+  lines.push(`${indent}/* E-CG-003: per-item attr "${aName}" unhandled value kind="${valKind}" */`);
 }
 
 /**

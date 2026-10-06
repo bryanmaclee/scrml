@@ -73,6 +73,19 @@ Pins: `compiler/tests/integration/foreign-slice-lexing.test.js`; conformance `fo
 `sql/prepare-tool-in-block-e-sql-006-neg`, `control-flow/lift-two-in-value-arm-e-lift-002-neg`,
 `server-fn/session-value-in-tool-neg` (each fails on `0aef3270d`).
 
+**S456 review round (S239).** F1: the first fix took tokens from a STANDALONE lexer, which reads `await` as an
+identifier — `await /'/.exec(s)` lexed `/` as division, the slice was taken as a statement body with no `return`,
+and `v` settled silently to `not` (a regression vs `0aef3270d`). The scans now take the token stream from
+`acorn.parse` of the slice in its real wrapper (an async function body; `onToken`), so the PARSER decides regex vs
+division; a slice that parses in neither shape is refused (E-FOREIGN-007), never given a guessed shape. F2: the
+token parse omits the crossing parameters, so a crossing-shadowing slice still yields tokens and E-FOREIGN-006 names
+the binding. F3: `generateValueOnlyServerJs` runs after `runCG` drained the sink — it now drains the sink into its
+own `errors` on every exit (no reachable repro found: a value-only module has no server content, and a client-mode
+lowering of the same node in `runCG` reports first). Each-row `onclick="…"`: per SPEC §5.2 rule 1 a quoted attribute
+is a static attribute; inside `<each>` it was dropped as `/* each: unsupported event handler shape */`, now emitted
+via `setAttribute` like the same attribute outside `<each>` (corpus count 0); a genuinely unlowerable handler/attr
+value kind is E-CG-003. Pin: conformance `foreign/foreign-slice-await-regex-pos`.
+
 **Still open, separately filed:** a compile that reports these errors still WRITES its artifacts
 ([[g-impl1-artifacts-written-on-error-s451]], §2.2.1 S451) — the refusal now fails the compile (exit 1), but the
 `null /* E-… */` artifact lands on disk.

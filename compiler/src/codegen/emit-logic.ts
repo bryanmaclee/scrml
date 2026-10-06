@@ -3584,10 +3584,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           return `null /* E-FOREIGN-006: crossing-shadow (${names}) */`;
         }
       }
-      // A slice the lexer cannot read is taken as a statement body, so the build
-      // check below reports the parser's complaint about the text as written.
-      const { topLevelReturn, topLevelStmtSep, lexable } = scanForeignSliceShape(slice);
-      const singleExpression = lexable && !topLevelReturn && !topLevelStmtSep;
+      // A slice that parses in neither shape (`parsed: false`) is taken as a
+      // statement body, which the build check below then REFUSES (E-FOREIGN-007) —
+      // it does not parse there either. Fail closed; never a guessed shape.
+      const { topLevelReturn, topLevelStmtSep, parsed } = scanForeignSliceShape(slice);
+      const singleExpression = parsed && !topLevelReturn && !topLevelStmtSep;
       // The newline before `)` keeps a trailing `//` comment in a one-expression
       // slice from swallowing the paren.
       const inner = singleExpression ? `return (${slice}\n);` : slice;

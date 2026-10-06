@@ -55,56 +55,72 @@ function runTool(name, src) {
 describe("scanForeignSliceShape — the slice as JS tokens", () => {
   const shape = (src) => {
     const r = scanForeignSliceShape(src);
-    return { ret: r.topLevelReturn, sep: r.topLevelStmtSep, lexable: r.lexable };
+    return { ret: r.topLevelReturn, sep: r.topLevelStmtSep, parsed: r.parsed };
   };
 
   test("a quote inside a regex literal does not open a string (the flogence repro)", () => {
     expect(shape(`const clean = (x) => String(x).replace(/['x]/g, "")\nreturn clean("it's")`))
-      .toEqual({ ret: true, sep: false, lexable: true });
+      .toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("a double quote and a backtick inside regex classes", () => {
-    expect(shape("const a = /[\"]/g\nconst b = /[`]/g\nreturn a")).toEqual({ ret: true, sep: false, lexable: true });
+    expect(shape("const a = /[\"]/g\nconst b = /[`]/g\nreturn a")).toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("a `/` inside a regex class, and flags", () => {
-    expect(shape("const s = /[/]+/gimsuy\nreturn s")).toEqual({ ret: true, sep: false, lexable: true });
+    expect(shape("const s = /[/]+/gimsuy\nreturn s")).toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("division chains are division, not a regex — a single expression", () => {
-    expect(shape("a / b / c")).toEqual({ ret: false, sep: false, lexable: true });
-    expect(shape("(x) / 2 / y")).toEqual({ ret: false, sep: false, lexable: true });
+    expect(shape("a / b / c")).toEqual({ ret: false, sep: false, parsed: true });
+    expect(shape("(x) / 2 / y")).toEqual({ ret: false, sep: false, parsed: true });
   });
 
   test("a regex after `)` of an `if` is a regex (statement context), not a division", () => {
-    expect(shape("if (q) /[;']/.test(s)\nreturn 1")).toEqual({ ret: true, sep: false, lexable: true });
+    expect(shape("if (q) /[;']/.test(s)\nreturn 1")).toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("quotes in comments are not strings", () => {
-    expect(shape("// it's here\n/* and 'here' */\nreturn 1")).toEqual({ ret: true, sep: false, lexable: true });
+    expect(shape("// it's here\n/* and 'here' */\nreturn 1")).toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("a template literal with a nested template in a `${}` hole", () => {
-    expect(shape("`<${a ? `${b};` : \"c\"}>`")).toEqual({ ret: false, sep: false, lexable: true });
-    expect(shape("const t = `${x}`\nreturn t")).toEqual({ ret: true, sep: false, lexable: true });
+    expect(shape("`<${a ? `${b};` : \"c\"}>`")).toEqual({ ret: false, sep: false, parsed: true });
+    expect(shape("const t = `${x}`\nreturn t")).toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("`;` and `return` inside strings, nested functions and `for(;;)` are not top level", () => {
-    expect(shape(`["a;b", "return"].map((x) => { return x; })`)).toEqual({ ret: false, sep: false, lexable: true });
-    expect(shape("for (let i = 0; i < 2; i++) f(i)\nreturn 1")).toEqual({ ret: true, sep: false, lexable: true });
+    expect(shape(`["a;b", "return"].map((x) => { return x; })`)).toEqual({ ret: false, sep: false, parsed: true });
+    expect(shape("for (let i = 0; i < 2; i++) f(i)\nreturn 1")).toEqual({ ret: true, sep: false, parsed: true });
   });
 
   test("a member named `.return` / `?.return` is not the keyword (g-foreign-value-block-dot-return-misread-as-keyword)", () => {
-    expect(shape("g.return(99)")).toEqual({ ret: false, sep: false, lexable: true });
-    expect(shape("g?.return(99)")).toEqual({ ret: false, sep: false, lexable: true });
+    expect(shape("g.return(99)")).toEqual({ ret: false, sep: false, parsed: true });
+    expect(shape("g?.return(99)")).toEqual({ ret: false, sep: false, parsed: true });
   });
 
   test("a top-level `;` is a statement separator", () => {
-    expect(shape("f(); g()")).toEqual({ ret: false, sep: true, lexable: true });
+    expect(shape("f(); g()")).toEqual({ ret: false, sep: true, parsed: true });
   });
 
-  test("a slice the lexer cannot read is reported as not lexable", () => {
-    expect(shape(`const s = "unterminated\nreturn s`).lexable).toBe(false);
+  test("a slice that parses in neither shape is reported as not parsed (the caller refuses it)", () => {
+    expect(shape(`const s = "unterminated\nreturn s`).parsed).toBe(false);
+  });
+
+  // s456 review F1 — a standalone lexer reads `await` as an identifier, so the `/` after it
+  // lexed as division and the `'` as an unterminated string. The parser, in the slice's real
+  // (async function) context, reads a regex.
+  test("`await /'/` is a regex operand of `await` — a single expression", () => {
+    expect(shape("await /'/.exec(s)")).toEqual({ ret: false, sep: false, parsed: true });
+    expect(shape("await\n/'/.exec(s)")).toEqual({ ret: false, sep: false, parsed: true });
+  });
+
+  test("an object literal parses only as an expression — a single expression", () => {
+    expect(shape("{ a: 1, b: 2 }")).toEqual({ ret: false, sep: false, parsed: true });
+  });
+
+  test("text that parses in neither shape is not parsed (`a = b\\n++/'/.exec(s)`)", () => {
+    expect(shape("a = b\n++/'/.exec(s)").parsed).toBe(false);
   });
 });
 
@@ -143,6 +159,57 @@ function main(args: string[]): number {
 `);
     expect(errCodes(r.result)).toEqual([]);
     expect(r.stdout).toBe("out=its\n");
+  });
+
+  test("review F1 — `await /'/.exec(s)` gets its injected `return`; the value crosses", () => {
+    const r = runTool("f1await", `<program kind="tool" lang="js">
+function main(args: string[]): number {
+  const s = "it's"
+  const v = _={ in: { s } await /'/.exec(s) }=
+  const w = _={ in: { s }
+    await
+    /'/.exec(s)
+  }=
+  println("v=" + v[0] + " w=" + w[0])
+  return 0
+}
+</program>
+`);
+    expect(errCodes(r.result)).toEqual([]);
+    expect(r.stdout).toBe("v=' w='\n");
+  });
+
+  test("review F1 — text that parses in neither shape is E-FOREIGN-007, never a silent statement body", () => {
+    const { result } = compileTo("f1bad", `<program kind="tool" lang="js">
+function main(args: string[]): number {
+  const s = "x"
+  const v = _={ in: { s }
+    a = b
+    ++/'/.exec(s)
+  }=
+  println(v)
+  return 0
+}
+</program>
+`);
+    expect(errCodes(result)).toContain("E-FOREIGN-007");
+  });
+
+  test("review F2 — a crossing shadow with a regex quote in the slice is still E-FOREIGN-006", () => {
+    const { result } = compileTo("f2shadow", `<program kind="tool" lang="js">
+function main(args: string[]): number {
+  const s = "x"
+  const v = _={ in: { s }
+    const s = /'/.source
+    return s
+  }=
+  println(v)
+  return 0
+}
+</program>
+`);
+    expect(errCodes(result)).toContain("E-FOREIGN-006");
+    expect(errCodes(result)).not.toContain("E-FOREIGN-007");
   });
 });
 
@@ -250,6 +317,23 @@ function main(args: string[]): number {
 </program>
 `);
     expect(errCodes(result)).not.toContain("E-LIFT-002");
+  });
+
+  test("§5.2 rule 1 — a QUOTED event attribute in an `<each>` row is a static attribute, as outside one (not a dropped listener)", () => {
+    const { result, dist } = compileTo("eachq", `<program>
+<items> = [1, 2]
+<button onclick="go(0)">top</button>
+<ul>
+  <each in=@items as it>
+    <li><button onclick="go(it)">row</button></li>
+  </each>
+</ul>
+</program>
+`);
+    expect(errCodes(result)).toEqual([]);
+    const client = require("fs").readFileSync(join(dist, "eachq.client.js"), "utf8");
+    expect(client).toContain(`.setAttribute("onclick", "go(it)")`);
+    expect(client).not.toContain("unsupported event handler shape");
   });
 
   test("E-SESSION-VALUE in a tool main is reported", () => {
