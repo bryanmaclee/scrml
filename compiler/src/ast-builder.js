@@ -10297,7 +10297,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             consume();
           }
           // collect iterable expression up to `)`
-          const { expr: iterExpr } = collectExpr(")");
+          let { expr: iterExpr } = collectExpr(")");
+          // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
+          // collectExpr stops at the `!{}` handler (a BLOCK_REF is a statement
+          // boundary), which then became the loop BODY (E-PARSE-001). Inside the
+          // parenthesized head it is part of the iterable expression.
+          while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+            iterExpr += " " + consume().text;
+            if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
+          }
           iterable = iterExpr.trim();
           if (peek().kind === "PUNCT" && peek().text === ")") {
             consume(); // consume `)`
@@ -12589,7 +12597,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (peek().kind === 'KEYWORD' && (peek().text === 'of' || peek().text === 'in')) {
           consume();
         }
-        const { expr: iterExpr } = collectExpr(')');
+        let { expr: iterExpr } = collectExpr(')');
+        // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
+        // collectExpr stops at the `!{}` handler (a BLOCK_REF is a statement
+        // boundary), which then became the loop BODY (E-PARSE-001). Inside the
+        // parenthesized head it is part of the iterable expression.
+        while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+          iterExpr += " " + consume().text;
+          if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
+        }
         iterable = iterExpr.trim();
         if (peek().kind === 'PUNCT' && peek().text === ')') {
           consume(); // consume `)`
@@ -15267,7 +15283,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             consume();
           }
           // collect iterable expression up to `)`
-          const { expr: iterExpr } = collectExpr(")");
+          let { expr: iterExpr } = collectExpr(")");
+          // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
+          // collectExpr stops at the `!{}` handler (a BLOCK_REF is a statement
+          // boundary), which then became the loop BODY (E-PARSE-001). Inside the
+          // parenthesized head it is part of the iterable expression.
+          while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+            iterExpr += " " + consume().text;
+            if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
+          }
           iterable = iterExpr.trim();
           if (peek().kind === "PUNCT" && peek().text === ")") {
             consume(); // consume `)`

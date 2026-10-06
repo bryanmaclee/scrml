@@ -76,7 +76,7 @@ import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
-import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS } from "./codegen/sql-attempt.ts";
+import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -9277,8 +9277,12 @@ function annotateNodes(
     const localSqlRows = new Map<string, ResolvedType>();
     const _sink: TSError[] = [];
     const collectLocalSql = (nodes: ASTNodeLike[]): void => {
-      for (const s of nodes) {
-        if (!s || typeof s !== "object") continue;
+      for (const s0 of nodes) {
+        if (!s0 || typeof s0 !== "object") continue;
+        // S455 (§19.8.3) — `const X = ?{…}.get() !{…}`: the guard wraps the
+        // declaration; it binds `X` exactly as the unhandled one does (the
+        // declaration's own visit types it from `sqlNode` the same way).
+        const s = (handledSqlGuardInner(s0) ?? s0) as ASTNodeLike;
         if ((s.kind === "const-decl" || s.kind === "let-decl") && typeof s.name === "string") {
           const sqlNode = (s as Record<string, unknown>).sqlNode as ASTNodeLike | undefined;
           if (sqlNode && sqlNode.kind === "sql") {
@@ -15199,11 +15203,9 @@ function annotateNodes(
 
   /** Is the statement a `!{}` guards a `?{}` query? */
   function _guardedNodeHandlesSql(g: ASTNodeLike): boolean {
-    const r = g as Record<string, unknown>;
-    if (g.kind === "sql") return true;
-    const sq = r.sqlNode as { kind?: string } | undefined;
-    if (sq && sq.kind === "sql") return true;
-    return sqlQueryExprShape((r.initExpr ?? r.exprNode) as ExprNode | undefined) !== null;
+    // S455 — the shared predicate (sql-attempt.ts): also `lift ?{…} !{…}`, whose
+    // query hangs off `expr.node` and was never checked against SqlError.
+    return handledSqlOfGuardedNode(g) !== null;
   }
 
   /** The variant name an arm pattern names, or "_" for a catch-all. */
@@ -26903,6 +26905,9 @@ function checkFnBodyProhibitions(
     for (const stmt of nodes) {
       if (!stmt || typeof stmt !== "object") continue;
       if (stmt.kind === "function-decl") continue; // nested fn has own scope
+      // S455 — `const x = ?{…} !{…}` declares `x` exactly as the unhandled form.
+      const _handledInner = handledSqlGuardInner(stmt);
+      if (_handledInner) { collectLocalDecls([_handledInner as ASTNodeLike]); continue; }
       const declName = (stmt.name as string | undefined) ?? undefined;
       if (
         declName &&
@@ -27140,6 +27145,16 @@ function checkFnBodyProhibitions(
   function walkBody(nodes: ASTNodeLike[]): void {
     for (const stmt of nodes) {
       if (!stmt || typeof stmt !== "object") continue;
+
+      // S455 (§19.8.3, §48.3.1) — a `!{}` on a `?{}` wraps the WHOLE statement
+      // (`guarded-expr { guardedNode }`). The handler adds a failure path; the
+      // statement is still a SQL access, so it is checked exactly as the
+      // unhandled one (E-FN-001 — it used to be invisible here).
+      const _handledInner = handledSqlGuardInner(stmt);
+      if (_handledInner) {
+        walkBody([_handledInner as ASTNodeLike]);
+        continue;
+      }
 
       const stmtSpan = (stmt.span ?? fnSpan) as Span;
 

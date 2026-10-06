@@ -4,6 +4,7 @@ import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { exprNodeCollectCallees } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
+import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
@@ -893,6 +894,21 @@ function nodeIsReadOnly(node: any): boolean {
   if (Array.isArray(node)) return node.every(nodeIsReadOnly);
   if (typeof node !== "object") return true;
   const kind = node.kind;
+  // §19.8.3 (S455) — a `!{}` on a `?{}` wraps the whole statement: it is as
+  // read-only as the statement it guards, provided every arm is a provable value
+  // (a parsed, read-only expression, or the empty block). A `fail` arm or a
+  // statement-bearing block is unprovable. A guarded CALL stays unprovable.
+  if (kind === "guarded-expr") {
+    const inner = handledSqlGuardInner(node);
+    if (!inner || !nodeIsReadOnly(inner)) return false;
+    for (const arm of Array.isArray(node.arms) ? node.arms : []) {
+      if (!arm || arm.failExpr) return false;
+      if (arm.handlerExpr) { if (!nodeIsReadOnly(arm.handlerExpr)) return false; continue; }
+      const h = typeof arm.handler === "string" ? arm.handler.trim() : "";
+      if (h.replace(/^\{|\}$/g, "").trim() !== "") return false;
+    }
+    return true;
+  }
   if (typeof kind === "string") {
     // a lift target wraps its SQL node: `{ kind: "sql", node: <sql> }`
     if (kind === "sql") return sqlNodeIsReadOnly(typeof node.query === "string" ? node : node.node);

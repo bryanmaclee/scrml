@@ -96,6 +96,7 @@
 import * as acorn from "acorn";
 import { CGError } from "./errors.ts";
 import { FOREIGN_SEAL_FN } from "./foreign-seal.ts";
+import { SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "./session-store-emit.ts";
 
 /** Label used for a row whose SQL origins could not be resolved (strip-all). */
@@ -1305,6 +1306,13 @@ class FlowAnalysis {
   private rejecter: Closure;
   /** Everything ever thrown / rejected — what any `catch` may receive. */
   private thrown: Taint = clean();
+  /**
+   * S455 — for each `_scrml_protect_tag` site inside the row-shaping `then` of a
+   * HANDLED query (`_scrml_sql_attempt(run, args, then)`), keyed like `tagMeta`
+   * (`<module>:<start>`): the SQL skeleton of the attempt's `run`. That tag wraps
+   * `_scrml_rows`, not the template, so its own argument has no skeleton.
+   */
+  private attemptTagSkeletons = new Map<string, string>();
 
   constructor(parsed: Array<{ filePath: string; js: string; root: any }>, private resolveImport: (from: string, spec: string) => string | null) {
     this.rejecter = { cid: this.cidSeq++, rejecter: true };
@@ -1312,6 +1320,41 @@ class FlowAnalysis {
       const mod = { idx: this.mods.length, filePath: p.filePath, src: p.js, root: p.root, imports: new Map(), exports: new Map() } as unknown as Mod;
       mod.scope = { id: this.scopeSeq++, parent: null, names: new Set(), mod };
       this.mods.push(mod);
+      this.indexAttemptTags(mod.idx, p.root);
+    }
+  }
+
+  /** Fill `attemptTagSkeletons` for one module (see the field). */
+  private indexAttemptTags(modIdx: number, root: any): void {
+    const stack: any[] = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== "object") continue;
+      if (Array.isArray(n)) { for (const c of n) stack.push(c); continue; }
+      if (n.type === "CallExpression" && n.callee?.type === "Identifier" && n.callee.name === SQL_ATTEMPT_FN && n.arguments.length >= 3) {
+        const skel = this.tagSkeleton(n.arguments[0]);
+        if (skel !== null) {
+          const inner: any[] = [n.arguments[2]];
+          while (inner.length > 0) {
+            const m = inner.pop();
+            if (!m || typeof m !== "object") continue;
+            if (Array.isArray(m)) { for (const c of m) inner.push(c); continue; }
+            if (m.type === "CallExpression" && m.callee?.type === "Identifier" && m.callee.name === "_scrml_protect_tag") {
+              this.attemptTagSkeletons.set(`${modIdx}:${m.start}`, skel);
+            }
+            for (const k in m) {
+              if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+              const v = m[k];
+              if (v && typeof v === "object") inner.push(v);
+            }
+          }
+        }
+      }
+      for (const k in n) {
+        if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+        const v = n[k];
+        if (v && typeof v === "object") stack.push(v);
+      }
     }
   }
 
@@ -3252,6 +3295,20 @@ class FlowAnalysis {
     // --- the compiler's own protect runtime, modelled exactly -----------------
     if (callee.type === "Identifier" && !this.resolveLocalShadow(callee.name, scope)) {
       const name = callee.name;
+      if (name === SQL_ATTEMPT_FN) {
+        // §19.8.3 (S455) — a HANDLED `?{}` (sql-attempt.ts), modelled exactly:
+        // `_scrml_sql_attempt(run, args, then)` returns `then(await run(args))`
+        // on success, and on a driver throw a fresh `SqlError` envelope built
+        // from the DRIVER's error (`_scrml_sql_error`) — the try covers only the
+        // driver call, so no author value can reach that catch. The success
+        // value is therefore exactly the unhandled query's (`then` applies the
+        // same row shaping and `_scrml_protect_tag`), and the failure value is
+        // clean — what the unhandled form's thrown driver error is here too.
+        const runT = args[0] ?? clean();
+        const thenT = args[2] ?? clean();
+        const rows = this.hasCallable(runT) ? this.applyFns(runT.fns, [args[1] ?? clean()], undefined, node, fn) : clean();
+        return this.hasCallable(thenT) ? this.applyFns(thenT.fns, [rows], undefined, node, fn) : rows;
+      }
       if (name === "_scrml_protect_tag") {
         const colsArg = node.arguments[1];
         let cols: string[] | "*" = [];
@@ -3260,7 +3317,7 @@ class FlowAnalysis {
           cols = colsArg.elements.filter((e: any) => e?.type === "Literal" && typeof e.value === "string").map((e: any) => e.value);
         }
         const id = `${this.curMod!.idx}:${node.start}`;
-        if (!this.tagMeta.has(id)) this.tagMeta.set(id, { mod: this.curMod!, skeleton: this.tagSkeleton(node.arguments[0]), cols });
+        if (!this.tagMeta.has(id)) this.tagMeta.set(id, { mod: this.curMod!, skeleton: this.tagSkeleton(node.arguments[0]) ?? this.attemptTagSkeletons.get(id) ?? null, cols });
         return {
           ...clean(),
           row: { tags: new Set([id]), cols: new Set(cols === "*" ? [] : cols), all: cols === "*", revealed: new Set(), paths: new Set([ROW_SELF]) },
