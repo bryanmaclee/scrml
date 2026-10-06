@@ -1,0 +1,19 @@
+{
+  "id": "tenant-undeclared-live-db-pos",
+  "description": "§14.8.10 (S456) — control for E-TENANT-UNDECLARED on a live database: the file holds `assets` (tenant_id, declared by `tables=`) and `audit_log` (no tenant_id). Compiles; the `assets` read is filtered at the source.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: a relation in a live database is charged only when it carries `tenant_id` outside the compilation's tenant set; the `<db tables=>` registry declares `assets`.",
+  "expect": {
+    "codes": [
+      "I-TENANT-STRIP"
+    ],
+    "notCodes": [
+      "E-TENANT-UNDECLARED"
+    ],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}

@@ -44,6 +44,7 @@ import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
 // and the compilation's ONE tenant set it shares with the floor in CG.
 import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
+import { programBodyUndeclaredTenantTables, liveUndeclaredTenantTables } from "./tenant-undeclared.ts";
 import { compilationTenantSet } from "./codegen/tenant-egress.ts";
 import { appDeclaresDbAuthoritative } from "./codegen/db-authoritative.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
@@ -3000,6 +3001,16 @@ function _compileScrmlImpl(options = {}) {
     const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
     const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
     collectErrors("TENANT-SCHEMA", diags, fp);
+    // §14.8.10 (S456, ruling "b, startup check lands with it", item 1) — a program-body
+    // `?{CREATE [TEMP] TABLE … tenant_id …}` (or `ALTER TABLE … tenant_id`) whose table
+    // is outside the SAME tenant set is E-TENANT-UNDECLARED (tenant-undeclared.ts).
+    collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables)), fp);
+  }
+  // …item 2 — a live SQLite file a `<db src=>` block opened holds a `tenant_id` relation
+  // outside the set (protect-analyzer.ts collected them; reported at the `<db>` block).
+  for (const d of liveUndeclaredTenantTables(paResult.protectAnalysis?.liveTenantTables, compilationTenant.tables)) {
+    const fp = paResult.protectAnalysis?.liveTenantTables?.find((r) => r.span === d.span)?.filePath ?? null;
+    collectErrors("TENANT-SCHEMA", [d], fp);
   }
 
   // Stage 7: DG (all files — sees post-meta-expansion AST)

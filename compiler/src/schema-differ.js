@@ -3746,3 +3746,75 @@ export function emitScrmlSchemaSource(actual, opts = {}) {
   const emittedTables = model.filter((t) => t.columns.length > 0).map((t) => t.name);
   return { source, warnings, emittedTables, droppedCount };
 }
+
+/**
+ * §14.8.10 (S456, ruling user-voice-scrml.md S456 "b, startup check lands with it") —
+ * the tables a PROGRAM-BODY `?{}` statement (not a `< schema>` body) gives a
+ * `tenant_id` column. The caller (`compiler/src/tenant-undeclared.ts`) refuses each one
+ * the compilation's tenant set does not hold — `E-TENANT-UNDECLARED`: the floor scopes
+ * only DECLARED tables, so an undeclared one's rows would reach every request.
+ *
+ * Read with the same recognizers the `< schema>` reading uses, but EVERY `CREATE … TABLE`
+ * head counts here — `TEMP` / `TEMPORARY` / `UNLOGGED` / `VIRTUAL` / … included (a
+ * `< schema>` rejects those heads, E-SCHEMA-014; a program body runs them):
+ *   · a head whose column list closes as modelled → its columns (`columnsFromDdlBody`);
+ *     a `LIKE <template>` item is returned as `like` (the caller decides: the copy
+ *     carries `tenant_id` when the template is tenant-scoped);
+ *   · otherwise — no column list (`AS SELECT …`, `USING fts5(…)`), a list that never
+ *     closes, or a statement holding a quote / comment form the reader does not model
+ *     (`UNMODELED_SQL_FORM`) — the statement read to the end of the text: naming
+ *     `tenant_id` anywhere there counts (fail-closed, like the ALTER reading);
+ *   · an `ALTER TABLE <t> … tenant_id …` (`alterTableTenantDecls`, the S455 reading).
+ * A head whose name cannot be read (`${…}`, a stray character) is returned with
+ * `name: null` when its statement names `tenant_id` — the caller refuses it.
+ *
+ * @param {string} text the SQL text of one `?{}` statement
+ * @returns {Array<{name: string|null, key: string|null, kind: "create"|"alter", modifiers: string[], offset: number, tenant: boolean, like: string|null}>}
+ */
+export function programTenantTableDecls(text) {
+  const out = [];
+  if (typeof text !== "string" || text.length === 0) return out;
+  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  // A program-body statement RUNS: a head inside a `'…'` literal or a comment is data, not
+  // a table (`INSERT INTO audit (sql) VALUES ('CREATE TABLE …')`). That reading is trusted
+  // only when the text holds no quote / comment form it does not model exactly
+  // (`UNMODELED_SQL_FORM` — a backslash escape, `$…$`, `[…]`, `#`, a backtick, a `${…}`);
+  // otherwise every head counts (fail-closed: a dialect can end a literal earlier).
+  const live = UNMODELED_SQL_FORM.test(text) ? () => true : (at) => masked.slice(at, at + 1) === text.slice(at, at + 1);
+  for (const h of scanCreateTableHeads(text)) {
+    if (!live(h.start)) continue;
+    const namePart = h.readable && h.parts.length > 0 && !h.danglingDot ? h.parts[h.parts.length - 1] : null;
+    const closed = h.parenAt !== -1 && h.bodyEnd !== -1;
+    let tenant = false;
+    let like = null;
+    if (namePart && closed && !UNMODELED_SQL_FORM.test(text.slice(h.start, h.bodyEnd + 1))) {
+      const body = text.slice(h.parenAt + 1, h.bodyEnd);
+      tenant = columnsFromDdlBody(body).some((c) => c.name.toLowerCase() === "tenant_id");
+      const ref = findLikeTemplateReference(body);
+      if (ref) {
+        const m = /^LIKE\s+([\s\S]*?)\s*(?:(?:INCLUDING|EXCLUDING)[\s\S]*)?$/i.exec(ref);
+        const chain = (m ? m[1] : "").split(".").map((p) => p.trim().replace(/^["`[]|["`\]]$/g, ""));
+        const last = chain[chain.length - 1];
+        like = last ? last.toLowerCase() : null;
+      }
+    } else {
+      tenant = namesTenantId(text.slice(h.start));
+    }
+    if (!tenant && like === null) continue;
+    out.push({
+      name: namePart ? namePart.name : null,
+      key: namePart ? namePart.name.toLowerCase() : null,
+      kind: "create",
+      modifiers: h.modifiers,
+      offset: h.start,
+      tenant,
+      like,
+    });
+  }
+  for (const a of alterTableTenantDecls(text, masked)) {
+    if (!live(a.offset)) continue;
+    out.push({ name: a.name, key: a.key, kind: "alter", modifiers: [], offset: a.offset, tenant: true, like: null });
+  }
+  out.sort((a, b) => a.offset - b.offset);
+  return out;
+}

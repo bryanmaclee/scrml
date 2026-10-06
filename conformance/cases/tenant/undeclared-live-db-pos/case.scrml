@@ -1,0 +1,12 @@
+<program>
+    // live.db (built from live.db.sql) holds `assets` (tenant_id) and `audit_log` (no
+    // tenant_id). `tables=` declares `assets`, the only tenant table: nothing refused.
+    <db src="./live.db" tables="assets">
+        ${
+            function mine() {
+                return ?{`SELECT name FROM assets`}.all()
+            }
+        }
+        <button onclick=${ mine() }>mine</button>
+    </db>
+</program>

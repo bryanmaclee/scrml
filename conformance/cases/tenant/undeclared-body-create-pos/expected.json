@@ -1,0 +1,19 @@
+{
+  "id": "tenant-undeclared-body-create-pos",
+  "description": "§14.8.10 (S456) — control for E-TENANT-UNDECLARED: a program-body `?{CREATE TABLE IF NOT EXISTS audit_log (id, msg)}` (no `tenant_id`) beside a `<schema>`-declared tenant table compiles; the declared table's read is filtered at the source.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: E-TENANT-UNDECLARED charges only a table that carries a `tenant_id` column outside the compilation's tenant set; a table without `tenant_id` is not tenant data.",
+  "expect": {
+    "codes": [
+      "I-TENANT-STRIP"
+    ],
+    "notCodes": [
+      "E-TENANT-UNDECLARED"
+    ],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}

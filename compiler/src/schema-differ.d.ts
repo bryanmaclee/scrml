@@ -98,6 +98,17 @@ export declare function schemaTableDeclarations(text: string): Array<{
   columns: Array<{ name: string }>;
 }>;
 
+/** §14.8.10 (S456) — the tables a program-body `?{}` statement gives a `tenant_id` column (E-TENANT-UNDECLARED). */
+export declare function programTenantTableDecls(text: string): Array<{
+  name: string | null;
+  key: string | null;
+  kind: "create" | "alter";
+  modifiers: string[];
+  offset: number;
+  tenant: boolean;
+  like: string | null;
+}>;
+
 /** The bounded principal role the per-request A1 wrapper drops to (S6). */
 export declare const DBAUTH_ROLE: "scrml_app";
 /** The compiler-managed tenant-isolation policy name (S1). */
