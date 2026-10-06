@@ -1246,7 +1246,8 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   // iterations with the same key used to share one row, so a write through one
   // (`row.body = row.body + "!"`) showed up in the other.
   const pick = terminator === "get"
-    ? `return _hit === undefined ? null : { ..._hit };`
+    // (a row is an object, so a slot with no row is the only falsy `_hit`)
+    ? `return _hit ? { ..._hit } : null;`
     : `return (_hit ?? []).map((_r) => ({ ..._r }));`;
 
   const lines: string[] = [];

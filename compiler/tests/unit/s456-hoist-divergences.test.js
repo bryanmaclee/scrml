@@ -70,7 +70,11 @@ function program(body, { before = "", db = "./app.db" } = {}) {
 
 describe("the hoist decision for the S456 runtime cases", () => {
   test("(1) key-affinity: all three loops hoisted", () => {
-    expect(compile(caseSource("sql-hoisted-loop-key-affinity-rt")).hoists).toBe(3);
+    const c = compile(caseSource("sql-hoisted-loop-key-affinity-rt"));
+    expect(c.hoists).toBe(3);
+    // the hoist emits no `undefined` (W-CG-UNDEFINED-INTERPOLATION, §42 absence canon)
+    const codes = [...(c.r.errors ?? []), ...(c.r.warnings ?? [])].map((d) => d.code);
+    expect(codes).not.toContain("W-CG-UNDEFINED-INTERPOLATION");
   });
   test("(2) write-between-iterations: no loop hoisted, each with a D-BATCH-001 near-miss naming the call", () => {
     const c = compile(caseSource("sql-hoisted-loop-write-between-iterations-rt"));
