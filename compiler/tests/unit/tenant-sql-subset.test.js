@@ -15,7 +15,9 @@ import {
 
 const tenants = new Set(["assets", "orders"]);
 const isTenant = (n) => tenants.has(n.toLowerCase());
-const analyze = (q) => analyzeTenantSql(q, isTenant, tenants);
+// (S455: the allow-lists are the BUILT-INS of the database the query runs on — these
+// fixtures are SQLite's unless a test passes another dialect)
+const analyze = (q, dialect = "sqlite") => analyzeTenantSql(q, isTenant, tenants, { dialect });
 
 describe("lexTenantSubset — the closed token set", () => {
   test("accepts identifiers, numbers, plain literals, ${} params and the listed punctuation", () => {
@@ -33,7 +35,7 @@ describe("lexTenantSubset — the closed token set", () => {
       'SELECT "id" FROM t', "SELECT `id` FROM t", "SELECT [id] FROM t", "SELECT $1 FROM t",
       "SELECT $q$x$q$ FROM t", "SELECT id FROM t; SELECT 1", "SELECT id FROM t -- c", "SELECT /* c */ id FROM t",
       "SELECT E'x' FROM t", "SELECT X'00' FROM t", "SELECT N'x' FROM t", "SELECT 0x1F FROM t", "SELECT 1_000 FROM t",
-      "SELECT id::text FROM t", "SELECT ? FROM t", "SELECT @p FROM t", "SELECT id FROM t # c", "SELECT a & b FROM t",
+      "SELECT ? FROM t", "SELECT @p FROM t", "SELECT id FROM t # c", "SELECT a & b FROM t",
       "SELECT a | b FROM t", "SELECT ~a FROM t", "SELECT a ^ b FROM t", "SELECT ARRAY[1] FROM t", "SELECT {a} FROM t",
       "SELECT idé FROM t", "SELECT id\u0000 FROM t", "SELECT id FROM t\u000b", "SELECT U&\"x\" FROM t",
     ]) {

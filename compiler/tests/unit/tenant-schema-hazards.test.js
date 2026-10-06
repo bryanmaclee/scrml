@@ -83,9 +83,12 @@ describe("(1) triggers", () => {
       "CREATE TRIGGER t AFTER INSERT ON config BEGIN UPDATE config SET v = CASE WHEN 1 THEN 'a' END; UPDATE assets SET cost = 0; END");
     expect(kinds(hs)).toEqual(["trigger:t"]);
   });
-  test("MySQL `FOR EACH ROW <statement>` body", () => {
+  test("MySQL `FOR EACH ROW <statement>` body — not a `BEGIN … END` statement list the subset reads (charged)", () => {
+    // S455 "yes, both": a trigger body in the subset is `BEGIN`, statements, `END`
     expect(kinds(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config FOR EACH ROW UPDATE assets SET cost = 0")))
-      .toEqual(["trigger:t"]);
+      .toEqual(["body outside the tenant SQL subset:t:unattributable"]);
+    expect(kinds(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config FOR EACH ROW UPDATE config SET v = 'x'")))
+      .toEqual(["body outside the tenant SQL subset:t:unattributable"]);
   });
 });
 
@@ -153,21 +156,27 @@ describe("fail-closed — what the checker cannot attribute is charged, never tr
     expect(kinds(hs)).toEqual(["trigger:t:unattributable"]);
     expect(hs[0].why).toContain("function `f`");
   });
+  // S455 "yes, both": a body is read in the tenant SQL subset — a call off the allow-list or a
+  // `${…}` makes it a body OUTSIDE the subset (charged against every tenant table, as before).
   test("a view / trigger calling a function off the floor's allow-list", () => {
-    expect(kinds(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT json_extract(v, '$.a') FROM config"))).toEqual(["view:v:unattributable"]);
+    expect(kinds(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT json_extract(v, '$.a') FROM config"))).toEqual(["body outside the tenant SQL subset:v:unattributable"]);
     expect(kinds(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN SELECT my_fn(NEW.k); END")))
-      .toEqual(["trigger:t:unattributable"]);
+      .toEqual(["body outside the tenant SQL subset:t:unattributable"]);
   });
   test("a `${…}` interpolation inside a declaration, or as a whole statement", () => {
-    expect(kinds(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT * FROM ${t}"))).toEqual(["view:v:unattributable"]);
+    expect(kinds(hazards(ASSETS, CONFIG, "CREATE VIEW v AS SELECT * FROM ${t}"))).toEqual(["body outside the tenant SQL subset:v:unattributable"]);
     expect(kinds(hazards(ASSETS, "${ddl}"))).toEqual(["statement:`${…}`:unattributable"]);
   });
-  test("quoted, bracketed, backticked and schema-qualified names are read", () => {
-    expect(kinds(hazards(ASSETS, CONFIG, `CREATE TRIGGER "t" AFTER INSERT ON "config" BEGIN UPDATE "assets" SET name = 'x'; END`))).toEqual(["trigger:t"]);
+  test("quoted, bracketed, backticked and schema-qualified names are read in a HEAD; in a BODY they are outside the subset", () => {
+    // the head (name, ON target) is read by the schema lexer — a quoted name there is read
+    expect(kinds(hazards(ASSETS, CONFIG, `CREATE TRIGGER "t" AFTER INSERT ON "assets" BEGIN SELECT 1; END`))).toEqual(["trigger:t"]);
     expect(kinds(hazards(ASSETS, "CREATE TRIGGER t2 AFTER DELETE ON main.assets BEGIN SELECT 1; END"))).toEqual(["trigger:t2"]);
-    expect(kinds(hazards(ASSETS, "CREATE VIEW [v3] AS SELECT * FROM [assets]"))).toEqual(["view:v3"]);
+    // the body is read in the subset — a quoted identifier there is outside it (S455 "yes, both")
+    expect(kinds(hazards(ASSETS, CONFIG, `CREATE TRIGGER "t" AFTER INSERT ON "config" BEGIN UPDATE "assets" SET name = 'x'; END`)))
+      .toEqual(["body outside the tenant SQL subset:t:unattributable"]);
+    expect(kinds(hazards(ASSETS, "CREATE VIEW [v3] AS SELECT * FROM [assets]"))).toEqual(["body outside the tenant SQL subset:v3:unattributable"]);
     const bare = "\n    CREATE TABLE assets (id INTEGER, tenant_id TEXT)\n    CREATE VIEW `v4` AS SELECT * FROM `assets`\n";
-    expect(kinds(findSchemaTenantHazards(bare, schemaTenantTableNames([bare])))).toEqual(["view:v4"]);
+    expect(kinds(findSchemaTenantHazards(bare, schemaTenantTableNames([bare])))).toEqual(["body outside the tenant SQL subset:v4:unattributable"]);
   });
   test("an unclosed BEGIN, an unreadable ON target, a function / DO body, an event trigger", () => {
     expect(kinds(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN UPDATE config SET v = 1;"))).toEqual(["trigger:t:unattributable"]);
@@ -219,9 +228,11 @@ describe("keyword-spelled identifiers never end or skip a parse (S455 review HIG
     }
   });
   test("a `begin` / `execute` column in the WHEN clause does not start the body early", () => {
-    expect(hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config WHEN NEW.begin = 1 BEGIN UPDATE assets SET cost = 0; END"))
+    // (the columns are declared: a qualified `NEW.begin` must name a declared column — the `rel.f` rule)
+    const CFG2 = "CREATE TABLE config (k TEXT PRIMARY KEY, v TEXT, begin INTEGER, execute INTEGER)";
+    expect(hazards(ASSETS, CFG2, "CREATE TRIGGER t AFTER INSERT ON config WHEN NEW.begin = 1 BEGIN UPDATE assets SET cost = 0; END"))
       .toHaveLength(1);
-    const hs = hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config WHEN NEW.execute = 1 BEGIN UPDATE assets SET cost = 0; END");
+    const hs = hazards(ASSETS, CFG2, "CREATE TRIGGER t AFTER INSERT ON config WHEN NEW.execute = 1 BEGIN UPDATE assets SET cost = 0; END");
     expect(kinds(hs)).toEqual(["trigger:t"]);
   });
   test("an `end` column in a trigger that touches only non-tenant tables is quiet (no false positive)", () => {
@@ -231,7 +242,9 @@ describe("keyword-spelled identifiers never end or skip a parse (S455 review HIG
   test("a nested BEGIN … END; block does not cut the body short (read to the last END)", () => {
     const hs = hazards(ASSETS, CONFIG,
       "CREATE TRIGGER t AFTER INSERT ON config BEGIN BEGIN UPDATE config SET v = 1; END; UPDATE assets SET cost = 0; END");
-    expect(hs.some((h) => h.kind === "trigger" && h.object === "t")).toBe(true); // the body is read to its LAST END
+    // the body is read to its LAST END — and a nested `BEGIN` / `END` is not a statement the
+    // subset's trigger body has (S455 "yes, both"), so it is charged, never passed
+    expect(kinds(hs)).toEqual(["body outside the tenant SQL subset:t:unattributable"]);
   });
   test("an END that does not end the CREATE is not a close — the trigger is charged unclosed, never passed", () => {
     const hs = hazards(ASSETS, CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN UPDATE config SET v = 1; END junk UPDATE config SET v = 2");
@@ -251,8 +264,9 @@ describe("keyword-spelled identifiers never end or skip a parse (S455 review HIG
       .toEqual(["view:v"]);
   });
   test("a QUOTED callee is a call (`\"query_to_xml\"(…)`)", () => {
+    // (S455 "yes, both": a quoted identifier is outside the subset's closed token set)
     expect(kinds(hazards(ASSETS, CONFIG, `CREATE VIEW v AS SELECT "query_to_xml"('sel' || 'ect 1', true, false, '') AS x FROM config`)))
-      .toEqual(["view:v:unattributable"]);
+      .toEqual(["body outside the tenant SQL subset:v:unattributable"]);
   });
 });
 
@@ -271,10 +285,11 @@ describe("string forms the lexer does not model exactly are charged (S455 review
 // on a tenant table widens isolation. Only an explicit `AS RESTRICTIVE` (ANDed) is exempt.
 describe("row-security POLICY on a tenant table: only AS RESTRICTIVE is exempt", () => {
   const USING = "USING (tenant_id = current_setting('scrml.tenant', true))";
-  test("AS RESTRICTIVE (any case) is quiet", () => {
-    expect(hazards(ASSETS, `CREATE POLICY p ON assets AS RESTRICTIVE FOR SELECT ${USING}`)).toEqual([]);
-    expect(hazards(ASSETS, `CREATE POLICY p ON assets as restrictive ${USING}`)).toEqual([]);
-    expect(hazards(ASSETS, `CREATE POLICY "p q" ON public.assets As Restrictive ${USING}`)).toEqual([]);
+  test("AS RESTRICTIVE (any case) is quiet — on Postgres, where `current_setting` is a built-in (S455)", () => {
+    const pg = (...stmts) => { const b = body(...stmts); return findSchemaTenantHazards(b, schemaTenantTableNames([b]), undefined, "postgres"); };
+    expect(pg(ASSETS, `CREATE POLICY p ON assets AS RESTRICTIVE FOR SELECT ${USING}`)).toEqual([]);
+    expect(pg(ASSETS, `CREATE POLICY p ON assets as restrictive ${USING}`)).toEqual([]);
+    expect(pg(ASSETS, `CREATE POLICY "p q" ON public.assets As Restrictive ${USING}`)).toEqual([]);
   });
   test("AS PERMISSIVE → charged, the message says to write AS RESTRICTIVE", () => {
     const b = body(ASSETS, "CREATE POLICY open_all ON assets AS PERMISSIVE USING (true)");
@@ -310,7 +325,8 @@ describe("comments — read three ways, the union is charged", () => {
   });
   test("a semicolon inside a string or a dollar-quoted literal does not end a view", () => {
     expect(kinds(hazards(ASSETS, "CREATE VIEW v AS SELECT ';' AS s, id FROM assets"))).toEqual(["view:v"]);
-    expect(kinds(hazards(ASSETS, "CREATE VIEW v AS SELECT $$;$$ AS s, id FROM assets"))).toEqual(["view:v"]);
+    // a dollar quote is outside the subset (S455 "yes, both") — charged, against every tenant table
+    expect(kinds(hazards(ASSETS, "CREATE VIEW v AS SELECT $$;$$ AS s, id FROM assets"))).toEqual(["body outside the tenant SQL subset:v:unattributable"]);
   });
 });
 

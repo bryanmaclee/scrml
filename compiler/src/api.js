@@ -2991,9 +2991,13 @@ function _compileScrmlImpl(options = {}) {
   // file's `<schema>`: admin.scrml's `SELECT name FROM assets` (assets declared in
   // app.scrml) was emitted unfiltered and served every tenant's rows (executed).
   const compilationTenant = compilationTenantSet(metaFiles, buildProtectContext(paResult.protectAnalysis));
+  // S455 "yes, both" — the columns EVERY compiled file's `<schema>` declares: a body's
+  // qualified `rel.col` must name one (Postgres reads `rel.f` as the call `f(rel)` otherwise).
+  // (Computed only when the floor is on — with no tenant table the rule charges nothing.)
+  const compilationColumns = compilationTenant.columns ?? new Map();   // the SAME declared columns the query floor reads
   for (const fileAST of metaFiles) {
     const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
-    const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables));
+    const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
     collectErrors("TENANT-SCHEMA", diags, fp);
   }
 
