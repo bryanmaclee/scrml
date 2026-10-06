@@ -1,0 +1,18 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+    </>
+    // A program-body CREATE TABLE of a table WITHOUT tenant_id is not tenant data:
+    // nothing to declare, nothing refused. The declared tenant table is still scoped.
+    ${
+        function setup() {
+            ?{`CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY, msg TEXT)`}.run()
+            return 1
+        }
+        function mine() {
+            return ?{`SELECT name FROM assets`}.all()
+        }
+    }
+    <button onclick=${ setup() }>setup</button>
+    <button onclick=${ mine() }>mine</button>
+</program>

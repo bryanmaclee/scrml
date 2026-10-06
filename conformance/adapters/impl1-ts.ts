@@ -25,6 +25,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
 // api.js is the reference compiler's public entry (plain ESM .js).
 import { compileScrml } from "../../compiler/src/api.js";
 
@@ -106,11 +107,17 @@ function normalizeSeverity(sev: string | undefined, streamSev: "error" | "warnin
  * Only the entry file is passed to compileScrml; the compiler auto-gathers the
  * imported siblings from the same dir (§21.3).
  */
-function writeCaseFiles(dir: string, source: string, auxFiles: Record<string, string>): string {
+function writeCaseFiles(dir: string, source: string, auxFiles: Record<string, string>, dbFixtures: Record<string, string> = {}): string {
   const file = join(dir, "case.scrml");
   writeFileSync(file, source);
   for (const name of Object.keys(auxFiles)) {
     writeFileSync(join(dir, name), auxFiles[name]);
+  }
+  // The database-fixture convention (S456): a case's `<name>.db.sql` is the SQL that
+  // builds the SQLite file `<name>.db` beside case.scrml — a live database the compile opens.
+  for (const name of Object.keys(dbFixtures)) {
+    const db = new Database(join(dir, name), { create: true });
+    try { db.exec(dbFixtures[name]); } finally { db.close(); }
   }
   return file;
 }
@@ -126,10 +133,10 @@ interface Diagnostic {
  * Side-effect free from the caller's perspective: the temp dir is removed
  * before return (success OR throw).
  */
-export function compile(source: string, auxFiles: Record<string, string> = {}): CompileResult {
+export function compile(source: string, auxFiles: Record<string, string> = {}, dbFixtures: Record<string, string> = {}): CompileResult {
   const dir = mkdtempSync(join(tmpdir(), "scrml-conf-impl1-"));
   try {
-    const file = writeCaseFiles(dir, source, auxFiles);
+    const file = writeCaseFiles(dir, source, auxFiles, dbFixtures);
     const result = compileScrml({
       inputFiles: [file],
       write: false,

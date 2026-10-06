@@ -1,0 +1,16 @@
+{
+  "id": "tenant-undeclared-body-create-temp-neg",
+  "description": "§14.8.10 (S456) — a program-body `?{CREATE TEMP TABLE staging (…, tenant_id TEXT)}`. A temporary table cannot be declared in `<schema>` (E-SCHEMA-014), so it was never in the tenant set and its reads were unscoped (g-tenant-small-residuals-s455 residual (a); compiled clean on 2dd6d35d9). Now refused at compile.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (ruling user-voice-scrml.md S456 \"b, startup check lands with it\"): a program-body `?{CREATE [TEMP|TEMPORARY] TABLE … tenant_id …}` whose table is outside the compilation's tenant set is E-TENANT-UNDECLARED.",
+  "expect": {
+    "codes": [
+      "E-TENANT-UNDECLARED"
+    ],
+    "codeCounts": {
+      "E-TENANT-UNDECLARED": 1
+    }
+  }
+}

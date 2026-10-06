@@ -101,6 +101,20 @@ export declare function schemaTableDeclarations(text: string): Array<{
   columns: Array<{ name: string }>;
 }>;
 
+/** §14.8.10 (S456 "a, fix F7/F9 too" + "your recs, go") — the closed allow-list verdict of each statement of a program-body `?{}`. */
+export declare function programStatementVerdicts(
+  text: string,
+  opts?: { dialect?: string; isTenant?: (name: string) => boolean },
+): Array<{
+  verdict: "admitted" | "tenant" | "not-admitted" | "unreadable";
+  /** The statement's leading keyword (upper case), or its first characters. */
+  lead: string;
+  /** The relation a `tenant` verdict names. */
+  name: string | null;
+  why: string | null;
+  offset: number;
+}>;
+
 /** The bounded principal role the per-request A1 wrapper drops to (S6). */
 export declare const DBAUTH_ROLE: "scrml_app";
 /** The compiler-managed tenant-isolation policy name (S1). */

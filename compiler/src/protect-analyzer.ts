@@ -85,6 +85,7 @@ import {
   harvestRawCreateTables,
 } from "./schema-differ.js";
 import type { SchemaTableDecl } from "./schema-differ.js";
+import type { LiveTenantRelation } from "./tenant-undeclared.ts";
 
 // ---------------------------------------------------------------------------
 // PA-internal types
@@ -125,6 +126,13 @@ export interface ProtectAnalysis {
    * strips its rows wholesale instead of assuming "no protected columns".
    */
   declaredTables?: Set<string>;
+  /**
+   * §14.8.10 (S456) — every relation carrying a `tenant_id` column in a SQLite FILE a
+   * `<db src=…>` block opened (every relation in the file, not only `tables=`), plus any
+   * whose columns could not be read. The api.js TENANT-SCHEMA stage refuses each one
+   * outside the compilation's tenant set (`E-TENANT-UNDECLARED`, tenant-undeclared.ts).
+   */
+  liveTenantTables?: LiveTenantRelation[];
 }
 
 /**
@@ -1301,6 +1309,7 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   const errors: PAError[] = [];
   const cache = new SchemaCache(input.onNote);
   const declaredTables = new Set<string>();
+  const liveTenantTables: LiveTenantRelation[] = [];
 
   try {
     for (const fileAST of files) {
@@ -1347,7 +1356,7 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
       const dbBlocks = collectDbBlocks(nodes);
 
       for (const block of dbBlocks) {
-        processDbBlock(block, filePath, cache, views, errors, createTableMap, declaredTables, ownedDbFiles);
+        processDbBlock(block, filePath, cache, views, errors, createTableMap, declaredTables, ownedDbFiles, liveTenantTables);
       }
     }
     // §8.1.1 (S445 review F1) — a relative path written for some OTHER base.
@@ -1357,9 +1366,48 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   }
 
   return {
-    protectAnalysis: { views, declaredTables },
+    protectAnalysis: { views, declaredTables, liveTenantTables },
     errors,
   };
+}
+
+/**
+ * §14.8.10 (S456) — the relations (tables and views) of an open SQLite file that carry a
+ * `tenant_id` column (case-insensitive, as the floor reads it), appended to `into`. A
+ * relation whose columns cannot be read is appended with `error` (unknown is not clean);
+ * an unreadable catalogue is one such entry.
+ */
+function collectLiveTenantRelations(
+  db: Database,
+  displayPath: string,
+  filePath: string,
+  span: Span,
+  into: LiveTenantRelation[],
+): void {
+  let rels: Array<{ name?: unknown; type?: unknown }>;
+  try {
+    rels = db.query(
+      "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND substr(name, 1, 7) <> 'sqlite_'",
+    ).all() as Array<{ name?: unknown; type?: unknown }>;
+  } catch (err) {
+    into.push({ table: "(the schema catalogue)", type: "unreadable", db: displayPath, filePath, span, error: (err as Error).message });
+    return;
+  }
+  for (const r of rels) {
+    if (typeof r?.name !== "string") continue;
+    const type = typeof r.type === "string" ? r.type : "table";
+    try {
+      // `table_xinfo`, not `table_info` (S456 "a, fix F7/F9 too"): `table_info` omits generated
+      // columns and hidden ones such as an fts4 `languageid=` column — a `tenant_id` there was
+      // invisible (executed: `tenant_id TEXT GENERATED ALWAYS AS (…)` and `fts4(…, languageid="tenant_id")`).
+      const cols = db.query(`PRAGMA table_xinfo(${JSON.stringify(r.name)})`).all() as PAPragmaRow[];
+      if (cols.some((c) => typeof c?.name === "string" && c.name.toLowerCase() === "tenant_id")) {
+        into.push({ table: r.name, type, db: displayPath, filePath, span });
+      }
+    } catch (err) {
+      into.push({ table: r.name, type: "unreadable", db: displayPath, filePath, span, error: (err as Error).message });
+    }
+  }
 }
 
 /** Lower-cased, schema-qualifier-free table name (SQLite identifiers are case-insensitive). */
@@ -1386,6 +1434,7 @@ function processDbBlock(
   createTableMap: Map<string, string>,
   declaredTables: Set<string> = new Set(),
   ownedDbFiles: ReadonlySet<string> = new Set(),
+  liveTenantTables: LiveTenantRelation[] = [],
 ): void {
   const blockSpan = block.span;
 
@@ -1490,6 +1539,15 @@ function processDbBlock(
     for (const r of rows) if (typeof r?.name === "string") declaredTables.add(foldTableName(r.name));
   } catch {
     // Unreadable catalogue: nothing is added, so its tables stay unknown (fail closed).
+  }
+  // §14.8.10 (S456, ruling "b, startup check lands with it", item 2) — the LIVE file's
+  // relations carrying `tenant_id`, every one (not only `tables=`): the TENANT-SCHEMA
+  // stage refuses each outside the compilation's tenant set (E-TENANT-UNDECLARED).
+  // Only a real file — a shadow database is built from this compilation's own
+  // declarations (its `<schema>` is declared; a body `CREATE TABLE` is item 1).
+  if (srcKind === "file" && existsSync(dbPath)) {
+    const live = cache.openDb(dbPath, blockSpan, errors, displayPath);
+    if (live !== null) collectLiveTenantRelations(live, displayPath, filePath, blockSpan, liveTenantTables);
   }
 
   // ------------------------------------------------------------------

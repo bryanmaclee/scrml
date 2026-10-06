@@ -210,9 +210,17 @@ describe("§14.8.10 non-tenant apps carry zero tenant-floor overhead", () => {
     writeFileSync(file, src);
     const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
     const out = [...result.outputs.values()][0];
-    expect(out.serverJs).not.toContain("_scrml_tenant_");
-    expect(out.serverJs).not.toContain("_scrml_active_tenant");
-    expect(out.serverJs).not.toContain("tenant_id");
+    // S456 ("b, startup check lands with it") — every module with a database carries the
+    // startup check for UNDECLARED tenant tables (a non-tenant compilation's database can
+    // hold one: its set is empty, so any `tenant_id` table is undeclared). It is not floor
+    // machinery; everything else below still must be absent.
+    const STARTUP_CHECK = /\n\/\/ §14\.8\.10 \(S456\) — which relations[\s\S]*?\nexport const _scrml_tenant_startup_check = \{[\s\S]*?\n\};\n?/;
+    expect(out.serverJs).toMatch(STARTUP_CHECK);
+    expect(out.serverJs).toContain("const _SCRML_TENANT_DECLARED = new Set([]);");
+    const floorOnly = out.serverJs.replace(STARTUP_CHECK, "\n");
+    expect(floorOnly).not.toContain("_scrml_tenant_");
+    expect(floorOnly).not.toContain("_scrml_active_tenant");
+    expect(floorOnly).not.toContain("tenant_id");
     expect(hasCode(result, "I-TENANT-STRIP")).toBe(false);
   });
 });

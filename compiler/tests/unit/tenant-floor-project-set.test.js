@@ -211,8 +211,14 @@ describe("item 1 — a file whose reads touch a table tenant-scoped in ANOTHER c
   test("a compilation with no tenant table anywhere is untouched (no floor, no tenant runtime)", () => {
     const plain = ADMIN.replace(/\.acrossTenants\(\)/, "");
     const p = project({ "admin.scrml": plain, "other.scrml": plain.replace(/adminAssets|adminAll/g, (m) => `${m}2`) });
+    // S456 — the startup check for UNDECLARED tenant tables is emitted for every module
+    // with a database (an empty set: any `tenant_id` table is undeclared); it is not floor
+    // machinery, so it is cut before asserting the floor is absent.
+    const STARTUP_CHECK = /\n\/\/ §14\.8\.10 \(S456\) — which relations[\s\S]*?\nexport const _scrml_tenant_startup_check = \{[\s\S]*?\n\};\n?/;
     for (const f of ["admin.server.js", "other.server.js"]) {
-      expect(readFileSync(join(p.out, f), "utf8")).not.toContain("_scrml_tenant_");
+      const js = readFileSync(join(p.out, f), "utf8");
+      expect(js).toMatch(STARTUP_CHECK);
+      expect(js.replace(STARTUP_CHECK, "\n")).not.toContain("_scrml_tenant_");
     }
   });
 });
