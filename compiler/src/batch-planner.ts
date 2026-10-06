@@ -761,7 +761,10 @@ export function runBatchPlanner(input: BPInput): BPOutput {
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const topNodes = getFileNodes(files[fileIndex]);
     const writeFactsOnce = (): LoopWriteFacts =>
-      (compilationWriteFacts ??= buildCompilationWriteFacts(files.map(getFileNodes)))[fileIndex];
+      (compilationWriteFacts ??= buildCompilationWriteFacts(files.map((f) => ({
+        nodes: getFileNodes(f),
+        filePath: typeof (f as any)?.filePath === "string" && (f as any).filePath ? (f as any).filePath : null,
+      }))))[fileIndex];
     walkAst(topNodes, (node) => {
       if (node.kind !== "for-stmt") return true;
       analyzeForLoop(node, batchPlan, errors, {

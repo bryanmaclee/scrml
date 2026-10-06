@@ -153,6 +153,28 @@ describe("(2) the write scan — hoist only a body PROVEN not to write", () => {
     expect(both.loopHoists).toHaveLength(0);
     expect(both.diagnostics.some((d) => d.reason.includes("`opts.push(…)`"))).toBe(true);
   });
+  test("a value returned by a function imported from OUTSIDE the compilation may carry a writer", () => {
+    const fileWith = (importNode, extra = []) => ({
+      filePath: "/p/a.scrml",
+      nodes: [importNode, { kind: "const-decl", name: "repo", init: "makeRepo ( )" }, {
+        kind: "function-decl", name: "f", params: ["xs"], body: [{
+          kind: "for-stmt", id: "loop", variable: "x", iterable: "xs", body: [
+            { kind: "let-decl", name: "row", init: "?{`SELECT body FROM notes WHERE id = ${x.id}`}.get()" },
+            { kind: "bare-expr", expr: "repo . add ( row )" },
+          ],
+        }],
+      }, ...extra],
+    });
+    // a host `.js` module: its factory is not analysed — `repo.add` may write
+    const external = { kind: "import-decl", raw: "import { makeRepo } from './repo.js'", names: ["makeRepo"], source: "./repo.js" };
+    const ext = runBatchPlanner({ files: [fileWith(external)], depGraph: null }).batchPlan;
+    expect(ext.loopHoists).toHaveLength(0);
+    expect(ext.diagnostics.some((d) => d.reason.includes("`repo.add(…)`"))).toBe(true);
+    // a `.scrml` module in the compilation is analysed: its factory builds no writer
+    const internal = { kind: "import-decl", raw: "import { makeRepo } from './b.scrml'", names: ["makeRepo"], source: "./b.scrml" };
+    const moduleB = { filePath: "/p/b.scrml", nodes: [{ kind: "function-decl", name: "makeRepo", params: [], body: [{ kind: "return-stmt", expr: "{ add : ( r ) => r }" }] }] };
+    expect(runBatchPlanner({ files: [fileWith(internal), moduleB], depGraph: null }).batchPlan.loopHoists).toHaveLength(1);
+  });
   test("an undeclared global call (fetch) is not hoisted", () => {
     const c = compile(program("            fetch(\"/x\")"));
     expect(c.hoists).toBe(0);

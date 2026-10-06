@@ -32,15 +32,18 @@
  * argument). Only then can `repo.save(x)` / `opts.cb(x)` reach a write without
  * naming the writer at the call, so only then are such calls refused.
  *
- * Residual, named: an object with a built-in-named method that writes (`{ push: w }`)
- * obtained as the RETURN value of an imported function — the value never appears
- * as a reference here. That needs data flow through the callee; it is not modelled.
+ * A CALL to a function imported from outside the compilation (a host `.js` module,
+ * the standard library, a package) also counts as an escape: its RETURN value may
+ * carry a writer (`const repo = makeRepo(); repo.add(x)`) that never appears as a
+ * reference. A `.scrml` module inside the compilation is analysed instead.
  *
  * A function is a WRITER when its body has a `?{}` that is not a plain read (see
  * `sqlIsPlainRead` — fail-closed: anything it cannot read as a lone SELECT is a
  * write), a `transaction { }` block, a foreign `_{}` block, or a call that may
  * write (least fixpoint over the compilation's functions).
  */
+
+import { dirname, resolve as resolvePath } from "node:path";
 
 export interface LoopWriteFacts {
   /** Local function name → may it write the database (transitively)? */
@@ -283,9 +286,17 @@ interface FileScan {
   facts: LoopWriteFacts;
 }
 
-function scanFile(fileNodes: unknown[], escapes: { value: boolean }): FileScan {
+function scanFile(
+  fileNodes: unknown[],
+  filePath: string | null,
+  compilationPaths: Set<string>,
+  escapes: { value: boolean },
+): FileScan & { externalImported: Set<string> } {
   const fnBodies = new Map<string, any[]>();
   const imported = new Set<string>();
+  // Names imported from a module whose code is NOT in this compilation (a host `.js`
+  // module, the standard library, a package): its functions are not analysed here.
+  const externalImported = new Set<string>();
   const declared = new Set<string>();
   const fileScan = emptyScan();
   const stack: any[] = [fileNodes];
@@ -295,10 +306,18 @@ function scanFile(fileNodes: unknown[], escapes: { value: boolean }): FileScan {
     if (Array.isArray(cur)) { for (const x of cur) stack.push(x); continue; }
     const kind = cur.kind;
     if (kind === "import-decl" || kind === "use-decl") {
-      for (const n of Array.isArray(cur.names) ? cur.names : []) if (typeof n === "string") imported.add(n);
-      for (const sp of Array.isArray(cur.specifiers) ? cur.specifiers : []) if (sp && typeof sp.local === "string") imported.add(sp.local);
+      const names = new Set<string>();
+      for (const n of Array.isArray(cur.names) ? cur.names : []) if (typeof n === "string") names.add(n);
+      for (const sp of Array.isArray(cur.specifiers) ? cur.specifiers : []) if (sp && typeof sp.local === "string") names.add(sp.local);
       const head = typeof cur.raw === "string" ? cur.raw.split(/\bfrom\b/)[0] : "";
-      for (const w of head.match(/[A-Za-z_$][\w$]*/g) ?? []) if (!["import", "use", "as", "type", "pinned"].includes(w)) imported.add(w);
+      for (const w of head.match(/[A-Za-z_$][\w$]*/g) ?? []) if (!["import", "use", "as", "type", "pinned"].includes(w)) names.add(w);
+      const source = typeof cur.source === "string" ? cur.source : "";
+      const inCompilation = kind === "import-decl" && filePath !== null && /\.scrml$/.test(source) &&
+        compilationPaths.has(resolvePath(dirname(filePath), source));
+      for (const n of names) {
+        imported.add(n);
+        if (!inCompilation) externalImported.add(n);
+      }
       continue;
     }
     if (kind === "function-decl" && typeof cur.name === "string") {
@@ -328,17 +347,34 @@ function scanFile(fileNodes: unknown[], escapes: { value: boolean }): FileScan {
   const facts: LoopWriteFacts = { fnMayWrite: new Map(), imported, declared, escapes: false };
   Object.defineProperty(facts, "escapes", { get: () => escapes.value, enumerable: true });
   for (const [name, s] of fnScans) facts.fnMayWrite.set(name, s.directWrite || imported.has(name));
-  return { fnScans, fileScan, facts };
+  return { fnScans, fileScan, facts, externalImported };
+}
+
+/** One file of the compilation, as the write scan reads it. */
+export interface WriteScanFile {
+  nodes: unknown[];
+  filePath: string | null;
 }
 
 /**
- * The write facts of every file of a compilation (aligned with `filesNodes`). The
- * escape flag is ONE for the compilation: a writer passed by value in one file can
- * reach a loop in another.
+ * The write facts of every file of a compilation (aligned with `files`). The escape
+ * flag is ONE for the compilation: a writer passed by value in one file can reach a
+ * loop in another.
  */
-export function buildCompilationWriteFacts(filesNodes: unknown[][]): LoopWriteFacts[] {
+export function buildCompilationWriteFacts(files: WriteScanFile[]): LoopWriteFacts[] {
   const escapes = { value: false };
-  const scans = filesNodes.map((nodes) => scanFile(nodes, escapes));
+  const compilationPaths = new Set(files.map((f) => f.filePath).filter((p): p is string => typeof p === "string").map((p) => resolvePath(p)));
+  const scans = files.map((f) => scanFile(f.nodes, f.filePath, compilationPaths, escapes));
+  // A CALL into a module outside the compilation may return a value carrying a writer
+  // (a factory returning `{ add: (x) => … }` — the returned value is never a reference
+  // here). Its result can reach any method call, so it counts as an escape.
+  for (const { fileScan, externalImported } of scans) {
+    if (fileScan.calls.some((c) =>
+      (c.kind === "bare" && externalImported.has(c.name)) ||
+      (c.kind === "member" && c.root !== null && externalImported.has(c.root)))) {
+      escapes.value = true;
+    }
+  }
   // Least fixpoint: may-write and escape grow together until stable.
   for (let changed = true; changed;) {
     changed = false;
@@ -360,8 +396,8 @@ export function buildCompilationWriteFacts(filesNodes: unknown[][]): LoopWriteFa
 }
 
 /** The write facts of a single file compiled alone. */
-export function buildLoopWriteFacts(fileNodes: unknown[]): LoopWriteFacts {
-  return buildCompilationWriteFacts([fileNodes])[0];
+export function buildLoopWriteFacts(fileNodes: unknown[], filePath: string | null = null): LoopWriteFacts {
+  return buildCompilationWriteFacts([{ nodes: fileNodes, filePath }])[0];
 }
 
 /** May this call reach a database write? */
