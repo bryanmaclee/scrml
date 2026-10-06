@@ -1,0 +1,33 @@
+{
+  "id": "server-db-sql-handled-cell-write-arm-values-rt",
+  "description": "§19.9.9 body split × §19.8.3 (RUNTIME, sqlEngine:\"real\"): a split function whose handled `?{}` arm is a plain VALUE runs that arm on the server with the query. Admitted (decided on the arm's AST, an allow-list): a string literal — `!{ _ :> \"mail admin@x.io\" }`, where the `@` is text, not a cell — and the function's own parameter, `!{ _ :> fallback }`. Both queries fail to run (`gone` is declared, never created), so the cells take the arm values, and the client continuation still runs (`@after`). The companion refusals (a client local, a call — E-RI-002) are pinned in compiler/tests/unit/s455-handled-sql-guard-consumers.test.js.",
+  "language-version": "1.0",
+  "spec": "§19.9.9, §19.8.3",
+  "source-test": "compiler/tests/unit/s455-handled-sql-guard-consumers.test.js",
+  "rationale": "§19.8.3: a `!{}` handler on the query — its arms match `SqlError` variants and the arm's value is the expression's value on failure. §19.9.9: a split function's server batch holds its server-tier statements; a value computable from literals and the function's parameters is available there.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ]
+    },
+    "input": [
+      { "click": "#a" },
+      { "wait": "settle" },
+      { "click": "#b" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "lit": "mail admin@x.io",
+      "param": "fb",
+      "after": "lit"
+    },
+    "domAnchored": [
+      { "selector": "#lit", "text": "mail admin@x.io" },
+      { "selector": "#param", "text": "fb" }
+    ]
+  }
+}

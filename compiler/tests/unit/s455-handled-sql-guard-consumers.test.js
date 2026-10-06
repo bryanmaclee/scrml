@@ -128,6 +128,40 @@ describe("S455 §1 — lowering (items 1, 2, 3, yield)", () => {
     expect(ri[0].message).toMatch(/cannot be split around the `!\{\}` handler/);
   });
 
+  // S239 review (94265ab3) finding 1 — the arm-admission rule is an AST allow-list, not a text scan.
+  const splitWithArm = (arm, params = "") => compile(`<program db="./app.db">${SCHEMA}
+    <rC> = "init"
+    <s> = "init"
+    function mark() {
+        @s = "marked"
+        return "m"
+    }
+    function fC(${params}) {
+        const fallback = "fb"
+        @rC = ?{\`SELECT id, body FROM notes\`}.get() !{ _ :> ${arm} }
+        @s = "after"
+    }
+    <button onclick={ fC(${params ? '"p"' : ""}) !{ .Transport(_) :> { return } } }>c</button>
+    <p>\${@rC} \${@s}</p>
+</program>`);
+  test("(2) an arm reading a CLIENT local (not in the server batch) is refused — E-RI-002, never split", () => {
+    const r = splitWithArm("fallback");
+    expect(r.codes["E-RI-002"]).toBe(1);
+  });
+  test("(2) an arm calling a function (it may write a cell transitively) is refused — E-RI-002", () => {
+    const r = splitWithArm("mark()");
+    expect(r.codes["E-RI-002"]).toBe(1);
+  });
+  test("(2) a string-literal arm containing `@` is a value, not a cell — admitted (split)", () => {
+    const r = splitWithArm('"mail admin@x.io"');
+    expect(r.codes["E-RI-002"]).toBeUndefined();
+    expect(r.server).toMatch(/= "mail admin@x\.io";/);
+  });
+  test("(2) an arm reading the function's own parameter is admitted (split)", () => {
+    const r = splitWithArm("p", "p");
+    expect(r.codes["E-RI-002"]).toBeUndefined();
+  });
+
   test("(3) `for (r of ?{…}.all() !{…})` parses — the handler is part of the iterable", () => {
     const { unhandled, handled } = both(`<program db="./app.db">${SCHEMA}
     <r> = "init"

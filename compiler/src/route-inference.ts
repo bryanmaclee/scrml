@@ -3073,6 +3073,8 @@ export function analyzeCPSEligibility(
    * for back-compat with self-host RI and external callers.
    */
   importedServerNamespaces: Set<string> = new Set(),
+  /** S455 — the function's plain parameter names (what a handled `?{}`'s arm may read on the server). */
+  fnParamNames: ReadonlySet<string> = new Set(),
 ): CPSResult | null {
   if (!body || body.length === 0) return null;
 
@@ -3115,7 +3117,7 @@ export function analyzeCPSEligibility(
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node, importedServerNamespaces));
 
-    if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt)) {
+    if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt, fnParamNames)) {
       mixedIndices.push(i);
     } else if (isServer && (node as any).kind === "defer-stmt") {
       // §19.16.5 — a server-tier deferred body. Tier it SERVER (never "mixed")
@@ -3179,22 +3181,79 @@ export function analyzeCPSEligibility(
 }
 
 /**
- * S455 — can every arm of a `!{}` guard run on the SERVER, with the query, in a
- * function the CPS split divides? A value arm can (it is the replacement for the
- * guarded result), and so can a block that only computes / logs. An arm that
- * leaves (`return` / `break` / `continue`), re-fails (`fail`), or writes a
- * `@cell` cannot: those act on the function's own control flow and client
- * state, which the client part owns. Read off the arm's text — a mention inside
- * a string literal also counts (fail closed).
+ * S455 — can every arm of a `!{}` guard on a `?{}` run on the SERVER, with the
+ * query, in a function the CPS split divides? Decided on the arm's AST, as an
+ * ALLOW-LIST (anything not positively known to be safe keeps the split refused,
+ * E-RI-002): an arm is admitted only when its body is a parsed pure VALUE
+ * (`handlerExpr`) built from literals, the function's own parameters and the
+ * arm's own payload binding, with no call, no `@cell` read or write, no
+ * assignment, no lambda — or the empty block `{ }` (no value). A block holding
+ * statements, a `fail`, a call (it may write a cell transitively), or any other
+ * free identifier (a client local is not in the server batch) is refused.
  */
-function guardArmsAreValues(guard: any): boolean {
+function guardArmsAreValues(guard: any, fnParamNames: ReadonlySet<string>): boolean {
   const arms: any[] = Array.isArray(guard?.arms) ? guard.arms : [];
   for (const arm of arms) {
     if (!arm || arm.failExpr) return false;
-    const h = typeof arm.handler === "string" ? arm.handler : "";
-    if (/(^|[^\w$.])(return|break|continue|fail)(?![\w$])/.test(h) || /@[A-Za-z_$]/.test(h)) return false;
+    if (!arm.handlerExpr) {
+      // The no-value arm: an empty block. Compared exactly (whitespace aside) —
+      // any other unparsed body is refused.
+      const h = typeof arm.handler === "string" ? arm.handler.split("").filter((c: string) => c.trim() !== "").join("") : "";
+      if (h !== "{}") return false;
+      continue;
+    }
+    const allowed = new Set<string>(fnParamNames);
+    if (typeof arm.binding === "string") {
+      for (const b of arm.binding.split(",")) { const n = b.trim(); if (n && n !== "_") allowed.add(n); }
+    }
+    if (!armExprIsPureValue(arm.handlerExpr, allowed)) return false;
   }
   return true;
+}
+
+const PURE_ARM_UNARY_OPS = new Set(["!", "-", "+", "typeof"]);
+/** Allow-list walk for `guardArmsAreValues` — see there. Unknown kinds are refused. */
+function armExprIsPureValue(e: any, allowed: ReadonlySet<string>): boolean {
+  if (!e || typeof e !== "object") return false;
+  switch (e.kind) {
+    case "lit":
+      return e.litType !== "template" || typeof e.raw !== "string" || !e.raw.includes("${");
+    case "ident":
+      return typeof e.name === "string" && !e.name.startsWith("@") && allowed.has(e.name);
+    case "array":
+      return Array.isArray(e.elements) && e.elements.every((x: any) =>
+        x && x.kind === "spread" ? armExprIsPureValue(x.argument, allowed) : armExprIsPureValue(x, allowed));
+    case "object":
+      return Array.isArray(e.props) && e.props.every((p: any) => {
+        if (!p) return false;
+        if (p.kind === "prop") return (!p.computed || armExprIsPureValue(p.key, allowed)) && armExprIsPureValue(p.value, allowed);
+        if (p.kind === "shorthand") return typeof p.name === "string" && allowed.has(p.name);
+        if (p.kind === "spread") return armExprIsPureValue(p.argument, allowed);
+        return false;
+      });
+    case "unary":
+      return PURE_ARM_UNARY_OPS.has(e.op) && armExprIsPureValue(e.argument, allowed);
+    case "binary":
+      return armExprIsPureValue(e.left, allowed) && armExprIsPureValue(e.right, allowed);
+    case "ternary":
+      return armExprIsPureValue(e.condition, allowed) && armExprIsPureValue(e.consequent, allowed) && armExprIsPureValue(e.alternate, allowed);
+    case "member":
+      return armExprIsPureValue(e.object, allowed);
+    case "index":
+      return armExprIsPureValue(e.object, allowed) && armExprIsPureValue(e.index, allowed);
+    default:
+      return false;
+  }
+}
+
+/** The plain parameter names of a function node (destructured params contribute nothing — fail closed). */
+function plainParamNames(fnNode: any): Set<string> {
+  const out = new Set<string>();
+  for (const p of Array.isArray(fnNode?.params) ? fnNode.params : []) {
+    const n = typeof p === "string" ? p : (p && typeof p.name === "string" ? p.name : null);
+    if (n) out.add(n.split(":")[0].trim());
+  }
+  return out;
 }
 
 /**
@@ -6426,6 +6485,7 @@ export function runRI(input: RIInput): RIOutput {
             importedServerFnNames,
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
+            plainParamNames(record.fnNode),
           );
 
           if (cpsResult && cpsResult.eligible) {
@@ -6570,13 +6630,14 @@ export function runRI(input: RIInput): RIOutput {
               // a handled `?{}` has an arm that is not a plain value: the arms run
               // on the server with the query, and an arm that returns / writes a
               // cell cannot run there (analyzeCPSEligibility, guardArmsAreValues).
-              const _armBlocker = (body as any[]).find((s) => handledSqlGuardInner(s) && !guardArmsAreValues(s));
+              const _armBlocker = (body as any[]).find((s) => handledSqlGuardInner(s) && !guardArmsAreValues(s, plainParamNames(record.fnNode)));
               const _armNote = _armBlocker
                 ? ` The function cannot be split around the \`!{}\` handler on the \`?{}\` at line ${_armBlocker.span?.line ?? "?"}: ` +
-                  `a handled query's arms run on the server with the query, and an arm there leaves the function ` +
-                  `(\`return\` / \`break\` / \`continue\`), re-fails (\`fail\`), or writes a \`@cell\` — which only the client ` +
-                  `part of the function can do. Make every arm a value (\`!{ _ :> not }\`) and act on the result after the ` +
-                  `query, or move the query into a \`!\` function and handle it at the call (§19.8.3).`
+                  `a handled query's arms run on the server with the query, so every arm must be a plain value built ` +
+                  `from literals, the function's parameters and the arm's own binding — and an arm here is not (a block ` +
+                  `with statements, \`fail\`, a call, a \`@cell\`, or a local the server side does not have). Make every ` +
+                  `arm such a value (\`!{ _ :> not }\`) and act on the result after the query, or move the query into a ` +
+                  `\`!\` function and handle it at the call (§19.8.3).`
                 : "";
               errors.push(new RIError(
                 "E-RI-002",

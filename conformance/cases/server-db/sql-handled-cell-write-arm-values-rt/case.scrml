@@ -1,0 +1,30 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <lit> = "init"
+    <param> = "init"
+    <after> = "init"
+    // A function that runs a handled `?{}` AND writes a cell is split (§19.9.9); the
+    // arms run on the server with the query. A plain-value arm is admitted: a string
+    // literal (an `@` inside it is text, not a cell) or the function's own parameter.
+    function loadLit() {
+        @lit = ?{`SELECT body FROM gone`}.get() !{ _ :> "mail admin@x.io" }
+        @after = "lit"
+    }
+    function loadParam(fallback) {
+        @param = ?{`SELECT body FROM gone`}.get() !{ _ :> fallback }
+    }
+    <button id="a" onclick={ loadLit() !{ .Transport(_) :> { return } } }>a</button>
+    <button id="b" onclick={ loadParam("fb") !{ .Transport(_) :> { return } } }>b</button>
+    <p id="lit">${@lit}</p>
+    <p id="param">${@param}</p>
+    <p id="after">${@after}</p>
+</program>
