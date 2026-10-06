@@ -100,3 +100,20 @@ server.js of hoisted-loop fixtures: 9 differ ONLY in the hoist preamble + the re
 1 (write-between-iterations) = its 3 loops no longer hoisted (intended). Loops that stopped hoisting corpus-wide: 3, all in
 conformance/cases/server-db/sql-hoisted-loop-write-between-iterations-rt (the new case); 0 pre-existing corpus loops
 (base 39 hoisted loops in 10 artifacts → head 36 in 9). examples/ + samples/ hoist 0 loops on both sides.
+
+## Tests
+- Pre-commit gate (unit + integration + conformance + tests/*.test.js): 31423 pass, 0 fail.
+- conformance: 1300 pass + 50 xfail of 1350 (was 1296 + 50 of 1346; +4 new cases).
+- Full `bun run test` (compiler/tests/, incl. browser): head 33806 pass / 104 skip / 50 fail. Same command on a 2dd6d35d9
+  worktree (pretest run, the 4 new cases copied in): 33767 / 108 / 56. The head's 50 failures are an exact subset of the
+  base's 56 (all browser-suite + detector-validation + esm-script-tag — pre-existing whole-suite failures); the base's 6
+  extra = the 4 new conformance cases (fail on base, pass on head) + 2 TodoMVC dist-not-compiled (base worktree env).
+  0 new failures.
+- types-gate OK (unchanged 190/119), s34-census PASS, regen-spec-index OK, facts + state --check OK after regen.
+
+## Not done / for the PA
+- SPEC (not edited): §8.10.1's detection list does not name "the body may write" as a near-miss condition, though §8.10.3
+  requires it; §8.10.6's cap paragraph says the override changes "the runtime check threshold AND the diagnostic message
+  text" — with chunking there is no runtime check/message, the cap is the chunk size. Both want a SPEC sentence.
+- Observed, not filed (unverified vs SPEC): a state cell named `<get>` / `<all>` gives E-STATE-UNDECLARED +
+  E-UNQUOTED-DISPLAY-TEXT (the chunked case was renamed to firstRows / allRows).
