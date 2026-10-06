@@ -89,3 +89,17 @@ RELAYED premise CONFIRMED: every login silently fails; the only tenant signal is
   both sides (samples/gauntlet-s19-phase4/nested-comments.scrml, RangeError max call stack) — unchanged.
 - Conformance: head 1299/1349 + 50 xfail; on base sources substrate-scoped-login-warn and
   schema-policy-comment-in-as-clause-pos FAIL (substrate-across-read-pos passes on both — a negative pin).
+
+## Task A hardening (self-review, after 191f095e7)
+- Adversarial pass on my own trigger: the condition limb as first built charged ANY condition before the pin,
+  incl. one guarding unrelated work, and a tenant SWITCH that tests the previous tenant's domain rows on
+  purpose ("save your drafts first") — a false positive with no correct silencing.
+- Rebuilt as two limbs: (1) VALUE — the read reaches the pinned value (always charged); (2) CONDITION — the read
+  reaches a condition that CONTROLS the pin (pin inside the statement, or it can return / throw / fail first),
+  charged only when the function also pins `userId` (a login: identity establishment hinging on the previous
+  identity's tenant, or none). Added: a loop iterable is a condition; a `for … of` variable binds the rows.
+- Documented miss (test-pinned): a switch validated by a tenant-scoped GRANT table via a condition only — broken in
+  every state, but indistinguishable in the AST from the legitimate drafts check.
+- Message names the limb ("pins the tenant on the result of a read" / "establishes a login behind a condition on").
+  SPEC §14.8.10 sentence + §34 row restated to match. Corpus re-run (head2 vs base): still 0 artifact diffs; diag
+  diffs only in the 2 new conformance cases; 0 corpus files gain the warning.

@@ -145,24 +145,63 @@ describe("the read DECIDES the pin — value, condition, or a binding derived fr
       return "ok"
     }`))).toBe(1);
   });
-  test("a tenant switch validated by a tenant-scoped grant table (the condition decides the pin)", () => {
-    expect(codes(prog(`    function switchTo(t: string) {
-      const g = ${q("SELECT role FROM user_roles WHERE user_id = 'u1' AND tenant_id = ${t}")}.get()
-      if (g is not) {
-        return "denied"
-      }
-      session.set("tenantId", t)
-      return "ok"
-    }`, `switchTo("B")`))).toBe(1);
-  });
-  test("a binding derived from the read decides the pin through a condition", () => {
-    expect(codes(prog(`    function f(org: string) {
+  test("CONDITION, in a login: a binding derived from the read guards the pins (tenant from a parameter)", () => {
+    const r = project({ "app.scrml": APP(), "x.scrml": prog(`    function f(org: string) {
       const u = ${q("SELECT id, email FROM users WHERE email = 'a@x'")}.get()
       const ok = u is some
       if (!ok) {
         return "bad"
       }
+      session.set("userId", u.id)
       session.set("tenantId", org)
+      return "ok"
+    }`, `f("A")`) }).result;
+    expect(fatal(r)).toEqual([]);
+    const w = hits(r);
+    expect(w.length).toBe(1);
+    expect(w[0].message).toContain("establishes a login");
+    expect(w[0].message).toContain("identity/grant substrate");
+  });
+});
+
+describe("a condition decides the pin only when it CONTROLS it", () => {
+  test("a for-of over grant rows with the pin inside the loop — fires (the iterable decides it)", () => {
+    expect(codes(prog(`    function f() {
+      for (const g of ${q("SELECT tenant_id FROM user_roles WHERE user_id = 'u1'")}.all()) {
+        session.set("tenantId", g.tenant_id)
+      }
+      return "ok"
+    }`))).toBe(1);
+  });
+  test("a condition over a scoped read that only guards unrelated work before the pin — not charged", () => {
+    expect(codes(prog(`    function f(t: string) {
+      const old = ${q("SELECT name FROM assets")}.all()
+      let n = 0
+      if (old.length > 0) {
+        n = old.length
+      }
+      session.set("tenantId", t)
+      return n
+    }`, `f("B")`))).toBe(0);
+  });
+  test("a tenant SWITCH (no userId pin) whose early return tests the previous tenant's rows — not charged", () => {
+    expect(codes(prog(`    function f(t: string) {
+      const drafts = ${q("SELECT name FROM assets")}.all()
+      if (drafts.length > 0) {
+        return "save your drafts first"
+      }
+      session.set("tenantId", t)
+      return "ok"
+    }`, `f("B")`))).toBe(0);
+  });
+  test("the same early return in a LOGIN (it pins userId too) — fires", () => {
+    expect(codes(prog(`    function f(t: string) {
+      const u = ${q("SELECT id FROM users WHERE email = 'a@x'")}.get()
+      if (u is not) {
+        return "bad"
+      }
+      session.set("userId", u.id)
+      session.set("tenantId", t)
       return "ok"
     }`, `f("A")`))).toBe(1);
   });
@@ -175,6 +214,18 @@ describe("not charged — each case is not provable from the AST", () => {
       session.set("tenantId", t)
       return before.length
     }`, `f("B")`))).toBe(0);
+  });
+  test("a SWITCH validated by a tenant-scoped grant table (condition only, no userId pin) — a documented miss", () => {
+    // Broken in every state (the grant row's tenant_id is the target, the floor filters to the
+    // active one), but the AST cannot tell a grant table from a domain table (previous test).
+    expect(codes(prog(`    function switchTo(t: string) {
+      const g = ${q("SELECT role FROM user_roles WHERE user_id = 'u1' AND tenant_id = ${t}")}.get()
+      if (g is not) {
+        return "denied"
+      }
+      session.set("tenantId", t)
+      return "ok"
+    }`, `switchTo("B")`))).toBe(0);
   });
   test("a read AFTER the pin", () => {
     expect(codes(prog(`    function f(t: string) {

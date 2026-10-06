@@ -18,15 +18,25 @@
  * ⚑ THE TRIGGER IS WHAT THE AST PROVES, NOTHING WIDER. Within ONE function, a read
  * of a tenant-scoped table that is not `.acrossTenants()`, executed before that
  * function's first `session.set("tenantId", v)` (v not the literal `not`), whose
- * result DECIDES the pin: the read sits in the pin's value or in a branch / loop /
- * match condition evaluated before the pin, directly or through local bindings
- * derived from it. Such a pin is decided by rows the floor has already filtered to
- * the tenant active before the pin — with none (a login) the read returns zero rows;
- * with one, only that tenant's rows — which is exactly the corollary's regress, in
- * every session state. Deliberately NOT charged (each is not provable from the AST):
- *   - a tenant-scoped read before the pin whose result does not reach the pin or a
- *     condition before it (a tenant switch that reads the previous tenant's domain
- *     rows on purpose is legitimate);
+ * result DECIDES the pin — in one of two ways:
+ *   1. VALUE: the read reaches the pinned value, directly or through local bindings
+ *      derived from it (a `for … of` variable included). The tenant is then resolved
+ *      from rows the floor has already filtered to the tenant active before the pin:
+ *      with none (a login) the pin is never reached with a value; with one, it can
+ *      only re-find that tenant. The corollary's regress, in every session state.
+ *   2. CONDITION, IN A LOGIN: the read reaches a branch / loop / match condition (a
+ *      loop's iterable included) that CONTROLS the pin — the pin is inside that
+ *      statement, or the statement can `return` / `throw` / `fail` before it — AND
+ *      the function also pins `userId` (it establishes the identity). Identity
+ *      establishment then hinges on rows of the tenant active BEFORE it — none, or
+ *      the previous identity's.
+ * Deliberately NOT charged (each is not provable from the AST):
+ *   - a read that decides the tenant pin only through a condition in a function that
+ *     does not pin `userId` — a tenant SWITCH may test the previous tenant's domain
+ *     rows on purpose ("you have unsaved drafts"); a switch that checks a
+ *     tenant-scoped GRANT table this way is broken too, but the AST cannot tell a
+ *     grant table from a domain table;
+ *   - a tenant-scoped read before the pin that decides nothing about it;
  *   - a read inside a nested function or lambda (it runs when called, not in order);
  *     a pin in a CALLEE is not followed either (today a `session.set` reached by an
  *     in-process peer call is already E-SESSION-CONTEXT — no session there);
@@ -57,8 +67,8 @@ export interface TenantSubstrateDiagnostic {
   severity: "warning";
 }
 
-/** One tenant-scoped read found before the pin. */
-interface ScopedRead { id: number; table: string; query: string; span: any }
+/** One tenant-scoped read found before the pin, and how it decides the pin. */
+interface ScopedRead { id: number; table: string; query: string; span: any; how?: "value" | "condition" }
 
 /** Keys never walked: positions, compiler stamps, and raw-text mirrors of structured fields. */
 function skipKey(key: string): boolean {
@@ -72,14 +82,14 @@ function sqlRefQuery(raw: unknown): string | null {
   return m ? m[1] : null;
 }
 
-/** `session.set("tenantId", v)` — the §20.5.1 pin (callee + literal key, structurally). */
-function isTenantPin(n: Record<string, any>): boolean {
+/** `session.set("<key>", v)` — a §20.5.1 session pin (callee + literal key, structurally). */
+function isSessionPin(n: Record<string, any>, key: string): boolean {
   if (n.kind !== "call") return false;
   const c = n.callee;
   if (!c || c.kind !== "member" || c.property !== "set") return false;
   if (!c.object || c.object.kind !== "ident" || c.object.name !== "session") return false;
   const a = n.args;
-  return Array.isArray(a) && a.length >= 2 && a[0]?.kind === "lit" && a[0].litType === "string" && a[0].value === "tenantId";
+  return Array.isArray(a) && a.length >= 2 && a[0]?.kind === "lit" && a[0].litType === "string" && a[0].value === key;
 }
 
 /** The pin clears the tenant (`session.set("tenantId", not)`) — a logout, not a resolution. */
@@ -111,6 +121,24 @@ function boundNames(name: unknown, out: string[] = []): string[] {
 const DECL_KINDS = new Set(["const-decl", "let-decl", "tilde-decl", "lin-decl"]);
 const NESTED_FN_KINDS = new Set(["function-decl", "lambda"]);
 
+const EXIT_KINDS = new Set(["return-stmt", "throw-stmt", "fail-expr"]);
+
+/** Can this statement leave the enclosing function (a `return` / `throw` / `fail`, not in a nested function)? */
+function exitsWithin(node: unknown): boolean {
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as Record<string, any>;
+    if (NESTED_FN_KINDS.has(o.kind)) return false;
+    if (EXIT_KINDS.has(o.kind)) return true;
+    for (const k in o) if (!skipKey(k) && walk(o[k])) return true;
+    return false;
+  };
+  return walk(node);
+}
+
 /** Does this function bind `session` itself (a param or a local), shadowing the builtin? */
 function shadowsSession(fn: Record<string, any>): boolean {
   for (const p of fn.params ?? []) {
@@ -139,7 +167,8 @@ function shadowsSession(fn: Record<string, any>): boolean {
 function decidingReads(fn: Record<string, any>, ctx: TenantContext): ScopedRead[] {
   const reads: ScopedRead[] = [];
   const env = new Map<string, Set<number>>();
-  const deciding = new Set<number>();
+  const byValue = new Set<number>();
+  const byCondition = new Set<number>();
   const across = new WeakSet<object>();
   let pinned = false;
   let stmtSpan: any = fn.span;
@@ -156,7 +185,7 @@ function decidingReads(fn: Record<string, any>, ctx: TenantContext): ScopedRead[
     reads.push({ id, table, query, span });
     return new Set([id]);
   };
-  const decide = (deps: Set<number>): void => { for (const d of deps) deciding.add(d); };
+  const decide = (into: Set<number>, deps: Set<number>): void => { for (const d of deps) into.add(d); };
   const union = (a: Set<number>, b: Set<number>): Set<number> => { for (const x of b) a.add(x); return a; };
 
   const walk = (node: unknown): Set<number> => {
@@ -186,26 +215,34 @@ function decidingReads(fn: Record<string, any>, ctx: TenantContext): ScopedRead[
           while (cur && (cur.kind === "call" || cur.kind === "member")) cur = cur.kind === "call" ? cur.callee : cur.object;
           if (cur && cur.kind === "sql-ref") across.add(cur);
         }
-        if (isTenantPin(n) && !pinClears(n)) {
-          decide(walk(n.args[1]));
+        if (isSessionPin(n, "tenantId") && !pinClears(n)) {
+          decide(byValue, walk(n.args[1]));
           pinned = true;
           return deps;
         }
       }
       if (n.kind === "ident" && typeof n.name === "string") return new Set(env.get(n.name) ?? []);
-      // A condition evaluated before the pin decides whether (and with what) it runs.
-      for (const k of ["condExpr", "headerExpr"]) {
-        if (n[k] && typeof n[k] === "object") decide(union(deps, walk(n[k])));
+      // A condition (an `if` / `while` / `match` / `switch` test, a loop's iterable or
+      // C-style test) DECIDES the pin when the pin is inside the statement it controls,
+      // or when that statement can leave the function before the pin (a `return` /
+      // `throw` / `fail` in it). A condition that only guards unrelated work does not.
+      const cond = new Set<number>();
+      for (const k of ["condExpr", "headerExpr", "iterExpr"]) {
+        if (n[k] && typeof n[k] === "object") union(cond, walk(n[k]));
       }
       if (n.cStyleParts && typeof n.cStyleParts === "object") {
         union(deps, walk(n.cStyleParts.initExpr));
-        decide(union(deps, walk(n.cStyleParts.condExpr)));
+        union(cond, walk(n.cStyleParts.condExpr));
       }
+      union(deps, cond);
+      // `for (const r of <rows>)` binds the loop variable to the rows it iterates.
+      if (n.kind === "for-stmt" && n.variable) for (const nm of boundNames(n.variable)) env.set(nm, new Set(cond));
       for (const k in n) {
-        if (skipKey(k) || k === "condExpr" || k === "headerExpr" || k === "cStyleParts") continue;
+        if (skipKey(k) || k === "condExpr" || k === "headerExpr" || k === "iterExpr" || k === "cStyleParts") continue;
         union(deps, walk(n[k]));
         if (pinned) break;
       }
+      if (cond.size > 0 && (pinned || exitsWithin(n))) decide(byCondition, cond);
       if (DECL_KINDS.has(n.kind)) {
         for (const nm of boundNames(n.name)) env.set(nm, new Set(deps));
         return new Set();
@@ -220,7 +257,32 @@ function decidingReads(fn: Record<string, any>, ctx: TenantContext): ScopedRead[
     }
   };
   walk(fn.body);
-  return pinned ? reads.filter((r) => deciding.has(r.id)) : [];
+  if (!pinned) return [];
+  // The CONDITION limb only in a function that also establishes the identity (a login).
+  const login = pinsUserId(fn);
+  const out: ScopedRead[] = [];
+  for (const r of reads) {
+    if (byValue.has(r.id)) out.push({ ...r, how: "value" });
+    else if (login && byCondition.has(r.id)) out.push({ ...r, how: "condition" });
+  }
+  return out;
+}
+
+/** Does this function pin `userId` (`session.set("userId", v)`, v not `not`) — establish an identity? */
+function pinsUserId(fn: Record<string, any>): boolean {
+  let found = false;
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (found || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as Record<string, any>;
+    if (NESTED_FN_KINDS.has(o.kind)) return;
+    if (isSessionPin(o, "userId") && !pinClears(o)) { found = true; return; }
+    for (const k in o) if (!skipKey(k)) walk(o[k]);
+  };
+  walk(fn.body);
+  return found;
 }
 
 /** Every function declaration in a file AST (nested ones included; each judged on its own body). */
@@ -241,14 +303,18 @@ function functionsOf(fileAST: unknown): Array<Record<string, any>> {
 }
 
 /** The warning text: the corollary, the observed effect, and the two fixes. */
-export function tenantSubstrateMessage(fnName: string, table: string, line: number | null): string {
+export function tenantSubstrateMessage(fnName: string, table: string, line: number | null, how: "value" | "condition" = "value"): string {
   const at = line !== null ? ` (line ${line})` : "";
+  const what = how === "value"
+    ? `pins the tenant (\`session.set("tenantId", …)\`) on the result of a read of \`${table}\`${at}`
+    : `establishes a login (\`session.set("userId", …)\` and \`session.set("tenantId", …)\`) behind a condition on ` +
+      `a read of \`${table}\`${at}`;
   return (
-    `${TENANT_SUBSTRATE_CODE}: \`${fnName}()\` pins the tenant (\`session.set("tenantId", …)\`) on the result of a ` +
-    `read of \`${table}\`${at}, and \`${table}\` is tenant-scoped — it carries a \`tenant_id\` column, and the ` +
-    `column's presence is the declaration (§14.8.10). The read runs BEFORE the pin, so the floor filters it to the ` +
-    `tenant active before the pin: with none pinned yet (a login) it returns zero rows and the pin is never reached ` +
-    `with a value; with one pinned it sees only that tenant's rows. §14.8.10 corollary: the identity/grant ` +
+    `${TENANT_SUBSTRATE_CODE}: \`${fnName}()\` ${what}, and \`${table}\` is tenant-scoped — it carries a \`tenant_id\` ` +
+    `column, and the column's presence is the declaration (§14.8.10). The read runs BEFORE the pin, so the floor ` +
+    `filters it to the tenant active before the pin: with none pinned yet (a login) it returns zero rows` +
+    (how === "value" ? " and the pin is never reached with a value" : ", so the login never succeeds") +
+    `; with one pinned it sees only that tenant's rows. §14.8.10 corollary: the identity/grant ` +
     `substrate (\`users\` / \`user_roles\`) is NOT tenant-scoped — you would need the tenant to read the table that ` +
     `tells you the tenant (infinite regress). Fix: drop \`tenant_id\` from \`${table}\` (the table the tenant is ` +
     `resolved from is not a domain table), or read it with \`.acrossTenants()\`. (See SPEC §14.8.10.)`
@@ -270,7 +336,7 @@ export function fileTenantSubstrateReads(fileAST: unknown, ctx: TenantContext): 
     const name = typeof fn.name === "string" ? fn.name : "<anonymous>";
     for (const r of decidingReads(fn, ctx)) {
       const line = r.span && typeof r.span.line === "number" ? r.span.line : null;
-      out.push({ code: TENANT_SUBSTRATE_CODE, message: tenantSubstrateMessage(name, r.table, line), span: r.span ?? fn.span, severity: "warning" });
+      out.push({ code: TENANT_SUBSTRATE_CODE, message: tenantSubstrateMessage(name, r.table, line, r.how ?? "value"), span: r.span ?? fn.span, severity: "warning" });
     }
   }
   return out;
