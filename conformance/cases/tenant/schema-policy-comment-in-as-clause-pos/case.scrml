@@ -1,0 +1,16 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+        ?{`CREATE POLICY only_a ON assets AS /* narrows, never widens */ RESTRICTIVE USING (tenant_id = 'A')`}
+        ?{`CREATE POLICY only_named ON assets AS -- ANDed with scrml_tenant_iso
+            RESTRICTIVE USING (name = 'x')`}
+    </>
+    // A comment between `AS` and `RESTRICTIVE` is not part of the statement: both
+    // policies are `AS RESTRICTIVE` and admitted (§14.8.10 statement-kind allow-list).
+    ${
+        function mine() {
+            return ?{`SELECT id, name FROM assets`}.all()
+        }
+    }
+    <button onclick=${ mine() }>mine</button>
+</program>

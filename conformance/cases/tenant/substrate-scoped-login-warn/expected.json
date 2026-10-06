@@ -1,0 +1,18 @@
+{
+  "id": "tenant-substrate-scoped-login-warn",
+  "description": "§14.8.10 corollary (S456) — `users` carries `tenant_id`, so it is tenant-scoped; `login()` reads it by email and pins `session.set(\"tenantId\", u.tenant_id)` on the result. The read runs before the pin and is filtered to the tenant active then (none in a login) — zero rows, every login silently fails (executed S455/S456: \"bad\" for a seeded user). W-TENANT-SUBSTRATE-SCOPED warns (non-fatal), naming the corollary and the two fixes.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-substrate-read.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: \"Corollary: the identity/grant substrate (`users` / `user_roles`) is NOT tenant-scoped — you would need the tenant to read the table that tells you the tenant (infinite regress).\" and \"A table whose `<schema>` carries a `tenant_id` column IS tenant-scoped; the column's presence is the declaration.\"",
+  "expect": {
+    "codes": [
+      "W-TENANT-SUBSTRATE-SCOPED",
+      "I-TENANT-STRIP"
+    ],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}

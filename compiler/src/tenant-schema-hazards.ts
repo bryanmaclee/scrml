@@ -59,7 +59,7 @@ import {
   lexTenantSubset, tenantRowFunctions, tenantGroupAggregates, namesFor, castTypesFor, endsOperandWord,
   type SqlDialect, type Avail,
 } from "./codegen/tenant-sql-subset.ts";
-import { schemaTableDeclarations, DBAUTH_ROLE } from "./schema-differ.js";
+import { schemaTableDeclarations, DBAUTH_ROLE, sqlLineCommentEnd } from "./schema-differ.js";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
 export type SchemaHazardKind =
@@ -103,6 +103,8 @@ interface Tok {
   k: "w" | "q" | "s" | "n" | "p" | "b"; t: string; up: string; at: number; sql: boolean;
   /** Offset just past the token in the `<schema>` body (a body's raw text is sliced by it). */
   end: number;
+  /** Read from a comment's TEXT (the `content` reading) — not a token of the live statement around it. */
+  cmt?: boolean;
   /**
    * A quoted form whose extent depends on the dialect, so this lexer cannot model it
    * exactly: a backslash inside a quote (MySQL escapes it; SQLite and Postgres do not)
@@ -113,6 +115,15 @@ interface Tok {
 }
 
 type CommentMode = "skip" | "skip-nested" | "content";
+
+/**
+ * The offsets of `--` comments holding a lone `\r` in one `lex` result (S456 F1) — a
+ * non-enumerable side list on the token array, so no statement reading sees them.
+ */
+function crAtOf(toks: Tok[]): readonly number[] {
+  return ((toks as unknown as { crAt?: number[] }).crAt) ?? [];
+}
+
 
 /**
  * Words after which an identifier (so a SQLite `[ident]`) is expected — the name of an object,
@@ -133,6 +144,8 @@ const WORD_CHAR = /[A-Za-z0-9_$\u0080-￿]/;
  */
 function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 = false): Tok[] {
   const out: Tok[] = [];
+  const crAt: number[] = [];
+  Object.defineProperty(out, "crAt", { value: crAt, enumerable: false });
   let i = from;
   let wrap = sql0 ? 1 : 0;      // `?{` wrappers open
   let braces = 0;               // `{` opened inside the current wrapper (a `${`)
@@ -145,7 +158,9 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
   const comment = (start: number, end: number, cFrom: number, cTo: number): void => {
     // `content` mode reads a comment's text as declarations (a commented-out one counts).
     if (mode === "content" && cTo > cFrom) {
-      for (const t of lex(text, "content", cFrom, cTo, wrap > 0)) out.push(t);
+      const sub = lex(text, "content", cFrom, cTo, wrap > 0);
+      for (const t of sub) out.push({ ...t, cmt: true });
+      for (const a of crAtOf(sub)) crAt.push(a);
     }
     i = end;
     void start;
@@ -156,8 +171,17 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
     const c2 = text[i + 1];
     if (/\s/.test(c)) { i++; continue; }
     if (c === "-" && c2 === "-") {
-      let e = text.indexOf("\n", i);
-      if (e === -1 || e > to) e = to;
+      // S456 review F1 (PA-reproduced): Postgres ends a `--` comment at `\r` OR `\n`
+      // (scan.l `newline [\n\r]`); SQLite and MySQL at `\n` only. Read to the FIRST of
+      // the two (Postgres's extent — `AS --x\rPERMISSIVE` was read as a comment through
+      // the `\n` and the live PERMISSIVE hidden). Where the two extents differ — a `\r`
+      // not followed by `\n` — the databases disagree on what follows (text that is code
+      // to one is comment to the other, and a `/*` there can hide text from either), so
+      // the comment's offset is recorded on the side (`LexResult.crAt`, not a token — a
+      // token would be read as statement text) and charged wherever it sits (fail-closed).
+      // A CRLF line end (`\r\n`) is the same extent for every database.
+      const e = sqlLineCommentEnd(text, i, to);
+      if (text[e] === "\r" && text[e + 1] !== "\n") crAt.push(i);
       comment(i, e, i + 2, e);
       continue;
     }
@@ -307,6 +331,35 @@ function readName(toks: Tok[], i: number): { name: string; next: number } | null
   let last = toks[j];
   while (isP(toks[j + 1], ".") && isName(toks[j + 2])) { j += 2; last = toks[j]; }
   return { name: last.t.toLowerCase(), next: j + 1 };
+}
+
+/**
+ * The head of `CREATE POLICY name ON table [AS PERMISSIVE | RESTRICTIVE] …`, from the
+ * `POLICY` token at `p`. A comment BETWEEN the head's tokens is not part of the statement
+ * (S456, g-tenant-small-residuals-s455 (b): `AS /* x *\/ RESTRICTIVE` and `AS --x⏎
+ * RESTRICTIVE` were charged): the comment-free readings never see it, and in the
+ * `content` reading its text tokens (`cmt`) are stepped over inside a live statement —
+ * a commented-out policy (its POLICY token itself comment text) is still read whole.
+ * `bodyFrom` is where the policy's subset-read body starts: just past the `AS` mode when
+ * one is written (so the comments around the AS clause are not body), else just past
+ * the table.
+ */
+function readPolicyHead(toks: Tok[], p: number): {
+  pname: { name: string; next: number } | null; shown: string; tbl: { name: string; next: number } | null;
+  tblAt: number; asAt: number; mode: Tok | undefined; bodyFrom: number;
+} {
+  const inComment = toks[p]?.cmt === true;
+  const live = (k: number): number => { while (!inComment && k < toks.length && toks[k].cmt) k++; return k; };
+  const pname = readName(toks, live(p + 1));
+  const shown = pname ? toks[pname.next - 1].t : "?";
+  const onAt = pname ? live(pname.next) : -1;
+  const tblAt = pname && isW(toks[onAt], "ON") ? live(onAt + 1) : -1;
+  const tbl = tblAt >= 0 ? readName(toks, tblAt) : null;
+  const asAt = tbl ? live(tbl.next) : -1;
+  const modeAt = tbl && isW(toks[asAt], "AS") ? live(asAt + 1) : -1;
+  const mode = modeAt >= 0 ? toks[modeAt] : undefined;
+  const bodyFrom = !tbl ? -1 : (isW(mode, "RESTRICTIVE") || isW(mode, "PERMISSIVE")) ? live(modeAt + 1) : tbl.next;
+  return { pname, shown, tbl, tblAt, asAt, mode, bodyFrom };
 }
 
 /**
@@ -2023,9 +2076,8 @@ function analyze(
     if (d.kind !== "other" || d.object !== "POLICY") continue;
     let p = d.start;
     while (p < d.end && !isW(toks[p], "POLICY")) p++;
-    const pname = readName(toks, p + 1);
-    const tbl = pname && isW(toks[pname.next], "ON") ? readName(toks, pname.next + 1) : null;
-    if (tbl) policyBody.set(d, { from: tbl.next, table: tbl.name, qual: qualNameAt(toks, pname!.next + 1, tbl.next) });
+    const head = readPolicyHead(toks, p);
+    if (head.tbl) policyBody.set(d, { from: head.bodyFrom, table: head.tbl.name, qual: qualNameAt(toks, head.tblAt, head.tbl.next) });
   }
   /** The token range of a declaration's body, or null when it has none the subset reads. */
   const bodyTokens = (d: Decl): [number, number] | null => {
@@ -2275,9 +2327,11 @@ function analyze(
     if (d.object === "POLICY") {
       let p = d.start;
       while (p < d.end && !isW(toks[p], "POLICY")) p++;
-      const pname = readName(toks, p + 1);
-      const tbl = pname && isW(toks[pname.next], "ON") ? readName(toks, pname.next + 1) : null;
-      const pShown = pname ? toks[pname.next - 1].t : "?";
+      const head = readPolicyHead(toks, p);
+      const tbl = head.tbl;
+      const pShown = head.shown;
+      const asWritten = isW(toks[head.asAt], "AS");
+      const restrictive = asWritten && isW(head.mode, "RESTRICTIVE");
       if (!tbl) {
         out.push({ kind: "permissive policy", object: pShown, tables: allTenant, unattributable: true, offset: d.at,
           why: "the checker cannot read which table it is declared on" });
@@ -2286,20 +2340,20 @@ function analyze(
       // A RESTRICTIVE policy's body (its USING / WITH CHECK expressions, run per row) is read
       // in the tenant SQL subset (S455 "yes, both"), its calls held to the expression
       // allow-list (`current_setting(…)` is on it). A permissive one is charged below anyway.
-      if (isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE") && r.outside) {
+      if (restrictive && r.outside) {
         out.push(outsideHazard("policy", { ...d, shown: pShown }, r.outside));
         continue;
       }
       let mode: string | null = "PERMISSIVE (the default when `AS` is omitted)";
       if (!tainted.has(tbl.name)) {
         // admitted only `AS RESTRICTIVE` (S455 "your rec on the allow-list"), on any table
-        if (!(isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE"))) {
+        if (!restrictive) {
           out.push(notAdmitted(`CREATE POLICY ${pShown}`, d.at, allTenant, "only `CREATE POLICY … AS RESTRICTIVE` is admitted"));
         }
         continue;
       }
-      if (isW(toks[tbl.next], "AS")) {
-        const m = toks[tbl.next + 1];
+      if (asWritten) {
+        const m = head.mode;
         if (isW(m, "RESTRICTIVE")) mode = null;
         else if (isW(m, "PERMISSIVE")) mode = "PERMISSIVE";
         else {
@@ -2428,6 +2482,13 @@ function analyze(
         why: `${ends.map((n) => `\`${n}\``).join(" and ")} ${ends.length > 1 ? "are" : "is"} tenant-scoped, and the database applies \`${actions.join("` / `")}\` ` +
           `to every matching row, whichever tenant owns it — a write the floor never sees` });
     }
+  }
+  // 4b. S456 F1 — a `--` comment holding a lone `\r`: charged wherever it sits (between
+  //     statements too — the text after it is a statement to one database only).
+  for (const at of crAtOf(toks).slice(0, 1)) {
+    out.push({ kind: "statement", object: "a `--` comment ending at a carriage return", tables: allTenant, unattributable: true, offset: at,
+      why: "it holds a carriage return (`\\r`) not followed by a newline — Postgres ends a `--` comment there, SQLite and MySQL " +
+        "only at the newline, so the databases disagree on which text after it is SQL; end the comment with a newline" });
   }
   // 5. A quoted form whose extent depends on the dialect (a backslash inside a quote, an
   //    `E'…'` / `U&'…'` string, an unterminated quote): where lexers disagree, text that is

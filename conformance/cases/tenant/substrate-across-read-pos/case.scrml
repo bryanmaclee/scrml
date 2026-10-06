@@ -1,0 +1,21 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, tenant_id TEXT)`}
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+    </>
+    // `users` carries tenant_id, so it is tenant-scoped; a scoped login read would
+    // return zero rows. `.acrossTenants()` is the deliberate unscoped read (one of the
+    // two fixes the §14.8.10 corollary warning names).
+    ${
+        function login(email: string) {
+            const u = ?{`SELECT id, tenant_id FROM users WHERE email = ${email}`}.acrossTenants().get()
+            if (u is not) {
+                return "bad"
+            }
+            session.set("userId", u.id)
+            session.set("tenantId", u.tenant_id)
+            return "ok"
+        }
+    }
+    <button onclick=${ login("a@x") }>log in</button>
+</program>
