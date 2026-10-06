@@ -71,3 +71,48 @@ loop = LAST row per key, not first.
 - Planner hoists shapes whose IN-rewrite is not equivalent: LIMIT/OFFSET (`… WHERE k = ${x.k} LIMIT 1` → one row
   total), aggregates/GROUP BY (`count(*)` → one row total), `OR <other> = ${y}` after the key (tupleRe only rejects
   AND; the other `${}` is left raw in the `.unsafe` string). Locus batch-planner.ts analyzeForLoop/extractKeyColumn.
+  → CLOSED in round 2 (allow-list), below.
+
+## Round 2 — S239 review on 0e253650 (LAND-WITH-NITS + fail-closed items) — 71d4bcaf9
+Repro (real bun:sqlite; 0e253650 vs head vs `.nobatch()` oracle; head == oracle on every cell):
+| item | 0e253650 | head = .nobatch() |
+|---|---|---|
+| I1 `'a FROM b' AS t` in SELECT | none,none,none (alias spliced into the string) | hello,bye,none (not hoisted) |
+| P2 count(*) | 3,none,none | 2,1,0 |
+| P2 max() | none,9,none | 8,9,null |
+| P2 LIMIT 1 | hello,none,none | hello,zed,none |
+| P2 OR kind='y' | 2,1,0 | 2,2,1 |
+| P2 UNION / OR id=${it.alt} | throws (go aborts) | 2,2 / 2,1 |
+| P2 GROUP BY | 1,1,0 (same by luck) | 1,1,0 |
+| I2 `body AS __scrml_batch_key` | ",none" | hello,none |
+| P3 items.splice(0,1) | none (evaluated twice) | hello |
+| P3 duplicate key, write via row | hello!,hello!! | hello!,hello! |
+| P1 `secret AS s` / `lower(secret)` / .all() | {"id":7,"s":"S7"} / {"id":7,"x":"s7"} / leak | {"id":7} / {} / [{"id":7}] |
+| JOIN + AND without ${} (allowed) | not hoisted (tuple regex) | hoisted, hello/a,none |
+Fix: hoist-sql-shape.ts token classifier + allow-list (builds the pre-fetch by token offsets); batch-planner
+`protectBlocksHoist` (any protected column in the compile → a table with protected columns or not in declaredTables
+is not hoisted; E-PROTECT-003 kept); tuple pre-check only rejects an AND carrying `${}`; emit-control-flow: iterable
+into `let _scrml_batch_items_N` once (Array.from for non-arrays), `.get()` lookup `{ ...row }`, `.all()` lookup
+`(… ?? []).map((_r) => ({ ..._r }))`.
+Differential vs 0e253650 (git archive + the 2 new cases copied in): 2375=2375, compile delta 0, syntax delta 0, bare
+218=218; 1 code change = the new protect case gaining I-PROTECT-STRIP-001 (its rows now pass the strip); 268 artifact
+diffs = 240 compiler-root path + 2 host-import path + 26 in hoisted-loop fixtures only (e-protect-003-neg now
+un-hoisted; sql-handled-hoisted-loop-rt + the S455 hoist cases: items var + row copy + id renumbering;
+unrewritable-site: renumbering only). Gate 31389 pass / 0 fail; conformance 1296 + 50 xfail of 1346; types-gate OK.
+
+## Known-gaps text (round 2 deferrals, for PA to file)
+- g-impl1-hoist-key-type-coercion-s455 (MED, open) — the Map is keyed with JS `===`-semantics on the row's key value,
+  while SQL `=` coerces: a text key (`{id: "7"}`) against an INTEGER column matches per-row but misses the Map → `not`.
+  Locus emit-control-flow.ts emitHoistedForStmt (key normalization) / batch-planner (refuse when key type unknown).
+- g-impl1-hoist-writes-between-iterations-unseen-s455 (MED, open) — the pre-fetch is taken before iteration 1; a write
+  in the loop body (or a peer call) to the read table is visible per-row but not in the Map. §8.10.3 claims equivalence
+  "on all side-effect orderings". Locus batch-planner.ts analyzeForLoop (refuse a body containing a write / a call).
+- g-impl1-hoist-prefetch-failure-timing-s455 (LOW, open) — an unhandled pre-fetch failure throws before iteration 1's
+  side effects, and for a conditional read even when no iteration reaches it. Fix: capture and re-raise at the read.
+- g-impl1-hoist-batch-cap-throws-instead-of-chunking-s455 (MED, open) — §8.10.6: "If `xs.length` at runtime exceeds
+  `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite SHALL chunk the IN-list into segments of at most
+  `SQLITE_MAX_VARIABLE_NUMBER` keys. If chunking is statically provable as impossible, **E-BATCH-002** fires at compile
+  time; at runtime, an over-limit execution throws `SqlError::BatchTooLarge`." impl#1 never chunks: >32766 keys throws
+  a plain Error with code "E-BATCH-002" at runtime. Locus emit-control-flow.ts emitHoistedForStmt (the cap line).
+- g-impl1-match-arm-sql-server-boundary-s455 (MED, open; not hoist) — `?{}` in a `match` block arm in a server fn →
+  E-CG-006 + SyntaxError, with or without .nobatch(). Locus emit-control-flow.ts match-arm structured-body emission.
