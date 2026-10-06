@@ -2,6 +2,26 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S455 — 2026-10-05/06 (bryan · ASUS; solo) — the tenant floor's schema boundary built by allow-list, R11 migrated reads-only, the foreign slice sealed, #1305's lowering made whole
+
+**Landed (each S239-reviewed; markers in `docs/pr-reviews.md`):**
+- **#1311** `state.ts` recent-sessions SHAs pinned to `--abbrev=9` (S454 B-4a; `state.ts --check` had been FAIL on main).
+- **#1312** §23.2.4a — an inline `_={ }=` slice is built once in global scope and sees only its `in:{}` crossings (it could read `_scrml_sql`, the raw db handle); E-FOREIGN-007. flogence's 738 slices compile identically.
+- **#1313** security — `E-TENANT-SCHEMA-HAZARD`: a `<schema>` trigger / rule / cascading FK / view against a tenant table is refused at the declaration (ruling "go, comp-time schema"); one compilation-wide TENANT-SCHEMA stage. Five review rounds, each HIGH a class fix.
+- **#1315** `scrml fix sql-failable` (R11) — provable READS get the S451 fallback written out (150 sites / 117 files); every WRITE is listed (ruling "b your rec on R11" — the S451 "meaning-preserving" premise was false: impl#1 throws, so a silent fallback on a write failed open).
+- **#1316** security — the tenant floor reads ONE tenant set per compilation (a second `<program>` file or an imported module read tenant tables unfiltered); `ALTER … ADD COLUMN tenant_id` scopes a table.
+- **#1317** security — a tenant compilation's `<schema>` admits a closed set of statement kinds (rulings "yes both" → "your rec on the allow-list"); isolation removal and code-running expressions refused. Seven review rounds; landed PARTIAL on bryan's word.
+- **#1319** security — tenant `<schema>` bodies lie in the S452 SQL subset; `rel.f` closed for bodies AND queries; dialect-aware function allow-list; `::<built-in>` casts admitted (ruling "a").
+- **#1320** + **#1321** — the Postgres overload hijack is a deploy requirement (`REVOKE CREATE ON SCHEMA public`, ruling "a"), stated in §14.8.11 and printed by `scrml build`.
+- **#1322** impl#1 (#1305 exception) — a handled `?{}` is seen by every consumer exactly as the unhandled one: `lift`, cell writes, for-of, `fn` purity, protect, CPS, batching. Root: `!{}` wraps the whole statement.
+- **#1324** test — the executed tenant-floor tests get a 30 s timeout (Windows runner).
+- **#1325** impl#1 ("go") — §8.10 N+1 hoisting: a keyed read at any depth is rewritten or the loop is not hoisted (never `null`); only an allow-listed query shape is hoisted; protected tables never.
+- Docs: #1310 #1314 #1318 #1323.
+
+**Rulings (user-voice §S455):** "go, comp-time schema" · "b your rec on R11" · "yes both" · "your rec on the allow-list" · "yes, both" (land PARTIAL + bodies into the subset) · "a" (`::` casts) · "a" (overload = deploy requirement) · "go" (hoist fix, the S435 exception).
+
+**Lesson:** a text classifier for a foreign SQL dialect took ~12 review rounds across #1313/#1317 before the boundary moved to an allow-list plus one shared subset; the S452 rule ("three rounds → change the boundary") was applied at round 7, not round 3.
+
 ## S454 — 2026-10-04/05 (bryan · ASUS; solo — Peter landed #1297/#1300 alongside) — three fail-open floors closed, U1b built, the Types gate made real
 
 **Landed (each S239-reviewed; markers in `docs/pr-reviews.md`, 0 owed):**

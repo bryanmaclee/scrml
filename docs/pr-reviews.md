@@ -2138,3 +2138,6 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1320 verdict=carve-out by=S455-bryan date=2026-10-05 probe=SPEC-text (§14.8.11 deploy requirement) + docs -->
 <!-- @review pr=1321 verdict=carve-out by=S455-bryan date=2026-10-05 probe=print-only build report line + one pure boolean field in api.js (PA read the full api.js delta) -->
 <!-- @review pr=1322 verdict=finding by=S455-bryan date=2026-10-05 probe=S239 r1 94265ab3 LAND-WITH-NITS — 19 unhandled twins + 149 corpus files byte-identical; F1 arm-value text regex was fail-closed→fail-open → AST allow-list at 2a8c32e8, PA-verified by execution -->
+<!-- @review pr=1323 verdict=carve-out by=S455-bryan date=2026-10-05 probe=docs-only gap filings + markers (windows red = the timeout fixed by #1324) -->
+<!-- @review pr=1324 verdict=carve-out by=S455-bryan date=2026-10-06 probe=test-only setDefaultTimeout(30_000) in one test file; Windows timeout, not logic -->
+<!-- @review pr=1325 verdict=finding by=S455-bryan date=2026-10-06 probe=S239 r1 0e253650 LAND-WITH-NITS — I1 literal-FROM regex + two pre-existing HIGHs made reachable (protect strip skipped; IN-rewrite wrong answers) → fail-closed allow-list + protected tables never hoisted at 48105a2a, PA-verified by execution (literal-FROM, count(*), <db protect> not hoisted; plain keyed read hoisted) -->

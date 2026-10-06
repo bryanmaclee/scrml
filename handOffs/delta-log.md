@@ -4271,3 +4271,6 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3733] land · #1320 §14.8.11 overload hijack = deploy requirement · #1321 `scrml build` prints it · → #1320 #1321 · @adv:g-tenant-pg-overload-hijack-s455
 [3734] land · #1322 handled `?{}` seen by every consumer as the unhandled one (lift, cell write, for-of, fn purity, protect, CPS, batching, hoisted reads); root = `!{}` wraps the STATEMENT · → #1322 · @adv:g-impl1-handled-sql-lowering-defects-s455
 [3735] ruling · S455 "go" — dispatch the §8.10 hoisted-keyed-read-inside-if fix; PA reading: grants the S435 exception for it · → user-voice §S455 · @adv:g-impl1-hoist-keyed-read-inside-if-null-s455
+[3736] land · #1324 executed tenant-floor tests get a 30 s timeout (Windows runner) · #1325 §8.10 hoist: any depth or no hoist (never null); allow-listed shapes only; protected tables never hoisted · → #1325 · @adv:g-impl1-hoist-keyed-read-inside-if-null-s455
+[3737] friction · #1325's fix made two pre-existing HIGHs reachable (the old `null` hid a protect leak + IN-rewrite wrong answers) — a fix that turns "always wrong" into "runs" owes a review of what now runs · → hand-off §S455 DURABLE
+[3738] state · S455 WRAP — 14 PRs (#1310–#1325, #1312/#1313/#1315/#1316/#1317/#1319/#1322/#1325 compiler; rest docs/test/script); 8 rulings; pa-ruled 5 · → hand-off §S455
