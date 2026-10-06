@@ -30,10 +30,11 @@ import { sqlIsPlainRead } from "../../src/hoist-write-scan.ts";
 
 const CASES = join(import.meta.dir, "..", "..", "..", "conformance", "cases", "server-db");
 
-function compile(source) {
+function compile(source, aux = {}) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-s456-"));
   const file = join(dir, "test.scrml");
   writeFileSync(file, source);
+  for (const [name, text] of Object.entries(aux)) writeFileSync(join(dir, name), text);
   try {
     const r = compileScrml({ inputFiles: [file], outputDir: null, write: false, log: () => {} });
     const serverJs = [...(r.outputs?.values() ?? [])].map((o) => o.serverJs ?? "").join("\n");
@@ -91,6 +92,63 @@ describe("the hoist decision for the S456 runtime cases", () => {
     expect(c.hoists).toBe(2);
     expect(c.serverJs).toContain("for (let _at = 0; _at < _keys.length; _at += 2) {");
     expect(c.serverJs).not.toContain("E-BATCH-002");
+  });
+});
+
+// S456 fix round F2 — imports. A read-only standard-library module and a `.scrml` module in
+// the compilation are KNOWN; only code the compiler cannot see stays fail-closed. Runtime
+// equality (hoisted == `.nobatch()`) for these shapes was executed against real emitted
+// server modules (docs/changes/s456-hoist-divergences/progress.md, fix round).
+const withImports = (imports, fns, markup = "") => [
+  '<program db="./app.db">',
+  "    <schema>",
+  "        notes {",
+  "            id: integer primary key",
+  "            body: text",
+  "        }",
+  "    </schema>",
+  "    ${",
+  imports,
+  "    }",
+  fns,
+  markup,
+  "    <p>x</p>",
+  "</program>",
+].join("\n");
+const UPPER_LOOP = [
+  "    function upper() {",
+  "        let out = []",
+  "        for (const it of [{ id: 7 }, { id: 8 }]) {",
+  "            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()",
+  "            out.push(row is not ? \"none\" : BODY)",
+  "        }",
+  "        return out.join(\",\")",
+  "    }",
+].join("\n");
+describe("(2) imports — known modules do not switch hoisting off (fix round F2)", () => {
+  test("a read-only stdlib function called only in markup leaves `out.push(row.body.toUpperCase())` hoisted", () => {
+    const c = compile(withImports("        import { round } from 'scrml:math'", UPPER_LOOP.replace("BODY", "row.body.toUpperCase()"), "    <p>${round(2.5)}</p>"));
+    expect(c.hoists).toBe(1);
+  });
+  test("a read-only stdlib function called in the loop body is write-free", () => {
+    const c = compile(withImports("        import { capitalize } from 'scrml:format'", UPPER_LOOP.replace("BODY", "capitalize(row.body)")));
+    expect(c.hoists).toBe(1);
+  });
+  test("a helper imported from a `.scrml` module IN the compilation is analysed: write-free → hoisted", () => {
+    const c = compile(withImports("        import { shout } from './h.scrml'", UPPER_LOOP.replace("BODY", "shout(row.body)")),
+      { "h.scrml": "export function shout(s) {\n    return s + \"!\"\n}\n" });
+    expect(c.hoists).toBe(1);
+  });
+  test("…and a writer from such a module is still refused, naming the call", () => {
+    const c = compile(withImports("        import { touch } from './w.scrml'", UPPER_LOOP.replace("BODY", "row.body").replace("        }\n        return", "            touch(it.id)\n        }\n        return")),
+      { "w.scrml": "export function touch(id) {\n    ?{`UPDATE notes SET body = body || '!' WHERE id = ${id}`}.run()\n}\n" });
+    expect(c.hoists).toBe(0);
+    expect(c.reasons.some((r) => r.includes("`touch(…)`"))).toBe(true);
+  });
+  test("a stdlib module that writes a database (scrml:store) stays fail-closed", () => {
+    const c = compile(withImports("        import { createStore } from 'scrml:store'",
+      UPPER_LOOP.replace("BODY", "row.body").replace("let out = []", "let out = []\n        const cache = createStore(\"./kv.db\", \"c\")").replace("            out.push", "            cache.get(\"k\")\n            out.push")));
+    expect(c.hoists).toBe(0);
   });
 });
 

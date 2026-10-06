@@ -15,27 +15,35 @@
  * body cannot write. A `?{}` cannot sit in an arrow body (E-SQL-009), so code can
  * reach a write only by CALLING something; the proof is over the calls:
  *
- *   - a bare call `f(…)` is write-free when `f` is a function declared in this file
- *     whose body is (transitively) write-free, or a built-in global in PURE_GLOBALS;
+ *   - a bare call `f(…)` is write-free when `f` is a function declared in this file,
+ *     or imported from a `.scrml` module INSIDE the compilation, whose body is
+ *     (transitively) write-free; a function of a read-only standard-library module
+ *     (PURE_STDLIB_MODULES: `scrml:math`, `scrml:format`, …); or a built-in global in
+ *     PURE_GLOBALS;
  *   - `new C(…)` is write-free when `C` is in PURE_CTORS;
  *   - a member call `x.m(…)` is write-free when its root `x` is a built-in namespace
  *     (PURE_NAMESPACES); or when `x` is a name this file declares (not an import),
  *     `m` is a built-in method name (BUILTIN_METHODS: `push`, `join`, `get`, …), AND
  *     no function value that may write ESCAPES anywhere in the compilation;
- *   - anything else — an imported function, an undeclared global (`fetch`), a
+ *   - anything else — a function imported from outside the compilation (a host
+ *     `.js` module, a package, a standard-library module that can reach a database or
+ *     the network: `scrml:store`, `scrml:http`, …), an undeclared global (`fetch`), a
  *     computed callee while a writer escapes — may write.
  *
- * A function value ESCAPES when a writer (a may-write function, or any imported
- * name) is referenced other than as a direct call — `items.map(bump)`,
+ * A function value ESCAPES when a writer (a may-write function, or a name imported
+ * from outside the compilation) is referenced other than as a direct call — `items.map(bump)`,
  * `const repo = { save: bump }` — or a lambda calls one, in ANY file of the
  * compilation (an object built in one file reaches a loop in another as an
  * argument). Only then can `repo.save(x)` / `opts.cb(x)` reach a write without
  * naming the writer at the call, so only then are such calls refused.
  *
- * A CALL to a function imported from outside the compilation (a host `.js` module,
- * the standard library, a package) also counts as an escape: its RETURN value may
- * carry a writer (`const repo = makeRepo(); repo.add(x)`) that never appears as a
- * reference. A `.scrml` module inside the compilation is analysed instead.
+ * A CALL to a function imported from outside the compilation (a host `.js` module, a
+ * package, a non-read-only standard-library module) also counts as an escape: its
+ * RETURN value may carry a writer (`const repo = makeRepo(); repo.add(x)`) that never
+ * appears as a reference. A `.scrml` module inside the compilation is analysed
+ * instead (its functions' write facts are linked across files), and a read-only
+ * standard-library module is known not to write — neither counts (S456 fix round F2:
+ * `${round(2.5)}` in markup used to switch hoisting off for the whole program).
  *
  * A function is a WRITER when its body has a `?{}` that is not a plain read (see
  * `sqlIsPlainRead` — fail-closed: anything it cannot read as a lone SELECT is a
@@ -48,13 +56,31 @@ import { dirname, resolve as resolvePath } from "node:path";
 export interface LoopWriteFacts {
   /** Local function name → may it write the database (transitively)? */
   fnMayWrite: Map<string, boolean>;
-  /** Names bound by `import` / `use` (their bodies are not visible here). */
+  /** Names bound by `import` / `use`. */
   imported: Set<string>;
+  /** Imported names whose module's code is not analysed here and may write (§ top). */
+  unknownImported: Set<string>;
+  /** Imported names from a read-only standard-library module (PURE_STDLIB_MODULES). */
+  pureImported: Set<string>;
+  /** An imported name from a `.scrml` module in the compilation → that module's facts + its exported name. */
+  importLinks: Map<string, { path: string; name: string }>;
+  /** The compilation's facts by resolved file path (to follow `importLinks`). */
+  byPath: Map<string, LoopWriteFacts>;
   /** Names the file declares (variables, parameters, loop binders, functions). */
   declared: Set<string>;
   /** A function value that may write is reachable through a non-call reference. */
   escapes: boolean;
 }
+
+/**
+ * Standard-library modules whose functions cannot write a database (no `?{}`, no
+ * network, no file system; read by hand, S456): their calls are write-free and
+ * their names do not escape. A callback handed to one (`debounce(bump)`) is still a
+ * writer referenced by value — an escape. Every other `scrml:` module (store, http,
+ * fs, auth, oauth, redis, process, host, cron, mcp, router, …) is outside-the-
+ * compilation code: may write.
+ */
+const PURE_STDLIB_MODULES = /^scrml:(math|format|regex|path|crypto|random|data|time)(\/|$)/;
 
 /** Built-in globals whose CALL cannot run scrml code that writes. */
 const PURE_GLOBALS = new Set([
@@ -291,12 +317,15 @@ function scanFile(
   filePath: string | null,
   compilationPaths: Set<string>,
   escapes: { value: boolean },
+  byPath: Map<string, LoopWriteFacts>,
 ): FileScan & { externalImported: Set<string> } {
   const fnBodies = new Map<string, any[]>();
   const imported = new Set<string>();
-  // Names imported from a module whose code is NOT in this compilation (a host `.js`
-  // module, the standard library, a package): its functions are not analysed here.
+  // Names imported from a module whose code is NOT analysed here (a host `.js` module,
+  // a package, a non-read-only standard-library module): may write.
   const externalImported = new Set<string>();
+  const pureImported = new Set<string>();
+  const importLinks = new Map<string, { path: string; name: string }>();
   const declared = new Set<string>();
   const fileScan = emptyScan();
   const stack: any[] = [fileNodes];
@@ -306,17 +335,32 @@ function scanFile(
     if (Array.isArray(cur)) { for (const x of cur) stack.push(x); continue; }
     const kind = cur.kind;
     if (kind === "import-decl" || kind === "use-decl") {
-      const names = new Set<string>();
-      for (const n of Array.isArray(cur.names) ? cur.names : []) if (typeof n === "string") names.add(n);
-      for (const sp of Array.isArray(cur.specifiers) ? cur.specifiers : []) if (sp && typeof sp.local === "string") names.add(sp.local);
+      // local name → the module's exported name (a specifier's `imported`, else itself)
+      const names = new Map<string, string>();
+      for (const n of Array.isArray(cur.names) ? cur.names : []) if (typeof n === "string") names.set(n, n);
+      for (const sp of Array.isArray(cur.specifiers) ? cur.specifiers : []) {
+        if (sp && typeof sp.local === "string") names.set(sp.local, typeof sp.imported === "string" ? sp.imported : sp.local);
+      }
       const head = typeof cur.raw === "string" ? cur.raw.split(/\bfrom\b/)[0] : "";
-      for (const w of head.match(/[A-Za-z_$][\w$]*/g) ?? []) if (!["import", "use", "as", "type", "pinned"].includes(w)) names.add(w);
-      const source = typeof cur.source === "string" ? cur.source : "";
-      const inCompilation = kind === "import-decl" && filePath !== null && /\.scrml$/.test(source) &&
-        compilationPaths.has(resolvePath(dirname(filePath), source));
-      for (const n of names) {
-        imported.add(n);
-        if (!inCompilation) externalImported.add(n);
+      // every other word of the head (a default / namespace binding the structured
+      // fields do not carry) — unlinked, so it is never assumed write-free
+      const unlinked = new Set<string>();
+      for (const w of head.match(/[A-Za-z_$][\w$]*/g) ?? []) {
+        if (!["import", "use", "as", "type", "pinned"].includes(w) && !names.has(w)) unlinked.add(w);
+      }
+      const source = typeof cur.source === "string" ? cur.source : (typeof cur.raw === "string" ? (/['"]([^'"]+)['"]/.exec(cur.raw)?.[1] ?? "") : "");
+      const target = kind === "import-decl" && filePath !== null && /\.scrml$/.test(source) ? resolvePath(dirname(filePath), source) : null;
+      const inCompilation = target !== null && compilationPaths.has(target);
+      const pure = PURE_STDLIB_MODULES.test(source);
+      for (const [local, exported] of names) {
+        imported.add(local);
+        if (pure) pureImported.add(local);
+        else if (inCompilation) importLinks.set(local, { path: target!, name: exported });
+        else externalImported.add(local);
+      }
+      for (const w of unlinked) {
+        imported.add(w);
+        if (pure) pureImported.add(w); else externalImported.add(w);
       }
       continue;
     }
@@ -344,9 +388,13 @@ function scanFile(
     for (const b of bodies) scanNode(b, s, false);
     fnScans.set(name, s);
   }
-  const facts: LoopWriteFacts = { fnMayWrite: new Map(), imported, declared, escapes: false };
+  const facts: LoopWriteFacts = {
+    fnMayWrite: new Map(), imported, unknownImported: externalImported, pureImported, importLinks,
+    byPath, declared, escapes: false,
+  };
   Object.defineProperty(facts, "escapes", { get: () => escapes.value, enumerable: true });
-  for (const [name, s] of fnScans) facts.fnMayWrite.set(name, s.directWrite || imported.has(name));
+  // A local function shadowing an unknown import is not trusted.
+  for (const [name, s] of fnScans) facts.fnMayWrite.set(name, s.directWrite || externalImported.has(name));
   return { fnScans, fileScan, facts, externalImported };
 }
 
@@ -364,8 +412,10 @@ export interface WriteScanFile {
 export function buildCompilationWriteFacts(files: WriteScanFile[]): LoopWriteFacts[] {
   const escapes = { value: false };
   const compilationPaths = new Set(files.map((f) => f.filePath).filter((p): p is string => typeof p === "string").map((p) => resolvePath(p)));
-  const scans = files.map((f) => scanFile(f.nodes, f.filePath, compilationPaths, escapes));
-  // A CALL into a module outside the compilation may return a value carrying a writer
+  const byPath = new Map<string, LoopWriteFacts>();
+  const scans = files.map((f) => scanFile(f.nodes, f.filePath, compilationPaths, escapes, byPath));
+  files.forEach((f, i) => { if (typeof f.filePath === "string") byPath.set(resolvePath(f.filePath), scans[i].facts); });
+  // A CALL into a module whose code is not analysed may return a value carrying a writer
   // (a factory returning `{ add: (x) => … }` — the returned value is never a reference
   // here). Its result can reach any method call, so it counts as an escape.
   for (const { fileScan, externalImported } of scans) {
@@ -386,7 +436,7 @@ export function buildCompilationWriteFacts(files: WriteScanFile[]): LoopWriteFac
     }
     if (!escapes.value) {
       for (const { fileScan, facts } of scans) {
-        const writerRef = [...fileScan.valueRefs].some((n) => facts.imported.has(n) || facts.fnMayWrite.get(n) === true);
+        const writerRef = [...fileScan.valueRefs].some((n) => nameMayWrite(n, facts));
         const lambdaWrites = fileScan.lambdaCalls.some((c) => callMayWrite(c, facts));
         if (writerRef || lambdaWrites) { escapes.value = true; changed = true; break; }
       }
@@ -400,17 +450,35 @@ export function buildLoopWriteFacts(fileNodes: unknown[], filePath: string | nul
   return buildCompilationWriteFacts([{ nodes: fileNodes, filePath }])[0];
 }
 
+/**
+ * May the function a name denotes write? A local function: its fixpoint fact. A
+ * read-only stdlib import: no. An import from a `.scrml` module in the compilation:
+ * that module's fact for the exported name (an export the scan did not find — a
+ * re-export, a const — may write). Any other import: may write. Not a function: no.
+ */
+function nameMayWrite(name: string, facts: LoopWriteFacts): boolean {
+  if (facts.pureImported.has(name)) return false;
+  const link = facts.importLinks.get(name);
+  if (link) {
+    const target = facts.byPath.get(link.path);
+    return !target || target.fnMayWrite.get(link.name) !== false;
+  }
+  if (facts.unknownImported.has(name)) return true;
+  return facts.fnMayWrite.get(name) === true;
+}
+
 /** May this call reach a database write? */
 export function callMayWrite(c: CallFact, facts: LoopWriteFacts): boolean {
   switch (c.kind) {
     case "bare":
       if (c.name.startsWith("@")) return true;
-      if (facts.imported.has(c.name)) return true;
+      if (facts.imported.has(c.name)) return nameMayWrite(c.name, facts);
       if (facts.fnMayWrite.has(c.name)) return facts.fnMayWrite.get(c.name) === true;
       return !PURE_GLOBALS.has(c.name);
     case "new":
       return !(c.name !== null && PURE_CTORS.has(c.name));
     case "member":
+      if (c.root !== null && facts.pureImported.has(c.root)) return false;
       if (c.root !== null && facts.imported.has(c.root)) return true;
       if (c.root !== null && PURE_NAMESPACES.has(c.root)) return false;
       if (c.root !== null && !c.root.startsWith("@") && !facts.declared.has(c.root)) return true;
