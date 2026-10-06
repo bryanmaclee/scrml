@@ -89,3 +89,18 @@ exclusions — client fns only; a guard is conservatively excluded).
 | (11) hoisted loop (new) | none,none / throws | hello,none / none,none(arm) |
 | top-level W-CG-001 (new) | 1→0 | 1 = 1 |
 | yield (new) | `let r = yield <raw>` | attempt + `yield r` |
+
+## Evidence — whole-corpus emit differential (write:true) + conformance
+`scripts/corpus-emit-differential.ts` base = `git archive 61f4b8e5b` (+ the 5 new conformance cases copied in so both
+sides enumerate the same 2367 sources) vs head working tree. Verdict line says INCOMPARABLE only because the archive side
+has no git revision (same as the R11 run). Enumeration 2367 = 2367; compile outcome 1425 ok both; syntax delta 0/0;
+bare server-fn sites 212 = 212.
+- Diagnostic-code changes: 2 sources, both NEW cases (fn/sql-access-handled-reject gains E-FN-001; sql-handled-split-write-rt
+  loses E-RI-002) — the fixes.
+- 244 differing artifacts: 236 differ ONLY by the compiler-root path (`_scrml_project_root`; normalized → byte-identical);
+  2 = host-import relative path (module/e-import-003, e-import-008 client.js); 6 = the 4 new runtime cases' own artifacts.
+  ZERO other corpus artifacts changed — every R11-rewritten site in the corpus emits byte-identically (expected: the R11
+  rule's gate kept every site whose impl#1 codes/batching a handled form changed, i.e. every defect-triggering shape, LISTED).
+- Execution sample: 30 runtime conformance cases holding R11 handled reads (`!{ _ :> not }` / `!{ _ :> [] }`) — PASS on base
+  AND head (identical success-path state). Full conformance: base 1283 pass + 50 xfail + 5 FAIL (the 5 new cases) →
+  head 1288 pass + 50 xfail; every other case identical.
