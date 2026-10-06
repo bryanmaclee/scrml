@@ -146,3 +146,22 @@ Merged origin/main (cfa9c6343; FACTS / gap-counts regenerated, not side-taken). 
   variant → E-FOREIGN-007; gap-2 small → `out=its`.
 - Corpus differential cfa9c6343 → 53fab7113: 11770 compared, 11494 identical + 276 path-only, 0 real;
   compile-failure set identical; 0 diagnostic changes; syntax 75 → 75.
+
+## U7 — review round 2 (S239 re-review of 32451a3ef: LAND-WITH-NITS, one MED fixed)
+
+- MED (confirmed by reviewer in happy-dom): round 1 lowered a quoted `onclick="hit('${it.name}')"`
+  in an `<each>` row to `setAttribute("onclick", \`hit('${it.name}')\`)` — row data became
+  executable. Now: quoted `on*` + `${…}` in an `<each>` row → E-CG-003 (injection sink; message
+  steers to `onclick=hit(it.name)` / `onclick=${() => hit(it.name)}`). Quoted `on*` WITHOUT `${}`
+  stays static. base(32451a3ef)/head: injection repro exit 0 + interpolated setAttribute → exit 1
+  E-CG-003, no setAttribute; plain `onclick="hit(0)"` row → static `setAttribute("onclick","hit(0)")`
+  on both.
+- Corpus measured by COMPILING (full capture at 32451a3ef, 2401 sources): quoted on* with `${}` —
+  each rows 0, top level 0 (0 `template-attr on*` emissions, 0 `data-scrml-attr-tpl-on*`, 0 static
+  quoted `on*` in any emitted HTML).
+- Filed (not fixed): g-quoted-event-attribute-interpolates-row-data-injection-s456 (MED, needs a
+  ruling) — §5.2 rule 1 quoted, plus the §3 table / §4.18 / §5.5.3 / VP-3 search results.
+- LOW (accepted, fails closed): the slice `{}\n/;/.test(s)` parses as statements (block + regex
+  statement) but has no top-level `;` / `return`, so §23.2.4a reads it as a single expression;
+  `return ({}\n/;/…)` does not build → E-FOREIGN-007 with the "sequence of statements" message.
+  On bb840edf5 it was a silent `undefined`.

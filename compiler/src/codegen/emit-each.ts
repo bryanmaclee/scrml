@@ -2721,6 +2721,25 @@ function renderTemplateAttrToJs(
     // the attr re-evaluates on reconcile, matching the interpolation/text paths.
     const sv = String(val.value ?? "");
     const tpl = buildEachAttrTemplate(sv, iterVarName);
+    // A QUOTED event attribute whose text interpolates `${…}` (`onclick="hit('${it.name}')"`)
+    // would become JavaScript built from ROW DATA — a row value `x');…;('` runs on click. Rows
+    // are where untrusted data lives, so this is REFUSED, fail closed (s456 review round 2).
+    // A quoted event attribute WITHOUT `${…}` stays a static string (§5.2 rule 1). The same
+    // interpolation outside `<each>` is a pre-existing sink awaiting a ruling:
+    // g-quoted-event-attribute-interpolates-row-data-injection-s456.
+    if (tpl !== null && eventNameForAttr(aName) !== null) {
+      recordRefusedLowering(new CGError(
+        "E-CG-003",
+        `E-CG-003: the quoted \`${aName}="…"\` attribute inside an \`<each>\` row interpolates ` +
+        `\`\${…}\` into event-handler text — JavaScript built from interpolated row text is an ` +
+        `injection sink (a row value can close the string and run code on the event). Use the ` +
+        `unquoted call form \`${aName}=hit(it.name)\` or an expression handler ` +
+        `\`${aName}=\${() => hit(it.name)}\`, which pass the row value as data (§5.2.1, §5.2.3).`,
+        (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+      ), attr);
+      lines.push(`${indent}/* E-CG-003: interpolated quoted "${aName}" attribute refused (injection sink) */`);
+      return;
+    }
     if (tpl !== null) {
       for (const _l of maybeWrapEachPerItemEffect(
         [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${tpl});`], iterVarName, indent,

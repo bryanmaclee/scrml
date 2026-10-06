@@ -31,10 +31,35 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 238 | 6 |
-| MED | 516 | 4 |
+| MED | 517 | 4 |
 | LOW | 288 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-quoted-event-attribute-interpolates-row-data-injection-s456 — a QUOTED `on*` attribute containing `${…}` outside `<each>` (`<button onclick="hit('${@items[0].name}')">`) is compiled to `setAttribute("onclick", \`hit('${…}')\`)`: event-handler JavaScript built from interpolated data — a value `x');globalThis.__pwn=1;('` runs on click — `NEW S456; MED; open (needs a ruling)`
+
+<!-- @gap id=g-quoted-event-attribute-interpolates-row-data-injection-s456 sev=MED status=open locus=compiler/src/codegen/emit-bindings.ts(top-level `template-attr` path: data-scrml-attr-tpl-<attr> + _scrml_effect setAttribute of a template literal; applies to on* attributes like any other) prov=review:S456-S239-round-2-confirmed-in-happy-dom -->
+
+Pre-existing on `0aef3270d` at top level (not introduced by S456). Found in the S456 review: the first S456 fix
+round lowered a quoted `onclick="…"` in an `<each>` row through the same template path, which extended the sink to
+rows, where untrusted data lives. Round 2 refuses the `<each>`-row form (E-CG-003, fail closed); the top-level form
+is left as it is, pending a ruling. **Corpus (compiled, `32451a3ef`, examples + samples + conformance + stdlib):
+0 quoted `on*` attributes with `${…}` at top level, 0 in `<each>` rows** (0 quoted `on*` attributes of any kind).
+
+**The SPEC tension (needs a ruling).** §5.2 rule 1 (SPEC.md:1791): *"`attr="value"` SHALL produce a static
+attribute with the literal string `value`. The compiler SHALL NOT interpret the string contents as an
+expression."* §5.1's table says the same (*"Quoted string | Static string literal. Value is fixed at compile
+time."*). Sentences that sanction `${…}` inside a quoted attribute, found by searching §4, §5 / §5.2.x, VP-3:
+- §3 context table (SPEC.md:312): attribute value position — *"`="${@x}"` in interpolated string"*.
+- §4.18 (SPEC.md:1626): *"It is the same token in an attribute-value string (`attr="${@x}"` — §5, already
+  template-string-shaped)"*.
+- §5.5.3 (SPEC.md:2405-2410): interpolation in a quoted **`class`** value SHALL compile to a template literal
+  attribute — scoped to `class`.
+- VP-3 is the "attribute-interpolation validation pass" (§38.11.1, SPEC.md:27952) — it refuses `${` in a
+  `<channel name=/topic=>`; no rule for event attributes.
+No sentence found that addresses a quoted EVENT attribute (`on*`) specifically. The ruling needed: is
+`on*="…${x}…"` (a) a static string (§5.2 rule 1 — then `${` is literal text), (b) refused (as in `<each>` rows
+since S456), or (c) interpolated — and if (c), how the value is escaped for a JavaScript-string context.
 
 ### g-foreign-slice-regex-quote-and-in-block-refusal-lost — a quote inside a regex literal in a `_={ … }=` slice hid its `return`; and a codegen refusal one block deep (E-FOREIGN-006/007, E-SQL-006, E-SESSION-VALUE) or E-LIFT-002 anywhere compiled exit 0 with only a `null /* E-… */` placeholder in the artifact — `NEW S456; HIGH; RESOLVED S456`
 

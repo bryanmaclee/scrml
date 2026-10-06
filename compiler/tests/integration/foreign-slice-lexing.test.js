@@ -336,6 +336,23 @@ function main(args: string[]): number {
     expect(client).not.toContain("unsupported event handler shape");
   });
 
+  test("review round 2 — a QUOTED event attribute interpolating row data in an `<each>` row is E-CG-003 (injection sink)", () => {
+    const { result, dist } = compileTo("eachinj", `<program>
+<items> = [{ name: "a" }, { name: "x');globalThis.__pwn=1;('" }]
+<ul>
+  <each in=@items as it>
+    <li><button onclick="go('\${it.name}')">row</button></li>
+  </each>
+</ul>
+</program>
+`);
+    const e = (result.errors ?? []).filter((d) => d.code === "E-CG-003");
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("injection sink");
+    const client = require("fs").readFileSync(join(dist, "eachinj.client.js"), "utf8");
+    expect(client).not.toMatch(/setAttribute\("onclick", `/);
+  });
+
   test("E-SESSION-VALUE in a tool main is reported", () => {
     const { result } = compileTo("sess", `<program kind="tool" lang="js">
 function main(args: string[]): number {
