@@ -2170,12 +2170,30 @@ function eventNameForAttr(aName: string): string | null {
     const ev = aName.slice(3);
     return ev.length > 0 ? ev : null;
   }
-  if (aName.startsWith("on") && aName.length > 2) {
+  if (aName.length > 2 && aName.slice(0, 2).toLowerCase() === "on") {
     // Exclude bind:/class: false hits (they never start with "on") and the
     // bare `on` directive. `onclick` → "click".
-    return aName.slice(2);
+    // s456 review round 3 — HTML attribute names are case-insensitive: `ONCLICK=` / `onClick=`
+    // ARE the click handler. Matched case-insensitively and mapped to the lowercase DOM event
+    // name; before, `ONCLICK=hit(it.name)` was not an event attribute here, so the CALL's result
+    // was written as handler text (`setAttribute("ONCLICK", String(hit(…)))`), and `onClick=`
+    // registered a "Click" listener that never fires.
+    return aName.slice(2).toLowerCase();
   }
   return null;
+}
+
+/**
+ * SAFETY predicate — is `aName` an event-handler attribute as the BROWSER sees it? HTML
+ * attribute names are case-insensitive (`ONCLICK`, `OnClick` and `onclick` are the same live
+ * handler), so this decides case-INSENSITIVELY and fails closed: any `on…` name counts, known
+ * event or not, plus the `on:` directive. Use this, not `eventNameForAttr` (which maps a name to
+ * a listener event and is case-sensitive), wherever a decision guards against building handler
+ * code from data. (s456 review round 3: `ONCLICK="hit('${it.name}')"` bypassed the round-2
+ * refusal.)
+ */
+function isEventHandlerAttrName(aName: string): boolean {
+  return aName.startsWith("on:") || (aName.length > 2 && aName.slice(0, 2).toLowerCase() === "on");
 }
 
 /**
@@ -2727,7 +2745,7 @@ function renderTemplateAttrToJs(
     // A quoted event attribute WITHOUT `${…}` stays a static string (§5.2 rule 1). The same
     // interpolation outside `<each>` is a pre-existing sink awaiting a ruling:
     // g-quoted-event-attribute-interpolates-row-data-injection-s456.
-    if (tpl !== null && eventNameForAttr(aName) !== null) {
+    if (tpl !== null && isEventHandlerAttrName(aName)) {
       recordRefusedLowering(new CGError(
         "E-CG-003",
         `E-CG-003: the quoted \`${aName}="…"\` attribute inside an \`<each>\` row interpolates ` +

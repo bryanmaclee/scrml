@@ -165,3 +165,21 @@ Merged origin/main (cfa9c6343; FACTS / gap-counts regenerated, not side-taken). 
   statement) but has no top-level `;` / `return`, so §23.2.4a reads it as a single expression;
   `return ({}\n/;/…)` does not build → E-FOREIGN-007 with the "sequence of statements" message.
   On bb840edf5 it was a silent `undefined`.
+
+## U8 — review round 3 (PA review of c31a5839c — case bypass)
+
+- `eventNameForAttr` (emit-each.ts) matched `on` case-sensitively: `ONCLICK` / `OnClick` / `oNcLiCk`
+  `="go('${it.name}')"` in an `<each>` row bypassed the round-2 refusal and emitted the interpolated
+  `setAttribute`. Callers of `eventNameForAttr` (all in emit-each.ts `renderTemplateAttrToJs`):
+  (1) the event-handler branch gate (unquoted handler → listener vs. fall-through to setAttribute) —
+  a safety decision too: `ONCLICK=hit(it.name)` wrote the CALL's result as handler text;
+  (2) the round-2 interpolated-quoted refusal gate. Fix: new `isEventHandlerAttrName` (case-
+  insensitive, any `on…` name, fail closed) for gate (2); `eventNameForAttr` matches `on…`
+  case-insensitively and lowercases the DOM event name (gate 1; `onClick=` registered a dead
+  "Click" listener before).
+- head: ONCLICK / OnClick / oNcLiCk quoted+`${}` → 3× E-CG-003; ONCLICK= / onClick= unquoted →
+  `addEventListener("click")`. Top level (unchanged, reported): quoted ONCLICK+`${}` interpolates
+  like lowercase (filed injection gap); unquoted ONCLICK= / onClick= register dead "ONCLICK" /
+  "Click" listeners → filed g-event-attribute-name-case-sensitive-listener-s456 (LOW).
+- Filed g-quoted-url-attribute-javascript-scheme-row-data-s456 (MED, ruling): href/src/action/
+  formaction `javascript:` + `${}` and srcdoc interpolation, each rows AND top level.

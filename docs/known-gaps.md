@@ -31,10 +31,35 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 238 | 6 |
-| MED | 517 | 4 |
-| LOW | 288 | 0 |
+| MED | 518 | 4 |
+| LOW | 289 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-quoted-url-attribute-javascript-scheme-row-data-s456 — a quoted URL-bearing attribute with `${…}` (`<a href="javascript:hit('${it.name}')">`, and `src` / `action` / `formaction`, plus `srcdoc`) is compiled to `setAttribute("href", \`javascript:hit('${…}')\`)`: data interpolated into a URL whose scheme makes it executable — a row value can close the string and run code on click / load — `NEW S456; MED; open (needs a ruling)`
+
+<!-- @gap id=g-quoted-url-attribute-javascript-scheme-row-data-s456 sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs string-literal path, buildEachAttrTemplate)+compiler/src/codegen/emit-bindings.ts(top-level template-attr path) prov=review:S456-PA-executed-on-c31a5839c -->
+
+PA-executed on `c31a5839c`, re-measured in the S456 round-3 fix (one probe file, exit 0, no diagnostic):
+**in an `<each>` row AND at top level**, `href=`, `<iframe src=>`, `<form action=>`, `<button formaction=>` with
+`"javascript:go('${…}')"` all emit `setAttribute("<attr>", \`javascript:go('${…}')\`)`; `<iframe srcdoc="<b>${…}</b>">`
+emits the interpolated HTML document (an HTML-injection sink). Pre-existing; the round-2/3 event-attribute refusal
+does not cover URL attributes. A wholly data-controlled URL (`href="${it.url}"`) carries the same risk when the
+data supplies the scheme. **Ruling needed:** refuse `${…}` interpolation into a URL attribute whose literal text
+starts with a scheme (`javascript:` / `data:` / `vbscript:`), and/or sanitize the scheme of an interpolated URL at
+runtime (allow-list `http:` / `https:` / `mailto:` / relative), and decide `srcdoc` (refuse interpolation, or
+HTML-escape the interpolated values). Same SPEC tension as
+[[g-quoted-event-attribute-interpolates-row-data-injection-s456]] (§5.2 rule 1 vs the quoted-attribute
+interpolation sentences recorded there).
+
+### g-event-attribute-name-case-sensitive-listener-s456 — top-level `ONCLICK=fn()` / `onClick=fn()` registers a `"ONCLICK"` / `"Click"` listener, which never fires (HTML attribute names are case-insensitive; DOM event names are lowercase) — `NEW S456; LOW; open`
+
+<!-- @gap id=g-event-attribute-name-case-sensitive-listener-s456 sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(event name taken from the attribute name verbatim: addEventListener("ONCLICK"), _scrml_Click_handlers) prov=empirical:S456-round-3-probe -->
+
+Found while fixing the round-3 case bypass. Inside an `<each>` row this is fixed (S456: `eventNameForAttr` matches
+`on…` case-insensitively and lowercases the event; `ONCLICK=hit(it.name)` used to write the CALL's result as handler
+text via `setAttribute`). At top level the handler is silently dead. A quoted top-level `ONCLICK="…${…}"`
+interpolates exactly like the lowercase form ([[g-quoted-event-attribute-interpolates-row-data-injection-s456]]).
 
 ### g-quoted-event-attribute-interpolates-row-data-injection-s456 — a QUOTED `on*` attribute containing `${…}` outside `<each>` (`<button onclick="hit('${@items[0].name}')">`) is compiled to `setAttribute("onclick", \`hit('${…}')\`)`: event-handler JavaScript built from interpolated data — a value `x');globalThis.__pwn=1;('` runs on click — `NEW S456; MED; open (needs a ruling)`
 

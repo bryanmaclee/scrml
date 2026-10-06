@@ -336,6 +336,30 @@ function main(args: string[]): number {
     expect(client).not.toContain("unsupported event handler shape");
   });
 
+  test("review round 3 — the refusal is case-insensitive (ONCLICK / OnClick / oNcLiCk), and unquoted ONCLICK= / onClick= wire a `click` listener", () => {
+    const { result, dist } = compileTo("eachcase", `<program>
+<items> = [{ name: "a" }]
+\${ function go(n) { log(n) } }
+<ul>
+  <each in=@items as it>
+    <li>
+      <button ONCLICK="go('\${it.name}')">a</button>
+      <button OnClick="go('\${it.name}')">b</button>
+      <button oNcLiCk="go('\${it.name}')">c</button>
+      <button ONCLICK=go(it.name)>d</button>
+      <button onClick=go(it.name)>e</button>
+    </li>
+  </each>
+</ul>
+</program>
+`);
+    expect((result.errors ?? []).filter((d) => d.code === "E-CG-003").length).toBe(3);
+    const client = require("fs").readFileSync(join(dist, "eachcase.client.js"), "utf8");
+    expect(client).not.toMatch(/_scrml_el_\d+\.setAttribute\("on/i);
+    expect((client.match(/_scrml_el_\d+\.addEventListener\("click"/g) ?? []).length).toBe(2);
+    expect(client).not.toMatch(/addEventListener\("(CLICK|Click)"/);
+  });
+
   test("review round 2 — a QUOTED event attribute interpolating row data in an `<each>` row is E-CG-003 (injection sink)", () => {
     const { result, dist } = compileTo("eachinj", `<program>
 <items> = [{ name: "a" }, { name: "x');globalThis.__pwn=1;('" }]
