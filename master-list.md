@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `d068cc145` — wrap(s455): the tenant schema boundary moved to allow-lists and one SQL subset, R11 migrated reads-only, the foreign slice sealed, #1305's lowering made whole, N+1 hoisting fail-closed (#1326) — **pushed**
 - `babb40672` — wrap(s454): three fail-open floors closed, U1b built end to end, the Types gate made blocking — and the hand-off rotated (509 KB → 43 KB) (#1306) — **pushed**
 - `859f60f79` — wrap(s453): addendum — the routed family is CLOSED by S454, and the two "this box" hazards are fixed (#1300) — **pushed**
 - `b35593879` — wrap(s452): one pattern-arm spelling across the language, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary (#1294) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `b490f3b75` — wrap(s449): 14 PRs landed under an S239 review each — <effect>, §6.15, opener keywords, the §55 gate in the bootstrap; the @session identity hole, protect r9, lost acknowledged writes fixed in impl#1; the bootstrap's honest number is 19 (#1252) — **pushed**
 - `fffc94b75` — wrap(s450-peter): bryan's "stamp all" built end to end — seven landings, two holes found live on main, aM pin bumped behind a deploy guard (#1245) — **pushed**
 - `2d6d8cd43` — wrap(s447): `when` became <effect> that cannot write state, the validity surface and submit gate, keywords outside the opener — and a possibly-accidental "your recs" caught before it shipped (#1231) — **pushed**
-- `4154bf006` — wrap(s448): took the reboot-killed S446-xps lane, landed the bootstrap codec, and found where a million /tmp files came from (#1224) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
