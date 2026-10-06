@@ -9,3 +9,6 @@
   recognizer emit-server's engagement gate uses); `scrml build` prints a plain report line.
   A db-authoritative build that reaches the report is Postgres by construction (E-DBAUTH-SQLITE
   hard-fails any other resolved driver per file in codegen/index.ts).
+- DONE 857965471: api.js dbAuthoritative + build.js pgSchemaCreateRequirementLines + unit test (10 pass). Pre-commit 31311/0.
+- FACTS regenerated (+1 test file, +53 src lines).
+- OWED to PA: SPEC §14.8.11 parenthetical edit (bullet lives on origin/docs/s455-overload-revoke).
