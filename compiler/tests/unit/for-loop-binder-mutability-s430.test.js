@@ -241,7 +241,7 @@ describe("(a) a non-rendering loop's `let` binder write is an ASSIGNMENT — com
     ].join("\n"));
     expect(r.fatal).toEqual([]);
     const js = r.serverJs;
-    expect(js).toMatch(/for \(let x of ids\) \{/);
+    expect(js).toMatch(/for \(let x of _scrml_batch_items_\d+\) \{/);
     expect(js).not.toContain("const x = row");
     // Execute the handler body with a stubbed request + SQL: the rows come back
     // keyed by id, the loop reassigns its binder to each row.
@@ -253,7 +253,15 @@ describe("(a) a non-rendering loop's `let` binder write is an ASSIGNMENT — com
       `return (async () => { ${iife})(); return _scrml_result; })();`,
     );
     const req = { json: async () => ({ ids: [{ id: 1 }, { id: 2 }] }) };
-    const sql = { unsafe: async (_q, keys) => keys.map((id) => ({ id, name: "n" + id })) };
+    // The stub answers as the driver would: the pre-fetch projects the key column
+    // as `id AS __scrml_batch_key` (S455, §8.10.4), so each row carries it; the
+    // loop strips it, so the rows it sees are exactly `{ id, name }`.
+    const sql = {
+      unsafe: async (q, keys) => {
+        expect(q).toContain("SELECT id, name, id AS __scrml_batch_key FROM users");
+        return keys.map((id) => ({ id, name: "n" + id, __scrml_batch_key: id }));
+      },
+    };
     expect(await run(req, sql)).toEqual([{ id: 1, name: "n1" }, { id: 2, name: "n2" }]);
   });
 

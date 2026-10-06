@@ -1,0 +1,101 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <inIf> = "init"
+    <inElse> = "init"
+    <elseIf> = "init"
+    <nestedIf> = "init"
+    <innerLoop> = "init"
+    <allInIf> = "init"
+    // §8.10 Tier 2: the loop body's single keyed `?{}` read is rewritten to one
+    // `WHERE IN (…)` pre-fetch + a per-iteration Map lookup WHEREVER it sits in the
+    // body — inside an `if`, an `else`, an `else if`, a nested `if`, an inner loop.
+    function inIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                out.push(row is not ? "none" : row.body)
+            } else {
+                out.push("skip")
+            }
+        }
+        return out.join(",")
+    }
+    function inElse(items) {
+        let out = []
+        for (const it of items) {
+            if (it.off) {
+                out.push("skip")
+            } else {
+                const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                out.push(row is not ? "none" : row.body)
+            }
+        }
+        return out.join(",")
+    }
+    function elseIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.off) {
+                out.push("skip")
+            } else if (it.on) {
+                const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                out.push(row is not ? "none" : row.body)
+            }
+        }
+        return out.join(",")
+    }
+    function nestedIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                if (it.id > 0) {
+                    const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                    out.push(row is not ? "none" : row.body)
+                }
+            }
+        }
+        return out.join(",")
+    }
+    function innerLoop(items) {
+        let out = []
+        for (const it of items) {
+            for (const k of [1]) {
+                const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                out.push(row is not ? "none" : row.body)
+            }
+        }
+        return out.join(",")
+    }
+    function allInIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                const rows = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.all()
+                out.push(rows.length == 0 ? "none" : "hello")
+            }
+        }
+        return out.join(",")
+    }
+    function go() {
+        const items = [{ id: 7, on: true, off: false }, { id: 8, on: true, off: false }, { id: 9, on: false, off: true }]
+        @inIf = inIf(items) !{ _ :> "err" }
+        @inElse = inElse(items) !{ _ :> "err" }
+        @elseIf = elseIf(items) !{ _ :> "err" }
+        @nestedIf = nestedIf(items) !{ _ :> "err" }
+        @innerLoop = innerLoop(items) !{ _ :> "err" }
+        @allInIf = allInIf(items) !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="inIf">${@inIf}</p>
+    <p id="inElse">${@inElse}</p>
+    <p id="elseIf">${@elseIf}</p>
+    <p id="nestedIf">${@nestedIf}</p>
+    <p id="innerLoop">${@innerLoop}</p>
+    <p id="allInIf">${@allInIf}</p>
+</program>

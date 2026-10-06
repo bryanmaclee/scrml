@@ -1,0 +1,46 @@
+{
+  "id": "server-db-sql-hoisted-loop-allow-list-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): only an ALLOW-LISTED query shape is hoisted (hoist-sql-shape.ts). Each cell equals the same function compiled with `.nobatch()` (per-iteration queries). Pre-fix (0e253650, S239 review): `count(*)` → \"3,none,none\" (one count for ALL keys under the first), `max()` → \"none,9,none\", `LIMIT 1` → \"hello,none,none\", `OR kind = 'y'` → \"2,1,0\", `UNION` and `OR id = ${it.alt}` threw (a second `${}` left raw in the `.unsafe` SQL), a `FROM` inside a string literal in the SELECT list split it → \"none,none,none\", a column named `__scrml_batch_key` collided with the key alias, `items.splice(0, 1)` was evaluated twice (the loop ran over nothing), and two iterations with the same key shared one row object (`hello!!`).",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings.\" A query whose IN-rewrite is not the per-key answer is not a §8.10 Tier 2 candidate; it keeps its per-iteration query.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello", "owner": 1, "kind": "x" },
+        { "id": 8, "body": "bye", "owner": 1, "kind": "y" },
+        { "id": 9, "body": "zed", "owner": 2, "kind": "x" }
+      ],
+      "tags": [
+        { "id": 1, "note_id": 7, "label": "b" },
+        { "id": 2, "note_id": 7, "label": "a" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "strlit": "hello,bye,none",
+      "count": "2,1,0",
+      "max": "8,9,null",
+      "groupby": "1,1,0",
+      "limit": "hello,zed,none",
+      "orkind": "2,2,1",
+      "union": "2,2",
+      "secondinterp": "2,1",
+      "aliascollide": "hello,none",
+      "splice": "hello",
+      "dupkey": "hello!,hello!",
+      "dupkeyall": "hello!,hello!",
+      "join": "hello/a,none"
+    },
+    "domAnchored": [
+      { "selector": "#count", "text": "2,1,0" },
+      { "selector": "#dupkey", "text": "hello!,hello!" }
+    ]
+  }
+}

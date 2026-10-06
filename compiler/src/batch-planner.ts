@@ -25,6 +25,8 @@
  * Idempotency: re-running on a BatchPlan-annotated input is a no-op.
  */
 
+import { classifyHoistableQuery } from "./hoist-sql-shape.ts";
+
 // ---------------------------------------------------------------------------
 // Public types — mirrored from SPEC.md §8.9 / §8.10 / §8.11 and
 // PIPELINE.md Stage 7.5.
@@ -67,6 +69,11 @@ export interface LoopHoist {
    * bun:sqlite spread args at emit time (`.all(...keys)`).
    */
   inSqlTemplate: string;
+  /**
+   * The alias `inSqlTemplate` projects the key column under (`HOIST_KEY_ALIAS`).
+   * The pre-fetch keys its Map on it and strips it from each row.
+   */
+  keyAlias: string;
   terminator: "get" | "all";
   rowCacheColumns: Set<string>;
 }
@@ -384,8 +391,10 @@ function extractKeyColumn(
 ): { keyColumn: string; keyField: string } | { reason: string } {
   const trimmed = sqlBody.trim();
   // Reject tuple WHERE (`col1 = ${x.a} AND col2 = ${x.b}`) — out of v1 scope.
+  // An AND predicate with no `${}` (`AND t.label <> 'zz'`) is not a tuple; the
+  // allow-list (hoist-sql-shape.ts) decides it.
   const tupleRe = new RegExp(
-    `WHERE\\s+[\\w.]+\\s*=\\s*\\$\\{\\s*${loopVar}\\.\\w+\\s*\\}\\s+AND\\s+`,
+    `WHERE\\s+[\\w.]+\\s*=\\s*\\$\\{\\s*${loopVar}\\.\\w+\\s*\\}\\s+AND\\s+[\\s\\S]*\\$\\{`,
     "i",
   );
   if (tupleRe.test(trimmed)) {
@@ -480,6 +489,45 @@ function findProtectOverlap(
   return [...overlap].sort();
 }
 
+/** The reserved alias the §8.10 pre-fetch projects the key column under. */
+export const HOIST_KEY_ALIAS = "__scrml_batch_key";
+
+/**
+ * §14.8.9 × §8.10 — why a read over `tables` may not be hoisted, or null.
+ * `protectAnalysis` absent = a direct planner call without the PA stage (unit
+ * seam); the compile pipeline always supplies it.
+ */
+function protectBlocksHoist(tables: string[], protectAnalysis: unknown): string | null {
+  if (!protectAnalysis || typeof protectAnalysis !== "object") return null;
+  const pa = protectAnalysis as {
+    views?: Map<unknown, { tables?: Map<string, { protectedFields?: Set<string> }> }>;
+    declaredTables?: Set<string>;
+  };
+  // No protected column anywhere in the compile: the §14.8.9 floor strips
+  // nothing, so there is nothing for the pre-fetch to bypass.
+  let anyProtected = false;
+  for (const view of pa.views?.values() ?? []) {
+    for (const tv of view?.tables?.values() ?? []) {
+      if (tv?.protectedFields && tv.protectedFields.size > 0) anyProtected = true;
+    }
+  }
+  if (!anyProtected) return null;
+  for (const t of tables) {
+    const lower = t.toLowerCase();
+    if (pa.declaredTables && !pa.declaredTables.has(lower)) {
+      return `table \`${t}\` is not a declared table, so its protected columns are unknown (§14.8.9) — not hoisted`;
+    }
+    for (const view of pa.views?.values() ?? []) {
+      for (const [name, tv] of view?.tables ?? []) {
+        if (name.toLowerCase() === lower && tv?.protectedFields && tv.protectedFields.size > 0) {
+          return `table \`${t}\` has protected column(s); the hoisted pre-fetch would bypass the §14.8.9 row strip — not hoisted`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function analyzeForLoop(
   forStmt: Record<string, unknown>,
   plan: BatchPlan,
@@ -525,19 +573,18 @@ function analyzeForLoop(
     return;
   }
 
-  // Build the IN-form SQL template by substituting the single equality
-  // predicate with `WHERE <keyColumn> IN (${__KEYS__})`. We use a distinct
-  // placeholder token rather than a real `${}` so the SQL rewriter at CG
-  // time won't try to turn it into a bound param — the emit step replaces
-  // the placeholder with a spread-rendered IN-list.
-  const keyEqPattern = new RegExp(
-    `WHERE\\s+${keyResult.keyColumn}\\s*=\\s*\\$\\{\\s*${loopVar}\\.${keyResult.keyField}\\s*\\}`,
-    "i",
-  );
-  const inSqlTemplate = site.body.replace(
-    keyEqPattern,
-    `WHERE ${keyResult.keyColumn} IN (__SCRML_BATCH_IN__)`,
-  );
+  // §8.10.1 / §8.10.3 — the ALLOW-LIST (hoist-sql-shape.ts): only a query whose
+  // `WHERE <key> IN (…)` pre-fetch, grouped by key, IS the per-key answer. The
+  // classifier also builds the pre-fetch: §8.10.4 — the key column is projected
+  // under a reserved alias whatever the SELECT list says (`SELECT body`,
+  // `id AS note_id`, `n.id` all left the rows without a bare key, so every lookup
+  // missed); the emitter keys on the alias and strips it.
+  const shape = classifyHoistableQuery(site.body, loopVar, HOIST_KEY_ALIAS);
+  if ("reason" in shape) {
+    emitNearMiss(plan, loopId, shape.reason, forStmt.span);
+    return;
+  }
+  const inSqlTemplate = shape.inSqlTemplate;
 
   // §8.10.7: populate rowCacheColumns from the SELECT column list, then
   // cross-reference against protectedFields on the target table. Overlap
@@ -560,16 +607,27 @@ function analyzeForLoop(
     });
     return;
   }
+  // §14.8.9 — the per-iteration query strips protected columns from its rows at
+  // the egress floor; the hoisted pre-fetch does not pass through that strip, so an
+  // aliased / computed protected column (`secret AS s`, `lower(secret)`) reached the
+  // client. Fail closed: a read over a table with ANY protected column, or one the
+  // protect analysis does not know, is not hoisted.
+  const protectReason = protectBlocksHoist(shape.tables, protectAnalysis);
+  if (protectReason !== null) {
+    emitNearMiss(plan, loopId, protectReason, forStmt.span);
+    return;
+  }
 
   plan.loopHoists.push({
     loopNode: loopId,
     queryNode: `${String(loopId)}#query`,
-    keyColumn: keyResult.keyColumn,
-    keyExpr: `${loopVar}.${keyResult.keyField}`,
+    keyColumn: shape.keyColumn,
+    keyExpr: `${loopVar}.${shape.keyField}`,
     loopVar,
-    keyField: keyResult.keyField,
+    keyField: shape.keyField,
     sqlTemplate: site.body,
     inSqlTemplate,
+    keyAlias: HOIST_KEY_ALIAS,
     terminator: site.terminator as "get" | "all",
     rowCacheColumns,
   });
