@@ -104,3 +104,13 @@ bare server-fn sites 212 = 212.
 - Execution sample: 30 runtime conformance cases holding R11 handled reads (`!{ _ :> not }` / `!{ _ :> [] }`) — PASS on base
   AND head (identical success-path state). Full conformance: base 1283 pass + 50 xfail + 5 FAIL (the 5 new cases) →
   head 1288 pass + 50 xfail; every other case identical.
+
+## Review F1 (S239 on 94265ab3) — fixed
+`guardArmsAreValues` scanned arm TEXT (Rule 7; fail-open: `!{ _ :> fallback }` with a client local, and `!{ _ :> mark() }`
+with a transitive cell write, were split and ReferenceError'd on the server; FP on `"mail admin@x.io"`). Now an AST
+allow-list (`armExprIsPureValue`): lit (no live template), ident ∈ {fn params, arm binding}, array/object/unary/binary/
+ternary/member/index of those; the empty block `{ }`; anything else (call, @cell, client local, block statements, fail,
+lambda, assign) → refused, E-RI-002 naming the arm. Both repros → E-RI-002; literal-with-@ and param arms admitted and
+correct at runtime (new conformance server-db/sql-handled-cell-write-arm-values-rt; 4 unit tests). Re-ran: unit file 18/18,
+conformance 1289 + 50 xfail, differential = same as before plus the new case's own artifacts (236 path-only, 2 host-import
+path, 8 = the new cases).
