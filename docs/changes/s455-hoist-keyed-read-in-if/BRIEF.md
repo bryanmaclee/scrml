@@ -1,0 +1,18 @@
+# BRIEF — s455-hoist-keyed-read-in-if (archived verbatim)
+
+start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ac0b2605613446744
+
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (path-discipline incidents to date are non-zero).
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- ; `git rev-parse --show-toplevel` == pwd; clean tree. `git fetch origin main`; `git merge-base HEAD origin/main` MUST equal `git rev-parse origin/main` (else `git merge --ff-only origin/main`; if that fails STOP). Expected base ≥ ebd4be2d4 (#1322).
+2. Every Read/Write/Edit uses an ABSOLUTE path under YOUR worktree root; never write outside it; never `cd` into the main checkout.
+3. NEVER `git stash`; NEVER `pkill -f`; never `git -c core.hooksPath=…`.
+4. `bun install`, then `bun run pretest` from your worktree cwd. Scratch under "$WT/.tmp/" (delete at end). TMPDIR, if set → ~/.cache/scrml-agent-tmp/s455-hoist.
+5. First commit: archive THIS ENTIRE PROMPT verbatim as docs/changes/s455-hoist-keyed-read-in-if/BRIEF.md (body `start at $(pwd)`); progress.md append-only, commit after each unit. Code + tests in ONE commit. Never --no-verify. Pre-commit timeout 300000. Types gate BLOCKING; s34-census / regen-spec-index / facts --check before pushing. Never put a status-bearing command behind a pipe.
+6. Push as `fix/s455-hoist-keyed-read-in-if` (normal push). Do NOT open/merge a PR.
+
+MAPS — REQUIRED FIRST READ: .claude/maps/primary.map.md (stamp f38697900, stale — #1305 and #1322 landed since: #1322 made every consumer see a handled `?{}` via `handledSqlOfGuardedNode` in codegen/sql-attempt.ts, and fixed the §8.10 hoist for a keyed read DIRECTLY in the loop body; read docs/changes/s455-handled-sql-lowering-defects/progress.md). Report load-bearing.
+
+TASK — impl#1, under the S435 freeze exception bryan granted S455 ("go" — user-voice-scrml.md §S455 last entry; PA reading recorded there). READ SPEC §8.10 IN FULL (N+1 loop hoisting — line ~9255) and quote the governing sentences in progress.md.
+DEFECT (pre-existing; reviewer-EXECUTED at 94265ab3 on real bun:sqlite, same on base): a §8.10-hoisted keyed read nested inside an `if` in the loop body emits `const row = null; // client cannot evaluate` → every row reads `not` on SUCCESS (unhandled and handled; the handled variant also throws past its arm). REPRODUCE FIRST (row present / absent / forced failure), record SHA + emitted fragment. Locus UNKNOWN (PA: the hoist pass that rewrites the loop-body keyed read — find where #1322 fixed the direct-body case and trace why a nested position falls back to `null`). FIX THE ROOT: the hoisted lookup must apply at ANY depth inside the loop body (if/else, nested blocks, ternaries) or, where the hoist cannot prove correctness, the loop must NOT be hoisted (fall back to per-iteration queries) — never emit `null`. Also check the reviewer's related items and fix if same root, else list with locus: §8.10 hoist does not project the key column (`SELECT body … WHERE id=` never matches); a handled reassignment `row = ?{…}.get() !{…}` inside a hoisted loop → E-CODEGEN-INVALID-LOGIC.
+EVIDENCE: base vs head runtime for each shape (direct, inside if, inside else, nested if, handled + unhandled); whole-corpus impl#1 emit differential (write:true), every changed artifact explained; conformance green + new runtime cases pinning the nested shapes. Direction: semantics-changed toward §8.10 (a miscompile fix) — measure which corpus files change.
+FINAL REPORT (<400 words): FINAL_SHA; repro table base/head; traced root; the fix; differential; tests; known-gaps text; maps load-bearing?; `git status` clean.
