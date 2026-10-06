@@ -1,0 +1,16 @@
+{
+  "id": "sql-query-not-readable-neg",
+  "description": "§8.1.2 (S456 fix round F2/F4) — an unbackticked `?{ … }` holding two statements in an `if` condition. The expression parser leaves the condition as unparsed text, and codegen's text path lowers only the backtick form `?{`…`}`; on main d2bc3a065 it was emitted unrewritten (invalid JavaScript) with no diagnostic. A `?{` in a position no check can read is refused at compile.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-one-statement.test.js",
+  "spec": "§8.1.2",
+  "rationale": "§8.1.2: a `?{}` in expression text the compiler holds unparsed that the compiler does not lower (no backtick template, a backtick inside the body, or no `}` right after the closing backtick) is E-SQL-QUERY-NOT-READABLE — fail closed at compile, never a runtime-only failure.",
+  "expect": {
+    "codes": [
+      "E-SQL-QUERY-NOT-READABLE"
+    ],
+    "codeCounts": {
+      "E-SQL-QUERY-NOT-READABLE": 1
+    }
+  }
+}

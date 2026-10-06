@@ -148,6 +148,53 @@ describe("E-SQL-MULTIPLE-STATEMENTS — compile (the S239 r5 shapes)", () => {
   });
 });
 
+describe("S456 fix round F2/F4 — `?{}` in expression text the parser held unparsed is read too", () => {
+  // Every position below compiled CLEAN on main d2bc3a065 (and, on a0348bd4f, emitted only the
+  // runtime throw — a clean program that threw on every call). The SQL lives in an
+  // `escape-hatch` / template-literal `raw`, which codegen lowers through its text path.
+  const fnApp = (stmt) => `<program db="./app.db">
+    \${
+        function a() {
+            ${stmt}
+            return 0
+        }
+    }
+    <button onclick=\${ a() }>s</button>
+</program>
+`;
+  const POSITIONS = {
+    "if condition": `if (?{${BT}SELECT 1; SELECT 2${BT}}.get()) { return 1 }`,
+    "while condition": `while (?{${BT}SELECT 3; SELECT 4${BT}}.get()) { return 2 }`,
+    "template-literal slot": `const s = ${BT}x \${?{${BT}SELECT 5; SELECT 6${BT}}.run()} y${BT}`,
+    "match scrutinee": `const r = match ?{${BT}SELECT 1; SELECT 2${BT}}.get() {\n ::Ok(row) :> 1\n _ :> 2\n }`,
+    "handled condition": `if (?{${BT}SELECT 1; SELECT 2${BT}}.get() !{ _ :> not }) { return 1 }`,
+    "call argument": `log(?{${BT}SELECT 1; SELECT 2${BT}}.all())`,
+  };
+  for (const [name, stmt] of Object.entries(POSITIONS)) {
+    test(`${name}: E-SQL-MULTIPLE-STATEMENTS at compile`, () => {
+      expect(compile(fnApp(stmt)).codes).toEqual([CODE]);
+    });
+  }
+  test("the §14.8.10 allow-list reads the same positions: `${?{`SET ROLE none`}.run()}` is not admitted", () => {
+    expect(compile(fnApp(`const s = ${BT}x \${?{${BT}SET ROLE none${BT}}.run()} y${BT}`)).codes).toEqual(["E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"]);
+  });
+  test("F4: an unbackticked `?{ … }` in a condition (emitted unrewritten — invalid JS — on main) is E-SQL-QUERY-NOT-READABLE", () => {
+    const r = compile(fnApp(`if (?{ SELECT 7; select 8 }.acrossTenants()) { return 3 }`));
+    expect(r.codes).toEqual(["E-SQL-QUERY-NOT-READABLE"]);
+    expect(r.errors[0].message).toContain("bind it to a local first");
+    // A single unbackticked statement in a condition is parsed structurally and lowered (control).
+    const ok = compile(fnApp(`if (?{ SELECT 7 }.get()) { return 3 }`));
+    expect(ok.codes).toEqual([]);
+    expect(ok.serverJs).toContain("_scrml_sql`SELECT 7`");
+  });
+  test("controls: one statement in each position compiles clean", () => {
+    expect(compile(fnApp(`if (?{${BT}SELECT 1${BT}}.get()) { return 1 }`)).codes).toEqual([]);
+    expect(compile(fnApp(`const s = ${BT}x \${?{${BT}SELECT 5;${BT}}.run()} y${BT}`)).codes).toEqual([]);
+    // `?{` inside a JS string (in a condition held as text) is data, not a query.
+    expect(compile(fnApp(`if (?{${BT}SELECT 1${BT}}.get() && "?{ x; y }" != "") { return 1 }`)).codes).toEqual([]);
+  });
+});
+
 describe("codegen defence in depth — a multi-statement body never reaches the driver", () => {
   const MULTI = "INSERT INTO log (msg) VALUES ('a'); INSERT INTO log (msg) VALUES ('b')";
   test("sqlHoldsOneStatement: the token walk, and a conservative reading outside the lexical subset", () => {

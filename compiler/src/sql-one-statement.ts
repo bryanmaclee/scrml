@@ -24,10 +24,11 @@
  */
 
 import { programStatementCount } from "./schema-differ.js";
+import { scanExpressionTextForSql } from "./sql-in-expression-text.ts";
 
 /** One `E-SQL-MULTIPLE-STATEMENTS` diagnostic (the TENANT-SCHEMA stage's shape). */
 export interface MultipleStatementsDiagnostic {
-  code: "E-SQL-MULTIPLE-STATEMENTS";
+  code: "E-SQL-MULTIPLE-STATEMENTS" | "E-SQL-QUERY-NOT-READABLE";
   message: string;
   span: unknown;
   severity: "error";
@@ -46,8 +47,22 @@ export function sqlRefBody(raw: string): string {
  * expression-position `sql-ref`'s `raw`, OUTSIDE every `<schema>` (a `<schema>` body is the
  * declaration itself — never a program-body statement).
  */
-export function forEachProgramBodySql(fileAST: unknown, read: (sql: string, span: unknown) => void): void {
+export function forEachProgramBodySql(
+  fileAST: unknown,
+  read: (sql: string, span: unknown) => void,
+  unreadable?: (why: string, span: unknown) => void,
+): void {
   const seen = new WeakSet<object>();
+  // S456 fix round F2 — a `?{}` inside expression text the parser held unparsed (an
+  // `escape-hatch` condition, a template literal, a raw `match` arm) is lowered by codegen's
+  // TEXT path; read exactly the body that path sends (sql-in-expression-text.ts), and report a
+  // `?{` it does not lower so the compile refuses it instead of emitting an unread query.
+  const scanText = (text: string, span: unknown): void => {
+    scanExpressionTextForSql(text, {
+      sql: (body) => read(body, span),
+      unreadable: (why) => { if (unreadable) unreadable(why, span); },
+    });
+  };
   const visit = (v: unknown, depth: number): void => {
     if (v === null || typeof v !== "object" || depth > 200 || seen.has(v as object)) return;
     seen.add(v as object);
@@ -56,6 +71,11 @@ export function forEachProgramBodySql(fileAST: unknown, read: (sql: string, span
     if (n.kind === "state" && n.stateType === "schema") return;
     if (n.kind === "sql" && typeof n.query === "string") read(n.query, n.span);
     else if (n.kind === "sql-ref" && typeof n.raw === "string") read(sqlRefBody(n.raw), n.span);
+    else if (n.kind === "escape-hatch" && typeof n.raw === "string") scanText(n.raw, n.span);
+    else if (n.kind === "lit" && n.litType === "template" && typeof n.raw === "string") scanText(n.raw, n.span);
+    else if (n.kind === "match-expr" && Array.isArray(n.rawArms)) {
+      for (const arm of n.rawArms) if (typeof arm === "string") scanText(arm, n.span);
+    } else if (n.kind === "expr" && typeof n.raw === "string" && n.exprNode === undefined) scanText(n.raw, n.span);
     for (const key of Object.keys(n)) {
       if (key === "span" || key.startsWith("_")) continue;
       visit(n[key], depth + 1);
@@ -74,6 +94,21 @@ export function programBodyMultipleStatements(fileAST: unknown): MultipleStateme
   const out: MultipleStatementsDiagnostic[] = [];
   const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
   const reported = new Set<string>();
+  const unreadable = (why: string, span: unknown): void => {
+    const key = `${String((span as any)?.start ?? "")}\0unread\0${why}`;
+    if (reported.has(key)) return;
+    reported.add(key);
+    out.push({
+      code: "E-SQL-QUERY-NOT-READABLE",
+      message:
+        `E-SQL-QUERY-NOT-READABLE: this \`?{}\` sits in expression text the compiler holds unparsed, and it is ${why}. ` +
+        `No check (one statement per \`?{}\` — §8.1.2; the program-body allow-list — §14.8.10) can read it, so it ` +
+        "is refused rather than emitted. Write it as `?{`…`}` (the backtick template), or bind it to a local first: " +
+        "`const row = ?{`…`}.get()`, then use `row` in the condition.",
+      span: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      severity: "error",
+    });
+  };
   forEachProgramBodySql(fileAST, (sql, span) => {
     const { statements } = programStatementCount(sql);
     if (statements <= 1) return;
@@ -91,6 +126,6 @@ export function programBodyMultipleStatements(fileAST: unknown): MultipleStateme
       span: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
       severity: "error",
     });
-  });
+  }, unreadable);
   return out;
 }
