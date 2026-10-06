@@ -1,0 +1,41 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <found> = "init"
+    <failed> = "init"
+    // §8.10 Tier 2: a `for` loop whose body holds one keyed `?{}` read is rewritten
+    // to one `WHERE IN (…)` pre-fetch + a per-iteration Map lookup. A HANDLED read
+    // (§19.8.3) keeps its meaning through the rewrite: the rows on success, the
+    // arm's value for each iteration when the pre-fetch fails to run.
+    function bodies(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function bodiesGone(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function go() {
+        @found = bodies([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> { return } }
+        @failed = bodiesGone([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> { return } }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="found">${@found}</p>
+    <p id="failed">${@failed}</p>
+</program>

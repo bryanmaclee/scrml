@@ -1,0 +1,36 @@
+{
+  "id": "server-db-sql-handled-cell-write-rt",
+  "description": "§19.8.3 handling form 1 (S451 R11) on a cell write in a function (RUNTIME, sqlEngine:\"real\"): `@c = ?{…}.get() !{…}`. It is the same cell write as the unhandled `@c = ?{…}.get()`: the function is split client/server (§19.9.9), the query runs on the server, and the CLIENT cell receives the row (`notes`), `not` (`empties` — no row is not a failure), or the arm's value when the query fails to run (`gone` is declared but never created → `.QueryFailed` → \"failed\"). Pre-S455 (g-impl1-handled-sql-lowering-defects-s455 item 2) the guard hid the cell write from route inference: the whole function went to the server, `@c` lowered to a server-side `_scrml_reactive_set` that never reached the client, and every cell stayed \"init\" at exit 0.",
+  "language-version": "1.0",
+  "spec": "§19.8.3, §19.8.4, §19.9.9",
+  "rationale": "§19.8.3: \"**A `!{}` handler on the query** — written after the terminator (`.get()`, `.all()`, `.run()`), its arms match `SqlError` variants\"; \"A query that runs and matches nothing succeeds: `.get()` on zero rows returns `not`\". The handler adds a failure path; the cell write it guards is unchanged.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ],
+      "empties": []
+    },
+    "input": [
+      { "click": "#a" },
+      { "wait": "settle" },
+      { "click": "#b" },
+      { "wait": "settle" },
+      { "click": "#c" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "hit": { "id": 7, "body": "hello" },
+      "miss": null,
+      "failed": "failed"
+    },
+    "domAnchored": [
+      { "selector": "#hit", "text": "hello" },
+      { "selector": "#miss", "text": "none" },
+      { "selector": "#failed", "text": "failed" }
+    ]
+  }
+}

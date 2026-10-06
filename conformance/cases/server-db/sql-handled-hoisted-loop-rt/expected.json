@@ -1,0 +1,29 @@
+{
+  "id": "server-db-sql-handled-hoisted-loop-rt",
+  "description": "§8.10 Tier 2 loop hoisting × §19.8.3 (RUNTIME, sqlEngine:\"real\"): a HANDLED keyed read in a `for` body, `const row = ?{…WHERE id = ${it.id}}.get() !{ _ :> not }`. The loop is still rewritten to one pre-fetch + a per-iteration Map lookup, and the handled read keeps its meaning: id 7 → the row, id 8 → `not` (no row is not a failure), and when the pre-fetch fails to run (`gone` is declared but never created) every iteration takes the arm's `not`. Pre-S455 (found by the S455 consumer enumeration of g-impl1-handled-sql-lowering-defects-s455) the hoist rewrite did not see the guarded statement, the pre-fetch ran but the loop body kept the query lowered with no server boundary — `null /* client cannot evaluate */` — so EVERY row read `not` even on success (\"none,none\"), and a failing pre-fetch threw past the handler.",
+  "language-version": "1.0",
+  "spec": "§8.10, §19.8.3",
+  "rationale": "§8.10: \"A for-loop whose body contains a single keyed `?{}` read SHALL be rewritten to a single `WHERE IN (...)` pre-fetch plus per-iteration `Map` lookup.\" §8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop\". §19.8.3: a handled query's success value is the unhandled one's; only a query that fails to run reaches the arms.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "found": "hello,none",
+      "failed": "none,none"
+    },
+    "domAnchored": [
+      { "selector": "#found", "text": "hello,none" },
+      { "selector": "#failed", "text": "none,none" }
+    ]
+  }
+}

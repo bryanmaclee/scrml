@@ -1,0 +1,28 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <status> = "init"
+    // §19.9.9: a function that runs a `?{}` AND writes a cell is split client/server.
+    // A handled write (`.run() !{…}`) splits exactly as the unhandled one does: the
+    // query runs on the server, the cell write lands on the client.
+    function addNote() {
+        ?{`INSERT INTO notes (body) VALUES ('x')`}.run() !{ _ :> {} }
+        @status = "added"
+    }
+    function countNotes() {
+        return ?{`SELECT count(*) AS n FROM notes`}.get() !{ _ :> not }
+    }
+    <count> = "init"
+    function refresh() {
+        const c = countNotes() !{ .Transport(_) :> { return } }
+        @count = c is not ? "none" : "n=" + c.n
+    }
+    <button id="add" onclick={ addNote() !{ .Transport(_) :> { return } } }>add</button>
+    <button id="refresh" onclick=refresh()>refresh</button>
+    <p id="status">${@status}</p>
+    <p id="count">${@count}</p>
+</program>
