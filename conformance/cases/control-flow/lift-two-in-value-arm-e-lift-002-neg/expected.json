@@ -1,0 +1,13 @@
+{
+  "id": "lift-two-in-value-arm-e-lift-002-neg",
+  "description": "§17.6 Example 6 verbatim in shape — two `lift` statements on the same execution path of one if-as-expression arm SHALL be E-LIFT-002. Before s456 codegen detected the shape but only wrote a `/* E-LIFT-002 … */` comment into the artifact; the compile exited 0.",
+  "language-version": "1.0",
+  "spec": "§17.6",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "rationale": "§10 / §17.6: in value-lift mode `lift` SHALL appear at most once on any execution path through an arm body; two or more reachable `lift` statements on the same path SHALL emit E-LIFT-002 (§34 row: Error).",
+  "provenance": "audit:s456 (comment-instead-of-diagnostic class)",
+  "expect": {
+    "codes": ["E-LIFT-002"],
+    "severity": { "E-LIFT-002": "error" }
+  }
+}

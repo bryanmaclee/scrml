@@ -1,8 +1,8 @@
 {
   "//": "TypeScript diagnostic NAME->COUNT baseline. See scripts/types-gate.ts for why this is a name set and not an exit code, and why it carries counts. Regenerate with `bun scripts/types-gate.ts --write`. A NEW name or a GROWN count is a regression; a REMOVED name or a SHRUNK count means this file is stale and should be regenerated in the commit that fixed it.",
   "//never": "Entries containing \"is not assignable to type 'never'\" are LIVE EXHAUSTIVE-SWITCH DECAY — a member was added to a union and a switch over it was not updated, so it silently falls through to the default arm. They are recorded so the population does not GROW. Each is a real bug and each should be FIXED, not inherited.",
-  "totalDiagnostics": 190,
-  "distinctNames": 119,
+  "totalDiagnostics": 185,
+  "distinctNames": 118,
   "neverFallthroughOccurrences": 9,
   "diagnostics": {
     "compiler/src/codegen/collect.ts :: TS2345 :: Argument of type 'unknown' is not assignable to parameter of type 'string'.": 1,
@@ -61,7 +61,6 @@
     "compiler/src/codegen/emit-reactive-wiring.ts :: TS2339 :: Property 'refs' does not exist on type 'object'.": 1,
     "compiler/src/codegen/emit-reactive-wiring.ts :: TS2339 :: Property 'varName' does not exist on type 'object'.": 2,
     "compiler/src/codegen/emit-reactive-wiring.ts :: TS2345 :: Argument of type '{ pid: string | null; stmts: any[]; } | null' is not assignable to parameter of type '{ pid: string | null; stmts: any[]; }'.": 1,
-    "compiler/src/codegen/emit-server.ts :: TS2353 :: Object literal may only specify known properties, and 'preparedStmtErrors' does not exist in type 'EmitLogicOpts'.": 5,
     "compiler/src/codegen/emit-server.ts :: TS7016 :: Could not find a declaration file for module '../module-resolver.js'. 'compiler/src/module-resolver.js' implicitly has an 'any' type.": 1,
     "compiler/src/codegen/emit-tool.ts :: TS7016 :: Could not find a declaration file for module '../commands/listen.js'. 'compiler/src/commands/listen.js' implicitly has an 'any' type.": 1,
     "compiler/src/codegen/emit-variant-guard.ts :: TS2339 :: Property 'collectEngineMessageVariants' does not exist on type '{ buildEngineBindingsMap: (fileAST: any) => Map<string, any> | null; collectEngineVarNames: (fileAST: any) => Set<string>; collectEnginesWithHooks: (fileAST: any) => Set<...>; collectEnginesWithOnTimeout: (fileAST: any) => Set<...>; collectEnginesWithIdleWatchdog: (fileAST: any) => Set<...>; collectEnginesWithIntern...'.": 1,

@@ -1,0 +1,9 @@
+<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        if (args.length == 0) {
+            const s = session
+            println(s)
+        }
+        return 0
+    }
+</program>

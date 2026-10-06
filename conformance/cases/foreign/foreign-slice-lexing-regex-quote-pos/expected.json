@@ -1,0 +1,14 @@
+{
+  "id": "foreign-slice-lexing-regex-quote-pos",
+  "description": "§23.2.4a positive, executed — the slice's shape (single expression vs statement body) and its crossing-shadow check are decided over the slice as JavaScript TOKENS. A quote or backtick inside a regex literal (`/['x]/g`, `/[\"]/g`, a backtick class), a `/` inside a regex class (`/[/]+/g`), quotes inside comments, a template literal with a nested template in a `${}` hole, a chain of divisions (`12 / 3 / 2`, a single expression) and a member named `.return` are all read as what they are. Before s456 the `'` in `/['x]/g` opened a string in the compiler's character scan and hid the slice's top-level `return` (a wrong E-FOREIGN-007); a `.return(...)` member read as the `return` keyword.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: a slice with no top-level `;` and no top-level `return` is a single expression (codegen injects the `return`), otherwise a statement body used verbatim; the discrimination is a syntactic scan that is string/comment/template-aware. A regex literal is a JavaScript token like a string: text inside it is not slice structure. Whether `/` starts a regex or divides is decided by the previous significant token, as the host's own lexer decides it.",
+  "provenance": "adopter:flogence-S56 (graph-ingest-tool.scrml + `const q1 = /[']/g`)",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-FOREIGN-", "E-TOOL-"],
+    "stdout": "its it's a-b p|q 2 <it's!> it's?\n"
+  }
+}

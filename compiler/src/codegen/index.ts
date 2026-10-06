@@ -65,6 +65,7 @@ import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShad
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
+import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
@@ -82,7 +83,7 @@ import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
 import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
 import { setServerSessionUserCell, resetServerAmbientSessionRefusals, drainServerAmbientSessionRefusalErrors, fileScopeDeclaresSessionCell, fileNodesOf } from "./server-session-guard.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
   setChunkNamespaceState,
@@ -1174,8 +1175,8 @@ export function resetCodegenModuleState(): void {
   setBoolColumnsForRewriter(null);
   setTenantContextForRewriter(null);
   // emit-expr — per-file shadow / ambient flags, request ids, server async
-  // classifier, session diagnostic sink. (The log production flag + `~` sink
-  // are set/reset by runCG itself.)
+  // classifier. (The log production flag, the `~` sink and the refused-lowering
+  // sink are set/reset by runCG itself.)
   setLogShadowedInFile(false);
   setRenderShadowedInFile(false);
   setPrintShadowedNames([]);
@@ -1186,7 +1187,6 @@ export function resetCodegenModuleState(): void {
   setCurrentUserAmbientActive(false); // also resets rewrite.ts + expression-parser mirrors
   setCurrentFileRequestIds(null);
   setServerAsyncClassifier(null);
-  resetSessionValueUseErrors();
   // chunk-namespace — per-unit id namespace token.
   resetChunkNamespaceState();
 }
@@ -1326,6 +1326,9 @@ export function runCG(input: CgInput): CgOutput {
   // would otherwise attribute one compile's orphan to the next compile.
   resetTildeUnresolvedErrors();
   resetExprGuardErrors();
+  // §2.2.1 (S456) — the run-wide refused-lowering sink (refused-lowering-errors.ts):
+  // a site that declines to lower records here, whatever opts reached it.
+  resetRefusedLowerings();
   // S91 A-4.1 — per-file CompileContext map, populated during the per-
   // file Plan/Emit phase. Passed to the route-splitter when
   // `emitPerRoute` is set so future A-4.2+ sub-phases can read per-file
@@ -3260,6 +3263,7 @@ export function runCG(input: CgInput): CgOutput {
     // Filed; not fixed here. Do not restore the stronger claim.
     for (const e of drainTildeUnresolvedErrors()) errors.push(e);
     for (const e of drainExprGuardErrors()) errors.push(e);
+    for (const e of drainRefusedLowerings()) errors.push(e);
   }
 
   // -------------------------------------------------------------------------
@@ -4310,6 +4314,7 @@ export function runCG(input: CgInput): CgOutput {
   // run costs nothing here.
   for (const e of drainTildeUnresolvedErrors()) errors.push(e);
   for (const e of drainExprGuardErrors()) errors.push(e);
+  for (const e of drainRefusedLowerings()) errors.push(e);
   for (const e of drainServerAmbientSessionRefusalErrors(null, resolveSpanLineCol)) errors.push(e);
 
   return {

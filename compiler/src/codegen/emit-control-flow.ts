@@ -9,6 +9,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
@@ -2853,11 +2854,13 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // still parses (the A backstop must not double-report a known-unlowerable
     // site as a generic invalid-JS defect). When no error channel is threaded
     // (the emit-expr.ts expression-position bridge passes no `opts`), the hard
-    // error cannot be recorded here — the A parse gate is then the backstop.
+    // error used to be dropped: the placeholder PARSES, so the A parse gate was
+    // never a backstop for it. With no channel the refusal goes to the run-wide
+    // refused-lowering sink (refused-lowering-errors.ts, drained by runCG) — s456.
     const matchSrc = (node?.header ?? "").trim() || "<match>";
     const errChannel: CGError[] | null | undefined = opts?.errors;
-    if (errChannel) {
-      errChannel.push(new CGError(
+    {
+      const refusal = new CGError(
         "E-CG-003",
         `E-CG-003: match expression \`match ${matchSrc} { ... }\` has no arm the ` +
         `code generator can lower — every arm failed to parse (unsupported arm ` +
@@ -2865,7 +2868,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
         `\`.Variant(binding) => result\`, \`"string" => result\`, \`else => result\`; ` +
         `the \`->\` / \`:>\` separators are accepted aliases per SPEC §18.2).`,
         (node?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2],
-      ));
+      );
+      if (errChannel) errChannel.push(refusal);
+      else recordRefusedLowering(refusal, node);
     }
     // Valid-JS placeholder (parses in statement AND expression position).
     return `(undefined) /* E-CG-003: match expression had no lowerable arms */`;

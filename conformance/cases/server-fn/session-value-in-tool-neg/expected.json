@@ -1,0 +1,13 @@
+{
+  "id": "session-value-in-tool-neg",
+  "description": "§20.5 E-SESSION-VALUE — a bare `session` value-use inside a `kind=\"tool\"` main. Codegen refuses it (`undefined /* E-SESSION-VALUE … */` placeholder); the refusal must fail the compile. Before s456 the refusal's sink was drained only by the web-app server emitter, so in a tool it was never reported: exit 0.",
+  "language-version": "1.0",
+  "spec": "§20.5",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "rationale": "§2.2.1: a codegen path that cannot lower a construct SHALL emit a hard diagnostic rather than a silent stub. `session` is not a first-class value (§20.5); the refusal is the same wherever the server-mode emission happens.",
+  "provenance": "audit:s456 (comment-instead-of-diagnostic class)",
+  "expect": {
+    "codes": ["E-SESSION-VALUE"],
+    "severity": { "E-SESSION-VALUE": "error" }
+  }
+}

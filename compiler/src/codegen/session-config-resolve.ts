@@ -186,7 +186,7 @@ export function resolveUnitSessionAttr(
 // session infrastructure" correctly NOT a conflict (review finding F-B) without
 // mirroring that predicate anywhere.
 //
-// Same reset/drain idiom as `resetSessionValueUseErrors` / `drainSessionValueUseErrors`
+// Same reset/drain idiom as `resetTildeUnresolvedErrors` / `drainTildeUnresolvedErrors`
 // in emit-expr.ts.
 // ---------------------------------------------------------------------------
 

@@ -172,3 +172,105 @@ export function checkForeignSliceSyntax(source: string): { message: string; slic
     return { message: raw, sliceLine: line !== null && line >= 1 ? line : null };
   }
 }
+
+// ---------------------------------------------------------------------------
+// The two pre-emit SYNTACTIC scans of a slice (§23.2.4a): its SHAPE (single expression vs
+// statement body) and its TOP-LEVEL bindings (the E-FOREIGN-006 crossing-shadow check).
+//
+// Both read the slice as a TOKEN STREAM from the same JS lexer `checkForeignSliceSyntax` uses,
+// never as characters. A hand character scanner has to re-derive JS lexing, and the one these
+// replace did not know regex literals: the `'` in `/['x]/g` opened a "string" that swallowed the
+// rest of the slice and hid its top-level `return`, turning a valid slice into a wrong
+// E-FOREIGN-007. Whether a `/` starts a regex or is a division is decided by the lexer from the
+// previous significant token, as the host decides it; strings, comments and template literals
+// (with their `${…}` holes) are tokens, so nothing inside them is ever read as structure.
+// (docs/changes/s456-foreign-slice-regex-apostrophe.)
+//
+// Opacity (§23.2.3) is unchanged: the scans read only nesting depth, `;`, the `return` keyword
+// and the binding keywords at depth 0. They never type-check, analyse or rewrite the interior.
+// ---------------------------------------------------------------------------
+
+interface SliceToken {
+  type: { label: string; keyword?: string };
+  value?: unknown;
+}
+
+/**
+ * The slice's tokens, or null when the lexer cannot read it (an unterminated string, a stray
+ * character). A slice the lexer cannot read cannot be built either; `checkForeignSliceSyntax`
+ * reports it with the parser's own message.
+ */
+function sliceTokens(src: string): SliceToken[] | null {
+  try {
+    const out: SliceToken[] = [];
+    for (const t of acorn.tokenizer(src, { ecmaVersion: "latest", sourceType: "script" })) {
+      out.push(t as SliceToken);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+const OPENERS = new Set(["(", "[", "{", "${"]);
+const CLOSERS = new Set([")", "]", "}"]);
+
+/** A token after `.` / `?.` is a property name even when it spells a keyword (`g.return()`). */
+function isPropertyNamePosition(prev: SliceToken | undefined): boolean {
+  return prev !== undefined && (prev.type.label === "." || prev.type.label === "?.");
+}
+
+/**
+ * §23.2.4a value-flow shape. A slice with no top-level `;` and no top-level `return` is a
+ * SINGLE EXPRESSION (codegen injects the `return`); otherwise it is a statement body used
+ * verbatim. `lexable: false` means the lexer could not read the slice; the caller treats it as a
+ * statement body so the build check reports the parser's complaint about the text as written.
+ */
+export function scanForeignSliceShape(src: string): { topLevelReturn: boolean; topLevelStmtSep: boolean; lexable: boolean } {
+  const tokens = sliceTokens(src);
+  if (tokens === null) return { topLevelReturn: false, topLevelStmtSep: false, lexable: false };
+  let depth = 0;
+  let topLevelReturn = false;
+  let topLevelStmtSep = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const label = t.type.label;
+    if (OPENERS.has(label)) { depth++; continue; }
+    if (CLOSERS.has(label)) { depth--; continue; }
+    if (depth !== 0) continue;
+    if (label === ";") topLevelStmtSep = true;
+    else if (t.type.keyword === "return" && !isPropertyNamePosition(tokens[i - 1])) topLevelReturn = true;
+  }
+  return { topLevelReturn, topLevelStmtSep, lexable: true };
+}
+
+/**
+ * The TOP-LEVEL bindings of the slice whose names are in `names` (the crossings): a `const` /
+ * `let` / `var` / `function` / `class` (incl. `function*`) at depth 0. A binding inside a nested
+ * `{}` / `()` / `[]`, a string, a comment or a template literal is not top level and does not
+ * collide with a parameter of the sealed function.
+ */
+export function scanForeignSliceTopLevelBindings(src: string, names: Set<string>): string[] {
+  const tokens = sliceTokens(src);
+  if (tokens === null) return [];
+  const found = new Set<string>();
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const label = t.type.label;
+    if (OPENERS.has(label)) { depth++; continue; }
+    if (CLOSERS.has(label)) { depth--; continue; }
+    if (depth !== 0 || isPropertyNamePosition(tokens[i - 1])) continue;
+    const kw = t.type.keyword;
+    const isBindingHead = kw === "const" || kw === "var" || kw === "function" || kw === "class"
+      || (label === "name" && t.value === "let");
+    if (!isBindingHead) continue;
+    let j = i + 1;
+    while (j < tokens.length && tokens[j].type.label === "*") j++;
+    const nameTok = tokens[j];
+    if (nameTok && nameTok.type.label === "name" && typeof nameTok.value === "string" && names.has(nameTok.value)) {
+      found.add(nameTok.value);
+    }
+  }
+  return [...found];
+}

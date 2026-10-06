@@ -1122,7 +1122,7 @@ export function collectNonAwaitableAsyncCalls(
  */
 export function emitLibraryFnMember(
   fnNode: ASTNode,
-  opts: { isExported: boolean; asyncFnNames: Set<string>; foreignCrossingErrors?: unknown[]; preparedStmtErrors?: unknown[]; nonAsyncReemit?: boolean },
+  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean },
 ): string {
   const name = (fnNode.name ?? "anon") as string;
   const ownAsync = opts.asyncFnNames.has(name);
@@ -1140,7 +1140,7 @@ export function emitLibraryFnMember(
       .filter((n): n is string => typeof n === "string" && n.length > 0),
   );
   const bodyOpts = serverBody
-    ? { boundary: "server", serverFnNames: opts.asyncFnNames, declaredNames, insideFunctionBody: true, foreignCrossingErrors: opts.foreignCrossingErrors, preparedStmtErrors: opts.preparedStmtErrors }
+    ? { boundary: "server", serverFnNames: opts.asyncFnNames, declaredNames, insideFunctionBody: true }
     : { boundary: "client", declaredNames, insideFunctionBody: true };
   const bodyCodes = emitFnShortcutBody(
     (fnNode.body ?? []) as never[],

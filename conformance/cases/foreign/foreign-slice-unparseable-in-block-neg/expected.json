@@ -1,0 +1,14 @@
+{
+  "id": "foreign-slice-unparseable-in-block-neg",
+  "description": "§23.2.4a E-FOREIGN-007 — an unbuildable slice (`args.length +;`) one block deep, inside an `if` in a `kind=\"tool\"` main. The refusal must reach the compile result as an Error wherever the slice sits. Before s456 the diagnostic travelled on a channel the `if` body's emit options did not carry: the compile exited 0 and the artifact held `const plan = null /* E-FOREIGN-007 … */`, which crashed at run time (adopter flogence, graph-ingest-tool.scrml).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: a slice that is not valid JavaScript as the body of a strict-mode async function of its crossings SHALL be a compile error (E-FOREIGN-007). §2.2.1: a codegen path that cannot lower a construct SHALL emit a hard diagnostic rather than a silent stub, and a compile reporting an Error SHALL NOT produce a runnable artifact. Neither depends on the block nesting of the slice.",
+  "provenance": "adopter:flogence-S56",
+  "expect": {
+    "codes": ["E-FOREIGN-007"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "severity": { "E-FOREIGN-007": "error" }
+  }
+}

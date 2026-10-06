@@ -1,0 +1,14 @@
+{
+  "id": "foreign-crossing-shadow-in-block-neg",
+  "description": "§23.2.4a E-FOREIGN-006 — a slice inside a `for` body declares a top-level `const a` while crossing `in: { a }`. The crossing-shadow error must fire and NAME the binding wherever the slice sits; before s456 the check was skipped one block deep (its channel was not in the loop body's emit options) and the slice fell through to a generic E-FOREIGN-007 — or, nested further, to nothing at all.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: a crossing name that the slice also declares at its top level SHALL be a compile error (E-FOREIGN-006) that names the shadowed binding.",
+  "provenance": "adopter:flogence-S56 (audit of the same channel)",
+  "expect": {
+    "codes": ["E-FOREIGN-006"],
+    "notCodes": ["E-FOREIGN-007", "E-CODEGEN-INVALID-LOGIC"],
+    "severity": { "E-FOREIGN-006": "error" }
+  }
+}
