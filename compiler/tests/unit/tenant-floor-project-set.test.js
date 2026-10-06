@@ -24,7 +24,11 @@
  * computed once by the api.js TENANT-SCHEMA stage and shared with CG; and the shared
  * recognizer (`schemaTableDeclarations`, schema-differ.js) reads `ALTER TABLE`.
  */
-import { describe, test, expect, afterAll } from "bun:test";
+import { describe, test, expect, afterAll, setDefaultTimeout } from "bun:test";
+
+// The EXECUTED cases compile a multi-file program and drive real bun:sqlite; on the
+// Windows CI runner that exceeded bun's 5 s default (S455, a timeout — not a logic failure).
+setDefaultTimeout(30_000);
 import { writeFileSync, mkdtempSync, rmSync, readFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
