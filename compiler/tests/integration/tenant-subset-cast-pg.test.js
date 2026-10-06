@@ -35,7 +35,9 @@ if (process.env.SCRML_PGTEST !== "0" && existsSync(`${SOCK}/.s.PGSQL.5432`)) {
 }
 if (!PG_OK) {
   // eslint-disable-next-line no-console
-  console.log(`[tenant-subset-cast-pg] Postgres not reachable on ${SOCK} — skipping the live S455 "a" gate (local-only).`);
+  console.log(`[tenant-subset-cast-pg] SKIPPED — Postgres not reachable on ${SOCK} (or SCRML_PGTEST=0): the live S455 "a" / rel.f gate did NOT run.`);
+  // a NAMED skip, so the report shows the gate did not run (never a vacuous pass)
+  test.skip(`[SKIPPED: no Postgres on ${SOCK}] live S455 tenant-subset gate (::int filtered at source; julianday / ::evil_t / assets.evil refused)`, () => {});
 }
 const d = PG_OK ? describe : describe.skip;
 
@@ -125,6 +127,14 @@ d("S455 \"a\" on Postgres — `::int` in a tenant query is accepted and still fi
   test("on Postgres a SQLite built-in name (`julianday`) in a tenant query is refused — not a Postgres built-in", async () => {
     const app = await load("jd", "SELECT name, julianday(name) AS j FROM assets");
     expect(app.errs.map((e) => e.code)).toContain("E-TENANT-AGG");
+  });
+
+  test("`rel.f` (S239 r2 of 7761b813): with a user `evil(assets)` in the database, `SELECT assets.evil FROM assets` reads every tenant — refused at compile", async () => {
+    await check.unsafe(`CREATE FUNCTION evil(assets) RETURNS text LANGUAGE sql AS $$ SELECT string_agg(name, ',') FROM assets $$`);
+    const leak = await check.unsafe("SELECT assets.evil FROM assets WHERE assets.tenant_id = 'A'");
+    expect(leak[0].evil).toContain("B-secret-asset");                 // the database does run it
+    const app = await load("relf", "SELECT assets.evil FROM assets");
+    expect(app.errs.map((e) => e.code)).toContain("E-TENANT-SQL-SUBSET");
   });
 
   test("a `::` cast to a type that is not built in is refused", async () => {

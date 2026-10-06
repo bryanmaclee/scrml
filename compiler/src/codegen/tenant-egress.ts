@@ -52,7 +52,7 @@
 import { normalizeSqlText } from "../sql-projection.ts";
 import type { ProtectContext } from "./protect-egress.ts";
 import { extractDesiredSchema } from "./db-authoritative.ts";
-import { fileSchemaTenantNames } from "../tenant-schema-hazards.ts";
+import { fileSchemaTenantNames, compilationSchemaColumns, schemaColumnKnowledge, tenantQueryQualifiedRefIssue } from "../tenant-schema-hazards.ts";
 import { resolveDbScopes } from "../db-ownership.ts";
 import { getNodes } from "./collect.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -97,6 +97,8 @@ export interface TenantContext {
   driverFor?: (dbVar: string) => string | undefined;
   /** S455 — the compilation's dialect (`compilationDialect`): the allow-lists are its built-ins. */
   dialect?: SqlDialect;
+  /** S455 — the declared columns a qualified `rel.f` in a tenant query must name (`CompilationTenantSet.columns`). */
+  columns?: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 /** The last part of a possibly-qualified, possibly-quoted SQL name, lowercased. */
@@ -246,12 +248,16 @@ export function buildTenantContext(
   if (compilation) for (const t of compilation.tables) tenantScopedTables.add(t);
   const dialect: SqlDialect = compilation?.dialect ?? "unknown";
   if (tenantScopedTables.size === 0) return { tenantScopedTables, dialect };
+  // without the compilation's knowledge (a caller driving one file), this file's own
+  // `<schema>` + desired tables + registry — the same reading, narrower
+  const columns = compilation?.columns ??
+    declaredColumns(schemaColumnKnowledge([schemaText ?? ""]), (schemaTables ?? []) as Array<{ name?: unknown; columns?: unknown }>, protectCtx);
   // The S452 r4 per-write limb keeps reading THIS file's `<schema>` text ("the
   // program's `<schema>`"): a hazard in any compiled file's `<schema>` is already
   // refused, compilation-wide, at the declaration (E-TENANT-SCHEMA-HAZARD), and
   // joining every file's text would only spread this regex reader's
   // unattributable over-fire across files.
-  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor, dialect };
+  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor, dialect, columns };
 }
 
 /**
@@ -313,6 +319,38 @@ export interface CompilationTenantSet {
    * type allow-lists are that database's built-ins, `unknown` → the intersection.
    */
   dialect?: SqlDialect;
+  /**
+   * The columns the compilation DECLARES, per table (S455 `rel.f`, S239 r2 of 7761b813):
+   * every `<schema>` (DSL, `CREATE TABLE`, `ALTER … ADD COLUMN`, an expanded `schemaFor`) read
+   * fail-closed (`schemaColumnKnowledge`), then — for a table no `<schema>` declares — the
+   * `<db tables=>` registry's columns. A qualified `rel.f` in a tenant query or a `<schema>`
+   * body must name one of these. Present when the set has a tenant table.
+   */
+  columns?: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+/**
+ * The declared columns (see `CompilationTenantSet.columns`): the `<schema>` reading first,
+ * then the desired-schema tables and the registry for a table it does not hold.
+ */
+export function declaredColumns(
+  schemaColumns: ReadonlyMap<string, ReadonlySet<string>>,
+  desiredTables: Iterable<{ name?: unknown; columns?: unknown }>,
+  protectCtx: ProtectContext | undefined,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const [t, c] of schemaColumns) out.set(t, new Set(c));
+  for (const t of desiredTables) {
+    if (typeof t?.name !== "string" || !Array.isArray(t?.columns)) continue;
+    const key = t.name.toLowerCase();
+    if (out.has(key)) continue;
+    out.set(key, new Set((t.columns as Array<{ name?: unknown }>).filter((c) => typeof c?.name === "string").map((c) => (c.name as string).toLowerCase())));
+  }
+  for (const [table, cols] of protectCtx?.schemaByTable ?? []) {
+    const key = table.toLowerCase();
+    if (!out.has(key)) out.set(key, new Set(cols.map((c) => c.toLowerCase())));
+  }
+  return out;
 }
 
 /**
@@ -332,11 +370,15 @@ export function compilationTenantSet(files: Iterable<unknown>, protectCtx: Prote
   const tables = new TenantTableSet();
   addRegistryTenantTables(tables, protectCtx);
   const list = [...files];
+  const desired: Array<{ name?: unknown; columns?: unknown }> = [];
   for (const fileAST of list) {
-    addSchemaTenantTables(tables, extractDesiredSchema(fileAST).tenantTables);
+    const ds = extractDesiredSchema(fileAST);
+    addSchemaTenantTables(tables, ds.tenantTables);
+    desired.push(...(ds.tables as Array<{ name?: unknown; columns?: unknown }>));
     for (const t of fileSchemaTenantNames(fileAST)) tables.add(t);
   }
-  return { tables, dialect: compilationDialect(list) };
+  const columns = tables.size > 0 ? declaredColumns(compilationSchemaColumns(list), desired, protectCtx) : new Map<string, Set<string>>();
+  return { tables, dialect: compilationDialect(list), columns };
 }
 
 /** The dialect a `db=` / `src=` value names (§44): a literal Postgres URI or SQLite target, else `unknown`. */
@@ -419,10 +461,23 @@ export type TenantScoping =
  */
 export function analyzeTenantQuery(sqlContent: string, ctx: TenantContext): TenantAnalysis {
   if (ctx.tenantScopedTables.size === 0) return null;
-  return analyzeTenantSql(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables, {
+  const dialect = ctx.dialect ?? "unknown";
+  const a = analyzeTenantSql(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables, {
     writeHazards: (t) => ctx.writeHazards?.get(t.toLowerCase()),
-    dialect: ctx.dialect ?? "unknown",
+    dialect,
   });
+  if (a !== null && a.kind === "refuse") return a;
+  // S455 `rel.f` (S239 r2 of 7761b813, executed on PG16: `SELECT assets.evil FROM assets` ran
+  // a user `evil(assets)` and returned every tenant). ONE subset with the `<schema>` bodies:
+  // a qualified reference in a tenant query — or in a query whose text names a tenant table —
+  // must name a column the compilation declares on the relation it resolves to.
+  const named = a !== null || [...ctx.tenantScopedTables].some((n) => new RegExp(`(?:^|[^A-Za-z0-9_])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^A-Za-z0-9_]|$)`, "i").test(sqlContent));
+  if (!named) return a;
+  const cols = ctx.columns;
+  const issue = tenantQueryQualifiedRefIssue(sqlContent, dialect, (rel) => cols?.get(rel) ?? null);
+  if (issue === null) return a;
+  const table = a !== null ? a.table : ([...ctx.tenantScopedTables].find((n) => sqlContent.toLowerCase().includes(n)) ?? "?");
+  return { kind: "refuse", code: "E-TENANT-SQL-SUBSET", reason: "subset", table, op: "?", detail: issue };
 }
 
 /**

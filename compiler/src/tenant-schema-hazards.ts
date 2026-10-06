@@ -56,7 +56,7 @@
  */
 
 import {
-  lexTenantSubset, tenantRowFunctions, tenantGroupAggregates, namesFor, castTypesFor,
+  lexTenantSubset, tenantRowFunctions, tenantGroupAggregates, namesFor, castTypesFor, endsOperandWord,
   type SqlDialect, type Avail,
 } from "./codegen/tenant-sql-subset.ts";
 import { schemaTableDeclarations, DBAUTH_ROLE } from "./schema-differ.js";
@@ -369,7 +369,11 @@ const INFIX_WORDS = new Set(["LIKE", "ILIKE", "GLOB", "MATCH", "REGEXP", "SIMILA
 
 /** Does token `t` end an operand (so a following infix keyword is an operator)? */
 function endsOperand(t: Tok | undefined): boolean {
-  return !!t && (t.k === "q" || t.k === "s" || t.k === "n" || isP(t, ")") || (t.k === "w" && !SYNTAX_WORDS_BEFORE_PAREN.has(t.up)));
+  // ONE rule with the query floor (`endsOperandWord`, tenant-sql-subset.ts): a keyword — the
+  // infix words themselves included — never ends an operand, so `x LIKE match(x)` /
+  // `NOT LIKE glob(…)` read `match` / `glob` as CALLS (S239 r2 of 7761b813, executed on PG16).
+  return !!t && (t.k === "q" || t.k === "s" || t.k === "n" || isP(t, ")") ||
+    (t.k === "w" && !SYNTAX_WORDS_BEFORE_PAREN.has(t.up) && endsOperandWord(t.up)));
 }
 
 /**
@@ -533,13 +537,18 @@ function offendingText(raw: string, at: number): string {
  * `;` as a separator (a trigger's `BEGIN … END` statement list — nowhere else). A `${…}`
  * is a bound PARAMETER in a query; in a `<schema>` it is SQL text spliced in — outside.
  */
-function lexBody(raw: string, from: number, to: number, statementList: boolean, dialect: SqlDialect): LexedBody {
+function lexBody(raw: string, from: number, to: number, statementList: boolean, dialect: SqlDialect, allowParams = false): LexedBody {
   const text = raw.slice(from, Math.max(from, to));
   const lx = lexTenantSubset(text, { statementSeparator: statementList, dialect });
   if (!lx.ok) return { ok: false, outside: { at: from + lx.at, token: offendingText(text, lx.at), why: lx.why } };
   const toks: Tok[] = [];
   for (const s of lx.toks) {
     const at = from + s.start;
+    if (s.kind === "param" && allowParams) {
+      // a query's `${…}` is a BOUND PARAMETER — an opaque value (never a name)
+      toks.push({ k: "n", t: "?", up: "?", at, end: from + s.end, sql: true });
+      continue;
+    }
     if (s.kind === "param") {
       return { ok: false, outside: { at, token: s.text.length > 40 ? `${s.text.slice(0, 40)}…` : s.text,
         why: "a `${…}` interpolation — in a `<schema>` it is SQL text spliced in, not a bound parameter" } };
@@ -854,7 +863,27 @@ function bodyIssue(toks: Tok[], rules: BodyRules): OutsideSubset | null {
     }
   }
   // ── qualified references: `rel.f` must be a declared column of `rel` ───────────
-  const { bind, tablePos, columnsOf } = bodyBindings(toks, rules.presets, rules.relColumns);
+  qualifiedRefIssues(toks, rules.presets, rules.relColumns, at);
+  if (issues.length === 0) return null;
+  return issues.reduce((a, b) => (b.at < a.at ? b : a));
+}
+
+/**
+ * THE `rel.f` RULE (S455 "yes, both" residual; one subset for `<schema>` bodies AND tenant
+ * queries — S239 r2 of 7761b813, executed on PG16: the query floor admitted `SELECT
+ * assets.evil FROM assets` and Postgres ran `evil(assets)`). Postgres reads `rel.f` as the
+ * CALL `f(rel)` when `f` is not a column of `rel`, so every qualified reference `x.y` must
+ * resolve, through the token run's own bindings (`bodyBindings`: FROM / JOIN aliases, an
+ * alias hiding its table's name, JOIN groups, CTEs, derived tables, `presets`), to relations
+ * on which `y` is a DECLARED column. Reports each violation through `at`.
+ */
+function qualifiedRefIssues(
+  toks: Tok[],
+  presets: ReadonlyArray<readonly [string, string]>,
+  relColumns: (rel: string) => ReadonlySet<string> | null,
+  at: (k: number, token: string, why: string) => void,
+): void {
+  const { bind, tablePos, columnsOf } = bodyBindings(toks, presets, relColumns);
   for (let k = 0; k < toks.length; k++) {
     if (!isP(toks[k], ".")) continue;
     const x = toks[k - 1];
@@ -891,8 +920,26 @@ function bodyIssue(toks: Tok[], rules: BodyRules): OutsideSubset | null {
       }
     }
   }
+}
+
+/**
+ * The query floor's `rel.f` reading (tenant-egress.ts `analyzeTenantQuery`): the first
+ * qualified reference in a tenant query `raw` that is not a declared column of the relation
+ * it resolves to, as a refusal detail — or null. Bound parameters are opaque values. A query
+ * that does not lex is the subset's own refusal (not this rule's).
+ */
+export function tenantQueryQualifiedRefIssue(
+  raw: string,
+  dialect: SqlDialect,
+  relColumns: (rel: string) => ReadonlySet<string> | null,
+): string | null {
+  const lx = lexBody(raw, 0, raw.length, false, dialect, true);
+  if (!lx.ok) return null;
+  const issues: OutsideSubset[] = [];
+  qualifiedRefIssues(lx.toks, [], relColumns, (k, token, why) => issues.push({ at: lx.toks[k]?.at ?? 0, token, why }));
   if (issues.length === 0) return null;
-  return issues.reduce((a, b) => (b.at < a.at ? b : a));
+  const first = issues.reduce((a, b) => (b.at < a.at ? b : a));
+  return `${first.why} — first offending token \`${first.token}\``;
 }
 
 /**

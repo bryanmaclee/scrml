@@ -27,6 +27,7 @@ import {
   schemaColumnKnowledge,
 } from "../../src/tenant-schema-hazards.ts";
 import { lexTenantSubset, analyzeTenantSql } from "../../src/codegen/tenant-sql-subset.ts";
+import { analyzeTenantQuery, buildTenantContext } from "../../src/codegen/tenant-egress.ts";
 import { compileScrml } from "../../src/api.js";
 
 const OUTSIDE = "body outside the tenant SQL subset";
@@ -387,6 +388,81 @@ describe("S455 \"a\" — `::<built-in type>` is in the shared subset (queries AN
     expect(analyzeTenantSql("SELECT id::int AS n, name FROM assets", isT, ["assets"], { dialect: "postgres" })).toMatchObject({ kind: "read", table: "assets" });
     expect(analyzeTenantSql("SELECT id::evil_t AS n FROM assets", isT, ["assets"], { dialect: "postgres" })).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
     expect(analyzeTenantSql("SELECT id::int AS n FROM assets", isT, ["assets"], { dialect: "sqlite" })).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S239 r2 of 7761b813 (LAND-WITH-NITS) — items 1–2, both executed on PG16
+// ---------------------------------------------------------------------------
+describe("r2 item 1 — an infix keyword is never itself an operand: `x LIKE match(x)` calls `match`", () => {
+  charged("bodies and expression regions, every dialect", [
+    [OTHER, "CREATE VIEW v AS SELECT label FROM other WHERE label LIKE match(label)"],
+    [OTHER, "CREATE VIEW v AS SELECT label FROM other WHERE label NOT LIKE glob(label, 'x')"],
+    [OTHER, "CREATE VIEW v AS SELECT label FROM other WHERE label LIKE like(label, 'x')"],
+    ["@postgres", OTHER, "CREATE VIEW v AS SELECT label FROM other WHERE label ILIKE regexp(label)"],
+    ["@sqlite", CONFIG, "CREATE TRIGGER t AFTER INSERT ON config BEGIN SELECT 1 WHERE NEW.k LIKE match(NEW.k); END"],
+    ["@postgres", "CREATE POLICY p ON assets AS RESTRICTIVE USING (name LIKE match(name))"],
+    ["CREATE TABLE t (a TEXT CHECK (a LIKE match(a)))"],
+    ["CREATE INDEX i ON assets ((name LIKE glob(name)))"],
+    ["CREATE TABLE t (a TEXT DEFAULT ('x' LIKE match('y')))"],
+  ]);
+  clean("the operator itself is unchanged", [
+    [OTHER, "CREATE VIEW v AS SELECT label FROM other WHERE label LIKE ('a%') AND label NOT LIKE 'b%'"],
+    ["CREATE TABLE t (a TEXT CHECK (a LIKE ('x%')))"],
+  ]);
+  test("the query floor reads the same rule (one helper)", () => {
+    const isT = (n) => n === "assets";
+    expect(analyzeTenantSql("SELECT name FROM assets WHERE name LIKE match(name)", isT, ["assets"], { dialect: "postgres" }))
+      .toMatchObject({ code: "E-TENANT-AGG", reason: "function" });
+  });
+});
+
+describe("r2 item 2 (HIGH) — `rel.f` in a tenant QUERY (one subset with the bodies)", () => {
+  const ctx = (cols) => buildTenantContext({ protectedByTable: new Map(), schemaByTable: new Map(Object.entries(cols)) });
+  const C = ctx({ assets: ["id", "name", "tenant_id"], users: ["id", "name"] });
+  test("the reviewer's repro `SELECT assets.evil FROM assets` (PG16 ran `evil(assets)`, every tenant) is refused", () => {
+    const a = analyzeTenantQuery("SELECT assets.evil FROM assets", C);
+    expect(a).toMatchObject({ kind: "refuse", code: "E-TENANT-SQL-SUBSET" });
+    expect(a.detail).toContain("`assets.evil`");
+  });
+  for (const q of [
+    "SELECT a.evil FROM assets a",
+    "SELECT assets.name FROM assets a",                                  // `assets` is hidden by its alias
+    "SELECT x.name FROM assets a",                                       // unbound qualifier
+    "UPDATE assets SET name = 'x' WHERE assets.evil = 1",
+    "SELECT a.name FROM assets a JOIN ext.users u ON u.evil = a.id",    // an undeclared qualified relation
+    "SELECT count(*) AS n FROM other o WHERE o.evil = 'assets'",         // names a tenant table only in a literal
+  ]) {
+    test(`refused: ${q}`, () => expect(analyzeTenantQuery(q, C)).toMatchObject({ code: "E-TENANT-SQL-SUBSET" }));
+  }
+  for (const q of [
+    "SELECT assets.id, assets.name FROM assets",
+    "SELECT a.id, u.name FROM assets a JOIN users u ON a.id = u.id",
+    "SELECT name FROM assets WHERE id = ${x}",
+    "DELETE FROM assets WHERE assets.id = ${x}",
+  ]) {
+    test(`admitted: ${q}`, () => expect(analyzeTenantQuery(q, C)?.kind).not.toBe("refuse"));
+  }
+  test("a non-tenant query is not the floor's (unchanged)", () => {
+    expect(analyzeTenantQuery("SELECT o.evil FROM other o", C)).toBeNull();
+  });
+  test("end to end: the TENANT-SCHEMA set's columns reach the floor (a <schema>-declared column admitted, an undeclared one refused)", () => {
+    const app = (q) => `<program db="app.db">
+  <schema>
+    ${w("CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)")}
+    ${w("ALTER TABLE assets ADD COLUMN extra TEXT")}
+  </schema>
+  \${
+    function mine() {
+      return ?{${BT}${q}${BT}}.all()
+    }
+  }
+  <button onclick=\${ mine() }>x</button>
+</program>
+`;
+    const codes = (r) => (r.errors ?? []).map((e) => e.code);
+    expect(codes(compileFiles({ "app.scrml": app("SELECT assets.name, assets.extra FROM assets") }))).not.toContain("E-TENANT-SQL-SUBSET");
+    expect(codes(compileFiles({ "app.scrml": app("SELECT assets.evil FROM assets") }))).toContain("E-TENANT-SQL-SUBSET");
   });
 });
 

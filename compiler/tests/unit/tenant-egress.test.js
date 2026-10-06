@@ -232,6 +232,10 @@ describe("§14.8.10 rewriteSelectAddTenantId — projection-column add (NOT a WH
       .toBe("SELECT id, name, assets.tenant_id AS __scrml_tenant_0 FROM assets WHERE id = ${x}");
   });
   test("qualifies the key with the tenant table's alias in a multi-table FROM", () => {
+    // (S455 `rel.f`: a qualified reference must name a DECLARED column — `uid` and `users`
+    // are declared here; an undeclared one is E-TENANT-SQL-SUBSET, below)
+    const ctx = buildTenantContext(protectCtx({ assets: ["id", "name", "uid", "tenant_id"], users: ["id", "name"] }));
+    const add = (q) => rewriteSelectAddTenantId(q, resolveTenantScoping(q, ctx));
     expect(add("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id"))
       .toBe("SELECT a.id, u.name, a.tenant_id AS __scrml_tenant_0 FROM assets a JOIN users u ON a.uid = u.id");
   });

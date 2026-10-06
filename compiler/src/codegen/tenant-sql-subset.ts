@@ -444,10 +444,25 @@ const NON_CALL_WORDS: ReadonlySet<string> = new Set([
 ]);
 /** Infix keywords: `x LIKE (…)` is syntax; `LIKE(` NOT after an operand is a call. */
 const INFIX_WORDS: ReadonlySet<string> = new Set(["LIKE", "ILIKE", "GLOB", "MATCH", "REGEXP", "SIMILAR", "BETWEEN", "IS", "ESCAPE"]);
+/**
+ * Keywords that never END an operand: a following infix word is then not an operator, so
+ * `x LIKE match(x)` reads `match(` as a CALL. ONE list for the query floor and the
+ * `<schema>` reader (`endsOperandWord`) — S239 r2 of 7761b813: the schema reader counted
+ * `LIKE` itself as an operand and admitted `label LIKE match(label)` (executed on PG16).
+ */
+const NOT_OPERAND_END: ReadonlySet<string> = new Set([
+  ...NON_CALL_WORDS, ...INFIX_WORDS,
+  "NOT", "AND", "OR", "ESCAPE", "CASE", "WHEN", "THEN", "ELSE", "ANY", "ALL", "SOME", "ARRAY", "TO", "ON", "USING",
+  "IS", "FOR", "WHERE", "ROW", "SELECT", "VALUES", "EXISTS", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT",
+  "EXCEPT", "LATERAL", "WINDOW", "RETURNING", "FETCH", "ONLY", "DISTINCT", "DEFAULT", "CHECK", "UNIQUE", "AS",
+  "WITH", "FROM", "IN", "COLLATE", "BY", "SET", "INTO", "JOIN", "BEGIN",
+]);
+/** Can an identifier spelled `up` (upper-cased) END an operand? (A keyword never does.) */
+export function endsOperandWord(up: string): boolean { return !NOT_OPERAND_END.has(up); }
 /** Does token `t` end an operand (so a following infix keyword is an operator)? */
 function endsOperandTok(t: SqlTok | undefined): boolean {
   return !!t && (t.kind === "num" || t.kind === "str" || t.kind === "param" || t.kind === "cast" ||
-    (t.kind === "punct" && t.text === ")") || (t.kind === "ident" && !NON_CALL_WORDS.has(t.up) && !INFIX_WORDS.has(t.up)));
+    (t.kind === "punct" && t.text === ")") || (t.kind === "ident" && endsOperandWord(t.up)));
 }
 
 /** Keywords that end a FROM clause / a table reference's alias position. */

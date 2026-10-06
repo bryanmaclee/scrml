@@ -43,7 +43,7 @@ import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
 // and the compilation's ONE tenant set it shares with the floor in CG.
-import { fileTenantSchemaHazards, compilationSchemaColumns } from "./tenant-schema-hazards.ts";
+import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
 import { compilationTenantSet } from "./codegen/tenant-egress.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
@@ -2994,7 +2994,7 @@ function _compileScrmlImpl(options = {}) {
   // S455 "yes, both" — the columns EVERY compiled file's `<schema>` declares: a body's
   // qualified `rel.col` must name one (Postgres reads `rel.f` as the call `f(rel)` otherwise).
   // (Computed only when the floor is on — with no tenant table the rule charges nothing.)
-  const compilationColumns = compilationTenant.tables.size > 0 ? compilationSchemaColumns(metaFiles) : new Map();
+  const compilationColumns = compilationTenant.columns ?? new Map();   // the SAME declared columns the query floor reads
   for (const fileAST of metaFiles) {
     const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
     const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
