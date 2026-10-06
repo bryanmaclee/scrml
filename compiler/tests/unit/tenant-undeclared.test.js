@@ -65,7 +65,16 @@ describe("programStatementVerdicts — the CLOSED program-body allow-list (S456 
     expect(v("DELETE FROM t")).toEqual(["ok"]);
     expect(v("SELECT * INTO inv FROM x", "postgres")).toEqual(["not-admitted"]);
     expect(v("WITH x AS (SELECT 'A' AS tenant_id) SELECT * INTO inv FROM x", "postgres")).toEqual(["not-admitted"]);
-    expect(v("SELECT a INTO @v FROM t", "unknown")).toEqual(["not-admitted"]);
+    expect(v("SELECT a INTO @v FROM t", "unknown")).toEqual(["unreadable"]);   // `@` is outside the lexical subset
+    // S456 round 4 (r4 F2): an INTO at ANY depth that is not the statement's own INSERT / REPLACE target
+    expect(v("(SELECT 'A' AS tenant_id INTO x3)")).toEqual(["not-admitted"]);
+    expect(v("WITH a AS (SELECT 1) (SELECT 'A' AS tenant_id INTO x5 FROM a)")).toEqual(["not-admitted"]);
+    expect(v("SELECT replace INTO t FROM x")).toEqual(["not-admitted"]);
+    expect(v("WITH x(a) AS (SELECT 1) INSERT INTO t (a) SELECT a FROM x")).toEqual(["ok"]);
+    expect(v("INSERT OR IGNORE INTO t (a) VALUES ('é')")).toEqual(["ok"]);   // non-ASCII inside a literal is data
+    // a data-modifying CTE's INSERT target is a write target too; a CTE's SELECT … INTO is not
+    expect(v("WITH x AS (INSERT INTO t (v) VALUES (1) RETURNING v) SELECT v FROM x", "postgres")).toEqual(["ok"]);
+    expect(v("WITH x AS (SELECT 'A' AS tenant_id INTO y) SELECT 1", "postgres")).toEqual(["not-admitted"]);
   });
   test("CREATE [TEMP] TABLE (spelled columns): admitted; a tenant_id column outside the set → tenant (any case / quoting)", () => {
     expect(v("CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY, msg TEXT NOT NULL DEFAULT '', UNIQUE (msg))")).toEqual(["ok"]);
@@ -109,9 +118,23 @@ describe("programStatementVerdicts — the CLOSED program-body allow-list (S456 
       "EXPLAIN ANALYZE SELECT * INTO c FROM assets",
       "CREATE SCHEMA s CREATE TABLE t (id int, tenant_id text)",
       "CREATE TABLE x AS SELECT a FROM t", "CREATE TABLE copy (LIKE assets)", "CREATE TABLE main.x (a INT)",
-      "ATTACH 'x.db' AS o", "DROP TABLE t", "VACUUM", "DO $$ BEGIN END $$", "CALL p()", "SET search_path = x",
-      "CREATE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql", "END",
+      "ATTACH 'x.db' AS o", "DROP TABLE t", "VACUUM", "CALL p()", "SET search_path = x", "END",
     ]) expect(v(s, "postgres")).toEqual(["not-admitted"]);
+  });
+  test("S456 round 4 — the CLOSED LEXICAL SUBSET: anything outside it is UNREADABLE, whatever the database", () => {
+    // r4 F1: `w·$z$` is ONE identifier to PG16 and SQLite, a dollar quote to a reader admitting `$`
+    expect(v("CREATE TABLE stash (v TEXT, w·$z$ TEXT, tenant_id TEXT, q·$z$ TEXT)")).toEqual(["unreadable"]);
+    expect(v("SELECT 1 AS a, 2 AS x😀$z$, 'A' AS tenant_id INTO stash3 FROM (SELECT 1 AS y😀$z$) s")).toEqual(["unreadable"]);
+    expect(v("SELECT $a$", "sqlite")).toEqual(["unreadable"]);                         // r4 F5
+    expect(v('CREATE TABLE t (id INT, U&"tenant\\005fid" TEXT)', "postgres")).toEqual(["unreadable"]);   // r4 F3
+    expect(v("SELECT 1 /*! ; CREATE TABLE x (tenant_id TEXT) */")).toEqual(["unreadable"]);   // r4 F4
+    expect(v("SELECT 1 /*M! ; CREATE TABLE x (tenant_id TEXT) */")).toEqual(["unreadable"]);
+    for (const s of ["SELECT E'a'", "SELECT X'00'", "SELECT B'1'", "SELECT N'a'", "SELECT ?", "SELECT :a", "SELECT @a",
+      "SELECT `a` FROM t", "SELECT [a] FROM t", "SELECT 'a\\b'", "DO $$ BEGIN END $$", "SELECT 1\fFROM t", "SELECT 1\u00a0FROM t", "SELECT éa FROM t"]) {
+      expect(v(s, "sqlite")).toEqual(["unreadable"]);
+    }
+    expect(v("SELECT a::int, -1.5, 'é' FROM t WHERE b <> ${x} -- note")).toEqual(["ok"]);
+    expect(v('SELECT "Name", "" FROM "T"')).toEqual(["ok"]);
   });
   test("UNREADABLE (databases disagree) → refused whether or not tenant_id is named", () => {
     expect(v("SELECT 1 /* a /* b */ ; CREATE TABLE x (a TEXT) -- */")).toEqual(["unreadable"]);
@@ -121,8 +144,6 @@ describe("programStatementVerdicts — the CLOSED program-body allow-list (S456 
     expect(v("SELECT 1 # c", "unknown")).toEqual(["unreadable"]);
     expect(v("SELECT 1 --c", "unknown")).toEqual(["unreadable"]);
     expect(v("SELECT [a] FROM t", "postgres")).toEqual(["unreadable"]);
-    // on SQLite a backslash is an ordinary character and `[…]` an identifier
-    expect(v("SELECT '\\' AS s, [a] FROM t", "sqlite")).toEqual(["ok"]);
     // CRLF line endings are not a lone CR
     expect(v("SELECT 1 -- c\r\nFROM t")).toEqual(["ok"]);
   });
@@ -173,7 +194,7 @@ describe("(1) program-body statements in a compile: E-TENANT-UNDECLARED / E-SQL-
       expect(compileFiles({ "app.scrml": bodyApp(s) }).codes).toEqual([]);
     }
   });
-  test("a bare-identifier body stays E-SQL-003's alone (no second code)", () => {
+  test("a bare-identifier body is refused by both rules (round 4: only a bare `${…}` body is E-SQL-003's alone)", () => {
     const src = `<program db="./app.db">
     \${
         function run(q) {
@@ -182,6 +203,20 @@ describe("(1) program-body statements in a compile: E-TENANT-UNDECLARED / E-SQL-
         }
     }
     <button onclick=\${ run("x") }>s</button>
+</program>
+`;
+    const codes = compileFiles({ "app.scrml": src }).codes;
+    expect(codes).toContain("E-SQL-003");
+    expect(codes).toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");
+    const slot = src.replace("?{q}", "?{${q}}");
+    expect(compileFiles({ "app.scrml": slot }).codes).not.toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");
+  });
+  test("a program WITHOUT a database is not governed (S456 \"a\": \"in any compilation with a database\")", () => {
+    const src = `<program>
+    \${
+        function f() { return ?{${BT}SELECT * INTO x FROM t${BT}}.all() }
+    }
+    <button onclick=\${ f() }>s</button>
 </program>
 `;
     expect(compileFiles({ "app.scrml": src }).codes).not.toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");

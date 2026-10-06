@@ -44,7 +44,7 @@ import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
 // and the compilation's ONE tenant set it shares with the floor in CG.
 import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
-import { programBodyUndeclaredTenantTables, liveUndeclaredTenantTables } from "./tenant-undeclared.ts";
+import { programBodyUndeclaredTenantTables, liveUndeclaredTenantTables, compilationHasDatabase } from "./tenant-undeclared.ts";
 import { compilationTenantSet, buildTenantContext } from "./codegen/tenant-egress.ts";
 import { fileTenantSubstrateReads } from "./tenant-substrate-read.ts";
 import { appDeclaresDbAuthoritative } from "./codegen/db-authoritative.ts";
@@ -3005,6 +3005,8 @@ function _compileScrmlImpl(options = {}) {
   const substrateCtx = compilationTenant.tables.size > 0
     ? buildTenantContext(buildProtectContext(paResult.protectAnalysis), [], "", undefined, compilationTenant)
     : null;
+  // S456 "a, fix F7/F9 too": the program-body allow-list governs a compilation with a database.
+  const compilationHasDb = compilationHasDatabase(metaFiles);
   for (const fileAST of metaFiles) {
     const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
     const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
@@ -3015,7 +3017,7 @@ function _compileScrmlImpl(options = {}) {
     // an admitted form giving a relation outside the SAME tenant set a `tenant_id` column is
     // E-TENANT-UNDECLARED; anything else is E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED
     // (tenant-undeclared.ts over schema-differ.js `programStatementVerdicts`).
-    collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables, compilationTenant.dialect ?? "unknown")), fp);
+    if (compilationHasDb) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables, compilationTenant.dialect ?? "unknown")), fp);
   }
   // …item 2 — a live SQLite file a `<db src=>` block opened holds a `tenant_id` relation
   // outside the set (protect-analyzer.ts collected them; reported at the `<db>` block).

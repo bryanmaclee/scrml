@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 237 | 6 |
+| HIGH | 238 | 6 |
 | MED | 517 | 4 |
 | LOW | 288 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
@@ -23163,6 +23163,10 @@ REPRODUCED (bun:sqlite, PA-side scratch): with `ATTACH 'other.db' AS o` on the c
 ### g-tenant-fts-index-impossible-s456 — a tenant-scoped full-text index cannot be declared: `<schema>` rejects `CREATE VIRTUAL TABLE` (E-SCHEMA-014) and a program-body `CREATE VIRTUAL TABLE … USING fts5(…, tenant_id)` is `E-TENANT-UNDECLARED` — `NEW S456; LOW; open (design note)`
 <!-- @gap id=g-tenant-fts-index-impossible-s456 sev=LOW status=open locus=compiler/src/schema-differ.js(findRejectedCreateTableHeads; programTenantTableDecls) prov=review:s456-S239-tenant-undeclared-F5 -->
 By construction, not a defect: no path declares a virtual table tenant-scoped, and the floor's reads of an FTS `MATCH` query are outside its SQL subset anyway. Needs a ruling if an adopter asks (e.g. a `<schema>` FTS form the floor understands, or a per-tenant index pattern).
+
+### g-tenant-set-config-in-program-body-s456 — a program-body `SELECT set_config('scrml.tenant', …)` / `set_config('search_path', …)` compiles clean in a tenant compilation — possible §14.8.11 RLS-tier bypass — `NEW S456; HIGH-candidate; open (RELAYED-UNVERIFIED)`
+<!-- @gap id=g-tenant-set-config-in-program-body-s456 sev=HIGH status=open locus=compiler/src/schema-differ.js(programStatementVerdicts DML admission)+compiler/src/codegen/tenant-sql-subset.ts prov=review:s456-S239-tenant-undeclared-r4 -->
+RELAYED from the S239 r4 reviewer, NOT reproduced here. A `SELECT` is admitted DML under the S456 program-body allow-list, and `set_config` names no tenant table, so neither the allow-list nor the tenant SQL subset refuses it. Under the §14.8.11 database-authoritative tier the per-request transaction pins `scrml.tenant` (and the role); a program statement that re-sets `scrml.tenant` or `search_path` inside that transaction could read another tenant's rows through row-level security, or resolve a table name to a different schema. Needs: a PG16 repro under the tier, then a ruling (e.g. refuse `set_config` / `current_setting`-writing calls in program-body SQL, or hold every program-body call to the tenant subset's function allow-list).
 
 ### g-tenant-startup-check-built-server-only-s456 — the S456 undeclared-tenant-table startup check runs only in the `_server.js` `scrml build` writes; `scrml dev` and a `scrml compile` module served by another host do not run it — `NEW S456; MED; open`
 <!-- @gap id=g-tenant-startup-check-built-server-only-s456 sev=MED status=open locus=compiler/src/commands/dev.js+compiler/src/codegen/tenant-startup-check.ts prov=ruling:user-voice-scrml.md-S456-"b,-startup-check-lands-with-it" -->

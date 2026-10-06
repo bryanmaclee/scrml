@@ -87,8 +87,6 @@ const SHAPES = {
 
   // --- fail-closed: origin unresolvable → WHOLE row stripped (survivors empty)
   quotedDq: Q('SELECT id, name, "passwordHash" FROM users'),
-  quotedBr: Q("SELECT id, name, [passwordHash] FROM users"),
-  quotedBt: `?{ SELECT id, name, ${B}passwordHash${B} FROM users }.all()`,
   exprLower: Q("SELECT id, name, lower(passwordHash) AS x FROM users"),
   exprConcat: Q("SELECT id, name, passwordHash || '' AS x FROM users"),
   exprSubstr: Q("SELECT id, name, substr(passwordHash, 1) AS x FROM users"),
@@ -136,8 +134,6 @@ const SHAPES = {
   // A quoted RETURNING target was read from the blanked view, where every
   // quoted identifier is the placeholder `q` — a table this program declares.
   quotedTargetDq: Q('UPDATE "users" SET name = \'alice\' WHERE id = 1 RETURNING *'),
-  quotedTargetBr: Q("UPDATE [users] SET name = 'alice' WHERE id = 1 RETURNING *"),
-  quotedTargetBt: `?{ UPDATE ${B}users${B} SET name = 'alice' WHERE id = 1 RETURNING * }.all()`,
   quotedTargetDelete: Q('DELETE FROM "users" WHERE id = 2 RETURNING *'),
 };
 
@@ -255,8 +251,6 @@ describe("CONF-PROTECT-EGRESS-FLOOR — resolved origin: protected column stripp
 describe("CONF-PROTECT-EGRESS-FLOOR — fail-closed wholesale strip: protected value absent, row dropped to {}", () => {
   const cases = [
     ['quoted identifier `"col"`', "quotedDq"],
-    ["bracket-quoted identifier `[col]`", "quotedBr"],
-    ["backtick-quoted identifier", "quotedBt"],
     ["expression `lower(col)`", "exprLower"],
     ["expression `col || ''`", "exprConcat"],
     ["expression `substr(col,1)`", "exprSubstr"],
@@ -371,6 +365,13 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: lone CR in a `--` comment — r
     ["UNION behind the CR", Q("SELECT id, name FROM users -- c\rUNION SELECT id, passwordHash FROM users")],
     ["UPDATE … `-- c<CR>RETURNING *`", Q("UPDATE users SET name = 'alice' WHERE id = 1 -- c\rRETURNING *")],
     ["`.run()`", Q("SELECT id, name -- c\r, passwordHash FROM users", ".run()")],
+    // S456 round 4 — the closed lexical subset: `[ident]` (SQLite) and backticks (MySQL) are
+    // read differently by the databases, so these S454 fail-closed / resolved shapes are now
+    // refused at compile instead.
+    ["bracket-quoted identifier `[col]`", Q("SELECT id, name, [passwordHash] FROM users")],
+    ["backtick-quoted identifier", `?{ SELECT id, name, ${B}passwordHash${B} FROM users }.all()`],
+    ["UPDATE [users] … RETURNING *", Q("UPDATE [users] SET name = 'alice' WHERE id = 1 RETURNING *")],
+    ["UPDATE `users` … RETURNING *", `?{ UPDATE ${B}users${B} SET name = 'alice' WHERE id = 1 RETURNING * }.all()`],
   ];
   for (const [label, body] of cases) {
     test(`${label} — E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`, () => {
@@ -406,8 +407,6 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: lone CR in a `--` comment — r
 describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: quoted RETURNING target resolves to the real table", () => {
   const cases = [
     ['UPDATE "users" … RETURNING *', "quotedTargetDq", "alice"],
-    ["UPDATE [users] … RETURNING *", "quotedTargetBr", "alice"],
-    ["UPDATE `users` … RETURNING *", "quotedTargetBt", "alice"],
     ['DELETE FROM "users" … RETURNING *', "quotedTargetDelete", "dave"],
   ];
   for (const [label, name, who] of cases) {

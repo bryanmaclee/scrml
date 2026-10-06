@@ -33,6 +33,25 @@
  */
 
 import { programStatementVerdicts } from "./schema-differ.js";
+import { resolveDbScopes } from "./db-ownership.ts";
+import { getNodes } from "./codegen/collect.ts";
+
+/**
+ * Whether any file compiled together declares a database (`<program db=>`, `<db src=>` — the
+ * §8.1.1 handles). The program-body allow-list governs "a compilation with a database" (S456
+ * "a, fix F7/F9 too"); a file whose handles cannot be resolved counts as having one (fail-closed).
+ */
+export function compilationHasDatabase(files: Iterable<unknown>): boolean {
+  for (const f of files) {
+    const filePath = typeof (f as any)?.filePath === "string" && (f as any).filePath ? (f as any).filePath : null;
+    try {
+      if (resolveDbScopes(getNodes(f as any), filePath).handles.length > 0) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
 
 /** One `E-TENANT-UNDECLARED` diagnostic (the TENANT-SCHEMA stage's shape). */
 export interface TenantUndeclaredDiagnostic {
@@ -113,14 +132,11 @@ export function programBodyUndeclaredTenantTables(
   const seen = new WeakSet<object>();
   const reported = new Set<string>();
   const read = (sql: string, span: unknown): void => {
-    // A body that is one bare identifier (`?{q}`) is E-SQL-003's (a runtime-assembled SQL
-    // string) — unless it is one of the single-word statements E-SQL-003 admits, which the
-    // allow-list then judges (`BEGIN` admitted, `VACUUM` refused).
-    const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*$/.exec(sql);
-    if (bare && !["VACUUM", "BEGIN", "COMMIT", "END", "ROLLBACK", "ANALYZE", "CHECKPOINT"].includes(bare[1].toUpperCase())) return;
+    // (S456 round 4: a statement that does not begin with a keyword is refused like any other
+    // off-list statement — `(SELECT … INTO x)` was let through. Only a body of `${…}` slots
+    // alone is left to E-SQL-003, inside `programStatementVerdicts`.)
     for (const d of programStatementVerdicts(sql, { dialect, isTenant: declared })) {
       if (d.verdict === "admitted") continue;
-      if (d.verdict === "not-admitted" && d.why === "it does not begin with a SQL keyword") continue;
       const key = `${String((span as any)?.start ?? "")}\0${d.offset}\0${d.verdict}`;
       if (reported.has(key)) continue;
       reported.add(key);

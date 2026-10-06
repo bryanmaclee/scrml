@@ -3966,13 +3966,14 @@ export function emitScrmlSchemaSource(actual, opts = {}) {
 export function programStatementVerdicts(text, opts = {}) {
   const out = [];
   if (typeof text !== "string" || text.trim().length === 0) return out;
-  const dialect = opts.dialect ?? "unknown";
   const isTenant = opts.isTenant ?? (() => false);
-  const { toks, unreadable } = programSqlTokens(text, dialect);
+  const { toks, unreadable } = programSqlTokens(text);
   if (unreadable !== null) {
     out.push({ verdict: "unreadable", lead: "", name: null, why: unreadable, offset: 0 });
     return out;
   }
+  // A body of `${…}` slots alone is a runtime-assembled SQL string — E-SQL-003's, not this rule's.
+  if (toks.length > 0 && toks.every((t) => t.k === "param")) return out;
   let start = 0;
   for (let i = 0; i <= toks.length; i++) {
     if (i < toks.length && !(toks[i].k === "p" && toks[i].t === ";" && toks[i].depth === 0)) continue;
@@ -3997,112 +3998,124 @@ const TRANSACTION_LEADS = new Set(["BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "
 const DML_LEADS = new Set(["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "REPLACE"]);
 
 /**
- * The SQL tokens of a program-body statement, or the first reason the databases would not
- * all read it the same way. Literals, quoted identifiers, `${…}` parameters and ASCII
- * `$tag$ … $tag$` bodies are single tokens; comments are skipped. `depth` is the paren depth
- * OUTSIDE a `(` / `)` token.
+ * THE CLOSED LEXICAL SUBSET (S456 round 4 — the ruled "a statement the databases read
+ * differently is refused" clause made exact; the S452 tenant SQL subset's idea at the
+ * lexical layer). Outside a literal or comment a program-body statement may hold ONLY:
+ *   - whitespace: space, tab, LF, CR LF;
+ *   - ASCII identifiers `[A-Za-z_][A-Za-z0-9_]*`;
+ *   - double-quoted identifiers of printable ASCII with no escape but `""`;
+ *   - standard single-quoted strings: `''` the only escape, no backslash, any other character
+ *     (non-ASCII included — it is data), no prefix (`E'`, `B'`, `X'`, `N'`, `U&'` are refused);
+ *   - unsigned numbers `[0-9]+(.[0-9]+)?`;
+ *   - `-- ` comments (`--` then space, tab or a line end; ending at LF, no lone CR inside);
+ *   - `/* … *\/` comments that close, do not nest and are not executable (`/*!`, `/*M!`);
+ *   - `${…}` interpolation slots (bound parameters);
+ *   - the punctuation `( ) , ; . * + - / % = < > ! | & ~ ^` and the cast `::`.
+ * Anything else — a `$` that does not open `${`, any non-ASCII character, `U&`, a backslash,
+ * `#`, a backtick, `[` / `]`, `@`, `?`, a lone `:`, `{` / `}`, a lone CR, another whitespace
+ * character — makes the statement UNREADABLE (refused). Executed on PG16 and Bun.SQL sqlite by
+ * the S239 r4 review: `w·$z$` is ONE identifier to both databases but a dollar quote to a
+ * reader that admits `$`; the subset admits neither the `·` nor the `$`.
  */
-function programSqlTokens(text, dialect) {
+function programSqlTokens(text) {
   const toks = [];
   const n = text.length;
-  const sqliteOnly = dialect === "sqlite";
   let depth = 0;
   let i = 0;
   const bad = (why) => ({ toks, unreadable: why });
   while (i < n) {
     const c = text[i];
-    if (/\s/.test(c)) { i++; continue; }
+    if (c === " " || c === "\t" || c === "\n") { i++; continue; }
+    if (c === "\r") {
+      if (text[i + 1] === "\n") { i += 2; continue; }
+      return bad("a lone carriage return (databases end lines and `--` comments differently at it)");
+    }
     if (c === "-" && text[i + 1] === "-") {
-      if (!sqliteOnly && dialect !== "postgres" && !/\s/.test(text[i + 2] ?? " ")) {
-        return bad("a `--` not followed by whitespace is not a comment on MySQL");
+      const after = text[i + 2];
+      if (after !== undefined && after !== " " && after !== "\t" && after !== "\n" && after !== "\r") {
+        return bad("a `--` not followed by whitespace (not a comment on MySQL)");
       }
-      const end = sqlLineCommentEnd(text, i);
-      if (text[end] === "\r" && text[end + 1] !== "\n") {
-        return bad("a `--` comment holds a lone carriage return (Postgres ends the comment there, SQLite and MySQL do not)");
+      let j = i + 2;
+      while (j < n && text[j] !== "\n") {
+        if (text[j] === "\r" && text[j + 1] !== "\n") return bad("a `--` comment holds a lone carriage return (Postgres ends the comment there, SQLite and MySQL do not)");
+        j++;
       }
-      i = end;
+      i = j;
       continue;
     }
     if (c === "/" && text[i + 1] === "*") {
+      if (text[i + 2] === "!" || (text[i + 2] === "M" && text[i + 3] === "!")) return bad("an executable comment (`/*!` / `/*M!` — MySQL and MariaDB run its contents)");
       const close = text.indexOf("*/", i + 2);
-      const inner = text.slice(i + 2, close === -1 ? n : close);
-      if (inner.includes("/*")) return bad("a `/*` inside a block comment (Postgres nests block comments, SQLite and MySQL do not)");
       if (close === -1) return bad("an unclosed block comment");
+      if (text.slice(i + 2, close).includes("/*")) return bad("a `/*` inside a block comment (Postgres nests block comments, SQLite and MySQL do not)");
       i = close + 2;
       continue;
     }
-    if (c === "#" && !sqliteOnly && dialect !== "postgres") return bad("a `#` (a comment on MySQL)");
     if (c === "'") {
       let j = i + 1;
       while (j < n && !(text[j] === "'" && text[j + 1] !== "'")) j += text[j] === "'" ? 2 : 1;
       if (j >= n) return bad("an unclosed string literal");
-      if (!sqliteOnly && text.slice(i, j).includes("\\")) {
-        return bad("a string literal holds a backslash (an escape on MySQL and in a Postgres `E'…'` string)");
-      }
+      if (text.slice(i, j).includes("\\")) return bad("a string literal holds a backslash (an escape on MySQL and in a Postgres `E'…'` string)");
       toks.push({ k: "str", at: i, depth });
       i = j + 1;
       continue;
     }
-    if (c === '"' || c === "`" || c === "[") {
-      if (c === "[" && !sqliteOnly) return bad("a `[…]` identifier (SQLite's; an array subscript on Postgres)");
-      const close = c === "[" ? "]" : c;
-      if (text[i + 1] === close && text[i + 2] !== close) {   // `""` — empty (SQLite reads it as '')
-        toks.push({ k: "str", at: i, depth });
-        i += 2;
-        continue;
+    if (c === '"') {
+      let j = i + 1;
+      let name = "";
+      while (j < n) {
+        if (text[j] === '"') {
+          if (text[j + 1] === '"') { name += '"'; j += 2; continue; }
+          break;
+        }
+        if (!/[\x20-\x7e]/.test(text[j])) return bad("a double-quoted identifier holds a character that is not printable ASCII");
+        name += text[j];
+        j++;
       }
-      const p = readSqlIdentPart(text, i);
-      if (!p) return bad(`an unclosed quoted identifier (\`${c}\`)`);
-      toks.push({ k: "id", t: p.name, up: p.name.toUpperCase(), quoted: true, at: i, depth });
-      i = p.end;
+      if (j >= n) return bad("an unclosed double-quoted identifier");
+      // `""` (empty) is SQLite's empty string; any other is an identifier
+      toks.push(name.length === 0 ? { k: "str", at: i, depth } : { k: "id", t: name, up: name.toUpperCase(), quoted: true, at: i, depth });
+      i = j + 1;
       continue;
     }
     if (c === "$") {
-      if (text[i + 1] === "{") {                       // `${…}` — a bound parameter (a value)
-        let d = 0;
-        let j = i + 1;
-        for (; j < n; j++) {
-          if (text[j] === "{") d++;
-          else if (text[j] === "}" && --d === 0) break;
-        }
-        toks.push({ k: "param", at: i, depth });
-        i = j + 1;
-        continue;
+      if (text[i + 1] !== "{") return bad("a `$` that does not open a `${…}` slot (a dollar quote or a `$n` parameter — databases read it differently)");
+      let d = 0;
+      let j = i + 1;
+      for (; j < n; j++) {
+        if (text[j] === "{") d++;
+        else if (text[j] === "}" && --d === 0) break;
       }
-      const m = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(text.slice(i, i + 66));
-      if (m) {                                          // an ASCII `$tag$ … $tag$` string
-        const close = text.indexOf(m[0], i + m[0].length);
-        if (close === -1) return bad("an unclosed dollar-quoted string");
-        toks.push({ k: "str", at: i, depth });
-        i = close + m[0].length;
-        continue;
-      }
-      if (/^\$[\p{L}\p{N}_]*\$/u.test(text.slice(i, i + 66)) || /[^\x00-\x7f]/.test(text[i + 1] ?? "")) {
-        return bad("a dollar-quote tag that is not ASCII (Postgres reads it as a string; the reader does not)");
-      }
-      toks.push({ k: "p", t: "$", at: i, depth });   // `$1` placeholder and the like
-      i++;
+      if (j >= n) return bad("an unclosed `${…}` slot");
+      toks.push({ k: "param", at: i, depth });
+      i = j + 1;
       continue;
     }
-    if (/[\p{L}_]/u.test(c)) {
+    if (/[A-Za-z_]/.test(c)) {
       let j = i + 1;
-      while (j < n && SQL_IDENT_CHAR.test(text[j]) && !(text[j] === "$" && text[j + 1] === "{")) j++;
+      while (j < n && /[A-Za-z0-9_]/.test(text[j])) j++;
       const t = text.slice(i, j);
+      if (text[j] === "'" || (text[j] === "&" && (text[j + 1] === "'" || text[j + 1] === '"'))) {
+        return bad(`a prefixed literal (\`${t}${text[j]}…\` — \`E'…'\`, \`B'…'\`, \`X'…'\`, \`N'…'\`, \`U&…\` read differently by each database)`);
+      }
       toks.push({ k: "id", t, up: t.toUpperCase(), quoted: false, at: i, depth });
       i = j;
       continue;
     }
     if (/[0-9]/.test(c)) {
       let j = i + 1;
-      while (j < n && /[0-9.]/.test(text[j])) j++;
+      while (j < n && /[0-9]/.test(text[j])) j++;
+      if (text[j] === "." && /[0-9]/.test(text[j + 1] ?? "")) { j++; while (j < n && /[0-9]/.test(text[j])) j++; }
       toks.push({ k: "num", at: i, depth });
       i = j;
       continue;
     }
+    if (c === ":" && text[i + 1] === ":") { toks.push({ k: "p", t: "::", at: i, depth }); i += 2; continue; }
     if (c === "(") { toks.push({ k: "p", t: "(", at: i, depth }); depth++; i++; continue; }
     if (c === ")") { depth = Math.max(0, depth - 1); toks.push({ k: "p", t: ")", at: i, depth }); i++; continue; }
-    toks.push({ k: "p", t: c, at: i, depth });
-    i++;
+    if ("),;.*+-/%=<>!|&~^".includes(c)) { toks.push({ k: "p", t: c, at: i, depth }); i++; continue; }
+    const shown = /[\x21-\x7e]/.test(c) ? `\`${c}\`` : `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
+    return bad(`the character ${shown} is outside the program-body SQL subset`);
   }
   return { toks, unreadable: null };
 }
@@ -4144,13 +4157,40 @@ function statementVerdict(text, toks, isTenant) {
   if (lead.k !== "id" || lead.quoted) return notAdmitted("it does not begin with a SQL keyword");
 
   if (DML_LEADS.has(leadWord)) {
-    // A top-level INTO is a SELECT … INTO unless it is an INSERT / REPLACE target.
-    let last = leadWord;
-    for (const tok of toks) {
-      if (tok.depth !== 0 || tok.k !== "id" || tok.quoted) continue;
-      if (["SELECT", "INSERT", "REPLACE", "UPDATE", "DELETE", "MERGE"].includes(tok.up)) last = tok.up;
-      if (tok.up === "INTO" && last !== "INSERT" && last !== "REPLACE") {
-        return notAdmitted("a top-level `INTO` after `SELECT` creates a table (Postgres) or writes variables or a file (MySQL)");
+    // S456 round 4: an `INTO` at ANY depth is refused unless it is the target of THE
+    // statement's own INSERT / REPLACE — the main keyword (the first token, or, after a
+    // `WITH` list, the first depth-0 token after its last CTE), followed only by modifier
+    // words (`OR REPLACE`, `OR IGNORE`, MySQL `IGNORE` / `LOW_PRIORITY` / `DELAYED`, …).
+    // A `SELECT … INTO` creates a table on Postgres and writes variables or a file on MySQL;
+    // `INSERT` / `REPLACE` are not reserved words everywhere (`SELECT replace INTO t` names a
+    // column), so position decides, not spelling.
+    let main = 0;
+    if (leadWord === "WITH") {
+      main = -1;
+      for (let j = 1; j < toks.length; j++) {
+        if (toks[j].depth === 0 && isPunct(toks[j], ")") && !isPunct(toks[j + 1], ",") && !isWord(toks[j + 1], "AS")) { main = j + 1; break; }
+      }
+    }
+    const INTO_MODIFIERS = new Set(["OR", "REPLACE", "IGNORE", "ABORT", "FAIL", "ROLLBACK", "LOW_PRIORITY", "HIGH_PRIORITY", "DELAYED"]);
+    // The INSERT / REPLACE heads whose `INTO` is a write target: the statement's main keyword,
+    // and — in a `WITH` statement — a data-modifying CTE body (`name AS ( INSERT INTO …`).
+    const heads = [];
+    if (main >= 0) heads.push(main);
+    if (leadWord === "WITH") {
+      for (let j = 2; j < toks.length; j++) {
+        if (isPunct(toks[j - 1], "(") && (isWord(toks[j - 2], "AS") || isWord(toks[j - 2], "MATERIALIZED"))) heads.push(j);
+      }
+    }
+    const admittedInto = new Set();
+    for (const h of heads) {
+      if (!isWord(toks[h], "INSERT") && !isWord(toks[h], "REPLACE")) continue;
+      let j = h + 1;
+      while (j < toks.length && toks[j].k === "id" && !toks[j].quoted && INTO_MODIFIERS.has(toks[j].up)) j++;
+      if (isWord(toks[j], "INTO")) admittedInto.add(j);
+    }
+    for (let j = 0; j < toks.length; j++) {
+      if (!admittedInto.has(j) && isWord(toks[j], "INTO")) {
+        return notAdmitted("an `INTO` that is not the target of the statement's own `INSERT` / `REPLACE` (a `SELECT … INTO` creates a table on Postgres and writes variables or a file on MySQL)");
       }
     }
     return admitted();
