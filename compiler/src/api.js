@@ -45,6 +45,7 @@ import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // and the compilation's ONE tenant set it shares with the floor in CG.
 import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
 import { compilationTenantSet } from "./codegen/tenant-egress.ts";
+import { appDeclaresDbAuthoritative } from "./codegen/db-authoritative.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
@@ -4388,6 +4389,13 @@ function _compileScrmlImpl(options = {}) {
     // ("server" | "tool"). `scrml build` reports them, warns on paths the data root
     // cannot move, and bakes the referencing ones into the server's startup check.
     sqliteDatabases: (metaFiles ?? []).flatMap((f) => (f && Array.isArray(f._sqliteFileHandles) ? f._sqliteFileHandles : [])),
+    // §14.8.11 (S455 "a") — true when ANY compiled file declares a `db-authoritative`
+    // `<schema>` table: the SAME recognizer emit-server's principal-wrapper engagement gate
+    // uses (`appDeclaresDbAuthoritative`), so the report and the wrapper cannot disagree.
+    // A build that reaches `scrml build`'s report with this true is on Postgres: codegen's
+    // E-DBAUTH-SQLITE gate hard-fails any other resolved driver. `scrml build` uses it to
+    // state the deploy requirement `REVOKE CREATE ON SCHEMA public FROM PUBLIC`.
+    dbAuthoritative: (metaFiles ?? []).some((f) => f != null && appDeclaresDbAuthoritative(f)),
     // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
     // browser artifacts + their import closure). `generateServerEntry` bakes it
     // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.
