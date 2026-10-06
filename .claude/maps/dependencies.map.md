@@ -1,6 +1,21 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
+# client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
+# sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
+# tenant `<schema>` statement-kind allow-list, #1319 tenant `<schema>` bodies in the SQL subset, #1321 build-report PG
+# REVOKE, #1322 handled-`?{}` guard consumers, #1324 test timeout, #1325 §8.10 hoist), incremental refresh in an isolated
+# worktree @ `9c556dc74` = `origin/main`.** MAP-STAMP RULE: `git log --oneline f38697900..HEAD` -> 20; `bun scripts/state.ts
+# --check` at pass start: `maps: 20 commits behind HEAD (watermark f38697900, HEAD 9c556dc74)` — matches exactly.
+# ⛑ FIGURES RE-EXECUTED AT `9c556dc74`: `facts.ts --check` PASS · FACTS `compiler/src` **298,756 lines / 241 files** (+5 new
+# modules this window) · test files **1,609** (+12) · `compiler/SPEC.md` **46,681** lines (+546; `regen-spec-index.ts
+# --check` OK 72/72) · conformance **1346** (+28); `bun conformance/run.ts` -> **1296 pass + 50 xfail** · known-gaps open
+# **HIGH 241 · MED 513 · LOW 277** · Nominal 8; heading/marker drift 61 · bootstrap counter (live) 1346 attempted: PASS
+# **121** · FAIL **56** · NOT-TWINNED **515** · UNSUPPORTED **654** · CRASH 0; graded 177, 121 hold (68.4%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 6th window (1315 cases; `--check` STALE). slice-m4 and `types-gate.ts` NOT
+# re-executed this pass. ⚠ FACTS "CLI verbs 14" is WRONG (12 dispatched) — non-compliance N-S455-1.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S454 HEADER (stamp `f38697900`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
 # bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
 # U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
@@ -870,6 +885,20 @@
 # second call site in `collectFunctions`. No external dependency changed: `package.json` is untouched
 # in this window.
 #
+
+## S455 — DEPENDENCY DELTA (`f38697900..9c556dc74`, from import statements at `9c556dc74`)
+
+No `package.json` change. `acorn` (already a runtime dep, `^8.16.0`) gains two importers: `codegen/foreign-seal.ts` and `commands/fix-client-server-call.js`.
+
+New internal edges:
+- `api.js` -> `tenant-schema-hazards.ts` (`fileTenantSchemaHazards`), `codegen/tenant-egress.ts` (`compilationTenantSet`)
+- `tenant-schema-hazards.ts` -> `codegen/tenant-sql-subset.ts`, `schema-differ.js` (`schemaTableDeclarations`, `DBAUTH_ROLE`)
+- `codegen/tenant-egress.ts` -> `tenant-schema-hazards.ts` (`fileSchemaTenantNames`, `compilationSchemaColumns`, `schemaColumnKnowledge`, `tenantQueryQualifiedRefIssue`) — no cycle (`tenant-schema-hazards.ts` imports `tenant-sql-subset.ts`, not `tenant-egress.ts`)
+- `batch-planner.ts` -> `hoist-sql-shape.ts`
+- `codegen/{emit-logic,emit-server,emit-library,emit-tool,protect-flow}.ts` -> `codegen/foreign-seal.ts`
+- `codegen/sql-attempt.ts` <- 16 importers (`body-dg-builder`, `dependency-graph`, `meta-checker`, `monotonicity-analyzer`, `route-inference`, `type-system`, `codegen/{collect,emit-control-flow,emit-expr,emit-functions,emit-library,emit-logic,emit-server,emit-tool,protect-flow,scheduling}`)
+- `commands/fix-s66.js` -> `commands/fix-client-server-call.js`, `commands/fix-sql-failable.js`; `fix-sql-failable.js` -> `fix-client-server-call.js` (shared `skipBalanced` / `scratchProject` / `compileWithRI` / `promiseAllBatches`), `block-splitter.js`, `ast-builder.js`, `expression-parser.ts`; `fix-client-server-call.js` -> `api.js`, `route-inference.ts`, `expression-parser.ts`, `acorn`
+- `scripts/bootstrap-conformance.ts`: `TWIN_RULES` now excludes `client-server-call` and `sql-failable` (with `arm-pipe`)
 
 ## S454 — DEPENDENCY DELTA (`fd2f757d0..f38697900`, two windows: S452-WRAP `fd2f757d0..7ce905ac2` + S454 `7ce905ac2..f38697900`; from import statements at `f38697900`)
 

@@ -1,6 +1,10 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# generated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# ⛑ **S455 STAMP — `f38697900` -> `9c556dc74` (20 commits: #1306-#1325), incremental; scan mode INCREMENTAL (in-window
+# changed docs + SPEC §34 grep cross-check of every code added in the `compiler/src` diff + executed `scrml fix --help`,
+# `facts.ts --check`, `bootstrap-conformance.ts --check`). New section `## Summary — S455 pass` below.**
+# ━━━━━━━ BELOW IS THE S454 HEADER (stamp `f38697900`), CARRIED. ━━━━━━━
 # ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900` (12 commits: #1294 #1295 #1296 #1297 #1298 #1300 #1299 #1301 #1302 #1303
 # #1304 #1305), incremental; scan mode INCREMENTAL (in-window changed docs + SPEC grep cross-check + 2 executed
 # reproducers). New section `## Summary — S454 pass` below.**
@@ -455,6 +459,58 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S455 pass (this pass, stamp `9c556dc74`)
+
+Window `f38697900..9c556dc74` (20 commits). Docs scanned: the in-window changed `.md` set (`compiler/SPEC.md`,
+`compiler/SPEC-INDEX.md`, `docs/{FACTS,known-gaps,changelog,pr-reviews,PA-SCRML-PRIMER}.md`, `master-list.md`,
+`hand-off.md`, `docs/changes/s45{4,5}-*/`) + CLI help text + a §34 row check for all 24 codes in the `compiler/src` diff
+(all have rows). Non-compliant: 3 · Uncertain: 3 · Prior findings closed: 2.
+
+### N-S455-1 — `docs/FACTS.md` reports 14 CLI verbs; `cli.js` dispatches 12
+**Reason:** grep-mismatch (generated doc, generator allowlist stale)
+**Detail:** `FACTS.md:29` `| CLI verbs | 14 |` and `:41` list `fix-client-server-call` and `fix-sql-failable`. Both are
+`scrml fix` rule modules imported by `fix-s66.js`, not subcommands — `compiler/src/cli.js:149` dispatches `compile dev build
+serve init migrate fix db-migrate promote generate introspect semdiff` (12). At `f38697900` FACTS said 12. Cause:
+`scripts/facts.ts` `cliVerbs()` `NOT_A_VERB` set (:88) lacks the two new modules — the failure mode its own comment
+(:72) predicts. `facts.ts --check` PASSES because it checks self-consistency, not truth.
+**Suggested disposition:** update to match current — add both names to `NOT_A_VERB`, `facts.ts --write`.
+
+### N-S455-2 — `scrml fix --help` describes a `.run() !{ _ :> {} }` rewrite that `sql-failable` does not perform
+**Reason:** content-heuristic (user-facing CLI text vs code; executed)
+**Detail:** `compiler/src/commands/fix.js:59` (help) and `:16` (header) say sql-failable rewrites
+`` `.run() !{ _ :> {} }` ``. `fix-sql-failable.js:20` — "A WRITE is LISTED, never rewritten (S455 ruling — supersedes S451
+5(a)'s `.run() !{ _ :> {} }` shape)"; `SQL_FALLBACK` :88 has no `run` entry. SPEC `:19232` / `:19246` are current
+("provable reads rewritten, writes listed"). Executed: `bun compiler/src/cli.js fix --help` prints the stale text.
+**Suggested disposition:** update to match current (help + header: reads rewritten, writes listed).
+
+### N-S455-3 — `docs/bootstrap-conformance.md` STALE for the SIXTH consecutive window (carries N-S454-3)
+**Reason:** content-heuristic (generated doc vs live run)
+**Detail:** committed doc = 1315 cases; live `--check` at `9c556dc74`: STALE; 1346 attempted, PASS 121 · FAIL 56 ·
+NOT-TWINNED 515 · UNSUPPORTED 654 · CRASH 0 (graded 177, 68.4% hold). +28 conformance cases this window, none regenerated it.
+**Suggested disposition:** update to match current (`--write`); make `--check` blocking for PRs touching `conformance/cases/**`.
+
+## Uncertain docs (needs human review) — S455 pass
+
+### `docs/known-gaps.md:10042` — `G-SQL-ERROR-SURFACE-UNWIRED` (carried from N-S454-2, third limb)
+**Reason:** heading `open`; premise "`grep -rn SqlError compiler/src` = 0" is false (5 files at `9c556dc74`); handled
+queries map driver throws since #1305. Unhandled queries still throw, so narrowed not closed.
+**What to check:** rescope the entry to the unhandled path.
+
+### `compiler/SPEC.md:19879` — "E-ERROR-016 … no compiler emits it yet" (carried N-S454-4)
+**Reason:** `compiler/self-host-v2/analyze.scrml` has 8 `E-ERROR-016` mentions (impl#2 emits it); impl#1 has 0.
+**What to check:** say "impl#1 does not emit it" or land the row.
+
+### `compiler/SPEC.md:25549` E-CG-003 row and `:12916` "`UPDATE`/`DELETE` … fires `E-TENANT-WRITE`" (both carried)
+**Reason:** unchanged from the S454 pass; not re-executed.
+**What to check:** as in the S454 pass entries below.
+
+## Prior findings CLOSED at `9c556dc74`
+- **N-S454-1** (`E-NAME-COLLIDES-RESERVED-PREFIX` no §34 row) — CLOSED: row at `SPEC.md:25709`.
+- **N-S454-2** limbs 1-2 — CLOSED: `g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454` (`:22988`) and
+  `g-tenant-floor-raw-driver-handle-callable-s452` (`:22974`) both `status=resolved`. Limb 3 carried above.
+- CARRIED, still true: known-gaps heading/marker drift **61** (`state.ts --check`). `@generated:recent-sessions` now PASSES (#1311).
+
 
 ## Summary — S454 pass (this pass, stamp `f38697900`)
 

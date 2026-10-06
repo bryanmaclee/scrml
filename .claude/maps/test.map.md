@@ -1,6 +1,21 @@
 # test.map.md
 # project: scrml
-# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
+# client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
+# sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
+# tenant `<schema>` statement-kind allow-list, #1319 tenant `<schema>` bodies in the SQL subset, #1321 build-report PG
+# REVOKE, #1322 handled-`?{}` guard consumers, #1324 test timeout, #1325 §8.10 hoist), incremental refresh in an isolated
+# worktree @ `9c556dc74` = `origin/main`.** MAP-STAMP RULE: `git log --oneline f38697900..HEAD` -> 20; `bun scripts/state.ts
+# --check` at pass start: `maps: 20 commits behind HEAD (watermark f38697900, HEAD 9c556dc74)` — matches exactly.
+# ⛑ FIGURES RE-EXECUTED AT `9c556dc74`: `facts.ts --check` PASS · FACTS `compiler/src` **298,756 lines / 241 files** (+5 new
+# modules this window) · test files **1,609** (+12) · `compiler/SPEC.md` **46,681** lines (+546; `regen-spec-index.ts
+# --check` OK 72/72) · conformance **1346** (+28); `bun conformance/run.ts` -> **1296 pass + 50 xfail** · known-gaps open
+# **HIGH 241 · MED 513 · LOW 277** · Nominal 8; heading/marker drift 61 · bootstrap counter (live) 1346 attempted: PASS
+# **121** · FAIL **56** · NOT-TWINNED **515** · UNSUPPORTED **654** · CRASH 0; graded 177, 121 hold (68.4%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 6th window (1315 cases; `--check` STALE). slice-m4 and `types-gate.ts` NOT
+# re-executed this pass. ⚠ FACTS "CLI verbs 14" is WRONG (12 dispatched) — non-compliance N-S455-1.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S454 HEADER (stamp `f38697900`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
 # bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
 # U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
@@ -963,6 +978,16 @@
 # **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
 # check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
+
+## S455 — TEST SURFACE DELTA (`f38697900..9c556dc74`)
+
+Figures executed at `9c556dc74`: FACTS test files **1,609** (+12); conformance **1346** (+28); `bun conformance/run.ts` -> `1296/1346 cases pass`, `50 xfail`. All 31 tenant / foreign / hoist / handled-`?{}` cases PASS. slice-m4 not re-run.
+
+New test files (12): `commands/fix-client-server-call.test.js`, `commands/fix-sql-failable.test.js`, `integration/foreign-sealed-scope.test.js`, `integration/tenant-subset-cast-pg.test.js` (live-Postgres, skip-graceful), `unit/build-pg-schema-create-requirement.test.js`, `unit/s455-handled-sql-guard-consumers.test.js`, `unit/s455-hoist-allow-list.test.js`, `unit/s455-hoist-keyed-read-depth.test.js`, `unit/tenant-floor-project-set.test.js` (executed cases carry a 30 s timeout, #1324), `unit/tenant-schema-body-subset.test.js`, `unit/tenant-schema-hazards.test.js`, `unit/tenant-schema-isolation-removal.test.js`.
+
+New conformance cases (28): `tenant/schema-hazard-{end-column,fk-cascade,instead-of-view,schemafor-table,trigger-on-other-table,unattributable,view-over-tenant}-neg` + `-non-tenant-objects-pos`; `tenant/floor-alter-add-tenant-column-{neg,pos}`, `tenant/floor-imported-module-{read-pos,write-neg}` (multi-file: `admin.scrml`, `writer.scrml`); `foreign/foreign-slice-{no-free-capture-neg,sealed-crossings-pos,unparseable-neg}`; `server-db/sql-handled-{cell-write,cell-write-arm-values,hoisted-loop,hoisted-loop-nested-read,lift,split-write}-rt`; `server-db/sql-hoisted-loop-{allow-list,key-projection,nested-read,reassign,unrewritable-site}-rt`; `protect/hoisted-loop-protected-table-not-hoisted-rt`; `fn/sql-access-handled-reject`.
+
+Run: `bun test compiler/tests/unit/tenant-schema-hazards.test.js`; `bun conformance/run.ts` (whole corpus).
 
 ## S454 — TEST SURFACE DELTA (`7ce905ac2..f38697900`)
 

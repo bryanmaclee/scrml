@@ -1,6 +1,21 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
+# client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
+# sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
+# tenant `<schema>` statement-kind allow-list, #1319 tenant `<schema>` bodies in the SQL subset, #1321 build-report PG
+# REVOKE, #1322 handled-`?{}` guard consumers, #1324 test timeout, #1325 §8.10 hoist), incremental refresh in an isolated
+# worktree @ `9c556dc74` = `origin/main`.** MAP-STAMP RULE: `git log --oneline f38697900..HEAD` -> 20; `bun scripts/state.ts
+# --check` at pass start: `maps: 20 commits behind HEAD (watermark f38697900, HEAD 9c556dc74)` — matches exactly.
+# ⛑ FIGURES RE-EXECUTED AT `9c556dc74`: `facts.ts --check` PASS · FACTS `compiler/src` **298,756 lines / 241 files** (+5 new
+# modules this window) · test files **1,609** (+12) · `compiler/SPEC.md` **46,681** lines (+546; `regen-spec-index.ts
+# --check` OK 72/72) · conformance **1346** (+28); `bun conformance/run.ts` -> **1296 pass + 50 xfail** · known-gaps open
+# **HIGH 241 · MED 513 · LOW 277** · Nominal 8; heading/marker drift 61 · bootstrap counter (live) 1346 attempted: PASS
+# **121** · FAIL **56** · NOT-TWINNED **515** · UNSUPPORTED **654** · CRASH 0; graded 177, 121 hold (68.4%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 6th window (1315 cases; `--check` STALE). slice-m4 and `types-gate.ts` NOT
+# re-executed this pass. ⚠ FACTS "CLI verbs 14" is WRONG (12 dispatched) — non-compliance N-S455-1.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S454 HEADER (stamp `f38697900`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
 # bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
 # U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
@@ -944,6 +959,54 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S455 — STRUCTURE DELTA (`f38697900..9c556dc74`)
+
+| path | change |
+|---|---|
+| `compiler/src/tenant-schema-hazards.ts` | **NEW** (2765 lines) — §14.8.10 `E-TENANT-SCHEMA-HAZARD`: the `<schema>` declaration rule for tenant-scoped tables (#1313/#1317/#1319) |
+| `compiler/src/hoist-sql-shape.ts` | **NEW** (293 lines) — §8.10 token-level allow-list of hoistable N+1 query shapes (#1325) |
+| `compiler/src/codegen/foreign-seal.ts` | **NEW** (174 lines) — §23.2.4a sealed-scope `_{}` slice builder `_scrml_foreign_seal` + `E-FOREIGN-007` syntax check (#1312) |
+| `compiler/src/commands/fix-sql-failable.js` | **NEW** (546 lines) — `scrml fix` rule `sql-failable` (§19.8.3 R11) (#1315) |
+| `compiler/src/commands/fix-client-server-call.js` | **NEW** (793 lines) — `scrml fix` rule `client-server-call` (§19.9.10) (#1308) |
+| `compiler/src/codegen/sql-attempt.ts` | 141 -> **181** lines — +`handledSqlOfGuardedNode` / `handledSqlGuardInner` (#1322) |
+| `compiler/src/codegen/tenant-sql-subset.ts` | -> **1032** lines — dialect-aware allow-lists, `::<built-in>` casts, `statementSeparator` lex option (#1319) |
+| `compiler/src/codegen/tenant-egress.ts` | -> **1078** lines — `compilationTenantSet` / `CompilationTenantSet` (#1316) |
+| `compiler/tests/` | +12 — `commands/fix-{client-server-call,sql-failable}.test.js`, `integration/{foreign-sealed-scope,tenant-subset-cast-pg}.test.js`, `unit/{build-pg-schema-create-requirement,s455-handled-sql-guard-consumers,s455-hoist-allow-list,s455-hoist-keyed-read-depth,tenant-floor-project-set,tenant-schema-body-subset,tenant-schema-hazards,tenant-schema-isolation-removal}.test.js` |
+| `conformance/cases/{fn,foreign,protect,server-db,tenant}/` | +28 — `tenant/schema-hazard-*` (8), `tenant/floor-{alter-add-tenant-column,imported-module}-*` (4), `foreign/foreign-slice-*` (3), `server-db/sql-handled-*-rt` (5 new), `server-db/sql-hoisted-loop-*-rt` (6), `protect/hoisted-loop-protected-table-not-hoisted-rt`, `fn/sql-access-handled-reject` |
+| `docs/changes/s454-scrml-fix-f8-r11/`, `docs/changes/s455-*/` | dispatch BRIEF / progress dirs (historical by design — compliant) |
+
+No file deleted in `compiler/`, `scripts/`, `conformance/`, `stdlib/`. ~70 `samples/**` / `examples/**` / `conformance/cases/**` `.scrml` edits are the #1308 client-server-call corpus migration (not new structure).
+
+### ⛑ FILE INVENTORY — THE §14.8.10 TENANT `<schema>` DECLARATION RULE (new at `9c556dc74`)
+| file | exports / loci |
+|---|---|
+| `compiler/src/tenant-schema-hazards.ts` | types `SchemaHazardKind` :65 (10 kinds incl. `statement not admitted in a tenant schema`, `body outside the tenant SQL subset`, `isolation removal`, `permissive policy`), `SchemaColumns` :74, `SchemaHazard` :76, `SchemaHazardDiagnostic` :2672; fns `tenantQueryQualifiedRefIssue` :931 (the `rel.f` rule, shared with the query floor), `findSchemaTenantHazards` :2475, `schemaTenantTableNames` :2511, `schemaColumnKnowledge` :2551, `compilationSchemaColumns` :2638, `fileSchemaTenantNames` :2668, `fileTenantSchemaHazards` :2689 (the stage entry), `schemaHazardMessage` :2716. Module-local: token lexer `lex` :134; body subset reader `lexBody` :540 / `bodyBindings` :618 / `bodyIssue` :794; token-level call rule `bodyCalls` :423 / `expressionCalls` :458 / `isSyntacticParen` :387; statement-kind allow-list `KNOWN_OBJECTS` :1274, `ADMITTED_PLAIN_LEADERS` :1296, `notAdmitted` :1301, `alterAdmission` :1332, `exemptStatementCode` :1405, `grantAdmitted` :1767; `isolationRemoval` :1824; `analyze` :1930 |
+| `compiler/src/api.js` | Stage 6.6 `TENANT-SCHEMA` :2970-:3003 — post-ME, pre-DG; `compilationTenantSet(metaFiles, …)` :2994 computed ONCE, passed to CG as `compilationTenant` (:3122); `fileTenantSchemaHazards(fileAST, tables, columns, dialect)` per file :3001 |
+| `compiler/src/codegen/tenant-egress.ts` | `CompilationTenantSet` :313 (`tables`, `dialect?`, `columns?`), `declaredColumns` :336, `COMPILATION_TENANT_KEY` :360, `compilationTenantOf` :363, `compilationTenantSet` :369, `dialectOfDbValue` :385, `compilationDialect` :398; `buildTenantContext` :234 reads the compilation set (:244); `schemaWriteHazards` :116 |
+| `compiler/src/codegen/tenant-sql-subset.ts` | `SqlDialect` :83, `Avail` :86, `availableOn` :89, `namesFor` :95, `PG_CAST_TYPES` :110, `SQLITE_CAST_TYPES` :426, `castTypesFor` :431, `SubsetLexOptions.statementSeparator` :248 (`;` as punctuation, for schema bodies), `lexTenantSubset` :265, `TENANT_ROW_FUNCTION_DIALECTS` :391, `TENANT_GROUP_AGGREGATE_DIALECTS` :405, `tenantRowFunctions` :410, `tenantGroupAggregates` :412, `firstNonBuiltinType` :531, `analyzeTenantSql` :611 |
+| `compiler/src/schema-differ.js` | `alterTableTenantDecls` :910 (module-local) — `ALTER TABLE … ADD COLUMN tenant_id` scopes a table (#1316) |
+
+### ⛑ FILE INVENTORY — §8.10 N+1 HOISTING (re-walked at `9c556dc74`)
+| file | exports / loci |
+|---|---|
+| `compiler/src/hoist-sql-shape.ts` | `HoistableQuery` :35 (`keyColumn`, `keyField`, `selectNames`, `tables`, `inSqlTemplate`), `classifyHoistableQuery` :143 (returns null = not hoistable) |
+| `compiler/src/batch-planner.ts` | imports `classifyHoistableQuery` :28, called :582; `HOIST_KEY_ALIAS = "__scrml_batch_key"` :493; `findProtectOverlap` :466, `protectBlocksHoist` :500 (a table with protected columns is never hoisted) |
+| `compiler/src/codegen/emit-control-flow.ts` | `substituteHoistedSqlInBody` :1009 (module-local; walks the detector's traversal, copy-on-write), `emitHoistedForStmt` :1150 (returns null unless exactly one site rewritten -> caller emits loop un-hoisted), call site :723 |
+
+### ⛑ FILE INVENTORY — THE HANDLED-`?{}` GUARD-CONSUMER SURFACE (#1322; supersedes the S454 handled-`?{}` inventory's consumer list)
+`codegen/sql-attempt.ts`: `handledSqlOfGuardedNode` :120 (a guarded-expr's statement-position `?{}`, `"expr"`, or null), `handledSqlGuardInner` :135. **29 call sites in 12 files** (grep at `9c556dc74`, comments excluded): `type-system.ts` :9285 :15208 :26909 :27153 · `route-inference.ts` :2168 :3097 :3164 :6633 · `dependency-graph.ts` :688 :822 :981 :1927 · `meta-checker.ts` :646 :764 · `monotonicity-analyzer.ts` :525 · `body-dg-builder.ts` :371 · `codegen/scheduling.ts` :902 · `codegen/emit-control-flow.ts` :1032 · `codegen/emit-functions.ts` :375 :542 :1342 · `codegen/collect.ts` :806 · `codegen/emit-server.ts` :4654 :4722 :4985 :5033 :5319 :5364 · `codegen/emit-logic.ts` :4081. **A new consumer of a `?{}` statement must see through the `!{}` guard via these two helpers** — 16 files import `sql-attempt` in total.
+
+### ⛑ FILE INVENTORY — §23.2.4a FOREIGN SEALED SCOPE (new at `9c556dc74`)
+`codegen/foreign-seal.ts`: `FOREIGN_SEAL_FN = "_scrml_foreign_seal"` :59, `SERVER_FOREIGN_SEAL_HELPER` :83, `foreignSliceSource` :131, `templateLiteralOf` :142, `foreignSiteLabel` :147, `checkForeignSliceSyntax` :161 (acorn). Lowering: `emit-logic.ts` `case "foreign"` :3503 (seal call :3708; `E-FOREIGN-007` :3691). Helper injected by `emit-server.ts` :1537 / :7014, `emit-library.ts` :75, `emit-tool.ts` :386; `protect-flow.ts` :877 / :3359 treats the seal call as opaque.
+
+### ⛑ FILE INVENTORY — `scrml fix` RULES ADDED THIS WINDOW
+| file | exports |
+|---|---|
+| `commands/fix-sql-failable.js` | `SQL_FAILABLE_RULE` :85, `SQL_FALLBACK` :88 (`get` -> `!{ _ :> not }`, `all`/`bare` -> `!{ _ :> [] }`), `sqlWriteReason` :188, `classifySql` :243 (read vs write; unclassifiable = write), `collectSqlSites` :302, `fixSqlFailable` :414. READS rewritten; WRITES listed, never rewritten |
+| `commands/fix-client-server-call.js` | `CLIENT_SERVER_CALL_RULE` :93, `TRANSPORT_HANDLER` :97, `skipBalanced` :144, `endsStatement` :216, `lineOf` :225, `scratchProject` :250, `compileWithRI` :273, `promiseAllBatches` :306, `armsCoverTransport` :372, `walkObjects` :384, `fixClientServerCall` :634 |
+| `commands/fix-s66.js` | `IMPL1_SAFE_RULES` :110 now includes both; chained at :1304 (client-server-call) and :1313 (sql-failable) |
+| `commands/build.js` | `pgSchemaCreateRequirementLines` :1055 (exported), used :1304 — db-authoritative programs print the PG `REVOKE CREATE ON SCHEMA public` deploy requirement |
 
 ## S454 — STRUCTURE DELTA (`7ce905ac2..f38697900`)
 
