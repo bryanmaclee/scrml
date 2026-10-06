@@ -31,10 +31,52 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 237 | 6 |
-| MED | 517 | 4 |
+| MED | 516 | 4 |
 | LOW | 286 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-foreign-slice-regex-quote-and-in-block-refusal-lost — a quote inside a regex literal in a `_={ … }=` slice hid its `return`; and a codegen refusal one block deep (E-FOREIGN-006/007, E-SQL-006, E-SESSION-VALUE) or E-LIFT-002 anywhere compiled exit 0 with only a `null /* E-… */` placeholder in the artifact — `NEW S456; HIGH; RESOLVED S456`
+
+<!-- @gap id=g-foreign-slice-regex-quote-and-in-block-refusal-lost sev=HIGH status=resolved resolved-by=S456-fix/s456-foreign-slice-regex-apostrophe locus=compiler/src/codegen/emit-logic.ts(case "foreign" scanForeignSliceShape/scanForeignSliceTopLevelBindings char scanners with no regex state; refusals pushed only to opts.foreignCrossingErrors/opts.preparedStmtErrors)+compiler/src/codegen/emit-control-flow.ts(_emitIfStmtInner bodyOpts rebuilt field by field, sinks not carried)+compiler/src/codegen/emit-logic.ts(E-LIFT-002 comment-only)+compiler/src/codegen/emit-expr.ts(_sessionValueUseErrors drained only by generateServerJs) prov=adopter:flogence-S56 -->
+
+**Reported by flogence (S56), PA-reproduced at `0aef3270d`.** Two roots, one adopter symptom.
+
+- **Gap 1 (HIGH, silent miscompile).** flogence `src/ports/graph-ingest-tool.scrml` @ `90671f6` plus one line
+  `const q1 = /[']/g` inside the ~420-line slice at :136 compiled **exit 0, no diagnostic**, and emitted
+  `const plan = null /* E-FOREIGN-007: … does not parse */`; the tool then crashed on `plan.say`. The slice sits
+  inside `if (args.includes("--ingest")) {`. `case "foreign"` reported E-FOREIGN-006/007 only into a channel
+  threaded through emit opts (`foreignCrossingErrors`), and an `if` / loop body is emitted with opts rebuilt field
+  by field, without it. Same channel, same loss: E-SQL-006 (`preparedStmtErrors`) one block deep in a tool `main`.
+- **Gap 2 (misattributed refusal).** The same slice directly in `main` failed with *"no top-level `;` and no
+  top-level `return`"* — wrong: the slice has a `return`. The shape scan was a character scanner with no regex
+  state; the `'` in `/['x]/g` opened a "string" that swallowed the rest of the slice.
+
+**Audit (comment/placeholder instead of diagnostic, `compiler/src/codegen`), measured at `0aef3270d`:**
+E-LIFT-002 — codegen wrote only `/* E-LIFT-002 … */`, never a diagnostic (SPEC §17.6 Example 6 compiled exit 0);
+E-SESSION-VALUE / E-SESSION-RESERVED-KEY — its sink was drained only by the web-app server emitter, lost in a
+`kind="tool"` (exit 0); match no-lowerable-arms E-CG-003 and Tier-3 E-TYPE-001 — reported only when an
+`opts.errors` channel happened to be threaded. Already sound: E-CG-TILDE-UNRESOLVED, E-VARIANT-AMBIGUOUS,
+expression-position `!{}` E-CG-003 (module sinks drained by runCG). Not fixed here, different fix shape:
+`/* §1a: cannot positionally bind … */` ([[g-tool-context-match-loses-enum-field-order]] — the fix is to resolve
+the field order, not to refuse).
+
+**Fix (S456).** (1) New run-wide sink `compiler/src/codegen/refused-lowering-errors.ts` — reset and drained by
+`runCG`, one diagnostic per construct (anchor node / real span) — receives every refusal above; the opts-threaded
+`foreignCrossingErrors` / `preparedStmtErrors` plumbing and the session sink are removed. (2) The two slice scans
+read acorn tokens (`foreign-seal.ts` `scanForeignSliceShape` / `scanForeignSliceTopLevelBindings`): regex vs
+division decided by the lexer's previous-token rule, strings / comments / templates (with `${}` holes) are tokens,
+`.return` is a property name (closes [[g-foreign-value-block-dot-return-misread-as-keyword]]). E-FOREIGN-006/007
+spans now resolve line/col from the byte offset (the foreign node's own `line` was 37 lines off on the repro).
+Pins: `compiler/tests/integration/foreign-slice-lexing.test.js`; conformance `foreign/foreign-slice-lexing-regex-quote-pos`,
+`foreign/foreign-slice-unparseable-in-block-neg`, `foreign/foreign-crossing-shadow-in-block-neg`,
+`sql/prepare-tool-in-block-e-sql-006-neg`, `control-flow/lift-two-in-value-arm-e-lift-002-neg`,
+`server-fn/session-value-in-tool-neg` (each fails on `0aef3270d`).
+
+**Still open, separately filed:** a compile that reports these errors still WRITES its artifacts
+([[g-impl1-artifacts-written-on-error-s451]], §2.2.1 S451) — the refusal now fails the compile (exit 1), but the
+`null /* E-… */` artifact lands on disk.
+
 
 ### g-sse-generator-write-in-client-fn-body-awaited-loses-subscription — `function go(){ @feed = ticks(); … }` with a `server function*` emits `await _scrml_sse_ticks()`: the cell holds the EventSource and every message drops — `NEW S446; HIGH; open`
 
@@ -1637,8 +1679,9 @@ here rather than filed separately, per converge-don't-enumerate.
 <!-- @gap id=g-tool-context-match-loses-enum-field-order sev=MED status=open locus=compiler/src/codegen/tool-context-match-emitter-drops-enum-field-order-table-emits-cannot-positionally-bind-comment(page-path-binds-via-.data.field) prov=flogenceP-§64-tool-dogfood-S389-peter-PA-confirmed-by-execution-88d59ac9-enum-match+tool-inmain-payload-variant-bind-undefined route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md -->
 > ⚑ **S391-bryan PA-VERIFICATION — MIS-SCOPED. This is NOT tool-specific, and the blast radius is mainstream.** PA-EXECUTED on `f699d0b5`, plain web-app `<program>` (no `kind="tool"` anywhere): a `server function` whose body does a positional payload bind compiles **exit 0, zero hard errors**, and the emitted `.server.js` carries `if (_scrml_tag_3 === "FileLine") { /* §1a: cannot positionally bind 'pa' — variant 'FileLine' field order unknown */ return pa; }` — `return pa` with `pa` **never bound**, i.e. a guaranteed `ReferenceError` on every call, silently. Two-sided control in the same compile: the CLIENT pass emits **zero** "cannot positionally bind" comments and binds correctly. **Root (agent-traced, PA-corroborated by the two-sided emit):** `setVariantFieldsForFile` has exactly ONE caller, `emit-client.ts:2012` inside `generateClientJs`, so the server pass and the tool pass both run with `_variantFields === null` (`emit-control-flow.ts:2824`). The tool is not special; it is simply another non-client pass. ⚑ The source comment at `emit-control-flow.ts:54-55` asserting the registry is populated "at the top of generateClientJs / generateServerJs" is **FALSE for the server half** — a Rule 4 item in its own right (a comment asserting behaviour that does not happen, the same shape as [[g-each-iter-shape-unfired]]). **Severity is understated at MED**: silent-wrong + guaranteed runtime crash + a shape any app with a payload enum in a `server function` will write. ⚑ **And the routed "2+3 are likely ONE incomplete tool-context match emitter — converge" is WRONG**: there is no separate tool-context match emitter at all (the tool reuses the shared `emit-control-flow.ts` with two different inputs wrong), and the two are separable — flipping `emit-tool.ts`'s `boundary:"server"` to `"client"` in a scratch copy makes the sibling await-defect vanish while THIS one persists byte-identical. Do not fold them.
 
-### g-foreign-value-block-dot-return-misread-as-keyword — an inline value-position `_={ … }=` foreign block whose single expression is a depth-0 member access named `.return` (iterator/generator `.return()`, or `?.return`) yields `undefined` — the single-expression discriminator misreads `.return` as the `return` keyword, so no `return` is injected. **PA-CONFIRMED by execution** (`scratchpad/tool-dogfood/t1/r3b.scrml`, 0 errors): `const res = _={ in: { g } g.return(99) }=` emits `const res = await (async (g) => { g.return(99) })(g)` — no injected return → `res === undefined` (expected `{value:99,done:true}`); control `g2.next()` emits `return (g2.next())`. **Violates §23.2.4a rule 1** (single-expression slice gets an injected return). **Root:** `emit-logic.ts:3095` `scanForeignSliceShape` — the top-level `return`-keyword check `!isWord(src[i-1])` treats `.` (not a word char) as a boundary, so member `.return` matches. **Fix (compute):** exclude a `.`-preceded (member-access) `return` from the keyword match; no change to what compiles/is refused/means. ⚑ Same scanner as `g-multi-statement-foreign-block-in-statement-position` + `g-foreign-multistmt-value-block-mislowers` — a third trigger; harden the scanner's tokenization (string/comment/member-access awareness) once. ROUTED to bryan (foreign-block lowering; fix is compute-turnkey). — `NEW S389-peter (§64 tool dog-food, PA-confirmed by execution on 88d59ac9)`; **MED**; open
-<!-- @gap id=g-foreign-value-block-dot-return-misread-as-keyword sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:3095-scanForeignSliceShape-top-level-return-keyword-check-!isWord(src[i-1])-treats-dot-as-boundary-so-member-.return-matches prov=flogenceP-§64-tool-dogfood-S389-peter-PA-confirmed-by-execution-88d59ac9-r3b-g.return(99)-emits-no-injected-return-undefined route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md -->
+### g-foreign-value-block-dot-return-misread-as-keyword — an inline value-position `_={ … }=` foreign block whose single expression is a depth-0 member access named `.return` (iterator/generator `.return()`, or `?.return`) yields `undefined` — the single-expression discriminator misreads `.return` as the `return` keyword, so no `return` is injected. **PA-CONFIRMED by execution** (`scratchpad/tool-dogfood/t1/r3b.scrml`, 0 errors): `const res = _={ in: { g } g.return(99) }=` emits `const res = await (async (g) => { g.return(99) })(g)` — no injected return → `res === undefined` (expected `{value:99,done:true}`); control `g2.next()` emits `return (g2.next())`. **Violates §23.2.4a rule 1** (single-expression slice gets an injected return). **Root:** `emit-logic.ts:3095` `scanForeignSliceShape` — the top-level `return`-keyword check `!isWord(src[i-1])` treats `.` (not a word char) as a boundary, so member `.return` matches. **Fix (compute):** exclude a `.`-preceded (member-access) `return` from the keyword match; no change to what compiles/is refused/means. ⚑ Same scanner as `g-multi-statement-foreign-block-in-statement-position` + `g-foreign-multistmt-value-block-mislowers` — a third trigger; harden the scanner's tokenization (string/comment/member-access awareness) once. ROUTED to bryan (foreign-block lowering; fix is compute-turnkey). — `NEW S389-peter (§64 tool dog-food, PA-confirmed by execution on 88d59ac9)`; **MED**; RESOLVED S456
+<!-- @gap id=g-foreign-value-block-dot-return-misread-as-keyword sev=MED status=resolved resolved-by=S456-fix/s456-foreign-slice-regex-apostrophe locus=compiler/src/codegen/emit-logic.ts:3095-scanForeignSliceShape-top-level-return-keyword-check-!isWord(src[i-1])-treats-dot-as-boundary-so-member-.return-matches prov=flogenceP-§64-tool-dogfood-S389-peter-PA-confirmed-by-execution-88d59ac9-r3b-g.return(99)-emits-no-injected-return-undefined route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md -->
+> ⛑ **RESOLVED S456** (`fix/s456-foreign-slice-regex-apostrophe`) — the slice shape scan now reads acorn tokens (`foreign-seal.ts` `scanForeignSliceShape`); a `return` token after `.` / `?.` is a property name, not the keyword. Pinned by `compiler/tests/integration/foreign-slice-lexing.test.js` and conformance `foreign/foreign-slice-lexing-regex-quote-pos` (`({ return: … }).return(word)` → injected `return`, value crosses).
 > ⚑ **S391-bryan verification — CONFIRMED exactly as filed (agent-executed, NOT PA-reproduced), and NOT tool-specific.** Traced at `emit-logic.ts:3095`, exact, still current: `[TRACE 3095] return-kw HIT at i=2 prevChar="." slice="g.return(99)"` → `topLevelReturn=true` → `singleExpression=false` → verbatim splice. Emitted `const res = await (async (g) => { g.return(99) })(g);` against the control `const ctrl = await (async (g2) => { return (g2.next()); })(g2);` — `res` is `undefined`, exit 0, silent. ⚑ **The `kind="tool"` framing is incidental**: the identical emit occurs in a plain web `<program>` server function, because the root is the shared `emit-logic` scanner, not a tool path. The filed diagnosis and proposed fix direction are both correct as written — this is the one of the four tool-surface findings that needed no correction.
 
 
