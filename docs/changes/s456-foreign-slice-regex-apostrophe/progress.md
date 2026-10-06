@@ -183,3 +183,9 @@ Merged origin/main (cfa9c6343; FACTS / gap-counts regenerated, not side-taken). 
   "Click" listeners → filed g-event-attribute-name-case-sensitive-listener-s456 (LOW).
 - Filed g-quoted-url-attribute-javascript-scheme-row-data-s456 (MED, ruling): href/src/action/
   formaction `javascript:` + `${}` and srcdoc interpolation, each rows AND top level.
+- Evidence (a0de560ff vs c31a5839c): case probe base exit 0 / 0 refusals / 3 interpolated
+  `setAttribute("ONCLICK"|"OnClick"|"oNcLiCk", …)` + `setAttribute("ONCLICK", String(hit(…)))` +
+  dead `"Click"` listener → head exit 1 / 3× E-CG-003 / two `"click"` listeners. Corpus: each-row
+  on* setAttribute 0; differential 11773 compared, 11497 identical + 276 path-only, 0 real, failure
+  set and diagnostics identical, syntax 75→75. Top-level dead "Click"/"Save" listeners: 5 corpus
+  sources (recorded in the LOW gap). `bun run test`: 33988 pass / 50 fail (same pre-existing set).

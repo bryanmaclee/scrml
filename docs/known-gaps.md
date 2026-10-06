@@ -58,7 +58,12 @@ interpolation sentences recorded there).
 
 Found while fixing the round-3 case bypass. Inside an `<each>` row this is fixed (S456: `eventNameForAttr` matches
 `on…` case-insensitively and lowercases the event; `ONCLICK=hit(it.name)` used to write the CALL's result as handler
-text via `setAttribute`). At top level the handler is silently dead. A quoted top-level `ONCLICK="…${…}"`
+text via `setAttribute`). At top level the handler is silently dead. Corpus (compiled, `c31a5839c`): 3
+`addEventListener("Click"` + 2 `addEventListener("Save"` in 5 sources (conformance
+`error/handler-failable-reference{-component-prop-neg,-via-component-prop-pos}`,
+`type-state-codes/e-state-undeclared-{neg,pos}`, sample `phase4-event-jsx-arrow-ghost-027`). ⚠ Some arrive
+through a COMPONENT prop (`onSave=`), where the name may be a component callback rather than a DOM event — the
+fix needs to tell the two apart, not just lowercase. (The `<each>` change altered 0 corpus artifacts.) A quoted top-level `ONCLICK="…${…}"`
 interpolates exactly like the lowercase form ([[g-quoted-event-attribute-interpolates-row-data-injection-s456]]).
 
 ### g-quoted-event-attribute-interpolates-row-data-injection-s456 — a QUOTED `on*` attribute containing `${…}` outside `<each>` (`<button onclick="hit('${@items[0].name}')">`) is compiled to `setAttribute("onclick", \`hit('${…}')\`)`: event-handler JavaScript built from interpolated data — a value `x');globalThis.__pwn=1;('` runs on click — `NEW S456; MED; open (needs a ruling)`
