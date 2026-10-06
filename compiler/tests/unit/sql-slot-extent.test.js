@@ -155,6 +155,37 @@ describe("judgeDriverCall — the emitted call read by acorn", () => {
     // The compiler read ONE segment (no slot); JS reads a slot and sends `); DELETE …` as SQL.
     expect(judgeDriverCall("_scrml_sql`A ${ x + '{' }); DELETE FROM t /* } */`", ["A ${ x + '{' }); DELETE FROM t /* } */"])).toBe("text-not-read");
   });
+  test("CRLF: JS cooks a template's CR LF to LF — a CRLF body is the same SQL (PR #1335 Windows CI regression)", () => {
+    // conformance ssr-auth-scoped-commented-currentuser-not-seeded on a CRLF checkout: an inert slot in a
+    // `--` comment ending in CR LF. The compiler's segment keeps the CR; the cooked quasi does not.
+    const seg = "SELECT * FROM posts\r\n  -- WHERE user_id = ${@currentUser.id}\r\n";
+    const call = "_scrml_sql`" + seg.replace(/\$\{/g, "\\${") + "`";
+    expect(judgeDriverCall(call, [seg])).toBe("ok");
+    // A LONE CR is cooked to LF too, but no compiler reader ends a line there → still refused.
+    const lone = "SELECT 1 -- c\r, secret FROM t";
+    expect(judgeDriverCall("_scrml_sql`" + lone + "`", [lone])).toBe("text-not-read");
+  });
+  test("CRLF and LF sources compile to the same diagnostics and the same SQL (the conformance case)", () => {
+    const src = `<program db="sqlite:./app.db" auth="required">
+<schema>
+  ?{${BT}CREATE TABLE posts (id INTEGER PRIMARY KEY, body TEXT)${BT}}
+</schema>
+\${
+  <posts server> = ?{${BT}SELECT * FROM posts
+  -- WHERE user_id = \${@currentUser.id}
+${BT}}.all()
+}
+<main><ul><each in=@posts key=@.id as p><li>\${p.body}</li></each></ul></main>
+</program>
+`;
+    const lf = compileToServer(src);
+    const crlf = compileToServer(src.replace(/\n/g, "\r\n"));
+    expect(lf.codes).toEqual([]);
+    expect(crlf.codes).toEqual([]);
+    const sqlLine = (js) => js.split(/\r?\n/).find((l) => l.includes("_scrml_sql`SELECT * FROM posts")) ?? "";
+    expect(sqlLine(crlf.serverJs)).not.toBe("");
+    expect(crlf.serverJs).not.toContain("E-SQL-001");
+  });
   test("a multi-statement tagged template or `unsafe` string → multiple-statements", () => {
     expect(judgeDriverCall("_scrml_sql`INSERT INTO t VALUES (${x}); DELETE FROM t`", ["INSERT INTO t VALUES (", "); DELETE FROM t"])).toBe("multiple-statements");
     expect(judgeDriverCall('_scrml_sql.unsafe("SELECT 1; SELECT 2")', null)).toBe("multiple-statements");

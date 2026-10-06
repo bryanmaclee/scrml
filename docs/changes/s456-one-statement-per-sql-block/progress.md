@@ -45,3 +45,9 @@
 - conformance 1327/1377 + 50 xfail (2 new cases pass).
 - F2/F3/F4 committed d90f42a99 (pre-commit 31688 pass / 0 fail); gates: types 190 unchanged, s34-census PASS (7 rows), spec-index OK, facts PASS, state PASS. Pushed (update of the existing ref).
 - FULL `bun run test` (head d90f42a99): 34001 pass / 50 fail / 104 skip — 48 = the same 9 pre-existing browser files (identical 40/48 on base, recorded above); 2 whole-suite-only (detector-validation, esm-script-tag-module-format) pass in isolation. sql-one-statement-pg (live PG16, system cluster) 9 pass.
+## PR #1335 WINDOWS CI REGRESSION (ssr/ssr-auth-scoped-commented-currentuser-not-seeded, runtime half)
+- base: origin/land/s456-one-statement 55dcb649b (FF from 96fbc1c7a).
+- REPRODUCED (Linux, case converted to CRLF): head → E-SQL-001 + the site emitted as a throw; LF → [] and the query. Whole conformance corpus converted to CRLF (a copy; every .scrml/.sql/.json/... LF→CRLF): head 1326 pass / 1 FAIL (this case only) / 50 xfail; main 1323 / 0 fail / 50.
+- ROOT (verified): judgeDriverCall compared the tagged template's COOKED quasis with extractSqlParams' segments. JavaScript cooks a template literal's CR LF (and lone CR) to LF (ECMA-262 TV of LineTerminatorSequence), so a body from a CRLF checkout differed by its CRs → "text-not-read". The PA hypothesis (CR stripped on one side) was right in kind; no reader disagreed on the slot — the slot in the `--` comment is inert to all of them.
+- FIX: the guard compares against the segments with CR LF read as LF (every compiler reader ends a line / `--` comment at the LF of a CR LF, so it is the same SQL). A LONE CR stays unnormalised → still differs → fails closed (the compiler readers do not end a line there; the program-body walk already refuses it).
+- AFTER: whole corpus CRLF 1327 pass / 0 fail / 50 xfail, outcome map IDENTICAL to the LF run. Tests: sql-slot-extent.test.js CRLF judge + lone-CR-refused + CRLF/LF compile parity on the case shape.

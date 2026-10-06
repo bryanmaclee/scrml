@@ -68,7 +68,16 @@ export function judgeDriverCall(call: string, segments: readonly string[] | null
   if (expr?.type === "TaggedTemplateExpression") {
     const quasis: string[] = expr.quasi.quasis.map((q: any) => q.value.cooked);
     if (quasis.some((q) => typeof q !== "string")) return "text-not-read";
-    if (segments !== null && (quasis.length !== segments.length || quasis.some((q, k) => q !== segments[k]))) {
+    // JavaScript COOKS a template literal's line terminators: a CR LF in the template source is
+    // one LF in the cooked string (ECMA-262 §13.2.8.6 TV of LineTerminatorSequence) — so a `?{}`
+    // body from a CRLF checkout reaches the driver with LF line ends. Every compiler reader ends a
+    // line / `--` comment at the LF of a CR LF, so the two texts are the same SQL: compare with CR LF
+    // read as LF. A LONE CR is cooked to LF as well, but the compiler readers do NOT end a line there
+    // (a `--` comment would end earlier for the database than for the checks) — it is left
+    // unnormalised, so it still differs and fails closed. (S456 PR #1335 Windows CI regression:
+    // `-- WHERE user_id = ${@currentUser.id}\r\n` was refused as E-SQL-001 on a CRLF checkout.)
+    const asCooked = (s: string): string => s.replace(/\r\n/g, "\n");
+    if (segments !== null && (quasis.length !== segments.length || quasis.some((q, k) => q !== asCooked(segments[k])))) {
       return "text-not-read";
     }
     return sqlHoldsOneStatement(quasis.join("${_}")) ? "ok" : "multiple-statements";
