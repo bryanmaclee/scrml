@@ -25,6 +25,7 @@ import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
+import { sqlHoldsOneStatement, multipleStatementsThrowExpr } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -3732,6 +3733,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const db = opts.dbVar ?? fallbackSqlHandle();
       const { effectiveSql: _tenantSql, tenantScope: _tenantScope } = _lowerTenantForQuery(rawQuery, _tenantAcross, db);
       const { sql, params, segments } = extractSqlParams(_tenantSql);
+      // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver
+      // (sql-one-statement-guard.ts — every driver path runs a chained statement somewhere).
+      if (!sqlHoldsOneStatement(_tenantSql)) return `${multipleStatementsThrowExpr()};`;
 
       const renderParams = (): string[] => {
         const _sqlExprCtx = _makeExprCtx(opts);

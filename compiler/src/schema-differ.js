@@ -3983,6 +3983,41 @@ export function programStatementVerdicts(text, opts = {}) {
   return out;
 }
 
+/**
+ * §8.1.2 (S456 — ruling user-voice-scrml.md S456 "one statement per seams reasonable. push") —
+ * ONE SQL statement per program-body `?{}`.
+ *
+ * Read with the same closed-lexical-subset token walk as `programStatementVerdicts`
+ * (`programSqlTokens`): every `;` outside a literal, a quoted identifier, a comment or a `${…}`
+ * slot that is FOLLOWED by any further token (a word, a literal, a slot, punctuation — another
+ * `;` included) separates a second statement. A single trailing `;`, followed only by whitespace
+ * and comments, does not. A `;` inside parentheses counts too: no admitted statement holds one,
+ * and a database splits or rejects there, never reads it as part of the first statement.
+ *
+ * WHY. A parameterless body reaches the driver as one string (`unsafe("…")`), and both drivers
+ * run every statement of it: Postgres' simple-query protocol executes each (executed on PG16 —
+ * `SELECT set_config('scrml.tenant','B',true); select … from invoices` re-pinned the tenant
+ * inside the §14.8.11 tier transaction and returned tenant B's rows to a tenant-A request), and
+ * Bun.SQL's SQLite adapter runs the following statements when the first returns no rows.
+ *
+ * @param {string} text the SQL text of one `?{}`
+ * @returns {{ statements: number, extra: number[], unreadable: string|null }}
+ *   `statements` — how many statements the body holds (0 for an empty body); `extra` — the
+ *   offset of each separating `;`; `unreadable` — set when the body is outside the lexical
+ *   subset (the count is then not known; `programStatementVerdicts` refuses such a body).
+ */
+export function programStatementCount(text) {
+  if (typeof text !== "string" || text.trim().length === 0) return { statements: 0, extra: [], unreadable: null };
+  const { toks, unreadable } = programSqlTokens(text);
+  if (unreadable !== null) return { statements: 0, extra: [], unreadable };
+  const extra = [];
+  for (let i = 0; i < toks.length - 1; i++) {
+    if (toks[i].k === "p" && toks[i].t === ";") extra.push(toks[i].at);
+  }
+  const statements = toks.length === 0 || (toks.length === 1 && toks[0].k === "p" && toks[0].t === ";") ? 0 : extra.length + 1;
+  return { statements, extra, unreadable: null };
+}
+
 /** The fts5 options that add no column (SQLite fts5.html §4; each executed — see above). */
 const FTS5_OPTIONS = new Set([
   "CONTENT", "CONTENT_ROWID", "TOKENIZE", "PREFIX", "COLUMNSIZE", "DETAIL",

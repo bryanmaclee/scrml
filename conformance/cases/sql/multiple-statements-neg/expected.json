@@ -1,0 +1,16 @@
+{
+  "id": "sql-multiple-statements-neg",
+  "description": "§8.1.2 (S456) — a program-body `?{}` holding two `;`-separated statements is E-SQL-MULTIPLE-STATEMENTS. Each INSERT alone is admitted DML (§14.8.10 item (1)); before S456 the chain compiled clean and was sent as one string, and every driver ran both statements somewhere (Postgres' simple-query protocol; the SQLite adapter after a row-less first statement). The S239 r5 review executed the class on PG16: `SELECT set_config('scrml.tenant','B',true); select …` re-pinned the tenant inside the §14.8.11 tier transaction.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-one-statement.test.js",
+  "spec": "§8.1.2",
+  "rationale": "§8.1.2 (ruling user-voice-scrml.md S456 \"one statement per seams reasonable. push\"): in a compilation with a database, a program-body `?{}` SHALL hold exactly one SQL statement; a `;` outside a literal, comment or `${…}` slot followed by any further token is E-SQL-MULTIPLE-STATEMENTS.",
+  "expect": {
+    "codes": [
+      "E-SQL-MULTIPLE-STATEMENTS"
+    ],
+    "codeCounts": {
+      "E-SQL-MULTIPLE-STATEMENTS": 1
+    }
+  }
+}

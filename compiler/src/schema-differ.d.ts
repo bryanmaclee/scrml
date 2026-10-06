@@ -115,6 +115,16 @@ export declare function programStatementVerdicts(
   offset: number;
 }>;
 
+/** §8.1.2 (S456 "one statement per") — how many SQL statements a program-body `?{}` holds. */
+export declare function programStatementCount(text: string): {
+  /** The statement count (0 for an empty body, or when `unreadable` is set). */
+  statements: number;
+  /** The offset of each `;` that separates a further statement. */
+  extra: number[];
+  /** Set when the body is outside the closed lexical subset (the count is then not known). */
+  unreadable: string | null;
+};
+
 /** The bounded principal role the per-request A1 wrapper drops to (S6). */
 export declare const DBAUTH_ROLE: "scrml_app";
 /** The compiler-managed tenant-isolation policy name (S1). */
