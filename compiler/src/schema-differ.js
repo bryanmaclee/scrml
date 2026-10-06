@@ -3918,155 +3918,363 @@ export function emitScrmlSchemaSource(actual, opts = {}) {
 }
 
 /**
- * §14.8.10 (S456, ruling user-voice-scrml.md S456 "b, startup check lands with it") —
- * the tables a PROGRAM-BODY `?{}` statement (not a `< schema>` body) gives a
- * `tenant_id` column. The caller (`compiler/src/tenant-undeclared.ts`) refuses each one
- * the compilation's tenant set does not hold — `E-TENANT-UNDECLARED`: the floor scopes
- * only DECLARED tables, so an undeclared one's rows would reach every request.
+ * §14.8.10 (S456, ruling user-voice-scrml.md S456 "b, startup check lands with it"; S456
+ * review round 2 — the boundary moved) — every relation a PROGRAM-BODY `?{}` statement
+ * (not a `< schema>` body) CREATES or gives new columns, with its column names when the
+ * compiler can determine every one of them, else `columns: null`. The caller
+ * (`compiler/src/tenant-undeclared.ts`) refuses — `E-TENANT-UNDECLARED` — a relation outside
+ * the compilation's tenant set whose columns are unknown or include `tenant_id`.
  *
- * Read with the same recognizers the `< schema>` reading uses, but EVERY `CREATE … TABLE`
- * head counts here — `TEMP` / `TEMPORARY` / `UNLOGGED` / `VIRTUAL` / … included (a
- * `< schema>` rejects those heads, E-SCHEMA-014; a program body runs them):
- *   · a head whose column list closes as modelled → its columns (`columnsFromDdlBody`);
- *     a `LIKE <template>` item is returned as `like` (the caller decides: the copy
- *     carries `tenant_id` when the template is tenant-scoped);
- *   · otherwise — no column list (`AS SELECT …`, `USING fts5(…)`), a list that never
- *     closes, or a statement holding a quote / comment form the reader does not model
- *     (`UNMODELED_SQL_FORM`) — the statement read to the end of the text: naming
- *     `tenant_id` anywhere there counts (fail-closed, like the ALTER reading);
- *   · an `ALTER TABLE <t> … tenant_id …` (`alterTableTenantDecls`, the S455 reading).
- * A head whose name cannot be read (`${…}`, a stray character) is returned with
- * `name: null` when its statement names `tenant_id` — the caller refuses it.
+ * ⚑ THE QUESTION IS "CAN THE COMPILER DETERMINE EVERY COLUMN OF WHAT THIS CREATES?", NOT
+ * "DOES THE TEXT MENTION tenant_id?". Three review rounds patched the mention reading
+ * (CREATE / ALTER → `SELECT … INTO` → `SELECT *` over a derived table, a VALUES list, a
+ * CTE — each executed on PG16 creating a `tenant_id` table that compiled clean). A column
+ * list is KNOWN only when it is spelled: a `CREATE TABLE` column list; a view's or CTAS's
+ * own `(a, b)` list; or a select list every item of which is a plain column reference or
+ * `expr AS name`. A `*`, `AS TABLE x`, `AS VALUES`, a `LIKE` copy, `INHERITS`,
+ * `PARTITION OF`, `OF type`, a virtual-table module, an unnamed expression and a name the
+ * reader cannot read (`${…}`) are UNKNOWN. What the select list reads FROM does not matter
+ * when every output name is spelled; it is exactly what makes a `*` unknowable.
  *
- * @param {string} text the SQL text of one `?{}` statement
- * @returns {Array<{name: string|null, key: string|null, kind: "create"|"alter", modifiers: string[], offset: number, tenant: boolean, like: string|null}>}
+ * Relation-creating statements read: `CREATE [OR REPLACE] [TEMP | TEMPORARY | UNLOGGED |
+ * GLOBAL | LOCAL | VIRTUAL | …] TABLE` (column list, or `AS query`, or any other form);
+ * `CREATE [OR REPLACE] [MATERIALIZED] VIEW` (its column list, else its query's); Postgres
+ * `SELECT … INTO [TEMP | TEMPORARY | UNLOGGED] [TABLE] t` (MySQL's `INTO @var | OUTFILE |
+ * DUMPFILE` writes no table); `ALTER TABLE t` actions `ADD [COLUMN]`, `RENAME [COLUMN] a TO
+ * b`, MySQL `CHANGE [COLUMN] a b` (new column names), and `RENAME TO u` (a new relation `u`
+ * whose columns the compiler does not know).
+ *
+ * Read from SQL TOKENS (`relationTokens`): literals, quoted identifiers, `--` (ending at CR
+ * or LF — S456 F1) and nesting `/* *\/` comments, `${…}` parameters and `$tag$…$tag$`
+ * bodies are each one token. A dollar-quoted body is OPAQUE — a routine's `SELECT … INTO
+ * var` is not table creation (S456 review R3), and DDL a `DO` / function body runs is
+ * runtime DDL the compile does not read (the §14.8.10 Limit: seen at the next startup).
+ * A statement holding a form whose extent differs by database — a backslash (MySQL string
+ * escape) or a `#` (MySQL comment) — and naming `tenant_id` anywhere is returned as one
+ * unreadable relation (fail-closed: the reading may have hidden a statement).
+ *
+ * @param {string} text the SQL text of one `?{}` (statement or expression position)
+ * @returns {Array<{name: string|null, key: string|null, kind: "table"|"view"|"select-into"|"alter"|"rename"|"unreadable", modifiers: string[], offset: number, columns: string[]|null, why: string|null}>}
  */
 export function programTenantTableDecls(text) {
   const out = [];
   if (typeof text !== "string" || text.length === 0) return out;
-  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
-  // A program-body statement RUNS: a head inside a `'…'` literal or a comment is data, not
-  // a table (`INSERT INTO audit (sql) VALUES ('CREATE TABLE …')`). That reading is trusted
-  // only when the text holds no quote / comment form it does not model exactly
-  // (`UNMODELED_SQL_FORM` — a backslash escape, `$…$`, `[…]`, `#`, a backtick, a `${…}`);
-  // otherwise every head counts (fail-closed: a dialect can end a literal earlier).
-  const live = UNMODELED_SQL_FORM.test(text) ? () => true : (at) => masked.slice(at, at + 1) === text.slice(at, at + 1);
-  for (const h of scanCreateTableHeads(text)) {
-    if (!live(h.start)) continue;
-    const namePart = h.readable && h.parts.length > 0 && !h.danglingDot ? h.parts[h.parts.length - 1] : null;
-    const closed = h.parenAt !== -1 && h.bodyEnd !== -1;
-    let tenant = false;
-    let like = null;
-    if (namePart && closed && !UNMODELED_SQL_FORM.test(text.slice(h.start, h.bodyEnd + 1))) {
-      const body = text.slice(h.parenAt + 1, h.bodyEnd);
-      tenant = columnsFromDdlBody(body).some((c) => c.name.toLowerCase() === "tenant_id");
-      const ref = findLikeTemplateReference(body);
-      if (ref) {
-        const m = /^LIKE\s+([\s\S]*?)\s*(?:(?:INCLUDING|EXCLUDING)[\s\S]*)?$/i.exec(ref);
-        const chain = (m ? m[1] : "").split(".").map((p) => p.trim().replace(/^["`[]|["`\]]$/g, ""));
-        const last = chain[chain.length - 1];
-        like = last ? last.toLowerCase() : null;
-      }
-    }
-    let star = false;
-    if (!(namePart && closed && !UNMODELED_SQL_FORM.test(text.slice(h.start, h.bodyEnd + 1)))) {
-      tenant = namesTenantId(text.slice(h.start));
-      // `CREATE TABLE t AS SELECT * FROM <tenant table>` copies `tenant_id` without naming it.
-      star = hasProjectionStar((UNMODELED_SQL_FORM.test(text) ? text : masked).slice(h.start));
-    }
-    if (!tenant && like === null && !star) continue;
+  const toks = relationTokens(text);
+  let start = 0;
+  for (let i = 0; i <= toks.length; i++) {
+    if (i < toks.length && !(toks[i].k === "p" && toks[i].t === ";" && toks[i].depth === 0)) continue;
+    if (i > start) readRelationStatement(text, toks.slice(start, i), out);
+    start = i + 1;
+  }
+  if (/[\\#]/.test(text) && namesTenantId(text)) {
     out.push({
-      name: namePart ? namePart.name : null,
-      key: namePart ? namePart.name.toLowerCase() : null,
-      kind: "create",
-      modifiers: h.modifiers,
-      offset: h.start,
-      tenant,
-      like,
-      star,
+      name: null, key: null, kind: "unreadable", modifiers: [], offset: 0, columns: null,
+      why: "the statement holds a backslash or `#`, whose meaning differs between databases, and names `tenant_id`",
     });
   }
-  for (const a of alterTableTenantDecls(text, masked)) {
-    if (!live(a.offset)) continue;
-    out.push({ name: a.name, key: a.key, kind: "alter", modifiers: [], offset: a.offset, tenant: true, like: null, star: false });
-  }
-  for (const s of selectIntoTables(text, UNMODELED_SQL_FORM.test(text) ? text : masked)) out.push(s);
   out.sort((a, b) => a.offset - b.offset);
   return out;
 }
 
+/** One token of `relationTokens`. `depth` is the paren depth OUTSIDE a `(` / `)` token. */
+// { k: "id" | "str" | "num" | "param" | "dollar" | "p", t?, up?, at, depth }
+
+/** The SQL tokens of a program-body statement (see `programTenantTableDecls`). */
+function relationTokens(text) {
+  const toks = [];
+  const n = text.length;
+  let depth = 0;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "-" && text[i + 1] === "-") { i = sqlLineCommentEnd(text, i); continue; }
+    if (c === "/" && text[i + 1] === "*") {
+      let d = 1;
+      let j = i + 2;
+      while (j < n && d > 0) {
+        if (text[j] === "/" && text[j + 1] === "*") { d++; j += 2; continue; }
+        if (text[j] === "*" && text[j + 1] === "/") { d--; j += 2; continue; }
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    if (c === "'") {
+      let j = i + 1;
+      while (j < n && !(text[j] === "'" && text[j + 1] !== "'")) j += text[j] === "'" ? 2 : 1;
+      toks.push({ k: "str", at: i, depth });
+      i = j + 1;
+      continue;
+    }
+    if (c === '"' || c === "`" || c === "[") {
+      const p = readSqlIdentPart(text, i);
+      if (p) {
+        toks.push({ k: "id", t: p.name, up: p.name.toUpperCase(), quoted: true, at: i, depth });
+        i = p.end;
+        continue;
+      }
+      toks.push({ k: "p", t: c, at: i, depth });
+      i++;
+      continue;
+    }
+    if (c === "$") {
+      if (text[i + 1] === "{") {                       // `${…}` — a bound parameter (a value)
+        let d = 0;
+        let j = i + 1;
+        for (; j < n; j++) {
+          if (text[j] === "{") d++;
+          else if (text[j] === "}" && --d === 0) break;
+        }
+        toks.push({ k: "param", at: i, depth });
+        i = j + 1;
+        continue;
+      }
+      const m = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(text.slice(i, i + 66));
+      if (m) {                                          // `$tag$ … $tag$` — an opaque body
+        const close = text.indexOf(m[0], i + m[0].length);
+        toks.push({ k: "dollar", at: i, depth });
+        i = close === -1 ? n : close + m[0].length;
+        continue;
+      }
+    }
+    if (/[\p{L}_]/u.test(c)) {
+      let j = i + 1;
+      while (j < n && SQL_IDENT_CHAR.test(text[j]) && !(text[j] === "$" && text[j + 1] === "{")) j++;
+      const t = text.slice(i, j);
+      toks.push({ k: "id", t, up: t.toUpperCase(), quoted: false, at: i, depth });
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(c)) {
+      let j = i + 1;
+      while (j < n && /[0-9.]/.test(text[j])) j++;
+      toks.push({ k: "num", at: i, depth });
+      i = j;
+      continue;
+    }
+    if (c === "(") { toks.push({ k: "p", t: "(", at: i, depth }); depth++; i++; continue; }
+    if (c === ")") { depth = Math.max(0, depth - 1); toks.push({ k: "p", t: ")", at: i, depth }); i++; continue; }
+    toks.push({ k: "p", t: c, at: i, depth });
+    i++;
+  }
+  return toks;
+}
+
+const isWord = (tok, w) => tok !== undefined && tok.k === "id" && !tok.quoted && tok.up === w;
+const isPunct = (tok, p) => tok !== undefined && tok.k === "p" && tok.t === p;
+
+/** A possibly-qualified name at `toks[i]`: `{ name, next }` (name null when unreadable). */
+function readRelationName(toks, i) {
+  if (toks[i]?.k !== "id") return { name: null, next: i + 1 };
+  let name = toks[i].t;
+  let j = i + 1;
+  while (isPunct(toks[j], ".") && toks[j + 1]?.k === "id") { name = toks[j + 1].t; j += 2; }
+  if (isPunct(toks[j], ".")) return { name: null, next: j + 1 };
+  return { name, next: j };
+}
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function closingParen(toks, open) {
+  for (let j = open + 1; j < toks.length; j++) {
+    if (isPunct(toks[j], ")") && toks[j].depth === toks[open].depth) return j;
+  }
+  return -1;
+}
+
+/** Split toks[from..to) at depth-`d` commas. */
+function splitAtCommas(toks, from, to, d) {
+  const items = [];
+  let s = from;
+  for (let j = from; j < to; j++) {
+    if (isPunct(toks[j], ",") && toks[j].depth === d) { items.push(toks.slice(s, j)); s = j + 1; }
+  }
+  items.push(toks.slice(s, to));
+  return items.filter((it) => it.length > 0);
+}
+
+const QUERY_CLAUSE_END = new Set(["FROM", "INTO", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "WINDOW", "FETCH", "FOR", "RETURNING"]);
+
 /**
- * Whether a SELECT region holds a projection `*` (`*`, `t.*`) — a copy of every column of
- * its source, `tenant_id` included when the source is tenant-scoped. `count(*)` is not one.
- * Over-inclusive (a multiplication counts): the caller charges a star only when the
- * statement also names a tenant-scoped table.
+ * The output names of the select list that starts after `toks[sel]` (a `SELECT`), or null
+ * when any item's name cannot be determined. Ends at the first depth-level clause keyword.
  */
-function hasProjectionStar(scan) {
-  return /\*/.test(scan.replace(/\(\s*\*\s*\)/g, ""));
+function selectListNames(toks, sel) {
+  const d = toks[sel].depth;
+  let i = sel + 1;
+  if (isWord(toks[i], "ALL")) i++;
+  if (isWord(toks[i], "DISTINCT")) {
+    i++;
+    if (isWord(toks[i], "ON") && isPunct(toks[i + 1], "(")) {
+      const c = closingParen(toks, i + 1);
+      if (c === -1) return null;
+      i = c + 1;
+    }
+  }
+  let end = i;
+  // (a `)` closing an enclosing paren carries depth d - 1, so it ends the list too)
+  while (end < toks.length && toks[end].depth >= d &&
+    !(toks[end].depth === d && toks[end].k === "id" && !toks[end].quoted && QUERY_CLAUSE_END.has(toks[end].up))) end++;
+  const names = [];
+  for (const item of splitAtCommas(toks, i, end, d)) {
+    const last = item[item.length - 1];
+    if (item.length >= 2 && last.k === "id" && isWord(item[item.length - 2], "AS") && item[item.length - 2].depth === d) {
+      names.push(last.t);
+      continue;
+    }
+    // a plain column reference: `c`, `t.c`, `s.t.c`
+    const plain = item.every((tok, k) => (k % 2 === 0 ? tok.k === "id" : isPunct(tok, "."))) && item.length % 2 === 1;
+    if (plain) { names.push(last.t); continue; }
+    return null;   // `*`, `t.*`, an unnamed expression, an implicit alias the reader does not trust
+  }
+  return names.length > 0 ? names : null;
 }
 
 /**
- * §14.8.10 (S456 review F1) — `SELECT … INTO [TEMP | TEMPORARY | UNLOGGED] [TABLE] <t>`:
- * Postgres CREATES `<t>` from the select list (SQLite has no such form; MySQL's
- * `SELECT … INTO @var | OUTFILE | DUMPFILE` writes variables or files, never a table).
- * Read from the SQL's word tokens, outside literals and comments (`scan` — the masked
- * text, or the raw text when it holds an unmodelled form): an `INTO` whose nearest
- * statement leader at its paren depth is `SELECT` (not `INSERT` / `REPLACE` / `MERGE`).
- * The new table's columns are the select list between that `SELECT` and the `INTO`:
- * naming `tenant_id` there (an alias included) is `tenant`; a `*` is `star`. A target the
- * reader cannot name (`${…}`) is returned with `name: null`.
- *
- * @returns {Array<{name: string|null, key: string|null, kind: "select-into", modifiers: string[], offset: number, tenant: boolean, like: null, star: boolean}>}
+ * The output names of a query at `toks[i]` (after `AS`): its first top-level SELECT's list,
+ * through leading parens and a `WITH` list; null for `TABLE x`, `VALUES`, anything else.
  */
-function selectIntoTables(text, scan) {
-  const out = [];
-  const LEADERS = new Set(["SELECT", "INSERT", "REPLACE", "MERGE", "UPDATE", "DELETE", "CREATE", "VALUES"]);
-  const leaders = [{ word: null, end: 0 }];   // per paren depth
-  const re = /[A-Za-z_][A-Za-z0-9_$]*|[()]/g;
-  let m;
-  while ((m = re.exec(scan)) !== null) {
-    const t = m[0];
-    if (t === "(") { leaders.push({ word: null, end: m.index + 1 }); continue; }
-    if (t === ")") { if (leaders.length > 1) leaders.pop(); continue; }
-    if (m.index > 0 && SQL_IDENT_CHAR.test(scan[m.index - 1])) continue;   // inside a word (`1into`)
-    const up = t.toUpperCase();
-    const top = leaders[leaders.length - 1];
-    if (LEADERS.has(up)) { top.word = up; top.end = m.index + t.length; continue; }
-    if (up !== "INTO" || top.word !== "SELECT") continue;
-    let j = skipSqlTrivia(text, m.index + t.length);
+function queryNames(toks, i) {
+  while (isPunct(toks[i], "(")) i++;
+  if (isWord(toks[i], "WITH")) {
+    const d = toks[i].depth;
+    let j = i + 1;
+    while (j < toks.length && !(toks[j].depth === d && toks[j].k === "id" && !toks[j].quoted &&
+      ["SELECT", "INSERT", "UPDATE", "DELETE", "VALUES", "TABLE", "MERGE"].includes(toks[j].up))) j++;
+    i = j;
+  }
+  return isWord(toks[i], "SELECT") ? selectListNames(toks, i) : null;
+}
+
+/** Read one `;`-separated statement's relation creations into `out`. */
+function readRelationStatement(text, toks, out) {
+  let i = 0;
+  while (isPunct(toks[i], "(")) i++;
+  const lead = toks[i];
+  if (!lead || lead.k !== "id" || lead.quoted) return;
+  const push = (name, kind, modifiers, offset, columns, why) =>
+    out.push({ name, key: name === null ? null : name.toLowerCase(), kind, modifiers, offset, columns, why });
+
+  if (lead.up === "CREATE") {
+    let j = i + 1;
     const modifiers = [];
-    for (const w of ["TEMPORARY", "TEMP", "UNLOGGED"]) {
-      const e = readSqlKeyword(text, j, w);
-      if (e !== -1) { modifiers.push(w); j = skipSqlTrivia(text, e); break; }
+    if (isWord(toks[j], "OR") && isWord(toks[j + 1], "REPLACE")) j += 2;
+    while (toks[j]?.k === "id" && !toks[j].quoted && !["TABLE", "VIEW"].includes(toks[j].up) && modifiers.length < 4) {
+      modifiers.push(toks[j].up);
+      j++;
     }
-    if (text[j] === "@") continue;                                         // MySQL user variable
-    if (/^(?:OUTFILE|DUMPFILE)\s*'/i.test(text.slice(j, j + 16))) continue;  // MySQL file export
-    { const e = readSqlKeyword(text, j, "STRICT"); if (e !== -1) j = skipSqlTrivia(text, e); }
-    { const e = readSqlKeyword(text, j, "TABLE"); if (e !== -1) j = skipSqlTrivia(text, e); }
-    let last = readSqlIdentPart(text, j);
-    if (last) {
-      let k = skipSqlTrivia(text, last.end);
-      while (text[k] === ".") {
-        const p = readSqlIdentPart(text, skipSqlTrivia(text, k + 1));
-        if (!p) { last = null; break; }
-        last = p;
-        k = skipSqlTrivia(text, p.end);
+    const isTable = isWord(toks[j], "TABLE");
+    const isView = isWord(toks[j], "VIEW");
+    if (!isTable && !isView) return;                 // INDEX, TRIGGER, FUNCTION, …: no new relation
+    if (isTable && modifiers.some((m) => !CREATE_TABLE_MODIFIER_WORDS.has(m))) return;
+    if (isView && modifiers.some((m) => !["MATERIALIZED", "TEMP", "TEMPORARY", "RECURSIVE"].includes(m))) return;
+    j++;
+    if (isWord(toks[j], "IF") && isWord(toks[j + 1], "NOT") && isWord(toks[j + 2], "EXISTS")) j += 3;
+    const at = toks[i].at;
+    const { name, next } = readRelationName(toks, j);
+    const kind = isView ? "view" : "table";
+    if (name === null) return push(null, kind, modifiers, at, null, "its name is not a name the compiler can read");
+    j = next;
+    let listed = null;
+    if (isPunct(toks[j], "(")) {
+      const close = closingParen(toks, j);
+      if (close === -1) return push(name, kind, modifiers, at, null, "its column list does not close");
+      const body = text.slice(toks[j].at + 1, toks[close].at);
+      if (findLikeTemplateReference(body)) return push(name, kind, modifiers, at, null, "it copies another table's columns (`LIKE`)");
+      listed = isView
+        ? splitAtCommas(toks, j + 1, close, toks[j].depth + 1).map((it) => (it.length === 1 && it[0].k === "id" ? it[0].t : null))
+        : columnsFromDdlBody(body).map((c) => c.name);
+      if (listed.includes(null) || (!isView && listed.length === 0)) return push(name, kind, modifiers, at, null, "its column list is not plain column names");
+      j = close + 1;
+      if (isWord(toks[j], "INHERITS") || isWord(toks[j], "PARTITION")) return push(name, kind, modifiers, at, null, "it inherits another table's columns");
+      if (!isWord(toks[j], "AS")) return push(name, kind, modifiers, at, listed, null);
+    }
+    if (isWord(toks[j], "AS")) {
+      if (listed) return push(name, kind, modifiers, at, listed, null);
+      const names = queryNames(toks, j + 1);
+      return push(name, kind, modifiers, at, names, names ? null : "its columns come from a query whose output names are not all spelled (a `*`, `TABLE x`, `VALUES`, or an unnamed expression)");
+    }
+    // SQLite's built-in full-text and r-tree modules declare their columns as the module
+    // arguments (`fts5(title, body UNINDEXED, tokenize = 'porter')`): an argument holding
+    // `=` is an option, any other one's first name is a column. Any other module's columns
+    // are its own business — unknown.
+    if (modifiers.includes("VIRTUAL") && isWord(toks[j], "USING") && toks[j + 1]?.k === "id" &&
+      ["FTS5", "FTS4", "FTS3", "RTREE", "RTREE_I32"].includes(toks[j + 1].up) && isPunct(toks[j + 2], "(")) {
+      const close = closingParen(toks, j + 2);
+      if (close !== -1) {
+        const cols = [];
+        for (const arg of splitAtCommas(toks, j + 3, close, toks[j + 2].depth + 1)) {
+          if (arg.some((tok) => isPunct(tok, "="))) continue;
+          if (arg[0]?.k !== "id") { cols.length = 0; break; }
+          cols.push(arg[0].t);
+        }
+        if (cols.length > 0) return push(name, kind, modifiers, at, cols, null);
       }
     }
-    const projection = text.slice(top.end, m.index);
-    const tenant = namesTenantId(projection);
-    const star = hasProjectionStar(scan.slice(top.end, m.index));
-    if (!tenant && !star) continue;
-    out.push({
-      name: last ? last.name : null,
-      key: last ? last.name.toLowerCase() : null,
-      kind: "select-into",
-      modifiers,
-      offset: m.index,
-      tenant,
-      like: null,
-      star,
-    });
+    return push(name, kind, modifiers, at, null, "it is not a plain column list (a virtual-table module whose columns the compiler does not read, `PARTITION OF`, `OF type`)");
   }
-  return out;
+
+  if (lead.up === "ALTER" && isWord(toks[i + 1], "TABLE")) {
+    let j = i + 2;
+    if (isWord(toks[j], "IF") && isWord(toks[j + 1], "EXISTS")) j += 2;
+    if (isWord(toks[j], "ONLY") && toks[j + 1]?.k === "id") j++;
+    const { name, next } = readRelationName(toks, j);
+    const at = lead.at;
+    const added = [];
+    let unknown = name === null;
+    for (const act of splitAtCommas(toks, next, toks.length, lead.depth)) {
+      let k = 0;
+      const w = (x) => isWord(act[k], x);
+      if (w("ADD")) {
+        k++;
+        if (["CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "INDEX", "KEY", "EXCLUDE"].some(w)) continue;
+        if (w("COLUMN")) k++;
+        if (w("IF") && isWord(act[k + 1], "NOT") && isWord(act[k + 2], "EXISTS")) k += 3;
+        if (act[k]?.k === "id") added.push(act[k].t); else unknown = true;
+      } else if (w("RENAME")) {
+        k++;
+        if (w("TO")) {
+          const r = readRelationName(act, k + 1);
+          push(r.name, "rename", [], at, null, "it renames a table whose columns the compiler does not know");
+          continue;
+        }
+        if (w("CONSTRAINT")) continue;
+        if (w("COLUMN")) k++;
+        const to = act.findIndex((tok, x) => x > k && isWord(tok, "TO"));
+        if (to !== -1 && act[to + 1]?.k === "id") added.push(act[to + 1].t); else unknown = true;
+      } else if (w("CHANGE")) {
+        k++;
+        if (w("COLUMN")) k++;
+        if (act[k + 1]?.k === "id") added.push(act[k + 1].t); else unknown = true;
+      }
+    }
+    if (added.length > 0 || unknown) push(name, "alter", [], at, unknown ? null : added, unknown ? "a column it adds or renames is not a name the compiler can read" : null);
+    return;
+  }
+
+  // Postgres `SELECT … INTO t` — at the top-level SELECT (through a `WITH` list).
+  let s = i;
+  if (lead.up === "WITH") {
+    const d = lead.depth;
+    s = i + 1;
+    while (s < toks.length && !(toks[s].depth === d && toks[s].k === "id" && !toks[s].quoted &&
+      ["SELECT", "INSERT", "UPDATE", "DELETE", "VALUES", "TABLE", "MERGE"].includes(toks[s].up))) s++;
+  }
+  if (!isWord(toks[s], "SELECT")) return;
+  const d = toks[s].depth;
+  for (let j = s + 1; j < toks.length; j++) {
+    if (toks[j].depth !== d || !isWord(toks[j], "INTO")) continue;
+    let k = j + 1;
+    const modifiers = [];
+    if (["TEMPORARY", "TEMP", "UNLOGGED"].some((m) => isWord(toks[k], m))) { modifiers.push(toks[k].up); k++; }
+    if (isPunct(toks[k], "@") || ((isWord(toks[k], "OUTFILE") || isWord(toks[k], "DUMPFILE")) && toks[k + 1]?.k === "str")) return;
+    if (isWord(toks[k], "STRICT")) k++;
+    if (isWord(toks[k], "TABLE")) k++;
+    const { name } = readRelationName(toks, k);
+    const names = selectListNames(toks, s);
+    push(name, "select-into", modifiers, toks[j].at, name === null ? null : names,
+      name === null ? "its name is not a name the compiler can read"
+        : names ? null : "its columns come from a select list whose output names are not all spelled (a `*` or an unnamed expression)");
+    return;
+  }
 }

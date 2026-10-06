@@ -52,53 +52,69 @@ ${schema}    \${
 </program>
 `;
 
-describe("programTenantTableDecls — the tables a program-body statement gives tenant_id", () => {
-  const one = (sql) => programTenantTableDecls(sql).map((d) => ({ key: d.key, kind: d.kind, tenant: d.tenant, like: d.like, modifiers: d.modifiers }));
-  test("CREATE [TEMP | TEMPORARY] TABLE [IF NOT EXISTS], any head kind", () => {
-    expect(one("CREATE TABLE invoices (id INTEGER, tenant_id TEXT)")).toEqual([{ key: "invoices", kind: "create", tenant: true, like: null, modifiers: [] }]);
-    expect(one("CREATE TEMP TABLE s (id INTEGER, tenant_id TEXT)")[0]).toMatchObject({ key: "s", tenant: true, modifiers: ["TEMP"] });
-    expect(one("create temporary table if not exists s (tenant_id text)")[0]).toMatchObject({ key: "s", tenant: true, modifiers: ["TEMPORARY"] });
-    expect(one("CREATE VIRTUAL TABLE docs USING fts5(body, tenant_id)")[0]).toMatchObject({ key: "docs", tenant: true, modifiers: ["VIRTUAL"] });
-    expect(one('CREATE TABLE "Quoted" (id INTEGER, "TENANT_ID" TEXT)')[0]).toMatchObject({ key: "quoted", tenant: true });
+describe("programTenantTableDecls — every relation a program-body statement creates, with its columns when determinable", () => {
+  const one = (sql) => programTenantTableDecls(sql).map((d) => [d.kind, d.key, d.columns]);
+  test("CREATE [TEMP | TEMPORARY] TABLE [IF NOT EXISTS] (column list) → its columns", () => {
+    expect(one("CREATE TABLE invoices (id INTEGER, tenant_id TEXT)")).toEqual([["table", "invoices", ["id", "tenant_id"]]]);
+    expect(one("CREATE TEMP TABLE s (id INTEGER, tenant_id TEXT)")).toEqual([["table", "s", ["id", "tenant_id"]]]);
+    expect(one("create temporary table if not exists s (msg text)")).toEqual([["table", "s", ["msg"]]]);
+    expect(one('CREATE TABLE "Quoted" (id INTEGER, "TENANT_ID" TEXT)')).toEqual([["table", "quoted", ["id", "TENANT_ID"]]]);
+    expect(one("CREATE TABLE log (id INTEGER, msg TEXT DEFAULT 'tenant_id')")).toEqual([["table", "log", ["id", "msg"]]]);
   });
-  test("no tenant_id column → nothing; a tenant_id only in a literal of a modelled column list is not a column", () => {
-    expect(one("CREATE TABLE log (id INTEGER, msg TEXT)")).toEqual([]);
-    expect(one("CREATE TABLE log (id INTEGER, msg TEXT DEFAULT 'tenant_id')")).toEqual([]);
+  test("S456 review R1 — `*` over a derived table, VALUES or a CTE is UNKNOWN", () => {
+    expect(one("SELECT * INTO inv FROM (SELECT 'A' AS tenant_id, 'sec' AS v) s")).toEqual([["select-into", "inv", null]]);
+    expect(one("SELECT * INTO inv FROM (VALUES ('A','s')) AS v(tenant_id,val)")).toEqual([["select-into", "inv", null]]);
+    expect(one("WITH x AS (SELECT 'A' AS tenant_id) SELECT * INTO inv FROM x")).toEqual([["select-into", "inv", null]]);
   });
-  test("fail-closed: no column list (AS SELECT), or an unmodelled form, reads the whole statement", () => {
-    expect(one("CREATE TABLE snap AS SELECT id, tenant_id FROM assets")[0]).toMatchObject({ key: "snap", tenant: true });
-    expect(one("CREATE TABLE t ([id] INTEGER, tenant_id TEXT)")[0]).toMatchObject({ key: "t", tenant: true });
+  test("S456 review R2 — CREATE TABLE … AS TABLE x / AS (TABLE x) / AS VALUES is UNKNOWN", () => {
+    expect(one("CREATE TABLE copy AS TABLE assets")).toEqual([["table", "copy", null]]);
+    expect(one("CREATE TABLE copy AS (TABLE assets)")).toEqual([["table", "copy", null]]);
+    expect(one("CREATE TABLE v AS VALUES (1, 'A')")).toEqual([["table", "v", null]]);
   });
-  test("a head inside a literal or a comment does not run — unless the text holds a form the reader does not model", () => {
+  test("S456 review R3 — a `$$` routine body is opaque: its `SELECT … INTO var` is not table creation", () => {
+    expect(one("CREATE FUNCTION f() RETURNS int AS $$ DECLARE v int; BEGIN SELECT tenant_id INTO v FROM assets; RETURN v; END $$ LANGUAGE plpgsql")).toEqual([]);
+    expect(one("DO $body$ BEGIN SELECT tenant_id INTO v FROM assets; END $body$")).toEqual([]);
+  });
+  test("an explicit select list is KNOWN — plain references and `expr AS name`, whatever the FROM", () => {
+    expect(one("CREATE TABLE snap AS SELECT id, a.name FROM assets a")).toEqual([["table", "snap", ["id", "name"]]]);
+    expect(one("SELECT id, count(*) AS n INTO counts FROM (SELECT * FROM x) s GROUP BY id")).toEqual([["select-into", "counts", ["id", "n"]]]);
+    expect(one("WITH x AS (SELECT 1 AS k) SELECT k INTO TEMP t FROM x")).toEqual([["select-into", "t", ["k"]]]);
+    expect(one("SELECT 'A' AS Tenant_ID INTO inv")).toEqual([["select-into", "inv", ["Tenant_ID"]]]);
+    expect(one("CREATE VIEW v (a, b) AS SELECT * FROM t")).toEqual([["view", "v", ["a", "b"]]]);
+    expect(one("CREATE TABLE t2 (a, b) AS SELECT * FROM t")).toEqual([["table", "t2", ["a", "b"]]]);
+  });
+  test("UNKNOWN: an unnamed expression, `t.*`, LIKE, a view over `*`, an unreadable name, an unknown module, a table rename", () => {
+    expect(one("SELECT a + 1 INTO x FROM t")).toEqual([["select-into", "x", null]]);
+    expect(one("SELECT t.* INTO x FROM t")).toEqual([["select-into", "x", null]]);
+    expect(one("CREATE TABLE copy (LIKE assets INCLUDING ALL)")).toEqual([["table", "copy", null]]);
+    expect(one("CREATE MATERIALIZED VIEW v AS SELECT * FROM assets")).toEqual([["view", "v", null]]);
+    expect(one("CREATE TABLE ${t} (id INTEGER)")).toEqual([["table", null, null]]);
+    expect(one("CREATE VIRTUAL TABLE c USING csv(filename='x.csv')")).toEqual([["table", "c", null]]);
+    expect(one("ALTER TABLE assets RENAME TO archive")).toEqual([["rename", "archive", null]]);
+  });
+  test("SQLite fts5 / rtree module arguments are its columns (options skipped)", () => {
+    expect(one("CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5(title, body, project UNINDEXED, tokenize = 'porter')")).toEqual([["table", "node_fts", ["title", "body", "project"]]]);
+    expect(one("CREATE VIRTUAL TABLE docs USING fts5(body, tenant_id)")).toEqual([["table", "docs", ["body", "tenant_id"]]]);
+  });
+  test("ALTER TABLE: ADD / RENAME COLUMN / CHANGE give their new column names", () => {
+    expect(one("ALTER TABLE notes ADD COLUMN tenant_id TEXT")).toEqual([["alter", "notes", ["tenant_id"]]]);
+    expect(one("ALTER TABLE notes ADD note TEXT, RENAME COLUMN a TO tenant_id")).toEqual([["alter", "notes", ["note", "tenant_id"]]]);
+    expect(one("ALTER TABLE notes ADD CONSTRAINT c CHECK (x > 0)")).toEqual([]);
+  });
+  test("not creation: INSERT INTO, CREATE INDEX, MySQL INTO @var / OUTFILE, a plain SELECT", () => {
+    expect(one("INSERT INTO t (a) SELECT a FROM u")).toEqual([]);
+    expect(one("CREATE INDEX ix ON t (a)")).toEqual([]);
+    expect(one("SELECT tenant_id INTO @v FROM t")).toEqual([]);
+    expect(one("SELECT tenant_id INTO OUTFILE '/tmp/x' FROM t")).toEqual([]);
+    expect(one("SELECT count(x) AS n FROM t")).toEqual([]);
+  });
+  test("tokens, not text: a statement in a literal or comment does not run; `--` ends at a lone CR (S456 F1)", () => {
     expect(one("INSERT INTO audit (q) VALUES ('CREATE TABLE x (id INTEGER, tenant_id TEXT)')")).toEqual([]);
-    expect(one("SELECT 1 -- CREATE TABLE x (tenant_id TEXT)")).toEqual([]);
     expect(one("SELECT 1 /* ALTER TABLE notes ADD COLUMN tenant_id TEXT */")).toEqual([]);
-    // a backslash: MySQL ends `'a\''` where the standard reading does not — read fail-closed
-    expect(one("SELECT 'a\\'' ; CREATE TABLE x (id INTEGER, tenant_id TEXT) --'")[0]).toMatchObject({ key: "x", tenant: true });
+    expect(one("SELECT 1; --c\rCREATE TABLE x (id INTEGER, tenant_id TEXT)")).toEqual([["table", "x", ["id", "tenant_id"]]]);
   });
-  test("S456 review F1 — SELECT … INTO [TEMP | UNLOGGED] [TABLE] t creates t (Postgres); MySQL INTO @var / OUTFILE does not", () => {
-    const sel = (sql) => programTenantTableDecls(sql).map((d) => ({ key: d.key, kind: d.kind, tenant: d.tenant, star: d.star, modifiers: d.modifiers }));
-    expect(sel("SELECT 'A' AS tenant_id, 'A-secret' AS v INTO inv")).toEqual([{ key: "inv", kind: "select-into", tenant: true, star: false, modifiers: [] }]);
-    expect(sel("SELECT * INTO TEMP snap FROM assets")).toEqual([{ key: "snap", kind: "select-into", tenant: false, star: true, modifiers: ["TEMP"] }]);
-    expect(sel("WITH x AS (SELECT 1) SELECT tenant_id INTO UNLOGGED TABLE o FROM x")[0]).toMatchObject({ key: "o", tenant: true, modifiers: ["UNLOGGED"] });
-    expect(sel("SELECT name INTO TABLE names_only FROM assets")).toEqual([]);
-    expect(sel("SELECT count(*) INTO tot FROM assets")).toEqual([]);
-    expect(sel("INSERT INTO log (tenant_id) VALUES ('x')")).toEqual([]);
-    expect(sel("SELECT tenant_id INTO @v FROM t")).toEqual([]);
-    expect(sel("SELECT tenant_id INTO OUTFILE '/tmp/x' FROM t")).toEqual([]);
-    expect(sel("SELECT 'select tenant_id into z' AS q")).toEqual([]);
-    expect(sel("CREATE TABLE copy AS SELECT * FROM assets")[0]).toMatchObject({ key: "copy", star: true });
-  });
-  test("a `--` comment ends at a lone CR (Postgres) — the CREATE / column after it is live (S456 review F1, shared readers)", () => {
-    expect(one("SELECT 1 --c\rCREATE TABLE x (id INTEGER, tenant_id TEXT)")[0]).toMatchObject({ key: "x", tenant: true });
-    expect(one("CREATE TABLE logs (id integer --c\r, tenant_id text)")[0]).toMatchObject({ key: "logs", tenant: true });
-  });
-  test("an unreadable name with tenant_id → name null (refused by the caller)", () => {
-    expect(programTenantTableDecls("CREATE TABLE ${t} (id INTEGER, tenant_id TEXT)")[0]).toMatchObject({ name: null, tenant: true });
-  });
-  test("LIKE <template> is returned for the caller; ALTER TABLE … tenant_id is a declaration", () => {
-    expect(one("CREATE TABLE copy (LIKE assets INCLUDING ALL)")[0]).toMatchObject({ key: "copy", tenant: false, like: "assets" });
-    expect(one("ALTER TABLE notes ADD COLUMN tenant_id TEXT")[0]).toMatchObject({ key: "notes", kind: "alter", tenant: true });
+  test("a backslash or `#` (meaning differs by database) beside `tenant_id` → one unreadable relation (fail-closed)", () => {
+    expect(one("SELECT 'a\\'' ; CREATE TABLE x (id INTEGER, tenant_id TEXT) --'").some(([k]) => k === "unreadable")).toBe(true);
   });
 });
 
@@ -128,12 +144,39 @@ describe("(1) a program-body ?{} creating an undeclared tenant table is E-TENANT
     expect(a.errors[0].message).toContain("`inv` (`SELECT … INTO`)");
     const b = compileFiles({ "app.scrml": bodyApp("SELECT * INTO TEMP snap FROM assets") });
     expect(b.codes).toContain("E-TENANT-UNDECLARED");
-    expect(b.errors.find((e) => e.code === "E-TENANT-UNDECLARED").message).toContain("from `*` over a tenant-scoped table");
+    expect(b.errors.find((e) => e.code === "E-TENANT-UNDECLARED").message).toContain("the compiler cannot determine its columns");
     // `CREATE TABLE … AS SELECT *` over a tenant table — the same copy
     expect(compileFiles({ "app.scrml": bodyApp("CREATE TABLE copy AS SELECT * FROM assets") }).codes).toContain("E-TENANT-UNDECLARED");
-    // controls: no tenant_id in the select list; * over a non-tenant table
+    // control: a spelled select list without tenant_id
     expect(compileFiles({ "app.scrml": bodyApp("SELECT msg INTO msgs FROM log") }).codes).not.toContain("E-TENANT-UNDECLARED");
-    expect(compileFiles({ "app.scrml": bodyApp("SELECT * INTO msgs FROM log") }).codes).not.toContain("E-TENANT-UNDECLARED");
+    // round 2: `*` is UNKNOWN whatever it reads — even a non-tenant table (its columns are not spelled here)
+    expect(compileFiles({ "app.scrml": bodyApp("SELECT * INTO msgs FROM log") }).codes).toContain("E-TENANT-UNDECLARED");
+  });
+  test("S456 review round 2 — R1 / R2 shapes are refused, with or without .acrossTenants() (it does not exempt DDL)", () => {
+    const shapes = [
+      "SELECT * INTO inv FROM (SELECT 'A' AS tenant_id, 'sec' AS v) s",
+      "SELECT * INTO inv FROM (VALUES ('A','s')) AS v(tenant_id,val)",
+      "WITH x AS (SELECT 'A' AS tenant_id) SELECT * INTO inv FROM x",
+      "CREATE TABLE copy AS TABLE assets",
+      "CREATE TABLE copy AS (TABLE assets)",
+    ];
+    for (const s of shapes) {
+      expect(compileFiles({ "app.scrml": bodyApp(s) }).codes).toContain("E-TENANT-UNDECLARED");
+      const across = bodyApp(s).replace("}.run()", "}.acrossTenants().run()");
+      expect(across).toContain(".acrossTenants()");
+      expect(compileFiles({ "app.scrml": across }).codes).toContain("E-TENANT-UNDECLARED");
+    }
+  });
+  test("S456 review round 2 — R3: a PL/pgSQL `SELECT … INTO var` inside a `$$` body is not charged; explicit-column CTAS / SELECT INTO compile", () => {
+    const fn = "CREATE FUNCTION f() RETURNS int AS $$ DECLARE v int; BEGIN SELECT tenant_id INTO v FROM assets; RETURN v; END $$ LANGUAGE plpgsql";
+    expect(compileFiles({ "app.scrml": bodyApp(fn) }).codes).not.toContain("E-TENANT-UNDECLARED");
+    for (const s of [
+      "CREATE TABLE IF NOT EXISTS daily AS SELECT id, name AS label FROM log",
+      "SELECT id, msg INTO TEMP recent FROM log",
+      "CREATE VIEW recent_v (id, msg) AS SELECT * FROM log",
+    ]) {
+      expect(compileFiles({ "app.scrml": bodyApp(s) }).codes).toEqual([]);
+    }
   });
   test("a LIKE copy of a tenant-scoped table carries tenant_id", () => {
     expect(compileFiles({ "app.scrml": bodyApp("CREATE TABLE assets_copy (LIKE assets)") }).codes).toContain("E-TENANT-UNDECLARED");

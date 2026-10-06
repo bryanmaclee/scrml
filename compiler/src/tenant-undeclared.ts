@@ -33,7 +33,6 @@
  */
 
 import { programTenantTableDecls } from "./schema-differ.js";
-import { tenantTableMentioned } from "./codegen/tenant-sql-subset.ts";
 
 /** One `E-TENANT-UNDECLARED` diagnostic (the TENANT-SCHEMA stage's shape). */
 export interface TenantUndeclaredDiagnostic {
@@ -62,6 +61,8 @@ const FIX =
   "Declare it in `<schema>` so the tenant floor scopes it. A `tenant_id` column IS the declaration " +
   "(§14.8.10) — there is no opt-out: if the table is not tenant data, rename the column.";
 
+const TENANT_COLUMN_NAME = "tenant_id";
+
 /** Lowercased membership in the compilation's tenant set. */
 function inSet(set: Iterable<string>): (name: string) => boolean {
   const s = new Set<string>();
@@ -81,42 +82,50 @@ export function programBodyUndeclaredTenantTables(
   const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
   const seen = new WeakSet<object>();
   const reported = new Set<string>();
-  const tenantNames = [...new Set([...tenantTables].map((t) => String(t).toLowerCase()))];
   const read = (sql: string, span: unknown): void => {
     for (const d of programTenantTableDecls(sql)) {
-      // A projection `*` copies `tenant_id` when the statement reads a tenant-scoped table
-      // (named as a token of the floor's SQL subset, or — outside it — anywhere in its text).
-      const starCopy = d.star && !d.tenant && tenantTableMentioned(sql, declared, tenantNames) !== null;
-      const carries = d.tenant || (d.like !== null && declared(d.like)) || starCopy;
-      if (!carries) continue;
+      // Declared tenant-scoped: the floor scopes it, whatever its columns.
       if (d.key !== null && declared(d.key)) continue;
+      const known = d.columns !== null;
+      const carries = known && d.columns!.some((c) => c.toLowerCase() === TENANT_COLUMN_NAME);
+      if (known && !carries) continue;   // every column known, none is `tenant_id`: not tenant data
       const temp = d.modifiers.some((m) => m === "TEMP" || m === "TEMPORARY");
       const label = d.name === null ? "whose name the compiler cannot read" : `\`${d.name}\``;
-      const how = d.kind === "select-into" ? " (`SELECT … INTO`)" : "";
-      const what = d.kind === "alter"
-        ? `gives the table \`${d.name}\` a \`tenant_id\` column (\`ALTER TABLE\`)`
-        : d.tenant
-          ? `creates ${temp ? "the temporary table" : "the table"} ${label}${how} with a \`tenant_id\` column`
-          : starCopy
-            ? `creates ${temp ? "the temporary table" : "the table"} ${label}${how} from \`*\` over a tenant-scoped table, so it carries \`tenant_id\``
-            : `creates the table \`${d.name}\` as a copy (\`LIKE ${d.like}\`) of a tenant-scoped table, so it carries \`tenant_id\``;
-      const name = d.name === null ? "this table" : `\`${d.name}\``;
+      const noun = d.kind === "view" ? (d.modifiers.includes("MATERIALIZED") ? "the materialized view" : "the view")
+        : temp ? "the temporary table" : "the table";
+      const how = d.kind === "select-into" ? " (`SELECT … INTO`)" : d.kind === "rename" ? " (`ALTER TABLE … RENAME TO`)" : "";
+      const name = d.name === null ? "this relation" : `\`${d.name}\``;
+      const what = d.kind === "unreadable"
+        ? `cannot be read exactly — ${d.why}`
+        : d.kind === "alter"
+          ? carries
+            ? `gives the table ${label} a \`tenant_id\` column (\`ALTER TABLE\`)`
+            : `adds a column to the table ${label} that the compiler cannot name (${d.why})`
+          : carries
+            ? `creates ${noun} ${label}${how} with a \`tenant_id\` column`
+            : `creates ${noun} ${label}${how}, but the compiler cannot determine its columns — ${d.why}`;
       // A temporary table cannot itself be declared in `<schema>` (E-SCHEMA-014 rejects a
       // TEMP head), so its fix names the two things that work.
-      const fix = temp
-        ? "A temporary table cannot be declared in `<schema>` (E-SCHEMA-014), so keep tenant rows in a table " +
-          "`<schema>` declares — the tenant floor scopes it — or, if these rows are not tenant data, rename the column: " +
-          "a `tenant_id` column IS the declaration (§14.8.10) and there is no opt-out."
-        : FIX;
-      const key = `${String((span as any)?.start ?? "")}\0${d.key ?? "?"}\0${d.kind}`;
+      const fix = !carries
+        ? "Spell the column list (every output column a plain column or `expr AS name`), or declare it in " +
+          "`<schema>`. A relation whose columns the compiler cannot see may carry `tenant_id`, which IS the " +
+          "declaration (§14.8.10) — there is no opt-out."
+        : temp
+          ? "A temporary table cannot be declared in `<schema>` (E-SCHEMA-014), so keep tenant rows in a table " +
+            "`<schema>` declares — the tenant floor scopes it — or, if these rows are not tenant data, rename the column: " +
+            "a `tenant_id` column IS the declaration (§14.8.10) and there is no opt-out."
+          : FIX;
+      const key = `${String((span as any)?.start ?? "")}\0${d.key ?? "?"}\0${d.kind}\0${d.offset}`;
       if (reported.has(key)) continue;
       reported.add(key);
       out.push({
         code: "E-TENANT-UNDECLARED",
-        message:
-          `E-TENANT-UNDECLARED: this \`?{}\` ${what}, but ${name} is not declared tenant-scoped — no \`<schema>\` ` +
-          `and no \`<db tables=>\` of this compilation declares it — so the tenant floor would not scope it and every ` +
-          `tenant's rows would reach every request. ${fix}`,
+        message: d.kind === "unreadable"
+          ? `E-TENANT-UNDECLARED: this \`?{}\` ${what}; the compiler cannot tell which relations it creates, so it is ` +
+            `refused (§14.8.10). Remove the backslash / \`#\`, or declare the tables in \`<schema>\`.`
+          : `E-TENANT-UNDECLARED: this \`?{}\` ${what}, and ${name} is not declared tenant-scoped — no \`<schema>\` ` +
+            `and no \`<db tables=>\` of this compilation declares it — so a \`tenant_id\` in it would not be scoped and ` +
+            `every tenant's rows would reach every request. ${fix}`,
         span: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
         severity: "error",
       });

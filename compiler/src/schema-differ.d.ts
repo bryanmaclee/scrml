@@ -101,17 +101,17 @@ export declare function schemaTableDeclarations(text: string): Array<{
   columns: Array<{ name: string }>;
 }>;
 
-/** §14.8.10 (S456) — the tables a program-body `?{}` statement gives a `tenant_id` column (E-TENANT-UNDECLARED). */
+/** §14.8.10 (S456) — the relations a program-body `?{}` statement creates or gives columns, with their columns when the compiler can determine them (E-TENANT-UNDECLARED). */
 export declare function programTenantTableDecls(text: string): Array<{
   name: string | null;
   key: string | null;
-  kind: "create" | "alter" | "select-into";
+  kind: "table" | "view" | "select-into" | "alter" | "rename" | "unreadable";
   modifiers: string[];
   offset: number;
-  tenant: boolean;
-  like: string | null;
-  /** The new table copies a projection `*` — it carries `tenant_id` when its source is tenant-scoped. */
-  star: boolean;
+  /** Every column the statement gives the relation, or null when the compiler cannot determine them. */
+  columns: string[] | null;
+  /** Why the columns are unknown (null when known). */
+  why: string | null;
 }>;
 
 /** The bounded principal role the per-request A1 wrapper drops to (S6). */
