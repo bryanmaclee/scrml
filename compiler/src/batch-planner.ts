@@ -26,7 +26,7 @@
  */
 
 import { classifyHoistableQuery, HOIST_VAL_ALIAS } from "./hoist-sql-shape.ts";
-import { buildLoopWriteFacts, loopBodyWriteReason, type LoopWriteFacts } from "./hoist-write-scan.ts";
+import { buildCompilationWriteFacts, loopBodyWriteReason, type LoopWriteFacts } from "./hoist-write-scan.ts";
 import { resolveDbScopes } from "./db-ownership.ts";
 import { dialectOfDbValue } from "./codegen/tenant-egress.ts";
 
@@ -754,10 +754,14 @@ export function runBatchPlanner(input: BPInput): BPOutput {
   let dialectReason: string | null | undefined;
   const dialectReasonOnce = (): string | null =>
     dialectReason === undefined ? (dialectReason = hoistDialectReason(input.files ?? [])) : dialectReason;
-  for (const file of input.files ?? []) {
-    const topNodes = getFileNodes(file);
-    let writeFacts: LoopWriteFacts | null = null;
-    const writeFactsOnce = (): LoopWriteFacts => (writeFacts ??= buildLoopWriteFacts(topNodes));
+  // The write facts are compilation-wide (a writer passed by value in one file can
+  // reach a loop in another — hoist-write-scan.ts), aligned with input.files.
+  let compilationWriteFacts: LoopWriteFacts[] | null = null;
+  const files = input.files ?? [];
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const topNodes = getFileNodes(files[fileIndex]);
+    const writeFactsOnce = (): LoopWriteFacts =>
+      (compilationWriteFacts ??= buildCompilationWriteFacts(files.map(getFileNodes)))[fileIndex];
     walkAst(topNodes, (node) => {
       if (node.kind !== "for-stmt") return true;
       analyzeForLoop(node, batchPlan, errors, {

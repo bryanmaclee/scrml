@@ -19,21 +19,27 @@
  *     whose body is (transitively) write-free, or a built-in global in PURE_GLOBALS;
  *   - `new C(…)` is write-free when `C` is in PURE_CTORS;
  *   - a member call `x.m(…)` is write-free when its root `x` is a built-in namespace
- *     (PURE_NAMESPACES), or a name this file declares (not an import) AND no function
- *     value that may write ESCAPES anywhere in the file (see below);
+ *     (PURE_NAMESPACES); or when `x` is a name this file declares (not an import),
+ *     `m` is a built-in method name (BUILTIN_METHODS: `push`, `join`, `get`, …), AND
+ *     no function value that may write ESCAPES anywhere in the compilation;
  *   - anything else — an imported function, an undeclared global (`fetch`), a
  *     computed callee while a writer escapes — may write.
  *
- * A function value ESCAPES when a writer (a may-write local function, or any
- * imported name) is referenced other than as a direct call — `items.map(bump)`,
- * `const repo = { save: bump }` — or a lambda anywhere in the file calls one. Only
- * then can `repo.save(x)` / `cb(x)` reach a write without naming the writer at the
- * call, so only then are such calls refused.
+ * A function value ESCAPES when a writer (a may-write function, or any imported
+ * name) is referenced other than as a direct call — `items.map(bump)`,
+ * `const repo = { save: bump }` — or a lambda calls one, in ANY file of the
+ * compilation (an object built in one file reaches a loop in another as an
+ * argument). Only then can `repo.save(x)` / `opts.cb(x)` reach a write without
+ * naming the writer at the call, so only then are such calls refused.
+ *
+ * Residual, named: an object with a built-in-named method that writes (`{ push: w }`)
+ * obtained as the RETURN value of an imported function — the value never appears
+ * as a reference here. That needs data flow through the callee; it is not modelled.
  *
  * A function is a WRITER when its body has a `?{}` that is not a plain read (see
  * `sqlIsPlainRead` — fail-closed: anything it cannot read as a lone SELECT is a
  * write), a `transaction { }` block, a foreign `_{}` block, or a call that may
- * write (least fixpoint over the file's functions).
+ * write (least fixpoint over the compilation's functions).
  */
 
 export interface LoopWriteFacts {
@@ -60,6 +66,25 @@ const PURE_NAMESPACES = new Set([
   "console",
 ]);
 
+/**
+ * Built-in method names: a member call `x.m(…)` on a declared, non-imported name is
+ * write-free only for one of these (Array / String / Map / Set / Number / Date).
+ * A callback they invoke is covered by the escape rule (a writer passed by value).
+ */
+const BUILTIN_METHODS = new Set([
+  "push", "pop", "shift", "unshift", "slice", "splice", "concat", "join", "map", "filter", "reduce",
+  "reduceRight", "forEach", "find", "findIndex", "findLast", "findLastIndex", "some", "every",
+  "includes", "indexOf", "lastIndexOf", "at", "flat", "flatMap", "fill", "sort", "reverse", "keys",
+  "values", "entries", "toSorted", "toReversed", "toSpliced", "with", "copyWithin",
+  "toString", "toUpperCase", "toLowerCase", "trim", "trimStart", "trimEnd", "split", "replace",
+  "replaceAll", "startsWith", "endsWith", "padStart", "padEnd", "repeat", "charAt", "charCodeAt",
+  "codePointAt", "substring", "substr", "localeCompare", "match", "matchAll", "search", "normalize",
+  "toFixed", "toPrecision", "toLocaleString", "valueOf", "toJSON", "toISOString", "getTime",
+  "getFullYear", "getMonth", "getDate", "getDay", "getHours", "getMinutes", "getSeconds",
+  "getMilliseconds", "toLocaleDateString", "toLocaleTimeString",
+  "get", "set", "has", "add", "delete", "clear", "hasOwnProperty",
+]);
+
 /** Built-in constructors. */
 const PURE_CTORS = new Set([
   "Map", "Set", "WeakMap", "WeakSet", "Array", "Object", "Date", "Error", "TypeError", "RangeError",
@@ -83,7 +108,7 @@ export function sqlIsPlainRead(sqlBody: string): boolean {
 
 type CallFact =
   | { kind: "bare"; name: string }
-  | { kind: "member"; root: string | null }
+  | { kind: "member"; root: string | null; method: string }
   | { kind: "new"; name: string | null }
   | { kind: "computed" };
 
@@ -134,7 +159,7 @@ function scanText(text: string, out: ScanOut, inLambda: boolean): void {
         // root = the identifier that starts this chain (walk back over `a . b . c`)
         const before = s.slice(0, m.index);
         const rm = /(@?[A-Za-z_$][\w$]*)(?:\s*\.\s*[A-Za-z_$][\w$]*|\s*\[[^\]]*\]|\s*\([^()]*\))*\s*$/.exec(before);
-        const f: CallFact = { kind: "member", root: rm ? rm[1] : null };
+        const f: CallFact = { kind: "member", root: rm ? rm[1] : null, method: name };
         out.calls.push(f);
         if (lambda) out.lambdaCalls.push(f);
       }
@@ -169,7 +194,7 @@ function scanExpr(e: any, out: ScanOut, inLambda: boolean): void {
     // `?{…}.get()` — the query's own terminator, not a call into code
     if (c && c.kind === "member" && c.object && (c.object.kind === "sql" || c.object.kind === "sql-ref")) return;
     if (c && c.kind === "ident") push({ kind: "bare", name: c.name });
-    else if (c && c.kind === "member") { push({ kind: "member", root: memberRoot(c) }); scanExpr(c.object, out, inLambda); }
+    else if (c && c.kind === "member") { push({ kind: "member", root: memberRoot(c), method: String(c.property ?? "") }); scanExpr(c.object, out, inLambda); }
     else { push({ kind: "computed" }); scanExpr(c, out, inLambda); }
     scanExpr(e.args, out, inLambda);
     return;
@@ -251,8 +276,14 @@ function leadIdent(p: unknown): string | null {
   return m ? m[1] : null;
 }
 
-/** Collect the write facts of one file's top-level nodes. */
-export function buildLoopWriteFacts(fileNodes: unknown[]): LoopWriteFacts {
+/** One file's raw scan: its functions, imports, declarations, and every reference. */
+interface FileScan {
+  fnScans: Map<string, ScanOut>;
+  fileScan: ScanOut;
+  facts: LoopWriteFacts;
+}
+
+function scanFile(fileNodes: unknown[], escapes: { value: boolean }): FileScan {
   const fnBodies = new Map<string, any[]>();
   const imported = new Set<string>();
   const declared = new Set<string>();
@@ -294,23 +325,43 @@ export function buildLoopWriteFacts(fileNodes: unknown[]): LoopWriteFacts {
     for (const b of bodies) scanNode(b, s, false);
     fnScans.set(name, s);
   }
-
   const facts: LoopWriteFacts = { fnMayWrite: new Map(), imported, declared, escapes: false };
+  Object.defineProperty(facts, "escapes", { get: () => escapes.value, enumerable: true });
   for (const [name, s] of fnScans) facts.fnMayWrite.set(name, s.directWrite || imported.has(name));
+  return { fnScans, fileScan, facts };
+}
+
+/**
+ * The write facts of every file of a compilation (aligned with `filesNodes`). The
+ * escape flag is ONE for the compilation: a writer passed by value in one file can
+ * reach a loop in another.
+ */
+export function buildCompilationWriteFacts(filesNodes: unknown[][]): LoopWriteFacts[] {
+  const escapes = { value: false };
+  const scans = filesNodes.map((nodes) => scanFile(nodes, escapes));
   // Least fixpoint: may-write and escape grow together until stable.
   for (let changed = true; changed;) {
     changed = false;
-    for (const [name, s] of fnScans) {
-      if (facts.fnMayWrite.get(name)) continue;
-      if (s.calls.some((c) => callMayWrite(c, facts))) { facts.fnMayWrite.set(name, true); changed = true; }
+    for (const { fnScans, facts } of scans) {
+      for (const [name, s] of fnScans) {
+        if (facts.fnMayWrite.get(name)) continue;
+        if (s.calls.some((c) => callMayWrite(c, facts))) { facts.fnMayWrite.set(name, true); changed = true; }
+      }
     }
-    if (!facts.escapes) {
-      const writerRef = [...fileScan.valueRefs].some((n) => imported.has(n) || facts.fnMayWrite.get(n) === true);
-      const lambdaWrites = fileScan.lambdaCalls.some((c) => callMayWrite(c, facts));
-      if (writerRef || lambdaWrites) { facts.escapes = true; changed = true; }
+    if (!escapes.value) {
+      for (const { fileScan, facts } of scans) {
+        const writerRef = [...fileScan.valueRefs].some((n) => facts.imported.has(n) || facts.fnMayWrite.get(n) === true);
+        const lambdaWrites = fileScan.lambdaCalls.some((c) => callMayWrite(c, facts));
+        if (writerRef || lambdaWrites) { escapes.value = true; changed = true; break; }
+      }
     }
   }
-  return facts;
+  return scans.map((x) => x.facts);
+}
+
+/** The write facts of a single file compiled alone. */
+export function buildLoopWriteFacts(fileNodes: unknown[]): LoopWriteFacts {
+  return buildCompilationWriteFacts([fileNodes])[0];
 }
 
 /** May this call reach a database write? */
@@ -324,10 +375,10 @@ export function callMayWrite(c: CallFact, facts: LoopWriteFacts): boolean {
     case "new":
       return !(c.name !== null && PURE_CTORS.has(c.name));
     case "member":
-      if (c.root === null) return facts.escapes;
-      if (facts.imported.has(c.root)) return true;
-      if (PURE_NAMESPACES.has(c.root)) return false;
-      if (!c.root.startsWith("@") && !facts.declared.has(c.root)) return true;
+      if (c.root !== null && facts.imported.has(c.root)) return true;
+      if (c.root !== null && PURE_NAMESPACES.has(c.root)) return false;
+      if (c.root !== null && !c.root.startsWith("@") && !facts.declared.has(c.root)) return true;
+      if (!BUILTIN_METHODS.has(c.method)) return true;
       return facts.escapes;
     case "computed":
       return facts.escapes;
@@ -350,7 +401,7 @@ export function loopBodyWriteReason(body: unknown, facts: LoopWriteFacts, isSite
     const what =
       c.kind === "bare" ? `\`${c.name}(…)\`` :
       c.kind === "new" ? `\`new ${c.name ?? "…"}(…)\`` :
-      c.kind === "member" ? `\`${c.root ?? "…"}.…(…)\`` : "a computed callee";
+      c.kind === "member" ? `\`${c.root ?? "…"}.${c.method}(…)\`` : "a computed callee";
     return `the loop body calls ${what}, which the compiler cannot prove does not write the database — a write between iterations would not be seen by the pre-fetch (§8.10.3)`;
   }
   return null;

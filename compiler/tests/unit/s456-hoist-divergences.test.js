@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { classifyHoistableQuery, HOIST_VALUES_PLACEHOLDER, HOIST_VAL_ALIAS } from "../../src/hoist-sql-shape.ts";
-import { HOIST_KEY_ALIAS } from "../../src/batch-planner.ts";
+import { HOIST_KEY_ALIAS, runBatchPlanner } from "../../src/batch-planner.ts";
 import { sqlIsPlainRead } from "../../src/hoist-write-scan.ts";
 
 const CASES = join(import.meta.dir, "..", "..", "..", "conformance", "cases", "server-db");
@@ -124,6 +124,35 @@ describe("(2) the write scan — hoist only a body PROVEN not to write", () => {
     const c = compile(program("            repo.save(it.id)", { before: "    function touch(id) {\n        ?{`UPDATE notes SET body = 'x' WHERE id = ${id}`}.run()\n    }\n    const repo = { save: touch }" }));
     expect(c.hoists).toBe(0);
   });
+  test("a non-built-in method on a local object is not hoisted (it may be a writer)", () => {
+    const c = compile(program("            helper.save(it.id)", { before: "    const helper = { save: (id) => id }" }));
+    expect(c.hoists).toBe(0);
+    expect(c.reasons.some((r) => r.includes("`helper.save(…)`"))).toBe(true);
+  });
+  test("a writer passed by value in ANOTHER file of the compilation blocks member calls in this file's loop", () => {
+    const loopFile = (extra) => ({
+      filePath: "/a.scrml",
+      nodes: [{
+        kind: "function-decl", name: "f", params: ["xs", "opts"], body: [{
+          kind: "for-stmt", id: "loop", variable: "x", iterable: "xs", body: [
+            { kind: "let-decl", name: "row", init: "?{`SELECT body FROM notes WHERE id = ${x.id}`}.get()" },
+            { kind: "bare-expr", expr: "opts . push ( row )" },
+          ],
+        }],
+      }, ...extra],
+    });
+    const writerFile = {
+      filePath: "/b.scrml",
+      nodes: [
+        { kind: "function-decl", name: "touch", params: ["id"], body: [{ kind: "sql", query: "UPDATE notes SET body = 'x' WHERE id = ${id}", chainedCalls: [{ method: "run", args: "" }] }] },
+        { kind: "const-decl", name: "holder", init: "{ push : touch }" },
+      ],
+    };
+    expect(runBatchPlanner({ files: [loopFile([])], depGraph: null }).batchPlan.loopHoists).toHaveLength(1);
+    const both = runBatchPlanner({ files: [loopFile([]), writerFile], depGraph: null }).batchPlan;
+    expect(both.loopHoists).toHaveLength(0);
+    expect(both.diagnostics.some((d) => d.reason.includes("`opts.push(…)`"))).toBe(true);
+  });
   test("an undeclared global call (fetch) is not hoisted", () => {
     const c = compile(program("            fetch(\"/x\")"));
     expect(c.hoists).toBe(0);
@@ -193,5 +222,36 @@ describe("(3) failure timing + a changed key — emission", () => {
     expect(js).toMatch(/if \(_scrml_batch_failure_\d+\) throw _scrml_batch_failure_\d+\.error;/);
     // a key the body changed after the pre-fetch is fetched when its read runs
     expect(js).toMatch(/await _scrml_batch_fetch_\d+\(\[_k\], _s\);/);
+  });
+});
+
+describe("verify-only gaps closed by #1325 (S456 evidence: reproduced at f0925b6e4, gone at 9c556dc74+)", () => {
+  test("g-hoisted-loop-write-to-an-outer-let-emits-a-tdz: an outer `let` written in a hoisted loop is assigned, not re-declared", () => {
+    const c = compile([
+      '<program db="n.db">',
+      "<schema>",
+      "    users { id: integer primary key",
+      "            name: text }",
+      "</>",
+      "server function recent(ids) {",
+      "    let n = 0",
+      "    for (const x of ids) {",
+      "        let row = ?{`SELECT name FROM users WHERE id = ${x.id}`}.get()",
+      "        n = n + 1",
+      "    }",
+      "    return n",
+      "}",
+      "<p>x</p>",
+      "</>",
+    ].join("\n"));
+    expect(c.hoists).toBe(1);
+    expect(c.serverJs).toMatch(/\n\s*n = n \+ 1;/);
+    expect(c.serverJs).not.toContain("const n = n + 1");
+  });
+  test("g-nplus1-hoist-keys-map-by-unselected-column: a key column the SELECT does not return is still matched", () => {
+    // `SELECT body … WHERE id = …` — `id` is not selected; each row is tagged with its key slot instead
+    const c = compile(program("            out.push(row)"));
+    expect(c.hoists).toBe(1);
+    expect(c.serverJs).toContain("SELECT body, __scrml_batch_k.__scrml_batch_key AS __scrml_batch_key FROM notes, ");
   });
 });
