@@ -44,3 +44,48 @@
 
 ## Root (refined)
 `!{}` after a STATEMENT is parsed as `guarded-expr { guardedNode: <the statement>, arms }` — the handled `?{}` is not a different sql node kind; the whole STATEMENT is wrapped. Every consumer that classifies statements by kind (state-decl / sql / lift-expr / sqlNode) or recurses only through ARRAY-valued children never sees `guardedNode` (a single-object field). Fix = one shared predicate (`handledSqlGuardInner`, sql-attempt.ts) + each statement-classifying consumer sees through a sql-handling guard to its statement. Restricted to guards that handle a `?{}` (a guarded CALL keeps its current semantics — out of scope).
+
+## Fix (commits 1st WIP → tests) — one predicate, every statement-classifying consumer
+`handledSqlOfGuardedNode` / `handledSqlGuardInner` (codegen/sql-attempt.ts): the guarded STATEMENT's query through every
+kind a `!{}` can guard (bare `sql`, decl/return/state-decl `sqlNode`, `lift-expr` `expr.node`, whole-operand sql-ref).
+Restricted to guards on a `?{}` — a guarded CALL keeps its semantics (out of scope; same blind spots exist for it).
+
+Consumers changed (each now sees the guarded statement exactly as the unhandled one):
+- emit-logic `case "guarded-expr"`: lift-expr (1), server state-decl (2, whole-server path), yield-stmt, hoisted-site flag.
+- route-inference: findReactiveAssignment (E-RI-002 detection), analyzeCPSEligibility tiering + returnVarName (2)(9)(6);
+  a server-tier guard whose arm leaves / re-fails / writes a cell is unsplittable → E-RI-002 with a cause sentence.
+- emit-server CPS stub (both CSRF arms + multi-batch return cell), emit-functions CPS client wrapper (single + multi-batch).
+- monotonicity-analyzer classifyStatement (idempotency middleware parity).
+- body-dg-builder collectStatementFacts (6: table edges → E-CPS-MULTIBATCH-REORDER parity).
+- type-system: fn-body walk + local decls (5), E-TYPE-080 predicate (now also `lift`), inferReturnTypeFromBody (8).
+- protect-flow: `_scrml_sql_attempt` modelled exactly; tag skeleton read off the attempt's `run` (7).
+- scheduling nodeIsReadOnly (10).
+- collect.isServerOnlyNode (W-CG-001 top-level parity; library/export server-operation detection; CPS client guard).
+- dependency-graph: top-level sql blocks, reactive decls, hasLiftAfter, fn-body reactive refs.
+- meta-checker: runtime-meta SQL walk + phase-mixing.
+- emit-control-flow §8.10 hoist: a handled keyed read in a hoisted loop (NEW defect 11, found by the enumeration:
+  base emitted `null /* client cannot evaluate */` → every row `not` even on success) — attempt-wrapped pre-fetch.
+- ast-builder for-of head (3): the `!{}` BLOCK_REF inside the parenthesized head is part of the iterable (3 sites).
+
+Consumers enumerated and NOT changed (they reach guardedNode already): route-inference walkBodyForTriggers /
+controlFlowContainsServerTrigger / detectServerFreeClientCellReads / session-read scan / describeDeferServerReason
+(generic object recursion or explicit guarded-expr arms); type-system SQL-write leak visit (generic), decl/state visits
+(reached via visitNode(guardedNode)); batch-planner walkAst (generic); db-ownership, protect-analyzer, reserved-prefix,
+emit-functions cell-read scan, emit-server peer/currentUser scans (generic); scheduling cell-write batching (`st.sqlNode`
+exclusions — client fns only; a guard is conservatively excluded).
+
+## Repro, base 61f4b8e5b vs head (real bun:sqlite)
+| item | base | head |
+|---|---|---|
+| (1) lift-all | null,null (drops value; failure throws) | [{id:7}], [], [] |
+| (2) cell-get | init,init,init | {body:hello}, null, null(arm) |
+| (3) for-of-all | E-PARSE-001×3; empties n=1 | clean; n=1, n=0, n=0(arm) |
+| (5) fn ×3 shapes | E-FN-001 3→0 | 3 = 3 |
+| (6) rails-crud-admin r13 | REORDER 1→0, REACTIVE-003 3→0 | same as unhandled |
+| (7) protect assign-refresh | STRIP 1→0, E-PROTECT-006 0→2 | same as unhandled |
+| (8) register.scrml 44,49 | W-TYPE-031 7→8 | 7 = 7 |
+| (9) split-stmt-run | E-RI-002×3, cells init | clean; after,after,after |
+| (10) Promise.all caller | 1→0 | 1 = 1 |
+| (11) hoisted loop (new) | none,none / throws | hello,none / none,none(arm) |
+| top-level W-CG-001 (new) | 1→0 | 1 = 1 |
+| yield (new) | `let r = yield <raw>` | attempt + `yield r` |
