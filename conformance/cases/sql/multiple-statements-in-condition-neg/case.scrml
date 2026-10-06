@@ -1,0 +1,11 @@
+<program db="./app.db">
+    // A ;-chained ?{} in an `if` condition — expression text the parser holds unparsed —
+    // is read by the same check as a statement-position ?{} (§8.1.2).
+    ${
+        function check() {
+            if (?{`SELECT 1; DELETE FROM log`}.get()) { return 1 }
+            return 0
+        }
+    }
+    <button onclick=${ check() }>check</button>
+</program>

@@ -42,6 +42,7 @@
  */
 
 import { classifyDbTarget, resolveDbFilePath } from "./db-target.ts";
+import { jsInterpolationEnd } from "./codegen/sql-lex.ts";
 
 type AnyNode = Record<string, unknown>;
 
@@ -335,9 +336,9 @@ function tokenizeSql(sql: string): SqlTok[] {
       out.push({ k: "ident", v }); i = j; continue;
     }
     if (c === "$" && sql[i + 1] === "{") {
-      let depth = 0; let j = i + 1;
-      for (; j < n; j++) { if (sql[j] === "{") depth++; else if (sql[j] === "}") { depth--; if (depth === 0) { j++; break; } } }
-      out.push({ k: "punct", v: "${}" }); i = j; continue;
+      // The emitter's slot extent (sql-lex.ts, JS-aware) — never a re-derived brace count (S456 F1).
+      const end = jsInterpolationEnd(sql, i);
+      out.push({ k: "punct", v: "${}" }); i = end === -1 ? n : end; continue;
     }
     if (/[A-Za-z_]/.test(c)) {
       let j = i + 1; while (j < n && /[A-Za-z0-9_$]/.test(sql[j])) j++;

@@ -45,6 +45,7 @@ import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // and the compilation's ONE tenant set it shares with the floor in CG.
 import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
 import { programBodyUndeclaredTenantTables, liveUndeclaredTenantTables, compilationHasDatabase } from "./tenant-undeclared.ts";
+import { programBodyMultipleStatements } from "./sql-one-statement.ts";
 import { compilationTenantSet, buildTenantContext } from "./codegen/tenant-egress.ts";
 import { fileTenantSubstrateReads } from "./tenant-substrate-read.ts";
 import { appDeclaresDbAuthoritative } from "./codegen/db-authoritative.ts";
@@ -3018,6 +3019,9 @@ function _compileScrmlImpl(options = {}) {
     // E-TENANT-UNDECLARED; anything else is E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED
     // (tenant-undeclared.ts over schema-differ.js `programStatementVerdicts`).
     if (compilationHasDb) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables, compilationTenant.dialect ?? "unknown")), fp);
+    // §8.1.2 (S456, ruling "one statement per seams reasonable. push") — a program-body `?{}`
+    // holds exactly ONE SQL statement (sql-one-statement.ts over the same token walk).
+    if (compilationHasDb) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyMultipleStatements(fileAST)), fp);
   }
   // …item 2 — a live SQLite file a `<db src=>` block opened holds a `tenant_id` relation
   // outside the set (protect-analyzer.ts collected them; reported at the `<db>` block).

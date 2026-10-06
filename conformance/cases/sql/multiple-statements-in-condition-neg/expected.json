@@ -1,0 +1,16 @@
+{
+  "id": "sql-multiple-statements-in-condition-neg",
+  "description": "§8.1.2 (S456 fix round F2) — a `;`-chained `?{}` inside an `if` condition. The condition is expression text the parser holds unparsed (an escape-hatch), lowered by codegen's text path; the one-statement check (and the §14.8.10 allow-list) read the same body there. On main d2bc3a065 this compiled clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-one-statement.test.js",
+  "spec": "§8.1.2",
+  "rationale": "§8.1.2: every program-body `?{}` — statement position, expression position, and a `?{}` inside expression text the compiler holds unparsed (an `if` / `while` condition, a template-literal slot, a raw `match` arm) — holds exactly one SQL statement.",
+  "expect": {
+    "codes": [
+      "E-SQL-MULTIPLE-STATEMENTS"
+    ],
+    "codeCounts": {
+      "E-SQL-MULTIPLE-STATEMENTS": 1
+    }
+  }
+}

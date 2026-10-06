@@ -17,6 +17,7 @@ import {
   type ProtectedColumns,
 } from "./protect-egress.ts";
 import { sqlSkeleton } from "./protect-flow.ts";
+import { sqlHoldsOneStatement, multipleStatementsThrowExpr, judgeDriverCall, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE } from "./sql-one-statement-guard.ts";
 // §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
 // `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
 // and coerce them back to true/false at query-lowering time (server only).
@@ -609,8 +610,17 @@ export function rewriteSqlRefs(
     // injectable INSERT gets `tenant_id` (the hard-fail codes fire from the
     // emit-server scan).
     const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), dbVar);
+    // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
+    if (!sqlHoldsOneStatement(effectiveSql)) return multipleStatementsThrowExpr();
     const { params, segments } = extractSqlParams(effectiveSql);
     const tagged = buildTaggedTemplate(dbVar, segments, params);
+    // §8.1.2 (S456 fix round F1) — judge the tagged template AS EMITTED: its quasis (the SQL
+    // text JS will send) must be the segments read above, holding one statement.
+    const _verdict = judgeDriverCall(tagged, segments);
+    if (_verdict !== "ok") {
+      if (_verdict === "text-not-read" && errors) errors.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, { start: 0, end: 0 }));
+      return refusedDriverCallExpr(_verdict);
+    }
     const rows = tenantScope(`await ${tagged}`);
 
     // .get() and .first() — single-row helpers (§44.3 .get() returns Row | not).
@@ -645,6 +655,8 @@ export function rewriteSqlRefs(
     // §14.8.10 — a bare INSERT into a tenant-scoped table gets `tenant_id`
     // injected; a bare SELECT of one is filtered at the source like every read.
     const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), dbVar);
+    // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
+    if (!sqlHoldsOneStatement(effectiveSql)) return multipleStatementsThrowExpr();
     const { sql, params } = extractSqlParams(effectiveSql);
     // ⚑ S443 round 6: a bare `?{`SELECT * …`}` used as a VALUE is the driver's row
     // array — tag it like every other lowering (measured: it served `passwordHash`).

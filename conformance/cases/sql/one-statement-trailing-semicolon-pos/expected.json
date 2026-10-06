@@ -1,0 +1,15 @@
+{
+  "id": "sql-one-statement-trailing-semicolon-pos",
+  "description": "§8.1.2 (S456) — control for the one-statement rule: a single statement with a trailing `;` followed by a comment, a `;` inside a string literal, and two writes split into two `?{}`s inside a `transaction { }` block all compile clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-one-statement.test.js",
+  "spec": "§8.1.2",
+  "rationale": "§8.1.2: a `;` that is followed only by whitespace and comments ends the one statement; a `;` inside a literal, comment, quoted identifier or `${…}` slot is not a separator. The fix the diagnostic names (one `?{}` per statement; `transaction { }` for atomicity) compiles.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SQL-MULTIPLE-STATEMENTS",
+      "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"
+    ]
+  }
+}

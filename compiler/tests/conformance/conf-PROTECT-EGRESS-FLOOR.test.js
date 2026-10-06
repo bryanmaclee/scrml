@@ -96,21 +96,12 @@ const SHAPES = {
   union: Q("SELECT name, body FROM notes JOIN users ON users.id = notes.user_id UNION SELECT name, passwordHash FROM users"),
   mixedWith: Q("WiTh t AS (SELECT id, name, passwordHash FROM users) SELECT * FROM t"),
 
-  // --- formerly KNOWN LEAK (pinned under test.skip until S454): a leading `;`
-  // made the leader test (`isRowProducingQuery` over `stripLeadingSqlNoise`)
-  // fail, so no protect tag was emitted and the full row — passwordHash
-  // included — shipped. S454 inverted the default: a statement the floor does
-  // not POSITIVELY recognize is stripped wholesale.
-  leadingSemicolon: Q("; SELECT id, name, passwordHash FROM users"),
-  leadingSemicolonComment: Q("/* x */ ; SELECT id, name, passwordHash FROM users"),
-  leadingSemicolonGet: Q("; SELECT id, name, passwordHash FROM users WHERE id = 1", ".get()"),
+  // (The leading-`;` shapes — formerly a pinned leak, stripped wholesale since S454 — moved
+  // below: since S456 "one statement per" a `;` followed by any token is
+  // E-SQL-MULTIPLE-STATEMENTS at compile, so they cannot sit in this compiled program.)
 
   // --- S454: further shapes. Each "base:" note is the body 79bd05028 served,
   // EXECUTED with this harness.
-  // base: LEAK [{"id":1,"name":"alice","passwordHash":"SECRET-…"}]
-  doubleSemicolon: Q(";; SELECT id, name, passwordHash FROM users"),
-  // base: LEAK (same body)
-  lineCommentSemicolon: Q("-- lead\n; SELECT id, name, passwordHash FROM users"),
   // base: LEAK [{"id":1,"name":"alice","x":"SECRET-…"}] — a scalar subquery
   // over a view the compile does not know (created at runtime, see SEED)
   viewSubquery: Q("SELECT id, name, (SELECT p FROM v WHERE v.id = users.id) AS x FROM users"),
@@ -284,29 +275,47 @@ describe("CONF-PROTECT-EGRESS-FLOOR — fail-closed wholesale strip: protected v
 // The fix is not a `;` rule: the floor now strips WHOLESALE every statement it
 // does not POSITIVELY recognize (§14.8.9: "fail-closed on an unknown origin").
 // ---------------------------------------------------------------------------
-describe("CONF-PROTECT-EGRESS-FLOOR — leading `;` (formerly a pinned leak): stripped wholesale", () => {
+describe("CONF-PROTECT-EGRESS-FLOOR — leading `;` (formerly a pinned leak): refused at compile since S456 \"one statement per\"", () => {
+  // S454 stripped these wholesale at the egress (each LEAKED the hash on 79bd05028). §8.1.2
+  // (ruling user-voice-scrml.md S456 "one statement per seams reasonable. push"): a `;` followed
+  // by any token chains a second statement — E-SQL-MULTIPLE-STATEMENTS — so they never run.
   const cases = [
-    ["leading `;` then SELECT (`.all()`)", "leadingSemicolon"],
-    ["leading comment then `;` then SELECT", "leadingSemicolonComment"],
-    ["leading `;` then SELECT (`.get()`)", "leadingSemicolonGet"],
+    ["leading `;` then SELECT (`.all()`)", Q("; SELECT id, name, passwordHash FROM users")],
+    ["leading comment then `;` then SELECT", Q("/* x */ ; SELECT id, name, passwordHash FROM users")],
+    ["leading `;` then SELECT (`.get()`)", Q("; SELECT id, name, passwordHash FROM users WHERE id = 1", ".get()")],
+    ["`;;` then SELECT", Q(";; SELECT id, name, passwordHash FROM users")],
+    ["line comment, then `;`, then SELECT", Q("-- lead\n; SELECT id, name, passwordHash FROM users")],
   ];
-  for (const [label, name] of cases) {
-    test(`${label} — passwordHash ABSENT`, async () => {
-      const { text } = await call(name);
-      expect(text).not.toContain(SECRET);
+  for (const [label, body] of cases) {
+    test(`${label} — E-SQL-MULTIPLE-STATEMENTS`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "conf-protect-semi-"));
+      _tmp.push(dir);
+      const file = join(dir, "app.scrml");
+      writeFileSync(file, `<program db="app.db">
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+  </schema>
+  \${
+    server function probe() {
+      return ${body}
+    }
+  }
+  <button onclick=\${ probe() }>x</button>
+</program>
+`);
+      const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
+      expect((result.errors ?? []).map((e) => e.code)).toContain("E-SQL-MULTIPLE-STATEMENTS");
     });
   }
 });
 
 // ---------------------------------------------------------------------------
 // S454 — shapes the floor did not positively recognize. Every one of the
-// first five LEAKED on 79bd05028 (executed; bodies in the SHAPES comments).
+// first two LEAKED on 79bd05028 (executed; bodies in the SHAPES comments).
 // Each is now an UNKNOWN to the floor → the row is stripped wholesale.
 // ---------------------------------------------------------------------------
 describe("CONF-PROTECT-EGRESS-FLOOR — S454 unknown statements: protected value absent, row dropped to {}", () => {
   const cases = [
-    ["`;;` then SELECT", "doubleSemicolon"],
-    ["line comment, then `;`, then SELECT", "lineCommentSemicolon"],
     ["scalar subquery over a view the compile does not know", "viewSubquery"],
     ["`${}` pair whose braces the SQL splitter and JS read differently", "holeBrace"],
     ["WITH behind a block comment, a line comment and no space before SELECT", "withCommented"],
