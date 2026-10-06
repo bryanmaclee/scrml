@@ -45,6 +45,14 @@ export function parseSchemaBlock(schemaBody) {
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
   const n = text.length;
   let i = 0;
+  // S456 — every `{` / `(` match and next-`{` lookup of this body, answered in amortized
+  // linear time (an unbalanced body re-scanned to its end per head: `"a{"`×40k ≈ 13 s).
+  const finders = {
+    blockEnd: makeSchemaBlockEndFinder(text),
+    parenEnd: makeMatchingParenFinder(text),
+    nextBrace: makeNextCharFinder(text, "{"),
+    inRange: makeRangeMatcher(text),
+  };
 
   while (i < n) {
     // Skip whitespace between top-level entries.
@@ -75,7 +83,7 @@ export function parseSchemaBlock(schemaBody) {
     FN_HEAD_RE.lastIndex = i;
     const fnHead = FN_HEAD_RE.exec(text);
     if (fnHead) {
-      const parsed = parseFnDecl(text, i, fnHead);
+      const parsed = parseFnDecl(text, i, fnHead, finders);
       if (parsed) {
         fns.push(parsed.fn);
         if (parsed.bodySpan) fnBodySpans.push({ fnAt: i, ...parsed.bodySpan });
@@ -94,7 +102,7 @@ export function parseSchemaBlock(schemaBody) {
       const tableName = tblHead[1];
       const tblStart = i;
       const braceOpen = i + tblHead[0].length - 1; // index of the `{`
-      const braceClose = findSchemaBlockEnd(text, braceOpen);
+      const braceClose = finders.blockEnd(braceOpen);
       if (braceClose === -1) {
         // Unbalanced braces — bail on this entry (mirrors the old regex silently
         // not matching an unterminated block).
@@ -205,6 +213,145 @@ export function findGluedDslTableHeads(text) {
  * "matching" quote would swallow the closing brace). A P2 `fn` block is `{ """…""" }`
  * — its plpgsql quotes live inside the triple-quoted region this DOES skip.
  */
+/**
+ * `findSchemaBlockEnd` for many `{` offsets of ONE text, in amortized linear time
+ * (S456, g-tenant-small-residuals-s455 (c): `parseSchemaBlock` re-scanned to the end of
+ * the body for EVERY head of an unbalanced block — `"a{"`×40k took ~13 s).
+ *
+ * Why one scan answers later queries exactly: the scan is a pure function of its
+ * position (brace depth aside), so the scan from a `{` that an EARLIER scan visited as an
+ * ordinary character (not inside a `"""…"""` region it skipped) is that earlier scan's
+ * suffix. Its answer is the `}` that brings the depth back below that `{` — the `}` a
+ * stack pairs with it. So a query scans once, from its offset to the END, pairing every
+ * `{` it visits (unpaired → -1), and records them all; a later query on a recorded `{`
+ * is a lookup. A `{` no earlier scan visited (it sat inside one of their `"""` regions)
+ * starts a scan of its own — one per triple-quote alignment, not one per head.
+ * Results are identical to `findSchemaBlockEnd` (the S456 unit test asserts it).
+ */
+function makeSchemaBlockEndFinder(text) {
+  const known = new Map();
+  const n = text.length;
+  return (openIdx) => {
+    if (text[openIdx] !== "{") return -1;
+    const hit = known.get(openIdx);
+    if (hit !== undefined) return hit;
+    const open = [];
+    let i = openIdx;
+    while (i < n) {
+      if (text.startsWith('"""', i)) {
+        const close = text.indexOf('"""', i + 3);
+        i = close === -1 ? n : close + 3;
+        continue;
+      }
+      const ch = text[i];
+      if (ch === "{") open.push(i);
+      else if (ch === "}" && open.length > 0) known.set(open.pop(), i);
+      i++;
+    }
+    for (const o of open) known.set(o, -1);
+    return known.get(openIdx);
+  };
+}
+
+/**
+ * `findMatchingParen` for many `(` offsets of ONE text, in amortized linear time (the
+ * `fn` head of `parseSchemaBlock`: `"fn f("`×40k re-scanned to the end per head, ~18 s).
+ * Same suffix argument as `makeSchemaBlockEndFinder`, per pass (quote-aware, then
+ * quote-blind): a scan records, for each `)` it visits, the paren / bracket depth after
+ * it, and for each `(` the depth after it. The scan from a recorded `(` (paren depth `d`
+ * after it, bracket depth `b`) returns the first later `)` whose recorded state is
+ * (`d - 1`, `b`) — exactly where its own relative depths are both 0.
+ */
+function makeMatchingParenFinder(text) {
+  const passes = [true, false].map((quoteAware) => {
+    const known = new Map();     // `(` offset → { scan, d, b }
+    const scan = (from) => {
+      const closes = new Map();  // "d,b" → increasing `)` offsets
+      let depth = 0, bracketDepth = 0, quote = null;
+      const rec = { closes };
+      for (let i = from; i < text.length; i++) {
+        const ch = text[i];
+        if (quoteAware) {
+          if (quote) {
+            if (ch === "\\") { i++; continue; }
+            if (ch === quote) quote = null;
+            continue;
+          }
+          if (ch === '"' || ch === "'") { quote = ch; continue; }
+        }
+        if (ch === "(") { depth++; if (!known.has(i)) known.set(i, { rec, d: depth, b: bracketDepth }); }
+        else if (ch === ")") {
+          depth--;
+          const key = depth + "," + bracketDepth;
+          let list = closes.get(key);
+          if (list === undefined) closes.set(key, (list = []));
+          list.push(i);
+        } else if (ch === "[") bracketDepth++;
+        else if (ch === "]") bracketDepth--;
+      }
+    };
+    return (openIdx) => {
+      if (text[openIdx] !== "(") return -1;
+      if (!known.has(openIdx)) scan(openIdx);
+      const { rec, d, b } = known.get(openIdx);
+      const list = rec.closes.get((d - 1) + "," + b);
+      if (list === undefined) return -1;
+      let lo = 0, hi = list.length;               // first entry > openIdx
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid] > openIdx) hi = mid; else lo = mid + 1; }
+      return lo < list.length ? list[lo] : -1;
+    };
+  });
+  return (openIdx) => {
+    const hit = passes[0](openIdx);
+    return hit !== -1 ? hit : passes[1](openIdx);
+  };
+}
+
+// The `fn` modifier-run patterns (`parseFnDecl`). Global (`g`) so `makeRangeMatcher` can
+// run them over the whole body from an offset; every slice `exec` resets `lastIndex` to 0
+// first (a global pattern starts where its last match ended otherwise).
+const FN_OWNER_RE = /\bowner\s*\(\s*([A-Za-z_]\w*)\s*\)/g;
+const FN_RETURNS_RE = /\breturns\s+([A-Za-z_]\w*)/gi;
+const FN_CAP_RE = /\brequires\s+cap\s*\(\s*["']([^"']*)["']\s*\)/gi;
+const FN_SECDEF_RE = /\bsecurity\s+definer\b/gi;
+
+/**
+ * The first match of a modifier pattern in `text[from, to)` — what `re.exec(text.slice(from,
+ * to))` returns, without re-scanning the shared tail for every `fn` head (S456: many
+ * malformed heads before one `{` share one modifier run — quadratic). The first match in
+ * the WHOLE text at or after `from` is memoized per pattern; `from` only grows, so the
+ * scans total linear. Equivalence with the slice: `from` follows a `)` and `to` is a `{`
+ * (both non-word, so `\b` reads the same), and a match that starts in range but runs past
+ * `to` (only the cap pattern's `[^"']*` can cross a `{`) falls back to the slice.
+ */
+function makeRangeMatcher(text) {
+  const memo = new Map();   // pattern → { lo, m }: m = first match at or after lo (null: none)
+  return (re, from, to, slice) => {
+    let c = memo.get(re);
+    if (c === undefined || from < c.lo || (c.m !== null && c.m.index < from)) {
+      re.lastIndex = from;
+      c = { lo: from, m: re.exec(text) };
+      memo.set(re, c);
+    }
+    const m = c.m;
+    if (m === null || m.index >= to) return null;
+    if (m.index + m[0].length > to) { re.lastIndex = 0; const r = re.exec(slice); re.lastIndex = 0; return r; }
+    return m;
+  };
+}
+
+/** `text.indexOf(ch, from)`, memoized for one text: a lookup inside an earlier answered span is O(1). */
+function makeNextCharFinder(text, ch) {
+  let lo = -1, hi = -1, ans = -1;   // every `from` in [lo, hi] answers `ans`
+  return (from) => {
+    if (from >= lo && from <= hi && lo !== -1) return ans;
+    ans = text.indexOf(ch, from);
+    lo = from;
+    hi = ans === -1 ? text.length : ans;
+    return ans;
+  };
+}
+
 function findSchemaBlockEnd(text, openIdx) {
   if (text[openIdx] !== "{") return -1;
   const n = text.length;
@@ -1425,10 +1572,10 @@ function splitTopLevelCommas(body) {
  *
  * @returns {{ fn: SecdefFnDecl, next: number } | null} null on a malformed decl.
  */
-function parseFnDecl(text, startIdx, fnHead) {
+function parseFnDecl(text, startIdx, fnHead, finders = null) {
   const name = fnHead[1];
   const parenOpen = startIdx + fnHead[0].length - 1; // index of `(`
-  const parenClose = findMatchingParen(text, parenOpen);
+  const parenClose = finders ? finders.parenEnd(parenOpen) : findMatchingParen(text, parenOpen);
   if (parenClose === -1) return null;
 
   const argText = text.slice(parenOpen + 1, parenClose).trim();
@@ -1436,30 +1583,37 @@ function parseFnDecl(text, startIdx, fnHead) {
   if (args === null) return null;
 
   // The modifier run is everything between `)` and the body-opening `{`.
-  const braceOpen = text.indexOf("{", parenClose + 1);
+  const braceOpen = finders ? finders.nextBrace(parenClose + 1) : text.indexOf("{", parenClose + 1);
   if (braceOpen === -1) return null;
   const modifiers = text.slice(parenClose + 1, braceOpen);
 
   // owner(<role>) — MANDATORY (the SECDEF runs as this bounded NOLOGIN role, NOT
   // scrml_app). Strict identifier capture.
-  const ownerMatch = /\bowner\s*\(\s*([A-Za-z_]\w*)\s*\)/.exec(modifiers);
+  const modMatch = (re) => {
+    if (finders) return finders.inRange(re, parenClose + 1, braceOpen, modifiers);
+    re.lastIndex = 0;
+    const m = re.exec(modifiers);
+    re.lastIndex = 0;
+    return m;
+  };
+  const ownerMatch = modMatch(FN_OWNER_RE);
   if (!ownerMatch) return null;
   const owner = ownerMatch[1];
 
   // returns <type> — optional; defaults to `void`.
-  const returnsMatch = /\breturns\s+([A-Za-z_]\w*)/i.exec(modifiers);
+  const returnsMatch = modMatch(FN_RETURNS_RE);
   const returns = returnsMatch ? returnsMatch[1] : "void";
 
   // requires cap("x") — optional in-body capability gate (extracted, NOT trusted
   // verbatim; the quotes bound the value so no `'` can enter, and we still escape).
-  const capMatch = /\brequires\s+cap\s*\(\s*["']([^"']*)["']\s*\)/i.exec(modifiers);
+  const capMatch = modMatch(FN_CAP_RE);
   const cap = capMatch ? capMatch[1] : null;
 
   // `security definer` is the only supported mode in P2; its presence is advisory
   // here (every P2 `fn` emits SECURITY DEFINER). We record it for future modes.
-  const isSecurityDefiner = /\bsecurity\s+definer\b/i.test(modifiers);
+  const isSecurityDefiner = modMatch(FN_SECDEF_RE) !== null;
 
-  const braceClose = findSchemaBlockEnd(text, braceOpen);
+  const braceClose = finders ? finders.blockEnd(braceOpen) : findSchemaBlockEnd(text, braceOpen);
   if (braceClose === -1) return null;
   const blockText = text.slice(braceOpen + 1, braceClose);
 

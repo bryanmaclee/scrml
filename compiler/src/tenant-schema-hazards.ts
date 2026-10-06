@@ -103,6 +103,8 @@ interface Tok {
   k: "w" | "q" | "s" | "n" | "p" | "b"; t: string; up: string; at: number; sql: boolean;
   /** Offset just past the token in the `<schema>` body (a body's raw text is sliced by it). */
   end: number;
+  /** Read from a comment's TEXT (the `content` reading) — not a token of the live statement around it. */
+  cmt?: boolean;
   /**
    * A quoted form whose extent depends on the dialect, so this lexer cannot model it
    * exactly: a backslash inside a quote (MySQL escapes it; SQLite and Postgres do not)
@@ -145,7 +147,7 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
   const comment = (start: number, end: number, cFrom: number, cTo: number): void => {
     // `content` mode reads a comment's text as declarations (a commented-out one counts).
     if (mode === "content" && cTo > cFrom) {
-      for (const t of lex(text, "content", cFrom, cTo, wrap > 0)) out.push(t);
+      for (const t of lex(text, "content", cFrom, cTo, wrap > 0)) out.push({ ...t, cmt: true });
     }
     i = end;
     void start;
@@ -307,6 +309,35 @@ function readName(toks: Tok[], i: number): { name: string; next: number } | null
   let last = toks[j];
   while (isP(toks[j + 1], ".") && isName(toks[j + 2])) { j += 2; last = toks[j]; }
   return { name: last.t.toLowerCase(), next: j + 1 };
+}
+
+/**
+ * The head of `CREATE POLICY name ON table [AS PERMISSIVE | RESTRICTIVE] …`, from the
+ * `POLICY` token at `p`. A comment BETWEEN the head's tokens is not part of the statement
+ * (S456, g-tenant-small-residuals-s455 (b): `AS /* x *\/ RESTRICTIVE` and `AS --x⏎
+ * RESTRICTIVE` were charged): the comment-free readings never see it, and in the
+ * `content` reading its text tokens (`cmt`) are stepped over inside a live statement —
+ * a commented-out policy (its POLICY token itself comment text) is still read whole.
+ * `bodyFrom` is where the policy's subset-read body starts: just past the `AS` mode when
+ * one is written (so the comments around the AS clause are not body), else just past
+ * the table.
+ */
+function readPolicyHead(toks: Tok[], p: number): {
+  pname: { name: string; next: number } | null; shown: string; tbl: { name: string; next: number } | null;
+  tblAt: number; asAt: number; mode: Tok | undefined; bodyFrom: number;
+} {
+  const inComment = toks[p]?.cmt === true;
+  const live = (k: number): number => { while (!inComment && k < toks.length && toks[k].cmt) k++; return k; };
+  const pname = readName(toks, live(p + 1));
+  const shown = pname ? toks[pname.next - 1].t : "?";
+  const onAt = pname ? live(pname.next) : -1;
+  const tblAt = pname && isW(toks[onAt], "ON") ? live(onAt + 1) : -1;
+  const tbl = tblAt >= 0 ? readName(toks, tblAt) : null;
+  const asAt = tbl ? live(tbl.next) : -1;
+  const modeAt = tbl && isW(toks[asAt], "AS") ? live(asAt + 1) : -1;
+  const mode = modeAt >= 0 ? toks[modeAt] : undefined;
+  const bodyFrom = !tbl ? -1 : (isW(mode, "RESTRICTIVE") || isW(mode, "PERMISSIVE")) ? live(modeAt + 1) : tbl.next;
+  return { pname, shown, tbl, tblAt, asAt, mode, bodyFrom };
 }
 
 /**
@@ -2023,9 +2054,8 @@ function analyze(
     if (d.kind !== "other" || d.object !== "POLICY") continue;
     let p = d.start;
     while (p < d.end && !isW(toks[p], "POLICY")) p++;
-    const pname = readName(toks, p + 1);
-    const tbl = pname && isW(toks[pname.next], "ON") ? readName(toks, pname.next + 1) : null;
-    if (tbl) policyBody.set(d, { from: tbl.next, table: tbl.name, qual: qualNameAt(toks, pname!.next + 1, tbl.next) });
+    const head = readPolicyHead(toks, p);
+    if (head.tbl) policyBody.set(d, { from: head.bodyFrom, table: head.tbl.name, qual: qualNameAt(toks, head.tblAt, head.tbl.next) });
   }
   /** The token range of a declaration's body, or null when it has none the subset reads. */
   const bodyTokens = (d: Decl): [number, number] | null => {
@@ -2275,9 +2305,11 @@ function analyze(
     if (d.object === "POLICY") {
       let p = d.start;
       while (p < d.end && !isW(toks[p], "POLICY")) p++;
-      const pname = readName(toks, p + 1);
-      const tbl = pname && isW(toks[pname.next], "ON") ? readName(toks, pname.next + 1) : null;
-      const pShown = pname ? toks[pname.next - 1].t : "?";
+      const head = readPolicyHead(toks, p);
+      const tbl = head.tbl;
+      const pShown = head.shown;
+      const asWritten = isW(toks[head.asAt], "AS");
+      const restrictive = asWritten && isW(head.mode, "RESTRICTIVE");
       if (!tbl) {
         out.push({ kind: "permissive policy", object: pShown, tables: allTenant, unattributable: true, offset: d.at,
           why: "the checker cannot read which table it is declared on" });
@@ -2286,20 +2318,20 @@ function analyze(
       // A RESTRICTIVE policy's body (its USING / WITH CHECK expressions, run per row) is read
       // in the tenant SQL subset (S455 "yes, both"), its calls held to the expression
       // allow-list (`current_setting(…)` is on it). A permissive one is charged below anyway.
-      if (isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE") && r.outside) {
+      if (restrictive && r.outside) {
         out.push(outsideHazard("policy", { ...d, shown: pShown }, r.outside));
         continue;
       }
       let mode: string | null = "PERMISSIVE (the default when `AS` is omitted)";
       if (!tainted.has(tbl.name)) {
         // admitted only `AS RESTRICTIVE` (S455 "your rec on the allow-list"), on any table
-        if (!(isW(toks[tbl.next], "AS") && isW(toks[tbl.next + 1], "RESTRICTIVE"))) {
+        if (!restrictive) {
           out.push(notAdmitted(`CREATE POLICY ${pShown}`, d.at, allTenant, "only `CREATE POLICY … AS RESTRICTIVE` is admitted"));
         }
         continue;
       }
-      if (isW(toks[tbl.next], "AS")) {
-        const m = toks[tbl.next + 1];
+      if (asWritten) {
+        const m = head.mode;
         if (isW(m, "RESTRICTIVE")) mode = null;
         else if (isW(m, "PERMISSIVE")) mode = "PERMISSIVE";
         else {

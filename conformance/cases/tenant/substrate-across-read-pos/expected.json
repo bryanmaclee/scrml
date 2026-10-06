@@ -1,0 +1,19 @@
+{
+  "id": "tenant-substrate-across-read-pos",
+  "description": "§14.8.10 corollary (S456) — the same login with the identity read marked `.acrossTenants()` (one of the two fixes W-TENANT-SUBSTRATE-SCOPED names): the read is deliberately unscoped (I-TENANT-ACROSS) and no W-TENANT-SUBSTRATE-SCOPED fires.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-substrate-read.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: \"Corollary: the identity/grant substrate (`users` / `user_roles`) is NOT tenant-scoped\"; `.acrossTenants()` is the sole loud tenant opt-out.",
+  "expect": {
+    "codes": [
+      "I-TENANT-ACROSS"
+    ],
+    "notCodes": [
+      "W-TENANT-SUBSTRATE-SCOPED"
+    ],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}
