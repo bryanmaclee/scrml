@@ -27,3 +27,12 @@
 - PHASE 0 (round 2, head compiles, E-TENANT-UNDECLARED hits): 2423 single-file + ex22/ex23/flogence multi-file. First measurement: 1 newly rejected — flogence/src/app.scrml:331 `CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5(title, body, project UNINDEXED, grade UNINDEXED, id UNINDEXED)` (virtual module = unknown). Its columns ARE statically determinable (fts5 args), so the reader learned fts5/fts4/fts3/rtree args (an arg with = is an option); re-measured: 0 newly rejected (only this branch's two neg conformance cases).
 - REPRO aa7c2eb63 → head (all with .acrossTenants()): R1a/R1b/R1c clean → E-TENANT-UNDECLARED; R2a/R2b clean → E-TENANT-UNDECLARED; R3 (CREATE FUNCTION … $$ SELECT tenant_id INTO v …) E-TENANT-UNDECLARED+E-TENANT-SQL-SUBSET → E-TENANT-SQL-SUBSET only (the query floor's own pre-existing refusal); controls CTAS / SELECT…INTO with spelled columns: clean → clean.
 - SPEC: S456 paragraph item (1) rewritten to the known-columns rule; Limit rewritten ($…$ bodies, EXECUTE, separate programs, hand DDL; program-body DDL the compile cannot read is refused); round-2 provenance note; §34 row + Diagnostics bullet. Gates: types 190 OK, s34 PASS, spec-index regen, facts PASS, conformance 1316/1366 + 50 xfail; 106 tenant tests pass.
+## FIX ROUND 3 — ruling S456 "a, fix F7/F9 too" (closed allow-list) — PHASE 0 STOP
+- merged origin/main 0aef3270d (#1332) → 692c859bc; FACTS/SPEC-INDEX regenerated, state.ts --write (gap-counts).
+- PHASE 0 (prototype leading-keyword classifier over buildAST sql nodes outside <schema>, DB files only): 376 DB files, 1100 program-body ?{} statements. NEWLY REFUSED, grouped:
+  - PRAGMA ×19 — all flogence/src (non-test): PRAGMA table_info(<t>) ×17 (app.scrml, ports/bridge-tool, capture-tool, compare-tool, digest-tool, dispatch-async-tool, dispatch-tool, event-tool, fsp-core), PRAGMA busy_timeout = 10000 ×1 + PRAGMA journal_mode = WAL ×1 (ports/event-tool).
+  - CREATE [UNIQUE] INDEX ×4 — flogence/src/ports/capture-tool.scrml (gnode_src_pk, gedge_pk, gcand_key WHERE key <> '', gop_key WHERE key <> '').
+  - BEGIN ×2 / COMMIT ×2 — flogence/src/ports/graph-ingest-tool.scrml (1+1) and conformance/cases/sql/batch-warn-info (test, 1+1).
+  - (not new: 3 conformance E-SQL-003 cases whose body is `${q}` / `q` — already refused.)
+  - 0 SELECT…INTO, 0 other CREATE, 0 ALTER-other, 0 EXPLAIN/ATTACH/DO in the corpus.
+- STOPPED before building per the brief (non-test corpus program newly rejected: flogence). Nothing of the round-3 rule is built.
