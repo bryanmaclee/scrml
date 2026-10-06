@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 241 | 6 |
-| MED | 511 | 4 |
+| MED | 510 | 4 |
 | LOW | 277 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -23158,6 +23158,7 @@ Reviewer-executed on #1316: app.scrml declares `users(…, tenant_id)`; login.sc
 <!-- @gap id=g-r11-read-fallback-masks-outage-at-login-s455 sev=LOW status=open locus=stdlib/auth/templates/login.scrml+examples/23-trucking-dispatch/pages/auth/login.scrml+samples/login.scrml prov=review:s455-S239-r11-r2 -->
 Fails closed (no login), but an outage is misreported as bad credentials — the ruled read-fallback meaning (S455 "b"). The example owners should replace the `!{ _ :> not }` arm at the lookup with real handling (surface the outage).
 
-### g-tenant-pg-overload-hijack-s455 — a user function planted in `public` with an exact-match signature wins Postgres overload resolution over the allow-listed built-in, running inside admitted tenant queries/policies — `NEW S455; MED; open (RULED "a" — deploy requirement; build-time surfacing owed)`
-<!-- @gap id=g-tenant-pg-overload-hijack-s455 sev=MED status=open locus=compiler/src/commands/build.js(deploy report — no line yet) prov=ruling:user-voice-scrml.md-S455-"a"+review:s455-S239-subset-r2 -->
+### g-tenant-pg-overload-hijack-s455 — a user function planted in `public` with an exact-match signature wins Postgres overload resolution over the allow-listed built-in, running inside admitted tenant queries/policies — `NEW S455; MED; RESOLVED S455 (ruled "a": deploy requirement, surfaced by `scrml build`)`
+<!-- @gap id=g-tenant-pg-overload-hijack-s455 sev=MED status=resolved locus=compiler/src/commands/build.js(pgSchemaCreateRequirementLines) prov=ruling:user-voice-scrml.md-S455-"a"+review:s455-S239-subset-r2 -->
+RESOLVED S455: a deploy requirement (SPEC §14.8.11, ruling "a"); `scrml build` now prints it once per build in the database report when a `db-authoritative` table exists (feat/s455-build-report-pg-revoke). The compiler cannot see overloads; enforcement is the database's.
 Executed on PG16 by the S239 review of #1319: `lower(id)` → `public.lower(integer)` returned `A-secret,B-secret` under `WHERE tenant_id='A'`; also a row-type `lower(assets)` overload and `public.date(text)`. Name-level allow-lists cannot see overloads; precondition: the attacker can `CREATE` in the search_path. Ruled S455 **"a"**: a DEPLOY REQUIREMENT — `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (PG15+ default), stated in SPEC §14.8.11. Owed: surface it in the `scrml build` report when a `db-authoritative` Postgres table exists (no deploy doc exists in the repo to carry it).

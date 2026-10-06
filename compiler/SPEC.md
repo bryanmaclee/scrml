@@ -12981,8 +12981,10 @@ CREATE POLICY scrml_tenant_iso ON t USING (tenant_id = current_setting('scrml.te
   function planted by anyone who can `CREATE` in `public` runs inside an admitted query or policy as
   `scrml_app` and can read every tenant (executed on PostgreSQL 16, S455). The compiler cannot see
   overloads and does not rewrite SQL (§39 — SQL strings are sent unchanged), so this property belongs
-  to deployment. *(Surfacing it at build time — a `scrml build` report line when a `db-authoritative`
-  Postgres table exists — is owed: `g-tenant-pg-overload-hijack-s455`.)* *(Provenance:
+  to deployment. *(Surfaced at build time: `scrml build` prints a "Postgres deploy requirement" line in
+  its database report, once per build, whenever a `db-authoritative` table exists —
+  `pgSchemaCreateRequirementLines`, `compiler/src/commands/build.js`; a report line, not a diagnostic,
+  and never a build failure.)* *(Provenance:
   ruling:user-voice-scrml.md S455 **"a"** — option (a) of `g-tenant-pg-overload-hijack-s455`, NOT (b) a
   migrator `pg_proc` scan, NOT (c) `pg_catalog`-qualified emission · direction: inert for the compiler.)*
 - **`current_setting('scrml.tenant', true)`** — the `true` (missing-ok) argument makes a missing GUC
