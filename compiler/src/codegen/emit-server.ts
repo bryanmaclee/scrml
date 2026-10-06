@@ -53,7 +53,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
-import { registerProtectModule } from "./protect-flow.ts";
+import { registerProtectModule, HANDLE_RESULT_BINDING } from "./protect-flow.ts";
 import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
@@ -3826,7 +3826,8 @@ export function generateServerJs(
       }
 
       lines.push("    // handle() escape hatch body (§39.3) — wrapped in IIFE for return capture");
-      lines.push("    const _scrml_mw_result = await (async () => {");
+      // S456 — the binding protect-flow reads as the handle() egress sink.
+      lines.push(`    const ${HANDLE_RESULT_BINDING} = await (async () => {`);
 
       // §40.3.2 — "resolve(request) invokes the rest of the pipeline and returns
       // a Bun Response". TOTAL by construction: a host dispatcher that signals
