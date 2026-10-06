@@ -11,7 +11,7 @@ import { isDestructurePattern, emitDestructurePatternText } from "./emit-destruc
 import { CGError } from "./errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
-import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow } from "./sql-attempt.ts";
+import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -972,12 +972,29 @@ function substituteHoistedSqlInBody(
   body: any[],
   sqlSourcePattern: RegExp,
   replacement: string,
+  handled?: { replacement: string; hit: boolean },
 ): any[] {
   const out: any[] = [];
   for (const stmt of body) {
     if (!stmt || typeof stmt !== "object") {
       out.push(stmt);
       continue;
+    }
+    // §19.8.3 (S455) — a HANDLED hoisted site (`const row = ?{…}.get() !{…}`):
+    // the guard wraps the statement, so the query sits one level down. Rewrite
+    // the guarded statement with the handled replacement — which yields the
+    // pre-fetch's SqlError envelope when the pre-fetch failed, so the arms run
+    // for each iteration exactly as each per-row query would have failed — and
+    // keep the guard. It used to be missed: the loop emitted the query with no
+    // server boundary, i.e. `null /* client cannot evaluate */`, on success too.
+    const _handledInner = handled ? handledSqlGuardInner(stmt) : null;
+    if (_handledInner && handled) {
+      const [sub] = substituteHoistedSqlInBody([_handledInner], sqlSourcePattern, handled.replacement);
+      if (sub && (sub.sqlNode === undefined || sub.init !== _handledInner.init) && sub !== _handledInner) {
+        handled.hit = true;
+        out.push({ ...stmt, guardedNode: sub, _hoistedHandledSql: true });
+        continue;
+      }
     }
     const clone: any = { ...stmt };
     let replaced = false;
@@ -1019,7 +1036,7 @@ function substituteHoistedSqlInBody(
     // Recurse into nested body arrays (e.g., if-stmt.consequent, etc.) so
     // the SQL site in a nested block is also rewritten.
     if (!replaced && Array.isArray(clone.body)) {
-      clone.body = substituteHoistedSqlInBody(clone.body, sqlSourcePattern, replacement);
+      clone.body = substituteHoistedSqlInBody(clone.body, sqlSourcePattern, replacement, handled);
     }
     out.push(clone);
   }
@@ -1075,6 +1092,25 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
   const terminator: "get" | "all" = hoist.terminator;
   const inSqlTemplate: string = hoist.inSqlTemplate;
 
+  // Body rewrite — replace the original `?{`<template>`}.get()/.all()`
+  // call with the Map lookup. We match the raw template (with
+  // backticks) rather than post-emit strings so the rewrite happens at
+  // AST level, before emit-logic / rewrite.ts transform the string.
+  // Computed BEFORE the pre-fetch lines: whether the site is HANDLED (a `!{}`
+  // on it, §19.8.3, S455) decides how the pre-fetch is emitted.
+  const bodyTemplate = hoist.sqlTemplate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sourceRe = new RegExp(
+    `\\?\\{\`${bodyTemplate}\`\\}\\s*\\.\\s*${terminator}\\s*\\(\\s*\\)`,
+    "g",
+  );
+  const replacement = terminator === "get"
+    ? `(${mapVar}.get(${loopVar}.${keyField}) ?? null)`
+    : `(${mapVar}.get(${loopVar}.${keyField}) ?? [])`;
+  // A handled site reads the pre-fetch's SqlError envelope when it failed, so
+  // each iteration's arms run exactly as each per-row query would have failed.
+  const _handledSite = { replacement: `(${rowsVar}.__scrml_error ? ${rowsVar} : ${replacement})`, hit: false };
+  const rewrittenBody = substituteHoistedSqlInBody(node.body ?? [], sourceRe, replacement, _handledSite);
+
   const lines: string[] = [];
   lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn})`);
   lines.push(`const ${keysVar} = (${iterable}).map(${loopVar} => ${loopVar}.${keyField});`);
@@ -1098,33 +1134,29 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
   // Substitute `__SCRML_BATCH_IN__` placeholder in the template with the
   // generated positional placeholder list. The rest of the SQL template
   // (column list, table, other predicates) is preserved verbatim.
-  lines.push(
-    `const ${rowsVar} = ${keysVar}.length === 0 ? [] : (await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace("__SCRML_BATCH_IN__", ${placeholdersVar}), ${keysVar}));`,
-  );
-  lines.push(`const ${mapVar} = new Map();`);
-  if (terminator === "get") {
+  if (_handledSite.hit) {
+    // §19.8.3 (S455) — the site is HANDLED: the pre-fetch runs through the
+    // handled-query attempt, so a failure becomes the SqlError envelope the
+    // per-iteration arms match on (the map is then empty).
     lines.push(
-      `for (const _r of ${rowsVar}) ${mapVar}.set(_r[${JSON.stringify(keyColumn)}], _r);`,
+      `const ${rowsVar} = ${keysVar}.length === 0 ? [] : (await ${SQL_ATTEMPT_FN}((_scrml_p) => ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace("__SCRML_BATCH_IN__", ${placeholdersVar}), _scrml_p[0]), [${keysVar}], (_scrml_rows) => _scrml_rows));`,
     );
   } else {
     lines.push(
-      `for (const _r of ${rowsVar}) { const _k = _r[${JSON.stringify(keyColumn)}]; const _a = ${mapVar}.get(_k) ?? []; _a.push(_r); ${mapVar}.set(_k, _a); }`,
+      `const ${rowsVar} = ${keysVar}.length === 0 ? [] : (await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace("__SCRML_BATCH_IN__", ${placeholdersVar}), ${keysVar}));`,
     );
   }
-
-  // Body rewrite — replace the original `?{`<template>`}.get()/.all()`
-  // call with the Map lookup. We match the raw template (with
-  // backticks) rather than post-emit strings so the rewrite happens at
-  // AST level, before emit-logic / rewrite.ts transform the string.
-  const bodyTemplate = hoist.sqlTemplate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const sourceRe = new RegExp(
-    `\\?\\{\`${bodyTemplate}\`\\}\\s*\\.\\s*${terminator}\\s*\\(\\s*\\)`,
-    "g",
-  );
-  const replacement = terminator === "get"
-    ? `(${mapVar}.get(${loopVar}.${keyField}) ?? null)`
-    : `(${mapVar}.get(${loopVar}.${keyField}) ?? [])`;
-  const rewrittenBody = substituteHoistedSqlInBody(node.body ?? [], sourceRe, replacement);
+  const _rowsIter = _handledSite.hit ? `(${rowsVar}.__scrml_error ? [] : ${rowsVar})` : rowsVar;
+  lines.push(`const ${mapVar} = new Map();`);
+  if (terminator === "get") {
+    lines.push(
+      `for (const _r of ${_rowsIter}) ${mapVar}.set(_r[${JSON.stringify(keyColumn)}], _r);`,
+    );
+  } else {
+    lines.push(
+      `for (const _r of ${_rowsIter}) { const _k = _r[${JSON.stringify(keyColumn)}]; const _a = ${mapVar}.get(_k) ?? []; _a.push(_r); ${mapVar}.set(_k, _a); }`,
+    );
+  }
 
   // s430 — a `let` binder the body writes: `let` head + the binder in the body's
   // declared names, so the write is an assignment (not a TDZ `const x = x …`).

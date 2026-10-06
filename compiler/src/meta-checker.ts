@@ -3,6 +3,7 @@ import type { Span, FileAST, ASTNode, ExprNode, CallExpr, IdentExpr } from "./ty
 // F8 / v0.6 — dual-mode meta-block kind test (accepts the live `"meta"`
 // and the scrml-native `"Meta"` spelling — the M5-swap reconciliation).
 import { isMetaKind } from "./types/ast.ts";
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 
 /**
  * Meta Checker — Phase separation and reflect() API for ^{} meta contexts.
@@ -639,8 +640,10 @@ export function bodyContainsSqlContext(body: LogicNode[]): LogicNode | null {
   if (!Array.isArray(body)) return null;
 
   function walk(nodes: LogicNode[]): LogicNode | null {
-    for (const node of nodes) {
-      if (!node || typeof node !== "object") continue;
+    for (const node0 of nodes) {
+      if (!node0 || typeof node0 !== "object") continue;
+      // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the whole statement.
+      const node = (handledSqlGuardInner(node0) ?? node0) as LogicNode;
 
       // Check for sql-context nodes in the AST
       if (node.kind === "sql" || node.kind === "sql-context") return node;
@@ -755,8 +758,10 @@ export function bodyMixesPhases(
 
   function hasRuntimeRef(nodes: LogicNode[]): boolean {
     if (!Array.isArray(nodes)) return false;
-    for (const node of nodes) {
-      if (!node || typeof node !== "object") continue;
+    for (const node0 of nodes) {
+      if (!node0 || typeof node0 !== "object") continue;
+      // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the whole statement.
+      const node = (handledSqlGuardInner(node0) ?? node0) as LogicNode;
       if (isMetaKind(node.kind)) continue;
 
       // S23 bug 2b: state-decl nodes inside a meta body represent `@var =

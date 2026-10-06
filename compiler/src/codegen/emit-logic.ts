@@ -4033,6 +4033,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       let rebindsExisting = false;
       // S454 — `return f() !{…}` returns the guarded value after the arms.
       let returnsResult = false;
+      // S455 — `yield ?{…} !{…}` yields the guarded value after the arms.
+      let yieldsResult = false;
       // S454 — the guarded value is a handled `?{}` evaluated through `_scrml_sql_attempt`.
       let handlesSql = false;
       // D3 (g-handler-recovery-into-cell) — set when the guarded expression is a
@@ -4081,9 +4083,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // the arms. (A CPS-split function's cell write is lowered by emit-server /
         // emit-functions; it never reaches here.)
         const _isCellGuard = guardedNode.kind === "state-decl" && typeof guardedNode.name === "string" && guardedNode.name.length > 0 && opts.boundary === "server";
-        if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt" || _isLiftGuard || _isCellGuard)) {
+        // S455 — `yield ?{…} !{…}` (an SSE generator): the guarded value is
+        // yielded after the arms, as `return` returns it.
+        const _isYieldGuard = guardedNode.kind === "yield-stmt";
+        if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt" || _isLiftGuard || _isCellGuard || _isYieldGuard)) {
           if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name);
           if (_isLiftGuard && opts.boundary === "server") returnsResult = true;
+          if (_isYieldGuard) yieldsResult = true;
           if (_isCellGuard) cellWriteNode = guardedNode;
           if (opts.boundary === "server") {
             const sqlStmt = emitLogicNode(_handledSqlNode, { ...opts, tildeContext: undefined, sqlAttempt: true });
@@ -4182,6 +4188,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
 
       if (initExpr == null) return "";
+      // §8.10 + §19.8.3 (S455) — a handled query inside a hoisted loop: its
+      // operand is now the pre-fetch lookup (or the pre-fetch's SqlError
+      // envelope), and its arms still match SqlError variants.
+      if (node._hoistedHandledSql) handlesSql = true;
       // §19.8.3 — the arms of a handled `?{}` match SqlError variants (released at return).
       const _guardHandlesSql = handlesSql;
       if (_guardHandlesSql) enterSqlErrorSchema();
@@ -4416,6 +4426,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
       if (returnsResult) {
         lines.push(`return ${resultVar};`);
+      }
+      if (yieldsResult) {
+        lines.push(`yield ${resultVar};`);
       }
       // §32 Gap 5: when this guarded-expr's success-path produces a value
       // (i.e. the guardedNode was a bare-expr call, not a let/const/tilde-decl

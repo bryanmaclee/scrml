@@ -3179,17 +3179,20 @@ export function analyzeCPSEligibility(
 }
 
 /**
- * S455 — are every arm of a `!{}` guard a plain VALUE (the replacement for the
- * guarded result)? A `{ … }` block arm holding statements, or a `fail` arm, is
- * not: it can `return` or write a cell, which only makes sense where the
- * function's own control flow runs. An empty block `{ }` is the no-value arm.
+ * S455 — can every arm of a `!{}` guard run on the SERVER, with the query, in a
+ * function the CPS split divides? A value arm can (it is the replacement for the
+ * guarded result), and so can a block that only computes / logs. An arm that
+ * leaves (`return` / `break` / `continue`), re-fails (`fail`), or writes a
+ * `@cell` cannot: those act on the function's own control flow and client
+ * state, which the client part owns. Read off the arm's text — a mention inside
+ * a string literal also counts (fail closed).
  */
 function guardArmsAreValues(guard: any): boolean {
   const arms: any[] = Array.isArray(guard?.arms) ? guard.arms : [];
   for (const arm of arms) {
     if (!arm || arm.failExpr) return false;
-    const h = typeof arm.handler === "string" ? arm.handler.trim() : "";
-    if (h.startsWith("{") && h.replace(/^\{|\}$/g, "").trim() !== "") return false;
+    const h = typeof arm.handler === "string" ? arm.handler : "";
+    if (/(^|[^\w$.])(return|break|continue|fail)(?![\w$])/.test(h) || /@[A-Za-z_$]/.test(h)) return false;
   }
   return true;
 }
@@ -6563,10 +6566,22 @@ export function runRI(input: RIInput): RIOutput {
               const _cellPhrase = _assignedCellName != null
                 ? `the reactive cell \`@${_assignedCellName}\``
                 : "a `@` reactive variable";
+              // S455 (§19.8.3) — name the cause when the split was refused because
+              // a handled `?{}` has an arm that is not a plain value: the arms run
+              // on the server with the query, and an arm that returns / writes a
+              // cell cannot run there (analyzeCPSEligibility, guardArmsAreValues).
+              const _armBlocker = (body as any[]).find((s) => handledSqlGuardInner(s) && !guardArmsAreValues(s));
+              const _armNote = _armBlocker
+                ? ` The function cannot be split around the \`!{}\` handler on the \`?{}\` at line ${_armBlocker.span?.line ?? "?"}: ` +
+                  `a handled query's arms run on the server with the query, and an arm there leaves the function ` +
+                  `(\`return\` / \`break\` / \`continue\`), re-fails (\`fail\`), or writes a \`@cell\` — which only the client ` +
+                  `part of the function can do. Make every arm a value (\`!{ _ :> not }\`) and act on the result after the ` +
+                  `query, or move the query into a \`!\` function and handle it at the call (§19.8.3).`
+                : "";
               errors.push(new RIError(
                 "E-RI-002",
                 `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
-                `assigns to ${_cellPhrase}. Reactive state is client-side; a server ` +
+                `assigns to ${_cellPhrase}.${_armNote} Reactive state is client-side; a server ` +
                 `function has no client-reactive referent and cannot write it directly (§12.2). ` +
                 `For server-authoritative engine state, name a server-owned source cell the engine ` +
                 `hydrates from: \`<engine for=T server=@source ...>\` (§51.0.E — hydrates guard-free ` +
