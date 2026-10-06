@@ -92,6 +92,7 @@ import { getNodes } from "./codegen/collect.ts";
 import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -2160,6 +2161,16 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
       return null;
     }
 
+    // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the WHOLE statement
+    // (`guarded-expr { guardedNode }`, a single-object field the array walk
+    // below never reaches). `@c = ?{…}.get() !{…}` is the same cell write as
+    // the unhandled `@c = ?{…}.get()`.
+    const _handledInner = handledSqlGuardInner(node);
+    if (_handledInner) {
+      const found = visitNode(_handledInner as LogicStatement);
+      if (found !== null) return found;
+    }
+
     // Recurse into array children.
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id") continue;
@@ -3072,8 +3083,17 @@ export function analyzeCPSEligibility(
   const deferServerIndices: number[] = []; // §19.16.5 — `defer` stmts whose deferred body is server-tier
 
   for (let i = 0; i < body.length; i++) {
-    const node = body[i];
-    if (!node || typeof node !== "object") continue;
+    const stmt = body[i];
+    if (!stmt || typeof stmt !== "object") continue;
+    // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the whole statement; it is tiered
+    // exactly as the statement it guards (`@c = ?{…} !{…}` is reactive-server,
+    // `?{…}.run() !{…}` is server), so a handled query splits the function the
+    // way the unhandled one does. The arms run with the statement, on the
+    // server; an arm that is not a plain value (a block with statements, a
+    // `fail`) could `return` / write a cell there, which a split cannot honour,
+    // so that statement is unsplittable (fail closed, E-RI-002) — never moved.
+    const _handledInner = handledSqlGuardInner(stmt);
+    const node = (_handledInner ?? stmt) as LogicStatement;
 
     const isReactive = isReactiveStatement(node);
     const isServer = isServerTriggerStatement(
@@ -3095,7 +3115,9 @@ export function analyzeCPSEligibility(
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node, importedServerNamespaces));
 
-    if (isServer && (node as any).kind === "defer-stmt") {
+    if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt)) {
+      mixedIndices.push(i);
+    } else if (isServer && (node as any).kind === "defer-stmt") {
       // §19.16.5 — a server-tier deferred body. Tier it SERVER (never "mixed")
       // so the split is still computed and the caller can report the precise
       // E-DEFER-SERVER-IN-SPLIT instead of a cascading E-RI-002.
@@ -3137,7 +3159,7 @@ export function analyzeCPSEligibility(
   // Detect returnVarName from reactive-server statements.
   let returnVarName: string | null = null;
   for (const ri of reactiveServerIndices) {
-    const node = body[ri];
+    const node = (handledSqlGuardInner(body[ri]) ?? body[ri]) as LogicStatement;
     if (node.kind === "state-decl" && (node as any).name) {
       returnVarName = (node as any).name;
       break;
@@ -3154,6 +3176,22 @@ export function analyzeCPSEligibility(
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
   };
+}
+
+/**
+ * S455 — are every arm of a `!{}` guard a plain VALUE (the replacement for the
+ * guarded result)? A `{ … }` block arm holding statements, or a `fail` arm, is
+ * not: it can `return` or write a cell, which only makes sense where the
+ * function's own control flow runs. An empty block `{ }` is the no-value arm.
+ */
+function guardArmsAreValues(guard: any): boolean {
+  const arms: any[] = Array.isArray(guard?.arms) ? guard.arms : [];
+  for (const arm of arms) {
+    if (!arm || arm.failExpr) return false;
+    const h = typeof arm.handler === "string" ? arm.handler.trim() : "";
+    if (h.startsWith("{") && h.replace(/^\{|\}$/g, "").trim() !== "") return false;
+  }
+  return true;
 }
 
 /**

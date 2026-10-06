@@ -3,6 +3,7 @@ import { routePath, paramName, paramSignature } from "./utils.ts";
 import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
+import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
@@ -370,7 +371,8 @@ function buildClientBatchPlan(
     if (isLast) {
       returnCell = cpsSplit.returnVarName ?? null;
     } else if (indices.length > 0) {
-      const last = body[indices[indices.length - 1]] as ASTNode | undefined;
+      const lastRaw = body[indices[indices.length - 1]] as ASTNode | undefined;
+      const last = (handledSqlGuardInner(lastRaw) ?? lastRaw) as ASTNode | undefined; // S455 — `@c = ?{…} !{…}`
       if (last && last.kind === "state-decl" && typeof last.name === "string") {
         returnCell = last.name;
       }
@@ -536,10 +538,12 @@ function emitMultiBatchWrapper(opts: {
     // The reactive assignment that receives a batch result is already emitted
     // as part of that batch's await block (the `returnCell` publish above) —
     // skip a duplicate emission here.
+    // S455 — a handled `@c = ?{…} !{…}` is the same cell write one level down.
+    const _cellStmt = (handledSqlGuardInner(stmt) ?? stmt) as ASTNode;
     if (
-      stmt.kind === "state-decl" &&
-      typeof stmt.name === "string" &&
-      batchPlan.some((b) => b.returnCell === stmt.name)
+      _cellStmt.kind === "state-decl" &&
+      typeof _cellStmt.name === "string" &&
+      batchPlan.some((b) => b.returnCell === _cellStmt.name)
     ) {
       continue;
     }
@@ -1333,8 +1337,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // was extracted to the server, emit the reactive_set on the client using
         // the server result. This handles `@entries = ?{SELECT...}` where the SQL
         // runs on the server and the result is passed back via the fetch response.
-        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
-          lines.push(`    _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
+        // S455 — a handled `@c = ?{…} !{…}` (the guard wraps the state-decl):
+        // the server returned the guarded value; the cell takes it here.
+        const _retStmt = (handledSqlGuardInner(stmt) ?? stmt) as ASTNode;
+        if (cpsSplit.returnVarName && _retStmt.kind === "state-decl" && _retStmt.name === cpsSplit.returnVarName) {
+          lines.push(`    _scrml_reactive_set(${JSON.stringify(_retStmt.name)}, _scrml_server_result);`);
         }
         // Skip additional server statements — they are batched into one server call.
       } else if ((stmt as ASTNode).kind === "defer-stmt") {

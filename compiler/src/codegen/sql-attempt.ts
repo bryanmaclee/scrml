@@ -100,6 +100,46 @@ export function sqlQueryExprShape(node: ExprNode | null | undefined): SqlQueryEx
 }
 
 /**
+ * §19.8.3 (S455) — the `?{}` query that a STATEMENT-level `!{}` handler guards.
+ *
+ * A `!{}` written after a statement is parsed as
+ * `guarded-expr { guardedNode: <the statement>, arms }`: the WHOLE statement is
+ * wrapped, not the query. So a handled query is the same statement an unhandled
+ * one is (`@c = ?{…}.get()` is a `state-decl` carrying `sqlNode`, `lift ?{…}` is
+ * a `lift-expr` over `{ kind: "sql", node }`, `?{…}.run()` is a bare `sql`
+ * statement), one level down. Every analysis that classifies statements by kind
+ * must see that inner statement exactly as it sees the unhandled one — the
+ * handler adds a failure path and changes nothing else (placement, purity, the
+ * client/server split, protect, batching).
+ *
+ * Returns the guarded statement's query node (a structured `sql` node) — or
+ * `"expr"` for an expression-position query that is the WHOLE operand
+ * (`const r = (?{…}.get()) !{…}`) — or null when the guard does not handle a
+ * `?{}` (a guarded CALL, which keeps its own semantics).
+ */
+export function handledSqlOfGuardedNode(guardedNode: unknown): Record<string, unknown> | "expr" | null {
+  if (!guardedNode || typeof guardedNode !== "object") return null;
+  const g = guardedNode as Record<string, any>;
+  if (g.kind === "sql") return g;
+  if (g.sqlNode && typeof g.sqlNode === "object" && g.sqlNode.kind === "sql") return g.sqlNode;
+  if (g.kind === "lift-expr" && g.expr && g.expr.kind === "sql" && g.expr.node && g.expr.node.kind === "sql") return g.expr.node;
+  if (sqlQueryExprShape((g.initExpr ?? g.exprNode) as ExprNode | undefined) !== null) return "expr";
+  return null;
+}
+
+/**
+ * The statement a `!{}` on a `?{}` guards, when `node` is such a guard
+ * (`guarded-expr` whose guarded statement holds the handled query); else null.
+ * The one normalization the statement-classifying consumers share (S455).
+ */
+export function handledSqlGuardInner(node: unknown): Record<string, any> | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, any>;
+  if (n.kind !== "guarded-expr" || !n.guardedNode || typeof n.guardedNode !== "object") return null;
+  return handledSqlOfGuardedNode(n.guardedNode) !== null ? n.guardedNode : null;
+}
+
+/**
  * The server-bundle runtime helper. Injected into a server module IFF the module
  * references `_scrml_sql_attempt(`. Readable on purpose: an adopter debugging a
  * handled query lands here.
