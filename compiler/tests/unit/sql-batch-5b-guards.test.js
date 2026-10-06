@@ -86,8 +86,11 @@ describe("§1 E-PROTECT-003 fires on column overlap, hoist refused", () => {
 // §2
 // ---------------------------------------------------------------------------
 
-describe("§2 narrow SELECT avoids overlap → hoist proceeds", () => {
-  test("SELECT id, name → no E-PROTECT-003, hoist recorded", () => {
+describe("§2 narrow SELECT avoids overlap → no E-PROTECT-003, and (S455) the loop is not hoisted", () => {
+  test("SELECT id, name → no E-PROTECT-003; a table with protected columns is never hoisted", () => {
+    // S455 (review P1): the hoisted pre-fetch bypasses the §14.8.9 row strip the
+    // per-row query gets, so `secret AS s` reached the client. Fail closed: a read
+    // over a table with ANY protected column keeps its per-iteration query.
     const forStmt = mkForStmtWithSql("SELECT id, name FROM users WHERE id = ${x.id}");
     const file = { ast: { nodes: [forStmt] } };
     const { batchPlan, errors } = runBatchPlanner({
@@ -97,9 +100,21 @@ describe("§2 narrow SELECT avoids overlap → hoist proceeds", () => {
     });
     const protectErrs = errors.filter((e) => e.code === "E-PROTECT-003");
     expect(protectErrs.length).toBe(0);
+    expect(batchPlan.loopHoists.length).toBe(0);
+    expect(batchPlan.diagnostics.some((d) => d.code === "D-BATCH-001" && /protected column/.test(d.reason))).toBe(true);
+  });
+
+  test("a table with NO protected column is hoisted while another table is protected", () => {
+    const forStmt = mkForStmtWithSql("SELECT id, title FROM posts WHERE id = ${x.id}");
+    const file = { ast: { nodes: [forStmt] } };
+    const { batchPlan, errors } = runBatchPlanner({
+      files: [file],
+      depGraph: null,
+      protectAnalysis: mkProtectAnalysis("users", ["email"]),
+    });
+    expect(errors.filter((e) => e.code === "E-PROTECT-003").length).toBe(0);
     expect(batchPlan.loopHoists.length).toBe(1);
-    const hoist = batchPlan.loopHoists[0];
-    expect([...hoist.rowCacheColumns].sort()).toEqual(["id", "name"]);
+    expect([...batchPlan.loopHoists[0].rowCacheColumns].sort()).toEqual(["id", "title"]);
   });
 });
 

@@ -59,10 +59,13 @@ describe("§1 for-of + .get() → pre-loop IN fetch + Map lookup", () => {
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).toMatch(/_scrml_batch_keys_\d+ = \(ids\)\.map\(x => x\.id\)/);
+    // S455: the iterable is evaluated once into `_scrml_batch_items_N`; keys + loop read it.
+    expect(js).toMatch(/let _scrml_batch_items_\d+ = \(ids\);/);
+    expect(js).toMatch(/_scrml_batch_keys_\d+ = _scrml_batch_items_\d+\.map\(x => x\.id\)/);
     expect(js).toMatch(/_scrml_batch_rows_\d+/);
     expect(js).toMatch(/_scrml_batch_byKey_\d+ = new Map\(\)/);
-    expect(js).toMatch(/_scrml_batch_byKey_\d+\.get\(x\.id\) \?\? null/);
+    // S455: each lookup is its own copy of the row (as each per-row query returns).
+    expect(js).toMatch(/_scrml_batch_byKey_\d+\.has\(x\.id\) \? \{ \.\.\._scrml_batch_byKey_\d+\.get\(x\.id\) \} : null/);
   });
 });
 
@@ -127,7 +130,7 @@ describe("§4 original `?{...}.get()` call is removed from loop body", () => {
     ].join("\n");
     const js = serverJsOf(compile(src));
     // Find the substring inside the for-body and verify no per-iter query
-    const forIdx = js.indexOf("for (const x of ids) {");
+    const forIdx = js.search(/for \(const x of _scrml_batch_items_\d+\) \{/);
     const closeIdx = js.indexOf("}", forIdx);
     expect(forIdx).toBeGreaterThan(-1);
     const body = js.slice(forIdx, closeIdx);

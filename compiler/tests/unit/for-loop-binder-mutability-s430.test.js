@@ -241,7 +241,7 @@ describe("(a) a non-rendering loop's `let` binder write is an ASSIGNMENT — com
     ].join("\n"));
     expect(r.fatal).toEqual([]);
     const js = r.serverJs;
-    expect(js).toMatch(/for \(let x of ids\) \{/);
+    expect(js).toMatch(/for \(let x of _scrml_batch_items_\d+\) \{/);
     expect(js).not.toContain("const x = row");
     // Execute the handler body with a stubbed request + SQL: the rows come back
     // keyed by id, the loop reassigns its binder to each row.

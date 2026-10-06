@@ -1,0 +1,24 @@
+{
+  "id": "protect-hoisted-loop-protected-table-not-hoisted-rt",
+  "description": "§8.10 × §14.8.9 (SECURITY, RUNTIME, sqlEngine:\"real\"): a loop whose keyed read targets a table with a protected column (`<db protect=\"secret\">`) is NOT §8.10-hoisted, so each row passes the per-query §14.8.9 strip exactly as the `.nobatch()` form does: `secret AS s` → `{\"id\":7}`, `lower(secret) AS x` → `{}`, `.all()` → `[{\"id\":7}]`; an unprotected projection keeps its columns. Pre-fix (0e253650, S239 review P1) the hoisted pre-fetch bypassed the strip and the client received `{\"id\":7,\"s\":\"S7\"}` / `{\"id\":7,\"x\":\"s7\"}` (E-PROTECT-003 only matched the protected column by its bare NAME, so an alias or expression escaped it).",
+  "language-version": "1.0",
+  "spec": "§8.10.7, §14.8.9",
+  "rationale": "§14.8.9: a protected column never reaches the client. §8.10.3: the rewritten loop is observationally equivalent to the un-rewritten loop — the un-rewritten loop's rows are stripped. Fail closed: a read over a table with any protected column keeps its per-iteration query.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 7, "name": "Al", "secret": "S7" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": {
+      "a": [{ "id": 7 }],
+      "b": [{}],
+      "c": [[{ "id": 7 }]],
+      "d": [{ "id": 7, "name": "Al" }]
+    }
+  }
+}

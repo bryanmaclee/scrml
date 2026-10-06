@@ -334,7 +334,7 @@ describe("S455 §2 — analyses see the guarded statement exactly as the unhandl
 </program>`);
     expect(r.server).toMatch(/Tier 2 loop hoist/);
     expect(r.server).toMatch(/await _scrml_sql_attempt\(\(_scrml_p\) => _scrml_sql\.unsafe\(/);
-    expect(r.server).toMatch(/\.__scrml_error \? _scrml_batch_rows_\d+ : \(_scrml_batch_byKey_\d+\.get\(it\.id\) \?\? null\)/);
+    expect(r.server).toMatch(/\.__scrml_error \? _scrml_batch_rows_\d+ : \(_scrml_batch_byKey_\d+\.has\(it\.id\) \? \{ \.\.\._scrml_batch_byKey_\d+\.get\(it\.id\) \} : null\)/);
     expect(r.server).not.toMatch(/client cannot evaluate/);
   });
 });

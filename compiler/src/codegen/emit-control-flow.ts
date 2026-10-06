@@ -1182,9 +1182,14 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   const placeholdersVar = genVar("batch_placeholders");
   const rowsVar = genVar("batch_rows");
   const mapVar = genVar("batch_byKey");
+  const itemsVar = genVar("batch_items");
+  // Each lookup yields its OWN row object, as each per-iteration query does: two
+  // iterations with the same key used to share one row, so a write through one
+  // (`row.body = row.body + "!"`) showed up in the other.
+  const _key = `${loopVar}.${keyField}`;
   const replacement = terminator === "get"
-    ? `(${mapVar}.get(${loopVar}.${keyField}) ?? null)`
-    : `(${mapVar}.get(${loopVar}.${keyField}) ?? [])`;
+    ? `(${mapVar}.has(${_key}) ? { ...${mapVar}.get(${_key}) } : null)`
+    : `(${mapVar}.get(${_key}) ?? []).map((_r) => ({ ..._r }))`;
   const subst: HoistSubst = {
     re: new RegExp(sourceSrc, "g"),
     probe: new RegExp(sourceSrc),
@@ -1205,7 +1210,13 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
 
   const lines: string[] = [];
   lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn})`);
-  lines.push(`const ${keysVar} = (${iterable}).map(${loopVar} => ${loopVar}.${keyField});`);
+  // The iterable is evaluated ONCE — the key list and the loop read the same
+  // items (it was evaluated twice: `items.splice(0, 1)` looped over nothing). A
+  // non-array iterable (a Set, a generator) is materialized so both can read it.
+  lines.push(`let ${itemsVar} = (${iterable});`);
+  lines.push(`if (!Array.isArray(${itemsVar})) ${itemsVar} = Array.from(${itemsVar});`);
+  iterable = itemsVar;
+  lines.push(`const ${keysVar} = ${itemsVar}.map(${loopVar} => ${loopVar}.${keyField});`);
   // §8.10.6: reject key counts above the configured cap at runtime.
   // Default 32766 matches SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER (the
   // bun:sqlite bundled version). S79 audit fix C.2 — adopter override via

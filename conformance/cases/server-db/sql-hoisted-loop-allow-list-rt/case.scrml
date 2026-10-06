@@ -1,0 +1,171 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+            owner: integer
+            kind: text
+        }
+        tags {
+            id: integer primary key
+            note_id: integer
+            label: text
+        }
+    </schema>
+    // §8.10 Tier 2: a loop whose keyed read's `WHERE <key> IN (…)` pre-fetch,
+    // grouped by key, would NOT be the per-key answer (aggregate, GROUP BY, LIMIT,
+    // OR, UNION, a second `${}`, a non-column SELECT item, the reserved alias) is
+    // not hoisted; the hoisted shapes (plain columns, JOIN, AND without `${}`) give
+    // the per-iteration answer, evaluate the iterable once, and give every
+    // iteration its own row object. Every cell equals the `.nobatch()` run.
+    <strlit> = "init"
+    <count> = "init"
+    <max> = "init"
+    <groupby> = "init"
+    <limit> = "init"
+    <orkind> = "init"
+    <union> = "init"
+    <secondinterp> = "init"
+    <aliascollide> = "init"
+    <splice> = "init"
+    <dupkey> = "init"
+    <dupkeyall> = "init"
+    <join> = "init"
+    function f_strlit(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT id, 'a FROM b' AS t, body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function f_count(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT count(*) AS n FROM notes WHERE owner = ${it.id}`}.get()
+            out.push(row is not ? "none" : "" + row.n)
+        }
+        return out.join(",")
+    }
+    function f_max(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT max(id) AS m FROM notes WHERE owner = ${it.id}`}.get()
+            out.push(row is not ? "none" : "" + row.m)
+        }
+        return out.join(",")
+    }
+    function f_groupby(items) {
+        let out = []
+        for (const it of items) {
+            const rows = ?{`SELECT owner, count(*) AS n FROM notes WHERE owner = ${it.id} GROUP BY owner`}.all()
+            out.push("" + rows.length)
+        }
+        return out.join(",")
+    }
+    function f_limit(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT body FROM notes WHERE owner = ${it.id} ORDER BY id LIMIT 1`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function f_orkind(items) {
+        let out = []
+        for (const it of items) {
+            const rows = ?{`SELECT body FROM notes WHERE owner = ${it.id} OR kind = 'y'`}.all()
+            out.push("" + rows.length)
+        }
+        return out.join(",")
+    }
+    function f_union(items) {
+        let out = []
+        for (const it of items) {
+            const rows = ?{`SELECT body FROM notes WHERE owner = ${it.id} UNION SELECT body FROM notes WHERE kind = 'y'`}.all()
+            out.push("" + rows.length)
+        }
+        return out.join(",")
+    }
+    function f_secondinterp(items) {
+        let out = []
+        for (const it of items) {
+            const rows = ?{`SELECT body FROM notes WHERE id = ${it.id} OR id = ${it.alt}`}.all()
+            out.push("" + rows.length)
+        }
+        return out.join(",")
+    }
+    function f_aliascollide(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT body AS __scrml_batch_key FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.__scrml_batch_key)
+        }
+        return out.join(",")
+    }
+    function f_splice(items) {
+        let out = []
+        for (const it of items.splice(0, 1)) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function f_dupkey(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            row.body = row.body + "!"
+            out.push(row.body)
+        }
+        return out.join(",")
+    }
+    function f_dupkeyall(items) {
+        let out = []
+        for (const it of items) {
+            const rows = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.all()
+            for (const r of rows) {
+                r.body = r.body + "!"
+                out.push(r.body)
+            }
+        }
+        return out.join(",")
+    }
+    function f_join(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT n.body, t.label FROM notes n JOIN tags t ON t.note_id = n.id WHERE n.id = ${it.id} AND t.label <> 'zz' ORDER BY t.label`}.get()
+            out.push(row is not ? "none" : row.body + "/" + row.label)
+        }
+        return out.join(",")
+    }
+    function go() {
+        @strlit = f_strlit([{ id: 7 }, { id: 8 }, { id: 5 }]) !{ _ :> "err" }
+        @count = f_count([{ id: 1 }, { id: 2 }, { id: 3 }]) !{ _ :> "err" }
+        @max = f_max([{ id: 1 }, { id: 2 }, { id: 3 }]) !{ _ :> "err" }
+        @groupby = f_groupby([{ id: 1 }, { id: 2 }, { id: 3 }]) !{ _ :> "err" }
+        @limit = f_limit([{ id: 1 }, { id: 2 }, { id: 3 }]) !{ _ :> "err" }
+        @orkind = f_orkind([{ id: 1 }, { id: 2 }, { id: 3 }]) !{ _ :> "err" }
+        @union = f_union([{ id: 1 }, { id: 2 }]) !{ _ :> "err" }
+        @secondinterp = f_secondinterp([{ id: 7, alt: 9 }, { id: 5, alt: 8 }]) !{ _ :> "err" }
+        @aliascollide = f_aliascollide([{ id: 7 }, { id: 5 }]) !{ _ :> "err" }
+        @splice = f_splice([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+        @dupkey = f_dupkey([{ id: 7 }, { id: 7 }]) !{ _ :> "err" }
+        @dupkeyall = f_dupkeyall([{ id: 7 }, { id: 7 }]) !{ _ :> "err" }
+        @join = f_join([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="strlit">${@strlit}</p>
+    <p id="count">${@count}</p>
+    <p id="max">${@max}</p>
+    <p id="groupby">${@groupby}</p>
+    <p id="limit">${@limit}</p>
+    <p id="orkind">${@orkind}</p>
+    <p id="union">${@union}</p>
+    <p id="secondinterp">${@secondinterp}</p>
+    <p id="aliascollide">${@aliascollide}</p>
+    <p id="splice">${@splice}</p>
+    <p id="dupkey">${@dupkey}</p>
+    <p id="dupkeyall">${@dupkeyall}</p>
+    <p id="join">${@join}</p>
+</program>
