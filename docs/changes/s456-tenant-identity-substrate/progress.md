@@ -103,3 +103,11 @@ RELAYED premise CONFIRMED: every login silently fails; the only tenant signal is
 - Message names the limb ("pins the tenant on the result of a read" / "establishes a login behind a condition on").
   SPEC §14.8.10 sentence + §34 row restated to match. Corpus re-run (head2 vs base): still 0 artifact diffs; diag
   diffs only in the 2 new conformance cases; 0 corpus files gain the warning.
+
+## Full `bun run test` (head be3b09f8f)
+- 33813 pass / 50 fail / 104 skip / 16 todo (1626 files). The 50 failures are all in 11 browser / render files
+  (browser-transitions 14, soft-nav 7, engine-message-dispatch 6, bug60 5, engine-gated-each 4, lift-markup 4,
+  cross-chunk 3, each-ternary 3, i174 2, detector-validation 1, esm-script-tag 1). PRE-EXISTING: the same 11 files
+  run on base 2dd6d35d9 compiler sources (flipped in place, pretest re-run, restored) give the same 290 pass / 50 fail.
+  None touches the tenant floor, `<schema>` or session code.
+- Pre-commit gate (unit + integration + conformance) on each code commit: 31477 / 31496 / 31500 pass, 0 fail.
