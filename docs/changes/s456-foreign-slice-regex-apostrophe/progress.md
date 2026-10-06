@@ -120,3 +120,29 @@ examples,samples,conformance,stdlib; base worktree @0aef3270d vs head worktree @
 Tests: pre-commit gate at 9f4c473a0 — 31621 tests / 1469 files, 0 fail. New:
 `compiler/tests/integration/foreign-slice-lexing.test.js` (22). Conformance 1316/1366 → 1322/1372
 (+6 PASS; each new case verified to fail on 0aef3270d).
+
+## U6 — review fix round (S239 review of bb840edf5)
+
+Merged origin/main (cfa9c6343; FACTS / gap-counts regenerated, not side-taken). Fix: 53fab7113.
+
+- F1 (MED regression, confirmed): standalone `acorn.tokenizer` reads `await` as an identifier →
+  `await /'/.exec(s)` lexed `/` as division → throw → `lexable:false` → statement body → `v=undefined`.
+  Now: tokens from `acorn.parse(onToken)` of the slice inside the sealed async-function wrapper
+  (statement shape, else expression shape). Neither parses → `parsed:false` → statement body →
+  the build check refuses it (E-FOREIGN-007); no guessed shape.
+  base(cfa9c6343)/head: `await /'/.exec(s)` + split-line form: exit 0 `v=undefined w=undefined` →
+  exit 0 `v=' w='`; `a = b\n++/'/.exec(s)`: E-FOREIGN-007 both.
+- F2: token parse omits the crossing params, so `in:{s}` + `const s = /'/…` → E-FOREIGN-006 (test).
+- F3: `generateValueOnlyServerJs` now drains the run-wide sink into its `errors` (try/finally).
+  Repro attempts: (a) exported fn returning `session` in a const module → module gets full server
+  content (route path, not value-only); (b) E-LIFT-002 in an exported fn of a value-only module →
+  value-only path IS taken, but runCG's client lowering of the same node reports first and the
+  sink dedupes (1 diagnostic with and without the drain). No reachable loss found; drain is defensive.
+- each-row `onclick="hit(it)"`: SPEC §5.2 rule 1 makes a quoted attribute a STATIC attribute, so
+  the fix is lowering, not refusal: now `setAttribute("onclick", "hit(it)")`, matching the top-level
+  emission `<button onclick="hit(0)">`. Corpus count of the shape: 0 (artifact grep over the full
+  base capture + source grep). Unlowerable handler/attr value kinds → E-CG-003 via the sink (also 0).
+- Large flogence repro: compiles, artifact == unmodified file's + the one line; `const q1 = ;`
+  variant → E-FOREIGN-007; gap-2 small → `out=its`.
+- Corpus differential cfa9c6343 → 53fab7113: 11770 compared, 11494 identical + 276 path-only, 0 real;
+  compile-failure set identical; 0 diagnostic changes; syntax 75 → 75.
