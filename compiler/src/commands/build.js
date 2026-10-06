@@ -1033,6 +1033,40 @@ export function sqliteBuildReport(records, target, label = (f) => f) {
 }
 
 /**
+ * §14.8.11 (S455 "a", g-tenant-pg-overload-hijack-s455) — the Postgres deploy
+ * requirement `scrml build` states once per build whose program declares ≥1
+ * `db-authoritative` table. Pure: the caller prints.
+ *
+ * Postgres resolves a function call by exact argument type across the whole
+ * `search_path`, and the compiler's function allow-lists (§14.8.10) are NAME-level:
+ * a user `public.lower(integer)` wins over `pg_catalog.lower(text)` for
+ * `lower(int_col)` and runs inside admitted tenant queries and policies as
+ * `scrml_app`. The compiler cannot see overloads and does not rewrite SQL (§39), so
+ * the property belongs to deployment — and the build says so. It never connects to
+ * a database and never fails the build.
+ *
+ * `dbAuthoritative` is `compileScrml`'s `dbAuthoritative`. A build that reaches the
+ * report with it true is on Postgres: codegen's E-DBAUTH-SQLITE gate fails any other
+ * resolved driver.
+ *
+ * @param {boolean|undefined} dbAuthoritative
+ * @returns {string[]} empty when the program has no db-authoritative table
+ */
+export function pgSchemaCreateRequirementLines(dbAuthoritative) {
+  if (dbAuthoritative !== true) return [];
+  return [
+    `Postgres deploy requirement (SPEC §14.8.11) — this program has db-authoritative tables:`,
+    `  the database MUST have \`REVOKE CREATE ON SCHEMA public FROM PUBLIC\` in effect (the PostgreSQL 15+`,
+    `  default), and no role but the migrating owner may hold CREATE on any schema in the app`,
+    `  connection's search_path.`,
+    `  Why: Postgres picks a function overload by exact argument type across the search_path, so a`,
+    `  function planted in \`public\` (e.g. public.lower(integer)) runs inside admitted tenant queries`,
+    `  and policies as scrml_app and can read every tenant. The compiler cannot see overloads and`,
+    `  scrml build does not inspect the database — check it on every database this server runs against.`,
+  ];
+}
+
+/**
  * Apply the --target fly adapter.
  * Writes Dockerfile and fly.toml to the output directory.
  *
@@ -1265,6 +1299,9 @@ export async function runBuild(args) {
     ? { databases: [], referencedOnly: [], warnings: [], lines: [] }
     : sqliteBuildReport(result.sqliteDatabases, opts.target, dbLabel);
   for (const w of dbReport.warnings) console.warn(`  [warn] ${w}`);
+  // §14.8.11 (S455 "a") — the Postgres `REVOKE CREATE ON SCHEMA public` deploy
+  // requirement, once per build, on every target (printed with the database report).
+  const pgRequirement = pgSchemaCreateRequirementLines(result.dbAuthoritative);
 
   console.log(`Compiled ${inputFiles.length} file(s) in ${result.durationMs}ms`);
 
@@ -1297,6 +1334,10 @@ export async function runBuild(args) {
     console.log(`\nscrml build complete.`);
     console.log(`Output: ${result.fileCount} files → ${resolvedOutputDir}/`);
     console.log(`Target: static`);
+    if (pgRequirement.length > 0) {
+      console.log("");
+      for (const l of pgRequirement) console.log(l);
+    }
     console.log(`\nStatic build ready. Deploy the contents of ${resolvedOutputDir}/ to any static host.`);
     return;
   }
@@ -1367,6 +1408,10 @@ export async function runBuild(args) {
   if (dbReport.lines.length > 0) {
     console.log("");
     for (const l of dbReport.lines) console.log(l);
+  }
+  if (pgRequirement.length > 0) {
+    console.log("");
+    for (const l of pgRequirement) console.log(l);
   }
 
   if (opts.target === "fly") {

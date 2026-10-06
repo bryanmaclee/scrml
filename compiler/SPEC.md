@@ -12972,6 +12972,21 @@ CREATE POLICY scrml_tenant_iso ON t USING (tenant_id = current_setting('scrml.te
   LEVEL SECURITY` (spike finding, validated vs real PG16), so the per-request principal MUST drop to
   the bounded `NOBYPASSRLS` `scrml_app` role. A1 without S6 is a **silent no-op** (RLS present, the
   owner ignores it — the "looks enforced and isn't" trap).
+- **No `CREATE` on a schema in the search path (S455) — a deploy REQUIREMENT, not a compile check.**
+  The database this tier runs on SHALL have `REVOKE CREATE ON SCHEMA public FROM PUBLIC` in effect
+  (the PostgreSQL 15+ default), and no role other than the migrating owner may hold `CREATE` on any
+  schema in the app connection's `search_path`. Reason: the compiler's function allow-lists (§14.8.10)
+  are NAME-level, and Postgres resolves a call by exact argument type across the whole `search_path` —
+  a user `public.lower(integer)` is chosen over `pg_catalog.lower(text)` for `lower(int_col)`, so a
+  function planted by anyone who can `CREATE` in `public` runs inside an admitted query or policy as
+  `scrml_app` and can read every tenant (executed on PostgreSQL 16, S455). The compiler cannot see
+  overloads and does not rewrite SQL (§39 — SQL strings are sent unchanged), so this property belongs
+  to deployment. *(Surfaced at build time: `scrml build` prints a "Postgres deploy requirement" line in
+  its database report, once per build, whenever a `db-authoritative` table exists —
+  `pgSchemaCreateRequirementLines`, `compiler/src/commands/build.js`; a report line, not a diagnostic,
+  and never a build failure.)* *(Provenance:
+  ruling:user-voice-scrml.md S455 **"a"** — option (a) of `g-tenant-pg-overload-hijack-s455`, NOT (b) a
+  migrator `pg_proc` scan, NOT (c) `pg_catalog`-qualified emission · direction: inert for the compiler.)*
 - **`current_setting('scrml.tenant', true)`** — the `true` (missing-ok) argument makes a missing GUC
   return `NULL` (not raise), so an unpinned request's tenant is `NULL`, which matches **no row** — a
   **fail-closed** read, identical in spirit to §14.8.10's unpinned-sees-zero-rows.

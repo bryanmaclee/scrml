@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 241 | 6 |
-| MED | 511 | 4 |
+| MED | 510 | 4 |
 | LOW | 277 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -23145,8 +23145,9 @@ Reviewer-executed: reads return both tenants. Direction: make the table tenant-s
 <!-- @gap id=g-tenant-small-residuals-s455 sev=LOW status=open locus=compiler/src/tenant-schema-hazards.ts+compiler/src/schema-differ.js prov=review:s455-S239-tenant-r2,r3 -->
 (a) `CREATE TEMP TABLE assets (… tenant_id)` not recognized as tenant-scoped (floor + checker agree; pre-existing). (b) FP: `AS /* x */ RESTRICTIVE` / `AS --x⏎ RESTRICTIVE` charged. (c) `parseSchemaBlock` still quadratic on unbalanced braces (`"a{"`×40k ≈ 12 s; same on base). (d) `--no-gather` drops imported files from the compilation-wide set (the documented separately-compiled Limit).
 
-### g-tenant-schema-rel-dot-fn-call-s455 — a Postgres function called through column notation (`SELECT o.evil FROM other o`, `(NEW).evil`) passes the tenant `<schema>` body checks — `NEW S455; MED; open (in flight S455)`
-<!-- @gap id=g-tenant-schema-rel-dot-fn-call-s455 sev=MED status=open locus=compiler/src/tenant-schema-hazards.ts(view/trigger body reader) prov=review:s455-S239-allowlist-r2 -->
+### g-tenant-schema-rel-dot-fn-call-s455 — a Postgres function called through column notation (`SELECT o.evil FROM other o`, `(NEW).evil`) passes the tenant `<schema>` body checks — `NEW S455; MED; RESOLVED S455 (#1319)`
+<!-- @gap id=g-tenant-schema-rel-dot-fn-call-s455 sev=MED status=resolved locus=compiler/src/tenant-schema-hazards.ts(view/trigger body reader) prov=review:s455-S239-allowlist-r2 -->
+RESOLVED S455 (#1319, 61f4b8e5b): schema bodies lie in the S452 tenant SQL subset; `x.y` admitted only to a column the compilation declares, with alias hiding, parenthesized join groups and undeclared qualifiers fail-closed — for bodies AND tenant queries (executed on PG16: `SELECT assets.evil FROM assets` now E-TENANT-SQL-SUBSET).
 In Postgres `rel.f` calls `f(rel)` when there is no column `f`; text inspection cannot tell a column from a function without column knowledge (SUSPECTED effect — no PG credentials in review). The #1317 PARTIAL landing's residual (bryan "yes, both"). Next arc (dispatched S455, `fix/s455-tenant-schema-body-subset`): schema bodies must lie inside the S452 tenant SQL subset; qualified refs fail closed to declared columns.
 
 ### g-tenant-identity-substrate-scoped-breaks-login-s455 — a `users` / `user_roles` table carrying `tenant_id` becomes tenant-scoped, so an unpinned login read in ANY file of the compilation returns zero rows and every login silently fails — `NEW S455; LOW-MED; open`
@@ -23156,3 +23157,8 @@ Reviewer-executed on #1316: app.scrml declares `users(…, tenant_id)`; login.sc
 ### g-r11-read-fallback-masks-outage-at-login-s455 — after the R11 `sql-failable` rewrite, a DB failure during a login lookup reads as "Invalid email or password" instead of a 500 — `NEW S455; LOW; open`
 <!-- @gap id=g-r11-read-fallback-masks-outage-at-login-s455 sev=LOW status=open locus=stdlib/auth/templates/login.scrml+examples/23-trucking-dispatch/pages/auth/login.scrml+samples/login.scrml prov=review:s455-S239-r11-r2 -->
 Fails closed (no login), but an outage is misreported as bad credentials — the ruled read-fallback meaning (S455 "b"). The example owners should replace the `!{ _ :> not }` arm at the lookup with real handling (surface the outage).
+
+### g-tenant-pg-overload-hijack-s455 — a user function planted in `public` with an exact-match signature wins Postgres overload resolution over the allow-listed built-in, running inside admitted tenant queries/policies — `NEW S455; MED; RESOLVED S455 (ruled "a": deploy requirement, surfaced by `scrml build`)`
+<!-- @gap id=g-tenant-pg-overload-hijack-s455 sev=MED status=resolved locus=compiler/src/commands/build.js(pgSchemaCreateRequirementLines) prov=ruling:user-voice-scrml.md-S455-"a"+review:s455-S239-subset-r2 -->
+RESOLVED S455: a deploy requirement (SPEC §14.8.11, ruling "a"); `scrml build` now prints it once per build in the database report when a `db-authoritative` table exists (feat/s455-build-report-pg-revoke). The compiler cannot see overloads; enforcement is the database's.
+Executed on PG16 by the S239 review of #1319: `lower(id)` → `public.lower(integer)` returned `A-secret,B-secret` under `WHERE tenant_id='A'`; also a row-type `lower(assets)` overload and `public.date(text)`. Name-level allow-lists cannot see overloads; precondition: the attacker can `CREATE` in the search_path. Ruled S455 **"a"**: a DEPLOY REQUIREMENT — `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (PG15+ default), stated in SPEC §14.8.11. Owed: surface it in the `scrml build` report when a `db-authoritative` Postgres table exists (no deploy doc exists in the repo to carry it).
