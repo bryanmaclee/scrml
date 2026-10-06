@@ -1,3 +1,59 @@
+# scrml — Session 455 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S454 below. Rulings authority: `scrml-support/user-voice-scrml.md` §S455 (8 rulings).
+> Board: `S455-bryan.md`. Changelog: `docs/changelog.md` §S455. Review ledger: `docs/pr-reviews.md` (S455 markers, #1310–#1325).
+> Solo session. Mechanical state: delta-log `[3715]`–`[3738]`.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. Check first
+- `gh pr list` — every S455 PR merged (#1310–#1325); the wrap PR itself. Five OLD PRs still untouched (#1176 #939 #865 #580 #579 — close-or-revive is still owed, carried from S454).
+- The flogence `msg.ts resolve` defect (pushes to protected `main`) — flogence confirmed it and queued its fix for bryan's ruling (their option (a): resolve files on the `inbox` branch). Until then scrml moves handled mail to `read/` by its own PRs and treats `resolve` as unavailable. Two flogence FYIs on scrml's `inbox` branch are read but un-resolvable for that reason.
+
+### 1. Owed (ordered)
+1. **Tenant floor — remaining open gaps** (all filed in `docs/known-gaps.md`, S455):
+   `g-tenant-identity-substrate-scoped-breaks-login-s455` (a users table carrying tenant_id silently breaks every login — wants a diagnostic) ·
+   `g-tenant-floor-off-for-live-db-and-body-create-tables-s455` (MED) · `g-tenant-small-residuals-s455` (LOW: TEMP table, restrictive-policy comment FP, quadratic unbalanced braces, `--no-gather`).
+2. **§8.10 hoist divergences** (filed from the #1325 review): key-type coercion (text key vs int column) · writes between iterations unseen (§8.10.3 claims equivalence) · pre-fetch failure timing · >32766 keys throws instead of chunking (§8.10.6 SHALL chunk) · `?{}` in a `match` arm in a server fn (E-CG-006 + SyntaxError).
+3. **impl#1 handled/guarded leftovers:** `g-impl1-guarded-call-and-server-load-consumers-s455` (guarded FUNCTION calls share #1322's blind spots; `!{}` on a `<x server>` load is detached) · `g-impl1-handled-sql-misc-codegen-s455` · `g-impl1-multibatch-split-count-null-s455` (silent-wrong, cause untraced).
+4. **Foreign seal follow-ups:** `g-db-scope-als-global-exposes-guarded-handle-s455` (MED) · wrapper-close at build (LOW) · top-level / binary-expr slice codegen (LOW).
+5. **R11 tail:** 244 listed sites (181 writes) need human handling; `g-r11-read-fallback-masks-outage-at-login-s455` (the example login files should surface an outage, not "invalid credentials").
+6. Carried from S454: bootstrap twin `E-NAME-COLLIDES-RESERVED-PREFIX`; U1c; dpa-068 (widen arm-body grammar).
+
+## 🔭 DURABLE
+**After three review rounds on a text classifier, change the boundary — and I applied it at round seven.** The tenant schema checker
+went: named hazards → statement kinds by name → per-file set → path-string db identity → keyword-identifier parse → FROM-in-call →
+brackets → `rel.f`. Every round closed a class; every review found the next, because the checker was guessing at full Postgres from
+text. It converged only when (1) statement KINDS became an allow-list (bryan "your rec on the allow-list"), (2) every `name(` became a
+call checked against a pure allow-list, and (3) bodies moved into the ONE S452 subset the compiler fully understands. S452 already
+said this. Next time: at round three, propose the allow-list/subset move, don't patch round four.
+
+**A ruling's stated premise can be measured false, and the brief must not inherit it.** S451 5(a) called the R11 rewrite
+"meaning-preserving" because the pre-R11 SPEC said failed queries were silent; impl#1 actually THREW. My brief demanded runtime
+identity with impl#1 AND the SPEC meaning — contradictory. The agent stopped correctly; the review then executed the consequence
+(a write failing silently while the audit log said "revoked"). bryan narrowed to reads-only. Verify a ruling's premise against the
+implementation before encoding it.
+
+**A fix can make a pre-existing hole reachable.** #1325 fixed hoisted reads inside `if` that emitted `null` — and `null` had been
+accidentally hiding a protect leak and wrong-answer IN-rewrites. A fix that turns "always wrong" into "now runs" owes a review of
+what the newly-running path does. Same shape in #1322's arm check (fail-closed base → fail-open head).
+
+## ⚑ MISSES (mine)
+1. ★★ The S452 three-rounds rule applied at round 7 (above).
+2. ★ The R11 brief inherited S451's false premise (above).
+3. ★ Edited SPEC on the main checkout (caught before commit; moved to a branch).
+4. ★ A probe's control was wrong twice (a view over a TENANT table is refused regardless; `protect=` on `<program>` is not the protect form) — both caught by re-running with a correct control before acting.
+5. ★ `git commit … | tail` style masking almost hid a failed pre-commit (contention with an agent's suite); caught by checking `c=$?` and the branch log.
+6. ★ Wrote "the deploy documentation states it" into SPEC — no deploy doc exists; corrected before landing.
+
+## Worktrees + /tmp (wrap 6b / 6b′)
+Removed at wrap: the 7 landed S455 agent worktrees + branches (dry-run listed first; all clean). `agent-ac0b2605613446744` (#1325) removed after its merge. Review/landing trees removed as used. ~31 older `agent-*` trees from earlier sessions remain (not audited — carried). /tmp probe (ASUS): **10,067** top-level `/tmp` entries since boot (S454: 10,023) · **1,159,489** files under `/tmp/claude-1000` (S454: 1,157,871) — +1.6k, flat.
+
+## Gate at close
+Cloud `gate` green on every S455 landing; main at wrap `9c556dc74` (#1325). Windows runner: one timeout in the executed tenant-floor test (fixed #1324). Review floor **0 owed** (`review-debt.ts --limit 2000`: 892/892). ⚠ Code-bearing carve-out rate 43/429 (10%, flagged HIGH) — S455 carved three small code-bearing PRs: #1311 (a `--abbrev=9` script pin), #1321 (a print-only build-report line + one pure api.js field, PA read the full diff), #1324 (a test timeout). Read their probe= lines if the rate keeps climbing. pa-ruled count: **5** (unchanged — every S455 surface change went to bryan).
+
+---
+
 # scrml — Session 454 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S452/S453 below. **ROTATED at this wrap:** everything S451-and-older moved verbatim to
