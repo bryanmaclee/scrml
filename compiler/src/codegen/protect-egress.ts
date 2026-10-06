@@ -63,7 +63,7 @@
  */
 
 import { extractSelectProjection } from "../sql-projection.ts";
-import { liveSqlInterpolations } from "./sql-lex.ts";
+import { liveSqlInterpolations, jsInterpolationEnd } from "./sql-lex.ts";
 // @ts-ignore — acorn ships its own types but the compiler imports it untyped
 // elsewhere (expression-parser.ts, validate-emit.ts, egress-field-scan.ts) for
 // the same reason. Used by `findAuthoredResponseConstruction` below.
@@ -499,9 +499,9 @@ function blankSqlNoise(sql: string): string {
   while (i < n) {
     const c = sql[i];
     if (c === "$" && sql[i + 1] === "{") {
-      let depth = 1;
-      let j = i + 2;
-      while (j < n && depth > 0) { if (sql[j] === "{") depth++; else if (sql[j] === "}") depth--; j++; }
+      // The emitter's slot extent (sql-lex.ts, JS-aware; S456 fix round F1 sweep).
+      const e = jsInterpolationEnd(sql, i);
+      const j = e === -1 ? n : e;
       out += " ".repeat(j - i);
       i = j;
       continue;

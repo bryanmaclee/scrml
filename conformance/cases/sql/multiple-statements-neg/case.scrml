@@ -1,0 +1,11 @@
+<program db="./app.db">
+    // Two statements in one ?{} — a ;-chained body is refused (§8.1.2). Each statement alone is
+    // admitted DML; the chain is the hazard: one string runs every statement on the database.
+    ${
+        function record() {
+            ?{`INSERT INTO log (msg) VALUES ('a'); INSERT INTO log (msg) VALUES ('b')`}.run()
+            return 1
+        }
+    }
+    <button onclick=${ record() }>record</button>
+</program>

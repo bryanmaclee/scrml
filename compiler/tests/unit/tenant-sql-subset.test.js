@@ -44,8 +44,11 @@ describe("lexTenantSubset — the closed token set", () => {
   });
   test("an interpolation is opaque, but its end must be provable without parsing JS", () => {
     expect(lexTenantSubset("SELECT id FROM t WHERE a = ${@user.id} AND b = ${f(x, y)} AND c = ${\"lit\"}").ok).toBe(true);
+    // A brace inside a plain string: this lexer's first `}` (the string removed) is the slot's
+    // end, and since S456 fix round F1 the emitter (`liveSqlInterpolations`, JS-aware) and JS
+    // agree — the cross-check that refused it (the emitter brace-counted) no longer disagrees.
+    expect(lexTenantSubset("SELECT ${ \"{\" } AS z FROM t").ok).toBe(true);
     for (const q of [
-      "SELECT ${ \"{\" } AS z FROM t",     // brace in a string — the emitter brace-counts, JS does not
       "SELECT ${ \"}\" } AS z FROM t",     // the first `}` is inside a string (unclosed quote)
       "SELECT ${ a / b } FROM t",           // a slash (regex / comment ambiguity)
       "SELECT ${ `x` } FROM t",             // a template

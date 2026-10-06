@@ -5,6 +5,7 @@ import { exprNodeCollectCallees } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
+import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
@@ -871,8 +872,8 @@ const _SQL_PAREN_KEYWORDS = new Set([
 function sqlNodeIsReadOnly(sql: any): boolean {
   if (!sql || sql.kind !== "sql" || typeof sql.query !== "string") return false;
   // `${...}` holes are bound parameters, never SQL text; quoted literals are data.
-  const q = sql.query
-    .replace(/\$\{[^}]*\}/g, "?")
+  // (slot extents: the emitter's, JS-aware — never a `[^}]*` re-derivation; S456 F1 sweep)
+  const q = replaceLiveSqlInterpolations(sql.query, () => "?")
     .replace(/'(?:[^']|'')*'/g, "''")
     .trim();
   if (!/^select\b/i.test(q)) return false;

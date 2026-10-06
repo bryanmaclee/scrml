@@ -35,6 +35,7 @@
 import { programStatementVerdicts } from "./schema-differ.js";
 import { resolveDbScopes } from "./db-ownership.ts";
 import { getNodes } from "./codegen/collect.ts";
+import { forEachProgramBodySql } from "./sql-one-statement.ts";
 
 /**
  * Whether any file compiled together declares a database (`<program db=>`, `<db src=>` — the
@@ -104,14 +105,6 @@ const ADMITTED_SUMMARY =
   "`SAVEPOINT` / `RELEASE`; and `PRAGMA table_info | table_xinfo | index_list | index_info | " +
   "foreign_key_list | busy_timeout | journal_mode`.";
 
-/** The SQL text inside an expression-position `?{ … }` (`sql-ref` `raw`), template backticks removed. */
-function sqlRefBody(raw: string): string {
-  let s = raw.trim();
-  if (s.startsWith("?{") && s.endsWith("}")) s = s.slice(2, -1).trim();
-  if (s.startsWith("`") && s.endsWith("`") && s.length >= 2) s = s.slice(1, -1);
-  return s;
-}
-
 /**
  * (1) Every program-body `?{}` statement, held to the CLOSED allow-list (S456 "a, fix F7/F9
  * too" + "your recs, go"; `schema-differ.js` `programStatementVerdicts`):
@@ -129,7 +122,6 @@ export function programBodyUndeclaredTenantTables(
   const declared = inSet(tenantTables);
   const out: ProgramStatementDiagnostic[] = [];
   const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
-  const seen = new WeakSet<object>();
   const reported = new Set<string>();
   const read = (sql: string, span: unknown): void => {
     // (S456 round 4: a statement that does not begin with a keyword is refused like any other
@@ -166,22 +158,9 @@ export function programBodyUndeclaredTenantTables(
       });
     }
   };
-  const visit = (v: unknown, depth: number): void => {
-    if (v === null || typeof v !== "object" || depth > 200 || seen.has(v as object)) return;
-    seen.add(v as object);
-    if (Array.isArray(v)) { for (const x of v) visit(x, depth + 1); return; }
-    const n = v as Record<string, unknown>;
-    // A `<schema>` body is the declaration itself — never a program-body statement.
-    if (n.kind === "state" && n.stateType === "schema") return;
-    if (n.kind === "sql" && typeof n.query === "string") read(n.query, n.span);
-    else if (n.kind === "sql-ref" && typeof n.raw === "string") read(sqlRefBody(n.raw), n.span);
-    for (const key of Object.keys(n)) {
-      if (key === "span" || key.startsWith("_")) continue;
-      visit(n[key], depth + 1);
-    }
-  };
-  const root = (fileAST as any)?.ast?.nodes ?? (fileAST as any)?.nodes ?? fileAST;
-  visit(root, 0);
+  // Every `?{}` outside a `<schema>` (a `<schema>` body is the declaration itself) — the same
+  // walk the §8.1.2 one-statement rule reads (sql-one-statement.ts).
+  forEachProgramBodySql(fileAST, read);
   return out;
 }
 

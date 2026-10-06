@@ -24,6 +24,8 @@
  * three sessions. So the caller reports rather than guesses.
  */
 
+import { replaceLiveSqlInterpolations } from "./codegen/sql-lex.ts";
+
 /**
  * Clauses after which an identifier is a table reference, PAIRED WITH THE PRIVILEGE that
  * reference implies.
@@ -60,7 +62,9 @@ const UNRESOLVABLE = [
 
 /** `${…}` interpolations are bound PARAMETERS and never identifiers — blank them first. */
 function blankInterpolations(sql) {
-  return sql.replace(/\$\{[^}]*\}/g, " ? ");
+  // The emitter's slot extents (sql-lex.ts, JS-aware) — a `[^}]*` match ended `${ f({a:1}) }`
+  // at the first `}` and left the rest to be read as SQL identifiers (S456 fix round F1 sweep).
+  return replaceLiveSqlInterpolations(sql, () => " ? ");
 }
 
 /** Strip string literals and comments so their contents cannot be read as identifiers. */
