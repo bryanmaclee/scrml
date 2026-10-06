@@ -86,3 +86,59 @@ base — the fail-closed unknown-callee rule taints the result and the server-fn
 
 The handle() exit (`return _scrml_mw_result;`) has NO runtime guard at all — no redact, no
 `_scrml_protect_mediated` check. For handle(), the static analysis is the only guard.
+
+## Unit 2 — fix landed (14c836010)
+
+- `protect-flow.ts`: (1) `HANDLE_RESULT_BINDING` + `isHandleResultDeclarator` — handle()'s return is a
+  sink (kind "handle", naked semantics like the serializer, so a row routed through `resolve()` is
+  not a false positive); (2) `responseCtorOf(t)` — Response recognized by the constructor VALUE's
+  global names (`Taint.gn`), exact vs maybe (fail closed on gnAny); applied to `new X(...)`,
+  `X.json/redirect/<unreadable key>(...)`, `Reflect.construct(X, ...)`. The spelled
+  `path === "Response"` branch in `evalGlobalCall` is removed (subsumed).
+- `emit-server.ts`: the wrapper's declarator uses the shared constant.
+- Spoofing check: an author `const _scrml_mw_result = …` is `E-NAME-COLLIDES-RESERVED-PREFIX`.
+
+### Head repro (same fixtures, HEAD compiler)
+
+| variant | base | head |
+|---|---|---|
+| gt / self / gtidx / alias / destr / gtjson / aliasjson / destrjson | rc=0, 200 with `"passwordHash":"SECRET"` | rc=1 E-PROTECT-006 (Response recognizer) |
+| bindjson (`.bind`-ed `Response.json`) | rc=0, 200 with hash | rc=1 E-PROTECT-006 (handle exit sink) |
+| hdrpost (`r.headers.set("x-h", u.passwordHash)` after resolve) | rc=0, onion 404 `x-h=SECRET` | rc=1 E-PROTECT-006 (handle exit sink) |
+| negctl (unprotected value via `new globalThis.Response`) | rc=0, 200 `{"id":1,"name":"ada"}` | rc=0, same |
+| gt_name_only (`u.name` body) / gt_reveal / resolve_clean | rc=0 | rc=0 (reveal ships deliberately; x-name=ada) |
+| sf_* (server fn, every spelling) | rc=1 E-PROTECT-006 | rc=1 E-PROTECT-006 |
+
+### Corpus differential (scripts/corpus-emit-differential.ts, roots examples,samples,conformance,stdlib)
+
+2368 sources both sides; compile-failure SET identical (0 newly failing / 0 newly passing);
+0 diagnostic-CODE changes. Text/byte deltas are the base copy's `.tmp/base/` path prefix only
+(server.js -10 bytes = the embedded db path). Textual hits for `globalThis.Response` /
+`self.Response` / aliases: 0; `Response.json`: 1 (bare, in an endpoint arm — unchanged path).
+Files pairing `function handle(` with `protect=`: 0. Newly rejected: NONE.
+
+### Tests
+
+Pre-commit gate on 14c836010: 31426 pass / 58 skip / 12 todo / 0 fail. New integration test
+26/26; run against the base compiler the 11 leak tests fail and the 15 others pass (bite).
+11 conformance cases: 10 base rc=0 -> head E-PROTECT-006; the clean control compiles on both.
+
+### Runtime half — static is the only guard for handle(); NOT closed (fork for the PA)
+
+The handle() exit returns `_scrml_mw_result` with no runtime guard. Closing it with the
+`_scrml_protect_mediated` check would refuse (a) every legitimate author body in handle()
+(§40's escape hatch; adopter #471 PDF egress) and (b) every `resolve()`-path response that is
+not marked — verified: the SSR compose `new Response(_scrml_html, …)` is unmarked, and
+`build.js` / `dev.js` contain no mediation marking for static files. E-PROTECT-005's SPEC scope
+is "a server function, `<endpoint>` arm or `server function*`" — handle() is not in it. So a
+runtime refusal at the handle() exit is a language-surface change (extend limb 2/3 to
+handle()), not a conformance fix. Recommendation: keep handle() bodies author-owned; the static
+sink is the guard; if a runtime belt is wanted, it needs a ruling + mediation marks on every
+resolve()-path response first.
+
+### Residual filed
+
+`g-protect-005-recognizes-response-by-bare-name-only` (MED): E-PROTECT-005 detector
+(`protect-egress.ts findAuthoredResponseConstruction`) is bare-name only —
+`new globalThis.Response(JSON.stringify({ok:1}))` in a server fn compiles clean (a SHALL error
+missed; runtime limb 3 still refuses it, no leak). Not fixed here (scope; newly-rejecting).
