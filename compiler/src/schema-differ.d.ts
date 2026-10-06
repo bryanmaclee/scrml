@@ -101,17 +101,18 @@ export declare function schemaTableDeclarations(text: string): Array<{
   columns: Array<{ name: string }>;
 }>;
 
-/** §14.8.10 (S456) — the relations a program-body `?{}` statement creates or gives columns, with their columns when the compiler can determine them (E-TENANT-UNDECLARED). */
-export declare function programTenantTableDecls(text: string): Array<{
+/** §14.8.10 (S456 "a, fix F7/F9 too" + "your recs, go") — the closed allow-list verdict of each statement of a program-body `?{}`. */
+export declare function programStatementVerdicts(
+  text: string,
+  opts?: { dialect?: string; isTenant?: (name: string) => boolean },
+): Array<{
+  verdict: "admitted" | "tenant" | "not-admitted" | "unreadable";
+  /** The statement's leading keyword (upper case), or its first characters. */
+  lead: string;
+  /** The relation a `tenant` verdict names. */
   name: string | null;
-  key: string | null;
-  kind: "table" | "view" | "select-into" | "alter" | "rename" | "unreadable";
-  modifiers: string[];
-  offset: number;
-  /** Every column the statement gives the relation, or null when the compiler cannot determine them. */
-  columns: string[] | null;
-  /** Why the columns are unknown (null when known). */
   why: string | null;
+  offset: number;
 }>;
 
 /** The bounded principal role the per-request A1 wrapper drops to (S6). */

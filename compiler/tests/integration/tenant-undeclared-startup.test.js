@@ -210,6 +210,38 @@ async function buildProject(source) {
   return { parent, root };
 }
 
+describe("F7/F9 (S456 \"a, fix F7/F9 too\") — the startup check reads generated and hidden columns (pragma_table_xinfo)", () => {
+  test("SQLite: a GENERATED tenant_id column and an fts4 languageid=\"tenant_id\" are reported", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "s456-xinfo-"));
+    const data = mkdtempSync(join(tmpdir(), "s456-xinfo-data-"));
+    const prev = process.env.SCRML_DATA_DIR;
+    try {
+      mkdirSync(join(dir, "src"), { recursive: true });
+      writeFileSync(join(dir, "scrml.toml"), "");
+      writeFileSync(join(dir, "src", "app.scrml"), APP("./app.db"));
+      const r = compileScrml({ inputFiles: [join(dir, "src", "app.scrml")], outputDir: join(dir, "dist"), write: true, log: () => {} });
+      expect((r.errors ?? []).filter((e) => e.severity === "error").map((e) => e.code)).toEqual([]);
+      mkdirSync(join(data, "src"), { recursive: true });
+      const db = new Database(join(data, "src", "app.db"), { create: true });
+      db.run("CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)");
+      db.run("CREATE TABLE gen (id INTEGER, tenant_id TEXT GENERATED ALWAYS AS ('A') VIRTUAL)");
+      db.run(`CREATE VIRTUAL TABLE f4 USING fts4(body, languageid="tenant_id")`);
+      // the pre-fix reading (`pragma_table_info`) sees neither
+      const old = db.query("SELECT m.name AS name FROM sqlite_master m, pragma_table_info(m.name) p WHERE lower(p.name) = 'tenant_id'").all().map((x) => x.name);
+      expect(old).toEqual(["assets"]);
+      db.close();
+      process.env.SCRML_DATA_DIR = data;
+      const mod = await importFresh(join(dir, "dist", "app.server.js"));
+      const found = await mod._scrml_tenant_startup_check.undeclared();
+      expect(found.map((f) => f.table).sort()).toEqual(["f4", "gen"]);
+    } finally {
+      if (prev === undefined) delete process.env.SCRML_DATA_DIR; else process.env.SCRML_DATA_DIR = prev;
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(data, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("F2 — a database down at boot: the server serves once it comes up, with no health probe", () => {
   test("SQLite: missing at boot → 503 ('could not be checked'); created → a plain request gets 200", async () => {
     const { parent, root } = await buildProject(REFERENCING);
@@ -321,6 +353,13 @@ d("the startup check on Postgres (live)", () => {
       expect(f.error).toBe(null);
       expect(f.db).not.toContain(PW);
     }
+  });
+
+  test("F9 on Postgres: a GENERATED tenant_id column is in pg_attribute (attnum > 0, not dropped) and is reported", async () => {
+    await check.unsafe("CREATE TABLE gen (id integer, tenant_id text GENERATED ALWAYS AS ('A') STORED)");
+    const found = await mod._scrml_tenant_startup_check.undeclared();
+    expect(found.map((f) => f.table)).toContain("public.gen");
+    await check.unsafe("DROP TABLE gen");
   });
 
   test("a partition of a declared table is not reported; renaming the column clears a finding", async () => {

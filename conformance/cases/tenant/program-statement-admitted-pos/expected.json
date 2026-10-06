@@ -1,0 +1,15 @@
+{
+  "id": "tenant-program-statement-admitted-pos",
+  "description": "§14.8.10 (S456 round 3) — control for the closed program-body allow-list: a spelled `CREATE TABLE IF NOT EXISTS`, `PRAGMA table_info`, one `ALTER TABLE … ADD COLUMN`, an fts5 table with closed options, a partial `CREATE UNIQUE INDEX`, `BEGIN` / `COMMIT` and an INSERT all compile — the shapes flogence/src uses.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 item (1) (rulings user-voice-scrml.md S456 \"a, fix F7/F9 too\" + \"your recs, go\"): each of these statements is on the admitted list, and none gives a relation a `tenant_id` column.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED",
+      "E-TENANT-UNDECLARED"
+    ]
+  }
+}

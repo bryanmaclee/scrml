@@ -3010,10 +3010,12 @@ function _compileScrmlImpl(options = {}) {
     const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
     collectErrors("TENANT-SCHEMA", diags, fp);
     if (substrateCtx) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => fileTenantSubstrateReads(fileAST, substrateCtx)), fp);
-    // §14.8.10 (S456, ruling "b, startup check lands with it", item 1) — a program-body
-    // `?{CREATE [TEMP] TABLE … tenant_id …}` (or `ALTER TABLE … tenant_id`) whose table
-    // is outside the SAME tenant set is E-TENANT-UNDECLARED (tenant-undeclared.ts).
-    collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables)), fp);
+    // §14.8.10 (S456, rulings "b, startup check lands with it" item 1 + "a, fix F7/F9 too" +
+    // "your recs, go") — every program-body `?{}` statement is held to a CLOSED allow-list:
+    // an admitted form giving a relation outside the SAME tenant set a `tenant_id` column is
+    // E-TENANT-UNDECLARED; anything else is E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED
+    // (tenant-undeclared.ts over schema-differ.js `programStatementVerdicts`).
+    collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables, compilationTenant.dialect ?? "unknown")), fp);
   }
   // …item 2 — a live SQLite file a `<db src=>` block opened holds a `tenant_id` relation
   // outside the set (protect-analyzer.ts collected them; reported at the `<db>` block).

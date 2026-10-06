@@ -3918,104 +3918,143 @@ export function emitScrmlSchemaSource(actual, opts = {}) {
 }
 
 /**
- * §14.8.10 (S456, ruling user-voice-scrml.md S456 "b, startup check lands with it"; S456
- * review round 2 — the boundary moved) — every relation a PROGRAM-BODY `?{}` statement
- * (not a `< schema>` body) CREATES or gives new columns, with its column names when the
- * compiler can determine every one of them, else `columns: null`. The caller
- * (`compiler/src/tenant-undeclared.ts`) refuses — `E-TENANT-UNDECLARED` — a relation outside
- * the compilation's tenant set whose columns are unknown or include `tenant_id`.
+ * §14.8.10 (S456 — rulings user-voice-scrml.md S456 "a, fix F7/F9 too" and "your recs, go") —
+ * program-body SQL in a database compilation is a CLOSED ALLOW-LIST.
  *
- * ⚑ THE QUESTION IS "CAN THE COMPILER DETERMINE EVERY COLUMN OF WHAT THIS CREATES?", NOT
- * "DOES THE TEXT MENTION tenant_id?". Three review rounds patched the mention reading
- * (CREATE / ALTER → `SELECT … INTO` → `SELECT *` over a derived table, a VALUES list, a
- * CTE — each executed on PG16 creating a `tenant_id` table that compiled clean). A column
- * list is KNOWN only when it is spelled: a `CREATE TABLE` column list; a view's or CTAS's
- * own `(a, b)` list; or a select list every item of which is a plain column reference or
- * `expr AS name`. A `*`, `AS TABLE x`, `AS VALUES`, a `LIKE` copy, `INHERITS`,
- * `PARTITION OF`, `OF type`, a virtual-table module, an unnamed expression and a name the
- * reader cannot read (`${…}`) are UNKNOWN. What the select list reads FROM does not matter
- * when every output name is spelled; it is exactly what makes a `*` unknowable.
+ * ⚑ ALLOW-LIST, NOT CLASSIFY. Three review rounds patched a reader that classified what a
+ * statement creates (CREATE / ALTER → `SELECT … INTO` → "known columns"); each round an S239
+ * reviewer executed a shape on PG16 that created a `tenant_id` relation and compiled clean
+ * (short view / CTAS column lists, `ALTER VIEW … RENAME COLUMN`, `EXPLAIN ANALYZE CREATE TABLE
+ * … AS`, `CREATE SCHEMA … CREATE TABLE`, comment and dollar-tag disagreements between
+ * databases, fts4 `languageid=`). The S452 durable, applied at the DDL layer: a program-body
+ * `?{}` statement is ADMITTED only when it is one of the forms below, read token by token;
+ * everything else is refused, whatever it would create.
  *
- * Relation-creating statements read: `CREATE [OR REPLACE] [TEMP | TEMPORARY | UNLOGGED |
- * GLOBAL | LOCAL | VIRTUAL | …] TABLE` (column list, or `AS query`, or any other form);
- * `CREATE [OR REPLACE] [MATERIALIZED] VIEW` (its column list, else its query's); Postgres
- * `SELECT … INTO [TEMP | TEMPORARY | UNLOGGED] [TABLE] t` (MySQL's `INTO @var | OUTFILE |
- * DUMPFILE` writes no table); `ALTER TABLE t` actions `ADD [COLUMN]`, `RENAME [COLUMN] a TO
- * b`, MySQL `CHANGE [COLUMN] a b` (new column names), and `RENAME TO u` (a new relation `u`
- * whose columns the compiler does not know).
+ * Admitted (each `;`-separated statement of the `?{}`):
+ *   1. DML — led by `SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`, with no
+ *      top-level `INTO` other than an `INSERT` / `REPLACE` target (a `SELECT … INTO` creates a
+ *      table on Postgres, and writes variables / files on MySQL).
+ *   2. `CREATE [TEMP | TEMPORARY] TABLE [IF NOT EXISTS] name (col type …, …)` — one name part,
+ *      a spelled column list whose every item is a column or a table constraint, optionally
+ *      followed by SQLite's `WITHOUT ROWID` / `STRICT`. A column named `tenant_id` (any case
+ *      or quoting) on a table outside the tenant set → `tenant`.
+ *   3. `ALTER TABLE name ADD [COLUMN] [IF NOT EXISTS] col type …` — one action. `col` =
+ *      `tenant_id` on a table outside the tenant set → `tenant`.
+ *   4. `CREATE VIRTUAL TABLE [IF NOT EXISTS] name USING fts5(col [UNINDEXED], …, opt = val …)`
+ *      with every option on `FTS5_OPTIONS` (none adds a column — SQLite fts5.html §4; executed:
+ *      `pragma_table_xinfo` shows only the declared columns plus fts5's own hidden table-name
+ *      and `rank` columns for each). `content = <table>` naming a tenant-scoped table, or a
+ *      column `tenant_id`, outside the tenant set → `tenant`.
+ *   5. Transaction control (ruling "your recs, go"; S451 R6 sanctions an author `?{BEGIN}`):
+ *      `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT` / `RELEASE` followed only by words.
+ *   6. `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col [COLLATE c] [ASC | DESC], …)
+ *      [WHERE …]` — an index adds no column and is not a readable relation.
+ *   7. `PRAGMA name`, `PRAGMA name = value`, `PRAGMA name(arg)` for `name` on `ADMITTED_PRAGMAS`.
  *
- * Read from SQL TOKENS (`relationTokens`): literals, quoted identifiers, `--` (ending at CR
- * or LF — S456 F1) and nesting `/* *\/` comments, `${…}` parameters and `$tag$…$tag$`
- * bodies are each one token. A dollar-quoted body is OPAQUE — a routine's `SELECT … INTO
- * var` is not table creation (S456 review R3), and DDL a `DO` / function body runs is
- * runtime DDL the compile does not read (the §14.8.10 Limit: seen at the next startup).
- * A statement holding a form whose extent differs by database — a backslash (MySQL string
- * escape) or a `#` (MySQL comment) — and naming `tenant_id` anywhere is returned as one
- * unreadable relation (fail-closed: the reading may have hidden a statement).
+ * UNREADABLE → refused: a statement the databases do not all read the same way — a `/*`
+ * inside a block comment (Postgres nests block comments; SQLite and MySQL do not), a `--`
+ * comment holding a lone CR (Postgres ends it there; SQLite and MySQL at LF), a `$tag$` whose
+ * tag is not ASCII (Postgres accepts it; the reader does not), and — unless the compilation's
+ * database is SQLite — a `'…'` literal holding a backslash (an `E'…'` / MySQL escape), a `#`
+ * (a MySQL comment), a `--` not followed by whitespace (not a comment on MySQL) and a `[…]`
+ * identifier (SQLite's; an array subscript on Postgres).
  *
  * @param {string} text the SQL text of one `?{}` (statement or expression position)
- * @returns {Array<{name: string|null, key: string|null, kind: "table"|"view"|"select-into"|"alter"|"rename"|"unreadable", modifiers: string[], offset: number, columns: string[]|null, why: string|null}>}
+ * @param {{ dialect?: string, isTenant?: (name: string) => boolean }} [opts]
+ * @returns {Array<{verdict: "admitted"|"tenant"|"not-admitted"|"unreadable", lead: string, name: string|null, why: string|null, offset: number}>}
  */
-export function programTenantTableDecls(text) {
+export function programStatementVerdicts(text, opts = {}) {
   const out = [];
-  if (typeof text !== "string" || text.length === 0) return out;
-  const toks = relationTokens(text);
+  if (typeof text !== "string" || text.trim().length === 0) return out;
+  const dialect = opts.dialect ?? "unknown";
+  const isTenant = opts.isTenant ?? (() => false);
+  const { toks, unreadable } = programSqlTokens(text, dialect);
+  if (unreadable !== null) {
+    out.push({ verdict: "unreadable", lead: "", name: null, why: unreadable, offset: 0 });
+    return out;
+  }
   let start = 0;
   for (let i = 0; i <= toks.length; i++) {
     if (i < toks.length && !(toks[i].k === "p" && toks[i].t === ";" && toks[i].depth === 0)) continue;
-    if (i > start) readRelationStatement(text, toks.slice(start, i), out);
+    if (i > start) out.push(statementVerdict(text, toks.slice(start, i), isTenant));
     start = i + 1;
   }
-  if (/[\\#]/.test(text) && namesTenantId(text)) {
-    out.push({
-      name: null, key: null, kind: "unreadable", modifiers: [], offset: 0, columns: null,
-      why: "the statement holds a backslash or `#`, whose meaning differs between databases, and names `tenant_id`",
-    });
-  }
-  out.sort((a, b) => a.offset - b.offset);
   return out;
 }
 
-/** One token of `relationTokens`. `depth` is the paren depth OUTSIDE a `(` / `)` token. */
-// { k: "id" | "str" | "num" | "param" | "dollar" | "p", t?, up?, at, depth }
+/** The fts5 options that add no column (SQLite fts5.html §4; each executed — see above). */
+const FTS5_OPTIONS = new Set([
+  "CONTENT", "CONTENT_ROWID", "TOKENIZE", "PREFIX", "COLUMNSIZE", "DETAIL",
+  "CONTENTLESS_DELETE", "CONTENTLESS_UNINDEXED", "LOCALE", "TOKENDATA",
+]);
 
-/** The SQL tokens of a program-body statement (see `programTenantTableDecls`). */
-function relationTokens(text) {
+/** The PRAGMAs a program body may run (ruling S456 "your recs, go"). */
+const ADMITTED_PRAGMAS = new Set([
+  "TABLE_INFO", "TABLE_XINFO", "INDEX_LIST", "INDEX_INFO", "FOREIGN_KEY_LIST", "BUSY_TIMEOUT", "JOURNAL_MODE",
+]);
+
+const TRANSACTION_LEADS = new Set(["BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE"]);
+const DML_LEADS = new Set(["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "REPLACE"]);
+
+/**
+ * The SQL tokens of a program-body statement, or the first reason the databases would not
+ * all read it the same way. Literals, quoted identifiers, `${…}` parameters and ASCII
+ * `$tag$ … $tag$` bodies are single tokens; comments are skipped. `depth` is the paren depth
+ * OUTSIDE a `(` / `)` token.
+ */
+function programSqlTokens(text, dialect) {
   const toks = [];
   const n = text.length;
+  const sqliteOnly = dialect === "sqlite";
   let depth = 0;
   let i = 0;
+  const bad = (why) => ({ toks, unreadable: why });
   while (i < n) {
     const c = text[i];
     if (/\s/.test(c)) { i++; continue; }
-    if (c === "-" && text[i + 1] === "-") { i = sqlLineCommentEnd(text, i); continue; }
-    if (c === "/" && text[i + 1] === "*") {
-      let d = 1;
-      let j = i + 2;
-      while (j < n && d > 0) {
-        if (text[j] === "/" && text[j + 1] === "*") { d++; j += 2; continue; }
-        if (text[j] === "*" && text[j + 1] === "/") { d--; j += 2; continue; }
-        j++;
+    if (c === "-" && text[i + 1] === "-") {
+      if (!sqliteOnly && dialect !== "postgres" && !/\s/.test(text[i + 2] ?? " ")) {
+        return bad("a `--` not followed by whitespace is not a comment on MySQL");
       }
-      i = j;
+      const end = sqlLineCommentEnd(text, i);
+      if (text[end] === "\r" && text[end + 1] !== "\n") {
+        return bad("a `--` comment holds a lone carriage return (Postgres ends the comment there, SQLite and MySQL do not)");
+      }
+      i = end;
       continue;
     }
+    if (c === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      const inner = text.slice(i + 2, close === -1 ? n : close);
+      if (inner.includes("/*")) return bad("a `/*` inside a block comment (Postgres nests block comments, SQLite and MySQL do not)");
+      if (close === -1) return bad("an unclosed block comment");
+      i = close + 2;
+      continue;
+    }
+    if (c === "#" && !sqliteOnly && dialect !== "postgres") return bad("a `#` (a comment on MySQL)");
     if (c === "'") {
       let j = i + 1;
       while (j < n && !(text[j] === "'" && text[j + 1] !== "'")) j += text[j] === "'" ? 2 : 1;
+      if (j >= n) return bad("an unclosed string literal");
+      if (!sqliteOnly && text.slice(i, j).includes("\\")) {
+        return bad("a string literal holds a backslash (an escape on MySQL and in a Postgres `E'…'` string)");
+      }
       toks.push({ k: "str", at: i, depth });
       i = j + 1;
       continue;
     }
     if (c === '"' || c === "`" || c === "[") {
-      const p = readSqlIdentPart(text, i);
-      if (p) {
-        toks.push({ k: "id", t: p.name, up: p.name.toUpperCase(), quoted: true, at: i, depth });
-        i = p.end;
+      if (c === "[" && !sqliteOnly) return bad("a `[…]` identifier (SQLite's; an array subscript on Postgres)");
+      const close = c === "[" ? "]" : c;
+      if (text[i + 1] === close && text[i + 2] !== close) {   // `""` — empty (SQLite reads it as '')
+        toks.push({ k: "str", at: i, depth });
+        i += 2;
         continue;
       }
-      toks.push({ k: "p", t: c, at: i, depth });
-      i++;
+      const p = readSqlIdentPart(text, i);
+      if (!p) return bad(`an unclosed quoted identifier (\`${c}\`)`);
+      toks.push({ k: "id", t: p.name, up: p.name.toUpperCase(), quoted: true, at: i, depth });
+      i = p.end;
       continue;
     }
     if (c === "$") {
@@ -4031,12 +4070,19 @@ function relationTokens(text) {
         continue;
       }
       const m = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(text.slice(i, i + 66));
-      if (m) {                                          // `$tag$ … $tag$` — an opaque body
+      if (m) {                                          // an ASCII `$tag$ … $tag$` string
         const close = text.indexOf(m[0], i + m[0].length);
-        toks.push({ k: "dollar", at: i, depth });
-        i = close === -1 ? n : close + m[0].length;
+        if (close === -1) return bad("an unclosed dollar-quoted string");
+        toks.push({ k: "str", at: i, depth });
+        i = close + m[0].length;
         continue;
       }
+      if (/^\$[\p{L}\p{N}_]*\$/u.test(text.slice(i, i + 66)) || /[^\x00-\x7f]/.test(text[i + 1] ?? "")) {
+        return bad("a dollar-quote tag that is not ASCII (Postgres reads it as a string; the reader does not)");
+      }
+      toks.push({ k: "p", t: "$", at: i, depth });   // `$1` placeholder and the like
+      i++;
+      continue;
     }
     if (/[\p{L}_]/u.test(c)) {
       let j = i + 1;
@@ -4058,21 +4104,12 @@ function relationTokens(text) {
     toks.push({ k: "p", t: c, at: i, depth });
     i++;
   }
-  return toks;
+  return { toks, unreadable: null };
 }
 
 const isWord = (tok, w) => tok !== undefined && tok.k === "id" && !tok.quoted && tok.up === w;
 const isPunct = (tok, p) => tok !== undefined && tok.k === "p" && tok.t === p;
-
-/** A possibly-qualified name at `toks[i]`: `{ name, next }` (name null when unreadable). */
-function readRelationName(toks, i) {
-  if (toks[i]?.k !== "id") return { name: null, next: i + 1 };
-  let name = toks[i].t;
-  let j = i + 1;
-  while (isPunct(toks[j], ".") && toks[j + 1]?.k === "id") { name = toks[j + 1].t; j += 2; }
-  if (isPunct(toks[j], ".")) return { name: null, next: j + 1 };
-  return { name, next: j };
-}
+const isName = (tok) => tok !== undefined && tok.k === "id";
 
 /** Index of the `)` closing the `(` at `open`, or -1. */
 function closingParen(toks, open) {
@@ -4090,191 +4127,152 @@ function splitAtCommas(toks, from, to, d) {
     if (isPunct(toks[j], ",") && toks[j].depth === d) { items.push(toks.slice(s, j)); s = j + 1; }
   }
   items.push(toks.slice(s, to));
-  return items.filter((it) => it.length > 0);
+  return items;
 }
 
-const QUERY_CLAUSE_END = new Set(["FROM", "INTO", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "WINDOW", "FETCH", "FOR", "RETURNING"]);
+const isTenantColumn = (name) => typeof name === "string" && name.toLowerCase() === "tenant_id";
+const TABLE_CONSTRAINT_LEADS = new Set(["CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "EXCLUDE"]);
 
-/**
- * The output names of the select list that starts after `toks[sel]` (a `SELECT`), or null
- * when any item's name cannot be determined. Ends at the first depth-level clause keyword.
- */
-function selectListNames(toks, sel) {
-  const d = toks[sel].depth;
-  let i = sel + 1;
-  if (isWord(toks[i], "ALL")) i++;
-  if (isWord(toks[i], "DISTINCT")) {
-    i++;
-    if (isWord(toks[i], "ON") && isPunct(toks[i + 1], "(")) {
-      const c = closingParen(toks, i + 1);
-      if (c === -1) return null;
-      i = c + 1;
-    }
-  }
-  let end = i;
-  // (a `)` closing an enclosing paren carries depth d - 1, so it ends the list too)
-  while (end < toks.length && toks[end].depth >= d &&
-    !(toks[end].depth === d && toks[end].k === "id" && !toks[end].quoted && QUERY_CLAUSE_END.has(toks[end].up))) end++;
-  const names = [];
-  for (const item of splitAtCommas(toks, i, end, d)) {
-    const last = item[item.length - 1];
-    if (item.length >= 2 && last.k === "id" && isWord(item[item.length - 2], "AS") && item[item.length - 2].depth === d) {
-      names.push(last.t);
-      continue;
-    }
-    // a plain column reference: `c`, `t.c`, `s.t.c`
-    const plain = item.every((tok, k) => (k % 2 === 0 ? tok.k === "id" : isPunct(tok, "."))) && item.length % 2 === 1;
-    if (plain) { names.push(last.t); continue; }
-    return null;   // `*`, `t.*`, an unnamed expression, an implicit alias the reader does not trust
-  }
-  return names.length > 0 ? names : null;
-}
+/** The verdict for one `;`-separated statement. */
+function statementVerdict(text, toks, isTenant) {
+  const lead = toks[0];
+  const at = lead.at;
+  const leadWord = lead.k === "id" && !lead.quoted ? lead.up : "";
+  const V = (verdict, name, why) => ({ verdict, lead: leadWord || text.slice(at, at + 12).trim(), name, why, offset: at });
+  const admitted = () => V("admitted", null, null);
+  const notAdmitted = (why) => V("not-admitted", null, why);
+  if (lead.k !== "id" || lead.quoted) return notAdmitted("it does not begin with a SQL keyword");
 
-/**
- * The output names of a query at `toks[i]` (after `AS`): its first top-level SELECT's list,
- * through leading parens and a `WITH` list; null for `TABLE x`, `VALUES`, anything else.
- */
-function queryNames(toks, i) {
-  while (isPunct(toks[i], "(")) i++;
-  if (isWord(toks[i], "WITH")) {
-    const d = toks[i].depth;
-    let j = i + 1;
-    while (j < toks.length && !(toks[j].depth === d && toks[j].k === "id" && !toks[j].quoted &&
-      ["SELECT", "INSERT", "UPDATE", "DELETE", "VALUES", "TABLE", "MERGE"].includes(toks[j].up))) j++;
-    i = j;
-  }
-  return isWord(toks[i], "SELECT") ? selectListNames(toks, i) : null;
-}
-
-/** Read one `;`-separated statement's relation creations into `out`. */
-function readRelationStatement(text, toks, out) {
-  let i = 0;
-  while (isPunct(toks[i], "(")) i++;
-  const lead = toks[i];
-  if (!lead || lead.k !== "id" || lead.quoted) return;
-  const push = (name, kind, modifiers, offset, columns, why) =>
-    out.push({ name, key: name === null ? null : name.toLowerCase(), kind, modifiers, offset, columns, why });
-
-  if (lead.up === "CREATE") {
-    let j = i + 1;
-    const modifiers = [];
-    if (isWord(toks[j], "OR") && isWord(toks[j + 1], "REPLACE")) j += 2;
-    while (toks[j]?.k === "id" && !toks[j].quoted && !["TABLE", "VIEW"].includes(toks[j].up) && modifiers.length < 4) {
-      modifiers.push(toks[j].up);
-      j++;
-    }
-    const isTable = isWord(toks[j], "TABLE");
-    const isView = isWord(toks[j], "VIEW");
-    if (!isTable && !isView) return;                 // INDEX, TRIGGER, FUNCTION, …: no new relation
-    if (isTable && modifiers.some((m) => !CREATE_TABLE_MODIFIER_WORDS.has(m))) return;
-    if (isView && modifiers.some((m) => !["MATERIALIZED", "TEMP", "TEMPORARY", "RECURSIVE"].includes(m))) return;
-    j++;
-    if (isWord(toks[j], "IF") && isWord(toks[j + 1], "NOT") && isWord(toks[j + 2], "EXISTS")) j += 3;
-    const at = toks[i].at;
-    const { name, next } = readRelationName(toks, j);
-    const kind = isView ? "view" : "table";
-    if (name === null) return push(null, kind, modifiers, at, null, "its name is not a name the compiler can read");
-    j = next;
-    let listed = null;
-    if (isPunct(toks[j], "(")) {
-      const close = closingParen(toks, j);
-      if (close === -1) return push(name, kind, modifiers, at, null, "its column list does not close");
-      const body = text.slice(toks[j].at + 1, toks[close].at);
-      if (findLikeTemplateReference(body)) return push(name, kind, modifiers, at, null, "it copies another table's columns (`LIKE`)");
-      listed = isView
-        ? splitAtCommas(toks, j + 1, close, toks[j].depth + 1).map((it) => (it.length === 1 && it[0].k === "id" ? it[0].t : null))
-        : columnsFromDdlBody(body).map((c) => c.name);
-      if (listed.includes(null) || (!isView && listed.length === 0)) return push(name, kind, modifiers, at, null, "its column list is not plain column names");
-      j = close + 1;
-      if (isWord(toks[j], "INHERITS") || isWord(toks[j], "PARTITION")) return push(name, kind, modifiers, at, null, "it inherits another table's columns");
-      if (!isWord(toks[j], "AS")) return push(name, kind, modifiers, at, listed, null);
-    }
-    if (isWord(toks[j], "AS")) {
-      if (listed) return push(name, kind, modifiers, at, listed, null);
-      const names = queryNames(toks, j + 1);
-      return push(name, kind, modifiers, at, names, names ? null : "its columns come from a query whose output names are not all spelled (a `*`, `TABLE x`, `VALUES`, or an unnamed expression)");
-    }
-    // SQLite's built-in full-text and r-tree modules declare their columns as the module
-    // arguments (`fts5(title, body UNINDEXED, tokenize = 'porter')`): an argument holding
-    // `=` is an option, any other one's first name is a column. Any other module's columns
-    // are its own business — unknown.
-    if (modifiers.includes("VIRTUAL") && isWord(toks[j], "USING") && toks[j + 1]?.k === "id" &&
-      ["FTS5", "FTS4", "FTS3", "RTREE", "RTREE_I32"].includes(toks[j + 1].up) && isPunct(toks[j + 2], "(")) {
-      const close = closingParen(toks, j + 2);
-      if (close !== -1) {
-        const cols = [];
-        for (const arg of splitAtCommas(toks, j + 3, close, toks[j + 2].depth + 1)) {
-          if (arg.some((tok) => isPunct(tok, "="))) continue;
-          if (arg[0]?.k !== "id") { cols.length = 0; break; }
-          cols.push(arg[0].t);
-        }
-        if (cols.length > 0) return push(name, kind, modifiers, at, cols, null);
+  if (DML_LEADS.has(leadWord)) {
+    // A top-level INTO is a SELECT … INTO unless it is an INSERT / REPLACE target.
+    let last = leadWord;
+    for (const tok of toks) {
+      if (tok.depth !== 0 || tok.k !== "id" || tok.quoted) continue;
+      if (["SELECT", "INSERT", "REPLACE", "UPDATE", "DELETE", "MERGE"].includes(tok.up)) last = tok.up;
+      if (tok.up === "INTO" && last !== "INSERT" && last !== "REPLACE") {
+        return notAdmitted("a top-level `INTO` after `SELECT` creates a table (Postgres) or writes variables or a file (MySQL)");
       }
     }
-    return push(name, kind, modifiers, at, null, "it is not a plain column list (a virtual-table module whose columns the compiler does not read, `PARTITION OF`, `OF type`)");
+    return admitted();
   }
 
-  if (lead.up === "ALTER" && isWord(toks[i + 1], "TABLE")) {
-    let j = i + 2;
-    if (isWord(toks[j], "IF") && isWord(toks[j + 1], "EXISTS")) j += 2;
-    if (isWord(toks[j], "ONLY") && toks[j + 1]?.k === "id") j++;
-    const { name, next } = readRelationName(toks, j);
-    const at = lead.at;
-    const added = [];
-    let unknown = name === null;
-    for (const act of splitAtCommas(toks, next, toks.length, lead.depth)) {
-      let k = 0;
-      const w = (x) => isWord(act[k], x);
-      if (w("ADD")) {
-        k++;
-        if (["CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "INDEX", "KEY", "EXCLUDE"].some(w)) continue;
-        if (w("COLUMN")) k++;
-        if (w("IF") && isWord(act[k + 1], "NOT") && isWord(act[k + 2], "EXISTS")) k += 3;
-        if (act[k]?.k === "id") added.push(act[k].t); else unknown = true;
-      } else if (w("RENAME")) {
-        k++;
-        if (w("TO")) {
-          const r = readRelationName(act, k + 1);
-          push(r.name, "rename", [], at, null, "it renames a table whose columns the compiler does not know");
+  if (TRANSACTION_LEADS.has(leadWord)) {
+    return toks.every((tok) => tok.k === "id") ? admitted() : notAdmitted("transaction control takes only keywords and a savepoint name");
+  }
+
+  if (leadWord === "PRAGMA") {
+    const nm = toks[1];
+    if (!isName(nm) || nm.quoted || !ADMITTED_PRAGMAS.has(nm.up)) return notAdmitted(`\`PRAGMA ${nm?.t ?? ""}\` is not on the admitted list`);
+    const rest = toks.slice(2);
+    if (rest.length === 0) return admitted();
+    if (isPunct(rest[0], "=") && rest.length === 2 && rest[1].k !== "p") return admitted();
+    if (isPunct(rest[0], "(") && rest.length === 3 && rest[1].k !== "p" && isPunct(rest[2], ")")) return admitted();
+    return notAdmitted("a PRAGMA takes `= value` or `(argument)` only");
+  }
+
+  if (leadWord === "ALTER") {
+    // ALTER TABLE name ADD [COLUMN] [IF NOT EXISTS] col type …
+    if (!isWord(toks[1], "TABLE") || !isName(toks[2]) || !isWord(toks[3], "ADD")) {
+      return notAdmitted("the only admitted `ALTER` is `ALTER TABLE name ADD [COLUMN] col type`");
+    }
+    let k = 4;
+    const columnWord = isWord(toks[k], "COLUMN");
+    if (columnWord) k++;
+    if (isWord(toks[k], "IF") && isWord(toks[k + 1], "NOT") && isWord(toks[k + 2], "EXISTS")) k += 3;
+    const col = toks[k];
+    // After `ADD COLUMN` the next name IS the column (`ADD COLUMN key TEXT`); after a bare
+    // `ADD`, a constraint keyword starts a constraint (`ADD KEY …`, `ADD CONSTRAINT …`).
+    const constraintWord = !columnWord && !col?.quoted && ["CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "INDEX", "KEY", "EXCLUDE"].includes(col?.up);
+    if (!isName(col) || constraintWord || !isName(toks[k + 1])) {
+      return notAdmitted("the only admitted `ALTER` is `ALTER TABLE name ADD [COLUMN] col type`");
+    }
+    if (toks.some((tok) => isPunct(tok, ",") && tok.depth === 0)) return notAdmitted("an admitted `ALTER TABLE … ADD COLUMN` adds one column");
+    if (isTenantColumn(col.t) && !isTenant(toks[2].t)) return V("tenant", toks[2].t, "it adds a `tenant_id` column");
+    return admitted();
+  }
+
+  if (leadWord === "CREATE") {
+    let k = 1;
+    let unique = false;
+    if (isWord(toks[k], "UNIQUE")) { unique = true; k++; }
+    if (isWord(toks[k], "INDEX")) {
+      k++;
+      if (isWord(toks[k], "IF") && isWord(toks[k + 1], "NOT") && isWord(toks[k + 2], "EXISTS")) k += 3;
+      if (!isName(toks[k]) || !isWord(toks[k + 1], "ON") || !isName(toks[k + 2]) || !isPunct(toks[k + 3], "(")) {
+        return notAdmitted("the admitted index form is `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (cols) [WHERE …]`");
+      }
+      const close = closingParen(toks, k + 3);
+      if (close === -1) return notAdmitted("its column list does not close");
+      for (const item of splitAtCommas(toks, k + 4, close, toks[k + 3].depth + 1)) {
+        let x = 0;
+        if (!isName(item[x])) return notAdmitted("an index item is not a column name");
+        x++;
+        if (isWord(item[x], "COLLATE") && isName(item[x + 1])) x += 2;
+        if (isWord(item[x], "ASC") || isWord(item[x], "DESC")) x++;
+        if (x !== item.length) return notAdmitted("an index item is not `col [COLLATE c] [ASC | DESC]`");
+      }
+      if (close + 1 < toks.length && !isWord(toks[close + 1], "WHERE")) return notAdmitted("only a `WHERE` may follow an index's column list");
+      return admitted();
+    }
+    if (unique) return notAdmitted("`CREATE UNIQUE` is admitted only for an index");
+    let temp = false;
+    if (isWord(toks[k], "TEMP") || isWord(toks[k], "TEMPORARY")) { temp = true; k++; }
+    const virtual = !temp && isWord(toks[k], "VIRTUAL");
+    if (virtual) k++;
+    if (!isWord(toks[k], "TABLE")) {
+      return notAdmitted(`\`CREATE ${toks[1]?.t ?? ""}\` is not admitted in a program body`);
+    }
+    k++;
+    if (isWord(toks[k], "IF") && isWord(toks[k + 1], "NOT") && isWord(toks[k + 2], "EXISTS")) k += 3;
+    const name = toks[k];
+    if (!isName(name) || isPunct(toks[k + 1], ".")) return notAdmitted("the table is not named by one plain name");
+    k++;
+    if (virtual) {
+      if (!isWord(toks[k], "USING") || !isWord(toks[k + 1], "FTS5") || !isPunct(toks[k + 2], "(")) {
+        return notAdmitted("the only admitted virtual table is `USING fts5(…)`");
+      }
+      const close = closingParen(toks, k + 2);
+      if (close === -1 || close !== toks.length - 1) return notAdmitted("its argument list does not close the statement");
+      let carries = false;
+      for (const arg of splitAtCommas(toks, k + 3, close, toks[k + 2].depth + 1)) {
+        if (arg.length >= 3 && isPunct(arg[1], "=")) {
+          if (!isName(arg[0]) || arg[0].quoted || !FTS5_OPTIONS.has(arg[0].up)) return notAdmitted(`the fts5 option \`${arg[0]?.t ?? "?"}\` is not on the admitted list`);
+          if (arg.length !== 3 || arg[2].k === "p" || arg[2].k === "param") return notAdmitted("an fts5 option takes one plain value");
+          if (arg[0].up === "CONTENT") {
+            const v = arg[2].k === "id" ? arg[2].t : text.slice(arg[2].at + 1, text.indexOf("'", arg[2].at + 1));
+            if (v && isTenant(v)) carries = true;
+          }
           continue;
         }
-        if (w("CONSTRAINT")) continue;
-        if (w("COLUMN")) k++;
-        const to = act.findIndex((tok, x) => x > k && isWord(tok, "TO"));
-        if (to !== -1 && act[to + 1]?.k === "id") added.push(act[to + 1].t); else unknown = true;
-      } else if (w("CHANGE")) {
-        k++;
-        if (w("COLUMN")) k++;
-        if (act[k + 1]?.k === "id") added.push(act[k + 1].t); else unknown = true;
+        if (!isName(arg[0]) || !(arg.length === 1 || (arg.length === 2 && isWord(arg[1], "UNINDEXED")))) {
+          return notAdmitted("an fts5 argument is not `col [UNINDEXED]` or `option = value`");
+        }
+        if (isTenantColumn(arg[0].t)) carries = true;
       }
+      if (carries && !isTenant(name.t)) return V("tenant", name.t, "its rows carry or index tenant data (a `tenant_id` column, or `content =` a tenant-scoped table)");
+      return admitted();
     }
-    if (added.length > 0 || unknown) push(name, "alter", [], at, unknown ? null : added, unknown ? "a column it adds or renames is not a name the compiler can read" : null);
-    return;
+    if (!isPunct(toks[k], "(")) return notAdmitted("an admitted `CREATE TABLE` spells its column list");
+    const close = closingParen(toks, k);
+    if (close === -1) return notAdmitted("its column list does not close");
+    const after = toks.slice(close + 1).filter((tok) => !isPunct(tok, ","));
+    const sqliteOptions = after.every((tok) => isWord(tok, "WITHOUT") || isWord(tok, "ROWID") || isWord(tok, "STRICT"));
+    if (!sqliteOptions) return notAdmitted("only SQLite's `WITHOUT ROWID` / `STRICT` may follow the column list");
+    let carries = false;
+    for (const item of splitAtCommas(toks, k + 1, close, toks[k].depth + 1)) {
+      if (item.length === 0) return notAdmitted("an empty column-list item");
+      const first = item[0];
+      if (!isName(first)) return notAdmitted("a column-list item does not begin with a name");
+      // A table constraint (`PRIMARY KEY (…)`, `UNIQUE (…)`, `CHECK (…)`, `CONSTRAINT n …`) names
+      // no new column; a column NAMED `unique` / `check` is followed by its type, not `(` / `KEY`.
+      if (!first.quoted && TABLE_CONSTRAINT_LEADS.has(first.up) &&
+        (first.up === "CONSTRAINT" || isPunct(item[1], "(") || isWord(item[1], "KEY") || isWord(item[1], "USING"))) continue;
+      if (!first.quoted && first.up === "LIKE") return notAdmitted("a `LIKE` copy is not a spelled column list");
+      if (isTenantColumn(first.t)) carries = true;
+    }
+    if (carries && !isTenant(name.t)) return V("tenant", name.t, `it creates ${temp ? "a temporary table" : "a table"} with a \`tenant_id\` column`);
+    return admitted();
   }
 
-  // Postgres `SELECT … INTO t` — at the top-level SELECT (through a `WITH` list).
-  let s = i;
-  if (lead.up === "WITH") {
-    const d = lead.depth;
-    s = i + 1;
-    while (s < toks.length && !(toks[s].depth === d && toks[s].k === "id" && !toks[s].quoted &&
-      ["SELECT", "INSERT", "UPDATE", "DELETE", "VALUES", "TABLE", "MERGE"].includes(toks[s].up))) s++;
-  }
-  if (!isWord(toks[s], "SELECT")) return;
-  const d = toks[s].depth;
-  for (let j = s + 1; j < toks.length; j++) {
-    if (toks[j].depth !== d || !isWord(toks[j], "INTO")) continue;
-    let k = j + 1;
-    const modifiers = [];
-    if (["TEMPORARY", "TEMP", "UNLOGGED"].some((m) => isWord(toks[k], m))) { modifiers.push(toks[k].up); k++; }
-    if (isPunct(toks[k], "@") || ((isWord(toks[k], "OUTFILE") || isWord(toks[k], "DUMPFILE")) && toks[k + 1]?.k === "str")) return;
-    if (isWord(toks[k], "STRICT")) k++;
-    if (isWord(toks[k], "TABLE")) k++;
-    const { name } = readRelationName(toks, k);
-    const names = selectListNames(toks, s);
-    push(name, "select-into", modifiers, toks[j].at, name === null ? null : names,
-      name === null ? "its name is not a name the compiler can read"
-        : names ? null : "its columns come from a select list whose output names are not all spelled (a `*` or an unnamed expression)");
-    return;
-  }
+  return notAdmitted(`a statement led by \`${lead.t}\` is not admitted in a program body`);
 }

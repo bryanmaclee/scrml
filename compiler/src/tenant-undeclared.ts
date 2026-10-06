@@ -32,11 +32,19 @@
  *       only the ones `tables=` names.
  */
 
-import { programTenantTableDecls } from "./schema-differ.js";
+import { programStatementVerdicts } from "./schema-differ.js";
 
 /** One `E-TENANT-UNDECLARED` diagnostic (the TENANT-SCHEMA stage's shape). */
 export interface TenantUndeclaredDiagnostic {
   code: "E-TENANT-UNDECLARED";
+  message: string;
+  span: unknown;
+  severity: "error";
+}
+
+/** A program-body statement refused by the closed allow-list (S456 "a, fix F7/F9 too"). */
+export interface ProgramStatementDiagnostic {
+  code: "E-TENANT-UNDECLARED" | "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED";
   message: string;
   span: unknown;
   severity: "error";
@@ -61,8 +69,6 @@ const FIX =
   "Declare it in `<schema>` so the tenant floor scopes it. A `tenant_id` column IS the declaration " +
   "(§14.8.10) — there is no opt-out: if the table is not tenant data, rename the column.";
 
-const TENANT_COLUMN_NAME = "tenant_id";
-
 /** Lowercased membership in the compilation's tenant set. */
 function inSet(set: Iterable<string>): (name: string) => boolean {
   const s = new Set<string>();
@@ -70,63 +76,76 @@ function inSet(set: Iterable<string>): (name: string) => boolean {
   return (name: string) => s.has(name.toLowerCase());
 }
 
+/** The admitted program-body statements, for messages (SPEC §14.8.10 item (1)). */
+const ADMITTED_SUMMARY =
+  "A program-body `?{}` admits only: DML (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`, " +
+  "no `SELECT … INTO`); `CREATE [TEMP] TABLE [IF NOT EXISTS] name (col type, …)`; `ALTER TABLE name ADD " +
+  "[COLUMN] col type`; `CREATE VIRTUAL TABLE name USING fts5(…)` with the closed fts5 options; `CREATE " +
+  "[UNIQUE] INDEX [IF NOT EXISTS] name ON table (cols) [WHERE …]`; `BEGIN` / `COMMIT` / `ROLLBACK` / " +
+  "`SAVEPOINT` / `RELEASE`; and `PRAGMA table_info | table_xinfo | index_list | index_info | " +
+  "foreign_key_list | busy_timeout | journal_mode`.";
+
+/** The SQL text inside an expression-position `?{ … }` (`sql-ref` `raw`), template backticks removed. */
+function sqlRefBody(raw: string): string {
+  let s = raw.trim();
+  if (s.startsWith("?{") && s.endsWith("}")) s = s.slice(2, -1).trim();
+  if (s.startsWith("`") && s.endsWith("`") && s.length >= 2) s = s.slice(1, -1);
+  return s;
+}
+
 /**
- * (1) Program-body `?{}` statements that give an undeclared table a `tenant_id` column.
+ * (1) Every program-body `?{}` statement, held to the CLOSED allow-list (S456 "a, fix F7/F9
+ * too" + "your recs, go"; `schema-differ.js` `programStatementVerdicts`):
+ *   - `tenant` — an admitted form that gives a relation outside the tenant set a `tenant_id`
+ *     column (or an fts5 `content =` a tenant table) → `E-TENANT-UNDECLARED`;
+ *   - `not-admitted` / `unreadable` → `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`.
+ * A statement that does not begin with a SQL keyword (a bare `${q}` or identifier body) is
+ * left to E-SQL-003, which already refuses it.
  */
 export function programBodyUndeclaredTenantTables(
   fileAST: unknown,
   tenantTables: Iterable<string>,
-): TenantUndeclaredDiagnostic[] {
+  dialect: string = "unknown",
+): ProgramStatementDiagnostic[] {
   const declared = inSet(tenantTables);
-  const out: TenantUndeclaredDiagnostic[] = [];
+  const out: ProgramStatementDiagnostic[] = [];
   const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
   const seen = new WeakSet<object>();
   const reported = new Set<string>();
   const read = (sql: string, span: unknown): void => {
-    for (const d of programTenantTableDecls(sql)) {
-      // Declared tenant-scoped: the floor scopes it, whatever its columns.
-      if (d.key !== null && declared(d.key)) continue;
-      const known = d.columns !== null;
-      const carries = known && d.columns!.some((c) => c.toLowerCase() === TENANT_COLUMN_NAME);
-      if (known && !carries) continue;   // every column known, none is `tenant_id`: not tenant data
-      const temp = d.modifiers.some((m) => m === "TEMP" || m === "TEMPORARY");
-      const label = d.name === null ? "whose name the compiler cannot read" : `\`${d.name}\``;
-      const noun = d.kind === "view" ? (d.modifiers.includes("MATERIALIZED") ? "the materialized view" : "the view")
-        : temp ? "the temporary table" : "the table";
-      const how = d.kind === "select-into" ? " (`SELECT … INTO`)" : d.kind === "rename" ? " (`ALTER TABLE … RENAME TO`)" : "";
-      const name = d.name === null ? "this relation" : `\`${d.name}\``;
-      const what = d.kind === "unreadable"
-        ? `cannot be read exactly — ${d.why}`
-        : d.kind === "alter"
-          ? carries
-            ? `gives the table ${label} a \`tenant_id\` column (\`ALTER TABLE\`)`
-            : `adds a column to the table ${label} that the compiler cannot name (${d.why})`
-          : carries
-            ? `creates ${noun} ${label}${how} with a \`tenant_id\` column`
-            : `creates ${noun} ${label}${how}, but the compiler cannot determine its columns — ${d.why}`;
-      // A temporary table cannot itself be declared in `<schema>` (E-SCHEMA-014 rejects a
-      // TEMP head), so its fix names the two things that work.
-      const fix = !carries
-        ? "Spell the column list (every output column a plain column or `expr AS name`), or declare it in " +
-          "`<schema>`. A relation whose columns the compiler cannot see may carry `tenant_id`, which IS the " +
-          "declaration (§14.8.10) — there is no opt-out."
-        : temp
-          ? "A temporary table cannot be declared in `<schema>` (E-SCHEMA-014), so keep tenant rows in a table " +
-            "`<schema>` declares — the tenant floor scopes it — or, if these rows are not tenant data, rename the column: " +
-            "a `tenant_id` column IS the declaration (§14.8.10) and there is no opt-out."
-          : FIX;
-      const key = `${String((span as any)?.start ?? "")}\0${d.key ?? "?"}\0${d.kind}\0${d.offset}`;
+    // A body that is one bare identifier (`?{q}`) is E-SQL-003's (a runtime-assembled SQL
+    // string) — unless it is one of the single-word statements E-SQL-003 admits, which the
+    // allow-list then judges (`BEGIN` admitted, `VACUUM` refused).
+    const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*$/.exec(sql);
+    if (bare && !["VACUUM", "BEGIN", "COMMIT", "END", "ROLLBACK", "ANALYZE", "CHECKPOINT"].includes(bare[1].toUpperCase())) return;
+    for (const d of programStatementVerdicts(sql, { dialect, isTenant: declared })) {
+      if (d.verdict === "admitted") continue;
+      if (d.verdict === "not-admitted" && d.why === "it does not begin with a SQL keyword") continue;
+      const key = `${String((span as any)?.start ?? "")}\0${d.offset}\0${d.verdict}`;
       if (reported.has(key)) continue;
       reported.add(key);
+      const at = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      if (d.verdict === "tenant") {
+        out.push({
+          code: "E-TENANT-UNDECLARED",
+          message:
+            `E-TENANT-UNDECLARED: this \`?{}\` statement gives \`${d.name}\` tenant data (${d.why}), and \`${d.name}\` is not declared ` +
+            `tenant-scoped: no \`<schema>\` and no \`<db tables=>\` of this compilation declares it, so the tenant ` +
+            `floor would not scope it and every tenant's rows would reach every request. ${FIX} (A temporary table ` +
+            `cannot be declared in \`<schema>\` — E-SCHEMA-014 — so keep tenant rows in a declared table.)`,
+          span: at,
+          severity: "error",
+        });
+        continue;
+      }
       out.push({
-        code: "E-TENANT-UNDECLARED",
-        message: d.kind === "unreadable"
-          ? `E-TENANT-UNDECLARED: this \`?{}\` ${what}; the compiler cannot tell which relations it creates, so it is ` +
-            `refused (§14.8.10). Remove the backslash / \`#\`, or declare the tables in \`<schema>\`.`
-          : `E-TENANT-UNDECLARED: this \`?{}\` ${what}, and ${name} is not declared tenant-scoped — no \`<schema>\` ` +
-            `and no \`<db tables=>\` of this compilation declares it — so a \`tenant_id\` in it would not be scoped and ` +
-            `every tenant's rows would reach every request. ${fix}`,
-        span: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        code: "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED",
+        message:
+          `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED: this \`?{}\` statement${d.lead ? ` (\`${d.lead}\` …)` : ""} is not ` +
+          `admitted in a program body: ${d.why}. Declare the relation in \`<schema>\` instead (§14.8.10 — a ` +
+          `statement the compiler cannot read exactly could create a \`tenant_id\` relation the tenant floor ` +
+          `does not scope). ${ADMITTED_SUMMARY}`,
+        span: at,
         severity: "error",
       });
     }
@@ -139,7 +158,7 @@ export function programBodyUndeclaredTenantTables(
     // A `<schema>` body is the declaration itself — never a program-body statement.
     if (n.kind === "state" && n.stateType === "schema") return;
     if (n.kind === "sql" && typeof n.query === "string") read(n.query, n.span);
-    else if (n.kind === "sql-ref" && typeof n.raw === "string") read(n.raw, n.span);
+    else if (n.kind === "sql-ref" && typeof n.raw === "string") read(sqlRefBody(n.raw), n.span);
     for (const key of Object.keys(n)) {
       if (key === "span" || key.startsWith("_")) continue;
       visit(n[key], depth + 1);

@@ -1397,7 +1397,10 @@ function collectLiveTenantRelations(
     if (typeof r?.name !== "string") continue;
     const type = typeof r.type === "string" ? r.type : "table";
     try {
-      const cols = db.query(`PRAGMA table_info(${JSON.stringify(r.name)})`).all() as PAPragmaRow[];
+      // `table_xinfo`, not `table_info` (S456 "a, fix F7/F9 too"): `table_info` omits generated
+      // columns and hidden ones such as an fts4 `languageid=` column — a `tenant_id` there was
+      // invisible (executed: `tenant_id TEXT GENERATED ALWAYS AS (…)` and `fts4(…, languageid="tenant_id")`).
+      const cols = db.query(`PRAGMA table_xinfo(${JSON.stringify(r.name)})`).all() as PAPragmaRow[];
       if (cols.some((c) => typeof c?.name === "string" && c.name.toLowerCase() === "tenant_id")) {
         into.push({ table: r.name, type, db: displayPath, filePath, span });
       }

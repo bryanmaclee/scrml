@@ -130,14 +130,9 @@ const SHAPES = {
   trailingSemicolon: Q("SELECT id, name, passwordHash FROM users;"),
 
   // --- S454 r2 (review-found; each LEAKED on 79bd05028 AND on 612e8c5ea).
-  // A lone CR inside a `--` comment: the floor ended the comment at LF only, the
-  // cooked JS template the SQL is lowered into turns the CR into LF, so the
-  // database read the rest of the line as live SQL.
-  crGet: Q("SELECT id, name -- c\r, passwordHash FROM users WHERE id = 1", ".get()"),
-  crAll: Q("SELECT id, name -- c\r, passwordHash FROM users"),
-  crUnion: Q("SELECT id, name FROM users -- c\rUNION SELECT id, passwordHash FROM users"),
-  crUpdateReturning: Q("UPDATE users SET name = 'alice' WHERE id = 1 -- c\rRETURNING *"),
-  crRun: Q("SELECT id, name -- c\r, passwordHash FROM users", ".run()"),
+  // (The lone-CR `--` shapes of S454 r2 moved below: since S456 round 3 they are
+  // refused at compile — E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED — so they cannot
+  // sit in this compiled program.)
   // A quoted RETURNING target was read from the blanked view, where every
   // quoted identifier is the placeholder `q` — a table this program declares.
   quotedTargetDq: Q('UPDATE "users" SET name = \'alice\' WHERE id = 1 RETURNING *'),
@@ -365,21 +360,37 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 resolved: trailing `;`", () => {
 // 79bd05028 and 612e8c5ea (`.get()` body:
 // {"id":1,"name":"alice","passwordHash":"SECRET-HASH-7f3a0b91"}).
 // ---------------------------------------------------------------------------
-describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: lone CR in a `--` comment strips wholesale", () => {
+describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: lone CR in a `--` comment — refused at compile since S456 round 3", () => {
+  // S454 r2 stripped these wholesale at the egress (each LEAKED the hash on 79bd05028 /
+  // 612e8c5ea). S456 round 3 (ruling user-voice-scrml.md S456 "a, fix F7/F9 too"): a
+  // statement the databases do not all read the same way — a lone CR ends a `--` comment
+  // on Postgres, not on SQLite — is UNREADABLE and refused at compile, so it never runs.
   const cases = [
-    ["`.get()`", "crGet"],
-    ["`.all()`", "crAll"],
-    ["UNION behind the CR", "crUnion"],
-    ["UPDATE … `-- c<CR>RETURNING *`", "crUpdateReturning"],
-    ["`.run()`", "crRun"],
+    ["`.get()`", Q("SELECT id, name -- c\r, passwordHash FROM users WHERE id = 1", ".get()")],
+    ["`.all()`", Q("SELECT id, name -- c\r, passwordHash FROM users")],
+    ["UNION behind the CR", Q("SELECT id, name FROM users -- c\rUNION SELECT id, passwordHash FROM users")],
+    ["UPDATE … `-- c<CR>RETURNING *`", Q("UPDATE users SET name = 'alice' WHERE id = 1 -- c\rRETURNING *")],
+    ["`.run()`", Q("SELECT id, name -- c\r, passwordHash FROM users", ".run()")],
   ];
-  for (const [label, name] of cases) {
-    test(`${label} — passwordHash ABSENT`, async () => {
-      const { text, json } = await call(name);
-      expect(text).not.toContain(SECRET);
-      const rows = Array.isArray(json) ? json : [json];
-      expect(rows.length).toBeGreaterThanOrEqual(1);
-      for (const row of rows) expect(Object.keys(row)).toEqual([]);
+  for (const [label, body] of cases) {
+    test(`${label} — E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "conf-protect-cr-"));
+      _tmp.push(dir);
+      const file = join(dir, "app.scrml");
+      writeFileSync(file, `<program db="app.db">
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+  </schema>
+  \${
+    server function probe() {
+      return ${body}
+    }
+  }
+  <button onclick=\${ probe() }>x</button>
+</program>
+`);
+      const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
+      expect((result.errors ?? []).map((e) => e.code)).toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");
     });
   }
 });
