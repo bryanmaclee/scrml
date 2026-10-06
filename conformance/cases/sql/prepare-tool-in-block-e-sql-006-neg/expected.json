@@ -1,0 +1,13 @@
+{
+  "id": "sql-prepare-tool-in-block-e-sql-006",
+  "description": "§44.3 — a `.prepare()` on a `?{}` result one block deep (inside an `if`) in a `kind=\"tool\"` main SHALL be compile error E-SQL-006. Before s456 the diagnostic travelled on a channel the `if` body's emit options did not carry: exit 0, and only the runtime-throwing IIFE in the artifact.",
+  "language-version": "1.0",
+  "spec": "§44.3",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "rationale": "§44.3 mandates `.prepare()` on a `?{}` result be a compile error; §2.2.1 forbids a silent stub in place of a hard diagnostic. Neither depends on the block nesting of the call.",
+  "provenance": "adopter:flogence-S56 (audit of the same channel)",
+  "expect": {
+    "codes": ["E-SQL-006"],
+    "severity": { "E-SQL-006": "error" }
+  }
+}

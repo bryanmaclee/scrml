@@ -44,6 +44,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2169,12 +2170,30 @@ function eventNameForAttr(aName: string): string | null {
     const ev = aName.slice(3);
     return ev.length > 0 ? ev : null;
   }
-  if (aName.startsWith("on") && aName.length > 2) {
+  if (aName.length > 2 && aName.slice(0, 2).toLowerCase() === "on") {
     // Exclude bind:/class: false hits (they never start with "on") and the
     // bare `on` directive. `onclick` → "click".
-    return aName.slice(2);
+    // s456 review round 3 — HTML attribute names are case-insensitive: `ONCLICK=` / `onClick=`
+    // ARE the click handler. Matched case-insensitively and mapped to the lowercase DOM event
+    // name; before, `ONCLICK=hit(it.name)` was not an event attribute here, so the CALL's result
+    // was written as handler text (`setAttribute("ONCLICK", String(hit(…)))`), and `onClick=`
+    // registered a "Click" listener that never fires.
+    return aName.slice(2).toLowerCase();
   }
   return null;
+}
+
+/**
+ * SAFETY predicate — is `aName` an event-handler attribute as the BROWSER sees it? HTML
+ * attribute names are case-insensitive (`ONCLICK`, `OnClick` and `onclick` are the same live
+ * handler), so this decides case-INSENSITIVELY and fails closed: any `on…` name counts, known
+ * event or not, plus the `on:` directive. Use this, not `eventNameForAttr` (which maps a name to
+ * a listener event and is case-sensitive), wherever a decision guards against building handler
+ * code from data. (s456 review round 3: `ONCLICK="hit('${it.name}')"` bypassed the round-2
+ * refusal.)
+ */
+function isEventHandlerAttrName(aName: string): boolean {
+  return aName.startsWith("on:") || (aName.length > 2 && aName.slice(0, 2).toLowerCase() === "on");
 }
 
 /**
@@ -2431,8 +2450,14 @@ function renderTemplateAttrToJs(
   }
 
   // ---- (2) event handlers — inline addEventListener -----------------------
+  // A QUOTED (`onclick="hit(it)"`) or bareword event attribute is NOT a handler: SPEC §5.2
+  // rule 1 — "`attr=\"value\"` SHALL produce a static attribute with the literal string
+  // `value`. The compiler SHALL NOT interpret the string contents as an expression." It falls
+  // through to the static-attribute path (4) below, exactly as the same attribute outside an
+  // `<each>` is emitted into the HTML. Until s456 it entered this branch and its listener body
+  // became `/* each: unsupported event handler shape */` — the attribute silently DROPPED.
   const ev = eventNameForAttr(aName);
-  if (ev !== null) {
+  if (ev !== null && valKind !== "string-literal" && valKind !== "absent" && val != null) {
     let handlerBody: string;
     if (valKind === "call-ref") {
       const fnName = String(val.name ?? "");
@@ -2503,7 +2528,17 @@ function renderTemplateAttrToJs(
       const ref = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
       handlerBody = `${ref}(event);`;
     } else {
-      handlerBody = "/* each: unsupported event handler shape */";
+      // §2.2.1 — a handler value kind this emitter cannot lower is REFUSED, never a silent
+      // no-op listener (run-wide sink, refused-lowering-errors.ts; s456 review).
+      recordRefusedLowering(new CGError(
+        "E-CG-003",
+        `E-CG-003: the \`${aName}=\` event handler inside an \`<each>\` row has a value shape ` +
+        `(\`${valKind || "unknown"}\`) the code generator cannot lower. Write it in a §5.2.3 form: ` +
+        `a call (\`${aName}=fn(@.id)\`), a handler reference (\`${aName}=@handler\`), or an inline ` +
+        `block (\`${aName}={ … }\` / \`${aName}=\${…}\`).`,
+        (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+      ), attr);
+      handlerBody = "/* E-CG-003: unsupported event handler shape */";
     }
     // Bug 73 — per-item handler live-keying. If a reconcile ctx is active and
     // the handler reads the iter var, prepend a fire-time re-resolution prelude
@@ -2704,6 +2739,25 @@ function renderTemplateAttrToJs(
     // the attr re-evaluates on reconcile, matching the interpolation/text paths.
     const sv = String(val.value ?? "");
     const tpl = buildEachAttrTemplate(sv, iterVarName);
+    // A QUOTED event attribute whose text interpolates `${…}` (`onclick="hit('${it.name}')"`)
+    // would become JavaScript built from ROW DATA — a row value `x');…;('` runs on click. Rows
+    // are where untrusted data lives, so this is REFUSED, fail closed (s456 review round 2).
+    // A quoted event attribute WITHOUT `${…}` stays a static string (§5.2 rule 1). The same
+    // interpolation outside `<each>` is a pre-existing sink awaiting a ruling:
+    // g-quoted-event-attribute-interpolates-row-data-injection-s456.
+    if (tpl !== null && isEventHandlerAttrName(aName)) {
+      recordRefusedLowering(new CGError(
+        "E-CG-003",
+        `E-CG-003: the quoted \`${aName}="…"\` attribute inside an \`<each>\` row interpolates ` +
+        `\`\${…}\` into event-handler text — JavaScript built from interpolated row text is an ` +
+        `injection sink (a row value can close the string and run code on the event). Use the ` +
+        `unquoted call form \`${aName}=hit(it.name)\` or an expression handler ` +
+        `\`${aName}=\${() => hit(it.name)}\`, which pass the row value as data (§5.2.1, §5.2.3).`,
+        (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+      ), attr);
+      lines.push(`${indent}/* E-CG-003: interpolated quoted "${aName}" attribute refused (injection sink) */`);
+      return;
+    }
     if (tpl !== null) {
       for (const _l of maybeWrapEachPerItemEffect(
         [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${tpl});`], iterVarName, indent,
@@ -2719,8 +2773,15 @@ function renderTemplateAttrToJs(
     return;
   }
 
-  // Unknown value kind — defensive literal copy with a hint.
-  lines.push(`${indent}// each: per-item attr "${aName}" unhandled value kind="${valKind}"`);
+  // Unknown value kind — REFUSED (§2.2.1; s456 review): the attribute would otherwise be
+  // dropped with only a comment in the artifact.
+  recordRefusedLowering(new CGError(
+    "E-CG-003",
+    `E-CG-003: the \`${aName}=\` attribute inside an \`<each>\` row has a value shape ` +
+    `(\`${valKind || "unknown"}\`) the code generator cannot lower.`,
+    (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+  ), attr);
+  lines.push(`${indent}/* E-CG-003: per-item attr "${aName}" unhandled value kind="${valKind}" */`);
 }
 
 /**

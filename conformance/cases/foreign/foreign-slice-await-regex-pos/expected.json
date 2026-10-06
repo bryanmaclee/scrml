@@ -1,0 +1,14 @@
+{
+  "id": "foreign-slice-await-regex-pos",
+  "description": "§23.2.4a positive, executed — `await /'/.exec(s)` (and the same split across lines) is a SINGLE EXPRESSION whose operand is a regex literal: codegen injects the `return` and the value crosses (`v`, `w` = \"'\"). Whether `/` starts a regex depends on the grammar of the slice's real context (the body of an async function, where `await` is an operator); a standalone lexer reads `await` as an identifier, the `/` as division and the `'` as an unterminated string. Before the s456 review fix that misread made the slice a statement body with no `return`, settling silently to `not`.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-slice-lexing.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a: a slice with no top-level `;` and no top-level `return` is a single expression and codegen injects the `return`; a slice is evaluated as the body of a strict-mode async function, so it is read in that context.",
+  "provenance": "review:s456-F1",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-FOREIGN-", "E-TOOL-"],
+    "stdout": "v=' w='\n"
+  }
+}

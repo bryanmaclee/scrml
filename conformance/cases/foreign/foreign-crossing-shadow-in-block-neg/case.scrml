@@ -1,0 +1,12 @@
+<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        for (const a of args) {
+            const out = _={ in: { a }
+                const a = 1;
+                return a;
+            }=
+            println(out)
+        }
+        return 0
+    }
+</program>

@@ -45,6 +45,7 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
@@ -134,31 +135,19 @@ export function setSessionShadowedInFile(on: boolean): void {
   _sessionShadowedInFile = !!on;
 }
 
-// §20.5 (B2.4, S266) — narrow module-level sink for session-builtin codegen
-// diagnostics raised during SERVER-mode expression emission. Carries two codes:
+// §20.5 (B2.4, S266) — session-builtin codegen refusals raised during SERVER-mode
+// expression emission. Two codes:
 //   • E-SESSION-VALUE — a bare `session` VALUE-use (`return session`, `let s =
 //     session`, `log(session)`, `session` as a call arg / assignment RHS): not a
 //     valid member/index/call of the builtin, would emit a bare `session` ref
 //     (ReferenceError at request time). Recorded by `emitIdent`.
 //   • E-SESSION-RESERVED-KEY (B5, S266) — a literal `session.set("csrfToken", …)`
 //     mass-assignment on the compiler-owned CSRF token. Recorded by `emitCall`.
-// Both have the precise `mode` + shadow context at the emission site; `generateServerJs`
-// drains them into the live `errors` array after emission (reset at the same start
-// seam), mirroring emit-server's `_foreignCrossingErrors` narrow-sink precedent.
-// Bounded to the server-emit window: reset-at-start + drain-at-end in emit-server.
-let _sessionValueUseErrors: CGError[] = [];
-
-/** Reset the E-SESSION-VALUE sink (called at the start of server emission). */
-export function resetSessionValueUseErrors(): void {
-  _sessionValueUseErrors = [];
-}
-
-/** Drain + clear the accumulated E-SESSION-VALUE diagnostics (post server emit). */
-export function drainSessionValueUseErrors(): CGError[] {
-  const out = _sessionValueUseErrors;
-  _sessionValueUseErrors = [];
-  return out;
-}
+// Both are recorded in the run-wide refused-lowering sink (refused-lowering-errors.ts,
+// drained by runCG). Until s456 they had their own sink, reset + drained only by
+// `generateServerJs` — so a refusal raised by the `kind="tool"` / library emitters
+// (server-mode too) was never drained: `const s = session` in a tool `main`
+// compiled exit 0 with only the placeholder in the artifact.
 
 // §32 / §47 (S397) — module-level sink for E-CG-TILDE-UNRESOLVED, the fail-closed
 // floor under the `~` accumulator.
@@ -170,14 +159,13 @@ export function drainSessionValueUseErrors(): CGError[] {
 // four — the `~` orphan arises deep inside client-mode expression emission, on
 // paths that build a context without one. Threading `errors` through every one of
 // those constructors is a far larger change than this arc's fence allows, and it
-// would be the wrong shape anyway: this is the same narrow-sink pattern
-// `_sessionValueUseErrors` (above) and emit-server's `_foreignCrossingErrors`
-// already establish for exactly this situation.
+// would be the wrong shape anyway: a module-level sink is the shape every refusal
+// that can be reached from an opts-less context needs (see also the run-wide
+// refused-lowering-errors.ts).
 //
-// LIFECYCLE, and it is WIDER than the session sink's deliberately: reset ONCE at
+// LIFECYCLE: reset ONCE at
 // the top of `runCG` and drained TWICE — in the per-file loop's `finally` and again
-// immediately before `runCG` returns. The session sink is bounded to the server-emit
-// window because `session` is a server builtin; a `~` orphan is mode-agnostic (every
+// immediately before `runCG` returns. A `~` orphan is mode-agnostic (every
 // measured occurrence is CLIENT-mode) and can arise in the tool, library and browser
 // emit paths, each of which leaves the per-file loop by a different `continue`. A
 // drain placed at any single one of those exits would silently lose the others.
@@ -1447,7 +1435,7 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     name === "session" &&
     !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
   ) {
-    _sessionValueUseErrors.push(new CGError(
+    recordRefusedLowering(new CGError(
       "E-SESSION-VALUE",
       "E-SESSION-VALUE: `session` is not a value — it is the request-scoped session " +
       "establishment builtin. Access a field (`session.userId` / `session.role` / " +
@@ -1455,9 +1443,9 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
       "`session.destroy()`. `session` cannot be returned, assigned, passed as an " +
       "argument, or otherwise used as a first-class value. (If you meant a local " +
       "variable, declare it under a different name — `session` is reserved.)",
-      node.span ?? { start: 0, end: 0 },
+      _tildeDiagSpan(node),
       "error",
-    ));
+    ), node);
     return "undefined /* E-SESSION-VALUE: `session` is not a value */";
   }
 
@@ -3841,16 +3829,16 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       (node.args[0] as LitExpr).litType === "string" &&
       (node.args[0] as LitExpr).value === "csrfToken"
     ) {
-      _sessionValueUseErrors.push(new CGError(
+      recordRefusedLowering(new CGError(
         "E-SESSION-RESERVED-KEY",
         "E-SESSION-RESERVED-KEY: `csrfToken` is a compiler-owned session key (the " +
         "§40.2 server-authoritative CSRF synchronizer token) and cannot be set via " +
         "`session.set(\"csrfToken\", …)`. Writing it would let a caller pin the CSRF " +
         "token to a known value, defeating the double-submit check. Remove the write; " +
         "the compiler mints + persists the token. (`userId` / `role` remain writable.)",
-        node.span ?? { start: 0, end: 0 },
+        _tildeDiagSpan(node as unknown as IdentExpr),
         "error",
-      ));
+      ), node);
     }
     // Lowered unconditionally in server mode; emit-server's post-emission scan
     // (S239 FIX 6) fires E-SESSION-CONTEXT if this `_scrml_req._scrml_sess` ref

@@ -31,10 +31,120 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 237 | 6 |
-| MED | 518 | 4 |
-| LOW | 289 | 0 |
+| MED | 519 | 4 |
+| LOW | 290 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-quoted-url-attribute-javascript-scheme-row-data-s456 — a quoted URL-bearing attribute with `${…}` (`<a href="javascript:hit('${it.name}')">`, and `src` / `action` / `formaction`, plus `srcdoc`) is compiled to `setAttribute("href", \`javascript:hit('${…}')\`)`: data interpolated into a URL whose scheme makes it executable — a row value can close the string and run code on click / load — `NEW S456; MED; open (needs a ruling)`
+
+<!-- @gap id=g-quoted-url-attribute-javascript-scheme-row-data-s456 sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs string-literal path, buildEachAttrTemplate)+compiler/src/codegen/emit-bindings.ts(top-level template-attr path) prov=review:S456-PA-executed-on-c31a5839c -->
+
+PA-executed on `c31a5839c`, re-measured in the S456 round-3 fix (one probe file, exit 0, no diagnostic):
+**in an `<each>` row AND at top level**, `href=`, `<iframe src=>`, `<form action=>`, `<button formaction=>` with
+`"javascript:go('${…}')"` all emit `setAttribute("<attr>", \`javascript:go('${…}')\`)`; `<iframe srcdoc="<b>${…}</b>">`
+emits the interpolated HTML document (an HTML-injection sink). Pre-existing; the round-2/3 event-attribute refusal
+does not cover URL attributes. A wholly data-controlled URL (`href="${it.url}"`) carries the same risk when the
+data supplies the scheme. **Ruling needed:** refuse `${…}` interpolation into a URL attribute whose literal text
+starts with a scheme (`javascript:` / `data:` / `vbscript:`), and/or sanitize the scheme of an interpolated URL at
+runtime (allow-list `http:` / `https:` / `mailto:` / relative), and decide `srcdoc` (refuse interpolation, or
+HTML-escape the interpolated values). Same SPEC tension as
+[[g-quoted-event-attribute-interpolates-row-data-injection-s456]] (§5.2 rule 1 vs the quoted-attribute
+interpolation sentences recorded there).
+
+### g-event-attribute-name-case-sensitive-listener-s456 — top-level `ONCLICK=fn()` / `onClick=fn()` registers a `"ONCLICK"` / `"Click"` listener, which never fires (HTML attribute names are case-insensitive; DOM event names are lowercase) — `NEW S456; LOW; open`
+
+<!-- @gap id=g-event-attribute-name-case-sensitive-listener-s456 sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(event name taken from the attribute name verbatim: addEventListener("ONCLICK"), _scrml_Click_handlers) prov=empirical:S456-round-3-probe -->
+
+Found while fixing the round-3 case bypass. Inside an `<each>` row this is fixed (S456: `eventNameForAttr` matches
+`on…` case-insensitively and lowercases the event; `ONCLICK=hit(it.name)` used to write the CALL's result as handler
+text via `setAttribute`). At top level the handler is silently dead. Corpus (compiled, `c31a5839c`): 3
+`addEventListener("Click"` + 2 `addEventListener("Save"` in 5 sources (conformance
+`error/handler-failable-reference{-component-prop-neg,-via-component-prop-pos}`,
+`type-state-codes/e-state-undeclared-{neg,pos}`, sample `phase4-event-jsx-arrow-ghost-027`). ⚠ Some arrive
+through a COMPONENT prop (`onSave=`), where the name may be a component callback rather than a DOM event — the
+fix needs to tell the two apart, not just lowercase. (The `<each>` change altered 0 corpus artifacts.) A quoted top-level `ONCLICK="…${…}"`
+interpolates exactly like the lowercase form ([[g-quoted-event-attribute-interpolates-row-data-injection-s456]]).
+
+### g-quoted-event-attribute-interpolates-row-data-injection-s456 — a QUOTED `on*` attribute containing `${…}` outside `<each>` (`<button onclick="hit('${@items[0].name}')">`) is compiled to `setAttribute("onclick", \`hit('${…}')\`)`: event-handler JavaScript built from interpolated data — a value `x');globalThis.__pwn=1;('` runs on click — `NEW S456; MED; open (needs a ruling)`
+
+<!-- @gap id=g-quoted-event-attribute-interpolates-row-data-injection-s456 sev=MED status=open locus=compiler/src/codegen/emit-bindings.ts(top-level `template-attr` path: data-scrml-attr-tpl-<attr> + _scrml_effect setAttribute of a template literal; applies to on* attributes like any other) prov=review:S456-S239-round-2-confirmed-in-happy-dom -->
+
+Pre-existing on `0aef3270d` at top level (not introduced by S456). Found in the S456 review: the first S456 fix
+round lowered a quoted `onclick="…"` in an `<each>` row through the same template path, which extended the sink to
+rows, where untrusted data lives. Round 2 refuses the `<each>`-row form (E-CG-003, fail closed); the top-level form
+is left as it is, pending a ruling. **Corpus (compiled, `32451a3ef`, examples + samples + conformance + stdlib):
+0 quoted `on*` attributes with `${…}` at top level, 0 in `<each>` rows** (0 quoted `on*` attributes of any kind).
+
+**The SPEC tension (needs a ruling).** §5.2 rule 1 (SPEC.md:1791): *"`attr="value"` SHALL produce a static
+attribute with the literal string `value`. The compiler SHALL NOT interpret the string contents as an
+expression."* §5.1's table says the same (*"Quoted string | Static string literal. Value is fixed at compile
+time."*). Sentences that sanction `${…}` inside a quoted attribute, found by searching §4, §5 / §5.2.x, VP-3:
+- §3 context table (SPEC.md:312): attribute value position — *"`="${@x}"` in interpolated string"*.
+- §4.18 (SPEC.md:1626): *"It is the same token in an attribute-value string (`attr="${@x}"` — §5, already
+  template-string-shaped)"*.
+- §5.5.3 (SPEC.md:2405-2410): interpolation in a quoted **`class`** value SHALL compile to a template literal
+  attribute — scoped to `class`.
+- VP-3 is the "attribute-interpolation validation pass" (§38.11.1, SPEC.md:27952) — it refuses `${` in a
+  `<channel name=/topic=>`; no rule for event attributes.
+No sentence found that addresses a quoted EVENT attribute (`on*`) specifically. The ruling needed: is
+`on*="…${x}…"` (a) a static string (§5.2 rule 1 — then `${` is literal text), (b) refused (as in `<each>` rows
+since S456), or (c) interpolated — and if (c), how the value is escaped for a JavaScript-string context.
+
+### g-foreign-slice-regex-quote-and-in-block-refusal-lost — a quote inside a regex literal in a `_={ … }=` slice hid its `return`; and a codegen refusal one block deep (E-FOREIGN-006/007, E-SQL-006, E-SESSION-VALUE) or E-LIFT-002 anywhere compiled exit 0 with only a `null /* E-… */` placeholder in the artifact — `NEW S456; HIGH; RESOLVED S456`
+
+<!-- @gap id=g-foreign-slice-regex-quote-and-in-block-refusal-lost sev=HIGH status=resolved resolved-by=S456-fix/s456-foreign-slice-regex-apostrophe locus=compiler/src/codegen/emit-logic.ts(case "foreign" scanForeignSliceShape/scanForeignSliceTopLevelBindings char scanners with no regex state; refusals pushed only to opts.foreignCrossingErrors/opts.preparedStmtErrors)+compiler/src/codegen/emit-control-flow.ts(_emitIfStmtInner bodyOpts rebuilt field by field, sinks not carried)+compiler/src/codegen/emit-logic.ts(E-LIFT-002 comment-only)+compiler/src/codegen/emit-expr.ts(_sessionValueUseErrors drained only by generateServerJs) prov=adopter:flogence-S56 -->
+
+**Reported by flogence (S56), PA-reproduced at `0aef3270d`.** Two roots, one adopter symptom.
+
+- **Gap 1 (HIGH, silent miscompile).** flogence `src/ports/graph-ingest-tool.scrml` @ `90671f6` plus one line
+  `const q1 = /[']/g` inside the ~420-line slice at :136 compiled **exit 0, no diagnostic**, and emitted
+  `const plan = null /* E-FOREIGN-007: … does not parse */`; the tool then crashed on `plan.say`. The slice sits
+  inside `if (args.includes("--ingest")) {`. `case "foreign"` reported E-FOREIGN-006/007 only into a channel
+  threaded through emit opts (`foreignCrossingErrors`), and an `if` / loop body is emitted with opts rebuilt field
+  by field, without it. Same channel, same loss: E-SQL-006 (`preparedStmtErrors`) one block deep in a tool `main`.
+- **Gap 2 (misattributed refusal).** The same slice directly in `main` failed with *"no top-level `;` and no
+  top-level `return`"* — wrong: the slice has a `return`. The shape scan was a character scanner with no regex
+  state; the `'` in `/['x]/g` opened a "string" that swallowed the rest of the slice.
+
+**Audit (comment/placeholder instead of diagnostic, `compiler/src/codegen`), measured at `0aef3270d`:**
+E-LIFT-002 — codegen wrote only `/* E-LIFT-002 … */`, never a diagnostic (SPEC §17.6 Example 6 compiled exit 0);
+E-SESSION-VALUE / E-SESSION-RESERVED-KEY — its sink was drained only by the web-app server emitter, lost in a
+`kind="tool"` (exit 0); match no-lowerable-arms E-CG-003 and Tier-3 E-TYPE-001 — reported only when an
+`opts.errors` channel happened to be threaded. Already sound: E-CG-TILDE-UNRESOLVED, E-VARIANT-AMBIGUOUS,
+expression-position `!{}` E-CG-003 (module sinks drained by runCG). Not fixed here, different fix shape:
+`/* §1a: cannot positionally bind … */` ([[g-tool-context-match-loses-enum-field-order]] — the fix is to resolve
+the field order, not to refuse).
+
+**Fix (S456).** (1) New run-wide sink `compiler/src/codegen/refused-lowering-errors.ts` — reset and drained by
+`runCG`, one diagnostic per construct (anchor node / real span) — receives every refusal above; the opts-threaded
+`foreignCrossingErrors` / `preparedStmtErrors` plumbing and the session sink are removed. (2) The two slice scans
+read acorn tokens (`foreign-seal.ts` `scanForeignSliceShape` / `scanForeignSliceTopLevelBindings`): regex vs
+division decided by the lexer's previous-token rule, strings / comments / templates (with `${}` holes) are tokens,
+`.return` is a property name (closes [[g-foreign-value-block-dot-return-misread-as-keyword]]). E-FOREIGN-006/007
+spans now resolve line/col from the byte offset (the foreign node's own `line` was 37 lines off on the repro).
+Pins: `compiler/tests/integration/foreign-slice-lexing.test.js`; conformance `foreign/foreign-slice-lexing-regex-quote-pos`,
+`foreign/foreign-slice-unparseable-in-block-neg`, `foreign/foreign-crossing-shadow-in-block-neg`,
+`sql/prepare-tool-in-block-e-sql-006-neg`, `control-flow/lift-two-in-value-arm-e-lift-002-neg`,
+`server-fn/session-value-in-tool-neg` (each fails on `0aef3270d`).
+
+**S456 review round (S239).** F1: the first fix took tokens from a STANDALONE lexer, which reads `await` as an
+identifier — `await /'/.exec(s)` lexed `/` as division, the slice was taken as a statement body with no `return`,
+and `v` settled silently to `not` (a regression vs `0aef3270d`). The scans now take the token stream from
+`acorn.parse` of the slice in its real wrapper (an async function body; `onToken`), so the PARSER decides regex vs
+division; a slice that parses in neither shape is refused (E-FOREIGN-007), never given a guessed shape. F2: the
+token parse omits the crossing parameters, so a crossing-shadowing slice still yields tokens and E-FOREIGN-006 names
+the binding. F3: `generateValueOnlyServerJs` runs after `runCG` drained the sink — it now drains the sink into its
+own `errors` on every exit (no reachable repro found: a value-only module has no server content, and a client-mode
+lowering of the same node in `runCG` reports first). Each-row `onclick="…"`: per SPEC §5.2 rule 1 a quoted attribute
+is a static attribute; inside `<each>` it was dropped as `/* each: unsupported event handler shape */`, now emitted
+via `setAttribute` like the same attribute outside `<each>` (corpus count 0); a genuinely unlowerable handler/attr
+value kind is E-CG-003. Pin: conformance `foreign/foreign-slice-await-regex-pos`.
+
+**Still open, separately filed:** a compile that reports these errors still WRITES its artifacts
+([[g-impl1-artifacts-written-on-error-s451]], §2.2.1 S451) — the refusal now fails the compile (exit 1), but the
+`null /* E-… */` artifact lands on disk.
+
 
 ### g-sse-generator-write-in-client-fn-body-awaited-loses-subscription — `function go(){ @feed = ticks(); … }` with a `server function*` emits `await _scrml_sse_ticks()`: the cell holds the EventSource and every message drops — `NEW S446; HIGH; open`
 
@@ -1637,8 +1747,9 @@ here rather than filed separately, per converge-don't-enumerate.
 <!-- @gap id=g-tool-context-match-loses-enum-field-order sev=MED status=open locus=compiler/src/codegen/tool-context-match-emitter-drops-enum-field-order-table-emits-cannot-positionally-bind-comment(page-path-binds-via-.data.field) prov=flogenceP-§64-tool-dogfood-S389-peter-PA-confirmed-by-execution-88d59ac9-enum-match+tool-inmain-payload-variant-bind-undefined route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md -->
 > ⚑ **S391-bryan PA-VERIFICATION — MIS-SCOPED. This is NOT tool-specific, and the blast radius is mainstream.** PA-EXECUTED on `f699d0b5`, plain web-app `<program>` (no `kind="tool"` anywhere): a `server function` whose body does a positional payload bind compiles **exit 0, zero hard errors**, and the emitted `.server.js` carries `if (_scrml_tag_3 === "FileLine") { /* §1a: cannot positionally bind 'pa' — variant 'FileLine' field order unknown */ return pa; }` — `return pa` with `pa` **never bound**, i.e. a guaranteed `ReferenceError` on every call, silently. Two-sided control in the same compile: the CLIENT pass emits **zero** "cannot positionally bind" comments and binds correctly. **Root (agent-traced, PA-corroborated by the two-sided emit):** `setVariantFieldsForFile` has exactly ONE caller, `emit-client.ts:2012` inside `generateClientJs`, so the server pass and the tool pass both run with `_variantFields === null` (`emit-control-flow.ts:2824`). The tool is not special; it is simply another non-client pass. ⚑ The source comment at `emit-control-flow.ts:54-55` asserting the registry is populated "at the top of generateClientJs / generateServerJs" is **FALSE for the server half** — a Rule 4 item in its own right (a comment asserting behaviour that does not happen, the same shape as [[g-each-iter-shape-unfired]]). **Severity is understated at MED**: silent-wrong + guaranteed runtime crash + a shape any app with a payload enum in a `server function` will write. ⚑ **And the routed "2+3 are likely ONE incomplete tool-context match emitter — converge" is WRONG**: there is no separate tool-context match emitter at all (the tool reuses the shared `emit-control-flow.ts` with two different inputs wrong), and the two are separable — flipping `emit-tool.ts`'s `boundary:"server"` to `"client"` in a scratch copy makes the sibling await-defect vanish while THIS one persists byte-identical. Do not fold them.
 
-### g-foreign-value-block-dot-return-misread-as-keyword — an inline value-position `_={ … }=` foreign block whose single expression is a depth-0 member access named `.return` (iterator/generator `.return()`, or `?.return`) yields `undefined` — the single-expression discriminator misreads `.return` as the `return` keyword, so no `return` is injected. **PA-CONFIRMED by execution** (`scratchpad/tool-dogfood/t1/r3b.scrml`, 0 errors): `const res = _={ in: { g } g.return(99) }=` emits `const res = await (async (g) => { g.return(99) })(g)` — no injected return → `res === undefined` (expected `{value:99,done:true}`); control `g2.next()` emits `return (g2.next())`. **Violates §23.2.4a rule 1** (single-expression slice gets an injected return). **Root:** `emit-logic.ts:3095` `scanForeignSliceShape` — the top-level `return`-keyword check `!isWord(src[i-1])` treats `.` (not a word char) as a boundary, so member `.return` matches. **Fix (compute):** exclude a `.`-preceded (member-access) `return` from the keyword match; no change to what compiles/is refused/means. ⚑ Same scanner as `g-multi-statement-foreign-block-in-statement-position` + `g-foreign-multistmt-value-block-mislowers` — a third trigger; harden the scanner's tokenization (string/comment/member-access awareness) once. ROUTED to bryan (foreign-block lowering; fix is compute-turnkey). — `NEW S389-peter (§64 tool dog-food, PA-confirmed by execution on 88d59ac9)`; **MED**; open
-<!-- @gap id=g-foreign-value-block-dot-return-misread-as-keyword sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:3095-scanForeignSliceShape-top-level-return-keyword-check-!isWord(src[i-1])-treats-dot-as-boundary-so-member-.return-matches prov=flogenceP-§64-tool-dogfood-S389-peter-PA-confirmed-by-execution-88d59ac9-r3b-g.return(99)-emits-no-injected-return-undefined route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md -->
+### g-foreign-value-block-dot-return-misread-as-keyword — an inline value-position `_={ … }=` foreign block whose single expression is a depth-0 member access named `.return` (iterator/generator `.return()`, or `?.return`) yields `undefined` — the single-expression discriminator misreads `.return` as the `return` keyword, so no `return` is injected. **PA-CONFIRMED by execution** (`scratchpad/tool-dogfood/t1/r3b.scrml`, 0 errors): `const res = _={ in: { g } g.return(99) }=` emits `const res = await (async (g) => { g.return(99) })(g)` — no injected return → `res === undefined` (expected `{value:99,done:true}`); control `g2.next()` emits `return (g2.next())`. **Violates §23.2.4a rule 1** (single-expression slice gets an injected return). **Root:** `emit-logic.ts:3095` `scanForeignSliceShape` — the top-level `return`-keyword check `!isWord(src[i-1])` treats `.` (not a word char) as a boundary, so member `.return` matches. **Fix (compute):** exclude a `.`-preceded (member-access) `return` from the keyword match; no change to what compiles/is refused/means. ⚑ Same scanner as `g-multi-statement-foreign-block-in-statement-position` + `g-foreign-multistmt-value-block-mislowers` — a third trigger; harden the scanner's tokenization (string/comment/member-access awareness) once. ROUTED to bryan (foreign-block lowering; fix is compute-turnkey). — `NEW S389-peter (§64 tool dog-food, PA-confirmed by execution on 88d59ac9)`; **MED**; RESOLVED S456
+<!-- @gap id=g-foreign-value-block-dot-return-misread-as-keyword sev=MED status=resolved resolved-by=S456-fix/s456-foreign-slice-regex-apostrophe locus=compiler/src/codegen/emit-logic.ts:3095-scanForeignSliceShape-top-level-return-keyword-check-!isWord(src[i-1])-treats-dot-as-boundary-so-member-.return-matches prov=flogenceP-§64-tool-dogfood-S389-peter-PA-confirmed-by-execution-88d59ac9-r3b-g.return(99)-emits-no-injected-return-undefined route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md -->
+> ⛑ **RESOLVED S456** (`fix/s456-foreign-slice-regex-apostrophe`) — the slice shape scan now reads acorn tokens (`foreign-seal.ts` `scanForeignSliceShape`); a `return` token after `.` / `?.` is a property name, not the keyword. Pinned by `compiler/tests/integration/foreign-slice-lexing.test.js` and conformance `foreign/foreign-slice-lexing-regex-quote-pos` (`({ return: … }).return(word)` → injected `return`, value crosses).
 > ⚑ **S391-bryan verification — CONFIRMED exactly as filed (agent-executed, NOT PA-reproduced), and NOT tool-specific.** Traced at `emit-logic.ts:3095`, exact, still current: `[TRACE 3095] return-kw HIT at i=2 prevChar="." slice="g.return(99)"` → `topLevelReturn=true` → `singleExpression=false` → verbatim splice. Emitted `const res = await (async (g) => { g.return(99) })(g);` against the control `const ctrl = await (async (g2) => { return (g2.next()); })(g2);` — `res` is `undefined`, exit 0, silent. ⚑ **The `kind="tool"` framing is incidental**: the identical emit occurs in a plain web `<program>` server function, because the root is the shared `emit-logic` scanner, not a tool path. The filed diagnosis and proposed fix direction are both correct as written — this is the one of the four tool-surface findings that needed no correction.
 
 

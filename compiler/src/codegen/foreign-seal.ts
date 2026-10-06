@@ -172,3 +172,145 @@ export function checkForeignSliceSyntax(source: string): { message: string; slic
     return { message: raw, sliceLine: line !== null && line >= 1 ? line : null };
   }
 }
+
+// ---------------------------------------------------------------------------
+// The two pre-emit SYNTACTIC scans of a slice (§23.2.4a): its SHAPE (single expression vs
+// statement body) and its TOP-LEVEL bindings (the E-FOREIGN-006 crossing-shadow check).
+//
+// Both read the slice as the TOKEN STREAM the PARSER produces when it parses the slice in the
+// context it is actually built in — the body of a strict async function inside the probe
+// `checkForeignSliceSyntax` uses — never as characters and never from a standalone lexer.
+//   - A hand character scanner did not know regex literals: the `'` in `/['x]/g` opened a
+//     "string" that hid the slice's top-level `return` (s456, adopter flogence).
+//   - A standalone lexer is not enough either (s456 review F1): whether `/` starts a regex or
+//     divides depends on the grammar, and outside an async function `await` is an identifier, so
+//     `await /'/.exec(s)` lexed `/` as division and the `'` as an unterminated string — and the
+//     slice was taken as a statement body with no `return`, settling silently to `not`.
+// The parser decides regex vs division in the slice's real context (acorn re-reads a `/` at an
+// expression start as a regex), and `onToken` hands back the tokens it settled on.
+//
+// The token parse uses the wrapper WITHOUT the crossings as parameters. Parameters never change
+// how the body tokenizes, and leaving them out keeps a crossing-shadowing slice (`in:{ a }` +
+// `const a`) parseable here — the redeclaration is what E-FOREIGN-006 must NAME, so it must not
+// make the token stream disappear (review F2). The build check (`checkForeignSliceSyntax`, with
+// the parameters) still decides buildability.
+//
+// A slice that parses in NEITHER shape has no token stream. It cannot be built in either shape,
+// so the caller's build check refuses it as E-FOREIGN-007 — the scans never guess a shape for
+// text the parser rejected.
+//
+// Opacity (§23.2.3) is unchanged: the scans read only nesting depth, `;`, the `return` keyword
+// and the binding keywords at depth 0. They never type-check, analyse or rewrite the interior.
+// ---------------------------------------------------------------------------
+
+interface SliceToken {
+  type: { label: string; keyword?: string };
+  value?: unknown;
+  start: number;
+  end: number;
+}
+
+/**
+ * Parse `body` as the sealed function body the helper builds (minus the parameters, see above)
+ * and return the tokens that fall inside the slice, or null when it does not parse. `body`
+ * contains the slice verbatim at `sliceOffsetInBody`.
+ */
+function tokensInWrapper(body: string, sliceLength: number, sliceOffsetInBody: number): SliceToken[] | null {
+  const head = `(function (require, __dirname, __filename) {"use strict";\nreturn (`;
+  const fnHead = "async function () {\n";
+  const probe = `${head}${fnHead}${body}\n});\n})`;
+  const from = head.length + fnHead.length + sliceOffsetInBody;
+  const to = from + sliceLength;
+  const all: SliceToken[] = [];
+  try {
+    acorn.parse(probe, {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      onToken: (t: SliceToken) => { all.push(t); },
+    });
+  } catch {
+    return null;
+  }
+  return all.filter((t) => t.start >= from && t.end <= to);
+}
+
+/**
+ * The slice's tokens as the parser reads them: first as a STATEMENT BODY (the verbatim shape),
+ * else as a SINGLE EXPRESSION (`return (<slice>\n);`). `asExpression` says which parse produced
+ * them. Null: the slice parses in neither shape.
+ */
+function parsedSliceTokens(slice: string): { tokens: SliceToken[]; asExpression: boolean } | null {
+  const asBody = tokensInWrapper(slice, slice.length, 0);
+  if (asBody !== null) return { tokens: asBody, asExpression: false };
+  const asExpr = tokensInWrapper(`return (${slice}\n);`, slice.length, "return (".length);
+  if (asExpr !== null) return { tokens: asExpr, asExpression: true };
+  return null;
+}
+
+const OPENERS = new Set(["(", "[", "{", "${"]);
+const CLOSERS = new Set([")", "]", "}"]);
+
+/** A token after `.` / `?.` is a property name even when it spells a keyword (`g.return()`). */
+function isPropertyNamePosition(prev: SliceToken | undefined): boolean {
+  return prev !== undefined && (prev.type.label === "." || prev.type.label === "?.");
+}
+
+/**
+ * §23.2.4a value-flow shape. A slice with no top-level `;` and no top-level `return` is a
+ * SINGLE EXPRESSION (codegen injects the `return`); otherwise it is a statement body used
+ * verbatim. A slice that parses only as an expression (an object literal `{ a: 1, b: 2 }`) is a
+ * single expression. `parsed: false` — the slice parses in neither shape; the caller must refuse
+ * it (E-FOREIGN-007 via the build check), never pick a shape for it.
+ */
+export function scanForeignSliceShape(src: string): { topLevelReturn: boolean; topLevelStmtSep: boolean; parsed: boolean } {
+  const parsed = parsedSliceTokens(src);
+  if (parsed === null) return { topLevelReturn: false, topLevelStmtSep: false, parsed: false };
+  if (parsed.asExpression) return { topLevelReturn: false, topLevelStmtSep: false, parsed: true };
+  const tokens = parsed.tokens;
+  let depth = 0;
+  let topLevelReturn = false;
+  let topLevelStmtSep = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const label = t.type.label;
+    if (OPENERS.has(label)) { depth++; continue; }
+    if (CLOSERS.has(label)) { depth--; continue; }
+    if (depth !== 0) continue;
+    if (label === ";") topLevelStmtSep = true;
+    else if (t.type.keyword === "return" && !isPropertyNamePosition(tokens[i - 1])) topLevelReturn = true;
+  }
+  return { topLevelReturn, topLevelStmtSep, parsed: true };
+}
+
+/**
+ * The TOP-LEVEL bindings of the slice whose names are in `names` (the crossings): a `const` /
+ * `let` / `var` / `function` / `class` (incl. `function*`) at depth 0. A binding inside a nested
+ * `{}` / `()` / `[]`, a string, a comment or a template literal is not top level and does not
+ * collide with a parameter of the sealed function. A slice that parses in neither shape reports
+ * none; its E-FOREIGN-007 carries the parser's complaint.
+ */
+export function scanForeignSliceTopLevelBindings(src: string, names: Set<string>): string[] {
+  const parsed = parsedSliceTokens(src);
+  if (parsed === null || parsed.asExpression) return [];
+  const tokens = parsed.tokens;
+  const found = new Set<string>();
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const label = t.type.label;
+    if (OPENERS.has(label)) { depth++; continue; }
+    if (CLOSERS.has(label)) { depth--; continue; }
+    if (depth !== 0 || isPropertyNamePosition(tokens[i - 1])) continue;
+    const kw = t.type.keyword;
+    const isBindingHead = kw === "const" || kw === "var" || kw === "function" || kw === "class"
+      || (label === "name" && t.value === "let");
+    if (!isBindingHead) continue;
+    let j = i + 1;
+    while (j < tokens.length && tokens[j].type.label === "*") j++;
+    const nameTok = tokens[j];
+    if (nameTok && nameTok.type.label === "name" && typeof nameTok.value === "string" && names.has(nameTok.value)) {
+      found.add(nameTok.value);
+    }
+  }
+  return [...found];
+}

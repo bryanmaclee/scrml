@@ -1,0 +1,9 @@
+<program kind="tool" lang="js" db="./app.db">
+    function main(args: string[]): number {
+        if (args.length == 0) {
+            const stmt = ?{`SELECT 1 AS one`}.prepare()
+            println(stmt)
+        }
+        return 0
+    }
+</program>

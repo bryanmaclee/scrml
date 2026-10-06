@@ -18,8 +18,9 @@ import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
-import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax } from "./foreign-seal.ts";
-import { resolveLogLoc } from "./log-loc.ts";
+import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax, scanForeignSliceShape, scanForeignSliceTopLevelBindings } from "./foreign-seal.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
@@ -1726,11 +1727,13 @@ function _emitTier3PositionalSugar(
     fieldNames.push(fieldName);
   }
 
-  // §14.11 line 7226 — positional-arity mismatch is E-TYPE-001.
+  // §14.11 line 7226 — positional-arity mismatch is E-TYPE-001. With no `opts.errors`
+  // channel the refusal goes to the run-wide refused-lowering sink (s456) — the caller
+  // emits a `null` fallback, which must never ship without the diagnostic.
   if (positionals.length !== fieldNames.length) {
-    if (opts.errors) {
+    {
       const span = (initExpr && initExpr.span) ? initExpr.span : (node.span ?? { start: 0, end: 0 });
-      opts.errors.push(new CGError(
+      const refusal = new CGError(
         "E-TYPE-001",
         `E-TYPE-001: Positional binding for type \`${structType.name}\` expects ` +
         `${fieldNames.length} field${fieldNames.length === 1 ? "" : "s"} ` +
@@ -1739,7 +1742,9 @@ function _emitTier3PositionalSugar(
         `Provide values in the declared field order, or use the named-initialiser form ` +
         `(\`{${fieldNames.map(n => `${n}: …`).join(", ")}}\`). See SPEC §14.11.`,
         span,
-      ));
+      );
+      if (opts.errors) opts.errors.push(refusal);
+      else recordRefusedLowering(refusal, node);
     }
     return null;
   }
@@ -3532,114 +3537,39 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       //     via their own `return`; a body without one yields `undefined`
       //     (honest — they wrote statements, not a value expression).
       //
-      // The scan is brace/paren/bracket-depth-aware and skips string and comment
-      // spans so a nested `return` (inside an arrow/closure) or a `;` inside a
-      // string/`for(;;)` is NOT mistaken for a top-level statement boundary. This
-      // is a SYNTACTIC scan over the opaque slice (no parse) — it never
-      // type-checks or rewrites the interior (§23.2.3 opacity preserved).
-      const scanForeignSliceShape = (src: string): { topLevelReturn: boolean; topLevelStmtSep: boolean } => {
-        let depth = 0;          // () [] {} nesting
-        let parenForDepth = 0;  // track `for(` so its `;` are not statement seps
-        let inS = "", esc = false, inLine = false, inBlock = false, inTpl = false;
-        let topLevelReturn = false, topLevelStmtSep = false;
-        const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
-        for (let i = 0; i < src.length; i++) {
-          const ch = src[i], nx = src[i + 1];
-          if (inLine) { if (ch === "\n") inLine = false; continue; }
-          if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; } continue; }
-          if (inS) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === inS) inS = ""; continue; }
-          if (inTpl) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === "`") inTpl = false; continue; }
-          if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
-          if (ch === "/" && nx === "*") { inBlock = true; i++; continue; }
-          if (ch === '"' || ch === "'") { inS = ch; continue; }
-          if (ch === "`") { inTpl = true; continue; }
-          if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
-          if (ch === ")" || ch === "]" || ch === "}") { depth--; if (parenForDepth && depth < parenForDepth) parenForDepth = 0; continue; }
-          if (depth === 0) {
-            if (ch === ";") { topLevelStmtSep = true; continue; }
-            // `return` keyword at top level (whole-word).
-            if (ch === "r" && src.slice(i, i + 6) === "return" && !isWord(src[i - 1] ?? "") && !isWord(src[i + 6] ?? "")) {
-              topLevelReturn = true;
-            }
-          }
-        }
-        return { topLevelReturn, topLevelStmtSep };
-      };
-      // Find TOP-LEVEL binding declarations in the opaque slice whose name is in
-      // `names` (the crossing set). Same depth/string/comment/template skipping as
-      // scanForeignSliceShape — a binding keyword inside a nested `{}`/`()`/`[]`,
-      // a string, a comment, or a template literal is NOT top-level and does not
-      // collide with the slice parameter (only the slice body's own top level does).
-      // Recognised binding heads: `const`/`let`/`var`/`function`/`class <name>`.
-      // (`function`/`class` may carry intervening `*`/whitespace before the name.)
-      const scanForeignSliceTopLevelBindings = (src: string, names: Set<string>): string[] => {
-        const found = new Set<string>();
-        let depth = 0;
-        let inS = "", esc = false, inLine = false, inBlock = false, inTpl = false;
-        const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
-        // Match a binding keyword starting at index `i` (whole-word, top level);
-        // returns the declared name if it is in `names`, else null.
-        const matchBinding = (i: number): string | null => {
-          for (const kw of ["const", "let", "var", "function", "class"]) {
-            if (src.slice(i, i + kw.length) === kw
-              && !isWord(src[i - 1] ?? "")
-              && !isWord(src[i + kw.length] ?? "")) {
-              // Skip past the keyword + any `*` (generator) + whitespace to the name.
-              let j = i + kw.length;
-              while (j < src.length && (src[j] === "*" || /\s/.test(src[j]))) j++;
-              let k = j;
-              while (k < src.length && isWord(src[k])) k++;
-              const name = src.slice(j, k);
-              return name && names.has(name) ? name : null;
-            }
-          }
-          return null;
-        };
-        for (let i = 0; i < src.length; i++) {
-          const ch = src[i], nx = src[i + 1];
-          if (inLine) { if (ch === "\n") inLine = false; continue; }
-          if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; } continue; }
-          if (inS) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === inS) inS = ""; continue; }
-          if (inTpl) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === "`") inTpl = false; continue; }
-          if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
-          if (ch === "/" && nx === "*") { inBlock = true; i++; continue; }
-          if (ch === '"' || ch === "'") { inS = ch; continue; }
-          if (ch === "`") { inTpl = true; continue; }
-          if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
-          if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
-          if (depth === 0 && (ch === "c" || ch === "l" || ch === "v" || ch === "f")) {
-            const hit = matchBinding(i);
-            if (hit) found.add(hit);
-          }
-        }
-        return [...found];
-      };
+      // Both scans (shape here, crossing-shadow below) read the slice as a JS
+      // TOKEN stream (foreign-seal.ts `scanForeignSliceShape` /
+      // `scanForeignSliceTopLevelBindings`), so a `;` / `return` / binding
+      // keyword inside a string, comment, template literal or REGEX literal, or
+      // nested in `()`/`[]`/`{}`, is never read as top-level structure. They never
+      // type-check or rewrite the interior (§23.2.3 opacity preserved).
+      //
+      // ⛔ A REFUSAL HERE GOES TO THE RUN-WIDE SINK (refused-lowering-errors.ts),
+      // never to an opts-threaded channel: an `if` / loop body is emitted with a
+      // freshly built opts, and a slice inside one used to reach this arm with no
+      // channel at all — exit 0 and only the `null /* … */` placeholder in the
+      // artifact (s456, flogence graph-ingest-tool).
+      const span = (node as any).span ?? { start: 0, end: 0 };
+      // The diagnostic's line/col come from the byte offset (the §20.6 source
+      // registry), not the node's own `line`, which is not reliable for a foreign
+      // node: measured on the flogence repro, a slice at line 136 carried line 99,
+      // so the CLI frame pointed 37 lines above the slice its message named.
+      const _sliceLoc = resolveSpanLineCol(span);
+      const diagSpan = _sliceLoc ? { ...span, line: _sliceLoc.line, col: _sliceLoc.col } : span;
       // CROSSING-SHADOW guard (E-FOREIGN-006). The `in:{}` crossing names become
       // the sealed slice function's PARAMETERS (below). If the verbatim slice ALSO
       // declares a TOP-LEVEL binding of the same name (`const`/`let`/`var`/
       // `function`/`class`), the slice redeclares an identifier already bound by
       // the parameter — e.g. `async function (x) { const x = … }` — which is
-      // invalid JS (and for `var`/`function`, a silent overwrite of the crossing). Without
-      // this guard the failure surfaces post-emit as the MISLEADING
-      // E-CODEGEN-INVALID-LOGIC ("compiler defect — please report it"), even though
-      // it is AUTHOR error: the author chose a crossing name that collides with a
-      // name the slice itself declares. This pre-emit SYNTACTIC scan (no parse —
-      // §23.2.3 opacity preserved: it inspects only top-level binding KEYWORDS,
-      // never type-checks or rewrites the interior) names the shadowed binding so
-      // the diagnostic points at the real fix (rename the crossing OR the local).
+      // invalid JS (and for `var`/`function`, a silent overwrite of the crossing).
+      // Named here as the AUTHOR error it is (rename the crossing OR the local),
+      // instead of a generic parse complaint.
       if (crossings.length > 0) {
         const shadowed = scanForeignSliceTopLevelBindings(slice, new Set(crossings));
-        // Dedicated narrow sink (`opts.foreignCrossingErrors`), NOT the broad
-        // `opts.errors`: the server-fn emit path (emit-server.ts) does not wire a
-        // general `opts.errors` sink, and threading one would surface OTHER arms'
-        // previously-swallowed errors (e.g. E-CG-003). The caller drains this
-        // sink into the live error stream after the function body emits.
-        const sink = (opts as any).foreignCrossingErrors as CGError[] | undefined;
-        if (shadowed.length > 0 && sink) {
-          const span = (node as any).span ?? { start: 0, end: 0 };
+        if (shadowed.length > 0) {
           const names = shadowed.map((n) => `\`${n}\``).join(", ");
           const singular = shadowed.length === 1;
-          sink.push(new CGError(
+          recordRefusedLowering(new CGError(
             "E-FOREIGN-006",
             `E-FOREIGN-006: the inline foreign block crosses ${singular ? "a name" : "names"} ` +
             `(${names}) that the slice ${singular ? "also declares" : "also declare"} ` +
@@ -3647,16 +3577,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             `so a same-named \`const\`/\`let\`/\`var\`/\`function\`/\`class\` inside the slice ` +
             `redeclares the parameter — invalid JS. Rename the crossing ${singular ? "name" : "names"} ` +
             `or the slice-local binding so they do not collide. See SPEC §23.2.4a.`,
-            span,
-          ));
-          // Decline to emit the redeclaring slice — the error stops the build, and
-          // a defensive `null` keeps the surrounding expression syntactically
-          // well-formed (no cascade into the misleading E-CODEGEN-INVALID-LOGIC).
+            diagSpan,
+          ), node);
+          // Decline to emit the redeclaring slice — the error fails the compile, and
+          // a `null` keeps the surrounding expression syntactically well-formed (no
+          // cascade into the misleading E-CODEGEN-INVALID-LOGIC).
           return `null /* E-FOREIGN-006: crossing-shadow (${names}) */`;
         }
       }
-      const { topLevelReturn, topLevelStmtSep } = scanForeignSliceShape(slice);
-      const singleExpression = !topLevelReturn && !topLevelStmtSep;
+      // A slice that parses in neither shape (`parsed: false`) is taken as a
+      // statement body, which the build check below then REFUSES (E-FOREIGN-007) —
+      // it does not parse there either. Fail closed; never a guessed shape.
+      const { topLevelReturn, topLevelStmtSep, parsed } = scanForeignSliceShape(slice);
+      const singleExpression = parsed && !topLevelReturn && !topLevelStmtSep;
       // The newline before `)` keeps a trailing `//` comment in a one-expression
       // slice from swallowing the paren.
       const inner = singleExpression ? `return (${slice}\n);` : slice;
@@ -3668,42 +3601,38 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // the crossings are its parameters and are passed at the call, which keeps
       // the codegen-injected boundary `await` here at the call site.
       const sliceSource = foreignSliceSource(crossings, inner);
-      const span = (node as any).span ?? { start: 0, end: 0 };
       const site = foreignSiteLabel(resolveLogLoc(span));
       // The artifact's syntax gate cannot see inside a string, so the slice is
       // checked HERE, as the helper will build it — an author error at the slice
       // (E-FOREIGN-007), not the old post-emit "compiler defect" framing.
       const syntaxProblem = checkForeignSliceSyntax(sliceSource);
       if (syntaxProblem) {
-        const sink = (opts as any).foreignCrossingErrors as CGError[] | undefined;
-        if (sink) {
-          // Name the ROOT cause. A slice with no top-level `;` and no top-level
-          // `return` is read as a SINGLE EXPRESSION (§23.2.4a rule 1) and given an
-          // injected `return (…)`. When that fails but the same text parses as a
-          // statement body, the author wrote statements, not a bad expression — the
-          // fix is the multi-statement shape, not "your JavaScript is invalid".
-          // (Recovering by re-reading it as multi-statement is NOT done here: that
-          // would turn a refusal into a silent `undefined` → `not`, the open fork in
-          // g-foreign-multistmt-value-block-mislowers.)
-          const statementsParse = singleExpression
-            && checkForeignSliceSyntax(foreignSliceSource(crossings, slice)) === null;
-          const where = syntaxProblem.sliceLine !== null ? ` (line ${syntaxProblem.sliceLine} of the slice)` : "";
-          sink.push(new CGError(
-            "E-FOREIGN-007",
-            statementsParse
-              ? `E-FOREIGN-007: the inline foreign slice at ${site} has no top-level \`;\` and no top-level ` +
-                `\`return\`, so it is read as a SINGLE EXPRESSION and given an injected \`return\` — but it ` +
-                `is a sequence of statements, not one expression. Use the multi-statement shape: end each ` +
-                `statement with \`;\` and give the slice its own \`return\` for the value it produces. ` +
-                `See SPEC §23.2.4a (slice body — single-expression OR multi-statement).`
-              : `E-FOREIGN-007: the inline foreign slice at ${site} is not valid JavaScript as written: ` +
-                `${syntaxProblem.message}${where}. A slice is evaluated as the body of a sealed async ` +
-                `function — not a module — so \`import.meta\` and static \`import\` are unavailable ` +
-                `(use \`__dirname\` / \`__filename\` / \`require\` / \`await import(…)\`), and the compiler ` +
-                `does not strip TypeScript type syntax from a slice. See SPEC §23.2.4a.`,
-            span,
-          ));
-        }
+        // Name the ROOT cause. A slice with no top-level `;` and no top-level
+        // `return` is read as a SINGLE EXPRESSION (§23.2.4a rule 1) and given an
+        // injected `return (…)`. When that fails but the same text parses as a
+        // statement body, the author wrote statements, not a bad expression — the
+        // fix is the multi-statement shape, not "your JavaScript is invalid".
+        // (Recovering by re-reading it as multi-statement is NOT done here: that
+        // would turn a refusal into a silent `undefined` → `not`, the open fork in
+        // g-foreign-multistmt-value-block-mislowers.)
+        const statementsParse = singleExpression
+          && checkForeignSliceSyntax(foreignSliceSource(crossings, slice)) === null;
+        const where = syntaxProblem.sliceLine !== null ? ` (line ${syntaxProblem.sliceLine} of the slice)` : "";
+        recordRefusedLowering(new CGError(
+          "E-FOREIGN-007",
+          statementsParse
+            ? `E-FOREIGN-007: the inline foreign slice at ${site} has no top-level \`;\` and no top-level ` +
+              `\`return\`, so it is read as a SINGLE EXPRESSION and given an injected \`return\` — but it ` +
+              `is a sequence of statements, not one expression. Use the multi-statement shape: end each ` +
+              `statement with \`;\` and give the slice its own \`return\` for the value it produces. ` +
+              `See SPEC §23.2.4a (slice body — single-expression OR multi-statement).`
+            : `E-FOREIGN-007: the inline foreign slice at ${site} is not valid JavaScript as written: ` +
+              `${syntaxProblem.message}${where}. A slice is evaluated as the body of a sealed async ` +
+              `function — not a module — so \`import.meta\` and static \`import\` are unavailable ` +
+              `(use \`__dirname\` / \`__filename\` / \`require\` / \`await import(…)\`), and the compiler ` +
+              `does not strip TypeScript type syntax from a slice. See SPEC §23.2.4a.`,
+          diagSpan,
+        ), node);
         return `null /* E-FOREIGN-007: the foreign slice at ${site.replace(/\*\//g, "* /")} does not parse */`;
       }
       return `await ${FOREIGN_SEAL_FN}(${JSON.stringify(site)}, ${templateLiteralOf(sliceSource)})(${argList});`;
@@ -3864,29 +3793,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
         // §44.3: .prepare() is removed.
         if (method === "prepare") {
-          // Push the mandated COMPILE diagnostic (E-SQL-006 — SPEC §34 / §44.3,
-          // "emitted at compiler/src/codegen") into the dedicated narrow
-          // `preparedStmtErrors` sink, an EXACT mirror of the `foreignCrossingErrors`
-          // precedent in `case "foreign"` above. The structured server-fn emit path
-          // (emit-server / emit-library / emit-tool) deliberately does NOT wire the
-          // broad `opts.errors` sink (threading it would surface OTHER arms'
-          // previously-swallowed errors, e.g. E-CG-003), so the caller drains this
-          // narrow sink into the live error stream AFTER the body emits. The prior
-          // comment here claimed rewriteSqlRefs (the TEXT/regex path) owned this
-          // emission — but a real top-level server `function` body lowers through
-          // THIS structured path, so with no sink the SHALL-mandated compile
-          // diagnostic never reached the developer (clean exit 0, runtime-only IIFE).
-          const sink = (opts as any).preparedStmtErrors as CGError[] | undefined;
-          if (sink) {
-            sink.push(new CGError(
-              "E-SQL-006",
-              `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
-              (node as any).span ?? { start: 0, end: 0 },
-            ));
-          }
+          // The mandated COMPILE diagnostic (E-SQL-006 — SPEC §34 / §44.3), recorded
+          // in the run-wide refused-lowering sink (refused-lowering-errors.ts, drained
+          // by runCG). It used to go to a `preparedStmtErrors` channel threaded through
+          // opts, which an `if` / loop body's freshly built opts dropped — a
+          // `.prepare()` one block deep in a tool `main` compiled exit 0 (s456).
+          recordRefusedLowering(new CGError(
+            "E-SQL-006",
+            `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
+            (node as any).span ?? { start: 0, end: 0 },
+          ), node);
           // STILL emit the runtime-throwing IIFE (defense-in-depth — PINNED by
           // sql-params / sql-write-ops §5): the JS parses and any runtime execution
-          // surfaces the issue immediately even when a caller drained no sink.
+          // surfaces the issue immediately.
           return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
         }
 
@@ -5292,12 +5211,27 @@ function _emitWhileStmtWithTilde(node: any, opts: EmitLogicOpts): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Count direct (top-level) lift-expr nodes in an arm body.
- * Used for E-LIFT-002 detection: multiple lift statements on the same
- * linear execution path in a value-lift arm are a compile error (§10).
+ * E-LIFT-002 (§10 / §17.6): two or more direct (top-level) `lift` statements in one
+ * value-lift arm body are on the same execution path — a compile ERROR.
+ *
+ * Until s456 this site only pushed a `/* E-LIFT-002 … *\/` comment into the artifact
+ * and reported nothing: SPEC §17.6 Example 6 compiled exit 0. The refusal is recorded in the run-wide refused-lowering sink
+ * (refused-lowering-errors.ts, drained by runCG), anchored on the first EXTRA `lift`.
+ * The comment stays as a marker in the (never-shipped) artifact.
  */
-function countTopLevelLifts(body: any[]): number {
-  return body.filter((n: any) => n?.kind === "lift-expr").length;
+function refuseExtraArmLifts(body: any[], lines: string[]): void {
+  const lifts = body.filter((n: any) => n?.kind === "lift-expr");
+  if (lifts.length <= 1) return;
+  const extra = lifts[1];
+  recordRefusedLowering(new CGError(
+    "E-LIFT-002",
+    "E-LIFT-002: Multiple `lift` statements on the same execution path in a value-lift arm. " +
+    "In an if-as-expression (§17.6), each arm produces exactly one value. Remove or consolidate " +
+    "the extra `lift` calls, or restructure into a separate accumulation context if multiple " +
+    "values are needed.",
+    extra?.span ?? { start: 0, end: 0 },
+  ), extra);
+  lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
 }
 
 /**
@@ -5382,9 +5316,7 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
     const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx(bodyOpts));
     const nestedConsequent: any[] = nestedIf.consequent ?? [];
     // E-LIFT-002: multiple lifts on same path in a value-lift arm
-    if (countTopLevelLifts(nestedConsequent) > 1) {
-      lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-    }
+    refuseExtraArmLifts(nestedConsequent, lines);
     lines.push(`else if (${nestedCond}) {`);
     // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
     const nestedSugar = _emitValueFormSugarArm(nestedConsequent, tildeVar, bodyOpts);
@@ -5407,9 +5339,7 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
   } else {
     // plain else
     // E-LIFT-002: multiple lifts in else arm
-    if (countTopLevelLifts(alternate) > 1) {
-      lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-    }
+    refuseExtraArmLifts(alternate, lines);
     lines.push(`else {`);
     // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
     const elseSugar = _emitValueFormSugarArm(alternate, tildeVar, bodyOpts);
@@ -5544,9 +5474,7 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
 
   // E-LIFT-002: multiple lifts on same linear path in a value-lift arm
   const consequent: any[] = ifExpr.consequent ?? [];
-  if (countTopLevelLifts(consequent) > 1) {
-    lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-  }
+  refuseExtraArmLifts(consequent, lines);
   lines.push(`if (${condition}) {`);
 
   // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.

@@ -884,24 +884,17 @@ function pruneServerFnsAndLowerGuarded(
   collectForeignNodes(logicBody, foreignNodes);
   const insideRemoval = (start: number, end: number): boolean =>
     removals.some((r) => start >= r.start && end <= r.end);
-  // E-FOREIGN-006 crossing-shadow sink (§23.2.4a) — a dedicated narrow sink,
-  // drained into `errors` after lowering. Without it, emit-logic `case "foreign"`
-  // silently SKIPS the shadow check (`if (shadowed.length > 0 && sink)`) and
-  // emits a redeclaring IIFE, surfacing later as the misleading
-  // E-CODEGEN-INVALID-LOGIC "compiler defect". Mirrors emit-server's wiring.
-  const foreignCrossingErrors: CGError[] = [];
-  // NB: no `.prepare()` (E-SQL-006) sink is threaded here — this loop lowers ONLY
-  // FOREIGN nodes (`collectForeignNodes` → emit-logic `case "foreign"`), which can
-  // never dispatch to `case "sql"`, so it cannot produce an E-SQL-006. The live
-  // `.prepare()` sinks are on the fn-body-emit paths (emit-library fn members,
-  // emit-server, emit-tool), not this foreign-splice loop.
+  // E-FOREIGN-006 / E-FOREIGN-007 (§23.2.4a): emit-logic `case "foreign"` records a
+  // refusal in the run-wide sink (refused-lowering-errors.ts, drained by runCG) and
+  // returns a `null /* E-FOREIGN-… */` placeholder, which is spliced below so the
+  // surrounding statement stays well-formed while the error fails the compile.
   for (const f of foreignNodes) {
     const sp = f.span as Span | undefined;
     if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
     if (insideRemoval(sp.start, sp.end)) continue;
     const lowered = emitLogicNode(
       f as Parameters<typeof emitLogicNode>[0],
-      { foreignCrossingErrors } as unknown as Parameters<typeof emitLogicNode>[1],
+      {} as Parameters<typeof emitLogicNode>[1],
     );
     if (lowered == null) continue;
     // Drop a trailing `;` — the foreign node span sits mid-expression (the RHS of
@@ -909,12 +902,6 @@ function pruneServerFnsAndLowerGuarded(
     // split the surrounding statement.
     ops.push({ start: sp.start, end: sp.end, text: lowered.replace(/;\s*$/, "") });
   }
-  // Drain the crossing-shadow diagnostics into the live error stream. When a
-  // shadow fired, emit-logic returned a `null /* E-FOREIGN-006 … */` sentinel
-  // (spliced above) so the surrounding statement stays well-formed while the
-  // named error stops the build.
-  for (const e of foreignCrossingErrors) errors.push(e);
-
   // Async-mark every function whose body holds a (non-removed) foreign node.
   if (foreignNodes.length > 0) {
     const asyncSpliced = new Set<number>();
@@ -1058,10 +1045,8 @@ function emitAsyncLibraryFns(
   // inherit this file's map). Mirrors emit-server generateServerJs (:1119).
   const syncCallSink: Array<{ name: string; span: unknown }> = [];
   const prevClassifier = setServerAsyncClassifier({ calleeMap, exportRegistry, syncCallSink });
-  const foreignCrossingErrors: unknown[] = [];
-  // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of
-  // `foreignCrossingErrors`), drained into `errors` after lowering.
-  const preparedStmtErrors: unknown[] = [];
+  // E-FOREIGN-006/007 and E-SQL-006 raised while lowering a body go to the run-wide
+  // refused-lowering sink (drained by runCG), not a sink threaded through opts.
   const removals: Array<{ start: number; end: number }> = [];
   const outLines: string[] = [];
   try {
@@ -1079,18 +1064,15 @@ function emitAsyncLibraryFns(
       // loses the async lowering and fails loudly rather than corrupting the file.
       const range = verifiedFnRemovalRange(fn, sourceText);
       if (!range) continue;
-      // ⚑ Snapshot the two diagnostic sinks this emit can append to, so a
-      // DISCARDED emit (the map-surface gate below) leaves no diagnostic behind.
-      // An error raised while lowering a body we then throw away would be a
-      // phantom: the fn ships its verbatim source, and the construct the error
-      // describes never reaches the artifact through this path.
-      const foreignMark = foreignCrossingErrors.length;
-      const preparedMark = preparedStmtErrors.length;
+      // A refusal raised while lowering a body that is then DISCARDED (the
+      // map-surface gate below) is kept, deliberately (s456). Those refusals —
+      // an unbuildable or crossing-shadowing `_{}` slice, a `.prepare()` — are
+      // facts about the SOURCE, which SPEC §23.2.4a / §44.3 make compile errors
+      // wherever the construct sits; the verbatim fallback does not make them
+      // buildable, it only moves where the build would fail.
       const emitted = emitLibraryFnMember(fn, {
         isExported: fn.fromExport === true,
         asyncFnNames,
-        foreignCrossingErrors,
-        preparedStmtErrors,
         // GITI-038 — a nested-async-closure holder that is NOT itself async: emit
         // its body server-side (nested await legal) but keep its OWN signature sync.
         nonAsyncReemit:
@@ -1112,8 +1094,6 @@ function emitAsyncLibraryFns(
         (MAP_RUNTIME_REFERENCED.test(emitted) && containsIndexExpr(fn.body)) ||
         unloweredMapSurfaceReads(emitted).length > 0
       ) {
-        foreignCrossingErrors.length = foreignMark;
-        preparedStmtErrors.length = preparedMark;
         continue;
       }
       removals.push(range);
@@ -1122,10 +1102,6 @@ function emitAsyncLibraryFns(
   } finally {
     setServerAsyncClassifier(prevClassifier);
   }
-  // E-FOREIGN-006 crossing-shadow diagnostics from lowering an async fn body.
-  for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
-  // E-SQL-006 .prepare() diagnostics from lowering an async fn body.
-  for (const e of preparedStmtErrors) if (e) errors.push(e as CGError);
   return { removals, lines: outLines, routedNames: new Set(toEmit.map((f) => f.name as string)) };
 }
 
