@@ -1,0 +1,14 @@
+start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aa4b4017c16439e9e
+
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (path-discipline incidents to date are non-zero).
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- ; `git rev-parse --show-toplevel` == pwd; clean tree. `git fetch origin main`; `git merge-base HEAD origin/main` MUST equal `git rev-parse origin/main` (else `git merge --ff-only origin/main`; if that fails STOP). Expected base ≥ 61f4b8e5b.
+2. Every Read/Write/Edit uses an ABSOLUTE path under YOUR worktree root; never write outside it; never `cd` into the main checkout.
+3. NEVER `git stash`; NEVER `pkill -f`; never `git -c core.hooksPath=…`.
+4. `bun install`, then `bun run pretest` from your worktree cwd. Scratch under "$WT/.tmp/" (delete at end).
+5. First commit: archive THIS ENTIRE PROMPT verbatim as docs/changes/s455-build-report-pg-revoke/BRIEF.md (body `start at $(pwd)`); progress.md. Code + tests in ONE commit. Never --no-verify. Pre-commit timeout 300000. Types gate BLOCKING. s34-census / regen-spec-index / facts --check before pushing.
+6. Push as `feat/s455-build-report-pg-revoke` (normal push). Do NOT open/merge a PR.
+
+MAPS: .claude/maps/primary.map.md (stamp f38697900) — Task-Shape Routing for CLI commands. Report load-bearing.
+CONCURRENCY: a sibling is fixing codegen (compiler/src/codegen/sql-attempt.ts and analyses). Touch only compiler/src/commands/build.js (+ its helpers if they live elsewhere under commands/), its tests, docs/changes/s455-build-report-pg-revoke/, and if an I-/W-code is added, its §34 row.
+
+TASK — bryan RULED S455 "a" (user-voice-scrml.md §S455; read it): the Postgres overload hijack (g-tenant-pg-overload-hijack-s455 in docs/known-gaps.md — read it) is a DEPLOY REQUIREMENT: `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (PG15+ default), stated in SPEC §14.8.11 (find the "No `CREATE` on a schema in the search path (S455)" bullet — quote it). What is owed: surface it at build time. When a `scrml build` (all targets) builds a program that has ≥1 `db-authoritative` table on a Postgres driver, the build's existing database report (§47.14 — `scrml build` already prints a database report with W-DEPLOY-* warnings; find it) SHALL print a clear line stating the requirement and why, once per build. Decide whether it is a plain report line or an Info code (prefer reusing the existing report mechanism; if you add a code, name it I-DEPLOY-PG-SCHEMA-CREATE, add its §34 row with an emitter note, and keep it Info — it never fails a build). Do NOT connect to any database. Tests: a db-authoritative PG program → the line present; SQLite or no db-authoritative table → absent. Update the SPEC §14.8.11 bullet's "owed" parenthetical to say it is surfaced (cite the code or report). FINAL REPORT (<200 words): FINAL_SHA; what prints; tests; `git status` clean.
