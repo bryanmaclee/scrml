@@ -49,6 +49,10 @@ what the newly-running path does. Same shape in #1322's arm check (fail-closed b
 ## Worktrees + /tmp (wrap 6b / 6b′)
 Removed at wrap: the 7 landed S455 agent worktrees + branches (dry-run listed first; all clean). `agent-ac0b2605613446744` (#1325) removed after its merge. Review/landing trees removed as used. ~31 older `agent-*` trees from earlier sessions remain (not audited — carried). /tmp probe (ASUS): **10,067** top-level `/tmp` entries since boot (S454: 10,023) · **1,159,489** files under `/tmp/claude-1000` (S454: 1,157,871) — +1.6k, flat.
 
+## Maps (wrap 6c) — REFRESHED to `9c556dc74` (PR `maps/s455`, separate)
+All 13 maps; inventory rows for every S455 module; 7 routing rows. `handledSqlOfGuardedNode` / `handledSqlGuardInner`: 29 call sites in 12 files.
+**Non-compliance to act on (small, owed):** (1) `docs/FACTS.md` says 14 CLI verbs — `cli.js` dispatches 12; `scripts/facts.ts` `NOT_A_VERB` must exclude `fix-sql-failable.js` / `fix-client-server-call.js`. (2) `scrml fix --help` still describes a `.run() !{ _ :> {} }` rewrite — `sql-failable` now LISTS writes. (3) `docs/bootstrap-conformance.md` stale for the 6th window (1315 committed vs 1346 live) — make its `--check` blocking on conformance/self-host-v2 PRs.
+
 ## Gate at close
 Cloud `gate` green on every S455 landing; main at wrap `9c556dc74` (#1325). Windows runner: one timeout in the executed tenant-floor test (fixed #1324). Review floor **0 owed** (`review-debt.ts --limit 2000`: 892/892). ⚠ Code-bearing carve-out rate 43/429 (10%, flagged HIGH) — S455 carved three small code-bearing PRs: #1311 (a `--abbrev=9` script pin), #1321 (a print-only build-report line + one pure api.js field, PA read the full diff), #1324 (a test timeout). Read their probe= lines if the rate keeps climbing. pa-ruled count: **5** (unchanged — every S455 surface change went to bryan).
 
