@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 241 | 6 |
-| MED | 513 | 4 |
+| HIGH | 240 | 6 |
+| MED | 515 | 4 |
 | LOW | 277 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -23164,8 +23164,9 @@ Fails closed (no login), but an outage is misreported as bad credentials — the
 RESOLVED S455: a deploy requirement (SPEC §14.8.11, ruling "a"); `scrml build` now prints it once per build in the database report when a `db-authoritative` table exists (feat/s455-build-report-pg-revoke). The compiler cannot see overloads; enforcement is the database's.
 Executed on PG16 by the S239 review of #1319: `lower(id)` → `public.lower(integer)` returned `A-secret,B-secret` under `WHERE tenant_id='A'`; also a row-type `lower(assets)` overload and `public.date(text)`. Name-level allow-lists cannot see overloads; precondition: the attacker can `CREATE` in the search_path. Ruled S455 **"a"**: a DEPLOY REQUIREMENT — `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (PG15+ default), stated in SPEC §14.8.11. Owed: surface it in the `scrml build` report when a `db-authoritative` Postgres table exists (no deploy doc exists in the repo to carry it).
 
-### g-impl1-hoist-keyed-read-inside-if-null-s455 — §8.10 N+1 hoist with the keyed read nested inside an `if` in the loop body emits `const row = null; // client cannot evaluate` — every row reads `not` on SUCCESS — `NEW S455; HIGH; open (pre-existing; in flight S455)`
-<!-- @gap id=g-impl1-hoist-keyed-read-inside-if-null-s455 sev=HIGH status=open locus=searched:the §8.10 loop-hoist pass (emit-logic / scheduling) — not traced prov=review:s455-S239-sqlg -->
+### g-impl1-hoist-keyed-read-inside-if-null-s455 — §8.10 N+1 hoist with the keyed read nested inside an `if` in the loop body emits `const row = null; // client cannot evaluate` — every row reads `not` on SUCCESS — `NEW S455; HIGH; RESOLVED S455 (#1325)`
+<!-- @gap id=g-impl1-hoist-keyed-read-inside-if-null-s455 sev=HIGH status=resolved locus=compiler/src/codegen/emit-control-flow.ts(substituteHoistedSqlInBody, emitHoistedForStmt)+compiler/src/hoist-sql-shape.ts prov=review:s455-S239-sqlg -->
+RESOLVED S455 (#1325, 9c556dc74): the rewrite follows the planner's traversal (any depth) or the loop is not hoisted — never `null`; key projected (`__scrml_batch_key`); hoist only an allow-listed query shape; protected tables never hoisted. 38/38 shapes match `.nobatch()` (base 5/38).
 Reviewer-executed at 94265ab3 on real bun:sqlite, same on base, handled and unhandled (the handled variant also throws past its arm). #1322 fixed only the read DIRECTLY in the loop body. Related: the hoist does not project the key column (`SELECT body … WHERE id=` never matches). Dispatched S455 (`fix/s455-hoist-keyed-read-in-if`, "go" = the S435 exception).
 
 ### g-impl1-handled-sql-misc-codegen-s455 — handled `?{}` in a few positions still fails to compile (fail-closed): reassignment inside a hoisted loop, nested inside an arm, ternary, `match` arm — `NEW S455; MED; open (pre-existing)`
@@ -23179,3 +23180,11 @@ Reviewer observed the wrong value (unhandled too) but did not trace the cause.
 ### g-impl1-guarded-call-and-server-load-consumers-s455 — guarded FUNCTION calls share the consumer blind spots #1322 closed for `?{}`; and smaller split/fn gaps — `NEW S455; MED; open (pre-existing)`
 <!-- @gap id=g-impl1-guarded-call-and-server-load-consumers-s455 sev=MED status=open locus=compiler/src/codegen/sql-attempt.ts(handledSqlOfGuardedNode — sql-only by design)+route-inference+type-system prov=review:s455-sqlg-dev -->
 From the #1322 consumer enumeration: a guarded function call `f() !{…}` has the same blind spots (E-RI-002, `fn` purity, body-DG); a `!{}` on a `<x server> = ?{}` load parses as a detached error-effect node (handler ignored); in a `fn`, a `?{}` in an `if` condition or `match ?{}` gets no E-FN-001; `const x = ?{}` is not treated as server-side in a split function (E-RI-002); an unhandled failing write in a split function still runs the client continuation.
+
+### g-impl1-hoist-batching-divergences-s455 — §8.10 hoisted loops still diverge from per-row reads in four ways — `NEW S455; MED; open`
+<!-- @gap id=g-impl1-hoist-batching-divergences-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(emitHoistedForStmt)+compiler/src/codegen/batch-planner.ts(analyzeForLoop) prov=review:s455-S239-hoist -->
+From the #1325 review (reviewer-executed vs `.nobatch()`): (1) key type coercion — the lookup Map uses JS `===` on the key while SQL `=` coerces, so a text key `"7"` against an INTEGER column matches per-row but misses → `not` (fix: normalize, or refuse when the key type is unknown); (2) writes between iterations are unseen — the pre-fetch precedes iteration 1, while §8.10.3 claims equivalence "on all side-effect orderings" (fix: refuse a body containing a write or a call); (3) pre-fetch failure timing — an unhandled pre-fetch failure throws before iteration 1's side effects, even when no iteration reaches a conditional read (fix: capture, re-raise at the read); (4) §8.10.6: *"If `xs.length` at runtime exceeds `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite SHALL chunk the IN-list…"* — impl#1 never chunks; >32766 keys throws a plain Error with code E-BATCH-002.
+
+### g-impl1-match-arm-sql-server-boundary-s455 — `?{}` inside a `match` block arm in a server function → E-CG-006 + a SyntaxError, with or without `.nobatch()` — `NEW S455; MED; open (pre-existing)`
+<!-- @gap id=g-impl1-match-arm-sql-server-boundary-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(match-arm structured-body emission ~:2796, PA-located-verify) prov=review:s455-hoist-dev -->
+Found while fixing #1325; not hoist-root.
