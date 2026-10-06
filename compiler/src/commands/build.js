@@ -568,19 +568,33 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     // (Postgres, a <program db=> SQLite file, one seeded after the build) is checked here.
     // Unlike a missing referenced database — whose every use already fails loudly — an
     // undeclared tenant table FAILS OPEN (its rows reach every request unscoped), so the
-    // whole server answers 503, not only its health check. It stays up, and the health
-    // route re-runs the check, so fixing the database clears it without a restart.
+    // whole server answers 503, not only its health check. It stays up and re-checks —
+    // on every health probe, and (S456 review F2) on ordinary requests under a bounded
+    // backoff — so a database that was down at boot, or is fixed in place, is served
+    // without a restart. A check that errors keeps refusing (fail-closed).
     lines.push("// §14.8.10 — UNDECLARED TENANT TABLES. The tenant floor scopes the tables this build");
     lines.push("// declares tenant-scoped (<schema>, <db tables=>). A table in a database that carries");
     lines.push("// tenant_id but is not declared would be read unscoped — every tenant's rows to every");
-    lines.push("// request — so this server refuses to serve while one exists: every request answers");
-    lines.push("// 503. /_scrml/health re-runs the check, so fixing the database clears it.");
+    lines.push("// request — so this server refuses to serve while one exists, or while a database");
+    lines.push("// cannot be checked: every request answers 503. It re-checks (one check at a time;");
+    lines.push("// ordinary requests at most every 1 s, backing off to 30 s; /_scrml/health at once),");
+    lines.push("// so a database that comes up later, or is fixed in place, is served without a restart.");
     lines.push(`const _SCRML_TENANT_CHECKS = [${tenantChecks.join(", ")}];`);
+    lines.push("// A database that does not answer within this long counts as unchecked (refused).");
+    lines.push("const _SCRML_TENANT_CHECK_TIMEOUT_MS = 10000;");
     lines.push("async function _scrml_tenant_undeclared() {");
     lines.push("  const found = [];");
     lines.push("  for (const check of _SCRML_TENANT_CHECKS) {");
     lines.push("    try {");
-    lines.push("      found.push(...(await check.undeclared()));");
+    lines.push("      let timer;");
+    lines.push("      const timeout = new Promise((_, reject) => {");
+    lines.push("        timer = setTimeout(() => reject(new Error(`no answer within ${_SCRML_TENANT_CHECK_TIMEOUT_MS / 1000} s`)), _SCRML_TENANT_CHECK_TIMEOUT_MS);");
+    lines.push("      });");
+    lines.push("      try {");
+    lines.push("        found.push(...(await Promise.race([check.undeclared(), timeout])));");
+    lines.push("      } finally {");
+    lines.push("        clearTimeout(timer);");
+    lines.push("      }");
     lines.push("    } catch (e) {");
     lines.push('      found.push({ db: "(a server module\'s database)", table: null, error: String((e && e.message) || e) });');
     lines.push("    }");
@@ -603,23 +617,58 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     lines.push("        `503 until that is fixed: declare the table in <schema> so the tenant floor scopes it, and ` +");
     lines.push("        `rebuild — or, if it is not tenant data, rename the column (a tenant_id column is the ` +");
     lines.push("        `declaration; there is no opt-out).`");
-    lines.push("      : `scrml: E-DEPLOY-DB-TENANT-UNDECLARED: database ${f.db} could not be checked for ` +");
-    lines.push("        `undeclared tenant tables (${f.error}). This server answers 503 until the check succeeds.`);");
+    lines.push("      : `scrml: E-DEPLOY-DB-TENANT-UNDECLARED: database ${f.db} could not be checked — the ` +");
+    lines.push("        `connection or the catalogue query failed (${f.error}); no undeclared table was found, ` +");
+    lines.push("        `the database could not be asked. This server answers 503 and keeps re-checking until ` +");
+    lines.push("        `the check succeeds.`);");
     lines.push("  }");
     lines.push("}");
-    lines.push("let _scrml_tenant_state = _scrml_tenant_undeclared().then((found) => {");
-    lines.push("  _scrml_tenant_report(found);");
-    lines.push("  return found;");
-    lines.push("});");
-    lines.push("// How many findings stand. `recheck` (the health route) re-runs a failed check.");
+    lines.push("// The standing findings (null until the first check finishes), the one check in");
+    lines.push("// flight, and the backoff between checks that ordinary requests trigger.");
+    lines.push("let _scrml_tenant_found = null;");
+    lines.push("let _scrml_tenant_inflight = null;");
+    lines.push("let _scrml_tenant_started = 0;");
+    lines.push("let _scrml_tenant_wait = 1000;");
+    lines.push('let _scrml_tenant_logged = "";');
+    lines.push("function _scrml_tenant_run() {");
+    lines.push("  if (_scrml_tenant_inflight) return _scrml_tenant_inflight;");
+    lines.push("  _scrml_tenant_started = Date.now();");
+    lines.push("  _scrml_tenant_inflight = _scrml_tenant_undeclared().then((found) => {");
+    lines.push("    const wasRefusing = _scrml_tenant_found !== null && _scrml_tenant_found.length > 0;");
+    lines.push("    _scrml_tenant_found = found;");
+    lines.push("    _scrml_tenant_inflight = null;");
+    lines.push("    if (found.length === 0) {");
+    lines.push("      _scrml_tenant_wait = 1000;");
+    lines.push('      _scrml_tenant_logged = "";');
+    lines.push('      if (wasRefusing) console.error("scrml: the undeclared-tenant-table check now passes; serving.");');
+    lines.push("    } else {");
+    lines.push("      _scrml_tenant_wait = Math.min(_scrml_tenant_wait * 2, 30000);");
+    lines.push("      // Log a finding set once, not on every re-check.");
+    lines.push("      const key = JSON.stringify(found);");
+    lines.push("      if (key !== _scrml_tenant_logged) {");
+    lines.push("        _scrml_tenant_logged = key;");
+    lines.push("        _scrml_tenant_report(found);");
+    lines.push("      }");
+    lines.push("    }");
+    lines.push("    return found;");
+    lines.push("  });");
+    lines.push("  return _scrml_tenant_inflight;");
+    lines.push("}");
+    lines.push("const _scrml_tenant_boot = _scrml_tenant_run();");
+    lines.push("// How many findings stand (a request answers 503 while any does). `recheck` (the");
+    lines.push("// health route) checks now; any other request starts a background re-check once");
+    lines.push("// the backoff has passed and answers from the standing result meanwhile.");
     lines.push("async function _scrml_tenant_refusals(recheck) {");
-    lines.push("  let found = await _scrml_tenant_state;");
-    lines.push("  if (found.length > 0 && recheck) {");
-    lines.push("    _scrml_tenant_state = _scrml_tenant_undeclared();");
-    lines.push("    found = await _scrml_tenant_state;");
-    lines.push('    if (found.length === 0) console.error("scrml: the undeclared-tenant-table check now passes; serving.");');
+    lines.push("  if (_scrml_tenant_found === null) {");
+    lines.push("    // The boot check has not finished: wait for it, but no longer than its own timeout.");
+    lines.push("    await Promise.race([_scrml_tenant_boot, new Promise((r) => setTimeout(r, _SCRML_TENANT_CHECK_TIMEOUT_MS + 1000))]);");
+    lines.push("    if (_scrml_tenant_found === null) return 1;");
     lines.push("  }");
-    lines.push("  return found.length;");
+    lines.push("  if (_scrml_tenant_found.length > 0) {");
+    lines.push("    if (recheck) await _scrml_tenant_run();");
+    lines.push("    else if (!_scrml_tenant_inflight && Date.now() - _scrml_tenant_started >= _scrml_tenant_wait) void _scrml_tenant_run();");
+    lines.push("  }");
+    lines.push("  return _scrml_tenant_found.length;");
     lines.push("}");
     lines.push("");
   }

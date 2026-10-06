@@ -3967,10 +3967,14 @@ export function programTenantTableDecls(text) {
         const last = chain[chain.length - 1];
         like = last ? last.toLowerCase() : null;
       }
-    } else {
-      tenant = namesTenantId(text.slice(h.start));
     }
-    if (!tenant && like === null) continue;
+    let star = false;
+    if (!(namePart && closed && !UNMODELED_SQL_FORM.test(text.slice(h.start, h.bodyEnd + 1)))) {
+      tenant = namesTenantId(text.slice(h.start));
+      // `CREATE TABLE t AS SELECT * FROM <tenant table>` copies `tenant_id` without naming it.
+      star = hasProjectionStar((UNMODELED_SQL_FORM.test(text) ? text : masked).slice(h.start));
+    }
+    if (!tenant && like === null && !star) continue;
     out.push({
       name: namePart ? namePart.name : null,
       key: namePart ? namePart.name.toLowerCase() : null,
@@ -3979,12 +3983,90 @@ export function programTenantTableDecls(text) {
       offset: h.start,
       tenant,
       like,
+      star,
     });
   }
   for (const a of alterTableTenantDecls(text, masked)) {
     if (!live(a.offset)) continue;
-    out.push({ name: a.name, key: a.key, kind: "alter", modifiers: [], offset: a.offset, tenant: true, like: null });
+    out.push({ name: a.name, key: a.key, kind: "alter", modifiers: [], offset: a.offset, tenant: true, like: null, star: false });
   }
+  for (const s of selectIntoTables(text, UNMODELED_SQL_FORM.test(text) ? text : masked)) out.push(s);
   out.sort((a, b) => a.offset - b.offset);
+  return out;
+}
+
+/**
+ * Whether a SELECT region holds a projection `*` (`*`, `t.*`) — a copy of every column of
+ * its source, `tenant_id` included when the source is tenant-scoped. `count(*)` is not one.
+ * Over-inclusive (a multiplication counts): the caller charges a star only when the
+ * statement also names a tenant-scoped table.
+ */
+function hasProjectionStar(scan) {
+  return /\*/.test(scan.replace(/\(\s*\*\s*\)/g, ""));
+}
+
+/**
+ * §14.8.10 (S456 review F1) — `SELECT … INTO [TEMP | TEMPORARY | UNLOGGED] [TABLE] <t>`:
+ * Postgres CREATES `<t>` from the select list (SQLite has no such form; MySQL's
+ * `SELECT … INTO @var | OUTFILE | DUMPFILE` writes variables or files, never a table).
+ * Read from the SQL's word tokens, outside literals and comments (`scan` — the masked
+ * text, or the raw text when it holds an unmodelled form): an `INTO` whose nearest
+ * statement leader at its paren depth is `SELECT` (not `INSERT` / `REPLACE` / `MERGE`).
+ * The new table's columns are the select list between that `SELECT` and the `INTO`:
+ * naming `tenant_id` there (an alias included) is `tenant`; a `*` is `star`. A target the
+ * reader cannot name (`${…}`) is returned with `name: null`.
+ *
+ * @returns {Array<{name: string|null, key: string|null, kind: "select-into", modifiers: string[], offset: number, tenant: boolean, like: null, star: boolean}>}
+ */
+function selectIntoTables(text, scan) {
+  const out = [];
+  const LEADERS = new Set(["SELECT", "INSERT", "REPLACE", "MERGE", "UPDATE", "DELETE", "CREATE", "VALUES"]);
+  const leaders = [{ word: null, end: 0 }];   // per paren depth
+  const re = /[A-Za-z_][A-Za-z0-9_$]*|[()]/g;
+  let m;
+  while ((m = re.exec(scan)) !== null) {
+    const t = m[0];
+    if (t === "(") { leaders.push({ word: null, end: m.index + 1 }); continue; }
+    if (t === ")") { if (leaders.length > 1) leaders.pop(); continue; }
+    if (m.index > 0 && SQL_IDENT_CHAR.test(scan[m.index - 1])) continue;   // inside a word (`1into`)
+    const up = t.toUpperCase();
+    const top = leaders[leaders.length - 1];
+    if (LEADERS.has(up)) { top.word = up; top.end = m.index + t.length; continue; }
+    if (up !== "INTO" || top.word !== "SELECT") continue;
+    let j = skipSqlTrivia(text, m.index + t.length);
+    const modifiers = [];
+    for (const w of ["TEMPORARY", "TEMP", "UNLOGGED"]) {
+      const e = readSqlKeyword(text, j, w);
+      if (e !== -1) { modifiers.push(w); j = skipSqlTrivia(text, e); break; }
+    }
+    if (text[j] === "@") continue;                                         // MySQL user variable
+    if (/^(?:OUTFILE|DUMPFILE)\s*'/i.test(text.slice(j, j + 16))) continue;  // MySQL file export
+    { const e = readSqlKeyword(text, j, "STRICT"); if (e !== -1) j = skipSqlTrivia(text, e); }
+    { const e = readSqlKeyword(text, j, "TABLE"); if (e !== -1) j = skipSqlTrivia(text, e); }
+    let last = readSqlIdentPart(text, j);
+    if (last) {
+      let k = skipSqlTrivia(text, last.end);
+      while (text[k] === ".") {
+        const p = readSqlIdentPart(text, skipSqlTrivia(text, k + 1));
+        if (!p) { last = null; break; }
+        last = p;
+        k = skipSqlTrivia(text, p.end);
+      }
+    }
+    const projection = text.slice(top.end, m.index);
+    const tenant = namesTenantId(projection);
+    const star = hasProjectionStar(scan.slice(top.end, m.index));
+    if (!tenant && !star) continue;
+    out.push({
+      name: last ? last.name : null,
+      key: last ? last.name.toLowerCase() : null,
+      kind: "select-into",
+      modifiers,
+      offset: m.index,
+      tenant,
+      like: null,
+      star,
+    });
+  }
   return out;
 }

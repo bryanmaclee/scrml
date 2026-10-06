@@ -33,6 +33,7 @@
  */
 
 import { programTenantTableDecls } from "./schema-differ.js";
+import { tenantTableMentioned } from "./codegen/tenant-sql-subset.ts";
 
 /** One `E-TENANT-UNDECLARED` diagnostic (the TENANT-SCHEMA stage's shape). */
 export interface TenantUndeclaredDiagnostic {
@@ -80,17 +81,25 @@ export function programBodyUndeclaredTenantTables(
   const filePath = (fileAST as any)?.filePath ?? (fileAST as any)?.ast?.filePath ?? "";
   const seen = new WeakSet<object>();
   const reported = new Set<string>();
+  const tenantNames = [...new Set([...tenantTables].map((t) => String(t).toLowerCase()))];
   const read = (sql: string, span: unknown): void => {
     for (const d of programTenantTableDecls(sql)) {
-      const carries = d.tenant || (d.like !== null && declared(d.like));
+      // A projection `*` copies `tenant_id` when the statement reads a tenant-scoped table
+      // (named as a token of the floor's SQL subset, or — outside it — anywhere in its text).
+      const starCopy = d.star && !d.tenant && tenantTableMentioned(sql, declared, tenantNames) !== null;
+      const carries = d.tenant || (d.like !== null && declared(d.like)) || starCopy;
       if (!carries) continue;
       if (d.key !== null && declared(d.key)) continue;
       const temp = d.modifiers.some((m) => m === "TEMP" || m === "TEMPORARY");
+      const label = d.name === null ? "whose name the compiler cannot read" : `\`${d.name}\``;
+      const how = d.kind === "select-into" ? " (`SELECT … INTO`)" : "";
       const what = d.kind === "alter"
         ? `gives the table \`${d.name}\` a \`tenant_id\` column (\`ALTER TABLE\`)`
         : d.tenant
-          ? `creates ${temp ? "the temporary table" : "the table"} ${d.name === null ? "whose name the compiler cannot read" : `\`${d.name}\``} with a \`tenant_id\` column`
-          : `creates the table \`${d.name}\` as a copy (\`LIKE ${d.like}\`) of a tenant-scoped table, so it carries \`tenant_id\``;
+          ? `creates ${temp ? "the temporary table" : "the table"} ${label}${how} with a \`tenant_id\` column`
+          : starCopy
+            ? `creates ${temp ? "the temporary table" : "the table"} ${label}${how} from \`*\` over a tenant-scoped table, so it carries \`tenant_id\``
+            : `creates the table \`${d.name}\` as a copy (\`LIKE ${d.like}\`) of a tenant-scoped table, so it carries \`tenant_id\``;
       const name = d.name === null ? "this table" : `\`${d.name}\``;
       // A temporary table cannot itself be declared in `<schema>` (E-SCHEMA-014 rejects a
       // TEMP head), so its fix names the two things that work.

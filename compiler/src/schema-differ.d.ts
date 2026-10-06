@@ -105,11 +105,13 @@ export declare function schemaTableDeclarations(text: string): Array<{
 export declare function programTenantTableDecls(text: string): Array<{
   name: string | null;
   key: string | null;
-  kind: "create" | "alter";
+  kind: "create" | "alter" | "select-into";
   modifiers: string[];
   offset: number;
   tenant: boolean;
   like: string | null;
+  /** The new table copies a projection `*` — it carries `tenant_id` when its source is tenant-scoped. */
+  star: boolean;
 }>;
 
 /** The bounded principal role the per-request A1 wrapper drops to (S6). */

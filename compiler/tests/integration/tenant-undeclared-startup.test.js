@@ -180,6 +180,78 @@ describe("the built server refuses to serve while an undeclared tenant table exi
 });
 
 // ---------------------------------------------------------------------------
+// S456 review F2 — a database DOWN AT BOOT: ordinary requests (no health probe) re-check
+// under a bounded backoff, so the server serves once the database answers.
+// ---------------------------------------------------------------------------
+
+/** Only reads → REFERENCES the database (§8.1.1): never creates it, so it can be missing at boot. */
+const REFERENCING = `<program db="./app.db">
+  \${
+    function count() {
+      const rows = ?{${BT}SELECT n FROM t${BT}}.all()
+      return rows.length
+    }
+  }
+  <button onclick=\${ count() }>go</button>
+</program>
+`;
+
+/** Build `src/app.scrml` in a fresh project; returns its root. */
+async function buildProject(source) {
+  const parent = mkdtempSync(join(tmpdir(), "s456-f2-"));
+  const root = join(parent, "proj");
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "scrml.toml"), "");
+  writeFileSync(join(root, "src", "app.scrml"), source);
+  const build = Bun.spawn(["bun", CLI, "build", join(root, "src"), "-o", join(root, "dist")], {
+    cwd: root, stdout: "pipe", stderr: "pipe", stdin: "ignore",
+  });
+  expect(await build.exited).toBe(0);
+  return { parent, root };
+}
+
+describe("F2 — a database down at boot: the server serves once it comes up, with no health probe", () => {
+  test("SQLite: missing at boot → 503 ('could not be checked'); created → a plain request gets 200", async () => {
+    const { parent, root } = await buildProject(REFERENCING);
+    const data = mkdtempSync(join(tmpdir(), "s456-f2-data-"));
+    const port = await freePort();
+    let err = "";
+    const proc = Bun.spawn(["bun", join(root, "dist", "_server.js")], {
+      cwd: root, stdout: "pipe", stderr: "pipe", stdin: "ignore",
+      env: { ...process.env, PORT: String(port), SCRML_DATA_DIR: data },
+    });
+    (async () => { for await (const c of proc.stderr) err += new TextDecoder().decode(c); })();
+    try {
+      let first = null;
+      for (const t0 = Date.now(); Date.now() - t0 < 15_000 && !first; await Bun.sleep(100)) {
+        try { first = await fetch(`http://localhost:${port}/app.html`); } catch { /* not up yet */ }
+      }
+      expect(first?.status).toBe(503);
+      expect(err).toContain("could not be checked — the connection or the catalogue query failed");
+      expect(err).not.toContain('holds "');
+      // the database comes up (seeded with a non-tenant table) — no health probe from here on
+      mkdirSync(join(data, "src"), { recursive: true });
+      const db = new Database(join(data, "src", "app.db"), { create: true });
+      db.run("CREATE TABLE t (n INTEGER)");
+      db.close();
+      let status = 0;
+      for (const t0 = Date.now(); Date.now() - t0 < 40_000 && status !== 200; await Bun.sleep(250)) {
+        status = (await fetch(`http://localhost:${port}/app.html`)).status;
+      }
+      expect(status).toBe(200);
+      expect(err).toContain("the undeclared-tenant-table check now passes; serving.");
+      // one finding set is logged once, not on every re-check
+      expect(err.split("could not be checked").length - 1).toBe(1);
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(parent, { recursive: true, force: true });
+      rmSync(data, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Live Postgres (local-only; a NAMED skip when none answers) — the Postgres branch
 // ---------------------------------------------------------------------------
 
@@ -260,5 +332,39 @@ d("the startup check on Postgres (live)", () => {
     const found = await mod._scrml_tenant_startup_check.undeclared();
     // `events` itself is undeclared (reported once, by its parent name); its partition is not
     expect(found.map((f) => f.table)).toEqual(["public.events"]);
+  });
+
+  test("F2 on Postgres: the database does not exist at boot (Postgres starting after the app) → 503; created → a plain request gets 200", async () => {
+    const DB2 = `${DB}_late`;
+    const url2 = `postgres://${ROLE}:${PW}@localhost:5432/${DB2}`;
+    await admin.unsafe(`DROP DATABASE IF EXISTS ${DB2}`).catch(() => {});
+    const { parent, root } = await buildProject(APP(url2));
+    const port = await freePort();
+    let err = "";
+    const proc = Bun.spawn(["bun", join(root, "dist", "_server.js")], {
+      cwd: root, stdout: "pipe", stderr: "pipe", stdin: "ignore",
+      env: { ...process.env, PORT: String(port) },
+    });
+    (async () => { for await (const c of proc.stderr) err += new TextDecoder().decode(c); })();
+    try {
+      let first = null;
+      for (const t0 = Date.now(); Date.now() - t0 < 20_000 && !first; await Bun.sleep(100)) {
+        try { first = await fetch(`http://localhost:${port}/app.html`); } catch { /* not up yet */ }
+      }
+      expect(first?.status).toBe(503);
+      expect(err).toContain("could not be checked");
+      expect(err).not.toContain(PW);
+      await admin.unsafe(`CREATE DATABASE ${DB2} OWNER ${ROLE}`);
+      let status = 0;
+      for (const t0 = Date.now(); Date.now() - t0 < 45_000 && status !== 200; await Bun.sleep(250)) {
+        status = (await fetch(`http://localhost:${port}/app.html`)).status;
+      }
+      expect(status).toBe(200);
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(parent, { recursive: true, force: true });
+      await admin.unsafe(`DROP DATABASE IF EXISTS ${DB2} WITH (FORCE)`).catch(() => {});
+    }
   });
 });
