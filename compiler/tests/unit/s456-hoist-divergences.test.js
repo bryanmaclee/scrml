@@ -237,13 +237,73 @@ describe("(1) the key table matches with the per-iteration query's own `=` (exec
   });
 });
 
-describe("(3) failure timing + a changed key — emission", () => {
-  test("unhandled: the pre-fetch failure is held, and thrown by the read", () => {
+/** The balanced `{…}` block that starts at the first `{` at or after `from`. */
+function balanced(js, from) {
+  const open = js.indexOf("{", from);
+  let depth = 0, end = open;
+  for (; end < js.length; end++) {
+    if (js[end] === "{") depth++;
+    else if (js[end] === "}" && --depth === 0) break;
+  }
+  return js.slice(from, end + 1);
+}
+
+describe("(3) failure + a changed key — the pre-fetch never raises; a key it did not load is read alone", () => {
+  test("emission: the pre-fetch swallows, the read fetches its own key when not loaded", () => {
     const js = compile(program("            out.push(row)")).serverJs;
-    expect(js).toMatch(/try \{ await _scrml_batch_fetch_\d+\(\[\.\.\._scrml_batch_slots_\d+\.keys\(\)\], 0\); \} catch \(_e\) \{ _scrml_batch_failure_\d+ = \{ error: _e \}; \}/);
-    expect(js).toMatch(/if \(_scrml_batch_failure_\d+\) throw _scrml_batch_failure_\d+\.error;/);
-    // a key the body changed after the pre-fetch is fetched when its read runs
-    expect(js).toMatch(/await _scrml_batch_fetch_\d+\(\[_k\], _s\);/);
+    expect(js).toMatch(/try \{ await _scrml_batch_fetch_\d+\(\[\.\.\._scrml_batch_slots_\d+\.keys\(\)\]\); \} catch \{/);
+    expect(js).toMatch(/if \(!_scrml_batch_loaded_\d+\.has\(_k\)\) \{/);
+    expect(js).toMatch(/await _scrml_batch_fetch_\d+\(\[_k\]\);/);
+    expect(js).toMatch(/for \(const _k of _chunk\) _scrml_batch_loaded_\d+\.add\(_k\);/);
+  });
+
+  // F1 (S456 fix round): an UNHANDLED read of a key that cannot be bound throws at ITS
+  // iteration, after the earlier iterations' side effects — as the per-row loop does.
+  // Executed: the handler body with a stubbed request (the items are the test's own
+  // objects, so the body's `it.seen = …` is visible after the throw) and a stub driver
+  // that fails any statement binding an object, as bun:sqlite does.
+  test("unhandled: iteration 1 completes; iteration 2 throws at its own read; iteration 3 never starts", async () => {
+    const src = [
+      '<program db="./app.db">',
+      "    <schema>",
+      "        notes {",
+      "            id: integer primary key",
+      "            body: text",
+      "        }",
+      "    </schema>",
+      "${ server function f(items) {",
+      "    let out = []",
+      "    for (const it of items) {",
+      "        it.seen = 1",
+      "        const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()",
+      "        it.got = row is not ? \"none\" : row.body",
+      "    }",
+      "    return out",
+      "} }",
+      "<p>x</p>",
+      "</program>",
+    ].join("\n");
+    const c = compile(src);
+    expect(c.hoists).toBe(1);
+    const start = c.serverJs.indexOf("const _scrml_result = await (async () => {");
+    expect(start).toBeGreaterThan(-1);
+    const run = new Function("_scrml_req", "_scrml_sql", `return (async () => { ${balanced(c.serverJs, start)})(); return _scrml_result; })();`);
+    const items = [{ id: 7 }, { id: { a: 1 } }, { id: 9 }];
+    const queries = [];
+    const sql = {
+      unsafe: async (q, keys) => {
+        queries.push(keys.map((k) => (typeof k === "object" ? "obj" : k)).join("|"));
+        if (keys.some((k) => typeof k === "object")) throw new Error("Binding expected string, TypedArray, boolean, number, bigint or null");
+        const slots = [...q.matchAll(/\((\d+), \?\d+\)/g)].map((m) => Number(m[1]));
+        return keys.flatMap((k, i) => (k === 7 ? [{ body: "hello", __scrml_batch_key: slots[i] }] : []));
+      },
+    };
+    let err = null;
+    try { await run({ json: async () => ({ items }) }, sql); } catch (e) { err = e; }
+    expect(String(err?.message)).toContain("Binding expected");
+    expect(items.map((it) => [it.seen ?? 0, it.got ?? "-"])).toEqual([[1, "hello"], [1, "-"], [0, "-"]]);
+    // the pre-fetch (all three keys) failed; key 7 and the object were each read alone, in order
+    expect(queries).toEqual(["7|obj|9", "7", "obj"]);
   });
 });
 

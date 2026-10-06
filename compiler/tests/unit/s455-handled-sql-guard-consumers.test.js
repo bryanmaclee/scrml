@@ -333,9 +333,9 @@ describe("S455 §2 — analyses see the guarded statement exactly as the unhandl
     <p>\${@r}</p>
 </program>`);
     expect(r.server).toMatch(/Tier 2 loop hoist/);
-    // S456: the pre-fetch runs through the attempt; its failure (the SqlError envelope)
-    // is held and returned by the per-iteration read, which the guard then matches.
-    expect(r.server).toMatch(/= await _scrml_sql_attempt\(\(_keys\) => _scrml_batch_fetch_\d+\(_keys, 0\)/);
+    // S456 (fix round F1): a key the pre-fetch did not load is read alone through the
+    // attempt; its own failure (the SqlError envelope) is what the guard then matches.
+    expect(r.server).toMatch(/= await _scrml_sql_attempt\(\(_keys\) => _scrml_batch_fetch_\d+\(_keys\), \[_k\], \(\) => null\)/);
     expect(r.server).toMatch(/let _scrml__scrml_result_\d+ = \(await _scrml_batch_read_\d+\(it\.id\)\);/);
     expect(r.server).not.toMatch(/client cannot evaluate/);
   });

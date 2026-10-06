@@ -6,7 +6,7 @@
  *   let _items = (xs);
  *   const _slots = new Map();      // distinct key → slot
  *   const _bySlot = new Map();     // slot → row / rows
- *   const _fetch = async (_keys, _base) => { chunks of ≤ cap keys; key-table SQL via .unsafe };
+ *   const _fetch = async (_keys) => { chunks of ≤ cap keys; key-table SQL via .unsafe; marks keys loaded };
  *   let _failure = null; try { await _fetch(…) } catch (_e) { _failure = { error: _e } }
  *   const _read = async (_k) => { … };
  *   for (const x of _items) {
@@ -67,7 +67,7 @@ describe("§1 for-of + .get() → pre-loop fetch + per-iteration read", () => {
     expect(js).toMatch(/let _scrml_batch_items_\d+ = \(ids\);/);
     expect(js).toMatch(/for \(const _k of _scrml_batch_items_\d+\.map\(\(x\) => x\.id\)\) \{ if \(!_scrml_batch_slots_\d+\.has\(_k\)\) _scrml_batch_slots_\d+\.set\(_k, _scrml_batch_slots_\d+\.size\); \}/);
     expect(js).toMatch(/const _scrml_batch_bySlot_\d+ = new Map\(\);/);
-    expect(js).toMatch(/const _scrml_batch_fetch_\d+ = async \(_keys, _base\) => \{/);
+    expect(js).toMatch(/const _scrml_batch_fetch_\d+ = async \(_keys\) => \{/);
     // S455: each read is its own copy of the row (as each per-row query returns).
     expect(js).toContain("return _hit ? { ..._hit } : null;");
     expect(js).toMatch(/let row = \(await _scrml_batch_read_\d+\(x\.id\)\);/);
@@ -115,7 +115,7 @@ describe("§3 positional placeholders ?1, ?2 preserved", () => {
     ].join("\n");
     const js = serverJsOf(compile(src));
     // the VALUES rows `(slot, ?N)`: the slot is a compiler integer, the key a bound `?N`
-    expect(js).toContain(`"(" + (_base + _at + _i) + ", ?" + (_i + 1) + ")"`);
+    expect(js).toMatch(/"\(" \+ _scrml_batch_slots_\d+\.get\(_k\) \+ ", \?" \+ \(_i \+ 1\) \+ "\)"/);
     expect(js).toContain(".join(\", \")");
   });
 });

@@ -81,12 +81,12 @@ describe("a nested keyed read is rewritten to the Map lookup", () => {
     });
   }
 
-  test("a handled nested site runs the pre-fetch through the attempt", () => {
+  test("a handled nested site reads an unloaded key through the attempt", () => {
     const js = serverJsOf(compile(program(shapes_handled())));
-    // S456: the pre-fetch's failure is the SqlError envelope, held and returned by the
-    // read that runs (§8.10.3), so the site's arms run where the per-row query failed.
-    expect(js).toMatch(/_scrml_batch_failure_\d+ = await _scrml_sql_attempt\(\(_keys\) => _scrml_batch_fetch_\d+\(_keys, 0\)/);
-    expect(js).toMatch(/if \(_scrml_batch_failure_\d+\) return _scrml_batch_failure_\d+;/);
+    // S456 fix round F1: a key the pre-fetch did not load is read ALONE through the attempt,
+    // so its own failure is the SqlError envelope the site's arms match on.
+    expect(js).toMatch(/const _failed = await _scrml_sql_attempt\(\(_keys\) => _scrml_batch_fetch_\d+\(_keys\), \[_k\], \(\) => null\);/);
+    expect(js).toContain("if (_failed) return _failed;");
   });
   function shapes_handled() {
     return `for (const it of items) {\n if (it.on) {\n const row = ${Q} !{ _ :> not }\n out.push(row)\n }\n }`;

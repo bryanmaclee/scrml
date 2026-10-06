@@ -1131,10 +1131,10 @@ function loopBodyHasSqlSite(value: any): boolean {
  *   const <slots> = new Map();                         // one slot per distinct key value
  *   for (const _k of <items>.map((<loopVar>) => <loopVar>.<keyField>)) { … <slots>.set(_k, <slots>.size) … }
  *   const <bySlot> = new Map();                        // slot → row (.get()) / rows (.all())
- *   const <fetch> = async (_keys, _base) => { … }      // chunks of at most <cap> keys (§8.10.6)
- *   let <failure> = null;                              // a pre-fetch failure, raised at the read (§8.10.3)
- *   try { await <fetch>([...<slots>.keys()], 0); } catch (_e) { <failure> = { error: _e }; }
- *   const <read> = async (_k) => { … };                // the per-iteration read
+ *   const <loaded> = new Set();                        // keys whose rows <bySlot> holds
+ *   const <fetch> = async (_keys) => { … }             // chunks of at most <cap> keys (§8.10.6)
+ *   try { await <fetch>([...<slots>.keys()]); } catch { … }   // the pre-fetch; a failure is not raised here
+ *   const <read> = async (_k) => { … };                // the per-iteration read: a key not loaded is read ALONE
  *   for (const <loopVar> of <items>) {
  *     <body with the ?{…}.get()/.all() replaced by `(await <read>(<loopVar>.<keyField>))`>
  *   }
@@ -1150,12 +1150,15 @@ function loopBodyHasSqlSite(value: any): boolean {
  *     at most `SQLITE_MAX_VARIABLE_NUMBER` keys" — the `batch-in-list-cap=` value. It
  *     threw E-BATCH-002 above the cap instead. Each distinct key is in exactly one
  *     chunk, so `.get()` keeps the first row per key and `.all()` the per-key group.
- *   - FAILURE TIMING (§8.10.3): a failed pre-fetch is held and raised by the first
- *     read that RUNS — where the per-iteration query would have failed — not before
- *     iteration 1 (a loop whose read is never reached does not fail at all). A
- *     handled read (§19.8.3) gets the SqlError envelope there instead.
- *   - A KEY THE BODY CHANGED after the pre-fetch (`it.id = it.id + 1`) is read when
- *     its read runs, with the same pre-fetch for one key — the per-iteration query.
+ *   - FAILURE (§8.10.3): the pre-fetch's failure is never raised by the pre-fetch.
+ *     A chunk that fails loads none of its keys, and a read whose key is not loaded
+ *     runs the same query for that ONE key when the read runs — the per-iteration
+ *     query, at the per-iteration moment. So a loop whose read is never reached does
+ *     not fail; a key that cannot be bound (an object, an array) fails only its own
+ *     read (it used to fail the whole pre-fetch, and every read with it — S456 fix
+ *     round F1); and a handled read (§19.8.3) gets its own SqlError envelope.
+ *   - A KEY THE BODY CHANGED after the pre-fetch (`it.id = it.id + 1`) is not loaded,
+ *     so it is read the same way.
  *
  * Writes between iterations are the planner's: a body that may write is not hoisted
  * (batch-planner.ts / hoist-write-scan.ts).
@@ -1210,11 +1213,11 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   const slotsVar = genVar("batch_slots");
   const bySlotVar = genVar("batch_bySlot");
   const fetchVar = genVar("batch_fetch");
-  const failureVar = genVar("batch_failure");
+  const loadedVar = genVar("batch_loaded");
   const readVar = genVar("batch_read");
   const _key = `${loopVar}.${keyField}`;
   // The same read for an unhandled and a handled site: it is `<read>` that knows
-  // which (a held failure throws / is returned as the SqlError envelope).
+  // which (its own failure throws / is returned as the SqlError envelope).
   const replacement = `(await ${readVar}(${_key}))`;
   const subst: HoistSubst = {
     re: new RegExp(sourceSrc, "g"),
@@ -1261,42 +1264,33 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   lines.push(`const ${slotsVar} = new Map();`);
   lines.push(`for (const _k of ${itemsVar}.map((${loopVar}) => ${_key})) { if (!${slotsVar}.has(_k)) ${slotsVar}.set(_k, ${slotsVar}.size); }`);
   lines.push(`const ${bySlotVar} = new Map();`);
-  lines.push(`// Fetch the rows of _keys (slots _base, _base + 1, …) in chunks of at most ${batchCap} bound keys (§8.10.6).`);
-  lines.push(`const ${fetchVar} = async (_keys, _base) => {`);
+  lines.push(`const ${loadedVar} = new Set();`);
+  lines.push(`// Fetch the rows of _keys in chunks of at most ${batchCap} bound keys (§8.10.6); a chunk's keys are loaded when its query succeeds.`);
+  lines.push(`const ${fetchVar} = async (_keys) => {`);
   lines.push(`  for (let _at = 0; _at < _keys.length; _at += ${batchCap}) {`);
   lines.push(`    const _chunk = _keys.slice(_at, _at + ${batchCap});`);
-  lines.push(`    const _values = _chunk.map((_, _i) => "(" + (_base + _at + _i) + ", ?" + (_i + 1) + ")").join(", ");`);
+  lines.push(`    const _values = _chunk.map((_k, _i) => "(" + ${slotsVar}.get(_k) + ", ?" + (_i + 1) + ")").join(", ");`);
   lines.push(`    const _rows = await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace(${JSON.stringify(HOIST_VALUES_PLACEHOLDER)}, _values), _chunk);`);
   lines.push(`    for (const _r of _rows) { const _s = _r[${aliasKey}]; delete _r[${aliasKey}]; delete _r[${aliasVal}]; ${store} }`);
+  lines.push(`    for (const _k of _chunk) ${loadedVar}.add(_k);`);
   lines.push(`  }`);
   lines.push(`};`);
-  // §8.10.3 — the failure is HELD and raised by the first read that runs.
-  lines.push(`// A pre-fetch failure is raised by the first read that runs, where the per-iteration query would have failed (§8.10.3).`);
-  lines.push(`let ${failureVar} = null;`);
+  // §8.10.3 — the pre-fetch never raises: a key it did not load is read alone by
+  // its own read, when that read runs (S456 fix round F1).
+  lines.push(`// A key the pre-fetch did not load (its chunk failed, or the loop body changed the key) is read alone when its read runs (§8.10.3).`);
+  lines.push(`try { await ${fetchVar}([...${slotsVar}.keys()]); } catch { /* each read whose key is not loaded runs its own query */ }`);
+  lines.push(`const ${readVar} = async (_k) => {`);
+  lines.push(`  if (!${loadedVar}.has(_k)) {`);
+  lines.push(`    if (!${slotsVar}.has(_k)) ${slotsVar}.set(_k, ${slotsVar}.size);`);
   if (handled) {
-    // §19.8.3 (S455) — the site is HANDLED: the failure is the SqlError envelope the
-    // read returns to the site's arms, for every read that runs.
-    lines.push(`if (${slotsVar}.size > 0) ${failureVar} = await ${SQL_ATTEMPT_FN}((_keys) => ${fetchVar}(_keys, 0), [...${slotsVar}.keys()], () => null);`);
-    lines.push(`const ${readVar} = async (_k) => {`);
-    lines.push(`  if (${failureVar}) return ${failureVar};`);
-    lines.push(`  if (!${slotsVar}.has(_k)) {`);
-    lines.push(`    // A key the loop body changed after the pre-fetch: read it now.`);
-    lines.push(`    const _s = ${slotsVar}.size;`);
-    lines.push(`    ${slotsVar}.set(_k, _s);`);
-    lines.push(`    const _failed = await ${SQL_ATTEMPT_FN}((_keys) => ${fetchVar}(_keys, _s), [_k], () => null);`);
-    lines.push(`    if (_failed) { ${slotsVar}.delete(_k); return _failed; }`);
-    lines.push(`  }`);
+    // §19.8.3 (S455) — a HANDLED site: this key's own failure is the SqlError
+    // envelope the site's arms match on.
+    lines.push(`    const _failed = await ${SQL_ATTEMPT_FN}((_keys) => ${fetchVar}(_keys), [_k], () => null);`);
+    lines.push(`    if (_failed) return _failed;`);
   } else {
-    lines.push(`try { await ${fetchVar}([...${slotsVar}.keys()], 0); } catch (_e) { ${failureVar} = { error: _e }; }`);
-    lines.push(`const ${readVar} = async (_k) => {`);
-    lines.push(`  if (${failureVar}) throw ${failureVar}.error;`);
-    lines.push(`  if (!${slotsVar}.has(_k)) {`);
-    lines.push(`    // A key the loop body changed after the pre-fetch: read it now.`);
-    lines.push(`    const _s = ${slotsVar}.size;`);
-    lines.push(`    ${slotsVar}.set(_k, _s);`);
-    lines.push(`    await ${fetchVar}([_k], _s);`);
-    lines.push(`  }`);
+    lines.push(`    await ${fetchVar}([_k]);`);
   }
+  lines.push(`  }`);
   lines.push(`  const _hit = ${bySlotVar}.get(${slotsVar}.get(_k));`);
   lines.push(`  ${pick}`);
   lines.push(`};`);
