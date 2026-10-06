@@ -1,0 +1,33 @@
+{
+  "id": "server-db-sql-hoisted-loop-nested-read-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): the loop body's single keyed `?{}` read sits NESTED — inside an `if`, an `else`, an `else if`, a nested `if`, an inner loop, and a `.all()` inside an `if`. The loop is rewritten to one pre-fetch + a per-iteration Map lookup and each read keeps its meaning: id 7 → the row, id 8 → `not` (no row), id 9 → the branch that does not read. Pre-S455 the planner hoisted these loops (its detector walks every depth) but the body rewrite recursed only through a node's `body` array, so the nested read was never replaced: the pre-fetch ran and the read itself was emitted with no server boundary — `null /* client cannot evaluate */` — so every row read `not` on success (\"none,none,skip\"), and `.all()` threw on `null.length`.",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10: \"A for-loop whose body contains a single keyed `?{}` read SHALL be rewritten to a single `WHERE IN (...)` pre-fetch plus per-iteration `Map` lookup.\" §8.10.1 condition 2 (\"Loop body contains exactly one `?{}` block\") places no depth restriction. §8.10.2: `.get()` missing keys yield `not`; `.all()` yields a possibly-empty array. §8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "inIf": "hello,none,skip",
+      "inElse": "hello,none,skip",
+      "elseIf": "hello,none,skip",
+      "nestedIf": "hello,none",
+      "innerLoop": "hello,none,none",
+      "allInIf": "hello,none"
+    },
+    "domAnchored": [
+      { "selector": "#inIf", "text": "hello,none,skip" },
+      { "selector": "#nestedIf", "text": "hello,none" }
+    ]
+  }
+}

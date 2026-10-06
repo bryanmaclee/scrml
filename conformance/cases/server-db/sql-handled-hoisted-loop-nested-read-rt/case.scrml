@@ -1,0 +1,106 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <inIf> = "init"
+    <inElse> = "init"
+    <nestedIf> = "init"
+    <allInIf> = "init"
+    <inIfFailed> = "init"
+    <allInIfFailed> = "init"
+    // §8.10 × §19.8.3: a HANDLED keyed read NESTED in the loop body. The loop is
+    // still rewritten to one pre-fetch + a per-iteration Map lookup; the read keeps
+    // its meaning — the row on success, the arm's value when the pre-fetch fails
+    // to run (`gone` is declared but never created).
+    function inIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+                out.push(row is not ? "none" : row.body)
+            } else {
+                out.push("skip")
+            }
+        }
+        return out.join(",")
+    }
+    function inElse(items) {
+        let out = []
+        for (const it of items) {
+            if (it.off) {
+                out.push("skip")
+            } else {
+                const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+                out.push(row is not ? "none" : row.body)
+            }
+        }
+        return out.join(",")
+    }
+    function nestedIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                if (it.id > 0) {
+                    const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+                    out.push(row is not ? "none" : row.body)
+                }
+            }
+        }
+        return out.join(",")
+    }
+    function allInIf(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                const rows = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.all() !{ _ :> [] }
+                out.push(rows.length == 0 ? "none" : "hello")
+            }
+        }
+        return out.join(",")
+    }
+    function inIfGone(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                const row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+                out.push(row is not ? "none" : row.body)
+            } else {
+                out.push("skip")
+            }
+        }
+        return out.join(",")
+    }
+    function allInIfGone(items) {
+        let out = []
+        for (const it of items) {
+            if (it.on) {
+                const rows = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.all() !{ _ :> [] }
+                out.push(rows.length == 0 ? "none" : "hello")
+            }
+        }
+        return out.join(",")
+    }
+    function go() {
+        const items = [{ id: 7, on: true, off: false }, { id: 8, on: true, off: false }, { id: 9, on: false, off: true }]
+        @inIf = inIf(items) !{ _ :> "err" }
+        @inElse = inElse(items) !{ _ :> "err" }
+        @nestedIf = nestedIf(items) !{ _ :> "err" }
+        @allInIf = allInIf(items) !{ _ :> "err" }
+        @inIfFailed = inIfGone(items) !{ _ :> "err" }
+        @allInIfFailed = allInIfGone(items) !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="inIf">${@inIf}</p>
+    <p id="inElse">${@inElse}</p>
+    <p id="nestedIf">${@nestedIf}</p>
+    <p id="allInIf">${@allInIf}</p>
+    <p id="inIfFailed">${@inIfFailed}</p>
+    <p id="allInIfFailed">${@allInIfFailed}</p>
+</program>

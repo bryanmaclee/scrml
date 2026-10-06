@@ -1,0 +1,98 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <direct> = "init"
+    <inIf> = "init"
+    <outer> = "init"
+    <handledDirect> = "init"
+    <handledInIf> = "init"
+    <handledFailed> = "init"
+    // §8.10: the loop's single keyed read is a REASSIGNMENT of an existing binding
+    // (`row = ?{…}.get()`, a keywordless assignment) — directly in the body, inside
+    // an `if`, and on a binding declared OUTSIDE the loop; unhandled and handled.
+    // The hoisted lookup assigns the binding; it is never re-declared.
+    function direct(items) {
+        let out = []
+        for (const it of items) {
+            let row = not
+            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function inIf(items) {
+        let out = []
+        for (const it of items) {
+            let row = not
+            if (it.on) {
+                row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+            }
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function outer(items) {
+        let out = []
+        let row = not
+        for (const it of items) {
+            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function handledDirect(items) {
+        let out = []
+        for (const it of items) {
+            let row = not
+            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function handledInIf(items) {
+        let out = []
+        for (const it of items) {
+            let row = not
+            if (it.on) {
+                row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+            }
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function handledGone(items) {
+        let out = []
+        for (const it of items) {
+            let row = not
+            if (it.on) {
+                row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+            }
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function go() {
+        const items = [{ id: 7, on: true }, { id: 8, on: true }]
+        @direct = direct(items) !{ _ :> "err" }
+        @inIf = inIf(items) !{ _ :> "err" }
+        @outer = outer(items) !{ _ :> "err" }
+        @handledDirect = handledDirect(items) !{ _ :> "err" }
+        @handledInIf = handledInIf(items) !{ _ :> "err" }
+        @handledFailed = handledGone(items) !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="direct">${@direct}</p>
+    <p id="inIf">${@inIf}</p>
+    <p id="outer">${@outer}</p>
+    <p id="handledDirect">${@handledDirect}</p>
+    <p id="handledInIf">${@handledInIf}</p>
+    <p id="handledFailed">${@handledFailed}</p>
+</program>

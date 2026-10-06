@@ -2427,6 +2427,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         }
         return `${node.name} = null; // SQL-init reassignment for ${node.name} — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function.`;
       }
+      // §8.10 (S455) — the same reassignment after a Tier 2 loop hoist replaced its
+      // query with the per-iteration Map lookup (emit-control-flow
+      // `substituteHoistedSqlInBody`: the sqlNode is gone, the lookup is `init`).
+      // Still an assignment to the existing binding, never a re-declaration.
+      if (
+        (node as any)._bareAssign && !node.sqlNode
+        && typeof node.name === "string" && tildeDeclIsRebind(opts.declaredNames, node.name)
+      ) {
+        return `${node.name} = ${emitExprField(node.initExpr, node.init ?? "", _makeExprCtx(opts))};`;
+      }
       // For tilde-decl with reactive deps: emit as derived reactive (auto-updates)
       // Phase 4d: ExprNode-first reactive dep extraction, string fallback
       if (node.kind === "tilde-decl" && typeof node.name === "string") {
@@ -4122,7 +4132,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // §19.4.3 (S454) — `x = f() !{…}` on an already-declared `x` is an
           // ASSIGNMENT: the guarded value lands in the existing binding. It used
           // to emit `var x = …`, a redeclaration of a `let x` (E-CODEGEN-INVALID-LOGIC).
-          if (guardedNode.kind === "tilde-decl" && typeof guardedNode.name === "string" && tildeDeclIsRebind(opts.declaredNames, guardedNode.name)) {
+          // A keywordless `w = ?{…} !{…}` whose query a §8.10 hoist replaced with
+          // its Map lookup (a `_bareAssign` const-decl, sqlNode gone — S455) is the
+          // same assignment as the un-hoisted `_bareAssign` arm above.
+          if ((guardedNode.kind === "tilde-decl" || guardedNode._bareAssign) && typeof guardedNode.name === "string" && tildeDeclIsRebind(opts.declaredNames, guardedNode.name)) {
             rebindsExisting = true;
           }
         } else {

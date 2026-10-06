@@ -1,0 +1,35 @@
+{
+  "id": "server-db-sql-hoisted-loop-key-projection-rt",
+  "description": "§8.10.4 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): the pre-fetch keys its Map on the key column even when the user's SELECT list does not carry it bare — not selected at all (`SELECT body … WHERE id = …`), aliased (`SELECT id AS note_id, body …`), or table-qualified (`SELECT n.body FROM notes n WHERE n.id = …`). The rows the loop sees are exactly the per-iteration query's rows (`Object.keys(row)` is `body` only — the projected key is stripped), and `.get()` is the FIRST row of the per-key query in its own ORDER BY (two tags for note 7, `ORDER BY label` → `a`). Pre-S455 the Map was keyed on `_r[\"<keyColumn>\"]`: absent / aliased / qualified, every lookup missed and every row read `not` on success (\"none,none\"); and `.get()` kept the LAST row per key.",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10.4: \"The key column is the column referenced by the single equality predicate in the `?{}` template.\" §8.10.2: \"`.get()` in the loop becomes `Map<key, Row>`; missing keys yield `not`\". §8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ],
+      "tags": [
+        { "id": 1, "note_id": 7, "label": "b" },
+        { "id": 2, "note_id": 7, "label": "a" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "aliased": "hello:7,none",
+      "qualified": "hello,none",
+      "firstrow": "a,none",
+      "bodyOnly": "hello:body,none"
+    },
+    "domAnchored": [
+      { "selector": "#bodyOnly", "text": "hello:body,none" },
+      { "selector": "#firstrow", "text": "a,none" }
+    ]
+  }
+}

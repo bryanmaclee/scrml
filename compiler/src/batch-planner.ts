@@ -67,6 +67,11 @@ export interface LoopHoist {
    * bun:sqlite spread args at emit time (`.all(...keys)`).
    */
   inSqlTemplate: string;
+  /**
+   * The alias `inSqlTemplate` projects the key column under (`HOIST_KEY_ALIAS`).
+   * The pre-fetch keys its Map on it and strips it from each row.
+   */
+  keyAlias: string;
   terminator: "get" | "all";
   rowCacheColumns: Set<string>;
 }
@@ -480,6 +485,30 @@ function findProtectOverlap(
   return [...overlap].sort();
 }
 
+/** The reserved alias the §8.10 pre-fetch projects the key column under. */
+export const HOIST_KEY_ALIAS = "__scrml_batch_key";
+
+/**
+ * Append `, <keyColumn> AS __scrml_batch_key` to the outer SELECT list of a
+ * hoisted query. `null` when the outer list cannot be delimited with certainty —
+ * a nested `SELECT`, or a `FROM` inside parentheses (`extract(year FROM d)`),
+ * before the first top-level `FROM` — so the loop is not hoisted.
+ */
+function projectHoistKey(sql: string, keyColumn: string): string | null {
+  const m = /^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s)/i.exec(sql);
+  if (!m) return null;
+  const list = m[2];
+  if (/\bSELECT\b/i.test(list)) return null;
+  let depth = 0;
+  for (const ch of list) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+  }
+  if (depth !== 0) return null;
+  const head = m[1] + list + `, ${keyColumn} AS ${HOIST_KEY_ALIAS}`;
+  return head + sql.slice(m[1].length + list.length);
+}
+
 function analyzeForLoop(
   forStmt: Record<string, unknown>,
   plan: BatchPlan,
@@ -534,10 +563,22 @@ function analyzeForLoop(
     `WHERE\\s+${keyResult.keyColumn}\\s*=\\s*\\$\\{\\s*${loopVar}\\.${keyResult.keyField}\\s*\\}`,
     "i",
   );
-  const inSqlTemplate = site.body.replace(
+  const inSqlWhere = site.body.replace(
     keyEqPattern,
     `WHERE ${keyResult.keyColumn} IN (__SCRML_BATCH_IN__)`,
   );
+  // §8.10.4 — the pre-fetch groups its rows by the key column, so it must SELECT
+  // it — under a reserved alias, whatever the user's SELECT list says. Keying on
+  // the user's own column broke whenever the list did not carry it bare:
+  // `SELECT body … WHERE id = …` (no `id` in the rows), `SELECT id AS note_id …`,
+  // `SELECT n.id … WHERE n.id = …` (a row has `id`, not `n.id`) — every lookup
+  // missed and every row read `not` on success. The emitter strips the alias, so
+  // each row is exactly the row the per-iteration query returns.
+  const inSqlTemplate = projectHoistKey(inSqlWhere, keyResult.keyColumn);
+  if (inSqlTemplate === null) {
+    emitNearMiss(plan, loopId, `the query's SELECT list could not be extended with the key column \`${keyResult.keyColumn}\` (a subquery or a FROM inside parentheses before the outer FROM)`, forStmt.span);
+    return;
+  }
 
   // §8.10.7: populate rowCacheColumns from the SELECT column list, then
   // cross-reference against protectedFields on the target table. Overlap
@@ -570,6 +611,7 @@ function analyzeForLoop(
     keyField: keyResult.keyField,
     sqlTemplate: site.body,
     inSqlTemplate,
+    keyAlias: HOIST_KEY_ALIAS,
     terminator: site.terminator as "get" | "all",
     rowCacheColumns,
   });
