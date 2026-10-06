@@ -142,3 +142,14 @@ resolve()-path response first.
 (`protect-egress.ts findAuthoredResponseConstruction`) is bare-name only —
 `new globalThis.Response(JSON.stringify({ok:1}))` in a server fn compiles clean (a SHALL error
 missed; runtime limb 3 still refuses it, no leak). Not fixed here (scope; newly-rejecting).
+
+## Unit 3 — full `bun run test` + gates
+
+`bun run test` (compiler/tests/, 1625 files): 33809 pass / 104 skip / 16 todo / 50 fail. The 50
+are 9 happy-dom browser files (48) + 2 contention flakes (`esm-script-tag-module-format`,
+`e2e-render-map/detector-validation` — both 0 fail in isolation on head). The 9 browser files
+run together: BASE copy (2dd6d35d9) 38 pass / 50 fail, HEAD 40 pass / 48 fail — pre-existing
+environment failures, all client-side; this change touches only server-side provenance analysis
+and emits byte-identical client.js (differential). Gates: types-gate OK (unchanged), s34
+--check-new PASS, regen-spec-index --check OK, facts --check PASS (FACTS regenerated in the fix
+commit: +11 conformance cases, +1 test file).
