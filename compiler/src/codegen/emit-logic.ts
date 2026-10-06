@@ -25,7 +25,7 @@ import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
-import { sqlHoldsOneStatement, multipleStatementsThrowExpr } from "./sql-one-statement-guard.ts";
+import { sqlHoldsOneStatement, multipleStatementsThrowExpr, judgeDriverCall, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -3842,6 +3842,17 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // floor refusal (`_scrml_tenant_write_key()`, the tenant source filter) is
       // never relabelled `QueryFailed` — only "a query that fails to run" is.
       const emitSqlDriverCall = (driverOf: (args: string[]) => string, args: string[], finish: (rowsExpr: string) => string): string => {
+        // §8.1.2 (S456 fix round F1) — judge the driver call AS EMITTED: acorn reads the SQL
+        // text the driver will receive (the tagged template's quasis must be the segments the
+        // compiler read; one statement). Otherwise the site throws and nothing is sent.
+        const _verdict = judgeDriverCall(driverOf(args), segments);
+        if (_verdict !== "ok") {
+          if (_verdict === "text-not-read") {
+            const sink = (opts as any).preparedStmtErrors as CGError[] | undefined;
+            if (sink) sink.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, (node as any).span ?? { start: 0, end: 0 }));
+          }
+          return `${refusedDriverCallExpr(_verdict)};`;
+        }
         if (!(opts as { sqlAttempt?: boolean }).sqlAttempt) return finish(`await ${driverOf(args)}`) + ";";
         const refs = args.map((_a, k) => `_scrml_p[${k}]`);
         return `await ${SQL_ATTEMPT_FN}((_scrml_p) => ${driverOf(refs)}, [${args.join(", ")}], (_scrml_rows) => ${finish("_scrml_rows")});`;

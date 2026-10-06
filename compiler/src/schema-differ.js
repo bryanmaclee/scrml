@@ -8,6 +8,7 @@
  */
 
 import { quoteIdent } from "./codegen/sql-ident.ts";
+import { liveSqlInterpolations, jsInterpolationEnd } from "./codegen/sql-lex.ts";
 
 /**
  * Parse a < schema> AST node into structured table declarations.
@@ -4058,6 +4059,15 @@ function programSqlTokens(text) {
   let depth = 0;
   let i = 0;
   const bad = (why) => ({ toks, unreadable: why });
+  // The bound parameters, as the emitter splits them (codegen/sql-lex.ts — the one reader).
+  const slots = new Map(liveSqlInterpolations(text).map((s) => [s.start, s]));
+  const used = new Set();
+  const done = () => {
+    // Every slot the emitter binds must be one this walk read as a slot — a `${` the emitter
+    // binds inside what this walk read as a literal or comment would send SQL unseen.
+    for (const at of slots.keys()) if (!used.has(at)) return bad("a `${…}` the SQL emitter binds where this reader saw a literal or a comment");
+    return { toks, unreadable: null };
+  };
   while (i < n) {
     const c = text[i];
     if (c === " " || c === "\t" || c === "\n") { i++; continue; }
@@ -4115,15 +4125,16 @@ function programSqlTokens(text) {
     }
     if (c === "$") {
       if (text[i + 1] !== "{") return bad("a `$` that does not open a `${…}` slot (a dollar quote or a `$n` parameter — databases read it differently)");
-      let d = 0;
-      let j = i + 1;
-      for (; j < n; j++) {
-        if (text[j] === "{") d++;
-        else if (text[j] === "}" && --d === 0) break;
-      }
-      if (j >= n) return bad("an unclosed `${…}` slot");
+      // S456 fix round F1 — the slot's extent is the EMITTER's (`liveSqlInterpolations`,
+      // read the way JavaScript reads the emitted template's `${…}`), never re-derived
+      // here: a brace count ended `${ x + '{' }` at a later `}`, so this walk saw one slot
+      // while JS bound `x + '{'` and sent `); CREATE TABLE … /*` as SQL (executed).
+      const slot = slots.get(i);
+      if (slot === undefined) return bad("a `${` the SQL emitter does not read as a bound parameter");
+      if (jsInterpolationEnd(text, i) !== slot.end) return bad("an unclosed `${…}` slot");
+      used.add(i);
       toks.push({ k: "param", at: i, depth });
-      i = j + 1;
+      i = slot.end;
       continue;
     }
     if (/[A-Za-z_]/.test(c)) {
@@ -4152,7 +4163,7 @@ function programSqlTokens(text) {
     const shown = /[\x21-\x7e]/.test(c) ? `\`${c}\`` : `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
     return bad(`the character ${shown} is outside the program-body SQL subset`);
   }
-  return { toks, unreadable: null };
+  return done();
 }
 
 const isWord = (tok, w) => tok !== undefined && tok.k === "id" && !tok.quoted && tok.up === w;

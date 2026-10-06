@@ -97,6 +97,7 @@ import * as acorn from "acorn";
 import { CGError } from "./errors.ts";
 import { FOREIGN_SEAL_FN } from "./foreign-seal.ts";
 import { SQL_ATTEMPT_FN } from "./sql-attempt.ts";
+import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "./session-store-emit.ts";
 
 /** Label used for a row whose SQL origins could not be resolved (strip-all). */
@@ -1021,25 +1022,10 @@ const PARSE_OPTIONS = { ecmaVersion: "latest" as const, sourceType: "module" as 
  * the rewriter's per-query record. Balanced-brace aware for `${ f({a:1}) }`.
  */
 export function sqlSkeleton(sql: string): string {
-  let out = "";
-  let i = 0;
-  while (i < sql.length) {
-    if (sql[i] === "$" && sql[i + 1] === "{") {
-      let depth = 1;
-      let j = i + 2;
-      while (j < sql.length && depth > 0) {
-        if (sql[j] === "{") depth++;
-        else if (sql[j] === "}") depth--;
-        j++;
-      }
-      out += "\u0000";
-      i = j;
-      continue;
-    }
-    out += sql[i];
-    i++;
-  }
-  return out.replace(/\s+/g, " ").trim();
+  // The holes are the emitter's slots (sql-lex.ts, JS-aware) — the rewriter's record and the
+  // emitted template's quasis are split the same way (S456 fix round F1 sweep: a brace count
+  // here disagreed with both on `${ x + '{' }`).
+  return replaceLiveSqlInterpolations(sql, () => "\u0000").replace(/\s+/g, " ").trim();
 }
 
 /** The rewriter's per-query record (see `rewrite.ts` `protectTagSqlResult`). */

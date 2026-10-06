@@ -83,6 +83,7 @@ import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNo
 // type error here, not a silent `asIs` at some adopter's decl site.
 import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
+import { replaceLiveSqlInterpolations } from "./codegen/sql-lex.ts";
 import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
@@ -6922,8 +6923,9 @@ export function rejectWritesToDerivedVars(
  * W-AUTH-004 lane), not a persisted client-controlled value.
  */
 function sqlIsPersistWrite(query: string): boolean {
-  const q = query
-    .replace(/\$\{[^}]*\}/g, " ")      // strip interpolations (leader is a bare keyword)
+  // strip interpolations (leader is a bare keyword) — the emitter's JS-aware slot extents,
+  // never a `[^}]*` re-derivation (S456 fix round F1 sweep)
+  const q = replaceLiveSqlInterpolations(query, () => " ")
     .replace(/--[^\r\n]*/g, " ")         // line comments
     .replace(/\/\*[\s\S]*?\*\//g, " ") // block comments
     .replace(/\s+/g, " ")

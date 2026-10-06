@@ -34,6 +34,8 @@
  * inside a string literal (`'a FROM b' AS t`) is a string, not a clause boundary.
  */
 
+import { jsInterpolationEnd } from "./codegen/sql-lex.ts";
+
 export interface HoistableQuery {
   /** The key column as written in the WHERE (`id`, `n.id`). */
   keyColumn: string;
@@ -118,12 +120,11 @@ function tokenize(sql: string): Tok[] | null {
       continue;
     }
     if (c === "$" && sql[i + 1] === "{") {
-      let depth = 0;
-      for (; i < sql.length; i++) {
-        if (sql[i] === "{") depth++;
-        else if (sql[i] === "}") { depth--; if (depth === 0) { i++; break; } }
-      }
-      if (depth !== 0) return null;
+      // The slot extent is the emitter's (sql-lex.ts `jsInterpolationEnd`, read as the emitted
+      // template's JS reads it) — never a re-derived brace count (S456 fix round F1).
+      const end = jsInterpolationEnd(sql, i);
+      if (end === -1) return null;
+      i = end;
       out.push({ kind: "interp", text: sql.slice(start, i), start, end: i });
       continue;
     }
