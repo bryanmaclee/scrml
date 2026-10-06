@@ -66,7 +66,7 @@ function blankInterpolations(sql) {
 /** Strip string literals and comments so their contents cannot be read as identifiers. */
 function blankLiteralsAndComments(sql) {
   return sql
-    .replace(/--[^\n]*/g, " ")
+    .replace(/--[^\r\n]*/g, " ")
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/'(?:[^']|'')*'/g, " '' ")
     .replace(/"(?:[^"]|"")*"/g, ' "" ');

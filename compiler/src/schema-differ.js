@@ -495,13 +495,31 @@ function legacyScanCreateTables(text) {
   return found;
 }
 
+/**
+ * Where a SQL `--` line comment starting at `i` ends (S456 review F1): the FIRST `\r` or
+ * `\n` — Postgres's extent (scan.l `newline [\n\r]`); SQLite and MySQL end it at `\n`
+ * only. Every reader here takes the shorter extent, so text after a lone `\r` is read as
+ * live SQL; a statement that holds a lone `\r` is also an unmodelled form
+ * (`UNMODELED_SQL_FORM`), and the tenant `<schema>` checker charges it, since a `/*`
+ * after it can hide text from either database.
+ *
+ * @param {string} text
+ * @param {number} i offset of the `--`
+ * @param {number} [to] scan limit
+ * @returns {number} offset of the terminator, or `to`
+ */
+export function sqlLineCommentEnd(text, i, to = text.length) {
+  for (let k = i; k < to; k++) if (text[k] === "\n" || text[k] === "\r") return k;
+  return to;
+}
+
 /** Skip whitespace and SQL `--` / `/* *\/` comments from `i` (inside a head only). */
 function skipSqlTrivia(src, i) {
   for (;;) {
     while (i < src.length && /\s/.test(src[i])) i++;
     if (src.startsWith("--", i)) {
-      const nl = src.indexOf("\n", i);
-      i = nl === -1 ? src.length : nl + 1;
+      const nl = sqlLineCommentEnd(src, i);
+      i = nl === src.length ? src.length : nl + 1;
       continue;
     }
     if (src.startsWith("/*", i)) {
@@ -1119,7 +1137,7 @@ function alterTableTenantDecls(text, masked) {
  * is read to its wrapper edge (`sqlWrapperEdge`), never to a modelled stop that the
  * form may have hidden or faked (S455 review F1).
  */
-const UNMODELED_SQL_FORM = /[[$\\#`]/;
+const UNMODELED_SQL_FORM = /[[$\\#`]|\r(?!\n)/;   // S456 F1: a lone `\r` (a `--` comment's extent differs by database)
 
 /** Whether `s` names `tenant_id` as a whole word (anywhere — literals and comments included). */
 function namesTenantId(s) {
@@ -1159,8 +1177,7 @@ function alterStatementEnd(text, from) {
       continue;
     }
     if (c === "-" && text[k + 1] === "-") {
-      const nl = text.indexOf("\n", k);
-      k = nl === -1 ? text.length : nl;
+      k = sqlLineCommentEnd(text, k);
       continue;
     }
     if (c === "/" && text[k + 1] === "*") {
@@ -1492,8 +1509,8 @@ function findRawDdlBodyEnd(src, from) {
   while (i < src.length) {
     const c = src[i];
     if (c === "-" && src[i + 1] === "-") {
-      const nl = src.indexOf("\n", i);
-      i = nl === -1 ? src.length : nl + 1;
+      const nl = sqlLineCommentEnd(src, i);
+      i = nl === src.length ? src.length : nl + 1;
       continue;
     }
     if (c === "/" && src[i + 1] === "*") {
@@ -1531,8 +1548,8 @@ function splitTopLevelCommas(body) {
   while (i < body.length) {
     const c = body[i];
     if (c === "-" && body[i + 1] === "-") {
-      const nl = body.indexOf("\n", i);
-      i = nl === -1 ? body.length : nl + 1;
+      const nl = sqlLineCommentEnd(body, i);
+      i = nl === body.length ? body.length : nl + 1;
       continue;
     }
     if (c === "/" && body[i + 1] === "*") {
@@ -1705,8 +1722,7 @@ function blankLiteralBodies(s, opts = {}) {
     // either is an accepted fail-closed false positive
     // (g-secdef-fn-body-ddl-false-positive for the fn body).
     if (comments && ch === "-" && s[i + 1] === "-") {
-      let j = i;
-      while (j < s.length && s[j] !== "\n") j++;
+      const j = sqlLineCommentEnd(s, i);
       out += " ".repeat(j - i);
       i = j;
       continue;

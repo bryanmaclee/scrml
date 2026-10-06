@@ -59,7 +59,7 @@ import {
   lexTenantSubset, tenantRowFunctions, tenantGroupAggregates, namesFor, castTypesFor, endsOperandWord,
   type SqlDialect, type Avail,
 } from "./codegen/tenant-sql-subset.ts";
-import { schemaTableDeclarations, DBAUTH_ROLE } from "./schema-differ.js";
+import { schemaTableDeclarations, DBAUTH_ROLE, sqlLineCommentEnd } from "./schema-differ.js";
 
 /** The hazard kinds (the `kind` named in the diagnostic). */
 export type SchemaHazardKind =
@@ -117,6 +117,15 @@ interface Tok {
 type CommentMode = "skip" | "skip-nested" | "content";
 
 /**
+ * The offsets of `--` comments holding a lone `\r` in one `lex` result (S456 F1) — a
+ * non-enumerable side list on the token array, so no statement reading sees them.
+ */
+function crAtOf(toks: Tok[]): readonly number[] {
+  return ((toks as unknown as { crAt?: number[] }).crAt) ?? [];
+}
+
+
+/**
  * Words after which an identifier (so a SQLite `[ident]`) is expected — the name of an object,
  * a column, a table being read or written, an alias. After anything else, `[` is a subscript.
  */
@@ -135,6 +144,8 @@ const WORD_CHAR = /[A-Za-z0-9_$\u0080-￿]/;
  */
 function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 = false): Tok[] {
   const out: Tok[] = [];
+  const crAt: number[] = [];
+  Object.defineProperty(out, "crAt", { value: crAt, enumerable: false });
   let i = from;
   let wrap = sql0 ? 1 : 0;      // `?{` wrappers open
   let braces = 0;               // `{` opened inside the current wrapper (a `${`)
@@ -147,7 +158,9 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
   const comment = (start: number, end: number, cFrom: number, cTo: number): void => {
     // `content` mode reads a comment's text as declarations (a commented-out one counts).
     if (mode === "content" && cTo > cFrom) {
-      for (const t of lex(text, "content", cFrom, cTo, wrap > 0)) out.push({ ...t, cmt: true });
+      const sub = lex(text, "content", cFrom, cTo, wrap > 0);
+      for (const t of sub) out.push({ ...t, cmt: true });
+      for (const a of crAtOf(sub)) crAt.push(a);
     }
     i = end;
     void start;
@@ -158,8 +171,17 @@ function lex(text: string, mode: CommentMode, from = 0, to = text.length, sql0 =
     const c2 = text[i + 1];
     if (/\s/.test(c)) { i++; continue; }
     if (c === "-" && c2 === "-") {
-      let e = text.indexOf("\n", i);
-      if (e === -1 || e > to) e = to;
+      // S456 review F1 (PA-reproduced): Postgres ends a `--` comment at `\r` OR `\n`
+      // (scan.l `newline [\n\r]`); SQLite and MySQL at `\n` only. Read to the FIRST of
+      // the two (Postgres's extent — `AS --x\rPERMISSIVE` was read as a comment through
+      // the `\n` and the live PERMISSIVE hidden). Where the two extents differ — a `\r`
+      // not followed by `\n` — the databases disagree on what follows (text that is code
+      // to one is comment to the other, and a `/*` there can hide text from either), so
+      // the comment's offset is recorded on the side (`LexResult.crAt`, not a token — a
+      // token would be read as statement text) and charged wherever it sits (fail-closed).
+      // A CRLF line end (`\r\n`) is the same extent for every database.
+      const e = sqlLineCommentEnd(text, i, to);
+      if (text[e] === "\r" && text[e + 1] !== "\n") crAt.push(i);
       comment(i, e, i + 2, e);
       continue;
     }
@@ -2460,6 +2482,13 @@ function analyze(
         why: `${ends.map((n) => `\`${n}\``).join(" and ")} ${ends.length > 1 ? "are" : "is"} tenant-scoped, and the database applies \`${actions.join("` / `")}\` ` +
           `to every matching row, whichever tenant owns it — a write the floor never sees` });
     }
+  }
+  // 4b. S456 F1 — a `--` comment holding a lone `\r`: charged wherever it sits (between
+  //     statements too — the text after it is a statement to one database only).
+  for (const at of crAtOf(toks).slice(0, 1)) {
+    out.push({ kind: "statement", object: "a `--` comment ending at a carriage return", tables: allTenant, unattributable: true, offset: at,
+      why: "it holds a carriage return (`\\r`) not followed by a newline — Postgres ends a `--` comment there, SQLite and MySQL " +
+        "only at the newline, so the databases disagree on which text after it is SQL; end the comment with a newline" });
   }
   // 5. A quoted form whose extent depends on the dialect (a backslash inside a quote, an
   //    `E'…'` / `U&'…'` string, an unterminated quote): where lexers disagree, text that is

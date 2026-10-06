@@ -1,0 +1,15 @@
+{
+  "id": "tenant-schema-policy-cr-comment-neg",
+  "description": "§14.8.10 (S456 review F1, PA-reproduced) — `CREATE POLICY p ON assets AS --x\\rPERMISSIVE USING (true) /*\\nRESTRICTIVE --*/`: Postgres ends a `--` comment at `\\r` OR `\\n` (scan.l `newline [\\n\\r]`), so the database runs `AS PERMISSIVE USING (true)` — a policy ORed with `scrml_tenant_iso` that widens it to every tenant. The lexer read the comment through `\\n` and admitted it (rc=0 on f746ff43b). Now every `--` reader ends at the first `\\r` / `\\n`, and a lone `\\r` in a `--` comment (whose extent differs between Postgres and SQLite / MySQL) is charged.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-small-residuals-s456.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: a `CREATE POLICY` on a tenant-scoped table is charged (kind permissive policy) unless it is explicitly `AS RESTRICTIVE`; fail-closed: a declaration the compiler cannot attribute is charged, never treated as safe.",
+  "expect": {
+    "codes": [
+      "E-TENANT-SCHEMA-HAZARD"
+    ],
+    "notCodes": [],
+    "notCodePrefixes": []
+  }
+}
