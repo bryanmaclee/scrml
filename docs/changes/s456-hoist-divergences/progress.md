@@ -117,3 +117,38 @@ conformance/cases/server-db/sql-hoisted-loop-write-between-iterations-rt (the ne
   text" — with chunking there is no runtime check/message, the cap is the chunk size. Both want a SPEC sentence.
 - Observed, not filed (unverified vs SPEC): a state cell named `<get>` / `<all>` gives E-STATE-UNDECLARED +
   E-UNQUOTED-DISPLAY-TEXT (the chunked case was renamed to firstRows / allRows).
+
+## Fix round 1 (S239 review of e7671481c = LAND-WITH-NITS) — merged origin/main (#1329, #1330) first; FACTS + gap-counts regenerated
+### F1 — one unbindable key failed every read (pre-existing; §8.10.3)
+Repro (real bun:sqlite; keys 7, {a:1}, 9, 8; handled `!{ .QueryFailed(m) :> "QF" _ :> "other" }`; .all() keys [1,2], 7):
+| | 2dd6d35d9 | e7671481c | head | .nobatch() |
+|---|---|---|---|---|
+| handled .get() | QF,QF,QF,QF | QF,QF,QF,QF | hello,QF,nine,none | hello,QF,nine,none |
+| handled .all() | 0,0 | 0,0 | 0,1 | 0,1 |
+| unhandled (executed handler, stub driver) | throws before iter 1 | throws at iter 1's read | iter 1 completes, throws at iter 2's read, iter 3 never starts | = head |
+Fix: the pre-fetch never raises. Each chunk marks its keys LOADED only when its query succeeds; a read whose key is
+not loaded runs the same key-table query for that ONE key (through `_scrml_sql_attempt` when handled) — the
+per-iteration query at the per-iteration moment. Subsumes the changed-key path; the held-failure variable is gone.
+Unhandled order pinned by an executed test (items are the test's own objects; `it.seen` / `it.got` after the throw;
+driver call log `["7|obj|9", "7", "obj"]`); that test FAILS on e7671481c. Conformance: server-db/sql-hoisted-loop-unbindable-key-rt.
+### F2 — any out-of-compilation import call switched hoisting off program-wide (INTRODUCED by 0d5369b00/d4931efe9)
+Fix: PURE_STDLIB_MODULES (math, format, regex, path, crypto, random, data, time — read by hand: no `?{}`, network, fs)
+are write-free and never escape; an import from a `.scrml` file in the compilation links to that file's write facts
+(nameMayWrite, fixpoint across files); host `.js`, packages and the other stdlib modules (store, http, fs, auth, …) stay
+fail-closed. Fixture set (.tmp/fx, realistic read-only loops; hoisted count per tree; runtime = real emitted server
+module + real SQLite file, POST each route, hoisted vs `.nobatch()`):
+| fixture | 2dd6d35d9 | e7671481c | head | runtime head == .nobatch() |
+|---|---|---|---|---|
+| fx1 no imports (2 loops) | 2 | 2 | 2 | yes |
+| fx2 `round` (scrml:math) in markup only | 2 | 0 | 2 | yes |
+| fx3 `capitalize` (scrml:format) in the body | 1 | 0 | 1 | yes |
+| fx4 math+time+format imported, `truncate` in body | 2 | 0 | 2 | yes |
+| fx5 helper from an in-compilation .scrml module | 2 | 1 | 2 | yes |
+| fx6 CONTROL: writer from an in-compilation module | 1 | 0 | 0 | (decision only — the module's write lands on another connection in this harness) |
+| fx7 CONTROL: `createStore` (scrml:store) in the function | 1 | 0 | 0 | (decision only) |
+| TOTAL | 11 | 3 | 9 | |
+(base's fx6 / fx7 hoists are the S456 write-scan refusals; the 2 "lost" vs base are exactly the two controls.)
+### F3 + reviewer-found pre-existing — filed, not fixed
+- g-impl1-hoist-set-grown-during-loop-s456 (hoisted "hello" vs per-row "hello,nine"; same at 2dd6d35d9).
+- g-object-method-shorthand-emits-an-empty-property (`{add: }`, client.js, exit 0; same at 2dd6d35d9).
+- g-assignment-rhs-with-embedded-sql-emits-a-dangling-operator (`n = n +;`, server.js, exit 0; same at 2dd6d35d9; not hoisted).

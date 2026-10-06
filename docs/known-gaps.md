@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 237 | 6 |
 | MED | 515 | 4 |
-| LOW | 280 | 0 |
+| LOW | 283 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -23205,7 +23205,19 @@ From the #1325 review (reviewer-executed vs `.nobatch()`): (1) key type coercion
 
 ### g-impl1-hoist-write-scan-dataflow-residual-s456 — the §8.10 write scan has no data flow: a writer reaching a declared local by aliasing a host value is not seen — `NEW S456; LOW; open`
 <!-- @gap id=g-impl1-hoist-write-scan-dataflow-residual-s456 sev=LOW status=open locus=compiler/src/hoist-write-scan.ts(callMayWrite member case) prov=agent:s456-hoist-divergences-self-review -->
-The S456 write scan (§8.10.3 — hoist only a body proven not to write) accepts a member call with a built-in method name (`x.push(…)`, `x.get(…)`) on a declared, non-imported root when no writer escapes anywhere in the compilation. Escapes cover a writer referenced by value, a lambda calling one, and any call into a module outside the compilation. NOT covered (no data flow): a declared local aliasing a host value the source never calls or imports — e.g. `const g = globalThis` then `g.store.add(x)` in the loop where host JS installed a writing `store`. Not probed for constructibility in scrml source. Fail-open if reachable: the loop is hoisted and a later iteration reads a row the earlier one changed through that path.
+The S456 write scan (§8.10.3 — hoist only a body proven not to write) accepts a member call with a built-in method name (`x.push(…)`, `x.get(…)`) on a declared, non-imported root when no writer escapes anywhere in the compilation. Escapes cover a writer referenced by value, a lambda calling one, and any call into a module whose code is not analysed (a host `.js` module, a package, a standard-library module outside the read-only list). NOT covered (no data flow): a declared local aliasing a host value the source never calls or imports — e.g. `const g = globalThis` then `g.store.add(x)` in the loop where host JS installed a writing `store`. Not probed for constructibility in scrml source. Fail-open if reachable: the loop is hoisted and a later iteration reads a row the earlier one changed through that path. **Trust assumption (S456 fix round F2):** `PURE_STDLIB_MODULES` (`scrml:math|format|regex|path|crypto|random|data|time`) was classified read-only BY HAND (no `?{}`, network or file system in their source at `bce7d9ef1`); a stdlib change that adds a database write to one of them must also remove it from that list — nothing checks this.
+
+### g-impl1-hoist-set-grown-during-loop-s456 — a hoisted loop over a Set the body adds to iterates only the original elements — `NEW S456; LOW; open (pre-existing)`
+<!-- @gap id=g-impl1-hoist-set-grown-during-loop-s456 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(emitHoistedForStmt — `Array.from(<iterable>)` once, up front) prov=review:s456-S239-fix-round-F3+empirical:s456-hoist-divergences -->
+`const items = new Set([{ id: 7 }]); for (const it of items) { const row = ?{…WHERE id = ${it.id}}.get(); …; if (it.id == 7) { items.add({ id: 9 }) } }` — hoisted `hello`, `.nobatch()` `hello,nine` (executed on real bun:sqlite at `2dd6d35d9` and at the S456 head; same both). The hoist materialises the iterable once (S455, so the key list and the loop read the same items); a Set / Map / array the body grows is iterated live by the per-row loop. §8.10.3 equivalence. Direction: refuse the hoist when the body can mutate the iterable (a call on the iterable's root), or iterate the live iterable and read added keys alone (the S456 unloaded-key path already does the read).
+
+### g-object-method-shorthand-emits-an-empty-property — `{ add(x) { … } }` emits `{add: }` (invalid JS), exit 0 — `NEW S456; LOW; open (pre-existing)`
+<!-- @gap id=g-object-method-shorthand-emits-an-empty-property sev=LOW status=open locus=compiler/src/expression-parser.ts(~:3215 ObjectExpression → ObjectProp: the method value)+compiler/src/codegen/emit-expr.ts(emitProp)—agent-located-verify prov=review:s456-S239-fix-round+empirical:s456-hoist-divergences -->
+`function bump() { const counter = { add(x) { return x + 1 } }; @r = counter.add(@r) }` emits `const counter = {add: };` into client.js with no diagnostic (reproduced at `2dd6d35d9` and the S456 head); the page's script is a SyntaxError on load. Not hoist-related.
+
+### g-assignment-rhs-with-embedded-sql-emits-a-dangling-operator — `n = n + ?{…}.all().length` emits `n = n +;`, exit 0 — `NEW S456; LOW; open (pre-existing)`
+<!-- @gap id=g-assignment-rhs-with-embedded-sql-emits-a-dangling-operator sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(bare reassignment whose RHS embeds a `?{}` — the sql site is split off the expression)—agent-located-verify prov=review:s456-S239-fix-round+empirical:s456-hoist-divergences -->
+`server function total(ids) { let n = 0; for (const it of ids) { n = n + ?{\`SELECT body FROM notes WHERE id = ${it.id}\`}.all().length } return n }` emits `n = n +;` in server.js with no diagnostic (reproduced at `2dd6d35d9` and the S456 head; the loop is not hoisted — not the hoist path). The server module fails to load.
 
 ### g-impl1-match-arm-sql-server-boundary-s455 — `?{}` inside a `match` block arm in a server function → E-CG-006 + a SyntaxError, with or without `.nobatch()` — `NEW S455; MED; open (pre-existing)`
 <!-- @gap id=g-impl1-match-arm-sql-server-boundary-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(match-arm structured-body emission ~:2796, PA-located-verify) prov=review:s455-hoist-dev -->
