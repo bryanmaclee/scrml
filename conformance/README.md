@@ -311,6 +311,16 @@ it from the entry's import graph (§21.3). A case with `import { x } from
 ENTRY bundle, so cross-file imports are gated at the CODES level today; the
 runtime half of multi-file (sibling-bundle loading) is a later wave.
 
+### The database-fixture convention (`<name>.db.sql`, S456)
+
+A case dir may hold `<name>.db.sql`: the SQL that builds a SQLite file `<name>.db`
+beside `case.scrml` BEFORE the compile — a live database the compile opens (a
+`<db src="./<name>.db" tables=…>` reads its schema at compile time, §14.8). The
+fixture is text, so the database a case asserts against is reviewable. impl#1's
+adapter builds it in `compile()` (the codes half); an impl#2 adapter SHALL build the
+same file. Introduced for §14.8.10 `E-TENANT-UNDECLARED` (a live file holding an
+undeclared `tenant_id` table).
+
 ### Per-implementation expected failure (`xfail`) — carried gaps (S430 P7)
 
 The ruling (bryan, S430 P7): impl#1 (the TS compiler) is fixed only for cause —

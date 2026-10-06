@@ -30,6 +30,7 @@ import { resolveDbDriver } from "./db-driver.ts";
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRENT_TRANSACTIONS_VALUE } from "./sql-tx-guard.ts";
+import { tenantStartupCheckLines, type TenantCheckHandle } from "./tenant-startup-check.ts";
 
 /** §19.10.6 (S449 review F1) — the SSE stream's `finally` backstop call. Emitted with
  *  every SSE route; dropped again when the module declares no `?{}` handle (and so
@@ -7171,6 +7172,20 @@ export function generateServerJs(
       if (_tenantScopeLines.length > 0) {
         finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _tenantScopeLines.join("\n") + "\n";
       }
+    }
+    // §14.8.10 (S456, ruling "b, startup check lands with it") — every database this
+    // module opens is checked when the built server starts: a relation carrying
+    // `tenant_id` outside the compilation's tenant set (`_tenantCtx` holds it) would be
+    // read unscoped, so `_server.js` refuses to serve while one exists
+    // (codegen/tenant-startup-check.ts; commands/build.js `generateServerEntry`).
+    const _tenantCheckHandles: TenantCheckHandle[] = [];
+    for (const ident of sortedIdents) {
+      const scope = dbScopes.get(ident);
+      if (scope) _tenantCheckHandles.push({ ident, driver: scope.driver, connection: scope.connectionString });
+    }
+    const _tenantCheckLines = tenantStartupCheckLines(_tenantCheckHandles, _tenantCtx.tenantScopedTables);
+    if (_tenantCheckLines.length > 0) {
+      finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _tenantCheckLines.join("\n") + "\n";
     }
   } else {
     // No `?{}` handle → no transaction runtime → no stream backstop to call.

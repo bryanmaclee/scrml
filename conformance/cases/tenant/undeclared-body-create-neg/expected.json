@@ -1,0 +1,16 @@
+{
+  "id": "tenant-undeclared-body-create-neg",
+  "description": "§14.8.10 (S456) — a program-body `?{CREATE TABLE IF NOT EXISTS invoices (…, tenant_id TEXT)}` whose table no `<schema>` / `<db tables=>` declares. Before S456 `invoices` was outside the compilation's tenant set, so its reads were emitted unscoped (every tenant's rows to every request) with no diagnostic (compiled clean on 2dd6d35d9). Now refused at compile.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (ruling user-voice-scrml.md S456 \"b, startup check lands with it\"): a table carrying a `tenant_id` column that is not in the compilation's tenant set is refused where the compiler can see it — a program-body `?{CREATE [TEMP] TABLE … tenant_id …}` is E-TENANT-UNDECLARED.",
+  "expect": {
+    "codes": [
+      "E-TENANT-UNDECLARED"
+    ],
+    "codeCounts": {
+      "E-TENANT-UNDECLARED": 1
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "tenant-program-statement-not-admitted-neg",
+  "description": "§14.8.10 (S456 round 3) — a program-body `?{CREATE VIEW … AS SELECT …}` (with `.acrossTenants()`) is not on the closed program-body allow-list. Before round 3 the compile classified what such a statement creates; the S239 r3 review executed eight shapes that created a `tenant_id` relation and compiled clean. Now any statement off the list is refused, whatever it would create.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 item (1) (rulings user-voice-scrml.md S456 \"a, fix F7/F9 too\" + \"your recs, go\"): in a compilation with a database, a program-body `?{}` statement SHALL be DML, a spelled `CREATE [TEMP] TABLE`, one `ALTER TABLE … ADD COLUMN`, an fts5 table with the closed option list, transaction control, `CREATE [UNIQUE] INDEX`, or a PRAGMA on the closed list; every other statement is E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED.",
+  "expect": {
+    "codes": [
+      "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED"
+    ],
+    "codeCounts": {
+      "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED": 1
+    }
+  }
+}

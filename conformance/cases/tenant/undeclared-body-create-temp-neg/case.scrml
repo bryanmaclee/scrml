@@ -1,0 +1,14 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+    </>
+    // A TEMP table carrying tenant_id: `<schema>` cannot declare a temporary table,
+    // so nothing scopes it. Refused.
+    ${
+        function stage() {
+            ?{`CREATE TEMP TABLE staging (id INTEGER, name TEXT, tenant_id TEXT)`}.run()
+            return 1
+        }
+    }
+    <button onclick=${ stage() }>stage</button>
+</program>

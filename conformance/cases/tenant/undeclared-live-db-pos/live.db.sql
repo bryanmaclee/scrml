@@ -1,0 +1,2 @@
+CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT);
+CREATE TABLE audit_log (id INTEGER PRIMARY KEY, msg TEXT);

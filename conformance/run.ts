@@ -352,6 +352,9 @@ export interface LoadedCase {
   /** Aux `.scrml` fixtures in the case dir (the `files` multi-file convention):
    *  every `*.scrml` besides `case.scrml`, keyed by filename, for import graphs. */
   auxFiles: Record<string, string>;
+  /** SQLite database fixtures (S456): `<name>.db` → the SQL in the case's `<name>.db.sql`,
+   *  built beside case.scrml before the compile (a live database the compile opens). */
+  dbFixtures?: Record<string, string>;
 }
 
 export interface CaseResult {
@@ -687,9 +690,14 @@ export function loadCases(casesDir: string = CASES_DIR): LoadedCase[] {
       // `files` convention: every *.scrml besides case.scrml is an aux import
       // fixture written alongside the entry at compile/run time (§21.3).
       const auxFiles: Record<string, string> = {};
+      // The database-fixture convention (S456): every `<name>.db.sql` is the SQL that
+      // builds a SQLite file `<name>.db` beside case.scrml before the compile.
+      const dbFixtures: Record<string, string> = {};
       for (const entry of readdirSync(dir)) {
         if (entry !== "case.scrml" && entry.endsWith(".scrml")) {
           auxFiles[entry] = readFileSync(join(dir, entry), "utf8");
+        } else if (entry.endsWith(".db.sql")) {
+          dbFixtures[entry.slice(0, -".sql".length)] = readFileSync(join(dir, entry), "utf8");
         }
       }
       out.push({
@@ -698,6 +706,7 @@ export function loadCases(casesDir: string = CASES_DIR): LoadedCase[] {
         source: readFileSync(scrml, "utf8"),
         expected,
         auxFiles,
+        ...(Object.keys(dbFixtures).length > 0 ? { dbFixtures } : {}),
       });
       continue; // a case dir is a leaf — do not descend further
     }
@@ -765,7 +774,7 @@ export function runCase(c: LoadedCase): CaseResult {
     };
   }
 
-  const { codes: emitted, byCode, counts } = compile(c.source, c.auxFiles);
+  const { codes: emitted, byCode, counts } = compile(c.source, c.auxFiles, c.dbFixtures);
   const emittedSet = new Set(emitted);
   const missing = ex.codes.filter((code) => !emittedSet.has(code));
   const forbidden = ex.notCodes.filter((code) => emittedSet.has(code));

@@ -297,6 +297,9 @@ export function describeServerUnit(source, relPath) {
       middlewareNames.push(name);
     } else if (name === "_scrml_mw_declared_in") {
       // Provenance for the onion above, not a route. Captured separately.
+    } else if (name === "_scrml_tenant_startup_check") {
+      // §14.8.10 (S456) — the undeclared-tenant-table startup check `{ undeclared }`,
+      // NOT a route. Captured separately (below); the entry runs it before serving.
     } else if (name === "_scrml_protected_document") {
       // §52.13 — the served-document auth guard `{ guard }`, NOT a route. It is
       // captured separately (below) and imported under a unique alias by the
@@ -317,10 +320,16 @@ export function describeServerUnit(source, relPath) {
     ? relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html")
     : null;
 
+  // §14.8.10 (S456) — a module whose databases the built server checks at startup.
+  const tenantStartupCheck = /export\s+const\s+_scrml_tenant_startup_check\s*=/.test(source);
+
   if (routeNames.length > 0 || wsHandlerNames.length > 0 || middlewareNames.length > 0) {
     // `filename` carries the relative path under outputDir so the generated
     // `_server.js` can import via `./${filename}` regardless of nesting.
-    return { filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn, protectedDocument };
+    return {
+      filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn, protectedDocument,
+      ...(tenantStartupCheck ? { tenantStartupCheck: true } : {}),
+    };
   }
   return null;
 }
@@ -397,6 +406,8 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   // that document in the static dispatch below
   // (g-auth-required-does-not-protect-the-served-html-document).
   const protectedDocs = [];
+  // §14.8.10 (S456) — the aliases of every module's undeclared-tenant-table check.
+  const tenantChecks = [];
 
   lines.push("// scrml production server — compiler-generated");
   lines.push("// DO NOT EDIT. Regenerate with: scrml build");
@@ -447,6 +458,12 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
       const alias = onionAliasFor.get(mod);
       if (alias) specifiers.push(`_scrml_mw_pipeline as ${alias}`);
       // §52.13 — a unique alias per protected module (the export name collides).
+      // §14.8.10 (S456) — a unique alias per module (the export name collides).
+      if (mod.tenantStartupCheck) {
+        const tcAlias = `_scrml_tc_${tenantChecks.length}`;
+        specifiers.push(`_scrml_tenant_startup_check as ${tcAlias}`);
+        tenantChecks.push(tcAlias);
+      }
       if (mod.protectedDocument) {
         const pdAlias = `_scrml_pd_${protectedDocs.length}`;
         specifiers.push(`_scrml_protected_document as ${pdAlias}`);
@@ -544,12 +561,139 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     lines.push("");
   }
 
+  const hasTenantChecks = tenantChecks.length > 0;
+  if (hasTenantChecks) {
+    // §14.8.10 (S456, ruling "b, startup check lands with it"). The compile refuses an
+    // undeclared tenant table it can see (E-TENANT-UNDECLARED); a database it cannot read
+    // (Postgres, a <program db=> SQLite file, one seeded after the build) is checked here.
+    // Unlike a missing referenced database — whose every use already fails loudly — an
+    // undeclared tenant table FAILS OPEN (its rows reach every request unscoped), so the
+    // whole server answers 503, not only its health check. It stays up and re-checks —
+    // on every health probe, and (S456 review F2) on ordinary requests under a bounded
+    // backoff — so a database that was down at boot, or is fixed in place, is served
+    // without a restart. A check that errors keeps refusing (fail-closed).
+    lines.push("// §14.8.10 — UNDECLARED TENANT TABLES. The tenant floor scopes the tables this build");
+    lines.push("// declares tenant-scoped (<schema>, <db tables=>). A table in a database that carries");
+    lines.push("// tenant_id but is not declared would be read unscoped — every tenant's rows to every");
+    lines.push("// request — so this server refuses to serve while one exists, or while a database");
+    lines.push("// cannot be checked: every request answers 503. It re-checks (one check at a time;");
+    lines.push("// ordinary requests at most every 1 s, backing off to 30 s; /_scrml/health at once),");
+    lines.push("// so a database that comes up later, or is fixed in place, is served without a restart.");
+    lines.push(`const _SCRML_TENANT_CHECKS = [${tenantChecks.join(", ")}];`);
+    lines.push("// A database that does not answer within this long counts as unchecked (refused).");
+    lines.push("const _SCRML_TENANT_CHECK_TIMEOUT_MS = 10000;");
+    lines.push("async function _scrml_tenant_undeclared() {");
+    lines.push("  const found = [];");
+    lines.push("  for (const check of _SCRML_TENANT_CHECKS) {");
+    lines.push("    try {");
+    lines.push("      let timer;");
+    lines.push("      const timeout = new Promise((_, reject) => {");
+    lines.push("        timer = setTimeout(() => reject(new Error(`no answer within ${_SCRML_TENANT_CHECK_TIMEOUT_MS / 1000} s`)), _SCRML_TENANT_CHECK_TIMEOUT_MS);");
+    lines.push("      });");
+    lines.push("      try {");
+    lines.push("        found.push(...(await Promise.race([check.undeclared(), timeout])));");
+    lines.push("      } finally {");
+    lines.push("        clearTimeout(timer);");
+    lines.push("      }");
+    lines.push("    } catch (e) {");
+    lines.push('      found.push({ db: "(a server module\'s database)", table: null, error: String((e && e.message) || e) });');
+    lines.push("    }");
+    lines.push("  }");
+    lines.push("  // Modules that share a database report its tables once.");
+    lines.push("  const seen = new Set();");
+    lines.push("  return found.filter((f) => {");
+    lines.push("    const key = `${f.db}\\0${f.table}\\0${f.error}`;");
+    lines.push("    if (seen.has(key)) return false;");
+    lines.push("    seen.add(key);");
+    lines.push("    return true;");
+    lines.push("  });");
+    lines.push("}");
+    lines.push("function _scrml_tenant_report(found) {");
+    lines.push("  for (const f of found) {");
+    lines.push("    console.error(f.table !== null");
+    lines.push('      ? `scrml: E-DEPLOY-DB-TENANT-UNDECLARED: database ${f.db} holds "${f.table}", which has a ` +');
+    lines.push("        `tenant_id column, but this build does not declare it tenant-scoped (no <schema> and no ` +");
+    lines.push("        `<db tables=> names it), so the tenant floor would not scope its rows. This server answers ` +");
+    lines.push("        `503 until that is fixed: declare the table in <schema> so the tenant floor scopes it, and ` +");
+    lines.push("        `rebuild — or, if it is not tenant data, rename the column (a tenant_id column is the ` +");
+    lines.push("        `declaration; there is no opt-out).`");
+    lines.push("      : `scrml: E-DEPLOY-DB-TENANT-UNDECLARED: database ${f.db} could not be checked — the ` +");
+    lines.push("        `connection or the catalogue query failed (${f.error}); no undeclared table was found, ` +");
+    lines.push("        `the database could not be asked. This server answers 503 and keeps re-checking until ` +");
+    lines.push("        `the check succeeds.`);");
+    lines.push("  }");
+    lines.push("}");
+    lines.push("// The standing findings (null until the first check finishes), the one check in");
+    lines.push("// flight, and the backoff between checks that ordinary requests trigger.");
+    lines.push("let _scrml_tenant_found = null;");
+    lines.push("let _scrml_tenant_inflight = null;");
+    lines.push("let _scrml_tenant_started = 0;");
+    lines.push("let _scrml_tenant_wait = 1000;");
+    lines.push('let _scrml_tenant_logged = "";');
+    lines.push("function _scrml_tenant_run() {");
+    lines.push("  if (_scrml_tenant_inflight) return _scrml_tenant_inflight;");
+    lines.push("  _scrml_tenant_started = Date.now();");
+    lines.push("  _scrml_tenant_inflight = _scrml_tenant_undeclared().then((found) => {");
+    lines.push("    const wasRefusing = _scrml_tenant_found !== null && _scrml_tenant_found.length > 0;");
+    lines.push("    _scrml_tenant_found = found;");
+    lines.push("    _scrml_tenant_inflight = null;");
+    lines.push("    if (found.length === 0) {");
+    lines.push("      _scrml_tenant_wait = 1000;");
+    lines.push('      _scrml_tenant_logged = "";');
+    lines.push('      if (wasRefusing) console.error("scrml: the undeclared-tenant-table check now passes; serving.");');
+    lines.push("    } else {");
+    lines.push("      _scrml_tenant_wait = Math.min(_scrml_tenant_wait * 2, 30000);");
+    lines.push("      // Log a finding set once, not on every re-check.");
+    lines.push("      const key = JSON.stringify(found);");
+    lines.push("      if (key !== _scrml_tenant_logged) {");
+    lines.push("        _scrml_tenant_logged = key;");
+    lines.push("        _scrml_tenant_report(found);");
+    lines.push("      }");
+    lines.push("    }");
+    lines.push("    return found;");
+    lines.push("  });");
+    lines.push("  return _scrml_tenant_inflight;");
+    lines.push("}");
+    lines.push("const _scrml_tenant_boot = _scrml_tenant_run();");
+    lines.push("// How many findings stand (a request answers 503 while any does). `recheck` (the");
+    lines.push("// health route) checks now; any other request starts a background re-check once");
+    lines.push("// the backoff has passed and answers from the standing result meanwhile.");
+    lines.push("async function _scrml_tenant_refusals(recheck) {");
+    lines.push("  if (_scrml_tenant_found === null) {");
+    lines.push("    // The boot check has not finished: wait for it, but no longer than its own timeout.");
+    lines.push("    await Promise.race([_scrml_tenant_boot, new Promise((r) => setTimeout(r, _SCRML_TENANT_CHECK_TIMEOUT_MS + 1000))]);");
+    lines.push("    if (_scrml_tenant_found === null) return 1;");
+    lines.push("  }");
+    lines.push("  if (_scrml_tenant_found.length > 0) {");
+    lines.push("    if (recheck) await _scrml_tenant_run();");
+    lines.push("    else if (!_scrml_tenant_inflight && Date.now() - _scrml_tenant_started >= _scrml_tenant_wait) void _scrml_tenant_run();");
+    lines.push("  }");
+    lines.push("  return _scrml_tenant_found.length;");
+    lines.push("}");
+    lines.push("");
+  }
+
   // Health check
   lines.push("// Health check (compiler-generated)");
   lines.push("routes.push({");
   lines.push('  path: "/_scrml/health",');
   lines.push('  method: "GET",');
-  if (hasReferencedDbs) {
+  if (hasTenantChecks) {
+    // The body names counts, not paths or tables: the health route is public.
+    lines.push("  handler: async () => {");
+    lines.push(hasReferencedDbs ? "    const missing = _scrml_missing_dbs().length;" : "    const missing = 0;");
+    lines.push("    const undeclared = await _scrml_tenant_refusals(true);");
+    lines.push("    const reasons = [];");
+    lines.push("    if (missing > 0) reasons.push(`${missing} database file(s) missing`);");
+    lines.push("    if (undeclared > 0) reasons.push(`${undeclared} undeclared tenant table(s) or unchecked database(s)`);");
+    lines.push("    return new Response(JSON.stringify(reasons.length === 0");
+    lines.push('      ? { status: "ok", uptime: process.uptime() }');
+    lines.push('      : { status: "unavailable", reason: `${reasons.join("; ")} — see the server log` }), {');
+    lines.push("      status: reasons.length === 0 ? 200 : 503,");
+    lines.push('      headers: { "Content-Type": "application/json" },');
+    lines.push("    });");
+    lines.push("  },");
+  } else if (hasReferencedDbs) {
     // The body names a count, not the paths: the health route is public.
     lines.push("  handler: () => {");
     lines.push("    const missing = _scrml_missing_dbs().length;");
@@ -762,6 +906,12 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push('    return new Response("Internal Server Error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });');
   lines.push("  },");
   lines.push("  async fetch(req, server) {");
+  if (hasTenantChecks) {
+    lines.push("    // §14.8.10 — no request is served while an undeclared tenant table stands (above).");
+    lines.push('    if (new URL(req.url).pathname !== "/_scrml/health" && (await _scrml_tenant_refusals(false)) > 0) {');
+    lines.push('      return new Response("Service Unavailable", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });');
+    lines.push("    }");
+  }
   if (hasOnion) {
     if (hasWs) {
       // SPEC §40.3.4: "handle() does NOT apply to WebSocket upgrade requests.

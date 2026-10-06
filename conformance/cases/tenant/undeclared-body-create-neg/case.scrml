@@ -1,0 +1,14 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)`}
+    </>
+    // `invoices` carries tenant_id but only a program-body ?{} creates it: no <schema>
+    // declares it, so the tenant floor would read it unscoped. Refused.
+    ${
+        function setup() {
+            ?{`CREATE TABLE IF NOT EXISTS invoices (id INTEGER PRIMARY KEY, amount INTEGER, tenant_id TEXT)`}.run()
+            return 1
+        }
+    }
+    <button onclick=${ setup() }>setup</button>
+</program>
