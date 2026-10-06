@@ -6924,7 +6924,7 @@ export function rejectWritesToDerivedVars(
 function sqlIsPersistWrite(query: string): boolean {
   const q = query
     .replace(/\$\{[^}]*\}/g, " ")      // strip interpolations (leader is a bare keyword)
-    .replace(/--[^\n]*/g, " ")         // line comments
+    .replace(/--[^\r\n]*/g, " ")         // line comments
     .replace(/\/\*[\s\S]*?\*\//g, " ") // block comments
     .replace(/\s+/g, " ")
     .trim();

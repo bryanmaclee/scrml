@@ -1,0 +1,19 @@
+{
+  "id": "tenant-schema-policy-comment-in-as-clause-pos",
+  "description": "§14.8.10 (S456, g-tenant-small-residuals-s455 (b)) — `CREATE POLICY … AS /* x */ RESTRICTIVE` and `AS -- x⏎ RESTRICTIVE` on a tenant-scoped table: a comment between the AS clause's tokens is not part of the statement, so both are `AS RESTRICTIVE` policies and admitted. Before S456 each was charged E-TENANT-SCHEMA-HAZARD twice — 'its AS clause (`x`) could not be read' (the comment text read as the mode) and 'body outside the tenant SQL subset — a comment' (the AS clause read as policy body).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-small-residuals-s456.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 statement-kind allow-list (S455 \"your rec on the allow-list\"): a `<schema>` admits \"`CREATE POLICY … AS RESTRICTIVE` (its body read in the tenant SQL subset … and its calls held to the expression allow-list …)\". The body a policy is read for is its USING / WITH CHECK expressions, not its AS clause.",
+  "expect": {
+    "codes": [
+      "I-TENANT-STRIP"
+    ],
+    "notCodes": [
+      "E-TENANT-SCHEMA-HAZARD"
+    ],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}

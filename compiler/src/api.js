@@ -44,7 +44,8 @@ import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
 // and the compilation's ONE tenant set it shares with the floor in CG.
 import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
-import { compilationTenantSet } from "./codegen/tenant-egress.ts";
+import { compilationTenantSet, buildTenantContext } from "./codegen/tenant-egress.ts";
+import { fileTenantSubstrateReads } from "./tenant-substrate-read.ts";
 import { appDeclaresDbAuthoritative } from "./codegen/db-authoritative.ts";
 import { buildProtectContext } from "./codegen/protect-egress.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
@@ -2996,10 +2997,18 @@ function _compileScrmlImpl(options = {}) {
   // qualified `rel.col` must name one (Postgres reads `rel.f` as the call `f(rel)` otherwise).
   // (Computed only when the floor is on — with no tenant table the rule charges nothing.)
   const compilationColumns = compilationTenant.columns ?? new Map();   // the SAME declared columns the query floor reads
+  // §14.8.10 corollary (S456, g-tenant-identity-substrate-scoped-breaks-login-s455) —
+  // W-TENANT-SUBSTRATE-SCOPED: a function that pins the tenant on the result of a read
+  // of a tenant-scoped table. Same set, same floor classification (`resolveTenantScoping`
+  // over the compilation's context), over the same expanded AST.
+  const substrateCtx = compilationTenant.tables.size > 0
+    ? buildTenantContext(buildProtectContext(paResult.protectAnalysis), [], "", undefined, compilationTenant)
+    : null;
   for (const fileAST of metaFiles) {
     const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
     const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
     collectErrors("TENANT-SCHEMA", diags, fp);
+    if (substrateCtx) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => fileTenantSubstrateReads(fileAST, substrateCtx)), fp);
   }
 
   // Stage 7: DG (all files — sees post-meta-expansion AST)
