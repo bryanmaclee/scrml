@@ -103,6 +103,33 @@ import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "./session-
 export const ALL_COLUMNS_LABEL = "*";
 
 /**
+ * S456 (`g-handle-globalthis-response-ships-protected-columns`) — the binding
+ * the §40.3 middleware wrapper (`emit-server.ts`) gives the value an author
+ * `handle()` RETURNS: `const _scrml_mw_result = await (async () => { <handle
+ * body> })();` … `return _scrml_mw_result;`. The host sends that value to the
+ * client AS-IS — no `_scrml_protect_redact`, no mediation check — so it is a
+ * client-egress sink of its own (sink kind "handle"), and the analysis reads
+ * it from the emitted tree: the declarator of this name whose initializer is
+ * the awaited IIFE. Shared with the emitter so the two cannot drift; the
+ * `_scrml_` prefix is reserved (`validators/reserved-prefix.ts`), so no author binding can
+ * pose as it.
+ */
+export const HANDLE_RESULT_BINDING = "_scrml_mw_result";
+
+/**
+ * Is `d` the declarator binding an author `handle()`'s return value — named
+ * `HANDLE_RESULT_BINDING` and initialized by an awaited IIFE (the handle body)?
+ * The no-`handle()` form of the wrapper binds the same name to
+ * `await downstream(req)` — the route dispatch, whose egress is already sinked
+ * route by route — and is deliberately not matched.
+ */
+function isHandleResultDeclarator(d: any): boolean {
+  if (d?.id?.type !== "Identifier" || d.id.name !== HANDLE_RESULT_BINDING) return false;
+  const init = d.init?.type === "AwaitExpression" ? d.init.argument : null;
+  return !!init && init.type === "CallExpression" && isFnNode(init.callee);
+}
+
+/**
  * S443 round 6b (L4) — a PSEUDO-label, carried through the same maps as the
  * protected labels so every propagation and alias rule applies to it
  * unchanged, but never reported as a column: "a property of this object may
@@ -155,7 +182,7 @@ const GLOBAL_CELL = "\u0000global";
 /** The compiler-owned session store — one object of the global heap shared by every module (r9 fix round). */
 const SESSION_STORE_CELL = "\u0000session-store";
 
-type SinkKind = "redact" | "frame" | "serializer" | "serializer-json" | "global";
+type SinkKind = "redact" | "frame" | "serializer" | "serializer-json" | "global" | "handle";
 
 interface RowPart {
   /** `_scrml_protect_tag` call sites (module-qualified) this row came from. */
@@ -947,6 +974,8 @@ export interface ProtectFlowLeak {
   siteFile: string | null;
   /** The egress is a write into a global store (S443 round 6, L3), not a response. */
   global?: boolean;
+  /** The egress is the value an author `handle()` returns (§40.3; S456), sent as-is. */
+  handle?: boolean;
 }
 
 /** One `_scrml_protect_tag` site: the SQL it wraps + whether a redact sink stripped it. */
@@ -1140,6 +1169,10 @@ export function analyzeCompileProtectFlow(
       ? `a write into a global store (\`globalThis\`, \`process.env\`, \`import.meta\` or another object reached ` +
         `from a global name) in \`${leak.sinkFn}\` — any other request, and code the compiler cannot see, can read ` +
         `it back and send it`
+      : leak.handle
+      ? `the response \`handle()\` returns (§40.3 — the server sends it to the client as-is, outside the ` +
+        `§14.8.9 redaction, however the \`Response\` constructor was reached: \`globalThis.Response\`, an alias, ` +
+        `a destructure, or a call the compiler cannot see into)`
       : isCompilerName(leak.sinkFn)
       ? `the compiler-emitted client egress \`${leak.sinkFn}\``
       : `the client egress of \`${leak.sinkFn}\``;
@@ -1155,6 +1188,16 @@ export function analyzeCompileProtectFlow(
       : leak.global
       ? "keep the value in a local binding, or store the ROW itself (it keeps its descriptor and is stripped " +
         "wherever it later leaves the server) — never a value taken out of it"
+      : leak.handle && leak.column === ALL_COLUMNS_LABEL
+      ? "build the `handle()` response only from named non-protected fields of a query whose column origins " +
+        "resolve (a plain SELECT with an explicit column list), or serve the row from a server function, whose " +
+        "response the compiler envelopes and redacts"
+      : leak.handle
+      ? `build the \`handle()\` response only from values that carry no protected column — read the row's ` +
+        `non-protected fields, or a value DERIVED from \`${leak.column}\` (a comparison, ` +
+        `\`verifyPassword(pw, row.${leak.column})\`) — or serve the row from a server function, whose response the ` +
+        `compiler envelopes and redacts; to send it deliberately, declassify it at the value — ` +
+        `\`row.reveal("${leak.column}")\``
       : leak.column === ALL_COLUMNS_LABEL
       ? "rewrite the query so its column origins resolve (a plain SELECT with an explicit column list), then " +
         "return the row itself or only its non-protected fields"
@@ -1414,6 +1457,7 @@ class FlowAnalysis {
         leaks.push({
           filePath: s.mod.filePath, sinkFn: s.fnName, column: col, site, siteFn: sf?.fn ?? null,
           siteFile: sf?.file ?? s.mod.filePath, ...(s.kind === "global" ? { global: true } : {}),
+          ...(s.kind === "handle" ? { handle: true } : {}),
         });
       }
       if (s.kind === "redact" && s.t.row && unrevealed(s.t.row).length > 0) for (const id of s.t.row.tags) stripped.add(id);
@@ -2369,6 +2413,9 @@ class FlowAnalysis {
         if (scope.parent === null && this.sessionStoreDecl(node, scope)) return;
         for (const d of node.declarations) {
           const v = d.init ? this.evalExpr(d.init, scope, fn) : clean();
+          // S456 — what an author `handle()` returns leaves the server as-is (see
+          // `HANDLE_RESULT_BINDING`): a client-egress sink, whatever constructed it.
+          if (isHandleResultDeclarator(d)) this.sink(v, fn, "handle");
           this.bindPattern(d.id, v, scope, fn);
           if (d.id?.type === "Identifier" && node.kind === "const" && this.isSqlConstruction(d.init, scope)) {
             const s = this.resolve(d.id.name, scope);
@@ -2701,6 +2748,31 @@ class FlowAnalysis {
     // No information at all (a host result, a parameter no caller shows): fail closed.
     return !t.row && t.fns.size === 0 && refsOf(t).size === 0 && t.scalar.size === 0 && t.deep.size === 0 && !t.k;
   }
+  /**
+   * S456 — may `t` be the platform `Response` constructor, however the program
+   * reached it? Decided on the value's GLOBAL NAMES (`Taint.gn`), not on how
+   * the callee is spelled: `Response`, `globalThis.Response`, `self.Response`,
+   * `globalThis["Response"]`, `const R = globalThis.Response`, `const {
+   * Response: R } = globalThis` and a parameter handed any of them all read
+   * `Response` through only global-object names. (`Response` is a platform
+   * global, so rebinding it is already refused — `PLATFORM_GLOBALS`.)
+   *   "exact" — read as `Response` itself, and nothing else is known of it;
+   *   "maybe" — a global value read through a path that names `Response` among
+   *             other names, or through a path the compiler cannot name
+   *             (`globalThis[k]`): fail closed, its arguments are sinks too;
+   *   null    — not reached from the global heap through `Response`.
+   * The spelled-path test this replaces (`path === "Response"`) missed every
+   * form but the bare one, and the `handle()` exit had no sink behind it:
+   * `new globalThis.Response(JSON.stringify(u))` served the hash at HTTP 200.
+   */
+  private responseCtorOf(t: Taint): "exact" | "maybe" | null {
+    if (!this.isGlobalValue(t)) return null;
+    if (t.gnAny) return "maybe";
+    if (!t.gn || !t.gn.has("Response")) return null;
+    for (const n of t.gn) if (n !== "Response" && !GLOBAL_OBJECT_NAMES.has(n)) return "maybe";
+    return t.row === null && t.fns.size === 0 ? "exact" : "maybe";
+  }
+
   /** Is `t` the global object itself (`globalThis`, `self`, an alias of it)? */
   private isGlobalObject(t: Taint): boolean {
     if (!this.isGlobalValue(t) || t.gnAny || !t.gn || t.gn.size === 0) return false;
@@ -3416,6 +3488,15 @@ class FlowAnalysis {
         for (const a of args) this.sink(a, fn, "serializer");
         return pathOwn;
       }
+      if (path === "Reflect.construct" && args[0]) {
+        // S456 — `Reflect.construct(globalThis.Response, [body, init])` is `new`.
+        const resp = this.responseCtorOf(args[0]);
+        if (resp !== null) {
+          this.sink(elemOf(args[1] ?? clean()), fn, "serializer");
+          for (const a of args.slice(2)) this.sink(a, fn, "serializer");
+          if (resp === "exact") return pathOwn;
+        }
+      }
       if (path === "Array.from" && args[1] && this.hasCallable(args[1])) {
         // `Array.from(rows, r => r.passwordHash)` — the mapper is a `.map`.
         return join(pathOwn, this.callbackMethod("map", args[0] ?? clean(), [args[1]], node, fn));
@@ -3468,6 +3549,21 @@ class FlowAnalysis {
       let method: string | null = null;
       if (m.computed) { this.evalExpr(m.property, scope, fn); method = staticKey(m.property); }
       else if (m.property.type === "Identifier") method = m.property.name;
+
+      // S456 — a static serializer of the platform `Response`, however the
+      // receiver was reached (`globalThis.Response.json(u)`, `R.json(u)` with
+      // `R` an alias or a destructure of it). A key the compiler cannot read
+      // may be `json`: fail closed (the row itself counts, as for `json`).
+      const respRecv = this.responseCtorOf(recv);
+      if (respRecv !== null && (method === null || method === "json" || method === "redirect")) {
+        if (method === "redirect") {
+          for (const a of args) this.sink(a, fn, "serializer");
+        } else {
+          this.sink(args[0] ?? clean(), fn, "serializer-json");
+          for (const a of args.slice(1)) this.sink(a, fn, "serializer");
+        }
+        if (respRecv === "exact" && method !== null) return pathOwn;
+      }
 
       // Bytes leaving the server: a channel publish, an SSE chunk, a WS send.
       const sinkArg = method === "publish" ? 1 : (method === "enqueue" || method === "send") ? 0 : -1;
@@ -3686,6 +3782,20 @@ class FlowAnalysis {
     const ct = this.evalExpr(callee, scope, fn);
     this.evaluated(ct.fns, node, fn);
     if (callee.type === "Identifier" && args.length > 0) this.recordParamCall(callee, join(...args), scope);
+    if (node.type === "NewExpression") {
+      // A response the server sends: the BODY and the INIT (status + headers —
+      // a `Location` / `Set-Cookie` built from the hash is egress too, F3). An
+      // AUTHOR-built one with a body is also E-PROTECT-005 and refused at
+      // runtime; a null-body one is not, so its headers must be checked here.
+      // S456 — recognized by the constructor VALUE (`responseCtorOf`), not by
+      // the callee's spelling: `new globalThis.Response(…)`, `new self.Response(…)`,
+      // `new globalThis["Response"](…)`, `new R(…)` for an alias or destructure.
+      const resp = this.responseCtorOf(ct);
+      if (resp !== null) {
+        for (const a of args) this.sink(a, fn, "serializer");
+        if (resp === "exact") return clean();
+      }
+    }
     const path = this.globalPath(callee, scope);
     // A GLOBAL callee may be a function something stored in the global heap
     // (L3) — applied — but it is also the platform built-in of that name, which
@@ -3713,14 +3823,7 @@ class FlowAnalysis {
       this.applyFns(args[0].fns, [{ ...clean(), fns: new Set([resolver]) }, { ...clean(), fns: new Set([this.rejecter]) }], undefined, node, fn);
       return this.resolved.get(key) ?? clean();
     }
-    if (path === "Response" && node.type === "NewExpression") {
-      // A response the server sends: the BODY and the INIT (status + headers —
-      // a `Location` / `Set-Cookie` built from the hash is egress too, F3). An
-      // AUTHOR-built one with a body is also E-PROTECT-005 and refused at
-      // runtime; a null-body one is not, so its headers must be checked here.
-      for (const a of args) this.sink(a, fn, "serializer");
-      return clean();
-    }
+    // (`new Response(…)` — every spelling — is sinked in `evalCall`, S456.)
     if (path !== null) {
       const b = this.builtin(path, args, node, fn);
       if (b) return LANGUAGE_COERCIONS.has(path) ? b : join(b, this.opaqueCallbacks(null, args, node, fn));

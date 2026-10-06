@@ -1,0 +1,15 @@
+<program db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function handle(request, resolve) {
+        const u = ?{`SELECT id, name, passwordHash FROM users WHERE id = 1`}.get() !{ _ :> not }
+        const R = globalThis.Response
+        return new R(JSON.stringify(u))
+      }
+    }
+  </db>
+  <p>hi</p>
+</program>
