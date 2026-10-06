@@ -62,6 +62,9 @@ export interface SecdefFnDecl {
  * Parse a `< schema>` AST node (or its raw body string) into structured table and
  * `fn` declarations. Consumers read `.tables ?? []`.
  */
+/** Where a SQL `--` line comment at `i` ends: the first `\r` or `\n` (Postgres's extent), else `to` (S456 F1). */
+export declare function sqlLineCommentEnd(text: string, i: number, to?: number): number;
+
 export declare function parseSchemaBlock(schemaBody: string | { body?: string | null } | null | undefined): {
   tables: SchemaTableDecl[];
   fns: SecdefFnDecl[];

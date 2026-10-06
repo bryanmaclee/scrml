@@ -16306,7 +16306,7 @@ function sqlBodyIsRuntimeExpr(query) {
   // than guessed at, so `?{ VACUUM }` keeps working.
   if (interpolations === 0) {
     const bare = query
-      .replace(/--[^\n]*/g, " ")
+      .replace(/--[^\r\n]*/g, " ")
       .replace(/\/\*[\s\S]*?\*\//g, " ")
       .trim();
     if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bare) && !SINGLE_WORD_SQL_STATEMENTS.has(bare.toUpperCase())) {
@@ -21928,7 +21928,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // their body is "composed solely of ${...} interpolations" describes a
         // construct that is not on their screen.
         const bareIdent = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(
-          query.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim(),
+          query.replace(/--[^\r\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim(),
         );
         const lead = bareIdent
           ? "E-SQL-003: the `?{}` SQL template body is a bare identifier, not a " +

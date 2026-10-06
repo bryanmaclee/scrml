@@ -111,3 +111,50 @@ RELAYED premise CONFIRMED: every login silently fails; the only tenant signal is
   run on base 2dd6d35d9 compiler sources (flipped in place, pretest re-run, restored) give the same 290 pass / 50 fail.
   None touches the tenant floor, `<schema>` or session code.
 - Pre-commit gate (unit + integration + conformance) on each code commit: 31477 / 31496 / 31500 pass, 0 fail.
+
+## FIX ROUND (S239 review of f746ff43b = DO-NOT-LAND)
+
+### F1 HIGH — `--` comments end at `\r` OR `\n` (Postgres scan.l `newline [\n\r]`)
+| input (tenant compilation, postgres) | main 5c053ee46 (PA) | f746ff43b | head |
+|---|---|---|---|
+| `AS --x\rPERMISSIVE USING (true) /*\nRESTRICTIVE --*/` | 2× E-TENANT-SCHEMA-HAZARD | rc=0 (executed) | 2× E-TENANT-SCHEMA-HAZARD |
+| mixed `AS --x\r\n--y\rPERMISSIVE …` | — | rc=0 (executed) | charged |
+| CRLF / LF `AS --x⏎RESTRICTIVE` | — | admitted | admitted |
+- Choice: every `--` reader takes the FIRST of `\r` / `\n` (Postgres's extent — reads MORE text as live); and a lone `\r`
+  (not followed by `\n`) inside a `--` comment is charged in a tenant `<schema>` wherever it sits (new kind "a `--`
+  comment ending at a carriage return"), because SQLite / MySQL end the comment only at `\n`, so the databases disagree on
+  which text after it is SQL, and a `/*` after it can hide text from EITHER reading — neither extent is a superset. CRLF
+  has one extent everywhere and is not charged. The record is a side list on the token array (`crAt`), not a token (a
+  first cut pushed a token and the policy head read it as the AS mode).
+- Audited consumers (each previously read `--` to `\n`):
+  - tenant-schema-hazards.ts `lex` (all 3 readings; policy heads, bodies' extents, statements) — FIXED (root).
+  - schema-differ.js: `skipSqlTrivia` (CREATE TABLE heads), `alterStatementEnd`, `findRawDdlBodyEnd`,
+    `splitTopLevelCommas` (column lists), `blankLiteralBodies` — all via new shared `sqlLineCommentEnd`; and
+    `UNMODELED_SQL_FORM` gains a lone `\r` (a statement holding one is read to its wrapper edge; naming tenant_id scopes).
+    EXECUTED leaks closed: `CREATE TABLE logs (id integer --c\r, tenant_id text)` and `CREATE TABLE --c\rlogs (…)`
+    were NOT tenant-scoped on f746ff43b and on 2dd6d35d9 (reads unfiltered); now scoped (I-TENANT-STRIP).
+  - tenant-sql-subset.ts `lexTenantSubset` (the S452 query floor + schema bodies): refuses any `--` outright — not
+    affected; executed: `SELECT name FROM cfg --x{\r,\r\n,\n}JOIN assets` → E-TENANT-SQL-SUBSET.
+  - Regex strips `/--[^\n]*/` → `/--[^\r\n]*/`: sql-table-refs.js `blankLiteralsAndComments` (table refs — a table
+    after a CR comment was invisible), type-system.ts `sqlIsPersistWrite` (§52 write detection — `--x\rUPDATE …` read
+    as not-a-write), gauntlet-phase1-checks.js (W-SCHEMA-NO-TABLES-DECLARED substance), ast-builder.js ×2 (E-SQL-003
+    bare-identifier body). All now read more text as live (fail-closed direction).
+  - Not changed: tenant-schema-hazards.ts backtick / `[ident]` same-line checks (quotes, not comments).
+- No SPEC edit for the CR charge: it is the existing §14.8.10 fail-closed clause ("a quoted form whose extent differs
+  between databases" / "text a reading left unread"), applied to a comment form.
+
+### W-TENANT-SUBSTRATE-SCOPED false negatives (each EXECUTED on f746ff43b: no warning)
+| finding | f746ff43b | head |
+|---|---|---|
+| F3 `const { id, tenant_id } = ?{…users…}.get()` → pin | no warning | WARN (`boundNames` reads `bindName` / nested `pattern`) |
+| F4 `@cur = ?{…}.get(); session.set("tenantId", @cur.tenant_id)` | no warning | WARN (`state-decl` binds `@cur`) |
+| F2 `const u = findUser(email)` (helper returns the read) | no warning | WARN, "through `findUser()`" (per-file return summaries, fixpoint) |
+| F6 `const login = (email) => { … }` block arrow | no warning | no warning — DOCUMENTED MISS: block-bodied arrows / function expressions are `escape-hatch` raw text in the AST (expression-parser.ts "we cannot fully convert block statements"); reading them = re-parsing source (Rule 7). Expression-bodied lambdas ARE now judged. |
+| F5 org-first re-pin | warns | still warns; message adds "or, if the tenant is already pinned earlier in the request (an org-first login), drop the redundant re-pin" |
+
+### Measurements
+- Corpus write:true, base 2dd6d35d9 sources (all 7 changed runtime files flipped in place, restored) vs head: 2372 single
+  + 5 projects — 0 artifact diffs; diag diffs only in the 2 S456 conformance cases already listed. 0 corpus files gain
+  the warning; 0 corpus files hold a lone `\r` in a `--` comment.
+- Conformance: head 1300/1350 + 50 xfail; NEW `tenant/schema-policy-cr-comment-neg` FAILS on f746ff43b sources, passes
+  on head.

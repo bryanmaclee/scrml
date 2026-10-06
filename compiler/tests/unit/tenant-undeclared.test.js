@@ -76,6 +76,10 @@ describe("programTenantTableDecls — the tables a program-body statement gives 
     // a backslash: MySQL ends `'a\''` where the standard reading does not — read fail-closed
     expect(one("SELECT 'a\\'' ; CREATE TABLE x (id INTEGER, tenant_id TEXT) --'")[0]).toMatchObject({ key: "x", tenant: true });
   });
+  test("a `--` comment ends at a lone CR (Postgres) — the CREATE / column after it is live (S456 review F1, shared readers)", () => {
+    expect(one("SELECT 1 --c\rCREATE TABLE x (id INTEGER, tenant_id TEXT)")[0]).toMatchObject({ key: "x", tenant: true });
+    expect(one("CREATE TABLE logs (id integer --c\r, tenant_id text)")[0]).toMatchObject({ key: "logs", tenant: true });
+  });
   test("an unreadable name with tenant_id → name null (refused by the caller)", () => {
     expect(programTenantTableDecls("CREATE TABLE ${t} (id INTEGER, tenant_id TEXT)")[0]).toMatchObject({ name: null, tenant: true });
   });

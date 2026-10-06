@@ -958,7 +958,7 @@ function checkSchemaDeclarations(ast, filePath, errors) {
       // ignore. A comment-only `<schema>` is quiet in all three syntaxes.
       const substantive = body
         .replace(/\/\*[\s\S]*?\*\//g, " ")
-        .replace(/--[^\n]*/g, " ")
+        .replace(/--[^\r\n]*/g, " ")
         .replace(/\/\/[^\n]*/g, " ")
         .trim();
       // A `fn`-only `<schema>` (§14.8.11.2 SECURITY DEFINER) declares no table

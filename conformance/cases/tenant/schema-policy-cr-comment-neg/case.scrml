@@ -1,0 +1,15 @@
+<program db="postgres://localhost/app">
+    <schema>
+        CREATE TABLE assets (id integer primary key, name text, tenant_id text);
+        CREATE POLICY p ON assets AS --xPERMISSIVE USING (true) /*
+        RESTRICTIVE --*/
+    </>
+    // The policy head above holds a lone carriage return (\r) inside a `--` comment.
+    // Postgres ends the comment there, so the database runs AS PERMISSIVE.
+    ${
+        function mine() {
+            return ?{`SELECT id, name FROM assets`}.all()
+        }
+    }
+    <button onclick=${ mine() }>mine</button>
+</program>

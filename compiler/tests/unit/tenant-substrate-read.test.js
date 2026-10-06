@@ -109,6 +109,9 @@ describe("W-TENANT-SUBSTRATE-SCOPED — the login reads a tenant-scoped identity
     expect(w[0].message).toContain("`users`");
     expect(w[0].message).toContain("identity/grant substrate (`users` / `user_roles`) is NOT tenant-scoped");
     expect(w[0].message).toContain("drop `tenant_id` from `users`");
+    // S456 review F5: the org-first login (tenant pinned earlier, users per tenant) is a
+    // legitimate design that still warns — the message names its remedy.
+    expect(w[0].message).toContain("drop the redundant re-pin");
     expect(w[0].message).toContain(".acrossTenants()");
     expect(w[0].span?.line).toBe(4);
     expect(await login(p.out)).toBe("bad");   // the behavior the warning names
@@ -204,6 +207,74 @@ describe("a condition decides the pin only when it CONTROLS it", () => {
       session.set("tenantId", t)
       return "ok"
     }`, `f("A")`))).toBe(1);
+  });
+});
+
+// S456 review (reviewer-executed false negatives on f746ff43b, each reproduced there: no warning).
+describe("review F2 / F3 / F4 / F6 — the read reaches the pin by other routes", () => {
+  test("F3: a DESTRUCTURED read — `const { id, tenant_id } = ?{…}.get()`", () => {
+    expect(codes(prog(`    function login(email: string) {
+      const { id, tenant_id } = ${q("SELECT id, tenant_id FROM users WHERE email = ${email}")}.get()
+      session.set("userId", id)
+      session.set("tenantId", tenant_id)
+      return "ok"
+    }`, `login("a@x")`))).toBe(1);
+  });
+  test("F4: the read stored in a CELL — `@cur = ?{…}.get()`, pinned from `@cur.tenant_id`", () => {
+    const src = prog(`    function login(email: string) {
+      @cur = ${q("SELECT id, tenant_id FROM users WHERE email = ${email}")}.get()
+      session.set("userId", @cur.id)
+      session.set("tenantId", @cur.tenant_id)
+      return "ok"
+    }`, `login("a@x")`).replace("  \${\n", "  <cur> = not\n  \${\n");
+    expect(codes(src)).toBe(1);
+  });
+  test("F2: the read in a same-file HELPER that returns it — reported at the call, naming the helper", () => {
+    const r = project({ "app.scrml": APP(), "x.scrml": prog(`    function findUser(email: string) {
+      return ${q("SELECT id, tenant_id FROM users WHERE email = ${email}")}.get()
+    }
+    function login(email: string) {
+      const u = findUser(email)
+      session.set("userId", u.id)
+      session.set("tenantId", u.tenant_id)
+      return "ok"
+    }`, `login("a@x")`) }).result;
+    expect(fatal(r)).toEqual([]);
+    const w = hits(r);
+    expect(w.length).toBe(1);
+    expect(w[0].message).toContain("`login()`");
+    expect(w[0].message).toContain("through `findUser()`");
+  });
+  test("F2: a helper of a helper (fixpoint), and a helper whose return is NOT the read (not charged)", () => {
+    expect(codes(prog(`    function readUser(email: string) {
+      return ${q("SELECT id, tenant_id FROM users WHERE email = ${email}")}.get()
+    }
+    function findUser(email: string) {
+      const u = readUser(email)
+      return u
+    }
+    function login(email: string) {
+      const u = findUser(email)
+      session.set("tenantId", u.tenant_id)
+      return "ok"
+    }`, `login("a@x")`))).toBe(1);
+    expect(codes(prog(`    function countUsers() {
+      const all = ${q("SELECT id FROM users")}.all()
+      return "n"
+    }
+    function login(t: string) {
+      const n = countUsers()
+      session.set("tenantId", t + n)
+      return "ok"
+    }`, `login("A")`))).toBe(0);
+  });
+  test("F6: a block-bodied arrow login is NOT judged — the AST holds it as raw text (escape-hatch); documented miss", () => {
+    expect(codes(prog(`    const login = (email) => {
+      const u = ${q("SELECT id, tenant_id FROM users WHERE email = ${email}")}.get()
+      session.set("userId", u.id)
+      session.set("tenantId", u.tenant_id)
+      return "ok"
+    }`, `login("a@x")`))).toBe(0);
   });
 });
 
