@@ -1,0 +1,64 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <unreached> = "init"
+    <handledUnreached> = "init"
+    <handledReached> = "init"
+    // §8.10 Tier 2: the pre-fetch over `gone` (declared, never created) FAILS. The
+    // failure is raised by the first read that runs — where the per-iteration query
+    // would have failed — so a loop whose read is never reached does not fail.
+    function unreached() {
+        let out = []
+        for (const it of [{ id: 7, on: false }, { id: 8, on: false }]) {
+            if (it.on) {
+                const row = ?{`SELECT body FROM gone WHERE id = ${it.id}`}.get()
+                out.push(row is not ? "none" : row.body)
+            } else {
+                out.push("skip")
+            }
+        }
+        return out.join(",")
+    }
+    function handledUnreached() {
+        let out = []
+        for (const it of [{ id: 7, on: false }]) {
+            if (it.on) {
+                const row = ?{`SELECT body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+                out.push(row is not ? "failed" : row.body)
+            } else {
+                out.push("skip")
+            }
+        }
+        return out.join(",")
+    }
+    // each read that runs gets the failure (the handler's arm), as each per-row query would
+    function handledReached() {
+        let out = []
+        for (const it of [{ id: 7, on: true }, { id: 8, on: false }, { id: 9, on: true }]) {
+            if (it.on) {
+                const row = ?{`SELECT body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+                out.push(row is not ? "failed" : row.body)
+            } else {
+                out.push("skip")
+            }
+        }
+        return out.join(",")
+    }
+    function go() {
+        @unreached = unreached() !{ _ :> "err" }
+        @handledUnreached = handledUnreached() !{ _ :> "err" }
+        @handledReached = handledReached() !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="unreached">${@unreached}</p>
+    <p id="handledUnreached">${@handledUnreached}</p>
+    <p id="handledReached">${@handledReached}</p>
+</program>

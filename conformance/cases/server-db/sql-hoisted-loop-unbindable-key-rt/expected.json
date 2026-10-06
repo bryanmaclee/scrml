@@ -1,0 +1,29 @@
+{
+  "id": "server-db-sql-hoisted-loop-unbindable-key-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): one key cannot be bound as a SQL parameter (an object, an array). Only THAT key's read fails — the other reads return their rows — exactly as the per-iteration queries do. Each cell equals the same function compiled with `.nobatch()`. Pre-fix (2dd6d35d9 and e7671481c, S456 fix round F1): the bad key failed the whole pre-fetch and that failure was handed to every read, valid keys included (handled \"QF,QF,QF,QF\", handledAll \"0,0\"). Now a chunk that fails loads none of its keys and each such read runs its own one-key query when it runs.",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings.\" §19.8.3: a handled query's failure reaches ITS handler.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" },
+        { "id": 9, "body": "nine" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "handled": "hello,QF,nine,none",
+      "handledAll": "0,1"
+    },
+    "domAnchored": [
+      { "selector": "#handled", "text": "hello,QF,nine,none" }
+    ]
+  }
+}
