@@ -1,6 +1,21 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-05T04:22:31-06:00  commit: f38697900
+# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
+# client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
+# sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
+# tenant `<schema>` statement-kind allow-list, #1319 tenant `<schema>` bodies in the SQL subset, #1321 build-report PG
+# REVOKE, #1322 handled-`?{}` guard consumers, #1324 test timeout, #1325 §8.10 hoist), incremental refresh in an isolated
+# worktree @ `9c556dc74` = `origin/main`.** MAP-STAMP RULE: `git log --oneline f38697900..HEAD` -> 20; `bun scripts/state.ts
+# --check` at pass start: `maps: 20 commits behind HEAD (watermark f38697900, HEAD 9c556dc74)` — matches exactly.
+# ⛑ FIGURES RE-EXECUTED AT `9c556dc74`: `facts.ts --check` PASS · FACTS `compiler/src` **298,756 lines / 241 files** (+5 new
+# modules this window) · test files **1,609** (+12) · `compiler/SPEC.md` **46,681** lines (+546; `regen-spec-index.ts
+# --check` OK 72/72) · conformance **1346** (+28); `bun conformance/run.ts` -> **1296 pass + 50 xfail** · known-gaps open
+# **HIGH 241 · MED 513 · LOW 277** · Nominal 8; heading/marker drift 61 · bootstrap counter (live) 1346 attempted: PASS
+# **121** · FAIL **56** · NOT-TWINNED **515** · UNSUPPORTED **654** · CRASH 0; graded 177, 121 hold (68.4%) — ⚠ committed
+# `docs/bootstrap-conformance.md` STALE a 6th window (1315 cases; `--check` STALE). slice-m4 and `types-gate.ts` NOT
+# re-executed this pass. ⚠ FACTS "CLI verbs 14" is WRONG (12 dispatched) — non-compliance N-S455-1.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S454 HEADER (stamp `f38697900`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S454 STAMP — `7ce905ac2` -> `f38697900`. 12 COMMITS (#1294 S452 wrap incl. the S452-WRAP maps refresh, #1295
 # bootstrap codec payload enums, #1296 call-ref handler colouring, #1297 `scripts/merge-on-green.sh`, #1298 SPEC
 # U1b / tenant / arm-pipe, #1300 S453 wrap addendum, #1299 protect= fail-closed, #1301 reserved `_scrml_` prefix,
@@ -1426,6 +1441,31 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
 
+## S455 — READ FIRST (facts at `9c556dc74`; supersedes the S454 block below where it conflicts)
+
+- ⛑ **Tenant floor = ONE set per compilation.** `compilationTenantSet` (`codegen/tenant-egress.ts:369`) is computed once at `api.js:2994` and handed to both the `TENANT-SCHEMA` stage and CG. Do not recompute a per-file tenant set anywhere.
+- ⛑ **NEW stage `TENANT-SCHEMA`** (`api.js:2970-:3003`, post-ME / pre-DG) emits `E-TENANT-SCHEMA-HAZARD` from `tenant-schema-hazards.ts` (2765 lines). A tenant `<schema>` admits a CLOSED set of statement kinds and its bodies must lie in the tenant SQL subset (shared with queries via `tenant-sql-subset.ts`, now dialect-aware).
+- ⛑ **A `!{}`-guarded `?{}` statement**: every analysis/codegen consumer must see through the guard via `handledSqlOfGuardedNode` / `handledSqlGuardInner` (`codegen/sql-attempt.ts:120` / :135) — 29 sites in 12 files.
+- ⛑ **§8.10 hoisting is allow-list-only** (`hoist-sql-shape.ts` `classifyHoistableQuery`); protected tables are never hoisted; `emitHoistedForStmt` returns null -> loop emitted un-hoisted.
+- ⛑ **`_{}` foreign slices are sealed** (`_scrml_foreign_seal`, `codegen/foreign-seal.ts`); unparseable slice = `E-FOREIGN-007`.
+- `scrml fix` default rules now include `client-server-call` and `sql-failable` (reads rewritten, writes listed).
+
+## Map Index (counts refreshed at `9c556dc74`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | updated | +5 src modules (241 FACTS files); NEW inventories: tenant `<schema>` rule, §8.10 hoist, handled-`?{}` consumers (29 sites), foreign seal, `scrml fix` rules |
+| dependencies.map.md  | updated | 0 npm changes; edges to `tenant-schema-hazards`, `hoist-sql-shape`, `foreign-seal`, `sql-attempt` (16 importers) |
+| schema.map.md        | updated | `CompilationTenantSet`, `SchemaHazard*`, `SqlDialect`, `HoistableQuery` |
+| config.map.md        | updated | no new env var; 3 non-configurable constants |
+| build.map.md         | updated | 2 new `scrml fix` rules; build-report PG requirement; state.ts `--abbrev=9` |
+| error.map.md         | updated | +E-TENANT-SCHEMA-HAZARD, +E-FOREIGN-007 (both with §34 rows) |
+| test.map.md          | updated | 1,609 test files (+12); conformance 1346 (1296 + 50 xfail) |
+| auth.map.md          | updated | tenant set per compilation; schema boundary; PG REVOKE; protected tables not hoisted |
+| domain.map.md        | updated | tenant set, schema hazard, hoistable query, foreign seal |
+| infra.map.md         | updated | build-report deploy requirement |
+| migrations.map.md    | updated | `alterTableTenantDecls` |
+| non-compliance.report.md | updated | S455 pass: 3 non-compliant, 3 uncertain |
+
 ## S454 — READ FIRST (facts at `f38697900`; supersedes the S452-WRAP block below where it conflicts)
 
 - ⛔ **SUPERSEDED S453 FACT:** "fifteen registration call sites" is FALSE. There are **sixteen** — the in-arm
@@ -2436,6 +2476,13 @@ that is precisely why they went stale twice in a row.** non-compliance.report.md
 
 | If your task is about… | Read |
 |---|---|
+| **⛑ S455 — A TENANT `<schema>` REFUSED / ADMITTED: `E-TENANT-SCHEMA-HAZARD`, a trigger / view / FK / policy / `ALTER` on a tenant table, "statement not admitted in a tenant schema", "body outside the tenant SQL subset"** | `compiler/src/tenant-schema-hazards.ts` (`fileTenantSchemaHazards` :2689, `findSchemaTenantHazards` :2475; allow-list `KNOWN_OBJECTS` :1274 / `alterAdmission` :1332; body reader `lexBody` :540 / `bodyIssue` :794); stage `TENANT-SCHEMA` `api.js:2970`. Inventory: structure.map.md `## S455` |
+| **⛑ S455 — WHICH TABLES ARE TENANT-SCOPED, a cross-file tenant read emitted unfiltered, a dialect-specific function/cast refused in a tenant query** | `codegen/tenant-egress.ts` `compilationTenantSet` :369 (ONE set, `api.js:2994`); `codegen/tenant-sql-subset.ts` (`castTypesFor` :431, `tenantRowFunctions` :410, `statementSeparator` :248, `analyzeTenantSql` :611); `tenantQueryQualifiedRefIssue` (`tenant-schema-hazards.ts:931`, the `rel.f` rule) |
+| **⛑ S455 — A `?{}` WRAPPED IN `!{}` BEHAVES DIFFERENTLY FROM THE BARE ONE in ANY analysis (lift, cell write, for-of, purity, protect, CPS split, batching, DG, RI)** | `codegen/sql-attempt.ts` `handledSqlOfGuardedNode` :120 / `handledSqlGuardInner` :135 — 29 consumer sites listed in structure.map.md `## S455` inventory; check that the consumer calls one of them |
+| **⛑ S455 — N+1 LOOP HOISTING (§8.10): a loop read that returns null / wrong row, a loop that is (not) hoisted, `__scrml_batch_key`, `D-BATCH-001`** | `hoist-sql-shape.ts` `classifyHoistableQuery` :143; `batch-planner.ts` :582 / `HOIST_KEY_ALIAS` :493 / `protectBlocksHoist` :500; `codegen/emit-control-flow.ts` `emitHoistedForStmt` :1150 / `substituteHoistedSqlInBody` :1009 |
+| **⛑ S455 — `_{}` FOREIGN SLICE scope / `E-FOREIGN-007` / `_scrml_foreign_seal`** | `codegen/foreign-seal.ts` (`checkForeignSliceSyntax` :161, `SERVER_FOREIGN_SEAL_HELPER` :83); `emit-logic.ts` `case "foreign"` :3503 |
+| **⛑ S455 — `scrml fix` sql-failable / client-server-call output, read-vs-write classification** | `commands/fix-sql-failable.js` (`classifySql` :243, `fixSqlFailable` :414); `commands/fix-client-server-call.js` (`fixClientServerCall` :634); chained in `commands/fix-s66.js` :1304 / :1313 |
+| **⛑ S455 — the `scrml build` Postgres deploy-requirement text** | `commands/build.js` `pgSchemaCreateRequirementLines` :1055 |
 | **⛑ S454 — ANY LISTENER / HANDLER EMISSION OR COLOURING CHANGE (supersedes the S453 row's COUNT below; the rest of it still holds)** | ⛔ **SIXTEEN REGISTRATION SITES, NOT FIFTEEN — SCOPE FROM THE INVENTORY, NOT FROM THIS ROW.** Read structure.map.md `## S454` "LISTENER-REGISTRATION SURFACE, RE-COUNTED" and re-run its grep first. Delta vs S453: (a) `colorHandlerAsync` (`emit-event-wiring.ts:484`, module-local) is called at :1229 (bare-ref `onclick=handler`) AND :1386; (b) `emit-variant-guard.ts` `emitArmWireFunction` :436 colours the in-arm non-delegable handler with `colorActiveHandler` :1299 — the site S453 missed; (c) the call-ref listener text carries the AUTHOR name, because the colouring resolver keys on author names and emit-client's `post-fn-name-mangle` pass renames afterwards — substituting `fnNameMap.get(...)` early is what hid async callees (#1296 root cause). Tests: `unit/s454-callref-handler-rejection.test.js`, `browser/callref-handler-rejection-log-s454.browser.test.js`. Open neighbours: 6 `*-s454` gaps listed in the inventory. |
 | **⛑ S454 — A `protect=` COLUMN RESOLUTION CHANGE: "why is this row stripped wholesale?", a `?{}` that now loses every column, or ANY edit to how `protect-egress.ts` decides a statement's output columns** | **THE RESOLVER FAILS CLOSED SINCE #1299.** `resolveProtectedOutputColumns` (`codegen/protect-egress.ts:641`) returns `null` only on a positive proof and labels every exit `[proof]` / `[unknown]`; `[unknown]` -> `{ all: true }` -> the `"*"` sentinel (`wrapWithProtectTag` :1152) -> every column of the row is protected at egress. The decision runs through `lexProtectSql` :287 -> `analyzeProtectStatement` :428 (export `classifyProtectStatement` :417). Do not "fix" a wholesale strip by widening a `[proof]` exit without an executed leak test — 13 executed leak shapes were closed this way. Inventory: structure.map.md `## S454`; tests `conformance/conf-PROTECT-EGRESS-FLOOR.test.js`, `unit/protect-failclosed-classify.test.js`. The older protect row's `protect-egress.ts` line numbers are pre-#1299. |
 | **⛑ S454 — `E-NAME-COLLIDES-RESERVED-PREFIX`, a `_scrml_` name in author source, a stdlib file that suddenly trips it, or a NEW compiler-synthesized `_scrml_` name** | `compiler/src/validators/reserved-prefix.ts` (`runReservedPrefixCheck` :532), run ONCE per file post-TAB at `api.js:1968` on the AUTHOR tree — never inside `buildAST`, because the compiler re-runs `buildAST` on text it synthesizes. Raw-captured regions are re-parsed with the same sub-parsers codegen uses (Rule 7). TAB-desugared refs pass via `isTabDesugaredReference` :217 — a NEW TAB desugar that emits a `_scrml_` reference into the author tree must be added there. Stdlib exemption = `module-resolver.js` `isStdlibSourceFile` (REAL path). ⚠ SPEC §47.1.1 still calls the code Nominal and §34 has no row (non-compliance N-S454-1). |
