@@ -374,7 +374,12 @@ describe("sql-failable — listed, never rewritten", () => {
   test("a transaction-control statement", () => {
     listedOnly(["  ${ function a() {", `      ${q("BEGIN")}.run()`, `      ${q("COMMIT")}.run()`, "      return 1", "  } }", "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>"], /transaction-control/);
   });
-  test("the gate: a rewrite that changes impl#1's codes reverts the WHOLE file (a handled `?{}` in a `fn` loses E-FN-001 on impl#1)", () => {
+  // S455 (g-impl1-handled-sql-lowering-defects-s455) — these two shapes used to trip the gate
+  // because impl#1 analysed a handled `?{}` differently from an unhandled one (E-FN-001 lost; the
+  // caller's Promise.all batching lost). impl#1 now sees the guarded statement exactly as the
+  // unhandled one, so the codes and the batching are unchanged and the rewrite stands. The gate
+  // itself is unchanged; these pin that it no longer has to fire for them.
+  test("a handled `?{}` in a `fn` keeps E-FN-001 on impl#1 (S455), so the gate passes and both reads are rewritten", () => {
     const src = program([
       "  ${ function ok() {",
       `      ${q("SELECT n FROM t")}.get()`,
@@ -387,12 +392,12 @@ describe("sql-failable — listed, never rewritten", () => {
       "  <button onclick={ @out = ok() !{ .Transport(_) :> { return } } }>a</button>",
     ]);
     const r = fix(src);
-    expect(r.changed).toBe(false);
-    expect(r.output).toBe(src);
-    expect(r.infos).toEqual([]);
-    expect(reasons(r).some((x) => /different codes after the rewrite/.test(x) && /E-FN-001/.test(x))).toBe(true);
+    expect(reasons(r).some((x) => /different codes after the rewrite/.test(x))).toBe(false);
+    expect(r.changed).toBe(true);
+    expect(r.output).toContain(`${q("SELECT n FROM t")}.get() ${NOT}\n`);
+    expect(r.output).toContain(`${q("SELECT n FROM t WHERE n = 2")}.get() ${NOT}\n`);
   });
-  test("the gate: a rewrite that changes impl#1's Promise.all batching of a caller reverts the file (§13.2)", () => {
+  test("a handled `?{}` in a callee keeps impl#1's Promise.all batching of the caller (S455), so the gate passes", () => {
     const src = program([
       "  <b1> = not",
       "  <b2> = not",
@@ -406,8 +411,9 @@ describe("sql-failable — listed, never rewritten", () => {
       "  <button onclick=onRead()>read</button>",
     ]);
     const r = fix(src);
-    expect(r.changed).toBe(false);
-    expect(reasons(r).some((x) => /batches this file's server calls differently/.test(x))).toBe(true);
+    expect(reasons(r).some((x) => /batches this file's server calls differently/.test(x))).toBe(false);
+    expect(r.changed).toBe(true);
+    expect(r.output).toContain(`return ${q("SELECT n FROM t WHERE id = ${id}")}.get() ${NOT}\n`);
   });
   test("a listed site does not stop the other sites in the file", () => {
     const src = program([

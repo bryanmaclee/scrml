@@ -1,0 +1,43 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        empties {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <hit> = "init"
+    <miss> = "init"
+    <failed> = "init"
+    // §19.8.3 handling form 1 on a `lift` in a server function body: `lift` there
+    // IS the function's result, so the handled query's value — the rows on
+    // success, the arm's value on failure — is what the caller receives.
+    function liftHit() {
+        lift ?{`SELECT id FROM notes`}.all() !{ _ :> [] }
+    }
+    function liftMiss() {
+        lift ?{`SELECT id FROM empties`}.all() !{ _ :> [] }
+    }
+    function liftFailed() {
+        lift ?{`SELECT id FROM gone`}.all() !{ _ :> [] }
+    }
+    function go() {
+        const a = liftHit() !{ .Transport(_) :> { return } }
+        const b = liftMiss() !{ .Transport(_) :> { return } }
+        const c = liftFailed() !{ .Transport(_) :> { return } }
+        @hit = "rows:" + a.length
+        @miss = "rows:" + b.length
+        @failed = "rows:" + c.length
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="hit">${@hit}</p>
+    <p id="miss">${@miss}</p>
+    <p id="failed">${@failed}</p>
+</program>

@@ -1,0 +1,40 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        empties {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <hit> = "init"
+    <miss> = "init"
+    <failed> = "init"
+    // §19.8.3 handling form 1 on a cell write in a function: `@c = ?{…}.get() !{…}`
+    // is the same cell write as the unhandled `@c = ?{…}.get()` — the query runs on
+    // the server and the CLIENT cell receives its value (the arm's on failure).
+    function loadHit() {
+        @hit = ?{`SELECT id, body FROM notes`}.get() !{ _ :> not }
+    }
+    function loadMiss() {
+        @miss = ?{`SELECT id, body FROM empties`}.get() !{ _ :> not }
+    }
+    function loadFailed() {
+        @failed = ?{`SELECT id, body FROM gone`}.get() !{
+            .QueryFailed(m) :> "failed"
+            _ :> not
+        }
+    }
+    <button id="a" onclick={ loadHit() !{ .Transport(_) :> { return } } }>a</button>
+    <button id="b" onclick={ loadMiss() !{ .Transport(_) :> { return } } }>b</button>
+    <button id="c" onclick={ loadFailed() !{ .Transport(_) :> { return } } }>c</button>
+    <p id="hit">${@hit is not ? "none" : @hit.body}</p>
+    <p id="miss">${@miss is not ? "none" : @miss.body}</p>
+    <p id="failed">${@failed}</p>
+</program>

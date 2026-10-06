@@ -12,7 +12,7 @@ import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
-import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -4650,7 +4650,8 @@ export function generateServerJs(
       if (isLast) return _cpsSplit?.returnVarName ?? null;
       if (serverIndices.length === 0) return null;
       const _bodyForRet: any[] = fnNode.body ?? [];
-      const _last = _bodyForRet[serverIndices[serverIndices.length - 1]];
+      const _lastRaw = _bodyForRet[serverIndices[serverIndices.length - 1]];
+      const _last = handledSqlGuardInner(_lastRaw) ?? _lastRaw; // S455 — `@c = ?{…} !{…}`
       return (_last && _last.kind === "state-decl" && typeof _last.name === "string")
         ? _last.name
         : null;
@@ -4717,7 +4718,8 @@ export function generateServerJs(
           if (_isLastBatch) {
             _batchReturnVar = _cpsSplit.returnVarName ?? null;
           } else if (_bIdx.length > 0) {
-            const _lastStmt = _batchBody[_bIdx[_bIdx.length - 1]];
+            const _lastStmtRaw = _batchBody[_bIdx[_bIdx.length - 1]];
+            const _lastStmt = handledSqlGuardInner(_lastStmtRaw) ?? _lastStmtRaw; // S455
             if (_lastStmt && _lastStmt.kind === "state-decl" && typeof _lastStmt.name === "string") {
               _batchReturnVar = _lastStmt.name;
             }
@@ -4978,8 +4980,25 @@ export function generateServerJs(
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
-            const stmt = body[idx];
+            const _rawStmt = body[idx];
+            // S455 (§19.8.3) — `@c = ?{…} !{…}`: the guard wraps the cell write.
+            const _handledInner = handledSqlGuardInner(_rawStmt);
+            const stmt = _handledInner ?? _rawStmt;
             if (stmt && stmt.kind === "state-decl" && cpsSplit.returnVarName === stmt.name) {
+              if (_handledInner) {
+                // The server runs the handled query and its (value) arms; the
+                // guarded value is the batch's return, written into the cell by
+                // the client continuation exactly as the unhandled form's is.
+                // Route inference splits only a guard whose arms are values.
+                const _guardCode = serverRewriteEmitted(emitLogicNode({
+                  ..._rawStmt,
+                  guardedNode: { kind: "const-decl", name: "_scrml_cps_return", init: stmt.init ?? "", initExpr: stmt.initExpr, sqlNode: stmt.sqlNode, span: stmt.span },
+                }, _serverFnOpts));
+                if (_guardCode) {
+                  for (const line of indentBodyLines(_guardCode, "    ")) lines.push(line);
+                }
+                continue;
+              }
               // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
               // continuation is `@x = ?{...}.method()`, the AST builder attached
               // a structured `sqlNode` so we can route through emit-logic case
@@ -5000,7 +5019,7 @@ export function generateServerJs(
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
+            const code = serverRewriteEmitted(emitLogicNode(_rawStmt, _serverFnOpts));
             if (code) {
               for (const line of indentBodyLines(code, "    ")) {
                 lines.push(line);
@@ -5011,10 +5030,11 @@ export function generateServerJs(
         if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
-          if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
+          const _lastDecl = handledSqlGuardInner(lastStmt) ?? lastStmt; // S455 — a handled `?{}` declaration
+          if (_lastDecl && _lastDecl.kind === "state-decl" && _lastDecl.name === cpsSplit.returnVarName) {
             lines.push(`    return _scrml_cps_return;`);
-          } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
-            lines.push(`    return ${lastStmt.name};`);
+          } else if (_lastDecl && (_lastDecl.kind === "let-decl" || _lastDecl.kind === "const-decl")) {
+            lines.push(`    return ${_lastDecl.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
             const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOpts));
             if (emitted) {
@@ -5294,8 +5314,25 @@ export function generateServerJs(
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
-            const stmt = body[idx];
+            const _rawStmt = body[idx];
+            // S455 (§19.8.3) — `@c = ?{…} !{…}`: the guard wraps the cell write.
+            const _handledInner = handledSqlGuardInner(_rawStmt);
+            const stmt = _handledInner ?? _rawStmt;
             if (stmt && stmt.kind === "state-decl" && cpsSplit.returnVarName === stmt.name) {
+              if (_handledInner) {
+                // The server runs the handled query and its (value) arms; the
+                // guarded value is the batch's return, written into the cell by
+                // the client continuation exactly as the unhandled form's is.
+                // Route inference splits only a guard whose arms are values.
+                const _guardCode = serverRewriteEmitted(emitLogicNode({
+                  ..._rawStmt,
+                  guardedNode: { kind: "const-decl", name: "_scrml_cps_return", init: stmt.init ?? "", initExpr: stmt.initExpr, sqlNode: stmt.sqlNode, span: stmt.span },
+                }, _serverFnOptsNonCsrf));
+                if (_guardCode) {
+                  for (const line of indentBodyLines(_guardCode, _bodyIndentNonCsrf)) lines.push(line);
+                }
+                continue;
+              }
               // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): mirror of
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
@@ -5313,7 +5350,7 @@ export function generateServerJs(
               lines.push(`${_bodyIndentNonCsrf}const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
+            const code = serverRewriteEmitted(emitLogicNode(_rawStmt, _serverFnOptsNonCsrf));
             if (code) {
               for (const line of indentBodyLines(code, _bodyIndentNonCsrf)) {
                 lines.push(line);
@@ -5324,10 +5361,11 @@ export function generateServerJs(
         if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
-          if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
+          const _lastDecl = handledSqlGuardInner(lastStmt) ?? lastStmt; // S455 — a handled `?{}` declaration
+          if (_lastDecl && _lastDecl.kind === "state-decl" && _lastDecl.name === cpsSplit.returnVarName) {
             lines.push(`${_bodyIndentNonCsrf}return _scrml_cps_return;`);
-          } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
-            lines.push(`${_bodyIndentNonCsrf}return ${lastStmt.name};`);
+          } else if (_lastDecl && (_lastDecl.kind === "let-decl" || _lastDecl.kind === "const-decl")) {
+            lines.push(`${_bodyIndentNonCsrf}return ${_lastDecl.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
             const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOptsNonCsrf));
             if (emitted) {

@@ -22,7 +22,7 @@ import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabe
 import { resolveLogLoc } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
-import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import type { ExprNode } from "../types/ast.ts";
@@ -4033,6 +4033,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       let rebindsExisting = false;
       // S454 — `return f() !{…}` returns the guarded value after the arms.
       let returnsResult = false;
+      // S455 — `yield ?{…} !{…}` yields the guarded value after the arms.
+      let yieldsResult = false;
       // S454 — the guarded value is a handled `?{}` evaluated through `_scrml_sql_attempt`.
       let handlesSql = false;
       // D3 (g-handler-recovery-into-cell) — set when the guarded expression is a
@@ -4044,6 +4046,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // We record the cell name here and, after the arms run, re-set the cell to
       // the (possibly-recovered) resultVar — §19.4.3 catch-recovery-into-assignment.
       let reactiveCellName: string | null = null;
+      // S455 (2) — a server-boundary `@cell = ?{…} !{…}`: the state-decl whose
+      // cell receives the guarded value (success or arm) after the arms.
+      let cellWriteNode: any = null;
       // S89 §13.2 Sub-Phase B Step 3 — auto-await detection. When the guarded
       // node's init expression is a statically-known `Promise<T>`-returning
       // call (server fn OR stdlib `async` export per §13.2.1 Q1 BROAD), the
@@ -4060,12 +4065,32 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // whole right-hand side of a declaration / assignment / `return`, or a
         // bare `?{}` statement) or as an expression-position `sql-ref` query
         // (`const r = (?{…}.get()) !{…}`). Server boundary only.
-        const _handledSqlNode: any =
-          guardedNode.kind === "sql" ? guardedNode
-          : (guardedNode.sqlNode && guardedNode.sqlNode.kind === "sql" ? guardedNode.sqlNode : null);
+        // S455 — the guarded STATEMENT's structured query, through every
+        // statement kind that carries one (`handledSqlOfGuardedNode`): a bare
+        // `?{}`, a declaration / `return` / `@cell =` `sqlNode`, and `lift ?{…}`.
+        const _h = handledSqlOfGuardedNode(guardedNode);
+        const _handledSqlNode: any = _h && _h !== "expr" ? _h : null;
         const _isDeclGuard = (guardedNode.kind === "let-decl" || guardedNode.kind === "const-decl" || guardedNode.kind === "tilde-decl") && !!guardedNode.name;
-        if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt")) {
+        // S455 (1) — `lift ?{…}.all() !{…}`: in a server function body `lift` IS
+        // `return` (case "lift-expr"), so the guarded value is returned after the
+        // arms exactly like `return ?{…} !{…}`. It used to fall to the generic
+        // branch, which stripped the `return` and dropped the value (the client
+        // got null) and never attempt-wrapped the query (a failure still threw).
+        const _isLiftGuard = guardedNode.kind === "lift-expr";
+        // S455 (2) — `@cell = ?{…}.get() !{…}` on the server boundary (a
+        // whole-server function — a channel-cell write, or the E-RI-002 shape):
+        // attempt-wrap the query and write the cell with the guarded value after
+        // the arms. (A CPS-split function's cell write is lowered by emit-server /
+        // emit-functions; it never reaches here.)
+        const _isCellGuard = guardedNode.kind === "state-decl" && typeof guardedNode.name === "string" && guardedNode.name.length > 0 && opts.boundary === "server";
+        // S455 — `yield ?{…} !{…}` (an SSE generator): the guarded value is
+        // yielded after the arms, as `return` returns it.
+        const _isYieldGuard = guardedNode.kind === "yield-stmt";
+        if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt" || _isLiftGuard || _isCellGuard || _isYieldGuard)) {
           if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name);
+          if (_isLiftGuard && opts.boundary === "server") returnsResult = true;
+          if (_isYieldGuard) yieldsResult = true;
+          if (_isCellGuard) cellWriteNode = guardedNode;
           if (opts.boundary === "server") {
             const sqlStmt = emitLogicNode(_handledSqlNode, { ...opts, tildeContext: undefined, sqlAttempt: true });
             initExpr = `(${sqlStmt.replace(/;\s*$/, "")})`;
@@ -4163,6 +4188,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
 
       if (initExpr == null) return "";
+      // §8.10 + §19.8.3 (S455) — a handled query inside a hoisted loop: its
+      // operand is now the pre-fetch lookup (or the pre-fetch's SqlError
+      // envelope), and its arms still match SqlError variants.
+      if (node._hoistedHandledSql) handlesSql = true;
       // §19.8.3 — the arms of a handled `?{}` match SqlError variants (released at return).
       const _guardHandlesSql = handlesSql;
       if (_guardHandlesSql) enterSqlErrorSchema();
@@ -4386,8 +4415,20 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (bindingName) {
         lines.push(rebindsExisting ? `${bindingName} = ${resultVar};` : `var ${bindingName} = ${resultVar};`);
       }
+      if (cellWriteNode) {
+        // The cell write is the ordinary state-decl lowering with the guarded
+        // value as its initializer (no `sqlNode`: the query already ran above).
+        const _cellWrite = emitLogicNode(
+          { ...cellWriteNode, sqlNode: undefined, init: resultVar, initExpr: { kind: "ident", name: resultVar } },
+          { ...opts, tildeContext: undefined },
+        );
+        if (_cellWrite) lines.push(_cellWrite);
+      }
       if (returnsResult) {
         lines.push(`return ${resultVar};`);
+      }
+      if (yieldsResult) {
+        lines.push(`yield ${resultVar};`);
       }
       // §32 Gap 5: when this guarded-expr's success-path produces a value
       // (i.e. the guardedNode was a bare-expr call, not a let/const/tilde-decl

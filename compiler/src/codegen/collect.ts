@@ -1,3 +1,4 @@
+import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { liveSqlInterpolationExprs, sqlHasLiveInterpolation } from "./sql-lex.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
@@ -795,6 +796,16 @@ export function containsSql(node: unknown): boolean {
 export function isServerOnlyNode(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
   const n = node as Node;
+
+  // §19.8.3 (S455) — a `!{}` on a `?{}` wraps the WHOLE statement
+  // (`guarded-expr { guardedNode }`). It is exactly as server-only as the
+  // statement it guards; it used to read as client-safe at every consumer here
+  // (a handled top-level `?{}` lost W-CG-001; a handled `?{}` in an exported
+  // function no longer marked it a server operation).
+  if (n.kind === "guarded-expr") {
+    const inner = handledSqlGuardInner(n);
+    if (inner) return isServerOnlyNode(inner);
+  }
 
   if (n.kind === "sql") return true;
   if (n.kind === "transaction-block") return true;

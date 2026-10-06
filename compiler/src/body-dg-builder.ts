@@ -65,6 +65,7 @@
 
 import type { LogicStatement, ExprNode, LambdaExpr } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 
 // ---------------------------------------------------------------------------
 // Public types — BodyDG / BodyDGNode / BodyDGEdge
@@ -361,6 +362,20 @@ const CONTROL_FLOW_KINDS = new Set([
 function collectStatementFacts(stmt: LogicStatement): StatementFacts {
   const facts = EMPTY_FACTS();
   if (!stmt || typeof stmt !== "object") return facts;
+
+  // §19.8.3 (S455) — a `!{}` on a `?{}` wraps the WHOLE statement
+  // (`guarded-expr { guardedNode, arms }`). It reads / writes / touches the
+  // tables of the statement it guards — plus whatever its arm values read. It
+  // used to fall to `default` and contribute nothing, which silently relaxed
+  // the schedule (a handled write lost its table edge to a later read).
+  const _handledInner = handledSqlGuardInner(stmt);
+  if (_handledInner) {
+    const inner = collectStatementFacts(_handledInner as LogicStatement);
+    for (const arm of ((stmt as { arms?: unknown[] }).arms ?? []) as Array<Record<string, unknown>>) {
+      collectExprFacts(arm?.handlerExpr as ExprNode | undefined, inner.reads);
+    }
+    return inner;
+  }
 
   const kind = (stmt as { kind?: string }).kind ?? "";
   const node = stmt as Record<string, unknown>;

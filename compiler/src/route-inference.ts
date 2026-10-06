@@ -92,6 +92,7 @@ import { getNodes } from "./codegen/collect.ts";
 import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -2160,6 +2161,16 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
       return null;
     }
 
+    // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the WHOLE statement
+    // (`guarded-expr { guardedNode }`, a single-object field the array walk
+    // below never reaches). `@c = ?{…}.get() !{…}` is the same cell write as
+    // the unhandled `@c = ?{…}.get()`.
+    const _handledInner = handledSqlGuardInner(node);
+    if (_handledInner) {
+      const found = visitNode(_handledInner as LogicStatement);
+      if (found !== null) return found;
+    }
+
     // Recurse into array children.
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id") continue;
@@ -3062,6 +3073,8 @@ export function analyzeCPSEligibility(
    * for back-compat with self-host RI and external callers.
    */
   importedServerNamespaces: Set<string> = new Set(),
+  /** S455 — the function's plain parameter names (what a handled `?{}`'s arm may read on the server). */
+  fnParamNames: ReadonlySet<string> = new Set(),
 ): CPSResult | null {
   if (!body || body.length === 0) return null;
 
@@ -3072,8 +3085,17 @@ export function analyzeCPSEligibility(
   const deferServerIndices: number[] = []; // §19.16.5 — `defer` stmts whose deferred body is server-tier
 
   for (let i = 0; i < body.length; i++) {
-    const node = body[i];
-    if (!node || typeof node !== "object") continue;
+    const stmt = body[i];
+    if (!stmt || typeof stmt !== "object") continue;
+    // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the whole statement; it is tiered
+    // exactly as the statement it guards (`@c = ?{…} !{…}` is reactive-server,
+    // `?{…}.run() !{…}` is server), so a handled query splits the function the
+    // way the unhandled one does. The arms run with the statement, on the
+    // server; an arm that is not a plain value (a block with statements, a
+    // `fail`) could `return` / write a cell there, which a split cannot honour,
+    // so that statement is unsplittable (fail closed, E-RI-002) — never moved.
+    const _handledInner = handledSqlGuardInner(stmt);
+    const node = (_handledInner ?? stmt) as LogicStatement;
 
     const isReactive = isReactiveStatement(node);
     const isServer = isServerTriggerStatement(
@@ -3095,7 +3117,9 @@ export function analyzeCPSEligibility(
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node, importedServerNamespaces));
 
-    if (isServer && (node as any).kind === "defer-stmt") {
+    if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt, fnParamNames)) {
+      mixedIndices.push(i);
+    } else if (isServer && (node as any).kind === "defer-stmt") {
       // §19.16.5 — a server-tier deferred body. Tier it SERVER (never "mixed")
       // so the split is still computed and the caller can report the precise
       // E-DEFER-SERVER-IN-SPLIT instead of a cascading E-RI-002.
@@ -3137,7 +3161,7 @@ export function analyzeCPSEligibility(
   // Detect returnVarName from reactive-server statements.
   let returnVarName: string | null = null;
   for (const ri of reactiveServerIndices) {
-    const node = body[ri];
+    const node = (handledSqlGuardInner(body[ri]) ?? body[ri]) as LogicStatement;
     if (node.kind === "state-decl" && (node as any).name) {
       returnVarName = (node as any).name;
       break;
@@ -3154,6 +3178,82 @@ export function analyzeCPSEligibility(
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
   };
+}
+
+/**
+ * S455 — can every arm of a `!{}` guard on a `?{}` run on the SERVER, with the
+ * query, in a function the CPS split divides? Decided on the arm's AST, as an
+ * ALLOW-LIST (anything not positively known to be safe keeps the split refused,
+ * E-RI-002): an arm is admitted only when its body is a parsed pure VALUE
+ * (`handlerExpr`) built from literals, the function's own parameters and the
+ * arm's own payload binding, with no call, no `@cell` read or write, no
+ * assignment, no lambda — or the empty block `{ }` (no value). A block holding
+ * statements, a `fail`, a call (it may write a cell transitively), or any other
+ * free identifier (a client local is not in the server batch) is refused.
+ */
+function guardArmsAreValues(guard: any, fnParamNames: ReadonlySet<string>): boolean {
+  const arms: any[] = Array.isArray(guard?.arms) ? guard.arms : [];
+  for (const arm of arms) {
+    if (!arm || arm.failExpr) return false;
+    if (!arm.handlerExpr) {
+      // The no-value arm: an empty block. Compared exactly (whitespace aside) —
+      // any other unparsed body is refused.
+      const h = typeof arm.handler === "string" ? arm.handler.split("").filter((c: string) => c.trim() !== "").join("") : "";
+      if (h !== "{}") return false;
+      continue;
+    }
+    const allowed = new Set<string>(fnParamNames);
+    if (typeof arm.binding === "string") {
+      for (const b of arm.binding.split(",")) { const n = b.trim(); if (n && n !== "_") allowed.add(n); }
+    }
+    if (!armExprIsPureValue(arm.handlerExpr, allowed)) return false;
+  }
+  return true;
+}
+
+const PURE_ARM_UNARY_OPS = new Set(["!", "-", "+", "typeof"]);
+/** Allow-list walk for `guardArmsAreValues` — see there. Unknown kinds are refused. */
+function armExprIsPureValue(e: any, allowed: ReadonlySet<string>): boolean {
+  if (!e || typeof e !== "object") return false;
+  switch (e.kind) {
+    case "lit":
+      return e.litType !== "template" || typeof e.raw !== "string" || !e.raw.includes("${");
+    case "ident":
+      return typeof e.name === "string" && !e.name.startsWith("@") && allowed.has(e.name);
+    case "array":
+      return Array.isArray(e.elements) && e.elements.every((x: any) =>
+        x && x.kind === "spread" ? armExprIsPureValue(x.argument, allowed) : armExprIsPureValue(x, allowed));
+    case "object":
+      return Array.isArray(e.props) && e.props.every((p: any) => {
+        if (!p) return false;
+        if (p.kind === "prop") return (!p.computed || armExprIsPureValue(p.key, allowed)) && armExprIsPureValue(p.value, allowed);
+        if (p.kind === "shorthand") return typeof p.name === "string" && allowed.has(p.name);
+        if (p.kind === "spread") return armExprIsPureValue(p.argument, allowed);
+        return false;
+      });
+    case "unary":
+      return PURE_ARM_UNARY_OPS.has(e.op) && armExprIsPureValue(e.argument, allowed);
+    case "binary":
+      return armExprIsPureValue(e.left, allowed) && armExprIsPureValue(e.right, allowed);
+    case "ternary":
+      return armExprIsPureValue(e.condition, allowed) && armExprIsPureValue(e.consequent, allowed) && armExprIsPureValue(e.alternate, allowed);
+    case "member":
+      return armExprIsPureValue(e.object, allowed);
+    case "index":
+      return armExprIsPureValue(e.object, allowed) && armExprIsPureValue(e.index, allowed);
+    default:
+      return false;
+  }
+}
+
+/** The plain parameter names of a function node (destructured params contribute nothing — fail closed). */
+function plainParamNames(fnNode: any): Set<string> {
+  const out = new Set<string>();
+  for (const p of Array.isArray(fnNode?.params) ? fnNode.params : []) {
+    const n = typeof p === "string" ? p : (p && typeof p.name === "string" ? p.name : null);
+    if (n) out.add(n.split(":")[0].trim());
+  }
+  return out;
 }
 
 /**
@@ -6385,6 +6485,7 @@ export function runRI(input: RIInput): RIOutput {
             importedServerFnNames,
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
+            plainParamNames(record.fnNode),
           );
 
           if (cpsResult && cpsResult.eligible) {
@@ -6525,10 +6626,23 @@ export function runRI(input: RIInput): RIOutput {
               const _cellPhrase = _assignedCellName != null
                 ? `the reactive cell \`@${_assignedCellName}\``
                 : "a `@` reactive variable";
+              // S455 (§19.8.3) — name the cause when the split was refused because
+              // a handled `?{}` has an arm that is not a plain value: the arms run
+              // on the server with the query, and an arm that returns / writes a
+              // cell cannot run there (analyzeCPSEligibility, guardArmsAreValues).
+              const _armBlocker = (body as any[]).find((s) => handledSqlGuardInner(s) && !guardArmsAreValues(s, plainParamNames(record.fnNode)));
+              const _armNote = _armBlocker
+                ? ` The function cannot be split around the \`!{}\` handler on the \`?{}\` at line ${_armBlocker.span?.line ?? "?"}: ` +
+                  `a handled query's arms run on the server with the query, so every arm must be a plain value built ` +
+                  `from literals, the function's parameters and the arm's own binding — and an arm here is not (a block ` +
+                  `with statements, \`fail\`, a call, a \`@cell\`, or a local the server side does not have). Make every ` +
+                  `arm such a value (\`!{ _ :> not }\`) and act on the result after the query, or move the query into a ` +
+                  `\`!\` function and handle it at the call (§19.8.3).`
+                : "";
               errors.push(new RIError(
                 "E-RI-002",
                 `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
-                `assigns to ${_cellPhrase}. Reactive state is client-side; a server ` +
+                `assigns to ${_cellPhrase}.${_armNote} Reactive state is client-side; a server ` +
                 `function has no client-reactive referent and cannot write it directly (§12.2). ` +
                 `For server-authoritative engine state, name a server-owned source cell the engine ` +
                 `hydrates from: \`<engine for=T server=@source ...>\` (§51.0.E — hydrates guard-free ` +
