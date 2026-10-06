@@ -23,14 +23,22 @@ import { join } from "node:path";
 
 const classify = (sql) => classifyHoistableQuery(sql, "it", HOIST_KEY_ALIAS);
 
+// S456 — the pre-fetch joins a KEY TABLE of `(slot, key)` rows and SQL matches each
+// row to its key with the per-iteration query's own `=` (hoist-sql-shape.ts
+// HOIST_KEY_TABLE); it was `<key> IN (…)` + a JS Map keyed on the key VALUE, which
+// missed a text key "7" that SQL matched to the INTEGER 7.
+const KA = "__scrml_batch_k.__scrml_batch_key AS __scrml_batch_key";
+const KT = "(SELECT column1 AS __scrml_batch_key, column2 AS __scrml_batch_val FROM (VALUES __SCRML_BATCH_VALUES__)) AS __scrml_batch_k";
+const KV = "__scrml_batch_k.__scrml_batch_val";
+
 describe("allow-list — hoisted shapes", () => {
   const ok = {
-    "plain columns": ["SELECT id, body FROM notes WHERE id = ${it.id}", "SELECT id, body, id AS __scrml_batch_key FROM notes WHERE id IN (__SCRML_BATCH_IN__)"],
-    "star": ["SELECT * FROM notes WHERE id = ${it.id}", "SELECT *, id AS __scrml_batch_key FROM notes WHERE id IN (__SCRML_BATCH_IN__)"],
-    "alias + qualified": ["SELECT n.id AS note_id, n.body FROM notes n WHERE n.id = ${it.id}", "SELECT n.id AS note_id, n.body, n.id AS __scrml_batch_key FROM notes n WHERE n.id IN (__SCRML_BATCH_IN__)"],
-    "AND without ${} + ORDER BY": ["SELECT body FROM notes WHERE owner = ${it.id} AND kind <> 'y' AND body IS NOT NULL ORDER BY id DESC", "SELECT body, owner AS __scrml_batch_key FROM notes WHERE owner IN (__SCRML_BATCH_IN__) AND kind <> 'y' AND body IS NOT NULL ORDER BY id DESC"],
-    "simple JOIN": ["SELECT n.body, t.label FROM notes n JOIN tags t ON t.note_id = n.id WHERE n.id = ${it.id}", "SELECT n.body, t.label, n.id AS __scrml_batch_key FROM notes n JOIN tags t ON t.note_id = n.id WHERE n.id IN (__SCRML_BATCH_IN__)"],
-    "IN literal list": ["SELECT body FROM notes WHERE id = ${it.id} AND kind IN ('x', 'z')", "SELECT body, id AS __scrml_batch_key FROM notes WHERE id IN (__SCRML_BATCH_IN__) AND kind IN ('x', 'z')"],
+    "plain columns": ["SELECT id, body FROM notes WHERE id = ${it.id}", `SELECT id, body, ${KA} FROM notes, ${KT} WHERE id = ${KV}`],
+    "star": ["SELECT * FROM notes WHERE id = ${it.id}", `SELECT *, ${KA} FROM notes, ${KT} WHERE id = ${KV}`],
+    "alias + qualified": ["SELECT n.id AS note_id, n.body FROM notes n WHERE n.id = ${it.id}", `SELECT n.id AS note_id, n.body, ${KA} FROM notes n, ${KT} WHERE n.id = ${KV}`],
+    "AND without ${} + ORDER BY": ["SELECT body FROM notes WHERE owner = ${it.id} AND kind <> 'y' AND body IS NOT NULL ORDER BY id DESC", `SELECT body, ${KA} FROM notes, ${KT} WHERE owner = ${KV} AND kind <> 'y' AND body IS NOT NULL ORDER BY id DESC`],
+    "simple JOIN": ["SELECT n.body, t.label FROM notes n JOIN tags t ON t.note_id = n.id WHERE n.id = ${it.id}", `SELECT n.body, t.label, ${KA} FROM notes n JOIN tags t ON t.note_id = n.id, ${KT} WHERE n.id = ${KV}`],
+    "IN literal list": ["SELECT body FROM notes WHERE id = ${it.id} AND kind IN ('x', 'z')", `SELECT body, ${KA} FROM notes, ${KT} WHERE id = ${KV} AND kind IN ('x', 'z')`],
   };
   for (const [name, [sql, inSql]] of Object.entries(ok)) {
     test(name, () => {
@@ -148,6 +156,8 @@ describe("P3 — emission", () => {
       "} }",
       "</>",
     ].join("\n"));
-    expect(js).toMatch(/\(_scrml_batch_byKey_\d+\.get\(it\.id\) \?\? \[\]\)\.map\(\(_r\) => \(\{ \.\.\._r \}\)\)/);
+    // S456: the per-iteration read returns a fresh array of row copies for its slot.
+    expect(js).toContain("return (_hit ?? []).map((_r) => ({ ..._r }));");
+    expect(js).toMatch(/const rows = \(await _scrml_batch_read_\d+\(it\.id\)\);/);
   });
 });

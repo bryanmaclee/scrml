@@ -2,24 +2,28 @@
  * Tier 2 N+1 Loop Hoist — Rewrite Tests (§8.10.2, Slice 5)
  *
  * Verifies that CG consumes BatchPlan.loopHoists and emits the rewritten
- * form:
- *   const _keys = xs.map(x => x.id);
- *   const _rows = _scrml_db.query("WHERE id IN (...)").all(...keys);
- *   const _byKey = new Map(_rows.map(r => [r.id, r]));
- *   for (const x of xs) {
- *     let row = _byKey.get(x.id) ?? null;   // was ?{...}.get()
+ * form (S456 shape — emit-control-flow.ts emitHoistedForStmt):
+ *   let _items = (xs);
+ *   const _slots = new Map();      // distinct key → slot
+ *   const _bySlot = new Map();     // slot → row / rows
+ *   const _fetch = async (_keys, _base) => { chunks of ≤ cap keys; key-table SQL via .unsafe };
+ *   let _failure = null; try { await _fetch(…) } catch (_e) { _failure = { error: _e } }
+ *   const _read = async (_k) => { … };
+ *   for (const x of _items) {
+ *     let row = (await _read(x.id));   // was ?{...}.get()
  *     ...
  *   }
  *
  * Coverage:
- *   §1  for-of + .get() → pre-loop IN fetch + Map.get lookup in body
- *   §2  .all() → Map<key, Row[]> with array-fallback lookup
+ *   §1  for-of + .get() → pre-loop fetch + per-iteration read in body
+ *   §2  .all() → slot → Row[] grouping with array-fallback read
  *   §3  positional placeholders ?1,?2,... preserved for bun:sqlite
  *   §4  original ?{...}.get() call is removed from emitted loop body
- *   §5  deterministic var names (genVar produces incrementing suffixes)
- *   §6  empty iterable → empty rows (short-circuit avoids prepare)
+ *   §5  one key-table query per chunk, bound via .unsafe
+ *   §6  empty iterable → no query (zero-length key list)
  *   §7  non-hoisted for-loop unchanged (regression guard)
- *   §8  key column appears in the emitted SELECT's WHERE IN
+ *   §9  §8.10.6 chunking (was an E-BATCH-002 throw)
+ *   §10 key column appears in the emitted SELECT's WHERE
  */
 
 import { describe, test, expect } from "bun:test";
@@ -47,8 +51,8 @@ function serverJsOf(result) {
 // §1
 // ---------------------------------------------------------------------------
 
-describe("§1 for-of + .get() → pre-loop IN fetch + Map lookup", () => {
-  test("emitted JS has keys/rows/byKey scaffolding + in-body lookup", () => {
+describe("§1 for-of + .get() → pre-loop fetch + per-iteration read", () => {
+  test("emitted JS has slots/bySlot/fetch/read scaffolding + in-body read", () => {
     const src = [
       '<program db="test.db">',
       "${ server function recent(ids) {",
@@ -61,11 +65,12 @@ describe("§1 for-of + .get() → pre-loop IN fetch + Map lookup", () => {
     const js = serverJsOf(compile(src));
     // S455: the iterable is evaluated once into `_scrml_batch_items_N`; keys + loop read it.
     expect(js).toMatch(/let _scrml_batch_items_\d+ = \(ids\);/);
-    expect(js).toMatch(/_scrml_batch_keys_\d+ = _scrml_batch_items_\d+\.map\(x => x\.id\)/);
-    expect(js).toMatch(/_scrml_batch_rows_\d+/);
-    expect(js).toMatch(/_scrml_batch_byKey_\d+ = new Map\(\)/);
-    // S455: each lookup is its own copy of the row (as each per-row query returns).
-    expect(js).toMatch(/_scrml_batch_byKey_\d+\.has\(x\.id\) \? \{ \.\.\._scrml_batch_byKey_\d+\.get\(x\.id\) \} : null/);
+    expect(js).toMatch(/for \(const _k of _scrml_batch_items_\d+\.map\(\(x\) => x\.id\)\) \{ if \(!_scrml_batch_slots_\d+\.has\(_k\)\) _scrml_batch_slots_\d+\.set\(_k, _scrml_batch_slots_\d+\.size\); \}/);
+    expect(js).toMatch(/const _scrml_batch_bySlot_\d+ = new Map\(\);/);
+    expect(js).toMatch(/const _scrml_batch_fetch_\d+ = async \(_keys, _base\) => \{/);
+    // S455: each read is its own copy of the row (as each per-row query returns).
+    expect(js).toContain("return _hit === undefined ? null : { ..._hit };");
+    expect(js).toMatch(/let row = \(await _scrml_batch_read_\d+\(x\.id\)\);/);
   });
 });
 
@@ -86,9 +91,10 @@ describe("§2 .all() → Map<key, Row[]> with array-fallback lookup", () => {
     ].join("\n");
     const js = serverJsOf(compile(src));
     // .all() terminator uses the grouping emission
-    expect(js).toMatch(/_scrml_batch_byKey_\d+\.get\(_k\) \?\? \[\]/);
-    // Body lookup falls back to [] not null
-    expect(js).toMatch(/_scrml_batch_byKey_\d+\.get\(u\.id\) \?\? \[\]/);
+    expect(js).toMatch(/const _group = _scrml_batch_bySlot_\d+\.get\(_s\); if \(_group\) _group\.push\(_r\);/);
+    // The read falls back to [] not null
+    expect(js).toContain("return (_hit ?? []).map((_r) => ({ ..._r }));");
+    expect(js).toMatch(/let posts = \(await _scrml_batch_read_\d+\(u\.id\)\);/);
   });
 });
 
@@ -108,7 +114,8 @@ describe("§3 positional placeholders ?1, ?2 preserved", () => {
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).toContain(`"?" + (_i + 1)`);
+    // the VALUES rows `(slot, ?N)`: the slot is a compiler integer, the key a bound `?N`
+    expect(js).toContain(`"(" + (_base + _at + _i) + ", ?" + (_i + 1) + ")"`);
     expect(js).toContain(".join(\", \")");
   });
 });
@@ -134,8 +141,8 @@ describe("§4 original `?{...}.get()` call is removed from loop body", () => {
     const closeIdx = js.indexOf("}", forIdx);
     expect(forIdx).toBeGreaterThan(-1);
     const body = js.slice(forIdx, closeIdx);
-    // Body contains the map lookup, not a query call
-    expect(body).toContain("_scrml_batch_byKey_");
+    // Body contains the per-iteration read, not a query call
+    expect(body).toContain("_scrml_batch_read_");
     expect(body).not.toMatch(/_scrml_db\.query\([^)]*WHERE id = \?1/);
   });
 });
@@ -144,8 +151,8 @@ describe("§4 original `?{...}.get()` call is removed from loop body", () => {
 // §5
 // ---------------------------------------------------------------------------
 
-describe("§5 single `WHERE IN (...)` query built before the loop", () => {
-  test("the pre-loop query runs sql.unsafe(rawSql, keys) — one round trip", () => {
+describe("§5 one key-table query per chunk, built before the loop", () => {
+  test("the pre-loop query runs sql.unsafe(rawSql, chunk) — one round trip per chunk", () => {
     const src = [
       '<program db="test.db">',
       "${ server function recent(ids) {",
@@ -156,12 +163,11 @@ describe("§5 single `WHERE IN (...)` query built before the loop", () => {
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).toContain("__SCRML_BATCH_IN__");
-    // §44 / Bun.SQL: dynamic IN-list emission goes through sql.unsafe(rawSql, paramArray).
+    expect(js).toContain(`.replace("__SCRML_BATCH_VALUES__", _values), _chunk)`);
+    // §44 / Bun.SQL: the dynamic key list goes through sql.unsafe(rawSql, paramArray).
     // Bun.SQL's SQLite branch does NOT support array binding via tagged-template ${arr},
     // so we keep manual `?N` placeholder construction and bind via .unsafe().
-    expect(js).toMatch(/_scrml_sql\.unsafe\(.*?_scrml_batch_keys_\d+\)/s);
-    expect(js).toContain("_scrml_sql.unsafe(");
+    expect(js).toMatch(/const _rows = await _scrml_sql\.unsafe\(.*?, _chunk\);/s);
   });
 });
 
@@ -169,8 +175,8 @@ describe("§5 single `WHERE IN (...)` query built before the loop", () => {
 // §6
 // ---------------------------------------------------------------------------
 
-describe("§6 empty iterable short-circuit → skips prepare", () => {
-  test("keys.length === 0 short-circuit emitted", () => {
+describe("§6 empty iterable → no query", () => {
+  test("the chunk loop runs zero times for zero keys", () => {
     const src = [
       '<program db="test.db">',
       "${ server function recent(ids) {",
@@ -181,7 +187,7 @@ describe("§6 empty iterable short-circuit → skips prepare", () => {
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).toMatch(/_scrml_batch_keys_\d+\.length === 0 \? \[\]/);
+    expect(js).toContain("for (let _at = 0; _at < _keys.length; _at += 32766) {");
   });
 });
 
@@ -201,8 +207,8 @@ describe("§7 regression: non-hoisted for-loop unchanged", () => {
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).not.toContain("_scrml_batch_keys_");
-    expect(js).not.toContain("__SCRML_BATCH_IN__");
+    expect(js).not.toContain("_scrml_batch_");
+    expect(js).not.toContain("__SCRML_BATCH_VALUES__");
   });
 });
 
@@ -211,11 +217,14 @@ describe("§7 regression: non-hoisted for-loop unchanged", () => {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// §9 E-BATCH-002 runtime guard
+// §9 §8.10.6 chunking (S456 — was an E-BATCH-002 throw above the cap)
 // ---------------------------------------------------------------------------
+// "If `xs.length` at runtime exceeds `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite
+// SHALL chunk the IN-list into segments of at most `SQLITE_MAX_VARIABLE_NUMBER` keys."
+// Runtime pin: conformance/cases/server-db/sql-hoisted-loop-chunked-rt.
 
-describe("§9 E-BATCH-002: runtime guard on SQLITE_MAX_VARIABLE_NUMBER (§8.10.6)", () => {
-  test("emitted JS includes a keys.length > 32766 check that throws E-BATCH-002", () => {
+describe("§9 chunking at SQLITE_MAX_VARIABLE_NUMBER (§8.10.6)", () => {
+  test("emitted JS fetches the keys in chunks of at most 32766, and never throws E-BATCH-002", () => {
     const src = [
       '<program db="test.db">',
       "${ server function recent(ids) {",
@@ -226,12 +235,12 @@ describe("§9 E-BATCH-002: runtime guard on SQLITE_MAX_VARIABLE_NUMBER (§8.10.6
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).toMatch(/_scrml_batch_keys_\d+\.length > 32766/);
-    expect(js).toContain("E-BATCH-002");
-    expect(js).toContain("SQLITE_MAX_VARIABLE_NUMBER");
+    expect(js).toContain("for (let _at = 0; _at < _keys.length; _at += 32766) {");
+    expect(js).toContain("const _chunk = _keys.slice(_at, _at + 32766);");
+    expect(js).not.toContain("E-BATCH-002");
   });
 
-  test("guard is placed before the sql.unsafe() bind call", () => {
+  test("<program batch-in-list-cap=> sets the chunk size", () => {
     const src = [
       '<program db="test.db">',
       "${ server function recent(ids) {",
@@ -241,12 +250,9 @@ describe("§9 E-BATCH-002: runtime guard on SQLITE_MAX_VARIABLE_NUMBER (§8.10.6
       "} }",
       "</>",
     ].join("\n");
-    const js = serverJsOf(compile(src));
-    const guardIdx = js.indexOf("E-BATCH-002");
-    // §44 emission: dynamic IN-list binds via sql.unsafe(rawSql, paramArray).
-    const bindIdx = js.search(/_scrml_sql\.unsafe\(.*?_scrml_batch_keys_\d+\)/s);
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(bindIdx).toBeGreaterThan(guardIdx);
+    const js = serverJsOf(compile(src.replace('<program db="test.db">', '<program db="test.db" batch-in-list-cap="999">')));
+    expect(js).toContain("for (let _at = 0; _at < _keys.length; _at += 999) {");
+    expect(js).toContain("in chunks of at most 999 bound keys (§8.10.6)");
   });
 });
 
@@ -254,8 +260,8 @@ describe("§9 E-BATCH-002: runtime guard on SQLITE_MAX_VARIABLE_NUMBER (§8.10.6
 // §10 key column flows into IN-list SELECT (renumbered from §8)
 // ---------------------------------------------------------------------------
 
-describe("§10 key column flows into the IN-list SELECT", () => {
-  test("WHERE user_id IN (...) appears when key column is user_id", () => {
+describe("§10 key column flows into the pre-fetch SELECT", () => {
+  test("WHERE user_id = <key table> appears when key column is user_id", () => {
     const src = [
       '<program db="test.db">',
       "${ server function postsFor(users) {",
@@ -266,6 +272,6 @@ describe("§10 key column flows into the IN-list SELECT", () => {
       "</>",
     ].join("\n");
     const js = serverJsOf(compile(src));
-    expect(js).toContain("WHERE user_id IN (__SCRML_BATCH_IN__)");
+    expect(js).toContain("WHERE user_id = __scrml_batch_k.__scrml_batch_val");
   });
 });

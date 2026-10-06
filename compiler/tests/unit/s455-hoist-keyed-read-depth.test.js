@@ -52,9 +52,14 @@ function program(fnBody) {
 }
 
 const Q = "?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()";
-// The per-iteration lookup — its own copy of the row (S455 review P3).
-const LOOKUP = /_scrml_batch_byKey_\d+\.has\(it\.id\) \? \{ \.\.\._scrml_batch_byKey_\d+\.get\(it\.id\) \} : null/;
-const ASSIGN = /\n\s*row = \(_scrml_batch_byKey_\d+\.has\(it\.id\) \? \{ \.\.\._scrml_batch_byKey_\d+\.get\(it\.id\) \} : null\);/;
+// The per-iteration read (S456: by slot, through the loop's read function, which
+// returns its own copy of the row — S455 review P3).
+const LOOKUP = /\(await _scrml_batch_read_\d+\(it\.id\)\)/;
+const ASSIGN = /\n\s*row = \(await _scrml_batch_read_\d+\(it\.id\)\);/;
+// The key-table pre-fetch pieces (hoist-sql-shape.ts HOIST_KEY_TABLE).
+const KA = `__scrml_batch_k.${HOIST_KEY_ALIAS} AS ${HOIST_KEY_ALIAS}`;
+const KT = `(SELECT column1 AS ${HOIST_KEY_ALIAS}, column2 AS __scrml_batch_val FROM (VALUES __SCRML_BATCH_VALUES__)) AS __scrml_batch_k`;
+const KV = "__scrml_batch_k.__scrml_batch_val";
 
 describe("a nested keyed read is rewritten to the Map lookup", () => {
   const shapes = {
@@ -78,8 +83,10 @@ describe("a nested keyed read is rewritten to the Map lookup", () => {
 
   test("a handled nested site runs the pre-fetch through the attempt", () => {
     const js = serverJsOf(compile(program(shapes_handled())));
-    expect(js).toMatch(/await _scrml_sql_attempt\(\(_scrml_p\) => _scrml_sql\.unsafe\(/);
-    expect(js).toMatch(/_scrml_batch_rows_\d+\.__scrml_error \? _scrml_batch_rows_\d+ : \(_scrml_batch_byKey_\d+\.has\(it\.id\)/);
+    // S456: the pre-fetch's failure is the SqlError envelope, held and returned by the
+    // read that runs (§8.10.3), so the site's arms run where the per-row query failed.
+    expect(js).toMatch(/_scrml_batch_failure_\d+ = await _scrml_sql_attempt\(\(_keys\) => _scrml_batch_fetch_\d+\(_keys, 0\)/);
+    expect(js).toMatch(/if \(_scrml_batch_failure_\d+\) return _scrml_batch_failure_\d+;/);
   });
   function shapes_handled() {
     return `for (const it of items) {\n if (it.on) {\n const row = ${Q} !{ _ :> not }\n out.push(row)\n }\n }`;
@@ -91,12 +98,12 @@ describe("a reassignment of an existing binding stays an assignment", () => {
     const js = serverJsOf(compile(program(`for (const it of items) {\n let row = not\n row = ${Q}\n out.push(row)\n }`)));
     expect(js).toContain("§8.10 Tier 2 loop hoist");
     expect(js).toMatch(ASSIGN);
-    expect(js).not.toMatch(/const row = \(_scrml_batch_byKey/);
+    expect(js).not.toMatch(/const row = \(await _scrml_batch_read/);
   });
   test("keywordless `row = ?{…}` on a `let row` declared OUTSIDE the loop", () => {
     const js = serverJsOf(compile(program(`let row = not\n for (const it of items) {\n row = ${Q}\n out.push(row)\n }`)));
     expect(js).toMatch(ASSIGN);
-    expect(js).not.toMatch(/const row = \(_scrml_batch_byKey/);
+    expect(js).not.toMatch(/const row = \(await _scrml_batch_read/);
   });
   test("handled `row = ?{…} !{…}` assigns the guarded value (no `var row`)", () => {
     const js = serverJsOf(compile(program(`for (const it of items) {\n let row = not\n if (it.on) {\n row = ${Q} !{ _ :> not }\n }\n out.push(row)\n }`)));
@@ -127,17 +134,17 @@ describe("a site the rewrite cannot replace leaves the loop un-hoisted", () => {
   });
 });
 
-describe("the pre-fetch keys on a projected alias and keeps the first row per key", () => {
-  test("SELECT body (key not selected): alias projected, read, and stripped", () => {
+describe("the pre-fetch keys on a projected slot alias and keeps the first row per key", () => {
+  test("SELECT body (key not selected): slot projected, read, and stripped", () => {
     const js = serverJsOf(compile(program(`for (const it of items) {\n const row = ?{\`SELECT body FROM notes WHERE id = \${it.id}\`}.get()\n out.push(row)\n }`)));
-    expect(js).toContain(`"SELECT body, id AS ${HOIST_KEY_ALIAS} FROM notes WHERE id IN (__SCRML_BATCH_IN__)"`);
-    expect(js).toContain(`const _k = _r["${HOIST_KEY_ALIAS}"]; delete _r["${HOIST_KEY_ALIAS}"];`);
-    expect(js).toMatch(/if \(!_scrml_batch_byKey_\d+\.has\(_k\)\) _scrml_batch_byKey_\d+\.set\(_k, _r\);/);
+    expect(js).toContain(`"SELECT body, ${KA} FROM notes, ${KT} WHERE id = ${KV}"`);
+    expect(js).toContain(`const _s = _r["${HOIST_KEY_ALIAS}"]; delete _r["${HOIST_KEY_ALIAS}"]; delete _r["__scrml_batch_val"];`);
+    expect(js).toMatch(/if \(!_scrml_batch_bySlot_\d+\.has\(_s\)\) _scrml_batch_bySlot_\d+\.set\(_s, _r\);/);
   });
-  test(".all() groups on the alias", () => {
+  test(".all() groups on the slot", () => {
     const js = serverJsOf(compile(program(`for (const it of items) {\n const rows = ?{\`SELECT title FROM posts WHERE user_id = \${it.id}\`}.all()\n out.push(rows)\n }`)));
-    expect(js).toContain(`"SELECT title, user_id AS ${HOIST_KEY_ALIAS} FROM posts WHERE user_id IN (__SCRML_BATCH_IN__)"`);
-    expect(js).toMatch(/const _a = _scrml_batch_byKey_\d+\.get\(_k\) \?\? \[\]; _a\.push\(_r\);/);
+    expect(js).toContain(`"SELECT title, ${KA} FROM posts, ${KT} WHERE user_id = ${KV}"`);
+    expect(js).toMatch(/const _group = _scrml_batch_bySlot_\d+\.get\(_s\); if \(_group\) _group\.push\(_r\); else _scrml_batch_bySlot_\d+\.set\(_s, \[_r\]\);/);
   });
 
   function plan(sql) {
@@ -146,11 +153,11 @@ describe("the pre-fetch keys on a projected alias and keeps the first row per ke
     };
     return runBatchPlanner({ files: [file], depGraph: null }).batchPlan;
   }
-  test("planner: qualified key column is projected as written", () => {
+  test("planner: the qualified key column is compared to the key table as written", () => {
     const p = plan("?{`SELECT n.body FROM notes n WHERE n.id = ${x.id}`}.get()");
     expect(p.loopHoists).toHaveLength(1);
     expect(p.loopHoists[0].keyAlias).toBe(HOIST_KEY_ALIAS);
-    expect(p.loopHoists[0].inSqlTemplate).toBe(`SELECT n.body, n.id AS ${HOIST_KEY_ALIAS} FROM notes n WHERE n.id IN (__SCRML_BATCH_IN__)`);
+    expect(p.loopHoists[0].inSqlTemplate).toBe(`SELECT n.body, ${KA} FROM notes n, ${KT} WHERE n.id = ${KV}`);
   });
   test("planner: a subquery in the SELECT list is not hoisted (D-BATCH-001)", () => {
     const p = plan("?{`SELECT (SELECT count(*) FROM tags) AS c FROM notes WHERE id = ${x.id}`}.get()");

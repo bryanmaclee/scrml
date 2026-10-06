@@ -1,0 +1,41 @@
+<program db="./app.db" batch-in-list-cap="2">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        tags {
+            id: integer primary key
+            name: text
+            note: integer
+        }
+    </schema>
+    <firstRows> = "init"
+    <allRows> = "init"
+    // §8.10.6: more distinct keys than the cap (batch-in-list-cap="2") — the pre-fetch
+    // runs in chunks of at most 2 keys and the results are merged; `.get()` keeps the
+    // first row per key, `.all()` the per-key group, as each per-iteration query does.
+    function getAll() {
+        let out = []
+        for (const it of [{ id: 7 }, { id: 8 }, { id: 9 }, { id: 7 }, { id: 10 }]) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function allAll() {
+        let out = []
+        for (const it of [{ id: 7 }, { id: 8 }, { id: 9 }, { id: 7 }, { id: 10 }]) {
+            const rows = ?{`SELECT name FROM tags WHERE note = ${it.id} ORDER BY name`}.all()
+            out.push(rows.map((t) => t.name).join("+"))
+        }
+        return out.join(",")
+    }
+    function go() {
+        @firstRows = getAll() !{ _ :> "err" }
+        @allRows = allAll() !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="firstRows">${@firstRows}</p>
+    <p id="allRows">${@allRows}</p>
+</program>

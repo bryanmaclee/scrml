@@ -1,0 +1,36 @@
+{
+  "id": "server-db-sql-hoisted-loop-chunked-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): with `<program batch-in-list-cap=\"2\">` and four distinct keys, the hoisted pre-fetch runs in chunks of at most 2 keys and merges the results; `.get()` keeps the first row per key and `.all()` the per-key group (ORDER BY respected within each key). Each cell equals the same function compiled with `.nobatch()`. Pre-fix (2dd6d35d9, S456): more keys than the cap threw E-BATCH-002 at runtime instead of chunking, so both cells stayed \"init\" (host backstop).",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10.6: \"If `xs.length` at runtime exceeds `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite SHALL chunk the IN-list into segments of at most `SQLITE_MAX_VARIABLE_NUMBER` keys.\" + the S79 cap override: \"The override changes BOTH the runtime check threshold AND the diagnostic message text emitted into the compiled output.\"",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" },
+        { "id": 9, "body": "nine" },
+        { "id": 10, "body": "ten" }
+      ],
+      "tags": [
+        { "id": 1, "name": "b", "note": 7 },
+        { "id": 2, "name": "a", "note": 7 },
+        { "id": 3, "name": "y", "note": 9 },
+        { "id": 4, "name": "z", "note": 10 }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "firstRows": "hello,none,nine,hello,ten",
+      "allRows": "a+b,,y,a+b,z"
+    },
+    "domAnchored": [
+      { "selector": "#firstRows", "text": "hello,none,nine,hello,ten" }
+    ]
+  }
+}

@@ -25,7 +25,10 @@
  * Idempotency: re-running on a BatchPlan-annotated input is a no-op.
  */
 
-import { classifyHoistableQuery } from "./hoist-sql-shape.ts";
+import { classifyHoistableQuery, HOIST_VAL_ALIAS } from "./hoist-sql-shape.ts";
+import { buildLoopWriteFacts, loopBodyWriteReason, type LoopWriteFacts } from "./hoist-write-scan.ts";
+import { resolveDbScopes } from "./db-ownership.ts";
+import { dialectOfDbValue } from "./codegen/tenant-egress.ts";
 
 // ---------------------------------------------------------------------------
 // Public types — mirrored from SPEC.md §8.9 / §8.10 / §8.11 and
@@ -64,16 +67,23 @@ export interface LoopHoist {
   /** Original SQL template body, e.g. "SELECT * FROM users WHERE id = ${x.id}". */
   sqlTemplate: string;
   /**
-   * Rewritten SQL with `WHERE <keyColumn> IN (${keysVar})` in place of the
-   * single equality. The `${keysVar}` slot is kept parameter-bound via
-   * bun:sqlite spread args at emit time (`.all(...keys)`).
+   * The pre-fetch (hoist-sql-shape.ts): the query joined to a key table of
+   * `(slot, key)` rows, `WHERE <keyColumn> = <key table>.<key>`, with the slot
+   * projected. `__SCRML_BATCH_VALUES__` is replaced at run time by the VALUES rows
+   * `(0, ?1), (1, ?2), …` — the keys stay bound parameters (§8.2).
    */
   inSqlTemplate: string;
   /**
-   * The alias `inSqlTemplate` projects the key column under (`HOIST_KEY_ALIAS`).
-   * The pre-fetch keys its Map on it and strips it from each row.
+   * The alias `inSqlTemplate` projects each row's key SLOT under (`HOIST_KEY_ALIAS`):
+   * the index of the distinct loop key the row matched. The pre-fetch keys its Map on
+   * it and strips it from each row.
    */
   keyAlias: string;
+  /**
+   * The bound key's column name in the pre-fetch's key table (`HOIST_VAL_ALIAS`). A
+   * `SELECT *` pre-fetch carries it in each row, so the emitter strips it too.
+   */
+  valAlias: string;
   terminator: "get" | "all";
   rowCacheColumns: Set<string>;
 }
@@ -528,12 +538,52 @@ function protectBlocksHoist(tables: string[], protectAnalysis: unknown): string 
   return null;
 }
 
+/**
+ * §8.10 — why this compilation's database cannot take the Tier 2 pre-fetch, or
+ * null. The pre-fetch is SQLite SQL: `?N` placeholders, and a key table whose
+ * `VALUES` column has no type affinity, so the `=` against the key column applies
+ * the column's affinity and collation exactly as the per-iteration `= ?` does
+ * (§8.10.2). Postgres rejects `?N` outright (measured S456: `operator does not
+ * exist: ? integer`) and types an untyped VALUES column differently. Fail closed:
+ * every database handle of the compilation must be a literal SQLite target. With
+ * no handle at all there is no database for the pre-fetch to run on and nothing
+ * to refuse.
+ */
+function hoistDialectReason(files: unknown[]): string | null {
+  for (const f of files) {
+    const filePath = typeof (f as any)?.filePath === "string" && (f as any).filePath ? (f as any).filePath : null;
+    let handles: Array<{ value: string }> = [];
+    try {
+      handles = resolveDbScopes(getFileNodes(f), filePath).handles;
+    } catch {
+      return "the compilation's database handles could not be resolved — the Tier 2 pre-fetch is SQLite SQL, so the loop is not hoisted";
+    }
+    for (const h of handles) {
+      const d = dialectOfDbValue(h.value);
+      if (d !== "sqlite") {
+        return `the database \`${h.value}\` is not a literal SQLite target (${d}) — the Tier 2 pre-fetch is SQLite SQL, so the loop is not hoisted`;
+      }
+    }
+  }
+  return null;
+}
+
+/** The context `analyzeForLoop` reads beyond the loop itself. */
+interface LoopContext {
+  protectAnalysis: unknown;
+  /** The file's write facts (hoist-write-scan.ts), computed on first use. */
+  writeFacts: () => LoopWriteFacts;
+  /** Why the compilation's database cannot take the pre-fetch, or null (computed on first use). */
+  dialectReason: () => string | null;
+}
+
 function analyzeForLoop(
   forStmt: Record<string, unknown>,
   plan: BatchPlan,
   errors: BatchPlannerError[],
-  protectAnalysis: unknown,
+  ctx: LoopContext,
 ): void {
+  const protectAnalysis = ctx.protectAnalysis;
   const loopVar = typeof forStmt.variable === "string" ? forStmt.variable : "";
   if (!loopVar) return;
 
@@ -617,6 +667,21 @@ function analyzeForLoop(
     emitNearMiss(plan, loopId, protectReason, forStmt.span);
     return;
   }
+  const dialectReason = ctx.dialectReason();
+  if (dialectReason !== null) {
+    emitNearMiss(plan, loopId, dialectReason, forStmt.span);
+    return;
+  }
+  // §8.10.3 — the pre-fetch is taken before iteration 1, so a body that can write
+  // the database between iterations would read stale rows (executed S456: a call to
+  // a function that UPDATEs the read row). Hoist only a body PROVEN not to write.
+  const isSite = (n: any): boolean =>
+    typeof n === "string" ? n.includes("`" + site.body + "`") : (n?.kind === "sql" && n.query === site.body);
+  const writeReason = loopBodyWriteReason(forStmt.body, ctx.writeFacts(), isSite);
+  if (writeReason !== null) {
+    emitNearMiss(plan, loopId, writeReason, forStmt.span);
+    return;
+  }
 
   plan.loopHoists.push({
     loopNode: loopId,
@@ -628,6 +693,7 @@ function analyzeForLoop(
     sqlTemplate: site.body,
     inSqlTemplate,
     keyAlias: HOIST_KEY_ALIAS,
+    valAlias: HOIST_VAL_ALIAS,
     terminator: site.terminator as "get" | "all",
     rowCacheColumns,
   });
@@ -684,11 +750,21 @@ export function runBatchPlanner(input: BPInput): BPOutput {
   // file, regardless of enclosing handler — `?{}` is server-only by
   // route inference (§12.2 Trigger 1), so any for-stmt containing SQL
   // is inherently server-bound. Near-miss shapes emit D-BATCH-001.
+  // Both computed on the first loop that reaches them (most files have none).
+  let dialectReason: string | null | undefined;
+  const dialectReasonOnce = (): string | null =>
+    dialectReason === undefined ? (dialectReason = hoistDialectReason(input.files ?? [])) : dialectReason;
   for (const file of input.files ?? []) {
     const topNodes = getFileNodes(file);
+    let writeFacts: LoopWriteFacts | null = null;
+    const writeFactsOnce = (): LoopWriteFacts => (writeFacts ??= buildLoopWriteFacts(topNodes));
     walkAst(topNodes, (node) => {
       if (node.kind !== "for-stmt") return true;
-      analyzeForLoop(node, batchPlan, errors, input.protectAnalysis);
+      analyzeForLoop(node, batchPlan, errors, {
+        protectAnalysis: input.protectAnalysis,
+        writeFacts: writeFactsOnce,
+        dialectReason: dialectReasonOnce,
+      });
       return true;
     });
   }

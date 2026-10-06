@@ -12,6 +12,7 @@ import { CGError } from "./errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
+import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -990,7 +991,7 @@ interface HoistSubst {
   probe: RegExp;
   /** The Map lookup expression. */
   replacement: string;
-  /** The lookup for a HANDLED site (§19.8.3) — yields the pre-fetch's SqlError envelope when it failed. */
+  /** The lookup for a HANDLED site (§19.8.3) — it yields the pre-fetch's SqlError envelope when the pre-fetch failed. */
   handledReplacement: string;
   /** Sites rewritten (unhandled + handled). */
   hits: number;
@@ -1124,24 +1125,48 @@ function loopBodyHasSqlSite(value: any): boolean {
 }
 
 /**
- * Emit the §8.10 rewritten form of a for-stmt. Produces:
- *   const _keys = <iterable>.map(<loopVar> => <loopVar>.<keyField>);
- *   const _placeholders = _keys.map((_, i) => `?${i+1}`).join(", ");
- *   const _rows = <db>.unsafe(<in-sql with placeholders>, _keys);
- *   const _byKey = new Map();
- *   for (const _r of _rows) { <take + strip the projected key>; <first row per key (.get()) / grouped (.all())> }
- *   for (const <loopVar> of <iterable>) {
- *     <body with original ?{...}.get()/.all() replaced by Map lookup>
+ * Emit the §8.10 rewritten form of a for-stmt (S456 shape):
+ *
+ *   let <items> = (<iterable>);                       // evaluated ONCE
+ *   const <slots> = new Map();                         // one slot per distinct key value
+ *   for (const _k of <items>.map((<loopVar>) => <loopVar>.<keyField>)) { … <slots>.set(_k, <slots>.size) … }
+ *   const <bySlot> = new Map();                        // slot → row (.get()) / rows (.all())
+ *   const <fetch> = async (_keys, _base) => { … }      // chunks of at most <cap> keys (§8.10.6)
+ *   let <failure> = null;                              // a pre-fetch failure, raised at the read (§8.10.3)
+ *   try { await <fetch>([...<slots>.keys()], 0); } catch (_e) { <failure> = { error: _e }; }
+ *   const <read> = async (_k) => { … };                // the per-iteration read
+ *   for (const <loopVar> of <items>) {
+ *     <body with the ?{…}.get()/.all() replaced by `(await <read>(<loopVar>.<keyField>))`>
  *   }
  *
- * The IN placeholder list is built at runtime from the key array (no
- * string interpolation of user data — preserves §8.2 parameter invariant
- * via spread binding).
+ * Each of the four parts restores one per-iteration property (§8.10.3: "The
+ * rewritten loop is observationally equivalent to the un-rewritten loop"):
+ *
+ *   - MATCHING (§8.10.2): rows are found by SLOT, and SQL decides which slot a row
+ *     belongs to, with the per-iteration query's own `=` (hoist-sql-shape.ts
+ *     HOIST_KEY_TABLE). A JS `Map` keyed on the key VALUE missed a text key "7" that
+ *     SQL matched to the INTEGER 7.
+ *   - CHUNKING (§8.10.6): "the Tier 2 rewrite SHALL chunk the IN-list into segments of
+ *     at most `SQLITE_MAX_VARIABLE_NUMBER` keys" — the `batch-in-list-cap=` value. It
+ *     threw E-BATCH-002 above the cap instead. Each distinct key is in exactly one
+ *     chunk, so `.get()` keeps the first row per key and `.all()` the per-key group.
+ *   - FAILURE TIMING (§8.10.3): a failed pre-fetch is held and raised by the first
+ *     read that RUNS — where the per-iteration query would have failed — not before
+ *     iteration 1 (a loop whose read is never reached does not fail at all). A
+ *     handled read (§19.8.3) gets the SqlError envelope there instead.
+ *   - A KEY THE BODY CHANGED after the pre-fetch (`it.id = it.id + 1`) is read when
+ *     its read runs, with the same pre-fetch for one key — the per-iteration query.
+ *
+ * Writes between iterations are the planner's: a body that may write is not hoisted
+ * (batch-planner.ts / hoist-write-scan.ts).
+ *
+ * The keys are bound parameters (`?1 …`); only compiler-generated slot integers are
+ * spliced into the SQL text (§8.2).
  *
  * Returns `null` when the body's site cannot be rewritten (see
- * `substituteHoistedSqlInBody`): the caller then emits the loop un-hoisted, with
- * its per-iteration query. A hoist that left the read in place would emit it with
- * no server boundary — a `null` read on success.
+ * `substituteHoistedSqlInBody`), or the plan is not the key-table shape: the caller
+ * then emits the loop un-hoisted, with its per-iteration query. A hoist that left the
+ * read in place would emit it with no server boundary — a `null` read on success.
  *
  * `opts` is the plain loop's: the hoisted loop lowers exactly as the un-hoisted one
  * (boundary, the enclosing scope's declared names, server-fn names, and the
@@ -1164,39 +1189,38 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   const keyColumn: string = hoist.keyColumn;
   const terminator: "get" | "all" = hoist.terminator;
   const inSqlTemplate: string = hoist.inSqlTemplate;
-  // §8.10.4 — the pre-fetch projects the key column under this alias
-  // (batch-planner `HOIST_KEY_ALIAS`), so the user's SELECT list need not name it
-  // (`SELECT body … WHERE id = …`), nor name it unqualified / unaliased. A plan
-  // without one reads the key column itself.
+  // The pre-fetch projects each row's key SLOT under `keyAlias` and, for a
+  // `SELECT *`, carries the key table's bound key under `valAlias`; both are
+  // stripped so each row is exactly the row the per-iteration query returns.
   const keyAlias: string | null = typeof hoist.keyAlias === "string" && hoist.keyAlias ? hoist.keyAlias : null;
+  const valAlias: string | null = typeof hoist.valAlias === "string" && hoist.valAlias ? hoist.valAlias : null;
+  if (keyAlias === null || valAlias === null || typeof inSqlTemplate !== "string" || !inSqlTemplate.includes(HOIST_VALUES_PLACEHOLDER)) {
+    return null;
+  }
 
   // Body rewrite — replace the original `?{`<template>`}.get()/.all()`
-  // call with the Map lookup. We match the raw template (with
+  // call with the per-iteration read. We match the raw template (with
   // backticks) rather than post-emit strings so the rewrite happens at
   // AST level, before emit-logic / rewrite.ts transform the string.
   // Computed BEFORE the pre-fetch lines: whether the site is HANDLED (a `!{}`
-  // on it, §19.8.3, S455) decides how the pre-fetch is emitted.
+  // on it, §19.8.3, S455) decides how the pre-fetch failure reaches the read.
   const bodyTemplate = hoist.sqlTemplate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const sourceSrc = `\\?\\{\`${bodyTemplate}\`\\}\\s*\\.\\s*${terminator}\\s*\\(\\s*\\)`;
-  const keysVar = genVar("batch_keys");
-  const placeholdersVar = genVar("batch_placeholders");
-  const rowsVar = genVar("batch_rows");
-  const mapVar = genVar("batch_byKey");
   const itemsVar = genVar("batch_items");
-  // Each lookup yields its OWN row object, as each per-iteration query does: two
-  // iterations with the same key used to share one row, so a write through one
-  // (`row.body = row.body + "!"`) showed up in the other.
+  const slotsVar = genVar("batch_slots");
+  const bySlotVar = genVar("batch_bySlot");
+  const fetchVar = genVar("batch_fetch");
+  const failureVar = genVar("batch_failure");
+  const readVar = genVar("batch_read");
   const _key = `${loopVar}.${keyField}`;
-  const replacement = terminator === "get"
-    ? `(${mapVar}.has(${_key}) ? { ...${mapVar}.get(${_key}) } : null)`
-    : `(${mapVar}.get(${_key}) ?? []).map((_r) => ({ ..._r }))`;
+  // The same read for an unhandled and a handled site: it is `<read>` that knows
+  // which (a held failure throws / is returned as the SqlError envelope).
+  const replacement = `(await ${readVar}(${_key}))`;
   const subst: HoistSubst = {
     re: new RegExp(sourceSrc, "g"),
     probe: new RegExp(sourceSrc),
     replacement,
-    // A handled site reads the pre-fetch's SqlError envelope when it failed, so
-    // each iteration's arms run exactly as each per-row query would have failed.
-    handledReplacement: `(${rowsVar}.__scrml_error ? ${rowsVar} : ${replacement})`,
+    handledReplacement: replacement,
     hits: 0,
     handledHits: 0,
   };
@@ -1208,65 +1232,73 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   const _ctx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   iterable = emitExprField(node.iterExpr, iterable, _ctx);
 
+  // §8.10.6 — chunk size. Default 32766 matches SQLite 3.32+
+  // SQLITE_MAX_VARIABLE_NUMBER (the bun:sqlite bundled version); S79 audit fix C.2 —
+  // adopter override via <program batch-in-list-cap="999"> for older SQLite.
+  const batchCap = getBatchInListCap();
+  const aliasKey = JSON.stringify(keyAlias);
+  const aliasVal = JSON.stringify(valAlias);
+  const store = terminator === "get"
+    // `.get()` is the FIRST row the per-key query returns (in its own ORDER BY).
+    ? `if (!${bySlotVar}.has(_s)) ${bySlotVar}.set(_s, _r);`
+    : `const _group = ${bySlotVar}.get(_s); if (_group) _group.push(_r); else ${bySlotVar}.set(_s, [_r]);`;
+  // Each read yields its OWN row object(s), as each per-iteration query does: two
+  // iterations with the same key used to share one row, so a write through one
+  // (`row.body = row.body + "!"`) showed up in the other.
+  const pick = terminator === "get"
+    ? `return _hit === undefined ? null : { ..._hit };`
+    : `return (_hit ?? []).map((_r) => ({ ..._r }));`;
+
   const lines: string[] = [];
-  lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn})`);
+  lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn}) — one pre-fetch, then a per-iteration read`);
   // The iterable is evaluated ONCE — the key list and the loop read the same
   // items (it was evaluated twice: `items.splice(0, 1)` looped over nothing). A
   // non-array iterable (a Set, a generator) is materialized so both can read it.
   lines.push(`let ${itemsVar} = (${iterable});`);
   lines.push(`if (!Array.isArray(${itemsVar})) ${itemsVar} = Array.from(${itemsVar});`);
-  iterable = itemsVar;
-  lines.push(`const ${keysVar} = ${itemsVar}.map(${loopVar} => ${loopVar}.${keyField});`);
-  // §8.10.6: reject key counts above the configured cap at runtime.
-  // Default 32766 matches SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER (the
-  // bun:sqlite bundled version). S79 audit fix C.2 — adopter override via
-  // <program batch-in-list-cap="65535"> for Postgres or
-  // <program batch-in-list-cap="999"> for older SQLite.
-  // Users can .nobatch() the site to opt out if they hit this ceiling.
-  const batchCap = getBatchInListCap();
-  lines.push(
-    `if (${keysVar}.length > ${batchCap}) { const _e = new Error("E-BATCH-002: batched IN-list exceeds SQLITE_MAX_VARIABLE_NUMBER (${batchCap}) for hoisted loop"); _e.code = "E-BATCH-002"; throw _e; }`,
-  );
-  // Build placeholder list `?1, ?2, ...` so Bun.SQL gets positional bound
-  // params. Bun.SQL's SQLite branch does NOT support array binding in tagged
-  // templates (`${arr}` throws), so we emit a runtime-built SQL string and
-  // bind the array via `sql.unsafe(rawSql, paramArray)` (§44.5).
-  lines.push(
-    `const ${placeholdersVar} = ${keysVar}.map((_, _i) => "?" + (_i + 1)).join(", ");`,
-  );
-  // Substitute `__SCRML_BATCH_IN__` placeholder in the template with the
-  // generated positional placeholder list. The rest of the SQL template
-  // (column list, table, other predicates) is preserved verbatim.
+  lines.push(`// One slot per distinct key; SQL matches each slot's key to rows with the query's own \`=\` (§8.10.2).`);
+  lines.push(`const ${slotsVar} = new Map();`);
+  lines.push(`for (const _k of ${itemsVar}.map((${loopVar}) => ${_key})) { if (!${slotsVar}.has(_k)) ${slotsVar}.set(_k, ${slotsVar}.size); }`);
+  lines.push(`const ${bySlotVar} = new Map();`);
+  lines.push(`// Fetch the rows of _keys (slots _base, _base + 1, …) in chunks of at most ${batchCap} bound keys (§8.10.6).`);
+  lines.push(`const ${fetchVar} = async (_keys, _base) => {`);
+  lines.push(`  for (let _at = 0; _at < _keys.length; _at += ${batchCap}) {`);
+  lines.push(`    const _chunk = _keys.slice(_at, _at + ${batchCap});`);
+  lines.push(`    const _values = _chunk.map((_, _i) => "(" + (_base + _at + _i) + ", ?" + (_i + 1) + ")").join(", ");`);
+  lines.push(`    const _rows = await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace(${JSON.stringify(HOIST_VALUES_PLACEHOLDER)}, _values), _chunk);`);
+  lines.push(`    for (const _r of _rows) { const _s = _r[${aliasKey}]; delete _r[${aliasKey}]; delete _r[${aliasVal}]; ${store} }`);
+  lines.push(`  }`);
+  lines.push(`};`);
+  // §8.10.3 — the failure is HELD and raised by the first read that runs.
+  lines.push(`// A pre-fetch failure is raised by the first read that runs, where the per-iteration query would have failed (§8.10.3).`);
+  lines.push(`let ${failureVar} = null;`);
   if (handled) {
-    // §19.8.3 (S455) — the site is HANDLED: the pre-fetch runs through the
-    // handled-query attempt, so a failure becomes the SqlError envelope the
-    // per-iteration arms match on (the map is then empty).
-    lines.push(
-      `const ${rowsVar} = ${keysVar}.length === 0 ? [] : (await ${SQL_ATTEMPT_FN}((_scrml_p) => ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace("__SCRML_BATCH_IN__", ${placeholdersVar}), _scrml_p[0]), [${keysVar}], (_scrml_rows) => _scrml_rows));`,
-    );
+    // §19.8.3 (S455) — the site is HANDLED: the failure is the SqlError envelope the
+    // read returns to the site's arms, for every read that runs.
+    lines.push(`if (${slotsVar}.size > 0) ${failureVar} = await ${SQL_ATTEMPT_FN}((_keys) => ${fetchVar}(_keys, 0), [...${slotsVar}.keys()], () => null);`);
+    lines.push(`const ${readVar} = async (_k) => {`);
+    lines.push(`  if (${failureVar}) return ${failureVar};`);
+    lines.push(`  if (!${slotsVar}.has(_k)) {`);
+    lines.push(`    // A key the loop body changed after the pre-fetch: read it now.`);
+    lines.push(`    const _s = ${slotsVar}.size;`);
+    lines.push(`    ${slotsVar}.set(_k, _s);`);
+    lines.push(`    const _failed = await ${SQL_ATTEMPT_FN}((_keys) => ${fetchVar}(_keys, _s), [_k], () => null);`);
+    lines.push(`    if (_failed) { ${slotsVar}.delete(_k); return _failed; }`);
+    lines.push(`  }`);
   } else {
-    lines.push(
-      `const ${rowsVar} = ${keysVar}.length === 0 ? [] : (await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace("__SCRML_BATCH_IN__", ${placeholdersVar}), ${keysVar}));`,
-    );
+    lines.push(`try { await ${fetchVar}([...${slotsVar}.keys()], 0); } catch (_e) { ${failureVar} = { error: _e }; }`);
+    lines.push(`const ${readVar} = async (_k) => {`);
+    lines.push(`  if (${failureVar}) throw ${failureVar}.error;`);
+    lines.push(`  if (!${slotsVar}.has(_k)) {`);
+    lines.push(`    // A key the loop body changed after the pre-fetch: read it now.`);
+    lines.push(`    const _s = ${slotsVar}.size;`);
+    lines.push(`    ${slotsVar}.set(_k, _s);`);
+    lines.push(`    await ${fetchVar}([_k], _s);`);
+    lines.push(`  }`);
   }
-  const _rowsIter = handled ? `(${rowsVar}.__scrml_error ? [] : ${rowsVar})` : rowsVar;
-  lines.push(`const ${mapVar} = new Map();`);
-  // The key of a row: the projected alias, removed so each row is exactly the row
-  // the per-iteration query returns.
-  const _takeKey = keyAlias
-    ? `const _k = _r[${JSON.stringify(keyAlias)}]; delete _r[${JSON.stringify(keyAlias)}];`
-    : `const _k = _r[${JSON.stringify(keyColumn)}];`;
-  if (terminator === "get") {
-    // `.get()` is the FIRST row the per-key query returns (§8.10.3 — in the query's
-    // own ORDER BY): keep the first row seen per key. It used to keep the last.
-    lines.push(
-      `for (const _r of ${_rowsIter}) { ${_takeKey} if (!${mapVar}.has(_k)) ${mapVar}.set(_k, _r); }`,
-    );
-  } else {
-    lines.push(
-      `for (const _r of ${_rowsIter}) { ${_takeKey} const _a = ${mapVar}.get(_k) ?? []; _a.push(_r); ${mapVar}.set(_k, _a); }`,
-    );
-  }
+  lines.push(`  const _hit = ${bySlotVar}.get(${slotsVar}.get(_k));`);
+  lines.push(`  ${pick}`);
+  lines.push(`};`);
 
   // s430 — a `let` binder the body writes: `let` head + the binder in the body's
   // declared names, so the write is an assignment (not a TDZ `const x = x …`).
@@ -1275,7 +1307,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   // `let row` an assignment (it used to re-declare `row` — E-CODEGEN-INVALID-LOGIC).
   const _hoistHeadKw = forHeadKeyword(node);
   const _hoistNames = loopBodyDeclaredNames(opts?.declaredNames, node, false);
-  lines.push(`for (${_hoistHeadKw} ${loopVar} of ${iterable}) {`);
+  lines.push(`for (${_hoistHeadKw} ${loopVar} of ${itemsVar}) {`);
   for (const code of emitLogicBody(rewrittenBody, { /* S415 */ declaredNames: blockScopedDeclaredNames(_hoistNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }

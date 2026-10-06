@@ -1,0 +1,55 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        tags {
+            id: integer primary key
+            name: text
+            note: integer
+        }
+    </schema>
+    <textKey> = "init"
+    <numKey> = "init"
+    <keyChanged> = "init"
+    // §8.10 Tier 2: the hoisted loop finds each iteration's rows with the SAME `=` the
+    // per-iteration query uses — the key column's type affinity applies. A text key
+    // "7" matches the INTEGER id 7; a number 7 matches the TEXT name '7'.
+    function textKey() {
+        let out = []
+        for (const it of [{ id: "7" }, { id: 7 }, { id: "x" }]) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function numKey() {
+        let out = []
+        for (const it of [{ n: 7 }, { n: "7" }]) {
+            const rows = ?{`SELECT id FROM tags WHERE name = ${it.n}`}.all()
+            out.push(rows.length)
+        }
+        return out.join(",")
+    }
+    // A key the loop body changes before its read is read with the changed value,
+    // as the per-iteration query reads it.
+    function keyChanged() {
+        let out = []
+        for (const it of [{ id: 6 }, { id: 8 }]) {
+            it.id = it.id + 1
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function go() {
+        @textKey = textKey() !{ _ :> "err" }
+        @numKey = numKey() !{ _ :> "err" }
+        @keyChanged = keyChanged() !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="textKey">${@textKey}</p>
+    <p id="numKey">${@numKey}</p>
+    <p id="keyChanged">${@keyChanged}</p>
+</program>
