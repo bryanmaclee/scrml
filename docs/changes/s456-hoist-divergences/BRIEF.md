@@ -1,0 +1,32 @@
+start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a2f749e5bfda8f7b8
+
+start at your worktree (cut from origin/main; expected base 2dd6d35d9 or later).
+
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (path-discipline incidents to date are non-zero).
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- ; `git rev-parse --show-toplevel` == pwd; clean tree. `git fetch origin main`; `git merge-base HEAD origin/main` MUST equal `git rev-parse origin/main` (else `git merge --ff-only origin/main`; if that fails STOP). Expected base ≥ 2dd6d35d9.
+2. Every Read/Write/Edit uses an ABSOLUTE path under YOUR worktree root; never write outside it; never `cd` into the main checkout (/home/bryan-maclee/scrmlMaster/scrml).
+3. NEVER `git stash` (shared across worktrees); NEVER `pkill -f` / `killall`; never `git -c core.hooksPath=…`.
+4. `bun install`, then `bun run pretest` from your worktree cwd (plain, not `bun --cwd X run`). Scratch under "$WT/.tmp/" (delete at end). TMPDIR, if set → ~/.cache/scrml-agent-tmp/s456-hoist (never inside a repo).
+5. First commit: archive THIS ENTIRE PROMPT verbatim as docs/changes/s456-hoist-divergences/BRIEF.md (first line `start at $(pwd)`); progress.md append-only, commit after each unit (WIP commits fine). Code + its tests in ONE commit. Never --no-verify. Foreground commit timeout 300000. Types gate is BLOCKING (`bun run types:check`; `--write` the baseline in the commit that changes the set); also run `bun scripts/s34-census.ts --check-new`, `bun scripts/regen-spec-index.ts --check`, `bun scripts/facts.ts --check` before pushing. Never put a status-bearing command behind a pipe (check `$?` / the artifact).
+6. Push as `fix/s456-hoist-divergences` (normal push). Do NOT open or merge a PR.
+
+MAPS — REQUIRED FIRST READ: .claude/maps/primary.map.md (stamp 9c556dc74 = #1325, current for source — only docs/regen PRs #1326-#1328 landed since). Follow its Task-Shape Routing for §8.10 / batch-planner / emit-control-flow. Read docs/changes/s455-hoist-keyed-read-in-if/progress.md (the #1325 arc this continues). Report whether the maps were load-bearing.
+
+TASK — impl#1, §8.10 N+1 loop hoisting: close the four divergences the S239 review of #1325 executed (gap `g-impl1-hoist-batching-divergences-s455`, docs/known-gaps.md). Authority: bryan S456 "go" on the PA's recommendation to fix these — read as extending the S435 impl#1-freeze exception S455 granted for #1325 to these same-surface silent-wrong fixes (PA reading, recorded for bryan's veto).
+
+GOVERNING SENTENCES (PA-quoted from compiler/SPEC.md; re-read §8.10 IN FULL, ~line 9255, and quote them in progress.md):
+- §8.10.3: "Per-iteration `Map` lookup preserves loop-iteration order for all body side effects — `lift`, reactive writes (`@x = ...`), nested server calls, `fail`, `break`, early `return`. The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings."
+- §8.10.2: "`.get()` in the loop becomes `Map<key, Row>`; missing keys yield `not`, preserving §8.7."
+- §8.10.6: "If `xs.length` at runtime exceeds `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite SHALL chunk the IN-list into segments of at most `SQLITE_MAX_VARIABLE_NUMBER` keys." (+ the S79 `batch-in-list-cap=` override paragraph.)
+Direction: semantics-changed TOWARD these sentences (conformance restoration), not a widening.
+
+THE FOUR DIVERGENCES — RELAYED from the reviewer, UNVERIFIED by the PA. REPRODUCE EACH FIRST on real bun:sqlite, hoisted vs `.nobatch()`, record SHA + emitted fragment; a non-reproducing item is reported as NOT-REPRODUCED with evidence, not fixed:
+(1) Key-type coercion — the lookup Map uses JS identity on the key while SQL `=` coerces: a text key "7" against an INTEGER column matches per-row but misses in the hoisted Map → `not`. Fix direction (yours to choose, justify): normalize the key the way the column's affinity would, or refuse the hoist when key/column types are not provably the same. Fail-closed preferred: never a silent miss.
+(2) Writes between iterations unseen — the pre-fetch precedes iteration 1, so a write performed inside the loop body (via a called function; §8.10.1 cond. 4 already excludes a second `?{}`) that changes a row read by a later iteration is invisible. PA-suggested direction: do not hoist when the body contains a call that may write (conservatively: any call the compiler cannot prove write-free / pure), emitting the §8.10.1 D-BATCH-001 near-miss reason. MEASURE how many corpus loops stop hoisting and list them.
+(3) Pre-fetch failure timing — an unhandled pre-fetch failure throws before iteration 1's side effects, even when no iteration reaches a conditional read. Fix: capture the pre-fetch failure and re-raise it at the first read that would have run (per-row-equivalent timing), handled and unhandled.
+(4) No chunking — >32766 keys (or the `batch-in-list-cap=` value) throws E-BATCH-002 instead of chunking. Implement the SHALL: chunk the IN-list, merge results, preserve per-key grouping for `.all()`.
+Locus hints are PA-located-verify, NOT traced: compiler/src/codegen/emit-control-flow.ts (emitHoistedForStmt, substituteHoistedSqlInBody), compiler/src/codegen/batch-planner.ts / compiler/src/batch-planner.ts (analyzeForLoop), compiler/src/hoist-sql-shape.ts. Report whether each held, was refined, or was wrong.
+ALSO VERIFY (report only, fix only if same root): `g-nplus1-hoist-keys-map-by-unselected-column` (HIGH, open) — likely closed by #1325's key projection; if so give the evidence for closing it. `g-hoisted-loop-write-to-an-outer-let-emits-a-tdz` (HIGH, open, emit-control-flow.ts) — reproduce and say whether it is the hoist path; do not fix if a different root, just report locus.
+EVIDENCE: per-item repro table base/head (hoisted vs `.nobatch()`, row present / absent / forced failure); whole-corpus impl#1 emit differential (write:true — compileScrml({write:false}) skips codegen and is NOT valid evidence), every changed artifact explained; conformance green + new runtime conformance cases pinning each fixed shape; full `bun run test` result.
+Update docs/known-gaps.md for the entries you touch (status, locus=, prov=). Do NOT edit SPEC.md (if you believe a SPEC sentence must change, say so in the report).
+FINAL REPORT (<450 words): FINAL_SHA; per-item repro table base/head; traced roots + fixes; loops that stopped hoisting (count + files); differential; tests; the two verify-only gaps; maps load-bearing?; `git status` clean.

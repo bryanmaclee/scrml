@@ -1,0 +1,34 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <handled> = "init"
+    <handledAll> = "init"
+    // one key cannot be bound (an object): only ITS read fails, as per row
+    function handled() {
+        let out = []
+        for (const it of [{ id: 7 }, { id: { a: 1 } }, { id: 9 }, { id: 8 }]) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get() !{ .QueryFailed(m) :> "QF"  _ :> "other" }
+            out.push(row is not ? "none" : (row.body is some ? row.body : row))
+        }
+        return out.join(",")
+    }
+    function handledAll() {
+        let out = []
+        for (const it of [{ id: [1, 2] }, { id: 7 }]) {
+            const rows = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.all() !{ .QueryFailed(m) :> []  _ :> [] }
+            out.push(rows.length)
+        }
+        return out.join(",")
+    }
+    function go() {
+        @handled = handled() !{ _ :> "err" }
+        @handledAll = handledAll() !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="handled">${@handled}</p>
+    <p id="handledAll">${@handledAll}</p>
+</program>

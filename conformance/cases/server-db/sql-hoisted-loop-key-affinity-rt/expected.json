@@ -1,0 +1,34 @@
+{
+  "id": "server-db-sql-hoisted-loop-key-affinity-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): the hoisted loop matches each iteration's key to rows with the per-iteration query's own SQL `=`, so the key column's type affinity applies exactly as it does per row. Each cell equals the same function compiled with `.nobatch()`. Pre-fix (2dd6d35d9, S456): the pre-fetch ran `WHERE id IN (…)` (SQL matched the rows) but the loop then looked each row up in a JS Map by the key VALUE — identity, no affinity — so the text key \"7\" missed the INTEGER row SQL had matched (textKey \"none,hello,none\", numKey \"0,1\"), and a key the body changed before its read (`it.id = it.id + 1`) was not in the Map at all (keyChanged \"none,none\"). Now the pre-fetch joins a key table of (slot, key) rows, SQL tags each row with the slot of the key it matched, and the loop reads by slot; a changed key is read when its read runs.",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10.2: \"`.get()` in the loop becomes `Map<key, Row>`; missing keys yield `not`, preserving §8.7.\" — a key is missing only when the per-iteration query finds no row. §8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings.\"",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" },
+        { "id": 9, "body": "nine" }
+      ],
+      "tags": [
+        { "id": 1, "name": "7", "note": 7 },
+        { "id": 2, "name": "x", "note": 7 }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "textKey": "hello,hello,none",
+      "numKey": "1,1",
+      "keyChanged": "hello,nine"
+    },
+    "domAnchored": [
+      { "selector": "#textKey", "text": "hello,hello,none" }
+    ]
+  }
+}

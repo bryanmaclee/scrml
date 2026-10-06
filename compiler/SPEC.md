@@ -9267,8 +9267,15 @@ A for-loop is a *Tier 2 candidate* iff all of the following hold, matched syntac
 3. The `?{}` block is terminated with `.get()` or `.all()`. `.run()` is excluded (see §8.10.5). `.prepare()` is invalid in scrml — see §44.3 / E-SQL-006.
 4. No other `?{}` blocks appear in the loop body.
 5. The query is not marked `.nobatch()` (§8.9.5).
+6. **(S456)** The loop body is provably write-free: it contains no call the compiler cannot prove performs no write (a database write, a reactive-cell write, or a call into a module whose effects are not analysed). A body that may write is not rewritten — the pre-fetch would precede the write and a later iteration would read stale rows, violating §8.10.3 — and D-BATCH-001 names the call.
 
 A for-loop that *almost* matches (e.g., two equality predicates, or a `.run()` terminator, or `.forEach`) but fails one condition SHALL produce **D-BATCH-001** with the specific near-miss reason. This diagnostic closes the coverage gap of pure-syntactic detection without the opacity of dataflow-based detection.
+
+> **Provenance:** spec:§8.10.3 "The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings." — the S456 conformance restoration (`g-impl1-hoist-batching-divergences-s455`, reviewer-executed divergence (2)); ruling:user-voice-scrml.md S456 "go".
+
+**Equivalence obligations (S456).** The rewrite SHALL match the per-row loop key by key: the key comparison SHALL be the database's own `=` (a text key against an INTEGER column matches exactly when the per-row query would), and a pre-fetch failure SHALL surface at the read that would have run, with the same error the per-row query raises for that key — a key whose batch failed is read by its own per-row query at that iteration.
+
+**Implementation status (impl#1, S456):** the rewrite is applied only when every database the program names is SQLite; a Postgres (or other) program keeps the per-row loop (`g-impl1-hoist-sqlite-only-s456`).
 
 #### 8.10.2 Rewrite (Map Lookup)
 
@@ -9308,7 +9315,7 @@ The key column is the column referenced by the single equality predicate in the 
 
 #### 8.10.6 Parameter Count Bound
 
-If `xs.length` at runtime exceeds `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite SHALL chunk the IN-list into segments of at most `SQLITE_MAX_VARIABLE_NUMBER` keys. If chunking is statically provable as impossible, **E-BATCH-002** fires at compile time; at runtime, an over-limit execution throws `SqlError::BatchTooLarge`.
+If `xs.length` at runtime exceeds `SQLITE_MAX_VARIABLE_NUMBER`, the Tier 2 rewrite SHALL chunk the IN-list into segments of at most `SQLITE_MAX_VARIABLE_NUMBER` keys. ~~If chunking is statically provable as impossible, **E-BATCH-002** fires at compile time; at runtime, an over-limit execution throws `SqlError::BatchTooLarge`.~~ *(S456: superseded — impl#1 chunks every over-cap key list; no over-limit throw remains. `E-BATCH-002` stays reserved for a backend whose cap cannot be chunked.)*
 
 **Cap override (S79 amendment).** The default cap is `32766` (SQLite 3.32+ `SQLITE_MAX_VARIABLE_NUMBER`, matching the bun:sqlite bundled version). Adopters targeting other backends MAY override per-app via the `<program batch-in-list-cap=>` attribute: a positive decimal integer (e.g. `"65535"` for Postgres' default `max_locks_per_transaction × N` ceiling, `"999"` for older SQLite builds). The override changes BOTH the runtime check threshold AND the diagnostic message text emitted into the compiled output. When the attribute is absent OR malformed (non-integer, zero, or negative), the compiler SHALL fall back to `32766` with no diagnostic. Users may also `.nobatch()` the call site (§8.9.5) to opt out of batching entirely when even an elevated cap is insufficient.
 

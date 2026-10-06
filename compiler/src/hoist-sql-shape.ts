@@ -2,7 +2,9 @@
  * §8.10 Tier 2 — the ALLOW-LIST of query shapes a loop hoist may rewrite (S455).
  *
  * The rewrite turns N per-iteration queries `… WHERE <key> = ${x.f}` into ONE
- * `… WHERE <key> IN (…)` pre-fetch grouped by key. That is the same answer only
+ * pre-fetch over all the keys, grouped by key (an `IN (…)` list until S456; now a
+ * joined key table, see HOIST_KEY_TABLE — the "IN-rewrite" below names either).
+ * That is the same answer only
  * when each per-key result is exactly the per-key slice of the IN result, and that
  * holds for a narrow, recognisable family of queries. Everything else — aggregates,
  * GROUP BY / HAVING, DISTINCT, LIMIT / OFFSET, OR, set operations, subqueries,
@@ -41,9 +43,36 @@ export interface HoistableQuery {
   selectNames: string[];
   /** The source table names (FROM + JOINs), as written (last dotted segment). */
   tables: string[];
-  /** The rewritten pre-fetch: key projected under `keyAlias`, `= ${…}` → `IN (__SCRML_BATCH_IN__)`. */
+  /**
+   * The rewritten pre-fetch: the query joined to the KEY TABLE (HOIST_KEY_TABLE), its
+   * `= ${…}` compared against the key table's key column instead, and each row's key
+   * SLOT projected under `keyAlias`. `__SCRML_BATCH_VALUES__` is the VALUES rows
+   * placeholder the emitter fills at run time (`(0, ?1), (1, ?2), …`).
+   */
   inSqlTemplate: string;
 }
+
+/**
+ * The pre-fetch's key table: one `(slot, key)` row per distinct loop key, the key a
+ * BOUND parameter (§8.2) and the slot a compiler-generated integer.
+ *
+ * WHY A KEY TABLE AND NOT `<key> IN (…)` (S456): the per-iteration query compares
+ * `<key> = ?` with SQL's equality — the key column's type affinity and collation
+ * apply (`id = '7'` matches the INTEGER 7; `name = 7` matches the TEXT '7'; a NOCASE
+ * column matches 'abc' to 'Abc'). An `IN (…)` pre-fetch returned the right rows, but
+ * the loop then found each row's key in a JS `Map` by the JS value — identity, no
+ * affinity, no collation — so the text key "7" missed the row SQL had matched and
+ * read `not`. With the key table SQL does the matching, with the SAME `=` as the
+ * per-iteration query (a `VALUES` column has no affinity, exactly like a bound
+ * parameter — executed against INTEGER / TEXT / NOCASE / BLOB / REAL / NUMERIC
+ * columns), and each row comes back tagged with the slot of the key it matched;
+ * the loop looks up the slot, never compares keys itself.
+ */
+export const HOIST_KEY_TABLE = "__scrml_batch_k";
+/** The key table's bound-key column (a `SELECT *` pre-fetch carries it; the emitter strips it). */
+export const HOIST_VAL_ALIAS = "__scrml_batch_val";
+/** The VALUES-rows placeholder in `inSqlTemplate`. */
+export const HOIST_VALUES_PLACEHOLDER = "__SCRML_BATCH_VALUES__";
 
 type TokKind = "word" | "qident" | "num" | "str" | "interp" | "op";
 interface Tok { kind: TokKind; text: string; start: number; end: number }
@@ -153,6 +182,10 @@ export function classifyHoistableQuery(
     if (t.kind === "word" && FORBIDDEN_WORDS.has(t.text.toUpperCase())) {
       return { reason: `the query uses ${t.text.toUpperCase()} — its IN-rewrite is not the per-key answer (§8.10.3)` };
     }
+    // The pre-fetch's own names (key alias, key table, its columns) must not collide.
+    if ((t.kind === "word" || t.kind === "qident") && /^"?__scrml_batch/i.test(t.text)) {
+      return { reason: `the query names \`${t.text}\`, which the pre-fetch reserves` };
+    }
   }
   let p = 0;
   const peek = (o = 0) => toks[p + o];
@@ -255,6 +288,7 @@ export function classifyHoistableQuery(
 
   // WHERE <key> = ${loopVar.field} (AND pred)*
   if (!kw(peek(), "WHERE")) return fail("expected WHERE <key> = ${…}");
+  const whereTok = toks[p];
   p++;
   const keyColumn = col();
   if (keyColumn === null) return fail("the WHERE does not start with the key column");
@@ -286,8 +320,16 @@ export function classifyHoistableQuery(
   }
   if (p !== toks.length) return fail(`unexpected \`${toks[p].text}\``);
 
+  // SELECT <list>, <key table>.<keyAlias> AS <keyAlias>
+  // FROM <sources>, (SELECT column1 AS <keyAlias>, column2 AS <val> FROM (VALUES …)) AS <key table>
+  // WHERE <key> = <key table>.<val> <rest>
+  // The key table joins after every source (a comma join filtered by the WHERE), so
+  // each source row is matched against each distinct key exactly as `<key> = ?` would.
+  const keyTable =
+    `(SELECT column1 AS ${keyAlias}, column2 AS ${HOIST_VAL_ALIAS} FROM (VALUES ${HOIST_VALUES_PLACEHOLDER})) AS ${HOIST_KEY_TABLE}`;
   const inSqlTemplate =
-    sql.slice(0, selectEnd) + `, ${keyColumn} AS ${keyAlias}` +
-    sql.slice(selectEnd, eqTok!.start) + "IN (__SCRML_BATCH_IN__)" + sql.slice(keyTok.end);
+    sql.slice(0, selectEnd) + `, ${HOIST_KEY_TABLE}.${keyAlias} AS ${keyAlias}` +
+    sql.slice(selectEnd, whereTok.start).trimEnd() + `, ${keyTable} ` +
+    sql.slice(whereTok.start, eqTok!.start) + `= ${HOIST_KEY_TABLE}.${HOIST_VAL_ALIAS}` + sql.slice(keyTok.end);
   return { keyColumn, keyField: km[1], selectNames, tables, inSqlTemplate };
 }

@@ -11,7 +11,7 @@
  *        via `<program idempotency-ttl="...">` attribute. Accepts bare
  *        millis or duration string ("1h"/"7d"/"300s"/"30m").
  *
- *   C.2  keysVar.length > 32766 (E-BATCH-002 ceiling) — overridable per-app
+ *   C.2  the §8.10.6 chunk size (default 32766) — overridable per-app
  *        via `<program batch-in-list-cap=N>` attribute.
  */
 
@@ -175,11 +175,17 @@ describe("§C.2 — batch-in-list cap via <program batch-in-list-cap=N>", () => 
     "utf8",
   );
 
+  // S456 — §8.10.6 "the Tier 2 rewrite SHALL chunk the IN-list into segments of at
+  // most `SQLITE_MAX_VARIABLE_NUMBER` keys": the cap is now the CHUNK size (it was a
+  // `keys.length > cap` throw). The runtime chunking itself is pinned by
+  // conformance/cases/server-db/sql-hoisted-loop-chunked-rt.
   test("emitter reads the dynamic cap, not a hardcoded literal", () => {
     expect(src).toContain("const batchCap = getBatchInListCap();");
-    expect(src).toContain("${keysVar}.length > ${batchCap}");
-    // No remaining hardcoded `> 32766` in the file.
+    expect(src).toContain("_at += ${batchCap}");
+    expect(src).toContain("_keys.slice(_at, _at + ${batchCap})");
+    // No remaining hardcoded `> 32766` / `+= 32766` in the file.
     expect(src).not.toContain("> 32766");
+    expect(src).not.toContain("+= 32766");
   });
 
   test("default cap 32766 preserved when override is null/invalid", () => {
@@ -191,8 +197,8 @@ describe("§C.2 — batch-in-list cap via <program batch-in-list-cap=N>", () => 
     expect(src).toContain('typeof cap === "number" && cap > 0');
   });
 
-  test("diagnostic message text references the configured cap", () => {
-    expect(src).toContain("(${batchCap}) for hoisted loop");
+  test("the emitted text references the configured cap", () => {
+    expect(src).toContain("in chunks of at most ${batchCap} bound keys (§8.10.6)");
   });
 
   test("module state lifecycle: codegen/index.ts wires set/reset", () => {
