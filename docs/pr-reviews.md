@@ -2135,3 +2135,6 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1317 verdict=finding by=S455-bryan date=2026-10-05 probe=S239 seven rounds on the tenant schema allow-list, every HIGH executed + PA-reproduced, fixed as a class; landed PARTIAL on bryan's "yes, both" (rel.f residual filed) -->
 <!-- @review pr=1318 verdict=carve-out by=S455-bryan date=2026-10-05 probe=docs-only gap filings + markers -->
 <!-- @review pr=1319 verdict=finding by=S455-bryan date=2026-10-05 probe=S239 r1 ee1a80bc DO-NOT-LAND (join-group aliases, qualified relations, dialect — executed on a throwaway PG16) → fixed; r2 7761b813 LAND-WITH-NITS (LIKE-infix; query-floor rel.f executed) → fixed; PA-verified by execution with controls at 7ea56093 -->
+<!-- @review pr=1320 verdict=carve-out by=S455-bryan date=2026-10-05 probe=SPEC-text (§14.8.11 deploy requirement) + docs -->
+<!-- @review pr=1321 verdict=carve-out by=S455-bryan date=2026-10-05 probe=print-only build report line + one pure boolean field in api.js (PA read the full api.js delta) -->
+<!-- @review pr=1322 verdict=finding by=S455-bryan date=2026-10-05 probe=S239 r1 94265ab3 LAND-WITH-NITS — 19 unhandled twins + 149 corpus files byte-identical; F1 arm-value text regex was fail-closed→fail-open → AST allow-list at 2a8c32e8, PA-verified by execution -->

@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 241 | 6 |
-| MED | 510 | 4 |
+| MED | 513 | 4 |
 | LOW | 277 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -23106,8 +23106,9 @@ Reference .scrml only (adopters get the hand-written shim). Same lowering class 
 <!-- @gap id=g-impl1-guarded-return-and-reassign-lowering-s454 sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(guarded-expr statement lowering)+emit-event-wiring.ts(submit preventDefault) prov=empirical:s454-F8-phase0-and-differential -->
 Found by the F8 `scrml fix` corpus differential; the F8 rule LISTS these sites rather than rewriting them. #1305 fixed the in-EXPRESSION `return f() !{…}` drop; the statement-form cases here are separate (verify which remain after #1305 before fixing).
 
-### g-impl1-handled-sql-lowering-defects-s455 — impl#1: #1305's handled-`?{}` lowering — `lift ?{}.all() !{…}` drops its value; `@c = ?{}.get() !{…}` in a function sets the cell server-side only; plus eight lesser defects — `NEW S455; HIGH; open`
-<!-- @gap id=g-impl1-handled-sql-lowering-defects-s455 sev=HIGH status=open locus=compiler/src/codegen/sql-attempt.ts(PA-located from the map; verify) prov=review:s455-r11-phase0 -->
+### g-impl1-handled-sql-lowering-defects-s455 — impl#1: #1305's handled-`?{}` lowering — `lift ?{}.all() !{…}` drops its value; `@c = ?{}.get() !{…}` in a function sets the cell server-side only; plus eight lesser defects — `NEW S455; HIGH; RESOLVED S455 (#1322)`
+<!-- @gap id=g-impl1-handled-sql-lowering-defects-s455 sev=HIGH status=resolved locus=compiler/src/codegen/sql-attempt.ts(PA-located from the map; verify) prov=review:s455-r11-phase0 -->
+RESOLVED S455 (#1322, ebd4be2d4): one shared check (`handledSqlOfGuardedNode`, codegen/sql-attempt.ts) makes every statement-classifying consumer see a handled `?{}`'s statement exactly as the unhandled one — items 1, 2, 3, 5–10 closed, plus three found by the consumer enumeration (hoisted keyed read always `not` when DIRECT in the loop body; top-level W-CG-001; `yield`). Residual: item 4 (bootstrap if-condition) → g-bootstrap-handled-sql-if-condition-unsupported-s455.
 Found by the S455 R11 `scrml fix` Phase 0 (agent-executed at bade5cb9d against real bun:sqlite; reproducers `docs/changes/s455-scrml-fix-r11-sql-failable/phase0-probe.ts` + progress.md). The R11 rule LISTS these shapes, so the rewritten corpus does not hit them; they bite authors who hand-write the handled form. (1) HIGH silent-wrong: `lift ?{…}.all() !{…}` in a function body — no lift/return emitted (client gets null) and the query is not attempt-wrapped (a failure still throws). (2) HIGH silent-wrong: `@c = ?{…}.get() !{…}` in a server function lowers to a server-side `_scrml_reactive_set` that never reaches the client. (3) `for (r of ?{}.all() !{…})` → E-PARSE-001. (4) bootstrap: handled `?{}` in an `if` condition → E-BOOTSTRAP-UNSUPPORTED. (5) fail-open: a handled `?{}` inside `fn` drops E-FN-001. (6) fail-open: E-CPS-MULTIBATCH-REORDER and E-REACTIVE-003 disappear (rails-crud-admin shape). (7) handled queries lose I-PROTECT-STRIP-001; one case gains E-PROTECT-006 (runtime redaction still held where measured). (8) return-type inference stops at a handled declaration (extra W-TYPE-031-UNPROVEN). (9) a handled query in a body-split function → E-RI-002. (10) a handled query in a callee stops impl#1 batching the caller's calls. Both exit 0 for (1)/(2).
 
 ### g-db-scope-als-global-exposes-guarded-handle-s455 — `globalThis.__scrml_db_scope_als`'s store keys `held` by the guarded `_scrml_sql` proxy, so a sealed foreign slice inside `transaction {}` reaches the db handle — `NEW S455; MED; open (pre-existing)`
@@ -23162,3 +23163,19 @@ Fails closed (no login), but an outage is misreported as bad credentials — the
 <!-- @gap id=g-tenant-pg-overload-hijack-s455 sev=MED status=resolved locus=compiler/src/commands/build.js(pgSchemaCreateRequirementLines) prov=ruling:user-voice-scrml.md-S455-"a"+review:s455-S239-subset-r2 -->
 RESOLVED S455: a deploy requirement (SPEC §14.8.11, ruling "a"); `scrml build` now prints it once per build in the database report when a `db-authoritative` table exists (feat/s455-build-report-pg-revoke). The compiler cannot see overloads; enforcement is the database's.
 Executed on PG16 by the S239 review of #1319: `lower(id)` → `public.lower(integer)` returned `A-secret,B-secret` under `WHERE tenant_id='A'`; also a row-type `lower(assets)` overload and `public.date(text)`. Name-level allow-lists cannot see overloads; precondition: the attacker can `CREATE` in the search_path. Ruled S455 **"a"**: a DEPLOY REQUIREMENT — `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (PG15+ default), stated in SPEC §14.8.11. Owed: surface it in the `scrml build` report when a `db-authoritative` Postgres table exists (no deploy doc exists in the repo to carry it).
+
+### g-impl1-hoist-keyed-read-inside-if-null-s455 — §8.10 N+1 hoist with the keyed read nested inside an `if` in the loop body emits `const row = null; // client cannot evaluate` — every row reads `not` on SUCCESS — `NEW S455; HIGH; open (pre-existing; in flight S455)`
+<!-- @gap id=g-impl1-hoist-keyed-read-inside-if-null-s455 sev=HIGH status=open locus=searched:the §8.10 loop-hoist pass (emit-logic / scheduling) — not traced prov=review:s455-S239-sqlg -->
+Reviewer-executed at 94265ab3 on real bun:sqlite, same on base, handled and unhandled (the handled variant also throws past its arm). #1322 fixed only the read DIRECTLY in the loop body. Related: the hoist does not project the key column (`SELECT body … WHERE id=` never matches). Dispatched S455 (`fix/s455-hoist-keyed-read-in-if`, "go" = the S435 exception).
+
+### g-impl1-handled-sql-misc-codegen-s455 — handled `?{}` in a few positions still fails to compile (fail-closed): reassignment inside a hoisted loop, nested inside an arm, ternary, `match` arm — `NEW S455; MED; open (pre-existing)`
+<!-- @gap id=g-impl1-handled-sql-misc-codegen-s455 sev=MED status=open locus=searched:emit-logic.ts guarded-expr lowering, ast-builder ternary/match — not traced prov=review:s455-S239-sqlg -->
+Reviewer-executed: handled reassignment `row = ?{…}.get() !{…}` inside a hoisted loop → E-CODEGEN-INVALID-LOGIC (unhandled works); nested handled `?{}` inside an arm → E-CODEGEN-INVALID-LOGIC; ternary `c ? ?{…}… : x` → E-ERROR-003; `match` arms holding a `?{}` → invalid JS (`Unexpected keyword 'else'`), handled or not.
+
+### g-impl1-multibatch-split-count-null-s455 — in a multi-batch split function, `const z = ?{count}.get(); @s = JSON.stringify(z)` sets `@s` to "null" instead of `{"n":0}` — `NEW S455; MED; open (pre-existing; cause unverified)`
+<!-- @gap id=g-impl1-multibatch-split-count-null-s455 sev=MED status=open locus=searched:emit-server CPS multi-batch — not traced prov=review:s455-S239-sqlg -->
+Reviewer observed the wrong value (unhandled too) but did not trace the cause.
+
+### g-impl1-guarded-call-and-server-load-consumers-s455 — guarded FUNCTION calls share the consumer blind spots #1322 closed for `?{}`; and smaller split/fn gaps — `NEW S455; MED; open (pre-existing)`
+<!-- @gap id=g-impl1-guarded-call-and-server-load-consumers-s455 sev=MED status=open locus=compiler/src/codegen/sql-attempt.ts(handledSqlOfGuardedNode — sql-only by design)+route-inference+type-system prov=review:s455-sqlg-dev -->
+From the #1322 consumer enumeration: a guarded function call `f() !{…}` has the same blind spots (E-RI-002, `fn` purity, body-DG); a `!{}` on a `<x server> = ?{}` load parses as a detached error-effect node (handler ignored); in a `fn`, a `?{}` in an `if` condition or `match ?{}` gets no E-FN-001; `const x = ?{}` is not treated as server-side in a split function (E-RI-002); an unhandled failing write in a split function still runs the client continuation.
