@@ -34,3 +34,58 @@
 | one-file (users declared in login.scrml) | same | same | 200 `"bad"` |
 
 RELAYED premise CONFIRMED: every login silently fails; the only tenant signal is info I-TENANT-STRIP.
+
+## Task A — built (31f5fbb9a, code + tests one commit; pre-commit 31477 pass / 0 fail)
+- Locus: api.js TENANT-SCHEMA stage (the one place `compilationTenantSet` and every file's expanded AST
+  coexist). NEW compiler/src/tenant-substrate-read.ts `fileTenantSubstrateReads(fileAST, ctx)`; ctx =
+  `buildTenantContext(protect, [], "", undefined, compilationTenant)`; reads classified by the floor's own
+  `resolveTenantScoping` (kind read | unresolvable).
+- Code: **W-TENANT-SUBSTRATE-SCOPED** (Warning). Trigger AS BUILT: within one `function-decl` body, walked in
+  evaluation order up to its first `session.set("tenantId", v)` call ExprNode (literal key; `v` not literal
+  `not`; skipped when the function or file binds `session`), a `sql` node / `sql-ref` ExprNode that is a
+  tenant-scoped read and not `.acrossTenants()` whose result DECIDES the pin: it is in the pin's value, or in a
+  `condExpr` / `headerExpr` / c-style for test evaluated before the pin, directly or through a local
+  (const/let/tilde/lin decl, `x =` assign) derived from it. Nested function-decls / lambdas skipped.
+- PA-brief divergence (surfaced): the brief's trigger was "any scoped read before the pin" on the premise
+  "before the pin no tenant is active". The runtime reads the tenant PER QUERY, so in a tenant SWITCH the
+  read before the pin sees the previous tenant — a switch that reads the old tenant's domain rows on purpose
+  would be a false positive with no correct silencing (`.acrossTenants()` is wrong there). Narrowed to reads
+  that DECIDE the pin — the corollary's regress, provable in every session state.
+- NOT built: interprocedural pin (already E-SESSION-CONTEXT — a peer call has no session; test pins it);
+  userId-only login reading a tenant-scoped users table, incl. `scrml generate auth`'s template (org-first
+  flows pin the tenant earlier; per-tenant users then work — not provable); raw-text-only `?{}`.
+- After (same harness): two-file + one-file → W-TENANT-SUBSTRATE-SCOPED@login.scrml line 4 / 8, message
+  names the corollary + both fixes; executed result unchanged ("bad") — warning only. `.acrossTenants()`
+  fix → no warning, "ok:u1"; dropping tenant_id from users → no warning, "ok:u1".
+- SPEC: §34 row + one §14.8.10 sentence with the brief's Provenance line. SPEC-INDEX regen, FACTS regen.
+
+## Task B (b) — reproduced on 2dd6d35d9 (.tmp/reproB/b.mjs, postgres dialect)
+- §14.8.10 allow-list clause quoted: a `<schema>` admits "`CREATE POLICY … AS RESTRICTIVE` (its body read in
+  the tenant SQL subset — "Bodies" below — and its calls held to the expression allow-list below …)".
+- base: `AS /* x */ RESTRICTIVE` → "body outside the tenant SQL subset — a `/* */` comment" + "permissive
+  policy — its `AS` clause (`x`) could not be read"; `AS --x⏎ RESTRICTIVE` → same two with `--`;
+  `ON assets /* c */ AS RESTRICTIVE` → "PERMISSIVE (the default when `AS` is omitted)"; non-tenant table →
+  "body outside … comment" + "not admitted".
+- Cause: the `content` reading lexes comment text as tokens (`x` read as the AS mode / the table's next
+  token), and the policy body (read in the subset, which admits no comment) started right after the table,
+  so it held the AS clause. Fix: `readPolicyHead` — comment-content tokens (`Tok.cmt`, new) are stepped over
+  inside a live statement (a commented-out policy is still read whole); the body starts after the AS mode.
+- head: all four admitted; still charged: comment inside USING, PERMISSIVE behind a comment, `/* RESTRICTIVE
+  */ PERMISSIVE`, `--RESTRICTIVE⏎ PERMISSIVE`, evil() behind a comment, nested-`/*` divergent, commented-out
+  permissive policy.
+
+## Task B (c) — measured on 2dd6d35d9 (.tmp/reproB/c.mjs)
+- base: "a{"×10k 0.8 s / ×20k 3.4 s / ×40k 13.5 s; "fn f("×40k 18.4 s; 'a{ """ '×20k 5.2 s; "a {{"×20k 6.7 s;
+  'x{ """ b{ c{ }…'×5k 4.1 s. Also the paren scan of `fn` heads and the modifier-run regexes were quadratic.
+- head: every case ≤ 46 ms; results byte-identical (JSON hash per case equal); differential fuzz vs the base
+  module (random bodies over braces / parens / quotes / `"""` / fn modifiers): 300k (len ≤30) + 200k (len ≤30)
+  + 50k (len ≤120) → 0 diffs.
+
+## Measurements (base 2dd6d35d9 compiler sources flipped in place, restored after)
+- Corpus write:true (examples/ samples/ conformance/cases/ stdlib/ = 2371 single-file; projects ex22, ex23,
+  examples, stdlib, flogence/src): 0 artifact diffs; diagnostic diffs ONLY in the 2 new conformance cases
+  (+W-TENANT-SUBSTRATE-SCOPED in substrate-scoped-login-warn; −4 E-TENANT-SCHEMA-HAZARD in
+  schema-policy-comment-in-as-clause-pos). Corpus files gaining the warning: NONE. One pre-existing crash on
+  both sides (samples/gauntlet-s19-phase4/nested-comments.scrml, RangeError max call stack) — unchanged.
+- Conformance: head 1299/1349 + 50 xfail; on base sources substrate-scoped-login-warn and
+  schema-policy-comment-in-as-clause-pos FAIL (substrate-across-read-pos passes on both — a negative pin).
