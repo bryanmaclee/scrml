@@ -19,7 +19,7 @@ import {
   type ProtectedColumns,
 } from "./protect-egress.ts";
 import { sqlSkeleton } from "./protect-flow.ts";
-import { sqlHoldsOneStatement, multipleStatementsThrowExpr, judgeDriverCall, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE } from "./sql-one-statement-guard.ts";
+import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal } from "./sql-one-statement-guard.ts";
 // §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
 // `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
 // and coerce them back to true/false at query-lowering time (server only).
@@ -653,15 +653,18 @@ function lowerSqlMethodSite(
   // emit-server scan).
   const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, across, dbVar);
   // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
-  if (!sqlHoldsOneStatement(effectiveSql)) return multipleStatementsThrowExpr();
+  if (!sqlHoldsOneStatement(effectiveSql)) return refuseMultipleStatements(effectiveSql, sqlContent);
   const { params, segments } = extractSqlParams(effectiveSql);
   const tagged = buildTaggedTemplate(dbVar, segments, params);
   // §8.1.2 (S456 fix round F1) — judge the tagged template AS EMITTED: its quasis (the SQL
   // text JS will send) must be the segments read above, holding one statement.
-  const _verdict = judgeDriverCall(tagged, segments);
+  // §14.8.10 item (1) (S457) — the same text, held to the program-body statement allow-list at
+  // the lowering (g-sql-checker-and-lowering-read-different-text-s457).
+  const { verdict: _verdict, refusal: _refusal } = judgeDriverCallDetail(tagged, segments);
   if (_verdict !== "ok") {
     if (_verdict === "text-not-read" && errors) errors.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, { start: 0, end: 0 }));
-    return refusedDriverCallExpr(_verdict);
+    if (_refusal) recordProgramStatementRefusal(_refusal, sqlContent);
+    return refusedDriverCallExpr(_verdict, _refusal);
   }
   const rows = tenantScope(`await ${tagged}`);
 
@@ -700,17 +703,25 @@ function lowerSqlBareSite(sqlContent: string, across: boolean, dbVar: string): s
   // injected; a bare SELECT of one is filtered at the source like every read.
   const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, across, dbVar);
   // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
-  if (!sqlHoldsOneStatement(effectiveSql)) return multipleStatementsThrowExpr();
-  const { sql, params } = extractSqlParams(effectiveSql);
+  if (!sqlHoldsOneStatement(effectiveSql)) return refuseMultipleStatements(effectiveSql, sqlContent);
+  const { sql, params, segments } = extractSqlParams(effectiveSql);
   // ⚑ S443 round 6: a bare `?{`SELECT * …`}` used as a VALUE is the driver's row
   // array — tag it like every other lowering (measured: it served `passwordHash`).
-  if (params.length === 0) {
-    return protectTagSqlResult(tenantScope(`await ${dbVar}.unsafe(${JSON.stringify(sql)})`), sqlContent);
-  }
   // One array element per slot: each payload is parenthesized, so a comma inside one
   // (`${a, b}` — the comma operator, which the tagged-template path evaluates to `b`)
   // stays ONE bound value instead of becoming two (S457: "expected 2 values, received 3").
-  return protectTagSqlResult(tenantScope(`await ${dbVar}.unsafe(${JSON.stringify(sql)}, [${params.map((p) => `(${p})`).join(", ")}])`), sqlContent);
+  const call = params.length === 0
+    ? `${dbVar}.unsafe(${JSON.stringify(sql)})`
+    : `${dbVar}.unsafe(${JSON.stringify(sql)}, [${params.map((p) => `(${p})`).join(", ")}])`;
+  // §8.1.2 + §14.8.10 item (1) (S457) — judge the `.unsafe` call AS EMITTED, like the tagged
+  // form: one statement, and on the program-body allow-list (`ATTACH DATABASE` reached the
+  // driver through this path — g-sql-checker-and-lowering-read-different-text-s457).
+  const { verdict: _verdict, refusal: _refusal } = judgeDriverCallDetail(call, segments);
+  if (_verdict !== "ok") {
+    if (_refusal) recordProgramStatementRefusal(_refusal, sqlContent);
+    return refusedDriverCallExpr(_verdict, _refusal);
+  }
+  return protectTagSqlResult(tenantScope(`await ${call}`), sqlContent);
 }
 
 // ---------------------------------------------------------------------------

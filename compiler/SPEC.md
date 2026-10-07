@@ -8920,6 +8920,16 @@ F2; these positions compiled clean before it).
   parameterized, `unsafe` with or without parameters — runs the statements after the first whenever the
   first returns no rows (`INSERT … (${v}); DELETE FROM t` emptied `t`): the database refuses nothing,
   and the token walk is the only protection.
+- **Checked where it is lowered (S457).** This rule and the §14.8.10 item (1) allow-list are ALSO
+  decided at every lowering of a program-body `?{}` — on the SQL text the emitted driver call sends,
+  read by the same JavaScript parse — so a `?{}` codegen lowers is a `?{}` the checks read, whatever
+  reader located it. In a compilation with a database a refused site is a compile error
+  (`E-SQL-MULTIPLE-STATEMENTS`, `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED` or `E-TENANT-UNDECLARED`)
+  reported at the `?{`, once per body, and is emitted as an expression that throws — nothing is sent.
+  *(S457: three shapes whose `?{` the raw-text reader missed — a keyword-named `@cell /` before it, an
+  object literal `/` in a server template-literal slot, a template that also holds `<#name>` —
+  compiled clean and ran `DROP TABLE` on SQLite.)* **Direction of change: newly-rejecting**; corpus
+  measured (2421 sources, base vs head): 0 newly refused.
 
 **Why.** Every statement of one string runs on the same connection, so a leading statement changes
 the context the next one runs in. Under the §14.8.11 tier, `?{ SELECT set_config('scrml.tenant',

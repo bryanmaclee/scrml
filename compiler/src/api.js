@@ -1419,6 +1419,8 @@ function _compileScrmlImpl(options = {}) {
   }
 
   const _attrInterpExecutableSeen = new Set();
+  /** S457 — `sqlBodyKey`s of program-body `?{}` refusals already reported (see collectErrors). */
+  const _sqlProgramStatementSeen = new Set();
   function collectErrors(stageName, errors, filePath = null) {
     if (errors && errors.length > 0) {
       for (const e of errors) {
@@ -1471,6 +1473,15 @@ function _compileScrmlImpl(options = {}) {
           if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
           _attrInterpExecutableSeen.add(attrKey);
           _attrInterpExecutableSeen.add(fullKey);
+        }
+        // §14.8.10 item (1) (S457) — a program-body `?{}` refused at the TENANT-SCHEMA stage is
+        // refused AGAIN at its codegen lowering (the authority — sql-one-statement-guard.ts): one
+        // report per body, the stage's (it carries the exact `?{` span). A body only the lowering
+        // reads (the stage's raw-text reader missed it) is reported by the lowering.
+        if (typeof e.sqlBodyKey === "string") {
+          if (stageName === "CG" && _sqlProgramStatementSeen.has(e.sqlBodyKey)) continue;
+          _sqlProgramStatementSeen.add(e.sqlBodyKey);
+          delete enriched.sqlBodyKey;
         }
         allErrors.push(enriched);
         // s432 F3 — positioned redaction (a fragment attribute's echoed name).
@@ -3172,6 +3183,9 @@ function _compileScrmlImpl(options = {}) {
     protectAnalysis: paResult.protectAnalysis,
     // §14.8.10 (S455) — the compilation's ONE tenant set (stage TENANT-SCHEMA above).
     compilationTenant,
+    // §14.8.10 item (1) (S457) — the SAME database scope the stage above used: codegen holds
+    // every `?{}` it lowers to the program-body statement allow-list.
+    compilationHasDatabase: compilationHasDb,
     batchPlan: bpResult.batchPlan,
     batchPlannerErrors: bpResult.errors,
     embedRuntime,

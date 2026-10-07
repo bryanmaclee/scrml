@@ -4309,3 +4309,4 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3771] land · #1342 s457-sql-one-reader · @adv:g-sql-slot-reader-regex-division-misreads-s456,g-rewrite-sql-refs-lowers-inside-js-literals-s456
 [3772] disp · s457-sql-check-at-lowering · s457-executable-sinks-srcdoc-svg · s457-runtime-local-rename-and-handler-truncation · → brief/s457b
 [3773] land · s457-is-some-core (#1333) — the placeholder gate split out pending the `__scrml_` prefix ruling (gate kept @ 934ac062c) · @adv:g-is-some-in-a-function-expression-body-emits-an-undefined-helper
+[3774] land · s457-sql-check-at-lowering — §8.1.2 + §14.8.10 item (1) judged at every author-?{} lowering on the SQL each driver call sends; F2/F3/F4 + 13 keyword cells + .unsafe ATTACH refused; differential: 0 bypass, 390/390 legal identical · @adv:g-sql-checker-and-lowering-read-different-text-s457

@@ -25,6 +25,7 @@
 
 import { programStatementCount } from "./schema-differ.js";
 import { scanExpressionTextForSql } from "./sql-in-expression-text.ts";
+import { multipleStatementsMessage, programStatementKey } from "./codegen/sql-one-statement-guard.ts";
 
 /** One `E-SQL-MULTIPLE-STATEMENTS` diagnostic (the TENANT-SCHEMA stage's shape). */
 export interface MultipleStatementsDiagnostic {
@@ -32,6 +33,8 @@ export interface MultipleStatementsDiagnostic {
   message: string;
   span: unknown;
   severity: "error";
+  /** S457 — the one-report-per-body key shared with the codegen lowering check. */
+  sqlBodyKey?: string;
 }
 
 /** The SQL text inside an expression-position `?{ … }` (`sql-ref` `raw`), template backticks removed. */
@@ -117,14 +120,13 @@ export function programBodyMultipleStatements(fileAST: unknown): MultipleStateme
     reported.add(key);
     out.push({
       code: "E-SQL-MULTIPLE-STATEMENTS",
-      message:
-        `E-SQL-MULTIPLE-STATEMENTS: this \`?{}\` holds ${statements} SQL statements — a \`?{}\` holds exactly one ` +
-        `(§8.1.2). A \`;\` may only end the statement; nothing may follow it. Split it into one \`?{}\` per ` +
-        `statement; when they must succeed or fail together, put those \`?{}\`s in a \`transaction { }\` block ` +
-        `(§8.5.3, §19.10). (Every statement of one string runs on the database, so a chained statement could ` +
-        `change the connection's tenant or role — §14.8.11 — for the statements after it.)`,
+      // One message for the stage and the codegen lowering check (codegen/sql-one-statement-guard.ts).
+      message: multipleStatementsMessage(statements),
       span: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
       severity: "error",
+      // S457 — the lowering refuses the same body again (the authority); api.js keeps one report
+      // per body, this one (it carries the `?{` span).
+      sqlBodyKey: programStatementKey("E-SQL-MULTIPLE-STATEMENTS", filePath, sql),
     });
   }, unreadable);
   return out;

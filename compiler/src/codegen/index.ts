@@ -66,6 +66,8 @@ import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-mac
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering-errors.ts";
+import { setProgramBodySqlPolicy, setProgramBodySqlFile, resetProgramStatementRefusals, drainProgramStatementRefusals } from "./sql-one-statement-guard.ts";
+import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
@@ -175,6 +177,13 @@ export interface CgInput {
    * `files` + `protectAnalysis` with the same function.
    */
   compilationTenant?: CompilationTenantSet;
+  /**
+   * §14.8.10 item (1) (S457) — whether the compilation has a database (api.js
+   * `compilationHasDatabase`, the TENANT-SCHEMA stage's value): the program-body statement
+   * allow-list governs only such a compilation, and codegen enforces it at every `?{}` lowering.
+   * When absent, runCG computes it from `files` with the same function.
+   */
+  compilationHasDatabase?: boolean;
   sourceMap?: boolean;
   embedRuntime?: boolean;
   mode?: "browser" | "library";
@@ -1174,6 +1183,9 @@ export function resetCodegenModuleState(): void {
   setProtectContextForRewriter(null);
   setBoolColumnsForRewriter(null);
   setTenantContextForRewriter(null);
+  // sql-one-statement-guard — the program-body SQL policy + file (S457; null = fail closed).
+  setProgramBodySqlPolicy(null);
+  setProgramBodySqlFile(null);
   // emit-expr — per-file shadow / ambient flags, request ids, server async
   // classifier. (The log production flag, the `~` sink and the refused-lowering
   // sink are set/reset by runCG itself.)
@@ -1201,6 +1213,7 @@ export function runCG(input: CgInput): CgOutput {
     depGraph,
     protectAnalysis,
     compilationTenant: compilationTenantInput,
+    compilationHasDatabase: compilationHasDatabaseInput,
     embedRuntime = false,
     sourceMap = false,
     mode = "browser",
@@ -1329,6 +1342,9 @@ export function runCG(input: CgInput): CgOutput {
   // §2.2.1 (S456) — the run-wide refused-lowering sink (refused-lowering-errors.ts):
   // a site that declines to lower records here, whatever opts reached it.
   resetRefusedLowerings();
+  // §14.8.10 item (1) (S457) — the program-body statement refusals codegen records at the
+  // lowering point (sql-one-statement-guard.ts); same reset / drain discipline.
+  resetProgramStatementRefusals();
   // S91 A-4.1 — per-file CompileContext map, populated during the per-
   // file Plan/Emit phase. Passed to the route-splitter when
   // `emitPerRoute` is set so future A-4.2+ sub-phases can read per-file
@@ -2344,6 +2360,14 @@ export function runCG(input: CgInput): CgOutput {
   for (const fileAST of files) {
     if (fileAST && typeof fileAST === "object") (fileAST as any)[COMPILATION_TENANT_KEY] = compilationTenant;
   }
+  // §14.8.10 item (1) (S457, g-sql-checker-and-lowering-read-different-text-s457) — every
+  // `?{}` lowering holds the SQL its driver call sends to the program-body statement allow-list,
+  // over the SAME tenant set and database scope the TENANT-SCHEMA stage used.
+  setProgramBodySqlPolicy({
+    hasDatabase: compilationHasDatabaseInput ?? compilationHasDatabase(files),
+    tenantTables: compilationTenant.tables ?? [],
+    dialect: compilationTenant.dialect ?? "unknown",
+  });
 
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
@@ -2359,6 +2383,7 @@ export function runCG(input: CgInput): CgOutput {
       // one database, UNRESOLVED (a compile error) with two or more — a lowering that
       // was told no handle never lands on the file's first database.
       setFileSqlFallback(resolveDbScopes(getNodes(fileAST as never), filePath || null).handles.length);
+      setProgramBodySqlFile(filePath || null);
       // §20.6 — register this file's source for log() file:line resolution.
       registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
       // §20.6 (shadowing) — a file-level `function log` shadows the builtin
@@ -3264,6 +3289,7 @@ export function runCG(input: CgInput): CgOutput {
     for (const e of drainTildeUnresolvedErrors()) errors.push(e);
     for (const e of drainExprGuardErrors()) errors.push(e);
     for (const e of drainRefusedLowerings()) errors.push(e);
+    for (const e of drainProgramStatementRefusals()) errors.push(e);
   }
 
   // -------------------------------------------------------------------------
@@ -4315,7 +4341,12 @@ export function runCG(input: CgInput): CgOutput {
   for (const e of drainTildeUnresolvedErrors()) errors.push(e);
   for (const e of drainExprGuardErrors()) errors.push(e);
   for (const e of drainRefusedLowerings()) errors.push(e);
+  for (const e of drainProgramStatementRefusals()) errors.push(e);
   for (const e of drainServerAmbientSessionRefusalErrors(null, resolveSpanLineCol)) errors.push(e);
+  // S457 — this compile's program-body SQL policy ends with it (an emitter driven directly
+  // afterwards fails closed instead of inheriting this compilation's database scope).
+  setProgramBodySqlPolicy(null);
+  setProgramBodySqlFile(null);
 
   return {
     outputs,

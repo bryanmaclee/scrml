@@ -136,12 +136,13 @@ export function scanExpressionTextForSql(text: string, visit: ExprTextSqlVisitor
 /**
  * The code read so far by `scanExpressionTextForSql`, as a list of units (a token, a collapsed
  * literal, one space for a whitespace run). `tail()` hands `regexAllowedAfter` the suffix it
- * reads — the last few units, reaching back past the `(` that matches a trailing `)` — so each
- * `/` costs O(its context), not O(text): re-joining (or flattening a `+=`-built string) up to
- * every `/` made the scan quadratic. `regexAllowedAfter` gives the same answer on this suffix as
- * on the whole: it reads back over trailing whitespace, the last token, the word and `.` before
- * it, the token before `of`, a `+` / `-` run, and for `)` the text back to its matching `(` and
- * the word before that — all inside the suffix.
+ * reads — the last few units; after a trailing `)`, the few units before its matching `(` plus
+ * an empty `()` — so each `/` costs O(its context), not O(text): re-joining (or flattening a
+ * `+=`-built string) up to every `/` made the scan quadratic, and so did re-reading a long
+ * parenthesised inside. `regexAllowedAfter` gives the same answer on this suffix as on the whole:
+ * it reads back over trailing whitespace, the last token, the word and `.` before it, the token
+ * before `of`, a `+` / `-` run, and for `)` only the word before its matching `(` — all inside the
+ * suffix.
  */
 class CodeSoFar {
   private readonly parts: string[] = [];
@@ -178,14 +179,19 @@ class CodeSoFar {
 
   /** The suffix of the code read so far that `regexAllowedAfter` reads (see the class note). */
   tail(): string {
-    let from = this.parts.length - CodeSoFar.LOOKBACK;
     const last = this.lastNonSpaceIndex();
     if (last >= 0 && this.parts[last] === ")") {
       const open = this.openOf.get(last) ?? -1;
-      if (open >= 0) from = Math.min(from, open - CodeSoFar.LOOKBACK);
-      else from = last; // unmatched: regexAllowedAfter finds no `(` (division) — on ")" alone too
+      // unmatched: regexAllowedAfter finds no `(` (division) — on ")" alone too
+      if (open < 0) return ")";
+      // After a `)`, regexAllowedAfter reads only what OPENED it: it walks back to the matching
+      // `(` and asks for the word before. Hand it the units before that `(` and an empty `()` —
+      // the same answer, without the parenthesised text: re-reading the whole inside on every
+      // `/` after a `)` made `((((x) / x) / x) …` quadratic (16k levels: 6.5 s, S457
+      // g-sql-site-locator-nested-paren-quadratic-s457).
+      return this.parts.slice(Math.max(0, open - CodeSoFar.LOOKBACK), open).join("") + "()";
     }
-    return this.parts.slice(Math.max(0, from)).join("");
+    return this.parts.slice(Math.max(0, this.parts.length - CodeSoFar.LOOKBACK)).join("");
   }
 }
 
