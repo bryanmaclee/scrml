@@ -4279,3 +4279,20 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3741] disp · s456-hoist-divergences (key coercion · writes between iterations · pre-fetch failure timing · §8.10.6 chunking) → fix/s456-hoist-divergences · @adv:g-impl1-hoist-batching-divergences-s455
 [3742] disp · s456-tenant-identity-substrate (W- on a non-acrossTenants tenant read in a tenantId-pinning fn; residuals b+c) → fix/s456-tenant-identity-substrate · @adv:g-tenant-identity-substrate-scoped-breaks-login-s455,g-tenant-small-residuals-s455
 [3743] finding · g-tenant-floor-off-for-live-db-and-body-create-tables-s455 + residual (a) TEMP tables are RULINGS not fixes — SPEC §14.8.10 states the floor is OFF for live-db / body CREATE TABLE tables; scoping them is semantics-changed, refusing them is newly-rejecting · → surfaced to bryan S456
+[3744] land · #1329 review carve-outs #1326–#1328 · → #1329
+[3745] ruling · S456 "closures fine" — #939 #865 #579 closed with evidence (obsolete/superseded/obsolete) · → user-voice §S456
+[3746] land · #1330 handle() return is a protect sink; Response by value — globalThis.Response leak closed · → #1330 · @adv:g-handle-globalthis-response-ships-protected-columns
+[3747] ruling · S456 "b, startup check lands with it" — undeclared tenant_id tables refused, startup check · → user-voice §S456
+[3748] land · #1331 W-TENANT-SUBSTRATE-SCOPED; `--` ends at CR|LF · → #1331 · @adv:g-tenant-identity-substrate-scoped-breaks-login-s455,g-tenant-small-residuals-s455
+[3749] land · #1332 §8.10 hoist ≡ per-row (key compare, write-free, failure timing, chunking) · → #1332 · @adv:g-impl1-hoist-batching-divergences-s455
+[3750] ruling · S456 "a, fix F7/F9 too" + "your recs, go" — program-body SQL closed statement allow-list; txn/INDEX/7 PRAGMAs admitted · → user-voice §S456
+[3751] land · #1334 undeclared tenant_id refused; closed statement + lexical allow-list; startup 503; table_xinfo · → #1334 · @adv:g-tenant-floor-off-for-live-db-and-body-create-tables-s455
+[3752] finding · set_config('scrml.tenant',…) multi-statement re-pin CONFIRMED live on PG16 under the §14.8.11 tier · → g-tenant-set-config-in-program-body-s456
+[3753] ruling · S456 "one statement per seams reasonable. push" · → user-voice §S456
+[3754] land · #1335 one statement per ?{} + one JS slot reader (8 consumers) + emitted-call guard; closes set_config re-pin + SQLite slot bypass of #1334; CRLF fix · → #1335 · @adv:g-tenant-set-config-in-program-body-s456,g-sql-slot-extent-brace-count-bypass-s456
+[3755] land · #1336 foreign slice silent null (flogence S56): refusal sink, acorn-parse slice tokens, each quoted handler refused · → #1336 · @adv:g-foreign-slice-regex-quote-and-in-block-refusal-lost
+[3756] ruling · S456 "your recs on 1 and 2" — no ${} into event attrs / scheme-led URL attrs / srcdoc · → user-voice §S456
+[3757] land · #1337 E-ATTR-INTERP-EXECUTABLE, judged as emitted · → #1337 · @adv:g-quoted-event-attribute-interpolates-row-data-injection-s456,g-quoted-url-attribute-javascript-scheme-row-data-s456
+[3758] friction · PA brief narrowed a fail-closed rule (every on…) to a WHATWG name list → 19 Chromium handler names re-opened (SVG onbegin ran on load); reverted to fail-closed + exact non-event exemptions · → hand-off §S456 DURABLE
+[3759] friction · split-review briefs dropped the no-pattern-pkill rule and shared one .tmp; a reviewer leaked a curl cookie jar into the main checkout · → hand-off §S456 MISSES
+[3760] state · S456 WRAP — 8 PRs (#1329–#1337), 7 rulings + 2 PA readings, 3 stale PRs closed; pa-ruled 3 · → hand-off §S456

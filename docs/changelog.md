@@ -2,6 +2,23 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S456 — 2026-10-06/07 (bryan · ASUS; solo, across a reboot) — tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting made per-row-equivalent, flogence's silent null slice
+
+Seven rulings (user-voice §S456). Every code landing went through at least one S239 round; four needed two to five. The recurring defect: two readers of one text disagree, and the disagreement is a bypass. Each fix made the checked text the text the runtime executes.
+
+**Landed:**
+- **#1330** `handle()` return is a `protect=` sink; the Response constructor is recognized by value (globalThis/self/alias/destructure/.json/.bind/Reflect.construct) — `new globalThis.Response(JSON.stringify(u))` no longer serves the protected column (executed on base: `passwordHash:"SECRET"`).
+- **#1331** W-TENANT-SUBSTRATE-SCOPED — a login read of a tenant-scoped identity table that decides the tenant pin (direct, destructured, @cell, same-file helper); the schema lexer ends `--` at CR or LF (r1 found a lone-CR comment hiding `PERMISSIVE`); `parseSchemaBlock` linear.
+- **#1332** §8.10 N+1 hoisting ≡ the per-row loop: DB-side key comparison via a (slot,key) join, hoist only provably write-free bodies (D-BATCH-001 names the call), per-read failure timing with single-key fallback, chunking at `batch-in-list-cap=`; SQLite-only (the PG pre-fetch was broken). SPEC §8.10.1 condition 6 + equivalence obligations; §8.10.6 throw struck.
+- **#1334** undeclared `tenant_id` tables refused (rulings "b, startup check lands with it", "a, fix F7/F9 too", "your recs, go"): program-body SQL in any DB compilation is a closed statement allow-list over a closed lexical subset (E-TENANT-UNDECLARED, E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED); compile-time SQLite scan + a startup check that serves 503 while an undeclared `tenant_id` relation exists (`table_xinfo`; re-check under backoff; fails closed). Five review rounds, two boundary changes.
+- **#1335** one SQL statement per program-body `?{}` (ruling "one statement per") + ONE JS-accurate `${}` slot reader shared by 8 consumers + an emitted-call guard; closed the live `set_config('scrml.tenant',…)` re-pin under the §14.8.11 tier (PG16) and a SQLite slot-desync bypass of #1334 (`${ x + '{' }); CREATE TABLE leak …`); CRLF fixed after a Windows-only failure.
+- **#1336** flogence's report: a `'` in a regex in a foreign slice compiled to `null` at exit 0 — codegen refusals now always reach the diagnostics (refusal sink; 5 more exit-0 refusals closed), slices are tokenized by `acorn.parse` in their real wrapper, `<each>` quoted handlers with `${}` refused (case-insensitive).
+- **#1337** E-ATTR-INTERP-EXECUTABLE (ruling "your recs on 1 and 2"): no `${…}` into any `on…` attribute (except exact `one`/`online`/`onboarding`), `srcdoc`, or a URL attribute led by an executable scheme — judged as emitted (after prop substitution and `^{emit}`).
+- **#1329** review carve-outs owed at boot.
+- PRs **#939 #865 #579** closed with evidence (obsolete / superseded).
+
+**Gate:** cloud `gate` green on every landing; corpus differentials showed 0 unintended changes on each. Review floor 0 owed.
+
 ## S455 — 2026-10-05/06 (bryan · ASUS; solo) — the tenant floor's schema boundary built by allow-list, R11 migrated reads-only, the foreign slice sealed, #1305's lowering made whole
 
 **Landed (each S239-reviewed; markers in `docs/pr-reviews.md`):**
