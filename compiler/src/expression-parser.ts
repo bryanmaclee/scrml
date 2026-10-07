@@ -1364,6 +1364,33 @@ function matchInputStateSigilLeft(s: string, end: number): number {
  * verbatim in the output (so `a || b is some` becomes
  * `a || __scrml_is_some__(b)`).
  */
+/**
+ * Words that stop the leftward operand scan: a `(…)` group directly right of
+ * one is a GROUPING paren, never a call (`return (f(n)) is not`).
+ *
+ * The set is deliberately ONLY words that are reserved in every JS mode AND
+ * that can never be a callee or a value, so reading them as a stop cannot
+ * change the meaning of any program that parsed before (#1333 review R1-R3):
+ *   - `of` and `await` are LEGAL identifiers in some modes — a user function
+ *     `of` is a callee (`of(x) is some`), so they are NOT here (`yield` is:
+ *     see below);
+ *   - `new`, `typeof`, `void`, `delete` are unary operators whose precedence
+ *     against `is` is unruled — treating them as stops changed what
+ *     `typeof (v) is some` / `new Object(v) is some` mean, so they keep the
+ *     pre-#1333 reading (operator inside the operand) and are NOT here;
+ *   - `not` / `and` / `or` are scrml words with their own lowering (§42.10,
+ *     §45.7) and are left to it.
+ * Each word below is reserved everywhere and introduces a statement, a clause
+ * or a binary operator — the word is never the callee of the group after it.
+ */
+const IS_LHS_STOP_KEYWORDS = new Set<string>([
+  "return", "throw", "case", "else", "do", "in", "instanceof",
+  // `yield` (review N1): emitted artifacts are ES modules, where `yield` is
+  // reserved and can never be a callee — inside a generator `yield (v) is some`
+  // yields the TEST, not `v`.
+  "yield",
+]);
+
 function scanLhsLeft(s: string, isStart: number): number {
   // 1. Skip whitespace immediately before `is`
   let i = isStart - 1;
@@ -1426,8 +1453,22 @@ function scanLhsLeft(s: string, isStart: number): number {
       // Ident segment. This may be:
       //   - the BASE of the chain (no `.` left of it) — terminate after,
       //   - or a member-tail-name (a `.` left of it) — continue chain.
+      const identEnd = pos;
       while (pos >= 0 && /[A-Za-z0-9_$]/.test(s[pos])) pos--;
       const identStart = pos + 1;
+
+      // #1333 — a KEYWORD left of a `(…)` group is not its callee: in
+      // `return (f(n)) is not` the `(f(n))` is a GROUPING paren and the LHS is
+      // that group. Consuming `return` produced `__scrml_is_not__(return (f(n)))`,
+      // an acorn ParseError that dropped the whole enclosing expression onto the
+      // string fallback. A keyword that is a MEMBER name (`m.delete(k)`) is
+      // preceded by `.` and stays part of the chain (checked below).
+      {
+        let dotScan = pos;
+        while (dotScan >= 0 && /\s/.test(s[dotScan])) dotScan--;
+        const isMember = dotScan >= 0 && s[dotScan] === ".";
+        if (!isMember && IS_LHS_STOP_KEYWORDS.has(s.slice(identStart, identEnd + 1))) break;
+      }
       chainStart = identStart;
 
       // Look for `.` (whitespace-tolerant) to the left — that makes the ident
@@ -1471,6 +1512,21 @@ function scanLhsLeft(s: string, isStart: number): number {
 
   // If we never consumed anything, the LHS is empty/invalid.
   if (chainStart > i) return -1;
+
+  // `new Callee(args)` binds tighter than any operator (it is a member-level
+  // primary), so the `new` belongs INSIDE the operand: `new Object(v) is some`
+  // tests the constructed value. Without this the operand stopped at
+  // `Object(v)` and the placeholder landed between `new` and its callee —
+  // `new __scrml_is_some__(Object(v))`, a ReferenceError before #1333 and a
+  // `new` applied to the lowering's arrow (TypeError) after it (review R2).
+  // Repeats for `new new X()()`. `new` is reserved, so it is never a callee.
+  for (;;) {
+    let k = chainStart - 1;
+    while (k >= 0 && /\s/.test(s[k])) k--;
+    if (k < 2 || s.slice(k - 2, k + 1) !== "new") break;
+    if (k - 3 >= 0 && /[A-Za-z0-9_$.@]/.test(s[k - 3])) break;
+    chainStart = k - 2;
+  }
   return chainStart;
 }
 
