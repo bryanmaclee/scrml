@@ -4296,3 +4296,7 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3758] friction · PA brief narrowed a fail-closed rule (every on…) to a WHATWG name list → 19 Chromium handler names re-opened (SVG onbegin ran on load); reverted to fail-closed + exact non-event exemptions · → hand-off §S456 DURABLE
 [3759] friction · split-review briefs dropped the no-pattern-pkill rule and shared one .tmp; a reviewer leaked a curl cookie jar into the main checkout · → hand-off §S456 MISSES
 [3760] state · S456 WRAP — 8 PRs (#1329–#1337), 7 rulings + 2 PA readings, 3 stale PRs closed; pa-ruled 3 · → hand-off §S456
+[3761] ruling · S457 "a now with c discussed for later" — runtime scheme guard on data-supplied URL schemes; PA reading: same safe-scheme set as §5.2 · → user-voice §S457 · @adv:g-quoted-url-attribute-data-supplied-scheme-s456
+[3762] disp · s457-url-scheme-runtime-guard · s457-sql-one-reader · s457-maps-noncompliance · s457-is-some-function-expression (#1333) · s457-reexport-and-dev-tenant-check · DD url-refinement-type · → brief/s457
+[3763] ruling · S457 "ok we can drop c" — no url/link refinement type for attributes; DD marked historical · → user-voice §S457
+[3764] land · s457-maps-noncompliance — FACTS verbs 12, fix --help, bootstrap-conformance regen + blocking PR step; filed walker gap + match-arm phantom (PA-reproduced) + string(url) gap · @adv:g-walkfileast-skips-engine-and-match-bodies
