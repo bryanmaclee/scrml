@@ -38,3 +38,10 @@
   log "E-DEPLOY-DB-TENANT-UNDECLARED: database ./ref.db could not be checked … database file not found: <path> —
   declared as "./ref.db" in app.scrml", no db file created. Test updated to that contract (path-in-log, value-free
   client body, nothing created kept). All 19 dev-driving test files: 270 pass / 0 fail.
+- [2026-10-07] B committed 4d2d91ad1 (hook: 31873 tests, 0 fail). Conformance: 1341 pass + 50 xfail / 1391.
+- [2026-10-07] Measurement (.tmp/measure.sh, base = git-archived 0d8e9d8ce compiler vs worktree): ex23 — 9 pages now
+  load ../schema.client.js (models/auth.scrml re-exports UserRole from ../schema.scrml); diagnostics identical;
+  sample phase1-export-reexport-008 + a scrml:auth/store/oauth probe: 0 differing lines. The measurement exposed a
+  wrong client filter: a re-exported ENUM (kind "type") was skipped although its variant object is a real client
+  value — fixed (client pairs mirror a direct import; only channels skipped). New test (enum) fails on the old filter.
+  ex23 auth.client.js footer now registers `UserRole: _scrml_modules["schema.client.js"].UserRole`.

@@ -174,6 +174,22 @@ describe("§21.4 — the client reads a re-export through the registry", () => {
     expect(reg["b.client.js"].K).toBe("kay");
   });
 
+  test("a re-exported ENUM reaches the client: its variant object comes through like a direct import", () => {
+    const b = build("enum", {
+      "c.scrml": `${D}{\n    export type Color:enum = { Red, Green }\n}\n`,
+      "b.scrml": `${D}{\n    export { Color } from "./c.scrml"\n}\n`,
+      "a.scrml": `<program>\nimport { Color } from "./b.scrml"\n\n<pick> = Color.Red\n<p>${D}{@pick}</p>\n</program>\n`,
+    });
+    expect(b.errors).toEqual([]);
+    expect(b.read("b.client.js")).toContain('_scrml_modules["b.client.js"] = { Color: _scrml_modules["c.client.js"].Color };');
+    const ctx = vm.createContext({ _scrml_modules: {} });
+    vm.runInContext(b.read("c.client.js"), ctx);
+    vm.runInContext(b.read("b.client.js"), ctx);
+    const reg = ctx._scrml_modules;
+    expect(reg["b.client.js"].Color).toBe(reg["c.client.js"].Color);
+    expect(reg["b.client.js"].Color.Red).toBe("Red");
+  });
+
   test("--module-format=esm: the re-export is read off the source NAMESPACE (no link-error-prone `export … from`)", () => {
     const b = build("esm", {
       "c.scrml": C,

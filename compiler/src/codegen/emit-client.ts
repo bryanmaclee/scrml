@@ -209,11 +209,13 @@ function buildModuleRegistryFooter(
   // s457 (§21.4) — re-exports of other local `.scrml` modules. A re-export binds
   // nothing in THIS module, so it is read from the source module's registry entry,
   // which (dependencies load first) is already populated: `helper:
-  // _scrml_modules["c.client.js"].w`. `export *` arrives expanded to names. A name
-  // the source module declares as a type, channel or engine has no client value and
-  // is not registered (an importer reads `undefined` for it — the same as importing
-  // it from the source directly). A re-exported name never falls through to a
-  // same-named local binding below: that local is not what the module exports.
+  // _scrml_modules["c.client.js"].w`. `export *` arrives expanded to names. The pair
+  // mirrors a DIRECT import of the source exactly: whatever the source registers (a
+  // fn, a const, an enum's variant object) comes through, and a name it does not
+  // register (a pure struct type, a component) reads `undefined` — never a throw. A
+  // channel is skipped, as in the source's own footer (CHX inlines it at the
+  // consumer). A re-exported name never falls through to a same-named local binding
+  // below: that local is not what the module exports.
   const reExportPairs: string[] = [];
   const reExported = new Set<string>();
   for (const edge of localReExportEdges(importGraph, filePath)) {
@@ -221,7 +223,7 @@ function buildModuleRegistryFooter(
     for (const { exported, imported } of edge.names) {
       reExported.add(exported);
       const b = resolveExportedBinding(importGraph, edge.absSource, imported);
-      if (b && (b.kind === "type" || b.kind === "channel" || b.kind === "engine")) continue;
+      if (b && b.kind === "channel") continue;
       if (!/^[A-Za-z_$][\w$]*$/.test(imported) || !/^[A-Za-z_$][\w$]*$/.test(exported)) continue;
       reExportPairs.push(`${exported}: _scrml_modules[${srcKey}].${imported}`);
     }
