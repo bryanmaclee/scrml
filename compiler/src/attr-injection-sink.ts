@@ -25,7 +25,22 @@
  * fixed safe set; a backslash or `&` before the scheme terminator is refused because the
  * emitted template literal decodes JS escapes (`\x6a` → `j`) and the scheme can then not be
  * proven.
+ *
+ * A URL whose literal text commits to NO scheme (`href="${url}"`) is not refused here: the scheme comes
+ * from the data, and §5.2 rule 3 (S457) guards it at RUNTIME instead — `quotedUrlAttrNeedsRuntimeGuard`
+ * below tells the emitters which quoted values need `_scrml_safe_url`. The scheme reader and the scheme
+ * sets live in `runtime-url-guard.js`, shared verbatim with that runtime guard.
  */
+
+import {
+  _SCRML_URL_VALUED_ATTRS,
+  _SCRML_SAFE_URL_SCHEMES,
+  _SCRML_SAFE_DATA_IMAGE_TYPES,
+  _SCRML_IMAGE_SOURCE_ATTRS,
+  _scrml_read_url_scheme,
+  _scrml_url_scheme_admitted,
+} from "./runtime-url-guard.js";
+
 
 // ---------------------------------------------------------------------------
 // Event-handler attribute name (fail closed)
@@ -68,119 +83,78 @@ export function isExecutableEventHandlerAttrName(name: string): boolean {
 // URL-valued attributes
 // ---------------------------------------------------------------------------
 
-/**
- * Attributes whose value is a URL (or a list that begins with one), lowercased. Element-
- * insensitive on purpose (fail closed): `href` is a URL on `<a>`, `<area>`, `<link>`, `<base>`
- * and SVG/MathML elements alike.
- *
- * Source: the HTML Living Standard attribute index (§ "Attributes", index of the HTML
- * attributes) — every attribute whose value is a "valid URL potentially surrounded by
- * spaces", a "valid non-empty URL", or a set/list of them: `action`, `cite`, `data`,
- * `formaction`, `href`, `itemid`, `itemtype`, `manifest`, `ping`, `poster`, `src`, `srcset`,
- * `imagesrcset`; plus the URL-valued attributes of § "Obsolete features" that browsers still
- * parse (`archive`, `background`, `classid`, `codebase`, `dynsrc`, `longdesc`, `lowsrc`,
- * `profile`, `icon`, `usemap`), and SVG/XML `xlink:href` / `xml:base`.
+/*
+ * The URL-attribute set, the safe-scheme set, the raster `data:image` set and the scheme reader are
+ * DEFINED in `runtime-url-guard.js` — the one file the runtime URL guard (§5.2 rule 3, S457) inlines
+ * verbatim — so the compile-time literal-prefix rule and the runtime data rule cannot drift. This module
+ * re-exports them under their compile-time names.
  */
-export const URL_VALUED_ATTRS: ReadonlySet<string> = new Set([
-  "action",
-  "archive",
-  "background",
-  "cite",
-  "classid",
-  "codebase",
-  "data",
-  "dynsrc",
-  "formaction",
-  "href",
-  "icon",
-  "imagesrcset",
-  "itemid",
-  "itemtype",
-  "longdesc",
-  "lowsrc",
-  "manifest",
-  "ping",
-  "poster",
-  "profile",
-  "src",
-  "srcset",
-  "usemap",
-  "xlink:href",
-  "xml:base",
-]);
 
 /**
- * Schemes after which interpolated text is admitted. A scheme written LITERALLY in the
- * attribute cannot be changed by the interpolation that follows it (the literal `:` ends the
- * scheme), and none of these schemes executes the URL's text as script in any URL attribute:
- * `http:` / `https:` / `ftp:` fetch or navigate, `mailto:` / `tel:` / `sms:` hand off to an
- * external handler. Every other scheme — `javascript:`, `vbscript:`, `data:` (an `<iframe src>`
- * / `<object data>` of `data:text/html` runs script; see `SAFE_DATA_IMAGE_TYPES` for the one
- * admitted `data:` shape), `blob:` (same-origin document), and any scheme not named here — is
- * refused (fail closed).
+ * Attributes whose value is a URL (or a list of URLs), lowercased, element-insensitive. The list and
+ * its sources are documented at `_SCRML_URL_VALUED_ATTRS` in `runtime-url-guard.js`.
  */
-export const SAFE_LITERAL_URL_SCHEMES: ReadonlySet<string> = new Set([
-  "http", "https", "ftp", "mailto", "tel", "sms",
-]);
+export const URL_VALUED_ATTRS: ReadonlySet<string> = _SCRML_URL_VALUED_ATTRS;
 
 /**
- * Raster image media types a `data:` URL may LITERALLY name before an interpolation, on an
- * image-loading attribute (`IMAGE_SOURCE_ATTRS`). A raster image is decoded, never executed —
- * `<img src="data:image/png;base64,${b64}">`. `image/svg+xml` is NOT here (SVG is a document that
- * can carry script), nor is any non-image type.
+ * Schemes after which interpolated text is admitted (and which the runtime guard admits in data). A
+ * scheme written LITERALLY in the attribute cannot be changed by the interpolation that follows it
+ * (the literal `:` ends the scheme).
  */
-export const SAFE_DATA_IMAGE_TYPES: ReadonlySet<string> = new Set([
-  "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/avif", "image/bmp",
-  "image/x-icon", "image/vnd.microsoft.icon",
-]);
+export const SAFE_LITERAL_URL_SCHEMES: ReadonlySet<string> = _SCRML_SAFE_URL_SCHEMES;
+
+/** Raster image media types a `data:` URL may name on an image-loading attribute. */
+export const SAFE_DATA_IMAGE_TYPES: ReadonlySet<string> = _SCRML_SAFE_DATA_IMAGE_TYPES;
 
 /** Attributes whose URL is loaded as an image source (where a raster `data:` image is admitted). */
-export const IMAGE_SOURCE_ATTRS: ReadonlySet<string> = new Set(["src", "srcset", "imagesrcset", "poster"]);
+export const IMAGE_SOURCE_ATTRS: ReadonlySet<string> = _SCRML_IMAGE_SOURCE_ATTRS;
 
-/** What a scheme test over a literal URL prefix found. `rest` is the normalized text after `:`. */
+/**
+ * What a scheme test over a literal URL prefix found. `rest` is the normalized text after `:`.
+ * `relative` — the literal text can no longer begin with a scheme (a `/`, `?` or `#` came first, or the
+ * run before `:` is not a scheme): whatever the interpolation supplies stays a relative URL.
+ * `none` — the literal text commits to nothing (`""`, `java`): the interpolated DATA can supply the
+ * scheme. Such a value is admitted at compile time and guarded at runtime (§5.2 rule 3).
+ */
 export type LiteralUrlScheme =
   | { kind: "none" }
+  | { kind: "relative" }
   | { kind: "scheme"; scheme: string; rest: string }
   | { kind: "unprovable"; reason: string };
 
 /**
- * Read the scheme the LITERAL text `prefix` (the attribute value up to its first `${`)
- * commits the URL to, the way the WHATWG URL parser will read the runtime string:
- *  - leading C0 controls and spaces are stripped (URL parser, "remove any leading C0 control
- *    or space");
- *  - ASCII tab / LF / CR are removed anywhere (URL parser, "remove all ASCII tab or newline"),
- *    so `java<TAB>script:` IS `javascript:`;
- *  - the scheme is the run before the first `:` when that run is `ALPHA *( ALPHA / DIGIT /
- *    "+" / "-" / "." )` and no `/`, `?` or `#` came first; it is compared lowercased.
- *  - a `\` or `&` before the scheme terminator is UNPROVABLE: the top-level lowering puts the
- *    text into a JS template literal, which decodes `\x6a`, `\u{6a}` and `\t`, and an entity
- *    such as `&#106;` is the HTML spelling of a scheme letter. Neither is ever needed in a
- *    real scheme, so it is refused rather than decoded.
- * `{kind:"none"}` means the literal text commits to NO scheme (a relative URL such as
- * `/users/`, or a prefix the interpolation itself completes, as in `href="${url}"` — a
- * data-supplied scheme, which the §5.2 executable-sink rule does not cover; open gap
- * g-quoted-url-attribute-data-supplied-scheme-s456).
+ * Read the scheme the LITERAL text `prefix` (the attribute value up to its first `${`) commits the
+ * URL to — the shared reader `_scrml_read_url_scheme` with escape decoding ON: the top-level lowering
+ * puts the text into a JS template literal, which decodes `\x6a`, `\u{6a}` and `\t`, and an entity such
+ * as `&#106;` is the HTML spelling of a scheme letter, so a `\` or `&` before the scheme ends is
+ * `unprovable` (refused rather than decoded).
  */
 export function readLiteralUrlScheme(prefix: string): LiteralUrlScheme {
-  let s = String(prefix ?? "");
-  let start = 0;
-  while (start < s.length && s.charCodeAt(start) <= 0x20) start++;
-  s = s.slice(start).replace(/[\t\n\r]/g, "");
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c === "\\" || c === "&") {
-      return { kind: "unprovable", reason: c === "\\" ? "an escape sequence (`\\`)" : "a character reference (`&`)" };
-    }
-    if (c === "/" || c === "?" || c === "#") return { kind: "none" };
-    if (c === ":") {
-      const candidate = s.slice(0, i);
-      if (/^[A-Za-z][A-Za-z0-9+.\-]*$/.test(candidate)) {
-        return { kind: "scheme", scheme: candidate.toLowerCase(), rest: s.slice(i + 1) };
-      }
-      return { kind: "none" };
-    }
-  }
-  return { kind: "none" };
+  return _scrml_read_url_scheme(String(prefix ?? ""), true) as LiteralUrlScheme;
+}
+
+/**
+ * Index of the first `${` in a quoted attribute value, counting the tokenizer-spaced `$ {` spelling
+ * some lowerings also interpolate; -1 when there is none.
+ */
+export function firstInterpolationIndex(value: string): number {
+  const m = /\$\s*\{/.exec(String(value ?? ""));
+  return m ? m.index : -1;
+}
+
+/**
+ * §5.2 rule 3 (S457) — does the QUOTED URL-valued attribute `name="value"` need the RUNTIME scheme
+ * guard? True when the value interpolates `${…}` and its literal text before the first interpolation
+ * commits to NO scheme (`readLiteralUrlScheme` kind `none`: `href="${url}"`, `src="java${x}"`). A
+ * literal prefix that proves a relative URL or a safe scheme needs no guard (its emitted write stays
+ * byte-identical); an unsafe or unprovable one is refused at compile time (rule 2) and never emitted.
+ */
+export function quotedUrlAttrNeedsRuntimeGuard(name: string, value: string): boolean {
+  if (typeof name !== "string" || typeof value !== "string") return false;
+  if (!URL_VALUED_ATTRS.has(name.toLowerCase())) return false;
+  const at = firstInterpolationIndex(value);
+  if (at < 0) return false;
+  return readLiteralUrlScheme(value.slice(0, at)).kind === "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -208,23 +182,11 @@ export function classifyInterpolatedAttrSink(name: string, value: string): Inter
   if (URL_VALUED_ATTRS.has(lower)) {
     const r = readLiteralUrlScheme(value.slice(0, at));
     if (r.kind === "unprovable") return { kind: "url-unprovable", reason: r.reason };
-    if (r.kind === "scheme" && !SAFE_LITERAL_URL_SCHEMES.has(r.scheme)) {
-      if (r.scheme === "data" && IMAGE_SOURCE_ATTRS.has(lower) && literalDataImageIsRaster(r.rest)) return null;
+    if (r.kind === "scheme" && !_scrml_url_scheme_admitted(lower, r.scheme, r.rest)) {
       return { kind: "url-scheme", scheme: r.scheme };
     }
   }
   return null;
-}
-
-/**
- * Does the literal text after `data:` commit to a raster image media type? The media type
- * must be COMPLETE in the literal text — terminated by `;` or `,` before the interpolation — so
- * the data cannot extend it (`data:image/png${x}` and `data:image/${t};…` are refused).
- */
-function literalDataImageIsRaster(rest: string): boolean {
-  const m = /^([^;,]*)[;,]/.exec(rest);
-  if (!m) return false;
-  return SAFE_DATA_IMAGE_TYPES.has(m[1].trim().toLowerCase());
 }
 
 /**

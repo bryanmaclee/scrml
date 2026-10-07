@@ -10,6 +10,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, wrapUrlGuard } from "./url-attr-guard.ts";
 import * as acorn from "acorn";
 
 /**
@@ -1193,9 +1194,12 @@ function splitTagSegments(s) {
  *
  * @param {string} elVar — the variable name of the element
  * @param {Array<{name: string, value: string|null}>} attrs
+ * @param {object|null} engineCtx
+ * @param {string} tag — the element's tag ("" when unknown: every URL-attribute name then counts
+ *   for the §5.2 rule 3 runtime guard — fail closed)
  * @returns {string[]}
  */
-function emitSetAttrs(elVar, attrs, engineCtx = null) {
+function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
   const lines = [];
   for (const attr of attrs) {
     if (attr.value === null) {
@@ -1379,6 +1383,9 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
           }
         }
         tpl += "`";
+        // §5.2 rule 3 (S457) — a URL attribute whose literal prefix commits to no scheme
+        // (`href="${it.url}"`, `href=${it.url}`): the data supplies the scheme; guard the write.
+        if (quotedUrlAttrNeedsGuard(tag, attr.name, attr.value)) tpl = wrapUrlGuard(elVar, attr.name, tpl);
         pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${tpl});`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${JSON.stringify(attr.value)});`);
@@ -1644,6 +1651,8 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           }
         }
         tpl += "`";
+        // §5.2 rule 3 (S457) — guard a URL attribute whose literal prefix commits to no scheme.
+        if (quotedUrlAttrNeedsGuard(tag, name, sv)) tpl = wrapUrlGuard(elVar, name, tpl);
         const _setStmt = `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`;
         if (currentLiftReconcileCtx()) {
           for (const _l of maybeWrapLiftPerItemEffect([_setStmt])) lines.push(_l);
@@ -1667,7 +1676,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
         lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       } else {
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
+        // §5.2 rule 3 (S457) — a URL attribute bound to a value: guard the write.
+        const _v = dynamicUrlAttrNeedsGuard(tag, name) ? wrapUrlGuard(elVar, name, rewritten) : rewritten;
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_v});`);
       }
     } else if (val.kind === "call-ref") {
       // Function call in attribute — reconstruct full call with arguments.
@@ -1700,7 +1711,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${callExpr} ?? ""));`);
+        const _cv = `String(${callExpr} ?? "")`;
+        // §5.2 rule 3 (S457) — a URL attribute computed by a call: guard the write.
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${dynamicUrlAttrNeedsGuard(tag, name) ? wrapUrlGuard(elVar, name, _cv) : _cv});`);
       }
     } else if (typeof val === "string") {
       // Raw string value
@@ -1806,7 +1819,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);
+        const _ev = `String(${rewritten} ?? "")`;
+        // §5.2 rule 3 (S457) — `href=${expr}`: the expression supplies the scheme; guard the write.
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${dynamicUrlAttrNeedsGuard(tag, name) ? wrapUrlGuard(elVar, name, _ev) : _ev});`);
       }
     } else if (val && val.kind) {
       // Exhaustiveness guard — surface unhandled attribute value kinds
@@ -2128,7 +2143,7 @@ function emitCreateElementFromExprString(expr) {
   // Parse and emit attributes
   if (attrsStr) {
     const attrs = parseAttrs(attrsStr);
-    const attrLines = emitSetAttrs(elVar, attrs);
+    const attrLines = emitSetAttrs(elVar, attrs, null, tag);
     for (const l of attrLines) lines.push(l);
   }
 
@@ -3104,7 +3119,7 @@ export function emitConsolidatedLift(body, opts = {}) {
         pendingAttrName = trailingMatch[1].replace(/\s*-\s*/g, "-");
       }
       const attrs = parseAttrs(cleanAttrsStr);
-      const attrLines = emitSetAttrs(elVar, attrs, engineCtx);
+      const attrLines = emitSetAttrs(elVar, attrs, engineCtx, tag);
       for (const l of attrLines) lines.push(l);
     }
     const parent = currentParent();
@@ -3254,7 +3269,11 @@ export function emitConsolidatedLift(body, opts = {}) {
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
                   lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
                 } else {
-                  lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, String(${rewritten} ?? ""));`);
+                  const _bv = `String(${rewritten} ?? "")`;
+                  // §5.2 rule 3 (S457) — a BLOCK_REF-split `href=${expr}`: guard the URL write.
+                  const _bEl = currentElement();
+                  const _bt = _bEl ? _bEl.tag : "";
+                  lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, ${dynamicUrlAttrNeedsGuard(_bt, attrName) ? wrapUrlGuard(elVar, attrName, _bv) : _bv});`);
                 }
               }
             } else {
@@ -3281,7 +3300,7 @@ export function emitConsolidatedLift(body, opts = {}) {
           const attrPart = firstTagIdx === -1 ? expr : expr.slice(0, firstTagIdx);
           const remainder = firstTagIdx === -1 ? "" : expr.slice(firstTagIdx);
           const attrs = parseAttrs(attrPart);
-          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx);
+          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
           for (const l of attrLines) lines.push(l);
           pendingAttrName = null;
           if (remainder.trim()) {
@@ -3323,7 +3342,7 @@ export function emitConsolidatedLift(body, opts = {}) {
           const attrPart = firstTagIdx === -1 ? expr : expr.slice(0, firstTagIdx);
           const remainder = firstTagIdx === -1 ? "" : expr.slice(firstTagIdx);
           const attrs = parseAttrs(attrPart);
-          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx);
+          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
           for (const l of attrLines) lines.push(l);
           pendingAttrName = null;
           if (remainder.trim()) {
@@ -3391,7 +3410,7 @@ export function emitConsolidatedLift(body, opts = {}) {
         // Apply the attribute to the current element using the existing attr/event emitter
         const syntheticAttrsStr = attrName + " = " + attrValue;
         const attrs = parseAttrs(syntheticAttrsStr);
-        const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx);
+        const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
         for (const l of attrLines) lines.push(l);
         pendingAttrName = null;
 

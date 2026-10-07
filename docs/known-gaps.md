@@ -30,11 +30,89 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 239 | 6 |
-| MED | 521 | 4 |
+| HIGH | 245 | 6 |
+| MED | 527 | 4 |
 | LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-srcdoc-unquoted-expression-not-refused-s457 — `<iframe srcdoc=${@u}>` compiles clean and runs the data as HTML; S456 refuses only the quoted `srcdoc="${…}"` — `NEW S457; HIGH; open`
+
+<!-- @gap id=g-srcdoc-unquoted-expression-not-refused-s457 sev=HIGH status=open locus=compiler/src/validators/attribute-interpolation.ts(collectExecutableSinkErrors — quoted form only)+compiler/src/attr-injection-sink.ts prov=empirical:S457-url-guard-differential-review(Chromium, 2 dialogs on base and head) -->
+
+SPEC §5.2 rule 2 / ruling S456 "your recs on 1 and 2": `srcdoc` interpolation is refused because its value is an HTML document (script). The unquoted expression form reaches the same sink and is not refused. Conformance restoration (newly-rejecting) toward the ruled purpose.
+
+### g-navigate-data-supplied-javascript-url-s457 — `navigate(@u)` with a `javascript:` value runs it — `NEW S457; MED; open`
+
+<!-- @gap id=g-navigate-data-supplied-javascript-url-s457 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_navigate → window.location.href = path) prov=review:S457-url-guard-agent -->
+
+`_scrml_navigate(path)` assigns `window.location.href` with no scheme check. Outside §5.2 rule 3 (attribute writes). Candidate fix: the same `runtime-url-guard.js` reader (a widening of the S457 ruling's scope → bryan's call).
+
+### g-runtime-meta-emit-innerhtml-sink-s457 — a runtime `^{ emit(...) }` writes data-built HTML through `innerHTML`, bypassing every attribute rule — `NEW S457; MED; open`
+
+<!-- @gap id=g-runtime-meta-emit-innerhtml-sink-s457 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_meta_emit → placeholder.innerHTML) prov=review:S457-url-guard-agent -->
+
+URL attributes and `on…` handlers inside a runtime-built HTML string reach the DOM unchecked. The S456 compile-time rule only reads literal `${` text in emitted markup. PLAUSIBLE (not executed).
+
+### g-user-function-named-id-breaks-click-dispatch-s457 — a user `function id(x)` makes every click handler dead: the dispatcher's local `id` is renamed to the user's binding — `NEW S457; HIGH; open (silent)`
+
+<!-- @gap id=g-user-function-named-id-breaks-click-dispatch-s457 sev=HIGH status=open locus=searched:client boot click dispatcher emit (rename pass applies user-identifier mangling to runtime-local names) prov=empirical:PA-reproduced-0d8e9d8ce -->
+
+PA-reproduced at `0d8e9d8ce`: emitted `const id = t.getAttribute("data-scrml-bind-onclick"); if (id && _scrml_click[_scrml_id_3]) …` — `_scrml_id_3` is the user's function, so no handler ever fires; exit 0, no diagnostic. Any compiler-emitted local whose name equals a user top-level identifier is suspect.
+
+### g-sql-placeholder-clobbers-string-literals-s457 — any string containing `?{` is silently replaced by `__scrml_sql_placeholder__` — `NEW S457; HIGH; open (silent wrong value)`
+
+<!-- @gap id=g-sql-placeholder-clobbers-string-literals-s457 sev=HIGH status=open locus=compiler/src/expression-parser.ts(replaceSqlBlockPlaceholder) prov=empirical:PA-reproduced-0d8e9d8ce -->
+
+PA-reproduced at `0d8e9d8ce`: `let r = "?{a}"` emits `let r = "__scrml_sql_placeholder__";`, exit 0. Same "two readers of one text" class as g-rewrite-sql-refs-lowers-inside-js-literals-s456: the replacement must act only on code-context `?{` (the `sql-in-expression-text` scanner). A client regex `` /?{`…`}/ `` is rewritten the same way.
+
+### g-onclick-unquoted-call-chain-drops-callback-s457 — `onclick=Promise.resolve(5).then(function (v) { … })` (unquoted, with spaces) emits `Promise.resolve(5);` — the callback silently vanishes — `NEW S457; HIGH; open (silent)`
+
+<!-- @gap id=g-onclick-unquoted-call-chain-drops-callback-s457 sev=HIGH status=open locus=searched:unquoted attribute value extent (block-splitter / attribute reader) prov=empirical:PA-reproduced-0d8e9d8ce -->
+
+PA-reproduced at `0d8e9d8ce`: exit 0; only diagnostics W-LINT-013 (Vue shorthand, irrelevant) + W-PROGRAM-SPA-INFERRED. The `${ … }` form works. The unquoted value ends at the first space and the rest is dropped without a diagnostic — fail-closed answer is a refusal naming the `${}` form.
+
+### g-map-literal-in-function-expression-emits-undefined-helper-s457 — `[:]` inside a block-bodied function expression reaches the artifact as `__scrml_map_lit__(…)` — `NEW S457; HIGH; open`
+
+<!-- @gap id=g-map-literal-in-function-expression-emits-undefined-helper-s457 sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts(escape-hatch raw route; no map-literal lowering) prov=empirical:s457-is-some-function-expression-agent -->
+
+Same preprocess-then-slice route as #1333. Silent at base (ReferenceError at run time); once the S457 #1333 fix lands its gate refuses it (E-CODEGEN-INVALID-LOGIC) — still needs its own lowering.
+
+### g-match-in-function-expression-mangled-s457 — `match` inside a function-expression body emits `__scrml_match__(v, ""On" :> …)` — `NEW S457; MED; open (fails loud)`
+
+<!-- @gap id=g-match-in-function-expression-mangled-s457 sev=MED status=open locus=compiler/src/codegen/rewrite.ts(escape-hatch raw route) prov=empirical:s457-is-some-function-expression-agent -->
+
+Already E-CODEGEN-INVALID-LOGIC. Same route as above.
+
+### g-object-shorthand-method-emits-empty-s457 — `{ check(v) { … } }` emits `{check: }`; getters `{ get p() {…} }` are refused too — `NEW S457; MED; open (fails loud)`
+
+<!-- @gap id=g-object-shorthand-method-emits-empty-s457 sev=MED status=open locus=searched:expression-parser.ts esTreeToExprNode Property(method/get/set) prov=empirical:s457-is-some-function-expression-agent+review -->
+
+E-CODEGEN-INVALID-LOGIC on both shapes.
+
+### g-optional-chain-is-predicate-refused-s457 — `o?.b is not` emits `o ? . (b === null…)` and is refused in every position — `NEW S457; MED; open (fails loud)`
+
+<!-- @gap id=g-optional-chain-is-predicate-refused-s457 sev=MED status=open locus=compiler/src/expression-parser.ts(scanLhsLeft — `?.` not a member-chain link) prov=review:S457-issome-differential -->
+
+§42.3.6 optional chaining with `is` does not work; the gate catches it.
+
+### g-e-sql-001-dropped-without-sink-s457 — E-SQL-001 is silent at compile time when no error sink is passed — `NEW S457; MED; open`
+
+<!-- @gap id=g-e-sql-001-dropped-without-sink-s457 sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(:3780 opts.preparedStmtErrors)+compiler/src/codegen/rewrite.ts(rewriteSqlRefs errors param) prov=empirical:s457-sql-one-reader-agent -->
+
+On base a malformed slot compiled at exit 0 into a site that throws E-SQL-001 at run time. The S457 one-reader fix removes that trigger; the dropped-error route remains.
+
+### g-ternary-question-brace-read-as-sql-s457 — `cond ?{v: 1}.v : 2` (no space after `?`) is read as a query and refused; the ternary is dropped — `NEW S457; LOW; open`
+
+<!-- @gap id=g-ternary-question-brace-read-as-sql-s457 sev=LOW status=open locus=compiler/src/sql-in-expression-text.ts+compiler/src/expression-parser.ts prov=empirical:s457-sql-one-reader-agent -->
+
+Fails closed (E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED).
+
+### g-regex-literal-with-space-gains-spaces-s457 — reported: `/a b/` emitted as `/ a b /` — `NEW S457; MED; open (UNVERIFIED)`
+
+<!-- @gap id=g-regex-literal-with-space-gains-spaces-s457 sev=MED status=open locus=searched:not traced prov=review:S457-issome-differential(PA could NOT reproduce in a top-level function body at 0d8e9d8ce) -->
+
+Reviewer-reported silent defect; the PA's probe (`@msg = /a b/.test("a b") ? …` in a `function`) emitted `/a b/` correctly. Find the position the reviewer used before acting.
 
 ### g-walkfileast-skips-engine-and-match-bodies — `walkFileAst` does not descend `engine-decl.bodyChildren` or `<match>` arms, so four whole-file rules go silent inside engine state-child bodies and match arms — `NEW S457; MED; open`
 
@@ -67,9 +145,9 @@ statically proven; `"/users/1"` fails E-CONTRACT-001. The check is "does `new UR
 
 ### g-svg-animation-and-meta-refresh-url-sinks-s456 — a URL can reach an executable sink through an attribute OUTSIDE the §5.2 URL-attribute set: SVG `<set attributeName="href" to="javascript:…${x}">` / `<animate attributeName="href" values="…">`, and `<meta http-equiv="refresh" content="0;url=javascript:…${x}">` — `NEW S456; LOW; open`
 
-<!-- @gap id=g-svg-animation-and-meta-refresh-url-sinks-s456 sev=LOW status=open locus=compiler/src/attr-injection-sink.ts(URL_VALUED_ATTRS is name-based; to / values / from / by and content are not URL attributes) prov=review:S456-S239-attr-injection-rulings-F4 -->
+<!-- @gap id=g-svg-animation-and-meta-refresh-url-sinks-s456 sev=HIGH status=open locus=compiler/src/attr-injection-sink.ts(URL_VALUED_ATTRS is name-based; to / values / from / by and content are not URL attributes) prov=review:S456-S239-attr-injection-rulings-F4 -->
 
-PLAUSIBLE, not executed (S239 review F4 of `93b36665a`). The S456 executable-sink rule reads an attribute's
+⚑ **S457: SVG half CONFIRMED in Chromium** (S457 URL-guard differential review, both trees): `<div if=@on><svg><a><set attributeName="href" to="${@u}"></set><rect …/></a></svg></div>` with `@u = "javascript:alert(document.domain)"`, mount, click → dialog. `to`/`values`/`from`/`by` are outside the §5.2 URL-attribute list so neither rule 2 nor rule 3 sees it; the `<meta refresh>` half is refused by Chromium itself. The expression form `to=${@u}` is silently dropped (separate bug). Severity LOW → HIGH. PLAUSIBLE, not executed (S239 review F4 of `93b36665a`). The S456 executable-sink rule reads an attribute's
 NAME to decide it is URL-valued; these sinks take their URL from a different attribute whose meaning depends
 on a sibling (`attributeName="href"`, `http-equiv="refresh"`). Modern browsers block `javascript:` in a meta
 refresh, and SMIL animation of `href` to `javascript:` is blocked in some engines — needs measuring per engine
@@ -77,9 +155,9 @@ before a rule. A fix is element-aware: `<set>` / `<animate>` with `attributeName
 `to` / `from` / `by` / `values` as URL-valued; `<meta http-equiv=refresh>` → apply the scheme test to the
 text after `url=`.
 
-### g-quoted-url-attribute-data-supplied-scheme-s456 — a quoted URL attribute whose literal text commits to NO scheme (`href="${it.url}"`, `src="${x}"`, `href="java${x}"`) takes its scheme from the DATA: a value `javascript:…` runs on click. Compiled to `setAttribute("href", \`${…}\`)` with no scheme check — `NEW S456; MED; open (needs a ruling)`
+### g-quoted-url-attribute-data-supplied-scheme-s456 — a quoted URL attribute whose literal text commits to NO scheme (`href="${it.url}"`, `src="${x}"`, `href="java${x}"`) takes its scheme from the DATA: a value `javascript:…` runs on click. Compiled to `setAttribute("href", \`${…}\`)` with no scheme check — `NEW S456; MED; RESOLVED S457` (ruling S457 "a": SPEC §5.2 rule 3 — runtime guard `_scrml_safe_url` at all 17 URL-attribute emitters incl. SSR first paint, element-scoped, one reader `compiler/src/runtime-url-guard.js`; a non-admitted data scheme writes `about:blank` + a §19.6.8 log line; Chromium-verified by the S457 differential review, 66,240-value fuzz)
 
-<!-- @gap id=g-quoted-url-attribute-data-supplied-scheme-s456 sev=MED status=open locus=compiler/src/attr-injection-sink.ts(readLiteralUrlScheme → kind:"none" is admitted)+compiler/src/codegen/emit-bindings.ts(top-level template-attr setAttribute)+compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs) prov=dispatch:S456-attr-injection-rulings -->
+<!-- @gap id=g-quoted-url-attribute-data-supplied-scheme-s456 sev=MED status=resolved resolved-by=S457-fix/s457-url-scheme-runtime-guard locus=compiler/src/attr-injection-sink.ts(readLiteralUrlScheme → kind:"none" is admitted)+compiler/src/codegen/emit-bindings.ts(top-level template-attr setAttribute)+compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs) prov=dispatch:S456-attr-injection-rulings -->
 
 Deliberately outside the S456 executable-sink rule (the brief: do not refuse `href="${url}"` — it would
 reject legitimate code). Corpus at `20ce26bf5`: 3 sources write a URL attribute whose literal prefix is
