@@ -106,11 +106,11 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
     const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // b0: `if=(@x is some)` → gate is `(@x is some)`.
     expect(clientJs).toContain(
-      `_scrml_effect(function() { if (!((${X_SOME}))) return; _scrml_render_value(el, _scrml_reactive_get("x").a); });`,
+      `_scrml_effect(function() { if (!((${X_SOME}))) return; _scrml_render_value(_scrml_el, _scrml_reactive_get("x").a); });`,
     );
     // Initial (non-effect) render is gated too.
     expect(clientJs).toContain(
-      `if ((${X_SOME})) { _scrml_render_value(el, _scrml_reactive_get("x").a); }`,
+      `if ((${X_SOME})) { _scrml_render_value(_scrml_el, _scrml_reactive_get("x").a); }`,
     );
   });
 
@@ -118,7 +118,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
     const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // b1: `else-if=(@y is some)` → visible iff `!(@x is some) && (@y is some)`.
     expect(clientJs).toContain(
-      `_scrml_effect(function() { if (!(!(${X_SOME}) && (${Y_SOME}))) return; _scrml_render_value(el, _scrml_reactive_get("y").b); });`,
+      `_scrml_effect(function() { if (!(!(${X_SOME}) && (${Y_SOME}))) return; _scrml_render_value(_scrml_el, _scrml_reactive_get("y").b); });`,
     );
   });
 
@@ -126,9 +126,9 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
     const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // else → visible iff `!(@x is some) && !(@y is some)`.
     const elseGate = `if (!(!(${X_SOME}) && !(${Y_SOME}))) return;`;
-    expect(clientJs).toContain(`${elseGate} _scrml_render_value(el, _scrml_reactive_get("z").c);`);
+    expect(clientJs).toContain(`${elseGate} _scrml_render_value(_scrml_el, _scrml_reactive_get("z").c);`);
     // The nested chain `${@z.meta.deep}` is guarded as a unit by the same gate.
-    expect(clientJs).toContain(`${elseGate} _scrml_render_value(el, _scrml_reactive_get("z").meta.deep);`);
+    expect(clientJs).toContain(`${elseGate} _scrml_render_value(_scrml_el, _scrml_reactive_get("z").meta.deep);`);
   });
 
   test("each branch gate is BYTE-IDENTICAL to the chain controller's `_next` cascade (lockstep)", () => {
@@ -139,7 +139,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
     expect(m).not.toBeNull();
     const cascadeCore = m[1]; // ((@x is some))
     // The b0 inner-effect gate negates exactly this core.
-    expect(clientJs).toContain(`if (!(${cascadeCore})) return; _scrml_render_value(el, _scrml_reactive_get("x").a);`);
+    expect(clientJs).toContain(`if (!(${cascadeCore})) return; _scrml_render_value(_scrml_el, _scrml_reactive_get("x").a);`);
   });
 
   test("(regression) the standalone single-`if=` keeps the ss20 display-toggle gate", () => {
@@ -148,7 +148,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
     // ss20 gates it via computeDisplayToggleCondition — same predicate shape,
     // NOT a chainGuard. It appears a SECOND time in the file (after the chain).
     const occurrences = clientJs.split(
-      `_scrml_effect(function() { if (!((${X_SOME}))) return; _scrml_render_value(el, _scrml_reactive_get("x").a); });`,
+      `_scrml_effect(function() { if (!((${X_SOME}))) return; _scrml_render_value(_scrml_el, _scrml_reactive_get("x").a); });`,
     ).length - 1;
     // Once for the chain b0, once for the standalone single-if.
     expect(occurrences).toBe(2);
@@ -157,9 +157,9 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   test("(regression) the sibling `show=` inner effect is NOT gated", () => {
     const clientJs = foldChunkNamespacing(compileCase().clientJs);
     expect(clientJs).toContain(
-      `_scrml_effect(function() { _scrml_render_value(el, _scrml_reactive_get("msg")); });`,
+      `_scrml_effect(function() { _scrml_render_value(_scrml_el, _scrml_reactive_get("msg")); });`,
     );
-    expect(/return; _scrml_render_value\(el, _scrml_reactive_get\("msg"\)\)/.test(clientJs)).toBe(false);
+    expect(/return; _scrml_render_value\(_scrml_el, _scrml_reactive_get\("msg"\)\)/.test(clientJs)).toBe(false);
   });
 });
 

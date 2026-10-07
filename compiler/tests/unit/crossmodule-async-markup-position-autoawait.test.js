@@ -54,9 +54,9 @@ describe("g-crossmodule-async-in-markup — reactive interpolation (@var)", () =
     fix("m1.scrml", `<program>\n\${\n  import { fetchStatus } from './lib.scrml'\n  <url> = "/x"\n}\n<p>\${ fetchStatus(@url).status }</p>\n</program>\n`);
     const js = compileClient([join(DIR, "lib.scrml"), join(DIR, "m1.scrml")], "m1");
     // Inner await injected; node-aware render inside an async IIFE.
-    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(el, \(await fetchStatus\(_scrml_cs_reactive_get\("url"\)\)\)\.status\);/);
+    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(_scrml_el, \(await fetchStatus\(_scrml_cs_reactive_get\("url"\)\)\)\.status\);/);
     // NOT the bare pre-fix render, and NEVER a double-await.
-    expect(js).not.toMatch(/_scrml_render_value\(el, fetchStatus\(_scrml_cs_reactive_get\("url"\)\)\.status\)/);
+    expect(js).not.toMatch(/_scrml_render_value\(_scrml_el, fetchStatus\(_scrml_cs_reactive_get\("url"\)\)\.status\)/);
     expect(js).not.toMatch(/await\s+await/);
     // Still wrapped by the sync reactive effect (deps tracked, re-runs on @url).
     expect(js).toMatch(/_scrml_effect\(function\(\) \{ \(async \(\) =>/);
@@ -68,8 +68,8 @@ describe("g-crossmodule-async-in-markup — non-reactive one-shot (const arg)", 
     fix("lib.scrml", LIB_SRC);
     fix("m2.scrml", `<program>\n\${\n  import { fetchStatus } from './lib.scrml'\n}\n<p>\${ fetchStatus("/x").status }</p>\n</program>\n`);
     const js = compileClient([join(DIR, "lib.scrml"), join(DIR, "m2.scrml")], "m2");
-    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(el, \(await fetchStatus\("\/x"\)\)\.status\);/);
-    expect(js).not.toMatch(/_scrml_render_value\(el, fetchStatus\("\/x"\)\.status\)/);
+    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(_scrml_el, \(await fetchStatus\("\/x"\)\)\.status\);/);
+    expect(js).not.toMatch(/_scrml_render_value\(_scrml_el, fetchStatus\("\/x"\)\.status\)/);
     expect(js).not.toMatch(/await\s+await/);
   });
 });
@@ -79,7 +79,7 @@ describe("g-crossmodule-async-in-markup — NEGATIVE: a SYNC cross-module import
     fix("sync-lib.scrml", SYNC_LIB_SRC);
     fix("m3.scrml", `<program>\n\${\n  import { label } from './sync-lib.scrml'\n  <n> = 3\n}\n<p>\${ label(@n) }</p>\n</program>\n`);
     const js = compileClient([join(DIR, "sync-lib.scrml"), join(DIR, "m3.scrml")], "m3");
-    expect(js).toMatch(/_scrml_render_value\(el, label\(_scrml_cs_reactive_get\("n"\)\)\)/);
+    expect(js).toMatch(/_scrml_render_value\(_scrml_el, label\(_scrml_cs_reactive_get\("n"\)\)\)/);
     // No await / async wrapping for a pure sync import.
     expect(js).not.toMatch(/await label\(/);
   });
@@ -97,7 +97,7 @@ describe("g-crossmodule-async-in-markup — combinator callback (S239 finding: b
     fix("lib.scrml", LIB_SRC);
     fix("m4.scrml", `<program>\n\${\n  import { fetchStatus } from './lib.scrml'\n  <items> = ["/a","/b"]\n}\n<p>\${ @items.map(fetchStatus) }</p>\n</program>\n`);
     const js = compileClient([join(DIR, "lib.scrml"), join(DIR, "m4.scrml")], "m4");
-    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(el, await _scrml_mapAsync\(/);
+    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(_scrml_el, await _scrml_mapAsync\(/);
     expect(js).not.toMatch(/await\s+await/);
     // The regression: an unwrapped top-level await in the sync effect is a parse error.
     expect(parses(js)).toBe(true);
@@ -107,7 +107,7 @@ describe("g-crossmodule-async-in-markup — combinator callback (S239 finding: b
     fix("lib.scrml", LIB_SRC);
     fix("m4b.scrml", `<program>\n\${\n  import { fetchStatus } from './lib.scrml'\n}\n<p>\${ [1,2].map(fetchStatus) }</p>\n</program>\n`);
     const js = compileClient([join(DIR, "lib.scrml"), join(DIR, "m4b.scrml")], "m4b");
-    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(el, await _scrml_mapAsync\(/);
+    expect(js).toMatch(/\(async \(\) => \{ try \{ _scrml_render_value\(_scrml_el, await _scrml_mapAsync\(/);
     expect(parses(js)).toBe(true);
   });
 });

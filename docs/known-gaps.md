@@ -31,10 +31,58 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 243 | 6 |
-| MED | 529 | 4 |
-| LOW | 291 | 0 |
+| MED | 533 | 4 |
+| LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-unquoted-handler-assignment-rhs-dropped-s457 — `onclick=@count = @count + 1` compiles to `count = count`: the `+ 1` is silently dropped — `NEW S457; HIGH; open (silent)`
+
+<!-- @gap id=g-unquoted-handler-assignment-rhs-dropped-s457 sev=HIGH status=open locus=compiler/src/tokenizer.ts(unquoted attribute value extent at depth-0 whitespace) prov=empirical:PA-reproduced-d5875e972 -->
+
+PA-reproduced on main `d5875e972`: emitted `reactive_set("count", _scrml_cs_reactive_get("count"))`, exit 0, no diagnostic. SPEC §5.2.3 lists bare assignment and compound update as handler forms and says "an attribute boundary is whitespace at depth 0" — so either the spaced form is illegal (then it must be REFUSED, not truncated) or the extent rule must read the whole assignment. Governing-sentence question for the fix; never silent. Same family as [[g-unquoted-non-handler-value-chain-truncated-s457]].
+
+### g-unquoted-non-handler-value-chain-truncated-s457 — `if=fn().ok`, `title=fmt(1).trim()`, `onclick=fn() .then(g)` truncate at the first member access / space and leak junk attributes — `NEW S457; HIGH; open (silent; needs a ruling)`
+
+<!-- @gap id=g-unquoted-non-handler-value-chain-truncated-s457 sev=HIGH status=open locus=compiler/src/tokenizer.ts(unquoted attribute value reader) prov=empirical:s457-runtime-local-rename-agent+differential-review -->
+
+`if=fn().ok` drops the condition (element always renders) + adds an `ok` attribute; `title=fmt(1).trim()` drops `.trim()` + adds `trim`. SPEC §5.1 lists only identifier and call forms; cluster-A says conditions are "atomic-only"; no code covers a member access on a call. RULING: legal (read the whole chain, as S457 did for handlers) or refused — whichever, never silent.
+
+### g-user-fn-named-host-global-hijacks-compiler-refs-s457 — a user `function fetch` (with any server fn) makes the runtime call the user's function for every server call; a user `function document` likewise — `NEW S457; HIGH; open (needs a ruling)`
+
+<!-- @gap id=g-user-fn-named-host-global-hijacks-compiler-refs-s457 sev=HIGH status=open locus=compiler/src/codegen/fn-name-rename.ts+compiler/src/runtime-template.js(free host-global references) prov=empirical:s457-runtime-local-rename-agent -->
+
+Both compiler and user references to a host global are free names, so scope analysis cannot tell them apart. Fork: (a) compiler references to host globals spelled through a runtime alias no user name can reach (PA rec — no new language rule; SPEC already allows shadowing `log`/`render`); (b) refuse user top-level names shadowing host globals the client output uses.
+
+### g-compiler-binding-captures-user-name-residual-s457 — ~30 more compiler-emitted enclosing bindings (`_fire _eager value errors src parts _branch error _d _args _seq _res _v _hv _rt __v __prev __next evt …`) capture a same-named user function — `NEW S457; MED; open`
+
+<!-- @gap id=g-compiler-binding-captures-user-name-residual-s457 sev=MED status=open locus=compiler/src/codegen/(emitters wrapping user text) prov=empirical:s457-runtime-local-rename-agent -->
+
+Same fix as 0c84f5038: rename at emission into `_scrml_`. Enumeration method in docs/changes/s457-runtime-local-rename-and-handler-truncation/progress.md.
+
+### g-handler-event-binding-unspecified-s457 — a user name `event` in a bare / inline handler is captured by the wrapper parameter `function(event)` — `NEW S457; MED; open (needs a ruling)`
+
+<!-- @gap id=g-handler-event-binding-unspecified-s457 sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts(wrapper parameter) prov=empirical:s457-runtime-local-rename-agent+review(HEAD: "event is not a function") -->
+
+§5.2: "The native event object is NOT passed to `fn` — it is available only inside the wrapper closure"; §5.2.3: "This amendment does not add an event-object binding to the inline block." Yet 22 corpus sites write `oninput=f(event.target.value)`. PA rec: bare/inline forms do not bind `event`; rename the wrapper param `_scrml_event`; refuse a bare `event` pointing to `${(e) => …}`; migrate the 22 sites (newly-rejecting).
+
+### g-declared-prop-reaches-expanded-root-s457 — do declared component props that are real HTML attributes (`id`, `title`, `href`, `disabled`) reach the expanded root? The emitters disagree — `NEW S457; MED; open (needs a ruling, §15)`
+
+<!-- @gap id=g-declared-prop-reaches-expanded-root-s457 sev=MED status=open locus=compiler/src/codegen/emit-html.ts(i81 isDeclaredPropAttr)+emit-each.ts+emit-lift.js prov=review:s457-executable-sinks-srcdoc-svg-r2 -->
+
+§15 is silent (§15.10: declared props "are available as plain identifiers throughout the component body"). emit-html drops an expression-valued declared prop (i81), writes a bare `@cell` declared prop as the cell-NAME text, writes reactive bool `disabled=@v`; `<each>`/`lift` write every declared prop's value; quoted `"${…}"` is written everywhere. So `<Link href=${@u}/>` loses its href at top level but keeps it in each/lift. Security is independent of the answer (§5.2 refuses srcdoc data at every write; no emitter writes on… text; rule 3 guards URLs). Corpus exposure: trucking load-new / load-detail / board, examples/22-multifile, gauntlet-r10-ts-components.
+
+### g-on-colon-event-selector-invalid-s457 — `on:click=` handlers are dead: the emitted `querySelectorAll('[data-scrml-bind-on:click]')` is an invalid selector and the wiring throws — `NEW S457; MED; open`
+
+<!-- @gap id=g-on-colon-event-selector-invalid-s457 sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts(selector built from the attribute name) prov=review:s457-rename-differential(both trees) -->
+
+### g-lift-component-function-props-unsubstituted-s457 — function props in a lifted component body are never substituted (ReferenceError); an `<each>` inside a lifted component is dropped — `NEW S457; MED; open`
+
+<!-- @gap id=g-lift-component-function-props-unsubstituted-s457 sev=MED status=open locus=compiler/src/codegen/emit-lift.js+compiler/src/component-expander.ts prov=review:s457-executable-sinks-srcdoc-svg-r2(trucking: address input, assignment save, toast dismiss throw; StatusPicker/AssignmentPicker options missing) -->
+
+### g-client-buffer-scope-rename-compile-cost-s457 — the S457 scope-aware rename parses the client buffer with Acorn: ~12-17% longer compiles on large examples — `NEW S457; LOW; open (perf)`
+
+<!-- @gap id=g-client-buffer-scope-rename-compile-cost-s457 sev=LOW status=open locus=compiler/src/codegen/fn-name-rename.ts prov=review:s457-rename-differential(unprofiled) -->
 
 ### g-template-sql-ref-marker-unrestored-client-s457 — a `?{}` in a template literal that also holds `<#name>`, in a function with no other `?{}`, stays client-side and ships `__scrml_sql_ref__("?{`…SQL…`}")` — `NEW S457; MED; open`
 
@@ -68,7 +116,7 @@ URL attributes and `on…` handlers inside a runtime-built HTML string reach the
 
 ### g-user-function-named-id-breaks-click-dispatch-s457 — a user `function id(x)` makes every click handler dead: the dispatcher's local `id` is renamed to the user's binding — `NEW S457; HIGH; open (silent)`
 
-<!-- @gap id=g-user-function-named-id-breaks-click-dispatch-s457 sev=HIGH status=open locus=searched:client boot click dispatcher emit (rename pass applies user-identifier mangling to runtime-local names) prov=empirical:PA-reproduced-0d8e9d8ce -->
+<!-- @gap id=g-user-function-named-id-breaks-click-dispatch-s457 sev=HIGH status=resolved resolved-by=S457-fix/s457-runtime-local-rename-and-handler-truncation@adf8d5464+0c84f5038 locus=searched:client boot click dispatcher emit (rename pass applies user-identifier mangling to runtime-local names) prov=empirical:PA-reproduced-0d8e9d8ce -->
 
 PA-reproduced at `0d8e9d8ce`: emitted `const id = t.getAttribute("data-scrml-bind-onclick"); if (id && _scrml_click[_scrml_id_3]) …` — `_scrml_id_3` is the user's function, so no handler ever fires; exit 0, no diagnostic. Any compiler-emitted local whose name equals a user top-level identifier is suspect.
 
@@ -80,7 +128,7 @@ PA-reproduced at `0d8e9d8ce`: `let r = "?{a}"` emits `let r = "__scrml_sql_place
 
 ### g-onclick-unquoted-call-chain-drops-callback-s457 — `onclick=Promise.resolve(5).then(function (v) { … })` (unquoted, with spaces) emits `Promise.resolve(5);` — the callback silently vanishes — `NEW S457; HIGH; open (silent)`
 
-<!-- @gap id=g-onclick-unquoted-call-chain-drops-callback-s457 sev=HIGH status=open locus=searched:unquoted attribute value extent (block-splitter / attribute reader) prov=empirical:PA-reproduced-0d8e9d8ce -->
+<!-- @gap id=g-onclick-unquoted-call-chain-drops-callback-s457 sev=HIGH status=resolved resolved-by=S457-fix/s457-runtime-local-rename-and-handler-truncation@f47219d32 locus=searched:unquoted attribute value extent (block-splitter / attribute reader) prov=empirical:PA-reproduced-0d8e9d8ce -->
 
 PA-reproduced at `0d8e9d8ce`: exit 0; only diagnostics W-LINT-013 (Vue shorthand, irrelevant) + W-PROGRAM-SPA-INFERRED. The `${ … }` form works. The unquoted value ends at the first space and the rest is dropped without a diagnostic — fail-closed answer is a refusal naming the `${}` form.
 
@@ -2315,7 +2363,7 @@ Step 5c's caller-context fixpoint in `route-inference.ts` counts function-to-fun
 BRANCH-conditional: this defect exists only if the derived-transitive arc (`worktree-agent-a17073292e367092e` @ `bdee6c2c`, unlanded) lands. The S337 gap pin already records the shape for the direct limb (the failing compile still writes the leaking bundle); the transitive limb repeats it in its correctness form — the compile reports `E-DERIVED-SERVER-ONLY-REACH` and still writes a bundle containing `async _scrml_fetch_doHash_N` wired into `_scrml_cs_derived_declare`, so a CI step that deploys `dist/` without checking the exit code ships a page that renders `[object Promise]`. Independently confirmed by execution in the S343 reproduction (`handOffs/s342-arc-audit/gap4-reproduction/RESULT.md`): at the arc tip the refusal fires at exit 1 and the identical broken client artifact is still written — the refusal changes the exit code, it does not prevent emission. The arc pins the behavior as an inverting expectation in `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §5. Same class as [[g-cli-emits-artifacts-on-failed-compile]] (LOW, open) and [[g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001]] (MED, open). Per the S342 arc audit; the report states no code locus.
 
 ### g-lambda-param-renamed-to-fetch-stub-when-a-server-fn-shares-its-name — codegen's fn-name mangler renames a lambda PARAMETER to the fetch-stub name when a server-placed `function` shares it; the body's reference dangles → runtime ReferenceError at exit 0 — `NEW S345-bryan (S338 review bycatch; REPRODUCED+EXECUTED S343); HIGH; open; S360-peter VERIFIED on HEAD + LOCUS TRACED, ROUTED-TO-BRYAN (mangler-retirement arc)`
-<!-- @gap id=g-lambda-param-renamed-to-fetch-stub-when-a-server-fn-shares-its-name sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:2969(post-fn-name-mangle-clientStage;regex:2993-2996) route=bryan prov=rationale:codegen-fn-name-mangler-renames-the-lambda-parameter-to-the-fetch-stub-name-while-the-body-still-references-the-original-name-producing-an-undeclared-identifier-in-the-emitted-client -->
+<!-- @gap id=g-lambda-param-renamed-to-fetch-stub-when-a-server-fn-shares-its-name sev=HIGH status=resolved resolved-by=S457-fix/s457-runtime-local-rename-and-handler-truncation@adf8d5464 locus=compiler/src/codegen/emit-client.ts:2969(post-fn-name-mangle-clientStage;regex:2993-2996) route=bryan prov=rationale:codegen-fn-name-mangler-renames-the-lambda-parameter-to-the-fetch-stub-name-while-the-body-still-references-the-original-name-producing-an-undeclared-identifier-in-the-emitted-client -->
 **S360-peter VERIFIED on HEAD + LOCUS TRACED (was `searched:`); ROUTED-TO-BRYAN.** Repro'd exit 0: `@nums.map(total => total*2)` with a same-file server `function total(p)` emits `.map((_scrml_fetch_total_3) => total * 2)` — param renamed, body dangling; executed → `ReferenceError: total is not defined`. **Locus:** `emit-client.ts:2969`, the `post-fn-name-mangle` whole-buffer scope-blind regex pass; the regex at `:2993-2996` has a lookahead char-class `[(;,}\]\n)]` that includes `)`, so the param token `total)` matches and is rewritten while the body `total * 2` (followed by `*`) is left → the asymmetric dangle. **WHY bryan (verified ambiguity):** `(total) =>` (param, must NOT mangle) and `@nums.map(total)` (server-fn passed by reference, MUST mangle to `_scrml_fetch_total_3` — verified by compile) hand the scope-blind regex the identical token `total)`; any regex narrow to protect the param newly-BREAKS the by-reference case. The sound fix needs the scope model that is the mangler-RETIREMENT arc (the source's own comments at :3038-3044 say so). Same substrate as [[g-mangler-scope-blind-shorthand-key-rename]]. Full turnkey brief in the bryan-lane queue S360 addenda.
 
 With a server-placed `function total(p) { return hashPassword(p) }` in the file, `const <doubled> = @nums.map(total => total * 2)` has the lambda **parameter** `total` renamed to the fetch-stub name while the body still says `total`, which is declared nowhere in client scope: main (`3ebaa01e`) emits `_scrml_cs_derived_declare("doubled", () => _scrml_cs_reactive_get("nums").map((_scrml_fetch_total_3) => total * 2))` at exit 0 with no diagnostic. REPRODUCED AND EXECUTED S343 (`gap4-reproduction/RESULT.md`): the arrow was extracted verbatim from the emitted `repro.client.js:63` and run — `ReferenceError: total is not defined`. A *codegen* defect, independent of §6.6.19. Two S343 corrections supersede how the S338 hand-off recorded the sequencing constraint: (1) the constraint ("fix the mangler before removing the over-fire") binds Gap 5/F4 — the lambda-param over-fire, [[g-derived-server-only-reach-lambda-param-overfire]], whose shadow-set gap is what refuses this program on the unlanded branch — NOT the F2 placement fork; (2) "masks" is overstated — at the arc tip (`bdee6c2c`) the refusal fires at exit 1 and the IDENTICAL broken arrow is still written, so the delta is exit-code only (cf. the #518 fail-open class), not emission. The audit states no compiler-side locus (the located artifact is the emitted client). Sibling, different defect: [[g-mangler-scope-blind-shorthand-key-rename]] (MED, open).
@@ -3930,7 +3978,7 @@ The parameter matched the lookahead (`log` followed by `,`); `log.length` did no
 Currently **masked**: that source already fails `E-CODEGEN-INVALID-LOGIC` from an upstream anonymous-fn defect, and the error text is itself the symptom (`...rml_v_1_scrml_v_1() { } 15 * * * * "`). **Any nameless fn that reaches `fnNameMap` re-arms it.** The guard is a non-empty-key check at map construction (`emit-functions.ts:604`), not a regex change.
 
 ### g-mangler-scope-blind-shorthand-key-rename — the rewrite is scope-blind and its lookahead set is partial, so object-shorthand KEYS get renamed → silent `undefined` — `NEW S325-bryan (Limb 2 population count); MED; open`
-<!-- @gap id=g-mangler-scope-blind-shorthand-key-rename sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex — no scope analysis, partial lookahead set) prov=rationale:measured-during-the-limb2-population-count -->
+<!-- @gap id=g-mangler-scope-blind-shorthand-key-rename sev=MED status=resolved resolved-by=S457-fix/s457-runtime-local-rename-and-handler-truncation@adf8d5464 locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex — no scope analysis, partial lookahead set) prov=rationale:measured-during-the-limb2-population-count -->
 
 **◐ PARTIALLY RESOLVED S326-bryan — PR #458, main `cf1849b2`. THE CLASS IS NOT CLOSED; status stays `open` deliberately.** The object-literal case is fixed by EXPANSION (`{get}` → `{get: _scrml_get_3}`), PA-verified on merged main. **Still broken, pinned by the suite at §2f rather than only in prose:** nested `{api: {get, post}}` · spread · mixed `{get, post, n: 1}` · the ternary **ALTERNATE** — and that asymmetry is the sharp part, the same expression compiles correctly on the consequent branch and incorrectly on the alternate. Plus interpolation-leading groups and `?? "anon"`. **The binding-pattern half was attempted and REMOVED during the S239 round:** fencing the pattern while the pass still rewrote the uses those bindings SHADOW turned a loud `TypeError` into a silent wrong answer — the exact class this entry describes. An honest repair needs a scope model and belongs to the mangler-retirement arc.
 

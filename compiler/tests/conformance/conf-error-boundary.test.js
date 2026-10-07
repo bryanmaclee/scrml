@@ -97,9 +97,9 @@ describe("errorBoundary §19.6 — emission contract", () => {
     // §51.3.2 — a payload variant stores its fields as a field-keyed object on
     // `.data`, single- AND multi-field alike (matching the enum constructor /
     // emitFailExpr / parseVariant / the `!{}` + `match` payload binders). So
-    // NotFound(id) substitutes `${id}` -> `(_eb_result.data).id` (NOT bare `.data`).
-    expect(js).toContain("(_eb_result.data).id");
-    expect(js).not.toContain("(_eb_result.data) : \"\"");
+    // NotFound(id) substitutes `${id}` -> `(_scrml_eb_result.data).id` (NOT bare `.data`).
+    expect(js).toContain("(_scrml_eb_result.data).id");
+    expect(js).not.toContain("(_scrml_eb_result.data) : \"\"");
   });
 });
 

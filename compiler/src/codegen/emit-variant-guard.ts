@@ -506,10 +506,14 @@ function emitArmWireFunction(
   // declaration (SyntaxError → E-CODEGEN-INVALID-LOGIC) or, worse, was silently
   // SHADOWED by the internal (`${el}` rendered the element). An internal that
   // collides with an arm name takes a `_scrml_arm`-prefixed spelling instead
-  // (the `_scrml_` namespace is the compiler's); without a collision the
-  // spelling — and so the emitted bytes — are unchanged.
-  const _armTaken = new Set(armParams);
-  const armLocal = (n: string): string => (_armTaken.has(n) ? `_scrml_arm${n.startsWith("_") ? "" : "_"}${n}` : n);
+  // (the `_scrml_` namespace is the compiler's).
+  //
+  // s457 (capture) — the internals are prefixed ALWAYS, not only on a collision
+  // with an arm name: the arm body also reads the user's TOP-LEVEL names (a
+  // function `_root`, `_d`, `el`, ...), which this scope would equally shadow.
+  // The `_scrml_` namespace is reserved to the compiler (§47.1.1), so a
+  // prefixed internal can never capture a user name.
+  const armLocal = (n: string): string => `_scrml_arm${n.startsWith("_") ? "" : "_"}${n}`;
   const R = armLocal("_root");
   const DS = armLocal("_disposers");
   const EL = armLocal("el");
@@ -1509,8 +1513,9 @@ export function emitVariantGuardedRender(
   // names share a scope with the row names it takes as parameters (item-scoped
   // mode). A row alias spelled like one of them (`as _v`, `as _mount`) was a
   // duplicate parameter or was shadowed by the internal; a colliding internal
-  // takes a `_scrml_arm`-prefixed spelling. No collision → unchanged bytes.
-  const dispLocal = (n: string): string => (rowScopeParams.includes(n) ? `_scrml_arm${n}` : n);
+  // takes a `_scrml_arm`-prefixed spelling — always (s457 capture: the user's
+  // top-level names reach this scope too).
+  const dispLocal = (n: string): string => `_scrml_arm${n}`;
   const MT = dispLocal("_mount");
   const VV = dispLocal("_v");
   const TG = dispLocal("_tag");

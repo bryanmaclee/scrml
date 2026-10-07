@@ -3672,7 +3672,7 @@ function emitEachReconcileLines(
   lines.push(`${indent}  ${itemsVar},`);
   lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => ${keyFnBody},`);
   lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => {`);
-  lines.push(`${indent}    const _itemFrag = document.createDocumentFragment();`);
+  lines.push(`${indent}    const _scrml_item_frag = document.createDocumentFragment();`);
   // Bug 64 / R28-1c (S159) — capture this node's create-time key (the SAME
   // expression the keyFn above uses) so per-item text/class bindings can
   // re-resolve the LIVE item by key on every reconcile. Push a reconcile ctx so
@@ -3720,7 +3720,7 @@ function emitEachReconcileLines(
     // `isItemRoot=true` mount below is a STRUCTURAL requirement of the reconcile
     // list (exactly one tracked node per item; a bare text node cannot hold a DOM
     // child) and is deliberately NOT gated by the RCDATA refusal.
-    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, false, true, _isSoleItemRoot);
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_scrml_item_frag", templateLines, `${indent}    `, engineCtx, false, false, true, _isSoleItemRoot);
   }
   for (const l of templateLines) lines.push(l);
   popEachReconcileCtx();
@@ -3760,12 +3760,12 @@ function emitEachReconcileLines(
   const _childIndent = `${indent}    `;
   const _rootCount = templateLines.reduce((n, l) => {
     if (!l.startsWith(_childIndent) || l[_childIndent.length] === " ") return n;
-    return n + (l.split("_itemFrag.appendChild(").length - 1);
+    return n + (l.split("_scrml_item_frag.appendChild(").length - 1);
   }, 0);
   lines.push(
     _rootCount > 1
-      ? `${indent}    return _itemFrag;`
-      : `${indent}    return _itemFrag.firstChild;`,
+      ? `${indent}    return _scrml_item_frag;`
+      : `${indent}    return _scrml_item_frag.firstChild;`,
   );
   lines.push(`${indent}  }`);
   lines.push(`${indent});`);
@@ -4199,7 +4199,7 @@ function emitArmScopedEachRenderFn(
   const iterVarName = node.asName ? node.asName : "_scrml_each_item";
   resetLocalIdCounter();
   const fnLines: string[] = [];
-  fnLines.push(`function ${fnName}(${["_root", ...params].join(", ")}) {`);
+  fnLines.push(`function ${fnName}(${["_scrml_each_root", ...params].join(", ")}) {`);
   let itemsExpr: string;
   if (node.iterShape === "in") {
     itemsExpr = rewriteMapAwareIterable(node.inExprRaw ?? "[]", eachMapVarNames, eachSetVarNames);
@@ -4210,15 +4210,15 @@ function emitArmScopedEachRenderFn(
     fnLines.push(`}`);
     return fnLines.join("\n");
   }
-  fnLines.push(`  const _items = ${itemsExpr};`);
-  fnLines.push(`  let _mount = null;`);
-  fnLines.push(`  if (_root && typeof document !== "undefined") {`);
-  fnLines.push(`    const _w = document.createTreeWalker(_root, NodeFilter.SHOW_COMMENT);`);
+  fnLines.push(`  const _scrml_items = ${itemsExpr};`);
+  fnLines.push(`  let _scrml_mount = null;`);
+  fnLines.push(`  if (_scrml_each_root && typeof document !== "undefined") {`);
+  fnLines.push(`    const _w = document.createTreeWalker(_scrml_each_root, NodeFilter.SHOW_COMMENT);`);
   fnLines.push(`    let _n;`);
-  fnLines.push(`    while ((_n = _w.nextNode())) { if (String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _mount = _n; break; } }`);
+  fnLines.push(`    while ((_n = _w.nextNode())) { if (String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _scrml_mount = _n; break; } }`);
   fnLines.push(`  }`);
-  fnLines.push(`  if (!_mount) return;`);
-  for (const l of emitEachReconcileLines(node, iterVarName, "_scrml_each_idx", "_mount", "_items", "  ", engineCtx)) {
+  fnLines.push(`  if (!_scrml_mount) return;`);
+  for (const l of emitEachReconcileLines(node, iterVarName, "_scrml_each_idx", "_scrml_mount", "_scrml_items", "  ", engineCtx)) {
     fnLines.push(l);
   }
   fnLines.push(`}`);
@@ -4393,7 +4393,7 @@ export function emitEachBodyRenderForFile(
     }
 
     // Dep-establishing read FIRST (see comment above).
-    fnLines.push(`  const _items = ${itemsExpr};`);
+    fnLines.push(`  const _scrml_items = ${itemsExpr};`);
     // Now locate the mount; if it is not in the DOM yet (non-initial engine arm
     // pre-entry), bail — the dep above is already tracked, so a later arm-entry
     // remount (via `_scrml_remount_each`) will re-run this fn with the mount present.
@@ -4404,11 +4404,11 @@ export function emitEachBodyRenderForFile(
     // The id is chunk-namespaced, so it is a STRING (`"a1b2c3d4_9"`) rather than
     // a bare numeric literal. `_scrml_find_each_anchor` concatenates it into
     // `"scrml-each:" + id`, so a string arg needs no runtime change.
-    fnLines.push(`  const _mount = _scrml_find_each_anchor(document, ${JSON.stringify(nsId(node.id))});`);
-    fnLines.push(`  if (!_mount) return;`);
+    fnLines.push(`  const _scrml_mount = _scrml_find_each_anchor(document, ${JSON.stringify(nsId(node.id))});`);
+    fnLines.push(`  if (!_scrml_mount) return;`);
 
     // Empty-guard + per-item reconcile (shared with the nested-each inline path).
-    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_mount", "_items", "  ", engineCtx)) {
+    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_scrml_mount", "_scrml_items", "  ", engineCtx)) {
       fnLines.push(l);
     }
     fnLines.push(`}`);

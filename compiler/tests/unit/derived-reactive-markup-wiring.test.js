@@ -79,9 +79,9 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
     // Count wiring blocks under "--- Reactive display wiring ---"
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     // The <p>${@isInsert}</p> placeholder gets _scrml_logic_3 (after program=1, ${}=2)
-    // navigate-wave1b: reactive display is wired inside `_scrml_nav_rewire(root)`
-    // so it re-binds on a soft nav; the query is `(root || document)`-scoped.
-    expect(wiringSection).toMatch(/const el = \(root \|\| document\)\.querySelector\('\[data-scrml-logic="_scrml_logic_\d+"\]'\)/);
+    // navigate-wave1b: reactive display is wired inside `_scrml_nav_rewire(_scrml_root)`
+    // so it re-binds on a soft nav; the query is `(_scrml_root || document)`-scoped.
+    expect(wiringSection).toMatch(/const _scrml_el = \(_scrml_root \|\| document\)\.querySelector\('\[data-scrml-logic="_scrml_logic_\d+"\]'\)/);
   });
 
   test("named derived rewrite routes through _scrml_derived_get (not _scrml_reactive_get)", () => {
@@ -112,8 +112,8 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain("_scrml_effect(function()");
     // markup-value-in-expression-2026-06-17: the display routes through the
-    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
-    expect(wiringSection).toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_derived_get\("isInsert"\)\); \}\)/);
+    // node-aware `_scrml_render_value(_scrml_el, expr)` helper (was `el.textContent =`).
+    expect(wiringSection).toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(_scrml_el, _scrml_derived_get\("isInsert"\)\); \}\)/);
   });
 
   test("string-returning derived also wired correctly", () => {
@@ -154,9 +154,9 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
     const { clientJs: __cjRaw } = compileSource(src, "mixed-direct-derived"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     // Both placeholders should produce wiring blocks.
-    // navigate-wave1b: reactive display wiring is `(root || document)`-scoped
+    // navigate-wave1b: reactive display wiring is `(_scrml_root || document)`-scoped
     // (inside `_scrml_nav_rewire`) so it re-binds on a soft nav.
-    const blockCount = (wiringSection.match(/const el = \(root \|\| document\)\.querySelector/g) || []).length;
+    const blockCount = (wiringSection.match(/const _scrml_el = \(_scrml_root \|\| document\)\.querySelector/g) || []).length;
     expect(blockCount).toBe(2);
     // Direct expression uses reactive_get on @mode.
     expect(wiringSection).toContain('_scrml_reactive_get("mode")');
