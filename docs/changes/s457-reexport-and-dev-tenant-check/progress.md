@@ -17,3 +17,10 @@
   No E-DEPLOY-DB-TENANT-UNDECLARED in the log. dev.js loadServerRoutes skips the `_scrml_tenant_startup_check` export
   (not a {path,method,handler}); the gate lives only as emitted text in build.js generateServerEntry.
   NB: SPEC §34 row E-DEPLOY-DB-TENANT-UNDECLARED says "`scrml dev` does not run it" — needs amending with the fix.
+- [2026-10-07] A FIXED (pending gate): module-resolver star enumeration + resolveExportedBinding/exportedNamesOf/
+  localReExportEdges/isReExportedByAnother; emit-server `export { … } from "./c.server.js"` (dist-space spec);
+  api.js value-only fixpoint over re-export lines + reconcileServerReExports (decide off emitted output);
+  emit-client footer re-export pairs + source module gets a footer/modules chunk; index.ts dep-script order follows
+  re-exports, isCrossFileLinked, #358 client-read seed followed through re-exports; emit-client-esm namespace re-read.
+  New tests: integration/s457-reexport-scrml-module (7; 7 fail on base by file-copy flip), unit/s457-reexport-resolution (5).
+  Empirical: reB/reC route -> 200 "from-c|p:kay|own-b" (control identical); happy-dom page load clean, registry identity.

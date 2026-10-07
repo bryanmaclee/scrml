@@ -72,7 +72,7 @@ import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, prog
 import { getElementAttrSchema } from "../attribute-registry.js";
 
 import { classifyFileShape } from "../library-shape.js";
-import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { resolveModulePath, isPromiseReturningStdlibFn, localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
@@ -427,6 +427,27 @@ function distRelRef(hostDistDir: string, targetDistRel: string): string {
  * (resolve them relative to the child's dist dir). Defaults to `entryFilePath`,
  * the own-document case, which stays byte-identical to pre-#235 behaviour.
  */
+/**
+ * s457 (§21.4) — the LOCAL `.scrml` re-export edges of `filePath` (module-resolver
+ * `localReExportEdges`), minus every name whose declaring module exports it as a
+ * type, a channel or an engine — none of which is a runtime value in a `.server.js`.
+ */
+function serverReExportEdges(
+  importGraph: any,
+  filePath: string,
+): Array<{ specifier: string; names: Array<{ exported: string; imported: string }> }> {
+  if (!importGraph || !filePath) return [];
+  const out: Array<{ specifier: string; names: Array<{ exported: string; imported: string }> }> = [];
+  for (const edge of localReExportEdges(importGraph, filePath)) {
+    const names = edge.names.filter((n: { exported: string; imported: string }) => {
+      const b = resolveExportedBinding(importGraph, edge.absSource, n.imported);
+      return !b || (b.kind !== "type" && b.kind !== "channel" && b.kind !== "engine");
+    });
+    if (names.length > 0) out.push({ specifier: edge.specifier, names });
+  }
+  return out;
+}
+
 function computeDependencyClientScripts(
   entryFilePath: string,
   importGraph: Map<string, { imports: Array<{ source?: string; absSource: string }> }> | null,
@@ -487,6 +508,10 @@ function computeDependencyClientScripts(
         }
       }
     }
+    // s457 (§21.4) — a local `.scrml` RE-EXPORT is a dependency too: the
+    // re-exporter's registry footer reads the source module's registry entry when it
+    // loads, so the source's `<script>` must be on the page, and earlier.
+    for (const edge of localReExportEdges(importGraph, absScrml)) visit(edge.absSource);
     visiting.delete(absScrml);
     if (!done.has(absScrml)) {
       done.add(absScrml);
@@ -552,7 +577,8 @@ function isCrossFileLinked(
       if (imp.absSource === fpKey) return true;
     }
   }
-  return false;
+  // (c) s457 (§21.4) — it re-exports a local `.scrml`, or one re-exports from it.
+  return localReExportEdges(importGraph, filePath).length > 0 || isReExportedByAnother(importGraph, filePath);
 }
 
 /**
@@ -1396,6 +1422,19 @@ export function runCG(input: CgInput): CgOutput {
             set.add(s.imported);
           }
         }
+      }
+    }
+    // s457 (§21.4) — a name read through a RE-EXPORT is a read of the module that
+    // DECLARES it: `import { K } from "./b.scrml"` where b re-exports c's `K` must
+    // mark c's `K`, or c never emits its client binding and b's footer registers
+    // `undefined`. Same confidentiality contract — only names the client really reads.
+    for (const [absSource, names] of [...crossFileClientReads]) {
+      for (const name of [...names]) {
+        const b = resolveExportedBinding(importGraphInput, absSource, name);
+        if (!b || b.filePath === toPosix(absSource)) continue;
+        let set = crossFileClientReads.get(b.filePath);
+        if (!set) { set = new Set<string>(); crossFileClientReads.set(b.filePath, set); }
+        set.add(b.name);
       }
     }
   }
@@ -2519,6 +2558,14 @@ export function runCG(input: CgInput): CgOutput {
       // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
       (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+
+      // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
+      // value-export block (`export { w as helper } from "./c.server.js"`). A name
+      // whose declaring module exports a TYPE, a channel or an engine has no runtime
+      // server binding, so it is left out here; whether the source `.server.js`
+      // really exports the rest is decided off the emitted output in api.js
+      // (`reconcileServerReExports`). Stashed because emit-server has no graph handle.
+      (fileAST as any)._serverReExportEdges = serverReExportEdges(importGraphInput, filePath);
 
       // ---------------------------------------------------------------------------
       // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets

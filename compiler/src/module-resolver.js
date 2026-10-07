@@ -19,8 +19,9 @@
  *   E-IMPORT-004  Imported name not found in target file's exports
  *   E-IMPORT-005  Import specifier is a bare (npm-style) name — must use vendor: prefix
  *
- * Design: v1 — named exports only, no default exports, no re-exports resolution,
- * relative paths only.
+ * Design: v1 — named exports only, no default exports, relative paths only.
+ * Re-exports (§21.4) resolve by ES rules: `resolveExportedBinding`,
+ * `exportedNamesOf`, `localReExportEdges` (s457).
  */
 
 import { resolve, dirname, join, basename, posix } from "path";
@@ -366,6 +367,10 @@ export function buildImportGraph(fileASTs) {
           kind: "re-export-all",
           isReExportAll: true,
           reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : null,
+          // s457 — the specifier AS WRITTEN (`./c.scrml`, `scrml:auth`), so codegen can
+          // tell a local `.scrml` re-export (one it emits a JS edge for) from a stdlib or
+          // vendor one, the same way it filters `imports` on `imp.source`.
+          reExportSpecifier: exp.reExportSource || null,
           span: exp.span || null,
         });
         continue;
@@ -389,6 +394,8 @@ export function buildImportGraph(fileASTs) {
             localName: localFor && localFor.has(name) ? localFor.get(name) : name,
             kind: exp.exportKind || "unknown",
             reExportSource: exp.reExportSource ? resolveModulePath(exp.reExportSource, filePath) : null,
+            // s457 — the specifier as written (see the re-export-all record above).
+            reExportSpecifier: exp.reExportSource || null,
             span: exp.span || null,
             // S89 §13.2 Sub-Phase B Step 2 — surface the `async` modifier so
             // buildExportRegistry can populate the per-name `isAsync` field
@@ -826,6 +833,26 @@ export function buildExportRegistry(graph) {
     if (!changed) break;
   }
 
+  // ---- Pass 2b (s457, §21.4) — enumerate `export * from './x.scrml'`. A star
+  // re-export exports every name its source exports (ES semantics: never `default`,
+  // an explicit export of the same name wins, and a name two stars bind to DIFFERENT
+  // bindings is ambiguous and not exported). Before this the registry held only the
+  // `"*"` record, so `import { w } from './b.scrml'` through `export *` fired a false
+  // E-IMPORT-004, and every registry consumer (async colouring, component routing)
+  // missed the name. Each enumerated entry copies the TERMINAL binding's entry.
+  for (const [filePath, names] of registry) {
+    const entry = graph.get(filePath);
+    if (!entry || !Array.isArray(entry.exports) || !entry.exports.some((e) => e.isReExportAll)) continue;
+    for (const n of exportedNamesOf(graph, filePath)) {
+      if (names.has(n)) continue;
+      const binding = resolveExportedBinding(graph, filePath, n);
+      if (!binding) continue;
+      const src = registry.get(binding.filePath)?.get(binding.name);
+      if (!src) continue;
+      names.set(n, { ...src, _reExportSource: null, _localName: n });
+    }
+  }
+
   // ---- Pass 3 — strip internal underscore-prefixed fields so the public
   // registry shape stays {kind, category, isComponent}.
   for (const [, names] of registry) {
@@ -836,6 +863,157 @@ export function buildExportRegistry(graph) {
   }
 
   return registry;
+}
+
+// ---------------------------------------------------------------------------
+// Re-export resolution (s457, §21.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Follow `name`, as exported by `filePath`, through re-exports to the module that
+ * DECLARES it. §21.4: "Re-export follows standard ES module `export { name } from
+ * 'source'` syntax", so the ES resolution rules apply: an explicit export (a local
+ * one or a named re-export) wins over every `export *`; `export *` never re-exports
+ * `default`; a name two stars resolve to different bindings is ambiguous (not
+ * exported); a re-export cycle binds nothing.
+ *
+ * Returns the terminal export record — `{ filePath, name, localName, kind }`, where
+ * `name` is the name the TERMINAL module exports it under and `kind` is that
+ * record's export kind — or null when it does not resolve inside the graph (a
+ * missing name, a source outside the compile unit, an ambiguity, a cycle).
+ *
+ * @param {Map<string, object>} graph — `buildImportGraph(...).graph`
+ * @param {string} filePath
+ * @param {string} name
+ * @returns {{ filePath: string, name: string, localName: string, kind: string } | null}
+ */
+export function resolveExportedBinding(graph, filePath, name, _seen = new Set()) {
+  const key = toPosix(filePath) + "\0" + name;
+  if (_seen.has(key)) return null;
+  _seen.add(key);
+  const entry = graph.get(filePath);
+  if (!entry || !Array.isArray(entry.exports)) return null;
+  for (const exp of entry.exports) {
+    if (exp.isReExportAll || exp.name !== name) continue;
+    if (exp.reExportSource) {
+      return resolveExportedBinding(graph, exp.reExportSource, exp.localName ?? name, _seen);
+    }
+    return { filePath: toPosix(filePath), name, localName: exp.localName ?? name, kind: exp.kind };
+  }
+  if (name === "default") return null;
+  let found = null;
+  for (const exp of entry.exports) {
+    if (!exp.isReExportAll || !exp.reExportSource) continue;
+    const b = resolveExportedBinding(graph, exp.reExportSource, name, new Set(_seen));
+    if (!b) continue;
+    if (found && (found.filePath !== b.filePath || found.name !== b.name)) return null;
+    found = b;
+  }
+  return found;
+}
+
+/**
+ * Every name `filePath` exports, `export *` expanded (ES rules as in
+ * `resolveExportedBinding`; an ambiguous star name is left out). The `"*"` record
+ * itself is not a name.
+ *
+ * @param {Map<string, object>} graph
+ * @param {string} filePath
+ * @returns {Set<string>}
+ */
+export function exportedNamesOf(graph, filePath, _seen = new Set()) {
+  const out = new Set();
+  const key = toPosix(filePath);
+  if (_seen.has(key)) return out;
+  _seen.add(key);
+  const entry = graph.get(filePath);
+  if (!entry || !Array.isArray(entry.exports)) return out;
+  for (const exp of entry.exports) {
+    if (!exp.isReExportAll && exp.name && exp.name !== "*") out.add(exp.name);
+  }
+  for (const exp of entry.exports) {
+    if (!exp.isReExportAll || !exp.reExportSource) continue;
+    for (const n of exportedNamesOf(graph, exp.reExportSource, _seen)) {
+      if (n === "default" || out.has(n)) continue;
+      if (resolveExportedBinding(graph, filePath, n)) out.add(n);
+    }
+  }
+  return out;
+}
+
+/**
+ * The LOCAL `.scrml` re-export edges of `filePath`, one per source module, in
+ * source order: `{ absSource, specifier, names: [{ exported, imported }] }`, where
+ * `imported` is the name the SOURCE module exports and `exported` the name this
+ * module re-exports it under. `export *` is expanded to its names (so a consumer
+ * never re-exports a source module's non-scrml exports — a `.server.js`'s
+ * `routes` / `fetch` — by accident). Only a relative specifier ending in `.scrml`
+ * counts, the filter the import side applies to `imp.source`; a stdlib / vendor
+ * re-export is not an edge between two emitted modules.
+ *
+ * @param {Map<string, object>} graph
+ * @param {string} filePath
+ * @returns {Array<{ absSource: string, specifier: string, names: Array<{ exported: string, imported: string }> }>}
+ */
+export function localReExportEdges(graph, filePath) {
+  const entry = graph?.get?.(filePath);
+  if (!entry || !Array.isArray(entry.exports)) return [];
+  const isLocalScrml = (spec) => typeof spec === "string" &&
+    (spec.startsWith("./") || spec.startsWith("../")) && spec.endsWith(".scrml");
+  const bySource = new Map();
+  const edgeFor = (exp) => {
+    let e = bySource.get(exp.reExportSource);
+    if (!e) {
+      e = { absSource: exp.reExportSource, specifier: exp.reExportSpecifier, names: [] };
+      bySource.set(exp.reExportSource, e);
+    }
+    return e;
+  };
+  const named = new Set();
+  for (const exp of entry.exports) {
+    if (exp.isReExportAll || !exp.reExportSource || !isLocalScrml(exp.reExportSpecifier)) continue;
+    edgeFor(exp).names.push({ exported: exp.name, imported: exp.localName ?? exp.name });
+    named.add(exp.name);
+  }
+  const explicit = new Set();
+  for (const exp of entry.exports) if (!exp.isReExportAll && exp.name) explicit.add(exp.name);
+  for (const exp of entry.exports) {
+    if (!exp.isReExportAll || !exp.reExportSource || !isLocalScrml(exp.reExportSpecifier)) continue;
+    const e = edgeFor(exp);
+    for (const n of exportedNamesOf(graph, exp.reExportSource)) {
+      if (n === "default" || explicit.has(n) || named.has(n)) continue;
+      // An ambiguous star name (two stars, two bindings) is not exported at all.
+      const mine = resolveExportedBinding(graph, filePath, n);
+      const theirs = resolveExportedBinding(graph, exp.reExportSource, n);
+      if (!mine || !theirs || mine.filePath !== theirs.filePath || mine.name !== theirs.name) continue;
+      e.names.push({ exported: n, imported: n });
+      named.add(n);
+    }
+  }
+  return [...bySource.values()].filter((e) => e.names.length > 0);
+}
+
+/**
+ * Is `filePath` the source of a local `.scrml` re-export in another module of the
+ * graph? Such a module is loaded by its re-exporter exactly like an imported one.
+ *
+ * @param {Map<string, object>} graph
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+export function isReExportedByAnother(graph, filePath) {
+  if (!graph) return false;
+  const key = toPosix(filePath);
+  for (const [fp, entry] of graph) {
+    if (!entry || !Array.isArray(entry.exports)) continue;
+    for (const exp of entry.exports) {
+      if (exp.reExportSource !== key) continue;
+      const spec = exp.reExportSpecifier;
+      if (typeof spec === "string" && (spec.startsWith("./") || spec.startsWith("../")) &&
+          spec.endsWith(".scrml") && toPosix(fp) !== key) return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
