@@ -1,6 +1,6 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -844,6 +844,10 @@
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
 
+## S456 — INFRA DELTA (`9c556dc74..ba2712973`)
+- Deploy behavior: a built `_server.js` refuses to serve (503 on every request) while a database it opens holds a `tenant_id` relation the build did not declare tenant-scoped, or cannot be checked within 10 s. It stays up and re-checks (1 s -> 30 s backoff; `/_scrml/health` immediate). Operators must declare such tables (`<schema>` / `<db tables=>`) or drop the column. Source: `codegen/tenant-startup-check.ts`, `commands/build.js` `generateServerEntry`.
+- No Docker / CI / workflow change.
+
 ## S455 — INFRA DELTA (`f38697900..9c556dc74`)
 
 No `.github/`, Dockerfile, or deploy-adapter change. Deploy-facing: `scrml build`'s database report prints the Postgres `REVOKE CREATE ON SCHEMA public FROM PUBLIC` requirement for db-authoritative programs (`commands/build.js:1055`).
@@ -1022,7 +1026,7 @@ the App-token approach was replaced by the fine-grained `MAPS_PAT` at `b5ec120b`
 Do not go looking for an App install.
 
 ## Tags
-#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows #zero-infra-diff #s437b #9941a504c #ci-bootstrap-step #s440 #cf62b415 #slice-m3-ci #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
+#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows #zero-infra-diff #s437b #9941a504c #ci-bootstrap-step #s440 #cf62b415 #slice-m3-ci #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s456 #ba2712973 #tenant-startup-check
 #zero-diff-window
 #s405 #infra-zero-diff #verified-empty-diff #protect-opaque-refusal-500 #e-protect-005-fails-at-compile-not-runtime #mounthydrate-guarded
 #s437 #d02738767 #gate-16-steps #windows-5-steps #e2e-render-map-gated #cloud-maps-relabel

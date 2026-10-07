@@ -1,6 +1,6 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -884,6 +884,9 @@ schema-migration tool.
 This is NOT a Prisma/Knex/Alembic-shaped versioned-migration-file tool. Read the model section below
 before assuming a `migrations/0001_*.sql`-style directory exists — it does not.
 
+## S456 — NEAR-ZERO-DIFF FOR THIS MAP (`9c556dc74..ba2712973`)
+- No migration tooling change. `schema-differ.js` gains program-body statement readers (`programStatementVerdicts` :3967, `programStatementCount` :4010) used by the §8.1.2 / §14.8.10 checks, not by `db-migrate` diffing. The `--` comment now ends at CR or LF in the schema lexer (#1331).
+
 ## S455 — NEAR-ZERO-DIFF FOR THIS MAP (`f38697900..9c556dc74`)
 
 `commands/db-migrate.js` unchanged. `schema-differ.js` (+247 lines): `alterTableTenantDecls` :910 — an `ALTER TABLE … ADD COLUMN tenant_id` in a `<schema>` makes the table tenant-scoped (read by the floor, `E-SCHEMA-015`, and `E-TENANT-SCHEMA-HAZARD`). Deploy requirement (§14.8.11): `REVOKE CREATE ON SCHEMA public` — stated by `scrml build`, not applied by `db-migrate`.
@@ -1242,7 +1245,7 @@ Also see error.map.md (the exact §34 fire sites) and schema.map.md (the lowerin
 inventory and `isEffectivelyImmutable`).
 
 ## Tags
-#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage #schema-body-is-ddl #state-block-statement-form-adjacency #s437b #9941a504c #zero-diff #s440 #cf62b415 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
+#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage #schema-body-is-ddl #state-block-statement-form-adjacency #s437b #9941a504c #zero-diff #s440 #cf62b415 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s456 #ba2712973
 #schema-differ-new-consumer #parseschemablock
 #s405 #rawddl-schema-invisible-to-db-migrate #if-t-rawddl-continue #split-at-the-consumer #diffschema-byte-identical #four-defects-impossible-by-construction #one-shared-recognizer #schema-differ-owns-it #import-direction-invariant #postgres-qualifier-normalized #e-pa-003-shadow-db #overwrite-last-wins-vs-first-wins #sourcetext-recovery-deleted #two-individually-correct-fixes-cancelling #w-schema-no-tables-declared #schema-anchor-fixture #deferred-migrate-arc
 #s437 #d02738767 #db-migrate-busy-timeout #no-wal-on-cli-handle #db-migrate-redaction

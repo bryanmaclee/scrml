@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -964,6 +964,38 @@ existing node kinds, or through codegen-internal / schema-differ-internal shapes
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
 `ifRaw`/`ifCond` pair below), and now the #458 region shapes immediately below.
+
+## S456 — SHAPE DELTA (`9c556dc74..ba2712973`)
+### InterpolatedAttrSink  [compiler/src/attr-injection-sink.ts:190]
+union: `{kind:"event-handler"}` | `{kind:"srcdoc"}` | `{kind:"url-scheme"; scheme}` | `{kind:"url-unprovable"; reason}`
+### LiteralUrlScheme  [attr-injection-sink.ts:141]
+union: `{kind:"none"}` | `{kind:"scheme"; scheme; rest}` | `{kind:"unprovable"; reason}`
+### AttrInterpError  [validators/attribute-interpolation.ts:53]
+### LoopWriteFacts  [hoist-write-scan.ts:56]
+fnMayWrite: Map<string, boolean> · imported: Set<string> · unknownImported: Set<string> · pureImported: Set<string> · … read file
+### WriteScanFile  [hoist-write-scan.ts:402]
+### ExprTextSqlVisitor  [sql-in-expression-text.ts:22]
+sql(body: string, at: number): void · unreadable(why: string, at: number): void
+### MultipleStatementsDiagnostic  [sql-one-statement.ts:30]
+code: "E-SQL-MULTIPLE-STATEMENTS" | "E-SQL-QUERY-NOT-READABLE" · message · span · severity: "error"
+### TenantUndeclaredDiagnostic  [tenant-undeclared.ts:58]
+code: "E-TENANT-UNDECLARED" · message · span · severity: "error"
+### ProgramStatementDiagnostic  [tenant-undeclared.ts:66]
+code: "E-TENANT-UNDECLARED" | "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED" · message · span · severity: "error"
+### LiveTenantRelation  [tenant-undeclared.ts:74]
+table: string · type: string ("table" | "view" | "unreadable") · db: string (display form) · … read file
+### TenantSubstrateDiagnostic  [tenant-substrate-read.ts:73]
+code: "W-TENANT-SUBSTRATE-SCOPED" · message · span · severity: "warning"
+### DriverCallVerdict  [codegen/sql-one-statement-guard.ts:51]
+"ok" | "multiple-statements" | "text-not-read"
+### TenantCheckHandle  [codegen/tenant-startup-check.ts:41]
+ident: string · driver: "sqlite" | "postgres" | "mysql" · connection: string (displayed redacted)
+### protect-analyzer result `liveTenantTables`  [protect-analyzer.ts:135]
+liveTenantTables?: LiveTenantRelation[]
+### protect-flow `SinkKind`  [codegen/protect-flow.ts:186] (module-local)
++ `"handle"`
+### AST node annotation (meta-eval.ts:591-:598)
+`_metaEmitSiteSpan: Span` — set on nodes spliced in from `^{ emit }`
 
 ## S455 — SHAPE DELTA (`f38697900..9c556dc74`)
 
@@ -2034,7 +2066,7 @@ rather than closed it.** build.map.md · test.map.md.
 changed what the compiler can SAY, not what it accepts.
 
 ## Tags
-#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth #s437b #9941a504c #handler-block #core-ir #self-host-v2 #s440 #cf62b415 #analyze-tables #stmt-commit #typing #ingest-ival #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066
+#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth #s437b #9941a504c #handler-block #core-ir #self-host-v2 #s440 #cf62b415 #analyze-tables #stmt-commit #typing #ingest-ival #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066 #s456 #ba2712973 #interpolated-attr-sink #live-tenant-relation
 #tildecontext-shape #liftvar-vs-var #armbodystmts-readonlyset #no-uniform-binder #es6-shorthand-defeats-field-regex #binding-is-raw-paren-text #parsebindinglist #types-dir-empty-is-not-a-currency-probe
 #litexpr-hasinterpolation #carried-not-inferred #raw-value-aliasing #literal-vs-literal-type-only #section-53-4 #section-7-5-1 #fieldtypeassignable #fieldtypeequals #section-14-8-8 #width-subtyping-only #primitives-by-name #int-vs-number #position-3-has-no-code #anchors-re-derived-by-symbol-grep
 #s405 #types-ast-zero-diff #extractdesiredschema #rawddl-marker #names-only #two-consumers-opposite-needs #split-at-the-consumer #diffschema-byte-identical #db-migrate-one-line-decline #parseschemablock-dsl-only #harvestrawcreatetabledecls #parserawcreatetablecolumns-no-production-caller #tenanttableset #case-folds-on-three-methods #deferred-migrate-arc

@@ -1,6 +1,10 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# generated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# ⛑ **S456 STAMP — `9c556dc74` -> `ba2712973` (11 commits: #1326-#1337), incremental; scan mode INCREMENTAL (in-window
+# changed docs + SPEC §34 check of the 7 new codes + executed `facts.ts --check`, `bootstrap-conformance.ts --check`,
+# `state.ts --check`). New section `## Summary — S456 pass` below.**
+# ━━━━━━━ BELOW IS THE S455 HEADER (stamp `9c556dc74`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74` (20 commits: #1306-#1325), incremental; scan mode INCREMENTAL (in-window
 # changed docs + SPEC §34 grep cross-check of every code added in the `compiler/src` diff + executed `scrml fix --help`,
 # `facts.ts --check`, `bootstrap-conformance.ts --check`). New section `## Summary — S455 pass` below.**
@@ -459,6 +463,48 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S456 pass (this pass, stamp `ba2712973`)
+
+Window `9c556dc74..ba2712973` (11 commits, #1326-#1337). Scan mode INCREMENTAL. Docs scanned: in-window changed `.md` set
+(`compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `conformance/README.md`, `docs/{FACTS,known-gaps,changelog,pr-reviews}.md`,
+`master-list.md`, `hand-off.md`, 7 `docs/changes/s456-*/` dirs) + a §34 row check for the 7 codes new in the `compiler/src`
+diff (all 7 have rows inside `## 34.` :25467-:26485) + executed `facts.ts --check` (PASS), `bootstrap-conformance.ts --check`
+(STALE), `state.ts --check`. `docs/changes/s456-*` BRIEF/progress = historical by design, compliant. `conformance/README.md`
+:314 documents the new `<name>.db.sql` convention and matches `conformance/run.ts`. Non-compliant: 3 (all carried) ·
+Uncertain: 3 (carried) + 1 new · Prior findings closed: 0.
+
+### N-S455-1 — `docs/FACTS.md` "CLI verbs 14" (CARRIED, still true at `ba2712973`)
+**Reason:** grep-mismatch (generated doc, generator allowlist stale)
+**Detail:** `FACTS.md:29`/`:41` still count `fix-client-server-call` and `fix-sql-failable` as verbs; `scripts/facts.ts:89`
+`NOT_A_VERB` still lacks both. `facts.ts --check` PASSES (self-consistency only).
+**Suggested disposition:** update to match current — add both to `NOT_A_VERB`, `facts.ts --write`.
+
+### N-S455-2 — `scrml fix --help` advertises a `.run() !{ _ :> {} }` rewrite (CARRIED, still true)
+**Reason:** content-heuristic (user-facing CLI text vs code)
+**Detail:** `compiler/src/commands/fix.js:59` unchanged; `fix-sql-failable.js` lists writes, never rewrites them.
+**Suggested disposition:** update to match current.
+
+### N-S455-3 — `docs/bootstrap-conformance.md` STALE for the SEVENTH consecutive window
+**Reason:** content-heuristic (generated doc vs live run)
+**Detail:** `bun scripts/bootstrap-conformance.ts --check` at `ba2712973`: STALE. Conformance grew +45 (1346 -> 1391) this
+window; none regenerated it.
+**Suggested disposition:** update to match current (`--write`); consider making `--check` blocking for `conformance/cases/**` PRs.
+
+## Uncertain docs (needs human review) — S456 pass
+
+### Reviewer-reported walker gaps not filed as known-gaps entries
+**Reason:** `validators/ast-walk.ts` `walkFileAst` does not descend `EngineDeclNode.bodyChildren`; component bodies are raw
+text until the CE re-parse. Both are now recorded in structure.map.md `## S456` and a primary.map.md routing row, but
+`grep bodyChildren docs/known-gaps.md` finds no entry for the walker limitation.
+**What to check:** decide whether `walkFileAst` skipping `bodyChildren` is by design (doc it in `ast-walk.ts`) or a gap
+(file it) — any future whole-file rule on `walkFileAst` silently misses engine state-child bodies.
+
+### Carried from S455 (unchanged, not re-executed beyond a grep)
+- `docs/known-gaps.md:10240` `G-SQL-ERROR-SURFACE-UNWIRED` — heading still `open`; premise narrowed by #1305.
+- `compiler/SPEC.md:20183` — "E-ERROR-016 … no compiler emits it yet" (impl#2 emits it).
+- `compiler/SPEC.md` E-CG-003 row and the `E-TENANT-WRITE` sentence — as in the S454 pass.
+- known-gaps heading/marker drift **61** (`state.ts --check`, unchanged).
 
 ## Summary — S455 pass (this pass, stamp `9c556dc74`)
 
@@ -4674,7 +4720,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066
+#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066 #s456 #ba2712973
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness
