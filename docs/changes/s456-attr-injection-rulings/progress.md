@@ -55,3 +55,15 @@ cannot be changed by the interpolation after its `:`. Newly refused non-test pro
 - `bun run test`: 34149 pass / 53 fail → after P3-FOLLOW fix (my helper name contained
   `isComponent`), remaining fails = the 48-name browser FAILURE-BASELINE + TodoMVC ×2 (dist not
   compiled, env) + 2 that pass in isolation (esm-script-tag NEGATIVE control, detector-validation S426).
+
+## U3 — evidence after c0cf5d61f
+
+- Pre-commit gate (unit + integration + conformance): 31771 pass / 0 fail.
+- Corpus differential (`corpus-emit-differential`, base 20ce26bf5 vs head, roots
+  examples,samples,conformance,stdlib,benchmarks): 2413 common sources; compile-failure delta 0/0;
+  diagnostic CODE changes 0; 1460 text-only = the capture directory name only (all 2413 compile
+  records identical after `.tmp/base`→`.tmp/head` substitution); artifact content diffs 0 of 11837;
+  syntax delta 0. +4 sources = the new conformance cases (3 neg exit 1, 1 pos exit 0).
+- Conformance 1338/1388 (+4 PASS, 50 xfail unchanged). Browser baseline `--check` PASS (48 names).
+- Gates: types-gate OK (unchanged), s34-census --check-new PASS, regen-spec-index --check OK,
+  facts --check OK, state --check OK.
