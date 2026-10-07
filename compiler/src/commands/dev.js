@@ -31,6 +31,7 @@ import { moduleFormatNotices } from "./module-format-notice.js";
 import { hasApplicationScopeRefusal } from "./refusal-gate.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import { createTenantGate, tenantHealthReason, TENANT_REFUSED_STATUS_TEXT } from "../codegen/tenant-startup-check.ts";
 import { listen, listenOrExit, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
 import {
   _scrml_static_request_path,
@@ -265,6 +266,16 @@ let registeredProtectedDocs = new Map();
 /** @type {Map<string, (req: Request) => Promise<Response>>} */
 let registeredComposeDocs = new Map();
 
+// §14.8.10 (S456; s457 for dev) — the undeclared-tenant-table refusal gate over every
+// loaded module's `_scrml_tenant_startup_check`, or null when no module opens a
+// database. The SAME gate text `scrml build`'s `_server.js` runs
+// (codegen/tenant-startup-check.ts `createTenantGate`): the ruling ("b, startup check
+// lands with it") makes the check part of the tenant floor, not of one command, and an
+// undeclared tenant table fails open — its rows would reach every request unscoped —
+// under `scrml dev` exactly as under a built server.
+/** @type {import("../codegen/tenant-startup-check.ts").TenantGate | null} */
+let registeredTenantGate = null;
+
 /**
  * Test/introspection accessor for the currently mounted §40.3 onion. Still an
  * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
@@ -280,6 +291,41 @@ export function getRegisteredOnions() {
  */
 export function getRegisteredRoutes() {
   return registeredRoutes;
+}
+
+/** Test/introspection accessor for the undeclared-tenant-table gate (null when none). */
+export function getRegisteredTenantGate() {
+  return registeredTenantGate;
+}
+
+/**
+ * §14.8.10 — answer a request the way `_server.js` does while the undeclared-tenant-table
+ * gate refuses: `/_scrml/health` re-checks at once and answers 200 / 503 naming only a
+ * COUNT (the route is public); every other request answers a plain 503 while any finding
+ * stands (an ordinary request re-checks in the background under the gate's backoff).
+ * Returns null when the request may be served. Each finding is printed once to the log
+ * as `E-DEPLOY-DB-TENANT-UNDECLARED` by the gate itself.
+ *
+ * Exported for the dev-server unit tests.
+ *
+ * @param {import("../codegen/tenant-startup-check.ts").TenantGate} gate
+ * @param {string} pathname
+ * @returns {Promise<Response|null>}
+ */
+export async function devTenantGateResponse(gate, pathname) {
+  if (pathname === "/_scrml/health") {
+    const undeclared = await gate.refusals(true);
+    return new Response(JSON.stringify(undeclared === 0
+      ? { status: "ok", uptime: process.uptime() }
+      : { status: "unavailable", reason: `${tenantHealthReason(undeclared)} — see the server log` }), {
+      status: undeclared === 0 ? 200 : 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if ((await gate.refusals(false)) > 0) {
+    return new Response(TENANT_REFUSED_STATUS_TEXT, { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  }
+  return null;
 }
 
 /**
@@ -375,6 +421,9 @@ export async function loadServerRoutes(outputDir, serverModules = null) {
   registeredOnions = [];
   registeredProtectedDocs = new Map();
   registeredComposeDocs = new Map();
+  registeredTenantGate = null;
+  /** @type {import("../codegen/tenant-startup-check.ts").TenantStartupCheck[]} */
+  const tenantChecks = [];
 
   // F-COMPILE-001 Option A: outputDir may be a tree when sources have nested
   // subdirectories. Walk recursively for *.server.js entries.
@@ -439,6 +488,13 @@ export async function loadServerRoutes(outputDir, serverModules = null) {
 
       if (!value || typeof value !== "object") continue;
 
+      // §14.8.10 — the module's undeclared-tenant-table check `{ undeclared }`, NOT a
+      // route. Every one runs in the gate built after the loop.
+      if (exportName === "_scrml_tenant_startup_check" && typeof value.undeclared === "function") {
+        tenantChecks.push(value);
+        continue;
+      }
+
       // WebSocket handlers export — collect separately, NOT as a route.
       // _scrml_ws_handlers has shape { open, message, close }, not { path, method, handler }.
       if (exportName === "_scrml_ws_handlers") {
@@ -473,6 +529,11 @@ export async function loadServerRoutes(outputDir, serverModules = null) {
       }
     }
   }
+
+  // §14.8.10 — start the undeclared-tenant-table gate (its first check runs now, as it
+  // does when `_server.js` loads). The app process is respawned on every recompile, so
+  // each compile is checked afresh.
+  if (tenantChecks.length > 0) registeredTenantGate = createTenantGate(tenantChecks);
 
   // §40.3/§40.8 — mount THE application onion. `scrml build` fails on a second
   // one; dev surfaces the identical diagnostic through the compile-failure
@@ -1485,6 +1546,14 @@ export function buildServeConfig(opts, serveDir) {
       // ------------------------------------------------------------------
       if (compileFailure) {
         return buildCompileErrorResponse(req, compileFailure);
+      }
+
+      // §14.8.10 (s457) — no app request (a WebSocket upgrade included) is served while
+      // a database holds an undeclared tenant table or cannot be checked; the same gate
+      // and the same answers as `_server.js`.
+      if (registeredTenantGate) {
+        const refused = await devTenantGateResponse(registeredTenantGate, pathname);
+        if (refused) return refused;
       }
 
       // ------------------------------------------------------------------

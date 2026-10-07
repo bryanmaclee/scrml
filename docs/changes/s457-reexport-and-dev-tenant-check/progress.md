@@ -24,3 +24,17 @@
   re-exports, isCrossFileLinked, #358 client-read seed followed through re-exports; emit-client-esm namespace re-read.
   New tests: integration/s457-reexport-scrml-module (7; 7 fail on base by file-copy flip), unit/s457-reexport-resolution (5).
   Empirical: reB/reC route -> 200 "from-c|p:kay|own-b" (control identical); happy-dom page load clean, registry identity.
+- [2026-10-07] B FIXED (pending gate): gate text moved to codegen/tenant-startup-check.ts TENANT_GATE_LINES (+ header,
+  tenantGateEntryLines, createTenantGate via new Function over the same text). build.js emits it verbatim —
+  generateServerEntry output BYTE-IDENTICAL to base (cmp on a 2-module entry). dev.js loadServerRoutes collects
+  `_scrml_tenant_startup_check`, builds the gate; buildServeConfig fetch gates after compile-failure (WS included);
+  `/_scrml/health` answers like _server.js while armed. Empirical `scrml dev` (.tmp/run-dev.sh):
+  dirty -> health 503 {count}, app.html 503, route 503, E-DEPLOY-DB-TENANT-UNDECLARED logged;
+  clean -> health 200, app.html 200, route 403 (CSRF = dispatched). SPEC §14.8.10 item 3, §34 row, §47.14 amended.
+  New test unit/s457-dev-tenant-startup-check (5).
+- [2026-10-07] first B commit refused by the hook: integration/dev-db-no-side-file §3 (REFERENCING program, missing db)
+  expected dev's old 500-at-first-use; dev now refuses 503 like _server.js has since S456 (a db that cannot be
+  inspected SHALL NOT be served, §14.8.10 item 3). Empirical (.tmp/run-ref.sh): route/app.html/health 503,
+  log "E-DEPLOY-DB-TENANT-UNDECLARED: database ./ref.db could not be checked … database file not found: <path> —
+  declared as "./ref.db" in app.scrml", no db file created. Test updated to that contract (path-in-log, value-free
+  client body, nothing created kept). All 19 dev-driving test files: 270 pass / 0 fail.
