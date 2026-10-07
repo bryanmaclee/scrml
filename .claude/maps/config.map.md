@@ -1,6 +1,6 @@
 # config.map.md
 # project: scrml
-# updated: 2026-10-05T22:22:59-06:00  commit: 9c556dc74
+# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -904,6 +904,10 @@ No `.env.example` or `.env.template` in the repo. No `.env*` files were read (pe
 
 **Re-verified at `e80b692e` (S313)** by re-enumerating every `process.env.*` / `Bun.env.*` reference across `compiler/src`, `lsp`, `scripts` and `e2e`. **The compiler-side set is UNCHANGED across five sessions** — every landing in this window was compiler source, spec, CI or docs; none introduced or removed a configuration key. The CI-secret table at the bottom is the only part of this map that moved.
 
+## S456 — CONFIG DELTA (`9c556dc74..ba2712973`)
+- No new environment variable, feature flag or config file.
+- Non-configurable constants emitted into `_server.js` (`commands/build.js`): `_SCRML_TENANT_CHECK_TIMEOUT_MS` (10 s), re-check backoff 1 s -> 30 s.
+
 ## S455 — CONFIG DELTA (`f38697900..9c556dc74`)
 
 No new environment variable, feature flag, or config file (grep of the `compiler/src` diff: `SCRML_DATA_DIR` appears only in a comment in `api.js`). New compile-time constants (NOT configurable): `HOIST_KEY_ALIAS = "__scrml_batch_key"` (`batch-planner.ts:493`), `FOREIGN_SEAL_FN = "_scrml_foreign_seal"` (`codegen/foreign-seal.ts:59`), `COMPILATION_TENANT_KEY = "_scrmlCompilationTenant"` (`codegen/tenant-egress.ts:360`).
@@ -1142,7 +1146,7 @@ A map stamp is now exactly as old as the last PA wrap.**
 No secret VALUE appears anywhere in this map set.
 
 ## Tags
-#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56 #zero-env-diff #s437b #9941a504c #zero-diff #s440 #cf62b415 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066
+#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56 #zero-env-diff #s437b #9941a504c #zero-diff #s440 #cf62b415 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid #s452-wrap #7ce905ac2 #tenant-sql-subset #e-tenant-sql-subset #arm-pipe #w-arm-pipe-legacy-impl1 #effect-summary #dpa-066 #s456 #ba2712973
 #zero-env-delta-by-grep #argv-not-env
 #s405 #config-zero-diff #ten-json-paths-are-conformance-fixtures #scrml-protect-mediated-is-a-symbol-not-a-setting #scrml-protect-origin #compile-time-literal-not-config #gated-on-protectactive
 #s437 #d02738767 #scrml-toml #manifest #host-import-capability #e-manifest-001 #e-import-008 #sqlite-busy-timeout #journal-mode-override-not-implemented #e-mw-008 #stageoverrides
