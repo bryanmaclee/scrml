@@ -20,9 +20,8 @@
  * the `<each>` row attribute lowering in `codegen/emit-each.ts` (a backstop). Do not write a
  * second classifier: every path calls `classifyInterpolatedAttrSink`.
  *
- * Fail-closed choices (each named at its site): every browser-executed handler name, any
- * vendor-prefixed `onwebkit…`/`onmoz…`/`onms…` name and scrml's `on:`/`onserver:`/`onclient:`
- * count as handlers; the URL-attribute set is element-insensitive; a scheme is refused unless it is in the
+ * Fail-closed choices (each named at its site): every `on…` attribute counts as a handler except
+ * the closed `NON_EVENT_ON_WORDS` list (`one`, `online`, `onboarding`); the URL-attribute set is element-insensitive; a scheme is refused unless it is in the
  * fixed safe set; a backslash or `&` before the scheme terminator is refused because the
  * emitted template literal decodes JS escapes (`\x6a` → `j`) and the scheme can then not be
  * proven.
@@ -33,76 +32,37 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Event-handler CONTENT attribute names a browser compiles as JavaScript, lowercased.
- *
- * A quoted attribute is never wired by scrml: its value is written with `setAttribute` (or as
- * static HTML), and the BROWSER decides whether the text is code. So the set is what browsers
- * execute:
- *  - HTML Living Standard § 8.1.8.2 "Event handlers on elements, Document objects, and Window
- *    objects": the `GlobalEventHandlers`, `WindowEventHandlers` and
- *    `DocumentAndElementEventHandlers` IDL attribute lists, whose content-attribute names are
- *    the same `on…` names;
- *  - the partial `GlobalEventHandlers` members other specs add (Pointer Events, Touch Events,
- *    CSS Animations / Transitions, Selection API, WebXR, Fullscreen), and `Document` handlers;
- *  - handlers browsers still implement outside the standard (`onsearch`, `onmousewheel`,
- *    `onbeforecopy` / `onbeforecut` / `onbeforepaste`, `onorientationchange`, `ongesture*`,
- *    `onshow`, `ondragexit`, `onfocusin` / `onfocusout`, `ondevice*`).
- * Vendor-prefixed names (`onwebkit…`, `onmoz…`, `onms…`) are refused by prefix, fail closed.
+ * The CLOSED list of `on…` attribute names that are ordinary English words, not event handlers
+ * (S456 review round 2, N1). Matched by EXACT, case-insensitive whole-name equality — never by
+ * prefix — so `onerror` / `onended` (which begin with `one`) stay handlers, and a new browser
+ * event can only fall in here if it is literally named `e`, `line` or `boarding`.
+ *  - `one`        — `on` + `e`: no DOM event is named `e`.
+ *  - `online`     — `on` + `line`: the handler is `ononline` (event `online`); `online=` itself
+ *                   is not one. No DOM event is named `line`.
+ *  - `onboarding` — `on` + `boarding`: no DOM event is named `boarding`.
+ * Keep it short and grep-able. Adding a word needs the same check: `word.slice(2)` is not, and
+ * is not plausibly going to be, an event name.
  */
-export const BROWSER_EVENT_HANDLER_ATTRS: ReadonlySet<string> = new Set([
-  // GlobalEventHandlers (HTML)
-  "onabort", "onauxclick", "onbeforeinput", "onbeforematch", "onbeforetoggle", "onblur",
-  "oncancel", "oncanplay", "oncanplaythrough", "onchange", "onclick", "onclose", "oncommand",
-  "oncontextlost", "oncontextmenu", "oncontextrestored", "oncopy", "oncuechange", "oncut",
-  "ondblclick", "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover",
-  "ondragstart", "ondrop", "ondurationchange", "onemptied", "onended", "onerror", "onfocus",
-  "onformdata", "oninput", "oninvalid", "onkeydown", "onkeypress", "onkeyup", "onload",
-  "onloadeddata", "onloadedmetadata", "onloadstart", "onmousedown", "onmouseenter",
-  "onmouseleave", "onmousemove", "onmouseout", "onmouseover", "onmouseup", "onpaste",
-  "onpause", "onplay", "onplaying", "onprogress", "onratechange", "onreset", "onresize",
-  "onscroll", "onscrollend", "onsecuritypolicyviolation", "onseeked", "onseeking", "onselect",
-  "onslotchange", "onstalled", "onsubmit", "onsuspend", "ontimeupdate", "ontoggle",
-  "onvolumechange", "onwaiting", "onwheel",
-  // WindowEventHandlers (HTML; reflected on <body> / <frameset>)
-  "onafterprint", "onbeforeprint", "onbeforeunload", "onhashchange", "onlanguagechange",
-  "onmessage", "onmessageerror", "onoffline", "ononline", "onpagehide", "onpagereveal",
-  "onpageshow", "onpageswap", "onpopstate", "onrejectionhandled", "onstorage",
-  "onunhandledrejection", "onunload",
-  // Partial GlobalEventHandlers from other specs
-  "ongotpointercapture", "onlostpointercapture", "onpointercancel", "onpointerdown",
-  "onpointerenter", "onpointerleave", "onpointermove", "onpointerout", "onpointerover",
-  "onpointerup", "onpointerrawupdate",
-  "ontouchcancel", "ontouchend", "ontouchmove", "ontouchstart",
-  "onanimationcancel", "onanimationend", "onanimationiteration", "onanimationstart",
-  "ontransitioncancel", "ontransitionend", "ontransitionrun", "ontransitionstart",
-  "onselectionchange", "onselectstart", "onbeforexrselect",
-  "onfullscreenchange", "onfullscreenerror",
-  // Document handlers
-  "onreadystatechange", "onvisibilitychange", "onpointerlockchange", "onpointerlockerror",
-  // Implemented outside the standard
-  "onsearch", "onmousewheel", "onbeforecopy", "onbeforecut", "onbeforepaste",
-  "onorientationchange", "ongesturestart", "ongesturechange", "ongestureend", "onshow",
-  "ondragexit", "onfocusin", "onfocusout", "ondevicemotion", "ondeviceorientation",
-  "ondeviceorientationabsolute", "onbeforeinstallprompt", "onappinstalled",
-]);
+export const NON_EVENT_ON_WORDS: ReadonlySet<string> = new Set(["one", "online", "onboarding"]);
 
 /**
  * SAFETY predicate — would a quoted `name="…"` attribute's text be executed as JavaScript?
- * Case-insensitive (`ONCLICK` / `OnClick` are the live `onclick` handler — s456 review round 3).
- * True for: a browser event-handler content attribute (`BROWSER_EVENT_HANDLER_ATTRS`); a
- * vendor-prefixed `onwebkit…` / `onmoz…` / `onms…` name; and scrml's own handler forms `on:…`,
- * `onserver:…`, `onclient:…` (fail closed — they name an event by construction). False for an
- * `on…` name no browser executes (`one`, `onboarding`, `online`): the runtime only ever sets it as
- * a plain attribute (S456 review F3a). This is NOT `multi-statement-scan.ts`'s
- * `isEventHandlerAttrName`, which recognises the UNQUOTED handler shapes the parser lowers.
+ * INVERTED, fail closed (S456 review round 2, N1): EVERY attribute whose lowercased name begins
+ * with `on` is an event-handler attribute — `onclick`, `ONCLICK`, `onbegin` / `onend` (SVG
+ * animation, run on load), `onscrollsnapchange`, an event no list knows yet, scrml's `on:…`,
+ * `onserver:…`, `onclient:…` — EXCEPT the exact names in `NON_EVENT_ON_WORDS`. A deny-list of
+ * executable names (round 1's F3a) missed 19 Chromium handlers; browsers add events, so the
+ * name set cannot be enumerated. The bare name `on` (no event part) is not a handler. This is NOT
+ * `multi-statement-scan.ts`'s `isEventHandlerAttrName`, which recognises the UNQUOTED handler
+ * shapes the parser lowers.
  */
 export function isExecutableEventHandlerAttrName(name: string): boolean {
   if (typeof name !== "string") return false;
   const lower = name.toLowerCase();
-  if (lower.startsWith("on:") || lower.startsWith("onserver:") || lower.startsWith("onclient:")) return true;
-  if (BROWSER_EVENT_HANDLER_ATTRS.has(lower)) return true;
-  return /^on(webkit|moz|ms)/.test(lower);
+  if (lower.length <= 2 || !lower.startsWith("on")) return false;
+  return !NON_EVENT_ON_WORDS.has(lower);
 }
+
 
 // ---------------------------------------------------------------------------
 // URL-valued attributes

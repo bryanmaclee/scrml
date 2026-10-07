@@ -100,3 +100,16 @@ cannot be changed by the interpolation after its `:`. Newly refused non-test pro
   path normalization (0 newly refused); 11837 artifacts compared, 0 content changes (2 differ only in
   a relative import path to the base archive's root). +7 sources = the conformance cases.
 - Gates: types OK (unchanged), s34-census --check-new PASS, spec-index / facts / state --check OK.
+
+## U5 — S239 round 2 of a592fee37 (DO-NOT-LAND) — N1
+
+- N1 (HIGH, Chromium 148): the F3a browser-handler NAME list missed 19 Chromium handlers (SVG
+  `onbegin` / `onend` run on load). Inverted: any `on…` name (lowercased, length > 2) is a handler
+  EXCEPT the closed exact-name list `NON_EVENT_ON_WORDS` = `one`, `online`, `onboarding` (no DOM event
+  is named `e` / `line` / `boarding`; exact match, so `onerror` / `onended` stay handlers).
+  `BROWSER_EVENT_HANDLER_ATTRS` deleted (nothing else used it).
+- a592fee37 → head: N1 probe (onbegin/onend/onrepeat + 7 dispatch-run names + onClick + ONCLICK2):
+  exit 1, 1 refusal → exit 1, 12 refusals. Exemptions (one/online/onboarding/ONE): exit 0 both.
+- Conformance 1341/1391; types/census/spec-index/facts/state OK.
+- Corpus differential (base 20ce26bf5 archive vs head, path-normalized): 2413 common sources, 0 exit-code
+  changes, 0 compile-record changes, 11837 artifacts, 0 content diffs. flogence: byte-identical.

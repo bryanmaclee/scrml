@@ -174,10 +174,10 @@ flogence `src/`): 0 programs affected.
 value at every depth (VP-3 post-CE no longer skips re-parsed bodies; the call site is stamped as
 `_expansionSiteSpan`) — `<Lnk u="javascript:go('${@nm}')"/>` through `href="${u}"` was exit 0. F2: the check
 re-runs after ME over the AST codegen consumes — `^{ emit("<button onclick=…${@nm}…>") }` was exit 0.
-F3a: the event-attribute test is now the browser-executed handler name set (HTML `GlobalEventHandlers` /
-`WindowEventHandlers` / `DocumentAndElementEventHandlers` + other specs' partials + non-standard
-implemented handlers), vendor prefixes, and scrml's `on:` / `onserver:` / `onclient:` — `one=` /
-`onboarding=` / `online=` are plain attributes again.
+F3a / round-2 N1: the event-attribute test is ANY `on…` name (any case, scrml's `on:` / `onserver:` /
+`onclient:` included) except the closed exact-name list `one` / `online` / `onboarding`. A first cut used a
+browser-handler NAME list and missed 19 Chromium handlers — SVG `<animate onbegin=… onend=…>` runs on load
+(S239 round 2, real Chromium 148); the name set cannot be enumerated, so the rule names the exceptions.
 
 ### g-foreign-slice-regex-quote-and-in-block-refusal-lost — a quote inside a regex literal in a `_={ … }=` slice hid its `return`; and a codegen refusal one block deep (E-FOREIGN-006/007, E-SQL-006, E-SESSION-VALUE) or E-LIFT-002 anywhere compiled exit 0 with only a `null /* E-… */` placeholder in the artifact — `NEW S456; HIGH; RESOLVED S456`
 

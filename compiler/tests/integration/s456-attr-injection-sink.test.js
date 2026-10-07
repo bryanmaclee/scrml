@@ -17,6 +17,7 @@ import {
   classifyInterpolatedAttrSink,
   readLiteralUrlScheme,
   isExecutableEventHandlerAttrName,
+  NON_EVENT_ON_WORDS,
 } from "../../src/attr-injection-sink.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
@@ -51,20 +52,28 @@ describe("§1 classifyInterpolatedAttrSink — the shared reader", () => {
     expect(classifyInterpolatedAttrSink("srcdoc", "<b>x</b>")).toBeNull();
   });
 
-  test("event-handler names: browser-executed handlers (any case), vendor prefixes, scrml's on:/onserver:/onclient:", () => {
-    for (const n of ["onclick", "ONCLICK", "OnClick", "oNcLiCk", "on:click", "onserver:msg", "onclient:x",
+  test("event-handler names: EVERY `on…` name, any case — incl. scrml's on:/onserver:/onclient: and names no list knows", () => {
+    for (const n of ["onclick", "ONCLICK", "OnClick", "oNcLiCk", "on:click", "on:custom", "onserver:msg", "onclient:x",
       "ononline", "onpointerdown", "onanimationend", "onsearch", "onwebkitanimationend", "onmozfullscreenchange",
-      "onbeforeunload", "onerror", "onload"]) {
+      "onbeforeunload", "onerror", "onended", "onemptied", "onload", "onwhatever", "only", "onset",
+      // N1 (S239 round 2, Chromium 148): SVG animation handlers run on load; the rest run when dispatched.
+      "onbegin", "onend", "onrepeat", "oncontentvisibilityautostatechange", "onscrollsnapchange",
+      "onscrollsnapchanging", "onlocation", "onpromptaction", "onpromptdismiss", "onvalidationstatuschange"]) {
+      expect(isExecutableEventHandlerAttrName(n)).toBe(true);
       expect(classifyInterpolatedAttrSink(n, "go('${x}')")).toEqual({ kind: "event-handler" });
     }
   });
 
-  test("F3a — `on…` names no browser executes are plain attributes (admitted)", () => {
-    for (const n of ["one", "onboarding", "online", "onwhatever", "only", "on"]) {
+  test("N1 — only the closed non-event word list is admitted, by exact name (any case)", () => {
+    expect([...NON_EVENT_ON_WORDS].sort()).toEqual(["onboarding", "one", "online"]);
+    for (const n of ["one", "ONE", "onboarding", "online", "OnLine", "on", "open", "title"]) {
       expect(isExecutableEventHandlerAttrName(n)).toBe(false);
       expect(classifyInterpolatedAttrSink(n, "x-${x}")).toBeNull();
     }
-    expect(isExecutableEventHandlerAttrName("open")).toBe(false);
+    // Exact match only: a handler that BEGINS with an exempt word stays a handler.
+    for (const n of ["onerror", "onended", "onemptied", "onlinechange", "oneclick", "onboardingdone"]) {
+      expect(isExecutableEventHandlerAttrName(n)).toBe(true);
+    }
   });
 
   test("F3b — a raster data:image on an image-source attribute is admitted; svg / html / non-image / incomplete type refused", () => {
@@ -393,6 +402,15 @@ describe("§4 F3 — through the pipeline", () => {
 `);
     expect(refusals.length).toBe(0);
     expect(result.errors ?? []).toEqual([]);
+  });
+
+  test("N1 — SVG `<animate onbegin=… onend=…>` with `${…}` (runs on load in Chromium) is refused", () => {
+    const { refusals } = compile("n1svg", `<program>
+<nm> = "a"
+<svg><animate id="t" attributeName="x" dur="1s" onbegin="console.log('\${@nm}')" onend="console.log('\${@nm}')"/></svg>
+</program>
+`);
+    expect(refusals.length).toBe(2);
   });
 
   test("data:image/svg+xml on <img src> is refused", () => {
