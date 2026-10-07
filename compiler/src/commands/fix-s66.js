@@ -27,9 +27,10 @@
  *                   calls from impl#1's Route Inference + AST and gates each file (re-parse, same
  *                   codes); a site it cannot rewrite is listed. It reports an INFO (`infos`) at each
  *                   client-function-body site: callers no longer abort.
- *   sql-failable    §19.8.3 (S451 R11, item 5(a)): an UNHANDLED `?{}` outside a `!` function →
- *                   `?{…}.get() !{ _ :> not }` / `.all() !{ _ :> [] }` / `.run() !{ _ :> {} }` (the
- *                   superseded silent meaning written out). Chained fourth; its own module
+ *   sql-failable    §19.8.3 (S451 R11, item 5(a)): an UNHANDLED `?{}` READ outside a `!` function →
+ *                   `?{…}.get() !{ _ :> not }` / `.all() !{ _ :> [] }` (the superseded silent meaning
+ *                   written out); every WRITE is listed, never rewritten (S455 "b your rec on R11"
+ *                   supersedes 5(a)'s `.run()` shape). Chained fourth; its own module
  *                   (fix-sql-failable.js) locates the queries from impl#1's AST + Route Inference and
  *                   gates each file (re-parse, same codes); a site it cannot rewrite is listed. It
  *                   reports an INFO at every rewritten site: on impl#1 a failure there used to throw.

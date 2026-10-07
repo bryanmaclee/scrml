@@ -30,11 +30,40 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 237 | 6 |
-| MED | 520 | 4 |
+| HIGH | 238 | 6 |
+| MED | 522 | 4 |
 | LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-walkfileast-skips-engine-and-match-bodies — `walkFileAst` does not descend `engine-decl.bodyChildren` or `<match>` arms, so four whole-file rules go silent inside engine state-child bodies and match arms — `NEW S457; MED; open`
+
+<!-- @gap id=g-walkfileast-skips-engine-and-match-bodies sev=MED status=open locus=compiler/src/validators/ast-walk.ts(walkFileAst/walkNode) prov=empirical:S457-maps-noncompliance-probe -->
+
+Measured at `0d8e9d8ce` (S457 maps-noncompliance agent, 18-cell compile matrix): VP-3 `E-CHANNEL-007`, VP-1 `W-ATTR-001`,
+`W-TRY-CATCH-IN-SCRML-SOURCE` fire at top level and are MISSED inside an engine state-child body and inside a `<match>` arm.
+`E-ATTR-INTERP-EXECUTABLE` is unaffected (it walks with `walkEveryMarkupNode`, `attribute-interpolation.ts:159`).
+Fix direction: make `walkNode` descend `bodyChildren` + match-block arms, or move the rules onto the generic walker — any
+future rule on `walkFileAst` inherits the hole. Newly-rejecting when fixed; corpus migration to be measured.
+Side observation (unverified against SPEC): a `<channel>` inside an engine / match arm body is dropped from output silently.
+
+### g-match-arm-unresolved-component-phantom — an unresolved `<Zork/>` inside a `<match>` arm compiles at exit 0 to a literal `<Zork></Zork>` element — `NEW S457; HIGH; open (silent)`
+
+<!-- @gap id=g-match-arm-unresolved-component-phantom sev=HIGH status=open locus=compiler/src/validators/post-ce-invariant.ts(:178 match-block arms "out of scope") prov=empirical:S457-maps-noncompliance-probe,PA-reproduced-0d8e9d8ce -->
+
+PA-reproduced at `0d8e9d8ce`: `<match for=Phase on=@phase><Idle><Zork/></>…</>` → exit 0, no diagnostic, emitted text
+contains `<Zork></Zork>`. The engine-body case was closed at S429 (E-COMPONENT-035's own engine pass); the match-arm case was
+left out of scope at `post-ce-invariant.ts:178`. SPEC §2.2.1: a compile reporting an Error SHALL NOT produce a runnable
+artifact — the top-level case is E-COMPONENT-035, so the arm case is a conformance restoration (newly-rejecting).
+
+### g-string-url-refinement-admits-executable-schemes — the `string(url)` refinement admits `javascript:` / `data:` and refuses relative URLs — `NEW S457; MED; open (needs a ruling)`
+
+<!-- @gap id=g-string-url-refinement-admits-executable-schemes sev=MED status=open locus=searched:§53 url predicate (check = new URL() parses) prov=dd:scrml-support/docs/deep-dives/url-refinement-type-2026-10-07.md -->
+
+From the S457 url-type deep-dive (Q2), agent-measured: `<u>: string(url) = "javascript:alert(1)"` compiles clean as
+statically proven; `"/users/1"` fails E-CONTRACT-001. The check is "does `new URL()` parse it", a form-input shape tied to
+`<input type="url">`. Question for bryan: should `string(url)` stop admitting executable schemes? Newly-rejecting; corpus has
+1 `string(url)` declaration, unaffected. (The (c) `url`/`link` type for attributes was DROPPED S457 — this is separate.)
 
 ### g-svg-animation-and-meta-refresh-url-sinks-s456 — a URL can reach an executable sink through an attribute OUTSIDE the §5.2 URL-attribute set: SVG `<set attributeName="href" to="javascript:…${x}">` / `<animate attributeName="href" values="…">`, and `<meta http-equiv="refresh" content="0;url=javascript:…${x}">` — `NEW S456; LOW; open`
 

@@ -10,7 +10,8 @@
 # THREE jobs:
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
 #                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet
-#                + the types gate (S454). This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
+#                + the types gate (S454) + the bootstrap-conformance report's currency on PRs touching
+#                conformance/cases or compiler/self-host-v2 (S457). This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
 #                green in `tracking` (the v1 self-host dist tests were removed S447 — see KEY FINDING).
 #   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
 #                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
@@ -215,6 +216,29 @@ jobs:
         run: bun scripts/corpus-compile-floor.ts --check
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
+      # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
+      # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3): nothing that grows
+      # the corpus was ever made to regenerate it. BLOCKING here, but PATH-SCOPED: only a pull request
+      # whose diff touches `conformance/cases/**` or `compiler/self-host-v2/**` must leave the report
+      # current. What blocks is STALENESS only — the FAIL count never sets the exit status (that stays
+      # a tracked backlog, not a gate). Remedy: `bun scripts/bootstrap-conformance.ts --write` (~60 s).
+      #
+      # PR-ONLY: on a push to `main` there is no PR base, and two individually-current corpus PRs can
+      # merge into a stale combination; failing the trunk check for that would be cry-wolf. The next
+      # corpus PR is made to heal it, and `tracking` still reports staleness on every run.
+      #
+      # HONEST LIMIT: the report also reads impl#1's front end (the §66 twins come from
+      # `compiler/src/commands/fix-s66.js`) and `conformance/*.ts`, so a PR touching only those can
+      # stale it without tripping this step; the next corpus PR then inherits a mechanical
+      # regenerate. `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
+      - name: Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+            echo "no conformance/cases or compiler/self-host-v2 change in this PR — report currency not required here"
+          else
+            bun scripts/bootstrap-conformance.ts --check
+          fi
       # S409 — an unresolved merge conflict reached `main` at e74f5423 (#900) and this job was GREEN.
       # `compiler/SPEC-INDEX.md` carried three raw markers around 117 duplicated rows; it is a
       # mandatory full-read at every Profile-A PA boot, so the next session read a doubled navigation
@@ -264,7 +288,8 @@ jobs:
       # (compiler/self-host-v2/) passes, by bucket and area; ~7 s. TRACKING ONLY, never in `gate`:
       # the number is a backlog, and a red gate over a backlog is the cry-wolf shape. `--check`
       # exits 1 only when docs/bootstrap-conformance.md is stale (regenerate with `--write`); the
-      # FAIL count never sets the exit status here. Step-level continue-on-error for the reason
+      # FAIL count never sets the exit status here. (S457: on a PR touching conformance/cases or
+      # compiler/self-host-v2 the same staleness check is ALSO a blocking `gate` step.) Step-level continue-on-error for the reason
       # stated above (a failed step halts the job). Needs no pretest.
       - name: Bootstrap conformance count (tracking; report staleness)
         continue-on-error: true
