@@ -20,8 +20,11 @@ import { jsInterpolationEnd } from "./codegen/sql-lex.ts";
 import { regexAllowedAfter } from "./codegen/code-segments.ts";
 
 export interface ExprTextSqlVisitor {
-  /** A `?{` + backtick … backtick + `}` query; `body` is the SQL text codegen lowers. */
-  sql(body: string, at: number): void;
+  /**
+   * A `?{` + backtick … backtick + `}` query; `body` is the SQL text codegen lowers, `at` the
+   * index of its `?`, `end` the index just past its closing `}`.
+   */
+  sql(body: string, at: number, end: number): void;
   /** A `?{` the text-path lowering does not read; `why` names the shape. */
   unreadable(why: string, at: number): void;
 }
@@ -39,18 +42,30 @@ function stringEnd(text: string, at: number): number {
 /**
  * Walk `text` (expression source) and report every `?{` query in code context. `base` offsets the
  * reported positions (for recursion into template slots).
+ *
+ * REGEX OR DIVISION (S457 fix round 1). Whether a `/` opens a regular-expression literal is asked
+ * of `regexAllowedAfter` — but over the CODE read so far, not the raw text before the `/`: a
+ * string, regex, template literal or `?{}` query read so far stands as one value token (`0`), a
+ * comment as whitespace, and a property name after `.` / `?.` as a plain identifier (`_`). The
+ * raw prefix let a comment's words, a keyword spelled inside a string, or a property named like a
+ * keyword decide the question: `x.if(1) / ?{…}`, `g("if(") / ?{…}`, `x // (⏎ / ?{…}` were read as
+ * a regex holding the query, so the query was neither checked nor lowered (emitted raw — invalid
+ * JS, fail closed). The compile checks and `rewriteSqlRefs` both locate sites through this one
+ * function, so they cannot disagree about which `?{` is code.
  */
 export function scanExpressionTextForSql(text: string, visit: ExprTextSqlVisitor, base = 0): void {
   if (typeof text !== "string" || !text.includes("?{")) return;
   const n = text.length;
+  // The code read so far, with every literal / comment / query collapsed (see above).
+  const code = new CodeSoFar();
   let i = 0;
   while (i < n) {
     const c = text[i];
-    if (c === "'" || c === '"') { i = stringEnd(text, i); continue; }
-    if (c === "/" && text[i + 1] === "/") { const nl = text.indexOf("\n", i); i = nl === -1 ? n : nl + 1; continue; }
-    if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); i = e === -1 ? n : e + 2; continue; }
-    if (c === "/" && regexAllowedAfter(text.slice(0, i))) {
-      // A regular-expression literal (the codegen's shared regex-vs-division reading).
+    if (c === "'" || c === '"') { i = stringEnd(text, i); code.push("0"); continue; }
+    if (c === "/" && text[i + 1] === "/") { const nl = text.indexOf("\n", i); i = nl === -1 ? n : nl + 1; code.push("\n"); continue; }
+    if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); i = e === -1 ? n : e + 2; code.push(" "); continue; }
+    if (c === "/" && regexAllowedAfter(code.tail())) {
+      // A regular-expression literal.
       let j = i + 1;
       let inClass = false;
       while (j < n && text[j] !== "\n") {
@@ -61,6 +76,7 @@ export function scanExpressionTextForSql(text: string, visit: ExprTextSqlVisitor
         j++;
       }
       i = j + 1;
+      code.push("0");
       continue;
     }
     if (c === "`") {
@@ -78,10 +94,12 @@ export function scanExpressionTextForSql(text: string, visit: ExprTextSqlVisitor
         j++;
       }
       i = j + 1;
+      code.push("0");
       continue;
     }
     if (c === "?" && text[i + 1] === "{") {
       const at = base + i;
+      code.push("0");
       // The text-path lowering's exact shape: `?{` BACKTICK body BACKTICK `}`.
       if (text[i + 2] !== "`") {
         visit.unreadable("a `?{ … }` written without the backtick template, in expression text the compiler holds unparsed (it is not lowered)", at);
@@ -97,10 +115,100 @@ export function scanExpressionTextForSql(text: string, visit: ExprTextSqlVisitor
         i = close + 1;
         continue;
       }
-      visit.sql(text.slice(i + 3, close), at);
+      visit.sql(text.slice(i + 3, close), at, base + close + 2);
       i = close + 2;
       continue;
     }
+    if (/[A-Za-z_$]/.test(c)) {
+      // A whole identifier / keyword. After `.` or `?.` it is a property name — a value, whatever
+      // it is spelled like (`x.if(1)`, `o.return`) — so it enters the code read as `_`.
+      let j = i + 1;
+      while (j < n && /[A-Za-z0-9_$]/.test(text[j]!)) j++;
+      code.push(code.lastNonSpace() === "." ? "_" : text.slice(i, j));
+      i = j;
+      continue;
+    }
+    code.push(c);
     i++;
   }
+}
+
+/**
+ * The code read so far by `scanExpressionTextForSql`, as a list of units (a token, a collapsed
+ * literal, one space for a whitespace run). `tail()` hands `regexAllowedAfter` the suffix it
+ * reads — the last few units, reaching back past the `(` that matches a trailing `)` — so each
+ * `/` costs O(its context), not O(text): re-joining (or flattening a `+=`-built string) up to
+ * every `/` made the scan quadratic. `regexAllowedAfter` gives the same answer on this suffix as
+ * on the whole: it reads back over trailing whitespace, the last token, the word and `.` before
+ * it, the token before `of`, a `+` / `-` run, and for `)` the text back to its matching `(` and
+ * the word before that — all inside the suffix.
+ */
+class CodeSoFar {
+  private readonly parts: string[] = [];
+  /** For a `)` unit: the index of its matching `(` unit, or -1 when it has none. */
+  private readonly openOf = new Map<number, number>();
+  private readonly opens: number[] = [];
+  private static readonly LOOKBACK = 64;
+
+  push(unit: string): void {
+    if (/^\s+$/.test(unit)) {
+      if (this.parts.length > 0 && this.parts[this.parts.length - 1] === " ") return;
+      this.parts.push(" ");
+      return;
+    }
+    const k = this.parts.length;
+    if (unit === "(") this.opens.push(k);
+    else if (unit === ")") this.openOf.set(k, this.opens.length > 0 ? this.opens.pop()! : -1);
+    this.parts.push(unit);
+  }
+
+  private lastNonSpaceIndex(): number {
+    let k = this.parts.length - 1;
+    if (k >= 0 && this.parts[k] === " ") k--;
+    return k;
+  }
+
+  /** The last non-whitespace character of the code read so far, or "". */
+  lastNonSpace(): string {
+    const k = this.lastNonSpaceIndex();
+    if (k < 0) return "";
+    const u = this.parts[k]!;
+    return u[u.length - 1]!;
+  }
+
+  /** The suffix of the code read so far that `regexAllowedAfter` reads (see the class note). */
+  tail(): string {
+    let from = this.parts.length - CodeSoFar.LOOKBACK;
+    const last = this.lastNonSpaceIndex();
+    if (last >= 0 && this.parts[last] === ")") {
+      const open = this.openOf.get(last) ?? -1;
+      if (open >= 0) from = Math.min(from, open - CodeSoFar.LOOKBACK);
+      else from = last; // unmatched: regexAllowedAfter finds no `(` (division) — on ")" alone too
+    }
+    return this.parts.slice(Math.max(0, from)).join("");
+  }
+}
+
+/** A `?{` + backtick … backtick + `}` query in code context: `[at, end)` and its SQL body. */
+export interface ExprTextSqlSite {
+  at: number;
+  end: number;
+  body: string;
+}
+
+/**
+ * Every query codegen's text path lowers in `text`, in source order — the `sql` visits of
+ * `scanExpressionTextForSql`. THE one reader of where a `?{}` sits in expression text: the
+ * compile checks (`sql-one-statement.ts`) read these bodies, and `codegen/rewrite.ts`
+ * `rewriteSqlRefs` lowers exactly these sites and no other text (S457,
+ * `g-rewrite-sql-refs-lowers-inside-js-literals-s456`: a whole-text regex lowered a `?{` inside a
+ * JS string / regex / comment / template text the checks had skipped — two readers of one text).
+ */
+export function sqlSitesInExpressionText(text: string): ExprTextSqlSite[] {
+  const out: ExprTextSqlSite[] = [];
+  scanExpressionTextForSql(text, {
+    sql: (body, at, end) => { out.push({ at, end, body }); },
+    unreadable: () => {},
+  });
+  return out;
 }

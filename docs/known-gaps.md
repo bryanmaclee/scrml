@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 238 | 6 |
-| MED | 522 | 4 |
+| HIGH | 239 | 6 |
+| MED | 521 | 4 |
 | LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -23398,13 +23398,32 @@ By construction, not a defect: no path declares a virtual table tenant-scoped, a
 **CONFIRMED S456 r5 (PG16, §14.8.11 tier, tenant-A request):** `?{ SELECT set_config('scrml.tenant','B',true); select id,tenant_id,amount from invoices }.acrossTenants()` → `[{"id":"b1","tenant_id":"B","amount":999}]` under all three logins (owner w/o BYPASSRLS, BYPASSRLS, superuser); `set_config('role','none',true); select …` → all tenants under BYPASSRLS/superuser. NOT reproduced: separate `?{}`s, author BEGIN/COMMIT, `transaction {}` (each `?{}` re-pins A in its own tx); without `.acrossTenants()` the floor refuses/filters. **RULED (a):** one SQL statement per program-body `?{}` in any DB compilation. Related, PLAUSIBLE (not executed): under the tier an author `?{BEGIN}` goes to the pool handle, so `transaction {}` gives no atomicity — needs a repro.
 RELAYED from the S239 r4 reviewer, NOT reproduced here. A `SELECT` is admitted DML under the S456 program-body allow-list, and `set_config` names no tenant table, so neither the allow-list nor the tenant SQL subset refuses it. Under the §14.8.11 database-authoritative tier the per-request transaction pins `scrml.tenant` (and the role); a program statement that re-sets `scrml.tenant` or `search_path` inside that transaction could read another tenant's rows through row-level security, or resolve a table name to a different schema. Needs: a PG16 repro under the tier, then a ruling (e.g. refuse `set_config` / `current_setting`-writing calls in program-body SQL, or hold every program-body call to the tenant subset's function allow-list).
 
-### g-sql-slot-reader-regex-division-misreads-s456 — the shared `${…}` slot reader decides regex-vs-division with a heuristic (`regexAllowedAfter`) that misreads after an object-literal `}`, after `)` when a keyword sits in a string or after `.`, and after comment text — `NEW S456; LOW; open (fails closed)`
-<!-- @gap id=g-sql-slot-reader-regex-division-misreads-s456 sev=LOW status=open locus=compiler/src/codegen/code-segments.ts(regexAllowedAfter)+compiler/src/codegen/sql-lex.ts(jsInterpolationEnd) prov=review:s456-S239-onestmt-r2-A -->
+### g-sql-slot-reader-regex-division-misreads-s456 — the shared `${…}` slot reader decides regex-vs-division with a heuristic (`regexAllowedAfter`) that misreads after an object-literal `}`, after `)` when a keyword sits in a string or after `.`, and after comment text — `NEW S456; LOW; RESOLVED S457` (jsInterpolationEnd ends a slot by PARSING it — scrml-acorn.ts ScrmlParser over a slice at the slot, linear; scrml-only payloads read by the same parser's tokenizer; neither → -1, fail closed. 520 JS-accepted slots: base 50 disagreements, head 0. Corpus 2485 sources inert)
+<!-- @gap id=g-sql-slot-reader-regex-division-misreads-s456 sev=LOW status=resolved resolved-by=S457-fix/s457-sql-one-reader locus=compiler/src/codegen/code-segments.ts(regexAllowedAfter)+compiler/src/codegen/sql-lex.ts(jsInterpolationEnd) prov=review:s456-S239-onestmt-r2-A -->
 Reviewer-executed (1406 cases vs acorn): every disagreement ends the slot LATER (or -1) and is refused at compile (E-SQL-MULTIPLE-STATEMENTS / NOT-ADMITTED / E-SQL-001) and the site throws — no bypass. Cost: false refusals of valid single statements (`${ x.if(1) / 2 }`, `${ x // (\n / 2 }`), CRLF line continuation in a slot string reads unterminated. The docstring/SPEC claim "one reader matches JS" overstates. Fix: end a slot via acorn (`parseExpressionAt` from the slot start) so the reader IS the JS parser.
 
 ### g-rewrite-sql-refs-lowers-inside-js-literals-s456 — `rewriteSqlRefs` lowers a backticked `?{` that sits inside a JS string or regex in raw expression text — `NEW S456; LOW-MED; open (pre-existing; no SQL execution found)`
-<!-- @gap id=g-rewrite-sql-refs-lowers-inside-js-literals-s456 sev=MED status=open locus=compiler/src/codegen/(rewriteSqlRefs) prov=review:s456-S239-onestmt-r2-C -->
+<!-- @gap id=g-rewrite-sql-refs-lowers-inside-js-literals-s456 sev=MED status=resolved resolved-by=S457-fix/s457-sql-one-reader locus=compiler/src/codegen/(rewriteSqlRefs) prov=review:s456-S239-onestmt-r2-C -->
 Reviewer-executed: `if (x == "?{\`SELECT 1; DELETE FROM log\`}")` compiles clean and emits a broken string (runtime SyntaxError); the single-statement form emits `"await _scrml_sql.unsafe(\"DELETE FROM log\")"` refused only by E-CG-006. The checker skips literals; the rewriter does not — two readers of one text. Fix: the rewriter skips JS strings/comments/regexes exactly as the checker does (one reader).
+
+
+RESOLVED S457 (s457-sql-one-reader): rewriteSqlRefs lowers exactly the sites `sqlSitesInExpressionText` (the checker's scanner) reports, each with its own `.nobatch()` / `.acrossTenants()` chain (the old text-keyed `.acrossTenants()` set let one marked query switch off the tenant floor for an identical unmarked query); a `?{` in a string / comment / regex / template text is untouched; regex-vs-division for site location is read over the cleaned code so far. Bare `.unsafe` params wrapped `(p)` (a `${a, b}` slot crashed SQLite). S239: two differential rounds, LAND-WITH-NITS. Residuals filed: [[g-sql-checker-and-lowering-read-different-text-s457]].
+
+### g-sql-checker-and-lowering-read-different-text-s457 — the program-body SQL checks scan RAW scrml text while the emitter lowers REWRITTEN or structurally-parsed text, so a `?{` can be lowered that no check read — `NEW S457; HIGH; open (security; pre-existing)`
+
+<!-- @gap id=g-sql-checker-and-lowering-read-different-text-s457 sev=HIGH status=open locus=compiler/src/sql-in-expression-text.ts(scanExpressionTextForSql)+compiler/src/codegen/rewrite.ts(rewriteSqlRefs after rewriteServerReactiveRefs)+compiler/src/codegen/emit-server.ts(emitServerTemplateLit)+compiler/src/expression-parser.ts(template raw with <#name>) prov=review:S457-sql-one-reader-r2(CONFIRMED on SQLite, identical on base 0d8e9d8ce) -->
+
+The S456 durable ("two readers of one text = a bypass") at the checker/emitter seam — the READING is shared, the TEXT is not. Three executed shapes, each compiling at exit 0 and emitting a `DROP TABLE` that ran against SQLite (base and head alike):
+- **F2** a keyword-named reactive cell before `/`: ``let a = `t ${ @new / ?{`DROP TABLE notes`}.run() }` `` — the checker reads `@new /` as a regex start (skips the site); `rewriteSqlRefs` runs after `rewriteServerReactiveRefs` and sees `_scrml_body["new"] /` (division) and lowers it. Also `@in @delete @typeof @void @return @await @yield @else @finally @throw @instanceof @do`; the bare `.unsafe` form passes `ATTACH DATABASE`.
+- **F3** an object literal before `/` in a server template-literal slot: ``let a = `t ${ { y: 1 } / ?{`DROP TABLE notes`}.run() }` `` — `emitServerTemplateLit` parses the slot structurally (division) and lowers; the checker's lexical scan reads a regex and skips it. A third reader.
+- **F4** any template literal that also contains `<#name>`: ``let a = `t ${ ?{`DROP TABLE notes`}.run() } ${ <#x> }` `` — the scanned raw holds `__scrml_sql_ref__("?{…}")`, never restored, so the checker sees no `?{`; codegen lowers it.
+The §8.1.2 one-statement rule is backstopped at codegen (judgeDriverCall); the §8.1.2 statement allow-list and the §14.8.10 tenant checks are NOT. Fix direction (root, not position): enforce the program-body SQL checks at the LOWERING point(s) — on the exact SQL text each emitted driver call will send — the way §8.1.2's one-statement guard already is; then a check cannot miss a site the emitter lowered.
+
+### g-sql-site-locator-nested-paren-quadratic-s457 — `sqlSitesInExpressionText` is quadratic on deeply nested `((((x) / x) / x)…` — `NEW S457; LOW; open (perf, pre-existing class)`
+
+<!-- @gap id=g-sql-site-locator-nested-paren-quadratic-s457 sev=LOW status=open locus=compiler/src/sql-in-expression-text.ts(CodeSoFar.tail) prov=review:S457-sql-one-reader-r2 -->
+
+16k nesting: 6.5 s on head vs 1.2-1.5 s on base (base also quadratic). Fix: hand `regexAllowedAfter` the units before the matching `(` plus `"()"`.
 
 ### g-sql-slot-extent-brace-count-bypass-s456 — a `${…}` slot whose JS payload holds a brace in a string (`${ x + '{' }`) was brace-counted by the emitter AND the program-body walk, while JavaScript ends it at its real `}`: the text up to a later `}` (e.g. `); CREATE TABLE leak (tenant_id …) /* }`) reached the database unread — bypassing the #1334 allow-list, `E-TENANT-UNDECLARED` and the one-statement rule — `NEW S456; HIGH; RESOLVED S456 (fix/s456-one-statement-per-sql-block)`
 <!-- @gap id=g-sql-slot-extent-brace-count-bypass-s456 sev=HIGH status=resolved locus=compiler/src/codegen/sql-lex.ts(jsInterpolationEnd; liveSqlInterpolations)+compiler/src/schema-differ.js(programSqlTokens)+compiler/src/codegen/sql-one-statement-guard.ts(judgeDriverCall) prov=review:s456-S239-one-statement-F1;ruling:user-voice-scrml.md-S456-"one statement per seams reasonable. push" -->
