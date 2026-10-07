@@ -1,0 +1,16 @@
+{
+  "id": "attr-executable-sink-non-handler-and-raster-data-pos",
+  "description": "§5.2 executable-sink rule (S456 review F3): an `on…` name no browser executes (`online=`), a raster `data:image/png` on `<img src>`, and `sms:` all interpolate normally.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule: \"An `on…` name no browser executes (`one`, `onboarding`, `online`) is an ordinary attribute\"; \"One `data:` shape is admitted: on an image-source attribute … a `data:` URL whose literal text names a complete raster image media type\"; `sms:` is in the literal safe-scheme set.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "domAnchored": [
+      { "selector": "#b", "attr": { "online": "z-abc" } },
+      { "selector": "#i", "attr": { "src": "data:image/png;base64,abc" } },
+      { "selector": "#s", "attr": { "href": "sms:abc" } }
+    ]
+  }
+}

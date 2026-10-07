@@ -1,0 +1,5 @@
+<program>
+<nm> = "a"
+${ function go(n) { log(n) } }
+^{ emit("<button onclick=\"go('" + "$" + "{@nm}')\">b</button>") }
+</program>

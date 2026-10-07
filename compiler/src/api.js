@@ -16,7 +16,7 @@ import { runPRECG } from "./precg.ts";
 import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
-import { runAttributeInterpolation } from "./validators/attribute-interpolation.ts";
+import { runAttributeInterpolation, runExecutableSinkCheck } from "./validators/attribute-interpolation.ts";
 import { ATTR_INTERP_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
@@ -1459,13 +1459,18 @@ function _compileScrmlImpl(options = {}) {
             enriched.span = { ...enriched.span, file: filePath };
           }
         }
-        // §5.2 executable-sink rule (S456) — one E-ATTR-INTERP-EXECUTABLE per source attribute. VP-3 refuses
-        // it before codegen; the `<each>` row lowering asks the same question as a backstop
-        // and reports at the same attribute span, so the second report is dropped here.
-        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE && enriched.span && typeof enriched.span === "object") {
-          const k = `${enriched.span.file ?? enriched.filePath ?? ""}:${enriched.span.start}:${enriched.span.end}`;
-          if (_attrInterpExecutableSeen.has(k)) continue;
-          _attrInterpExecutableSeen.add(k);
+        // §5.2 executable-sink rule (S456) — one E-ATTR-INTERP-EXECUTABLE per emitted attribute.
+        // VP-3 / the post-ME check refuse it before codegen, keyed by the attribute's identity
+        // (`attrSinkKey`) + where it is reported (two instances of one component are two
+        // reports). The `<each>` row lowering asks the same question as a backstop (CG stage);
+        // its report is dropped when that attribute was already refused anywhere.
+        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE) {
+          const sp = enriched.span && typeof enriched.span === "object" ? enriched.span : {};
+          const attrKey = e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
+          const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
+          if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
+          _attrInterpExecutableSeen.add(attrKey);
+          _attrInterpExecutableSeen.add(fullKey);
         }
         allErrors.push(enriched);
         // s432 F3 — positioned redaction (a fragment attribute's echoed name).
@@ -2979,6 +2984,15 @@ function _compileScrmlImpl(options = {}) {
   collectErrors("MC", mcResult.errors);
   const metaEvalResult = stage("ME", () => seams.pick("META-EVAL", runMetaEval)({ files: metaFiles }));
   collectErrors("ME", metaEvalResult.errors);
+
+  // Stage 6.55: the §5.2 executable-sink rule over the POST-META AST (S456 review F2).
+  // VP-3 (Stage 3.3) runs before ME, so markup a `^{ emit(…) }` splices in — e.g. an
+  // `onclick="go('${@x}')"` or a `href="javascript:…${@x}"` — reached codegen unchecked. Placed
+  // immediately after ME because ME is the LAST stage that adds markup to the AST (DG, the
+  // tenant checks and CG only read it), and before CG so a refusal stops emission like any
+  // other error. Same reader, same walker as VP-3; an attribute VP-3 already refused is not
+  // reported twice (collectErrors dedupe).
+  collectErrors("VP-3", runExecutableSinkCheck({ files: metaFiles }).errors);
 
   // Stage 6.6: TENANT-SCHEMA — §14.8.10 E-TENANT-SCHEMA-HAZARD (S455, ruling
   // user-voice-scrml.md S455 "go, comp-time schema"). The ONE evaluation of the

@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-component-prop-substituted-neg",
+  "description": "§5.2 executable-sink rule (S456 review F1): a caller's `javascript:` prop text substituted into a component body's `href=\"${v}\"` — through a nested Outer → Inner — is refused; the value judged is the one that will be emitted.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule: \"The value judged is the value AS IT WILL BE EMITTED: in an expanded component instance, after the caller's prop text is substituted into the attribute, at every expansion depth\". Before the fix this compiled to `setAttribute(\"href\", `javascript:go('${…}')`)` at exit 0.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

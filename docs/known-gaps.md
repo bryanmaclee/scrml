@@ -32,9 +32,21 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 237 | 6 |
 | MED | 520 | 4 |
-| LOW | 291 | 0 |
+| LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-svg-animation-and-meta-refresh-url-sinks-s456 — a URL can reach an executable sink through an attribute OUTSIDE the §5.2 URL-attribute set: SVG `<set attributeName="href" to="javascript:…${x}">` / `<animate attributeName="href" values="…">`, and `<meta http-equiv="refresh" content="0;url=javascript:…${x}">` — `NEW S456; LOW; open`
+
+<!-- @gap id=g-svg-animation-and-meta-refresh-url-sinks-s456 sev=LOW status=open locus=compiler/src/attr-injection-sink.ts(URL_VALUED_ATTRS is name-based; to / values / from / by and content are not URL attributes) prov=review:S456-S239-attr-injection-rulings-F4 -->
+
+PLAUSIBLE, not executed (S239 review F4 of `93b36665a`). The S456 executable-sink rule reads an attribute's
+NAME to decide it is URL-valued; these sinks take their URL from a different attribute whose meaning depends
+on a sibling (`attributeName="href"`, `http-equiv="refresh"`). Modern browsers block `javascript:` in a meta
+refresh, and SMIL animation of `href` to `javascript:` is blocked in some engines — needs measuring per engine
+before a rule. A fix is element-aware: `<set>` / `<animate>` with `attributeName` naming a URL attribute → treat
+`to` / `from` / `by` / `values` as URL-valued; `<meta http-equiv=refresh>` → apply the scheme test to the
+text after `url=`.
 
 ### g-quoted-url-attribute-data-supplied-scheme-s456 — a quoted URL attribute whose literal text commits to NO scheme (`href="${it.url}"`, `src="${x}"`, `href="java${x}"`) takes its scheme from the DATA: a value `javascript:…` runs on click. Compiled to `setAttribute("href", \`${…}\`)` with no scheme check — `NEW S456; MED; open (needs a ruling)`
 
@@ -103,7 +115,11 @@ ends is refused as unprovable. One reader, `compiler/src/attr-injection-sink.ts`
 component expander (definition bodies) and the `<each>` row lowering (backstop). The safe-scheme set is the
 implementation's reading of "begins with a scheme" — `examples/12-snippets-slots.scrml`'s
 `href="mailto:${u.email}"` stays admitted. NOT covered (open, filed separately): a scheme supplied by the
-DATA, `href="${url}"` — [[g-quoted-url-attribute-data-supplied-scheme-s456]].
+DATA, `href="${url}"` — [[g-quoted-url-attribute-data-supplied-scheme-s456]]. S239 review round: the
+rule now also judges component instances after prop substitution and `^{ emit(…) }` markup after ME; the
+safe set gained `ftp:` / `sms:`, and a complete raster `data:image/(png|jpeg|gif|webp|avif|bmp|x-icon)` type
+on `src` / `srcset` / `imagesrcset` / `poster` is admitted (`image/svg+xml` and every other type stay
+refused). Residual sinks outside the URL-attribute model: [[g-svg-animation-and-meta-refresh-url-sinks-s456]].
 
 ### g-event-attribute-name-case-sensitive-listener-s456 — top-level `ONCLICK=fn()` / `onClick=fn()` registers a `"ONCLICK"` / `"Click"` listener, which never fires (HTML attribute names are case-insensitive; DOM event names are lowercase) — `NEW S456; LOW; open`
 
@@ -153,6 +169,15 @@ quoted attribute textually), slot content, `<each>` rows, engine state-children,
 `for … lift`. One diagnostic per attribute. A quoted event attribute with no `${…}` stays static. The §3
 table, §4.18 and §5.5.3 now cross-reference the carve-out. Corpus (compiled at `20ce26bf5`, 2413 sources +
 flogence `src/`): 0 programs affected.
+
+**S239 review round (93b36665a → fix).** F1: an expanded component instance is judged on its SUBSTITUTED
+value at every depth (VP-3 post-CE no longer skips re-parsed bodies; the call site is stamped as
+`_expansionSiteSpan`) — `<Lnk u="javascript:go('${@nm}')"/>` through `href="${u}"` was exit 0. F2: the check
+re-runs after ME over the AST codegen consumes — `^{ emit("<button onclick=…${@nm}…>") }` was exit 0.
+F3a: the event-attribute test is now the browser-executed handler name set (HTML `GlobalEventHandlers` /
+`WindowEventHandlers` / `DocumentAndElementEventHandlers` + other specs' partials + non-standard
+implemented handlers), vendor prefixes, and scrml's `on:` / `onserver:` / `onclient:` — `one=` /
+`onboarding=` / `online=` are plain attributes again.
 
 ### g-foreign-slice-regex-quote-and-in-block-refusal-lost — a quote inside a regex literal in a `_={ … }=` slice hid its `return`; and a codegen refusal one block deep (E-FOREIGN-006/007, E-SQL-006, E-SESSION-VALUE) or E-LIFT-002 anywhere compiled exit 0 with only a `null /* E-… */` placeholder in the artifact — `NEW S456; HIGH; RESOLVED S456`
 

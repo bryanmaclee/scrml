@@ -1316,10 +1316,14 @@ function parseComponentDef(
   // body is raw text until this re-parse, and expansion substitutes a prop into a quoted
   // attribute textually, so this is the only stage that sees what the author wrote. Runs
   // for USED and UNUSED defs alike; anchored at the definition (the re-parsed offsets are
-  // relative to the body text). VP-3 skips these nodes after expansion.
+  // relative to the body text). The refused attribute is stamped (`markReported`), and the
+  // stamp travels with its expanded copies, so VP-3 does not report it again per instance.
+  // An attribute whose DEFINITION text is not a sink (`href="${u}"`) is judged again by VP-3
+  // on every expanded instance, AFTER the caller's prop text is substituted in.
   for (const e of collectExecutableSinkErrors(nodes, filePath, {
     where: `in component \`${name}\``,
     spanOverride: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    markReported: true,
   })) {
     ceErrors.push(makeCEError(e.code, e.message, e.span));
   }
@@ -3312,6 +3316,9 @@ function expandComponentNode(
     // Mark as expanded — no longer a component reference
     isComponent: false,
     _expandedFrom: componentName,
+    // §5.2 executable-sink rule (S456) — the call site, so VP-3 can anchor a refusal of an
+    // attribute whose EXPANDED value (the caller's prop text substituted in) is a sink.
+    _expansionSiteSpan: node.span,
     // i81 (S239 finding 7) — the DECLARED prop names of the component this root
     // came from. After expansion the root's `attrs` are a MERGE of the
     // definition's own attributes and the call site's props, and downstream
@@ -3338,6 +3345,7 @@ function expandComponentNode(
     id: ++counter.next,
     isComponent: false,
     _expandedFrom: componentName,
+    _expansionSiteSpan: node.span,
   }));
 
   return [expandedNode, ...secondaryNodes];

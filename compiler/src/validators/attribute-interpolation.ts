@@ -43,6 +43,7 @@ import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
   ATTR_INTERP_EXECUTABLE_CODE,
+  attrSinkKey,
 } from "../attr-injection-sink.ts";
 
 // ---------------------------------------------------------------------------
@@ -131,26 +132,70 @@ function validateMarkup(
  * coverage: a container field that holds markup is walked without an edit here. Cycles
  * (parent links, shared sub-trees) are cut by identity.
  */
-function walkEveryMarkupNode(root: unknown, visit: (node: MarkupNode) => void): void {
+/** Where an expanded component instance sits in the SOURCE the author wrote. */
+interface ExpansionContext {
+  /** The outermost call site whose span is in a real file (not a re-parsed component body). */
+  anchor: Span | null;
+  /** The nearest enclosing component's name (`_expandedFrom`). */
+  component: string | null;
+}
+
+/**
+ * A span whose `file` is `<path>#<Component>` belongs to a component body re-parsed by the
+ * component expander: its offsets are relative to the body text, not the source file.
+ */
+function spanFileIsReparsedComponentBody(file: unknown): boolean {
+  return typeof file === "string" && /#[A-Za-z_$][A-Za-z0-9_$]*$/.test(file);
+}
+
+/**
+ * Spans whose offsets are NOT the source file's: a re-parsed component body (`path#Name`) or
+ * markup re-parsed from a `^{ emit(…) }` (`__meta_emit__`).
+ */
+function spanFileIsSynthesized(file: unknown): boolean {
+  return spanFileIsReparsedComponentBody(file) || file === "__meta_emit__";
+}
+
+function walkEveryMarkupNode(
+  root: unknown,
+  visit: (node: MarkupNode, ctx: ExpansionContext) => void,
+): void {
   const seen = new Set<object>();
-  const stack: unknown[] = [root];
+  const stack: Array<{ cur: unknown; ctx: ExpansionContext }> = [
+    { cur: root, ctx: { anchor: null, component: null } },
+  ];
   while (stack.length > 0) {
-    const cur = stack.pop();
+    const { cur, ctx: parentCtx } = stack.pop()!;
     if (!cur || typeof cur !== "object") continue;
     if (seen.has(cur as object)) continue;
     seen.add(cur as object);
     if (Array.isArray(cur)) {
-      for (const c of cur) if (c && typeof c === "object") stack.push(c);
+      for (const c of cur) if (c && typeof c === "object") stack.push({ cur: c, ctx: parentCtx });
       continue;
     }
     const rec = cur as Record<string, unknown>;
+    let ctx = parentCtx;
+    if (rec._metaEmitSiteSpan && typeof rec._metaEmitSiteSpan === "object" && parentCtx.anchor === null) {
+      // A node spliced in by `^{ emit(…) }` (meta-eval stamps the `^{}` block's span).
+      const site = rec._metaEmitSiteSpan as Span;
+      if (!spanFileIsSynthesized(site.file)) ctx = { anchor: site, component: parentCtx.component };
+    }
+    if (typeof rec._expandedFrom === "string") {
+      // An expanded component root (component-expander stamps `_expansionSiteSpan` = the call
+      // site). Nested expansions sit inside a re-parsed body, so the OUTERMOST real call site
+      // is what the author can find; keep it once set.
+      const site = rec._expansionSiteSpan as Span | undefined;
+      const anchor = ctx.anchor ??
+        (site && !spanFileIsSynthesized(site.file) ? site : null);
+      ctx = { anchor, component: rec._expandedFrom as string };
+    }
     if (rec.kind === "markup" && typeof rec.tag === "string" && Array.isArray(rec.attrs)) {
-      visit(cur as unknown as MarkupNode);
+      visit(cur as unknown as MarkupNode, ctx);
     }
     for (const key of Object.keys(rec)) {
       if (key === "span") continue;
       const v = rec[key];
-      if (v && typeof v === "object") stack.push(v);
+      if (v && typeof v === "object") stack.push({ cur: v, ctx });
     }
   }
 }
@@ -169,49 +214,61 @@ function walkEveryMarkupNode(root: unknown, visit: (node: MarkupNode) => void): 
 export function collectExecutableSinkErrors(
   root: unknown,
   filePath: string,
-  opts: { where?: string; spanOverride?: Span; skipSpanFile?: (file: string) => boolean } = {},
+  opts: { where?: string; spanOverride?: Span; markReported?: boolean } = {},
 ): AttrInterpError[] {
   const errors: AttrInterpError[] = [];
   const reported = new Set<string>();
-  walkEveryMarkupNode(root, (node) => {
+  walkEveryMarkupNode(root, (node, ctx) => {
     for (const attr of node.attrs ?? []) {
       if (!attr || typeof attr.name !== "string") continue;
       const v = attr.value as { kind?: string; value?: unknown } | undefined;
       if (!v || v.kind !== "string-literal" || typeof v.value !== "string") continue;
+      // Already reported at the component DEFINITION (the def check stamps the attribute it
+      // refused; prop substitution copies the attribute with `{...attr}`, so the stamp travels
+      // with every expanded copy whose definition text was itself a sink).
+      if ((attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef === true) continue;
       const sink = classifyInterpolatedAttrSink(attr.name, v.value);
       if (!sink) continue;
+      if (opts.markReported) (attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef = true;
       const own: Span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-      if (opts.skipSpanFile && typeof own.file === "string" && opts.skipSpanFile(own.file)) continue;
-      // One diagnostic per source attribute (a node reached through two fields, e.g. an each
-      // body's `bodyChildren` and `templateChildren`, is one attribute).
-      const key = `${own.file ?? filePath}:${own.start}:${own.end}:${attr.name}`;
+      // An attribute inside an EXPANDED component instance: the value judged here is the one
+      // that will be emitted (the caller's prop text substituted in). Its own span is relative
+      // to the component body, so the diagnostic is anchored at the outermost call site.
+      const inExpansion = spanFileIsSynthesized(own.file) && ctx.anchor !== null;
+      const span = opts.spanOverride ?? (inExpansion ? (ctx.anchor as Span) : own);
+      const where = opts.where ??
+        (!inExpansion ? ""
+          : ctx.component ? `in component \`${ctx.component}\` as used here (the caller's prop value is substituted into it)`
+          : own.file === "__meta_emit__" ? "emitted by the `^{ emit(…) }` block here"
+          : "");
+      // One diagnostic per emitted attribute: a node reached through two fields (an each
+      // body's `bodyChildren` and `templateChildren`) is one attribute; two instances of a
+      // component are two.
+      const key = `${span.file ?? filePath}:${span.start}:${span.end}|${own.file ?? filePath}:${own.start}:${own.end}:${attr.name}`;
       if (reported.has(key)) continue;
       reported.add(key);
-      errors.push({
+      const err: AttrInterpError = {
         code: ATTR_INTERP_EXECUTABLE_CODE,
-        message: interpolatedAttrSinkMessage(sink, attr.name, node.tag ?? "", opts.where ?? ""),
-        span: opts.spanOverride ?? own,
+        message: interpolatedAttrSinkMessage(sink, attr.name, node.tag ?? "", where),
+        span,
         severity: "error",
-      });
+      };
+      // The attribute's identity for cross-stage dedupe (api.js): the `<each>` row backstop
+      // reports the same attribute at its own span.
+      (err as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(own, attr.name, filePath);
+      errors.push(err);
     }
   });
   return errors;
 }
 
-/**
- * A span whose `file` is `<path>#<Component>` belongs to a component body re-parsed by the
- * component expander, which already reported its attributes (see `collectExecutableSinkErrors`).
- */
-function spanFileIsReparsedComponentBody(file: string): boolean {
-  return /#[A-Za-z_$][A-Za-z0-9_$]*$/.test(file);
-}
 
 function validateExecutableSinks(
   ast: FileAST,
   filePath: string,
   errors: AttrInterpError[],
 ): void {
-  errors.push(...collectExecutableSinkErrors(ast.nodes, filePath, { skipSpanFile: spanFileIsReparsedComponentBody }));
+  errors.push(...collectExecutableSinkErrors(ast.nodes, filePath));
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +292,23 @@ export function runAttributeInterpolationFile(file: {
   validateExecutableSinks(ast, file.filePath, errors);
 
   return errors;
+}
+
+/**
+ * §5.2 executable-sink rule over the POST-META AST (S456 review F2). `^{ emit("<button
+ * onclick=\"…${@x}…\">") }` splices markup in at ME, after VP-3 ran; this re-runs the same
+ * check over the AST codegen will consume. An attribute VP-3 already refused is reported once
+ * (api.js dedupe on `attrSinkKey` + span).
+ */
+export function runExecutableSinkCheck(input: {
+  files: Array<{ filePath: string; ast: FileAST | null | undefined }>;
+}): { errors: AttrInterpError[] } {
+  const all: AttrInterpError[] = [];
+  for (const f of input.files) {
+    if (!f || !f.ast) continue;
+    all.push(...collectExecutableSinkErrors(f.ast.nodes, f.filePath));
+  }
+  return { errors: all };
 }
 
 export function runAttributeInterpolation(input: {

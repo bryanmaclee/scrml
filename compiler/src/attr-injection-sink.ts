@@ -14,13 +14,15 @@
  *      one (`javascript:`, `vbscript:`, `data:`, `blob:`, …): the data lands inside a URL whose
  *      scheme makes it executable (`javascript:go('${x}')`).
  *
- * Callers: VP-3 (`validators/attribute-interpolation.ts`, the attribute-interpolation pass —
- * the refusal point for every markup position) and the `<each>` row attribute lowering in
- * `codegen/emit-each.ts` (a backstop that asks the SAME question). Do not write a second
- * classifier: both paths call `classifyInterpolatedAttrSink`.
+ * Callers (all through `collectExecutableSinkErrors` or directly): VP-3 (post-CE — every
+ * markup position, expanded component instances judged on their SUBSTITUTED values), the same
+ * check re-run after ME (meta-emitted markup), the component expander (definition bodies), and
+ * the `<each>` row attribute lowering in `codegen/emit-each.ts` (a backstop). Do not write a
+ * second classifier: every path calls `classifyInterpolatedAttrSink`.
  *
- * Fail-closed choices (each named at its site): any `on…` attribute name counts as a handler;
- * the URL-attribute set is element-insensitive; a scheme is refused unless it is in the
+ * Fail-closed choices (each named at its site): every browser-executed handler name, any
+ * vendor-prefixed `onwebkit…`/`onmoz…`/`onms…` name and scrml's `on:`/`onserver:`/`onclient:`
+ * count as handlers; the URL-attribute set is element-insensitive; a scheme is refused unless it is in the
  * fixed safe set; a backslash or `&` before the scheme terminator is refused because the
  * emitted template literal decodes JS escapes (`\x6a` → `j`) and the scheme can then not be
  * proven.
@@ -31,18 +33,75 @@
 // ---------------------------------------------------------------------------
 
 /**
- * SAFETY predicate — is `name` an event-handler attribute as the BROWSER sees it? HTML
- * attribute names are case-insensitive (`ONCLICK`, `OnClick` and `onclick` are the same live
- * handler), so this decides case-INSENSITIVELY and fails closed: ANY `on…` name counts, known
- * event or not, which also covers the `on:` directive and the `onserver:` / `onclient:` channel
- * handlers. (Moved here from `codegen/emit-each.ts`, s456 review round 3, where
- * `ONCLICK="hit('${it.name}')"` bypassed a case-sensitive test.) This is NOT
- * `multi-statement-scan.ts`'s `isEventHandlerAttrName`, which recognises the handler SHAPES the
- * parser lowers (`on[a-z]+`) and is deliberately narrower.
+ * Event-handler CONTENT attribute names a browser compiles as JavaScript, lowercased.
+ *
+ * A quoted attribute is never wired by scrml: its value is written with `setAttribute` (or as
+ * static HTML), and the BROWSER decides whether the text is code. So the set is what browsers
+ * execute:
+ *  - HTML Living Standard § 8.1.8.2 "Event handlers on elements, Document objects, and Window
+ *    objects": the `GlobalEventHandlers`, `WindowEventHandlers` and
+ *    `DocumentAndElementEventHandlers` IDL attribute lists, whose content-attribute names are
+ *    the same `on…` names;
+ *  - the partial `GlobalEventHandlers` members other specs add (Pointer Events, Touch Events,
+ *    CSS Animations / Transitions, Selection API, WebXR, Fullscreen), and `Document` handlers;
+ *  - handlers browsers still implement outside the standard (`onsearch`, `onmousewheel`,
+ *    `onbeforecopy` / `onbeforecut` / `onbeforepaste`, `onorientationchange`, `ongesture*`,
+ *    `onshow`, `ondragexit`, `onfocusin` / `onfocusout`, `ondevice*`).
+ * Vendor-prefixed names (`onwebkit…`, `onmoz…`, `onms…`) are refused by prefix, fail closed.
  */
-export function isEventHandlerAttrNameFailClosed(name: string): boolean {
+export const BROWSER_EVENT_HANDLER_ATTRS: ReadonlySet<string> = new Set([
+  // GlobalEventHandlers (HTML)
+  "onabort", "onauxclick", "onbeforeinput", "onbeforematch", "onbeforetoggle", "onblur",
+  "oncancel", "oncanplay", "oncanplaythrough", "onchange", "onclick", "onclose", "oncommand",
+  "oncontextlost", "oncontextmenu", "oncontextrestored", "oncopy", "oncuechange", "oncut",
+  "ondblclick", "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover",
+  "ondragstart", "ondrop", "ondurationchange", "onemptied", "onended", "onerror", "onfocus",
+  "onformdata", "oninput", "oninvalid", "onkeydown", "onkeypress", "onkeyup", "onload",
+  "onloadeddata", "onloadedmetadata", "onloadstart", "onmousedown", "onmouseenter",
+  "onmouseleave", "onmousemove", "onmouseout", "onmouseover", "onmouseup", "onpaste",
+  "onpause", "onplay", "onplaying", "onprogress", "onratechange", "onreset", "onresize",
+  "onscroll", "onscrollend", "onsecuritypolicyviolation", "onseeked", "onseeking", "onselect",
+  "onslotchange", "onstalled", "onsubmit", "onsuspend", "ontimeupdate", "ontoggle",
+  "onvolumechange", "onwaiting", "onwheel",
+  // WindowEventHandlers (HTML; reflected on <body> / <frameset>)
+  "onafterprint", "onbeforeprint", "onbeforeunload", "onhashchange", "onlanguagechange",
+  "onmessage", "onmessageerror", "onoffline", "ononline", "onpagehide", "onpagereveal",
+  "onpageshow", "onpageswap", "onpopstate", "onrejectionhandled", "onstorage",
+  "onunhandledrejection", "onunload",
+  // Partial GlobalEventHandlers from other specs
+  "ongotpointercapture", "onlostpointercapture", "onpointercancel", "onpointerdown",
+  "onpointerenter", "onpointerleave", "onpointermove", "onpointerout", "onpointerover",
+  "onpointerup", "onpointerrawupdate",
+  "ontouchcancel", "ontouchend", "ontouchmove", "ontouchstart",
+  "onanimationcancel", "onanimationend", "onanimationiteration", "onanimationstart",
+  "ontransitioncancel", "ontransitionend", "ontransitionrun", "ontransitionstart",
+  "onselectionchange", "onselectstart", "onbeforexrselect",
+  "onfullscreenchange", "onfullscreenerror",
+  // Document handlers
+  "onreadystatechange", "onvisibilitychange", "onpointerlockchange", "onpointerlockerror",
+  // Implemented outside the standard
+  "onsearch", "onmousewheel", "onbeforecopy", "onbeforecut", "onbeforepaste",
+  "onorientationchange", "ongesturestart", "ongesturechange", "ongestureend", "onshow",
+  "ondragexit", "onfocusin", "onfocusout", "ondevicemotion", "ondeviceorientation",
+  "ondeviceorientationabsolute", "onbeforeinstallprompt", "onappinstalled",
+]);
+
+/**
+ * SAFETY predicate — would a quoted `name="…"` attribute's text be executed as JavaScript?
+ * Case-insensitive (`ONCLICK` / `OnClick` are the live `onclick` handler — s456 review round 3).
+ * True for: a browser event-handler content attribute (`BROWSER_EVENT_HANDLER_ATTRS`); a
+ * vendor-prefixed `onwebkit…` / `onmoz…` / `onms…` name; and scrml's own handler forms `on:…`,
+ * `onserver:…`, `onclient:…` (fail closed — they name an event by construction). False for an
+ * `on…` name no browser executes (`one`, `onboarding`, `online`): the runtime only ever sets it as
+ * a plain attribute (S456 review F3a). This is NOT `multi-statement-scan.ts`'s
+ * `isEventHandlerAttrName`, which recognises the UNQUOTED handler shapes the parser lowers.
+ */
+export function isExecutableEventHandlerAttrName(name: string): boolean {
   if (typeof name !== "string") return false;
-  return name.length > 2 && name.slice(0, 2).toLowerCase() === "on";
+  const lower = name.toLowerCase();
+  if (lower.startsWith("on:") || lower.startsWith("onserver:") || lower.startsWith("onclient:")) return true;
+  if (BROWSER_EVENT_HANDLER_ATTRS.has(lower)) return true;
+  return /^on(webkit|moz|ms)/.test(lower);
 }
 
 // ---------------------------------------------------------------------------
@@ -94,17 +153,34 @@ export const URL_VALUED_ATTRS: ReadonlySet<string> = new Set([
  * Schemes after which interpolated text is admitted. A scheme written LITERALLY in the
  * attribute cannot be changed by the interpolation that follows it (the literal `:` ends the
  * scheme), and none of these schemes executes the URL's text as script in any URL attribute:
- * `http:` / `https:` fetch or navigate, `mailto:` / `tel:` hand off to an external handler.
- * Every other scheme — `javascript:`, `vbscript:`, `data:` (an `<iframe src>` / `<object data>`
- * of `data:text/html` runs script), `blob:` (same-origin document), and any scheme not named
- * here — is refused (fail closed).
+ * `http:` / `https:` / `ftp:` fetch or navigate, `mailto:` / `tel:` / `sms:` hand off to an
+ * external handler. Every other scheme — `javascript:`, `vbscript:`, `data:` (an `<iframe src>`
+ * / `<object data>` of `data:text/html` runs script; see `SAFE_DATA_IMAGE_TYPES` for the one
+ * admitted `data:` shape), `blob:` (same-origin document), and any scheme not named here — is
+ * refused (fail closed).
  */
-export const SAFE_LITERAL_URL_SCHEMES: ReadonlySet<string> = new Set(["http", "https", "mailto", "tel"]);
+export const SAFE_LITERAL_URL_SCHEMES: ReadonlySet<string> = new Set([
+  "http", "https", "ftp", "mailto", "tel", "sms",
+]);
 
-/** What a scheme test over a literal URL prefix found. */
+/**
+ * Raster image media types a `data:` URL may LITERALLY name before an interpolation, on an
+ * image-loading attribute (`IMAGE_SOURCE_ATTRS`). A raster image is decoded, never executed —
+ * `<img src="data:image/png;base64,${b64}">`. `image/svg+xml` is NOT here (SVG is a document that
+ * can carry script), nor is any non-image type.
+ */
+export const SAFE_DATA_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/avif", "image/bmp",
+  "image/x-icon", "image/vnd.microsoft.icon",
+]);
+
+/** Attributes whose URL is loaded as an image source (where a raster `data:` image is admitted). */
+export const IMAGE_SOURCE_ATTRS: ReadonlySet<string> = new Set(["src", "srcset", "imagesrcset", "poster"]);
+
+/** What a scheme test over a literal URL prefix found. `rest` is the normalized text after `:`. */
 export type LiteralUrlScheme =
   | { kind: "none" }
-  | { kind: "scheme"; scheme: string }
+  | { kind: "scheme"; scheme: string; rest: string }
   | { kind: "unprovable"; reason: string };
 
 /**
@@ -117,7 +193,7 @@ export type LiteralUrlScheme =
  *  - the scheme is the run before the first `:` when that run is `ALPHA *( ALPHA / DIGIT /
  *    "+" / "-" / "." )` and no `/`, `?` or `#` came first; it is compared lowercased.
  *  - a `\` or `&` before the scheme terminator is UNPROVABLE: the top-level lowering puts the
- *    text into a JS template literal, which decodes `\x6a` / `j` / `\t`, and an entity
+ *    text into a JS template literal, which decodes `\x6a`, `\u{6a}` and `\t`, and an entity
  *    such as `&#106;` is the HTML spelling of a scheme letter. Neither is ever needed in a
  *    real scheme, so it is refused rather than decoded.
  * `{kind:"none"}` means the literal text commits to NO scheme (a relative URL such as
@@ -139,7 +215,7 @@ export function readLiteralUrlScheme(prefix: string): LiteralUrlScheme {
     if (c === ":") {
       const candidate = s.slice(0, i);
       if (/^[A-Za-z][A-Za-z0-9+.\-]*$/.test(candidate)) {
-        return { kind: "scheme", scheme: candidate.toLowerCase() };
+        return { kind: "scheme", scheme: candidate.toLowerCase(), rest: s.slice(i + 1) };
       }
       return { kind: "none" };
     }
@@ -166,17 +242,41 @@ export function classifyInterpolatedAttrSink(name: string, value: string): Inter
   if (typeof name !== "string" || typeof value !== "string") return null;
   const at = value.indexOf("${");
   if (at < 0) return null;
-  if (isEventHandlerAttrNameFailClosed(name)) return { kind: "event-handler" };
+  if (isExecutableEventHandlerAttrName(name)) return { kind: "event-handler" };
   const lower = name.toLowerCase();
   if (lower === "srcdoc") return { kind: "srcdoc" };
   if (URL_VALUED_ATTRS.has(lower)) {
     const r = readLiteralUrlScheme(value.slice(0, at));
     if (r.kind === "unprovable") return { kind: "url-unprovable", reason: r.reason };
     if (r.kind === "scheme" && !SAFE_LITERAL_URL_SCHEMES.has(r.scheme)) {
+      if (r.scheme === "data" && IMAGE_SOURCE_ATTRS.has(lower) && literalDataImageIsRaster(r.rest)) return null;
       return { kind: "url-scheme", scheme: r.scheme };
     }
   }
   return null;
+}
+
+/**
+ * Does the literal text after `data:` commit to a raster image media type? The media type
+ * must be COMPLETE in the literal text — terminated by `;` or `,` before the interpolation — so
+ * the data cannot extend it (`data:image/png${x}` and `data:image/${t};…` are refused).
+ */
+function literalDataImageIsRaster(rest: string): boolean {
+  const m = /^([^;,]*)[;,]/.exec(rest);
+  if (!m) return false;
+  return SAFE_DATA_IMAGE_TYPES.has(m[1].trim().toLowerCase());
+}
+
+/**
+ * Identity of one source attribute (its own span + name), carried on every refusal as
+ * `attrSinkKey` so api.js reports an attribute once across VP-3 / post-ME / the `<each>` backstop.
+ */
+export function attrSinkKey(
+  own: { file?: unknown; start?: unknown; end?: unknown } | null | undefined,
+  name: string,
+  filePath = "",
+): string {
+  return `${(own && own.file) ?? filePath}:${own?.start}:${own?.end}:${name}`;
 }
 
 /** The diagnostic code for every refusal this module decides (SPEC §34). */
@@ -207,7 +307,9 @@ export function interpolatedAttrSinkMessage(
     case "url-scheme":
       return head + ` into a URL whose literal scheme is \`${sink.scheme}:\`. Data interpolated ` +
         "after an executable scheme (`javascript:`, `vbscript:`, `data:`, …) runs as code. Only " +
-        "`http:`, `https:`, `mailto:` and `tel:` may precede an interpolation; for a handler, use " +
+        "`http:`, `https:`, `ftp:`, `mailto:`, `tel:` and `sms:` — and, on an image source " +
+        "attribute, a raster `data:image/png|jpeg|gif|webp|avif|bmp|x-icon` — may precede an " +
+        "interpolation; for a handler, use " +
         `an event attribute (\`onclick=f(x)\`) instead of a \`javascript:\` URL (§5.2).`;
     case "url-unprovable":
       return head + ` into a URL whose scheme cannot be determined from the literal text: it ` +

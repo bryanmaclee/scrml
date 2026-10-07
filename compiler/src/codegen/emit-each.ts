@@ -49,6 +49,7 @@ import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
   ATTR_INTERP_EXECUTABLE_CODE,
+  attrSinkKey,
 } from "../attr-injection-sink.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
@@ -2739,11 +2740,14 @@ function renderTemplateAttrToJs(
     // and it asks the SAME reader (`classifyInterpolatedAttrSink`) — never a second test.
     const sink = tpl !== null ? classifyInterpolatedAttrSink(aName, sv) : null;
     if (sink !== null) {
-      recordRefusedLowering(new CGError(
+      const refusal = new CGError(
         ATTR_INTERP_EXECUTABLE_CODE,
         interpolatedAttrSinkMessage(sink, aName, "", "inside an `<each>` row"),
         (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
-      ), attr);
+      );
+      // Same attribute identity VP-3 stamps, so api.js reports the attribute once.
+      (refusal as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(attr && attr.span, aName);
+      recordRefusedLowering(refusal, attr);
       lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${aName}" attribute refused (executable sink) */`);
       return;
     }

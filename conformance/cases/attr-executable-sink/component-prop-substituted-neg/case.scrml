@@ -1,0 +1,7 @@
+<program>
+<nm> = "a"
+${ function go(n) { log(n) } }
+const Inner = <a props={v:string} href="${v}">y</a>
+const Outer = <span props={w:string}><Inner v="${w}"/></span>
+<Outer w="javascript:go('${@nm}')"/>
+</program>

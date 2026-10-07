@@ -67,3 +67,36 @@ cannot be changed by the interpolation after its `:`. Newly refused non-test pro
 - Conformance 1338/1388 (+4 PASS, 50 xfail unchanged). Browser baseline `--check` PASS (48 names).
 - Gates: types-gate OK (unchanged), s34-census --check-new PASS, regen-spec-index --check OK,
   facts --check OK, state --check OK.
+
+## U4 — S239 review round of 93b36665a (DO-NOT-LAND) — fixes
+
+- F1 (HIGH, reproduced: `<Lnk u="javascript:go('${@nm}')"/>` through `href="${u}"`, and Outer→Inner,
+  exit 0 + interpolated setAttribute). Root confirmed: VP-3 skipped `path#Name` spans and the CE def
+  check only saw `href="${u}"`. Fix: VP-3 post-CE judges EVERY markup node, i.e. the substituted value
+  at every expansion depth (nested expansion happens in walkAndExpand before VP-3). Anchor: CE stamps
+  `_expansionSiteSpan` (call site) on expanded roots; the walker keeps the OUTERMOST real call site.
+  Def-check dedupe: the def check stamps `_execSinkReportedAtDef` on the attr it refused;
+  `substituteProps` copies attrs with `{...attr}`, so expanded copies skip. Two instances = two reports.
+- F2 (MED, reproduced: both `^{ emit(…) }` shapes exit 0). Fix: `runExecutableSinkCheck` re-run in
+  api.js right after ME (ME is the last stage that adds markup; DG/tenant/CG only read) over
+  `metaFiles` (the AST CG consumes). meta-eval stamps `_metaEmitSiteSpan` (the `^{}` block) on
+  spliced nodes for the anchor.
+- Dedupe (api.js): every refusal carries `attrSinkKey` (own span + name). Pre-CG stages dedupe on
+  key+reported span; the CG `<each>` backstop is dropped when its attribute was refused anywhere.
+- F3a: event test = browser-executed handler names (HTML GlobalEventHandlers / WindowEventHandlers /
+  DocumentAndElementEventHandlers + other specs' partials + Document + non-standard implemented) +
+  `onwebkit|onmoz|onms` prefix + `on:`/`onserver:`/`onclient:`. Not `eventNameForAttr`'s any-`on…`:
+  that function decides UNQUOTED handler wiring; a quoted value is never wired by scrml (always
+  setAttribute / static HTML), so the browser's executed set is the safety boundary.
+- F3b: complete raster `data:image/(png|jpeg|jpg|gif|webp|avif|bmp|x-icon|vnd.microsoft.icon)` with
+  `;`/`,` before the first `${`, on src/srcset/imagesrcset/poster → admitted. F3c: + ftp, sms.
+- F4: filed g-svg-animation-and-meta-refresh-url-sinks-s456 (LOW).
+- prev(93b36665a)/head: f1 exit0/0 refusals → exit1/2; f2 exit0/0 → exit1/2; F3 controls exit1/6 →
+  exit0/0; svg+xml + ononline exit1/2 → exit1/2.
+- Conformance +3 (component-prop-substituted-neg, meta-emit-neg, non-handler-and-raster-data-pos):
+  1341/1391. flogence: base 20ce26bf5 vs head byte-identical.
+- Corpus differential (base 20ce26bf5 full-tree archive vs head; the tool marks it INCOMPARABLE only
+  because the archive has no git revision): 2413 common sources — 0 compile-record changes after
+  path normalization (0 newly refused); 11837 artifacts compared, 0 content changes (2 differ only in
+  a relative import path to the base archive's root). +7 sources = the conformance cases.
+- Gates: types OK (unchanged), s34-census --check-new PASS, spec-index / facts / state --check OK.

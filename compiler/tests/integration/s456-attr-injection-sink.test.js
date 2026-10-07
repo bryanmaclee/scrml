@@ -16,7 +16,7 @@ import { compileScrml } from "../../src/api.js";
 import {
   classifyInterpolatedAttrSink,
   readLiteralUrlScheme,
-  isEventHandlerAttrNameFailClosed,
+  isExecutableEventHandlerAttrName,
 } from "../../src/attr-injection-sink.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
@@ -51,12 +51,38 @@ describe("§1 classifyInterpolatedAttrSink — the shared reader", () => {
     expect(classifyInterpolatedAttrSink("srcdoc", "<b>x</b>")).toBeNull();
   });
 
-  test("event-handler names are case-insensitive and fail closed (any `on…`)", () => {
-    for (const n of ["onclick", "ONCLICK", "OnClick", "oNcLiCk", "on:click", "onserver:msg", "onclient:x", "onwhatever"]) {
+  test("event-handler names: browser-executed handlers (any case), vendor prefixes, scrml's on:/onserver:/onclient:", () => {
+    for (const n of ["onclick", "ONCLICK", "OnClick", "oNcLiCk", "on:click", "onserver:msg", "onclient:x",
+      "ononline", "onpointerdown", "onanimationend", "onsearch", "onwebkitanimationend", "onmozfullscreenchange",
+      "onbeforeunload", "onerror", "onload"]) {
       expect(classifyInterpolatedAttrSink(n, "go('${x}')")).toEqual({ kind: "event-handler" });
     }
-    expect(isEventHandlerAttrNameFailClosed("on")).toBe(false);
-    expect(isEventHandlerAttrNameFailClosed("open")).toBe(false);
+  });
+
+  test("F3a — `on…` names no browser executes are plain attributes (admitted)", () => {
+    for (const n of ["one", "onboarding", "online", "onwhatever", "only", "on"]) {
+      expect(isExecutableEventHandlerAttrName(n)).toBe(false);
+      expect(classifyInterpolatedAttrSink(n, "x-${x}")).toBeNull();
+    }
+    expect(isExecutableEventHandlerAttrName("open")).toBe(false);
+  });
+
+  test("F3b — a raster data:image on an image-source attribute is admitted; svg / html / non-image / incomplete type refused", () => {
+    for (const [n, v] of [["src", "data:image/png;base64,${b}"], ["src", "DATA:IMAGE/JPEG;base64,${b}"],
+      ["srcset", "data:image/webp;base64,${b} 1x"], ["poster", "data:image/gif,${b}"],
+      ["src", "data:image/avif;base64,${b}"], ["src", "data:image/x-icon;base64,${b}"], ["imagesrcset", "data:image/bmp,${b}"]]) {
+      expect(classifyInterpolatedAttrSink(n, v)).toBeNull();
+    }
+    for (const [n, v] of [["src", "data:image/svg+xml,${b}"], ["src", "data:text/html,${b}"],
+      ["src", "data:image/png${b}"], ["src", "data:image/${t};base64,${b}"], ["href", "data:image/png;base64,${b}"],
+      ["data", "data:image/png;base64,${b}"], ["src", "data:,${b}"]]) {
+      expect(classifyInterpolatedAttrSink(n, v)).toEqual({ kind: "url-scheme", scheme: "data" });
+    }
+  });
+
+  test("F3c — sms: and ftp: are literal safe schemes", () => {
+    expect(classifyInterpolatedAttrSink("href", "sms:${n}")).toBeNull();
+    expect(classifyInterpolatedAttrSink("href", "ftp://h/${p}")).toBeNull();
   });
 
   test("srcdoc with `${` is a sink in any case", () => {
@@ -80,7 +106,7 @@ describe("§1 classifyInterpolatedAttrSink — the shared reader", () => {
       ["XLINK:HREF", "javascript:${x}", "javascript"],
       ["data", "data:text/html,${x}", "data"],
       ["href", "blob:${x}", "blob"],
-      ["href", "ftp://h/${x}", "ftp"],
+      ["href", "gopher://h/${x}", "gopher"],
     ];
     for (const [n, v, scheme] of cases) {
       expect(classifyInterpolatedAttrSink(n, v)).toEqual({ kind: "url-scheme", scheme });
@@ -105,7 +131,7 @@ describe("§1 classifyInterpolatedAttrSink — the shared reader", () => {
   test("readLiteralUrlScheme reads only the literal prefix", () => {
     expect(readLiteralUrlScheme("")).toEqual({ kind: "none" });
     expect(readLiteralUrlScheme("/x:y")).toEqual({ kind: "none" });
-    expect(readLiteralUrlScheme("Mailto:")).toEqual({ kind: "scheme", scheme: "mailto" });
+    expect(readLiteralUrlScheme("Mailto:")).toEqual({ kind: "scheme", scheme: "mailto", rest: "" });
     expect(readLiteralUrlScheme("1abc:")).toEqual({ kind: "none" });
   });
 });
@@ -267,5 +293,114 @@ describe("§3 admitted controls", () => {
     expect(client).toContain('setAttribute("href", `/users/');
     expect(client).toContain('setAttribute("href", `https://x.example/');
     expect(client).toContain('setAttribute("href", `mailto:');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4 — S239 review round (F1 / F2 / F3): the value AS EMITTED is judged
+// ---------------------------------------------------------------------------
+
+describe("§4 F1 — a prop substituted into a component's quoted attribute is judged after substitution", () => {
+  test("the caller's `javascript:` prop text through `href=\"${u}\"` is refused, at the call site", () => {
+    const { refusals, result } = compile("f1", `<program>
+<nm> = "a"
+\${ function go(n) { log(n) } }
+const Lnk = <a props={u:string} href="\${u}">x</a>
+<p>pad</p>
+<Lnk u="javascript:go('\${@nm}')"/>
+</program>
+`);
+    expect(refusals.length).toBe(1);
+    expect(refusals[0].message).toContain("in component `Lnk` as used here");
+    expect(refusals[0].span.line).toBe(6);
+    expect(result.errors.filter((d) => d.code === CODE).length).toBe(1);
+  });
+
+  test("nested Outer → Inner is refused and anchored at the OUTER call site", () => {
+    const { refusals } = compile("f1nest", `<program>
+<nm> = "a"
+\${ function go(n) { log(n) } }
+const Inner = <a props={v:string} href="\${v}">y</a>
+const Outer = <span props={w:string}><Inner v="\${w}"/></span>
+<Outer w="javascript:go('\${@nm}')"/>
+</program>
+`);
+    expect(refusals.length).toBe(1);
+    expect(refusals[0].message).toContain("in component `Inner`");
+    expect(refusals[0].span.line).toBe(6);
+  });
+
+  test("two instances are two refusals; a safe instance of the same component is admitted", () => {
+    const { refusals } = compile("f1two", `<program>
+<nm> = "a"
+const Lnk = <a props={u:string} href="\${u}">x</a>
+<Lnk u="javascript:a('\${@nm}')"/>
+<Lnk u="vbscript:b(\${@nm})"/>
+<Lnk u="/ok/\${@nm}"/>
+</program>
+`);
+    expect(refusals.length).toBe(2);
+  });
+
+  test("inside an `<each>` row, the expanded instance is refused once (VP-3 + row backstop dedupe)", () => {
+    const { refusals, client } = compile("f1each", `<program>
+<items> = [{ name: "a" }]
+const Lnk = <a props={u:string} href="\${u}">x</a>
+<ul>
+  <each in=@items as it>
+    <li><Lnk u="javascript:go('\${it.name}')"/></li>
+  </each>
+</ul>
+</program>
+`);
+    expect(refusals.length).toBe(1);
+    expect(client).not.toMatch(/setAttribute\("href", `javascript:/);
+  });
+});
+
+describe("§4 F2 — markup spliced in by `^{ emit(…) }` is checked after ME", () => {
+  test("an emitted quoted onclick and javascript: href are both refused, anchored at their ^{} blocks", () => {
+    const { refusals } = compile("f2", `<program>
+<nm> = "a"
+\${ function go(n) { log(n) } }
+^{ emit("<button onclick=\\"go('" + "$" + "{@nm}')\\">b</button>") }
+^{ emit("<a href=\\"javascript:go('" + "$" + "{@nm}')\\">a</a>") }
+</program>
+`);
+    expect(refusals.length).toBe(2);
+    expect(refusals.map((r) => r.span.line).sort()).toEqual([4, 5]);
+    for (const r of refusals) expect(r.message).toContain("emitted by the `^{ emit(…) }` block");
+  });
+
+  test("an emitted safe attribute is admitted", () => {
+    const { refusals } = compile("f2ok", `<program>
+<nm> = "a"
+^{ emit("<a href=\\"/u/" + "$" + "{@nm}\\">a</a>") }
+</program>
+`);
+    expect(refusals.length).toBe(0);
+  });
+});
+
+describe("§4 F3 — through the pipeline", () => {
+  test("`one=` / `onboarding=` / `online=` with `${…}` compile; data:image/png on <img src> compiles; sms: compiles", () => {
+    const { refusals, result } = compile("f3", `<program>
+<v> = "a"
+<b one="x\${@v}" onboarding="y\${@v}" online="z\${@v}">t</b>
+<img src="data:image/png;base64,\${@v}"/>
+<a href="sms:\${@v}">s</a>
+</program>
+`);
+    expect(refusals.length).toBe(0);
+    expect(result.errors ?? []).toEqual([]);
+  });
+
+  test("data:image/svg+xml on <img src> is refused", () => {
+    const { refusals } = compile("f3svg", `<program>
+<v> = "a"
+<img src="data:image/svg+xml,\${@v}"/>
+</program>
+`);
+    expect(refusals.length).toBe(1);
   });
 });
