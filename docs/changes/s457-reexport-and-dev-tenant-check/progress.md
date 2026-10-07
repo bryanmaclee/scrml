@@ -11,3 +11,9 @@
   - locus: emit-server.ts emitModuleValueExportLines skips re-export/re-export-all; emit-client buildModuleRegistryFooter
     registers only locally-declared bindings; codegen/index.ts computeDependencyClientScripts follows imports only;
     module-resolver buildExportRegistry/validateImports never enumerate `export *`.
+- [2026-10-07] B REPRODUCED on base: project `<program db="./app.db">` + `<schema>` declaring `assets`; db seeded with an
+  extra `invoices(tenant_id)` table. `scrml dev src --port 37411`:
+  `/_scrml/health` -> 404 Not found; `/app.html` -> 200; `POST /_scrml/__ri_route_listAssets_1` -> 403 (CSRF — i.e. dispatched).
+  No E-DEPLOY-DB-TENANT-UNDECLARED in the log. dev.js loadServerRoutes skips the `_scrml_tenant_startup_check` export
+  (not a {path,method,handler}); the gate lives only as emitted text in build.js generateServerEntry.
+  NB: SPEC §34 row E-DEPLOY-DB-TENANT-UNDECLARED says "`scrml dev` does not run it" — needs amending with the fix.
