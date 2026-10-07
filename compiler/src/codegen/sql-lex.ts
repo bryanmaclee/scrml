@@ -20,104 +20,108 @@
 // recognised as a scrml interpolation ONLY in code context.
 // ---------------------------------------------------------------------------
 
-import { regexAllowedAfter } from "./code-segments.ts";
+// @ts-ignore — acorn ships its own types but the plugin API is untyped
+import * as acorn from "acorn";
+import { ScrmlParser } from "../scrml-acorn.ts";
 
-/** A JavaScript line terminator (ends a `//` comment; not allowed in a regex or a quoted string). */
-const isJsLineTerminator = (c: string | undefined): boolean =>
-  c === "\n" || c === "\r" || c === " " || c === " ";
+/**
+ * The parser options a slot payload is read with: the server module's (an ES module —
+ * strict code, top-level `await` allowed), at the newest syntax acorn knows.
+ */
+const SLOT_PARSE_OPTIONS = {
+  ecmaVersion: "latest",
+  sourceType: "module",
+  allowAwaitOutsideFunction: true,
+} as const;
 
-/** Index just past the closing quote of the JS string literal opening at `at`; -1 if unterminated. */
-function jsStringEnd(src: string, at: number): number {
-  const q = src[at];
-  for (let i = at + 1; i < src.length; i++) {
-    const c = src[i];
-    if (c === "\\") { i++; continue; }
-    if (c === q) return i + 1;
-    if (c === "\n" || c === "\r") return -1;
-  }
-  return -1;
-}
-
-/** Index just past the closing backtick of the JS template literal opening at `at`; -1 if unterminated. */
-function jsTemplateEnd(src: string, at: number): number {
-  let i = at + 1;
-  while (i < src.length) {
-    const c = src[i];
-    if (c === "\\") { i += 2; continue; }
-    if (c === "`") return i + 1;
-    if (c === "$" && src[i + 1] === "{") {
-      const e = jsInterpolationEnd(src, i);
-      if (e === -1) return -1;
-      i = e;
-      continue;
-    }
-    i++;
-  }
-  return -1;
-}
-
-/** Index just past the flags of the JS regular-expression literal opening at `at`; -1 if unterminated. */
-function jsRegexEnd(src: string, at: number): number {
-  let inClass = false;
-  for (let i = at + 1; i < src.length; i++) {
-    const c = src[i];
-    if (isJsLineTerminator(c)) return -1;
-    if (c === "\\") { i++; continue; }
-    if (inClass) { if (c === "]") inClass = false; continue; }
-    if (c === "[") { inClass = true; continue; }
-    if (c === "/") {
-      let j = i + 1;
-      while (j < src.length && /[A-Za-z]/.test(src[j]!)) j++;
-      return j;
-    }
-  }
-  return -1;
+/**
+ * Index just past the `}` that closes the `${` at `start` (the `$`); -1 when no reader can
+ * prove where it ends.
+ *
+ * THE single reader of a `?{}` slot's extent (§8.1.2 "One reader of a slot's extent"; S456
+ * fix round F1, S457). `liveSqlInterpolations` uses it, so the emitter (`rewrite.ts`
+ * `extractSqlParams`), the program-body checks (§8.1.2 and the §14.8.10 allow-list, via
+ * `schema-differ.js` `programSqlTokens`), the tenant subset, the protect floor, §52 write
+ * detection and the §8.10 hoist all split a body where the emitted tagged template's JS
+ * parse does. The codegen guard (`sql-one-statement-guard.ts`) re-reads the emitted template
+ * with acorn and fails closed on any residual difference.
+ *
+ * HOW IT READS (S457 — `g-sql-slot-reader-regex-division-misreads-s456`). The slot is ended by
+ * the JavaScript PARSER, not by a scanner that guesses: the payload is parsed as one
+ * expression from just after `${` (acorn, extended only by the scrml `@` sigil and
+ * `Type::Variant` tokens — `scrml-acorn.ts`), and the slot ends at the `}` token the parser
+ * reaches next. String literals, nested template literals, comments and regular-expression
+ * literals are read by the parser itself, so whether a `/` opens a regex or divides is the
+ * grammar's answer (`${ x.if(1) / 2 }`, `${ ({a:1}) / 2 }`, `${ x // (⏎ / 2 }` — misread by
+ * the old preceding-character heuristic, `regexAllowedAfter`, which ended the slot later or
+ * not at all and refused a valid single statement).
+ *
+ * A payload in scrml-only expression syntax that is not JavaScript (`${ x is not ? 1 : 2 }`,
+ * `${ not x }`, a `?{…}` inside a template slot of expression text) cannot be parsed by a
+ * JavaScript parser before codegen lowers it. For those — and only those — the extent is
+ * read with the SAME parser's tokenizer: tokens are read in order (strings, templates and
+ * their `${…}`, comments and regex literals as the tokenizer reads them) and the slot ends at
+ * the `}` that balances the `${`. This is not a second scanner: it is acorn's own lexer, and
+ * the codegen guard still judges the emitted call. When neither reading reaches a `}` — the
+ * tokenizer throws (an unterminated string / template / comment / regex) or the text ends —
+ * the result is -1 and every consumer refuses the slot (fail closed).
+ */
+export function jsInterpolationEnd(src: string, start: number): number {
+  const parsed = parsedSlotEnd(src, start);
+  if (parsed !== -1) return parsed;
+  return tokenizedSlotEnd(src, start);
 }
 
 /**
- * Index just past the `}` that closes the `${` at `start` (the `$`), read the way
- * JavaScript reads a template-literal substitution: string literals (backslash escapes),
- * nested template literals (and their own `${…}`), `//` and block comments, and regular-
- * expression literals (`regexAllowedAfter`, the codegen's shared regex-vs-division reading)
- * are skipped, so a brace inside any of them does not count. -1 if unterminated.
- *
- * THE single reader of a `?{}` slot's extent (S456 fix round F1). `liveSqlInterpolations`
- * uses it, so the emitter (`rewrite.ts` `extractSqlParams`), the program-body checks (§8.1.2
- * and the §14.8.10 allow-list, via `schema-differ.js` `programSqlTokens`), the tenant subset
- * and the protect floor all split a body where the emitted tagged template's JS parse does.
- * The codegen guard (`sql-one-statement-guard.ts`) re-reads the emitted template with a real
- * JS parser and fails closed on any residual difference.
+ * A parser over the text FROM the slot's `$` on, positioned just after its `${`. Positions it
+ * reports are relative to `start` (callers add `start` back). Not `new ScrmlParser(…, src,
+ * start + 2)`: given a start offset, acorn's constructor counts the lines of everything before
+ * it (`input.slice(0, lineStart).split(lineBreak)`), O(body) per slot and so quadratic over a
+ * body of many slots (S457 review: 16k one-per-line slots took ~10 s). Nothing acorn reads
+ * depends on the text before the start offset — the tokenizer starts in its initial context
+ * either way, and line numbers are only used for `locations`, which is off.
  */
-export function jsInterpolationEnd(src: string, start: number): number {
-  let i = start + 2;
-  let depth = 1;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    if (c === "'" || c === '"') { i = jsStringEnd(src, i); if (i === -1) return -1; continue; }
-    if (c === "`") { i = jsTemplateEnd(src, i); if (i === -1) return -1; continue; }
-    if (c === "/" && src[i + 1] === "/") {
-      let j = i + 2;
-      while (j < n && !isJsLineTerminator(src[j])) j++;
-      i = j;
-      continue;
-    }
-    if (c === "/" && src[i + 1] === "*") {
-      const e = src.indexOf("*/", i + 2);
-      if (e === -1) return -1;
-      i = e + 2;
-      continue;
-    }
-    if (c === "/" && regexAllowedAfter(src.slice(start + 2, i))) {
-      i = jsRegexEnd(src, i);
-      if (i === -1) return -1;
-      continue;
-    }
-    if (c === "{") depth++;
-    else if (c === "}" && --depth === 0) return i + 1;
-    i++;
+function slotParser(src: string, start: number): any {
+  // acorn declares the Parser constructor protected in its .d.ts; it is public at run time (plugins are built this way).
+  return new (ScrmlParser as any)(SLOT_PARSE_OPTIONS, src.slice(start), 2);
+}
+
+/** The slot end by PARSING the payload as one expression; -1 when the payload is not one. */
+function parsedSlotEnd(src: string, start: number): number {
+  try {
+    // @ts-ignore — acorn's Parser constructor / nextToken / parseExpression are untyped here
+    const p = slotParser(src, start);
+    p.nextToken();
+    p.parseExpression();
+    // The token after the expression — whitespace and comments already skipped by acorn.
+    if (p.type === acorn.tokTypes.braceR) return start + p.end;
+    return -1;
+  } catch {
+    return -1;
   }
-  return -1;
+}
+
+/** The slot end by READING TOKENS to the `}` that balances the `${`; -1 when unprovable. */
+function tokenizedSlotEnd(src: string, start: number): number {
+  try {
+    // @ts-ignore — see parsedSlotEnd
+    const p = slotParser(src, start);
+    p.nextToken();
+    let depth = 0;
+    const tt = acorn.tokTypes;
+    for (;;) {
+      const type = p.type;
+      if (type === tt.eof) return -1;
+      if (type === tt.braceL || type === tt.dollarBraceL) depth++;
+      else if (type === tt.braceR) {
+        if (depth === 0) return start + p.end;
+        depth--;
+      }
+      p.next();
+    }
+  } catch {
+    return -1;
+  }
 }
 
 /** A live (code-context) `${expr}` interpolation span within a SQL body. */
