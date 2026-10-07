@@ -47,6 +47,7 @@ import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
+import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 import type {
   Span,
@@ -1309,6 +1310,19 @@ function parseComponentDef(
   }
 
   if (!nodes.length) return null;
+
+  // §5.2 executable-sink rule (S456) — a quoted attribute in the component body whose `${…}` lands in
+  // executable text (`onclick="go('${label}')"`, `href="javascript:…${x}"`, `srcdoc`). The
+  // body is raw text until this re-parse, and expansion substitutes a prop into a quoted
+  // attribute textually, so this is the only stage that sees what the author wrote. Runs
+  // for USED and UNUSED defs alike; anchored at the definition (the re-parsed offsets are
+  // relative to the body text). VP-3 skips these nodes after expansion.
+  for (const e of collectExecutableSinkErrors(nodes, filePath, {
+    where: `in component \`${name}\``,
+    spanOverride: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+  })) {
+    ceErrors.push(makeCEError(e.code, e.message, e.span));
+  }
 
   // Extract propsDecl from the primary (first) root element's `props` attribute
   const primaryNode = nodes[0];

@@ -45,6 +45,11 @@ import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import {
+  classifyInterpolatedAttrSink,
+  interpolatedAttrSinkMessage,
+  ATTR_INTERP_EXECUTABLE_CODE,
+} from "../attr-injection-sink.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2183,18 +2188,6 @@ function eventNameForAttr(aName: string): string | null {
   return null;
 }
 
-/**
- * SAFETY predicate — is `aName` an event-handler attribute as the BROWSER sees it? HTML
- * attribute names are case-insensitive (`ONCLICK`, `OnClick` and `onclick` are the same live
- * handler), so this decides case-INSENSITIVELY and fails closed: any `on…` name counts, known
- * event or not, plus the `on:` directive. Use this, not `eventNameForAttr` (which maps a name to
- * a listener event and is case-sensitive), wherever a decision guards against building handler
- * code from data. (s456 review round 3: `ONCLICK="hit('${it.name}')"` bypassed the round-2
- * refusal.)
- */
-function isEventHandlerAttrName(aName: string): boolean {
-  return aName.startsWith("on:") || (aName.length > 2 && aName.slice(0, 2).toLowerCase() === "on");
-}
 
 /**
  * g-expr-event-handler-dead-in-each (Family-A Half-2, 2026-06-25) — lower a
@@ -2739,23 +2732,19 @@ function renderTemplateAttrToJs(
     // the attr re-evaluates on reconcile, matching the interpolation/text paths.
     const sv = String(val.value ?? "");
     const tpl = buildEachAttrTemplate(sv, iterVarName);
-    // A QUOTED event attribute whose text interpolates `${…}` (`onclick="hit('${it.name}')"`)
-    // would become JavaScript built from ROW DATA — a row value `x');…;('` runs on click. Rows
-    // are where untrusted data lives, so this is REFUSED, fail closed (s456 review round 2).
-    // A quoted event attribute WITHOUT `${…}` stays a static string (§5.2 rule 1). The same
-    // interpolation outside `<each>` is a pre-existing sink awaiting a ruling:
-    // g-quoted-event-attribute-interpolates-row-data-injection-s456.
-    if (tpl !== null && isEventHandlerAttrName(aName)) {
+    // §5.2 executable-sink rule (S456) — a QUOTED attribute whose `${…}` lands in text the browser EXECUTES
+    // (an `on…` handler, `srcdoc`, a URL with a non-safe literal scheme such as
+    // `javascript:`) is refused. VP-3 refuses it for every markup position before codegen;
+    // this is the backstop for a row template that reaches here without VP-3 having seen it,
+    // and it asks the SAME reader (`classifyInterpolatedAttrSink`) — never a second test.
+    const sink = tpl !== null ? classifyInterpolatedAttrSink(aName, sv) : null;
+    if (sink !== null) {
       recordRefusedLowering(new CGError(
-        "E-CG-003",
-        `E-CG-003: the quoted \`${aName}="…"\` attribute inside an \`<each>\` row interpolates ` +
-        `\`\${…}\` into event-handler text — JavaScript built from interpolated row text is an ` +
-        `injection sink (a row value can close the string and run code on the event). Use the ` +
-        `unquoted call form \`${aName}=hit(it.name)\` or an expression handler ` +
-        `\`${aName}=\${() => hit(it.name)}\`, which pass the row value as data (§5.2.1, §5.2.3).`,
+        ATTR_INTERP_EXECUTABLE_CODE,
+        interpolatedAttrSinkMessage(sink, aName, "", "inside an `<each>` row"),
         (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
       ), attr);
-      lines.push(`${indent}/* E-CG-003: interpolated quoted "${aName}" attribute refused (injection sink) */`);
+      lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${aName}" attribute refused (executable sink) */`);
       return;
     }
     if (tpl !== null) {

@@ -353,14 +353,16 @@ function main(args: string[]): number {
 </ul>
 </program>
 `);
-    expect((result.errors ?? []).filter((d) => d.code === "E-CG-003").length).toBe(3);
+    // S456 ruling (SPEC §5.2 rule 6): the refusal is E-ATTR-INTERP-EXECUTABLE (VP-3), one per attribute.
+    expect((result.errors ?? []).filter((d) => d.code === "E-ATTR-INTERP-EXECUTABLE").length).toBe(3);
+    expect(errCodes(result)).not.toContain("E-CG-003");
     const client = require("fs").readFileSync(join(dist, "eachcase.client.js"), "utf8");
     expect(client).not.toMatch(/_scrml_el_\d+\.setAttribute\("on/i);
     expect((client.match(/_scrml_el_\d+\.addEventListener\("click"/g) ?? []).length).toBe(2);
     expect(client).not.toMatch(/addEventListener\("(CLICK|Click)"/);
   });
 
-  test("review round 2 — a QUOTED event attribute interpolating row data in an `<each>` row is E-CG-003 (injection sink)", () => {
+  test("review round 2 — a QUOTED event attribute interpolating row data in an `<each>` row is refused (injection sink; E-ATTR-INTERP-EXECUTABLE since S456)", () => {
     const { result, dist } = compileTo("eachinj", `<program>
 <items> = [{ name: "a" }, { name: "x');globalThis.__pwn=1;('" }]
 <ul>
@@ -370,9 +372,9 @@ function main(args: string[]): number {
 </ul>
 </program>
 `);
-    const e = (result.errors ?? []).filter((d) => d.code === "E-CG-003");
+    const e = (result.errors ?? []).filter((d) => d.code === "E-ATTR-INTERP-EXECUTABLE");
     expect(e.length).toBe(1);
-    expect(e[0].message).toContain("injection sink");
+    expect(e[0].message).toContain("JavaScript is never built from interpolated text");
     const client = require("fs").readFileSync(join(dist, "eachinj.client.js"), "utf8");
     expect(client).not.toMatch(/setAttribute\("onclick", `/);
   });

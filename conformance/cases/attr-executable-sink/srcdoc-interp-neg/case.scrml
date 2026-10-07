@@ -1,0 +1,4 @@
+<program>
+<nm> = "a"
+<iframe srcdoc="<p>${@nm}</p>"></iframe>
+</program>

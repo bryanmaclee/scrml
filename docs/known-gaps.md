@@ -31,14 +31,55 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 237 | 6 |
-| MED | 519 | 4 |
-| LOW | 290 | 0 |
+| MED | 520 | 4 |
+| LOW | 291 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
-### g-quoted-url-attribute-javascript-scheme-row-data-s456 — a quoted URL-bearing attribute with `${…}` (`<a href="javascript:hit('${it.name}')">`, and `src` / `action` / `formaction`, plus `srcdoc`) is compiled to `setAttribute("href", \`javascript:hit('${…}')\`)`: data interpolated into a URL whose scheme makes it executable — a row value can close the string and run code on click / load — `NEW S456; MED; open (needs a ruling)`
+### g-quoted-url-attribute-data-supplied-scheme-s456 — a quoted URL attribute whose literal text commits to NO scheme (`href="${it.url}"`, `src="${x}"`, `href="java${x}"`) takes its scheme from the DATA: a value `javascript:…` runs on click. Compiled to `setAttribute("href", \`${…}\`)` with no scheme check — `NEW S456; MED; open (needs a ruling)`
 
-<!-- @gap id=g-quoted-url-attribute-javascript-scheme-row-data-s456 sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs string-literal path, buildEachAttrTemplate)+compiler/src/codegen/emit-bindings.ts(top-level template-attr path) prov=review:S456-PA-executed-on-c31a5839c -->
+<!-- @gap id=g-quoted-url-attribute-data-supplied-scheme-s456 sev=MED status=open locus=compiler/src/attr-injection-sink.ts(readLiteralUrlScheme → kind:"none" is admitted)+compiler/src/codegen/emit-bindings.ts(top-level template-attr setAttribute)+compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs) prov=dispatch:S456-attr-injection-rulings -->
+
+Deliberately outside the S456 executable-sink rule (the brief: do not refuse `href="${url}"` — it would
+reject legitimate code). Corpus at `20ce26bf5`: 3 sources write a URL attribute whose literal prefix is
+empty (`href="${…}"` ×1, `src="${…}"` ×2); 2 compile to a template `setAttribute("src", …)`. The same hole
+exists for the expression form `href=${@u}` (measured: `el.setAttribute("href", String(…))`, no scheme
+check; `href=@u` is a different defect — [[g-unquoted-href-cell-ref-renders-cell-name-s456]]). Options for a ruling: (a) a runtime
+scheme guard on URL-attribute writes whose literal prefix commits to no scheme (allow `http:` / `https:` /
+`mailto:` / `tel:` / relative; otherwise write a blocked placeholder and log), applied to the quoted and the
+expression forms alike — the recommendation, since data-supplied URLs are legitimate and common; (b) a
+compile-time refusal (rejects legitimate code); (c) leave it to the author. `readLiteralUrlScheme` already
+says which prefixes need it (`kind:"none"`).
+
+### g-unquoted-href-cell-ref-renders-cell-name-s456 — `<a href=@link1>` (a top-level `<link1> = "…"` cell) renders the static attribute `href="link1"` — the cell's NAME, no client wiring — at exit 0 with no diagnostic, while `href=${@link1}` binds — `NEW S456; MED; open (unverified against prior filings)`
+
+<!-- @gap id=g-unquoted-href-cell-ref-renders-cell-name-s456 sev=MED status=open locus=searched:none(observed in the emitted HTML only) prov=empirical:S456-attr-injection-rulings-probe -->
+
+Observed at the S456 attr-injection-rulings head (no change in this area) while measuring
+[[g-quoted-url-attribute-data-supplied-scheme-s456]]. §3's context table lists `=@x` as a direct binding in
+attribute-value position. Not root-caused; other attribute names not measured. Search for a prior filing
+before fixing.
+
+### g-component-prop-in-quoted-attr-substitutes-source-text-s456 — a component prop read as `${label}` inside a QUOTED attribute of the component body is substituted with the call site's SOURCE TEXT when the argument is not a literal: `<Btn label=@nm/>` renders `title="hi @nm"`, and inside an `<each>` row `<Btn label=it.name/>` emits `setAttribute("title", "hi it.name")` — `NEW S456; MED; open`
+
+<!-- @gap id=g-component-prop-in-quoted-attr-substitutes-source-text-s456 sev=MED status=open locus=compiler/src/component-expander.ts(prop substitution into string-literal attribute values) prov=empirical:S456-attr-injection-rulings-probe -->
+
+Found while probing the executable-sink rule in components (exit 0, no diagnostic). With a literal argument
+(`label="a"`) the substitution is correct (`title="hi a"`). Not an injection sink (the result is static
+text), but the rendered value is wrong — the reactive read is neither interpolated nor subscribed.
+
+### g-quoted-attr-template-escape-decoding-diverges-s456 — a backslash in a quoted interpolated attribute is decoded at top level and kept literal in an `<each>` row: `title="x\ty ${@nm}"` emits the template literal `` `x\ty …` `` (a TAB at runtime) at top level, `` `x\\ty …` `` (backslash-t) in a row — `NEW S456; LOW; open`
+
+<!-- @gap id=g-quoted-attr-template-escape-decoding-diverges-s456 sev=LOW status=open locus=compiler/src/codegen/rewrite.ts(rewriteTemplateAttrValue copies `\x` pairs verbatim)+compiler/src/codegen/emit-each.ts(buildEachAttrTemplate escapes `\`) prov=empirical:S456-attr-injection-rulings-probe -->
+
+Measured at `20ce26bf5`. §5.2 rule 1 does not say whether a quoted attribute decodes escape sequences; the
+two lowerings disagree. Relevant to the executable-sink rule: because the top-level form DECODES, a scheme
+can be spelled with escapes (`\x6aavascript:`), which is why the S456 scheme test refuses any `\` before the
+scheme ends.
+
+### g-quoted-url-attribute-javascript-scheme-row-data-s456 — a quoted URL-bearing attribute with `${…}` (`<a href="javascript:hit('${it.name}')">`, and `src` / `action` / `formaction`, plus `srcdoc`) is compiled to `setAttribute("href", \`javascript:hit('${…}')\`)`: data interpolated into a URL whose scheme makes it executable — a row value can close the string and run code on click / load — `NEW S456; MED; RESOLVED S456`
+
+<!-- @gap id=g-quoted-url-attribute-javascript-scheme-row-data-s456 sev=MED status=resolved resolved-by=S456-fix/s456-attr-injection-rulings locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs string-literal path, buildEachAttrTemplate)+compiler/src/codegen/emit-bindings.ts(top-level template-attr path) prov=review:S456-PA-executed-on-c31a5839c -->
 
 PA-executed on `c31a5839c`, re-measured in the S456 round-3 fix (one probe file, exit 0, no diagnostic):
 **in an `<each>` row AND at top level**, `href=`, `<iframe src=>`, `<form action=>`, `<button formaction=>` with
@@ -52,6 +93,18 @@ HTML-escape the interpolated values). Same SPEC tension as
 [[g-quoted-event-attribute-interpolates-row-data-injection-s456]] (§5.2 rule 1 vs the quoted-attribute
 interpolation sentences recorded there).
 
+**RESOLVED S456** (ruling "your recs on 1 and 2"; `fix/s456-attr-injection-rulings`). SPEC §5.2 gained the
+executable-sink rule: `${…}` in a URL-valued attribute whose LITERAL text begins with a scheme other than
+`http:` / `https:` / `mailto:` / `tel:`, and `${…}` in `srcdoc`, are E-ATTR-INTERP-EXECUTABLE (§34 row), at
+every position — top level, component bodies (used or not), slot content, `<each>` rows, engine
+state-children, `<match>` arms, `for … lift`. The scheme test reads the literal prefix as a browser's URL
+parser does (leading C0/space ignored, tab/LF/CR removed, case-insensitive); a `\` or `&` before the scheme
+ends is refused as unprovable. One reader, `compiler/src/attr-injection-sink.ts`, called from VP-3, the
+component expander (definition bodies) and the `<each>` row lowering (backstop). The safe-scheme set is the
+implementation's reading of "begins with a scheme" — `examples/12-snippets-slots.scrml`'s
+`href="mailto:${u.email}"` stays admitted. NOT covered (open, filed separately): a scheme supplied by the
+DATA, `href="${url}"` — [[g-quoted-url-attribute-data-supplied-scheme-s456]].
+
 ### g-event-attribute-name-case-sensitive-listener-s456 — top-level `ONCLICK=fn()` / `onClick=fn()` registers a `"ONCLICK"` / `"Click"` listener, which never fires (HTML attribute names are case-insensitive; DOM event names are lowercase) — `NEW S456; LOW; open`
 
 <!-- @gap id=g-event-attribute-name-case-sensitive-listener-s456 sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(event name taken from the attribute name verbatim: addEventListener("ONCLICK"), _scrml_Click_handlers) prov=empirical:S456-round-3-probe -->
@@ -64,11 +117,11 @@ text via `setAttribute`). At top level the handler is silently dead. Corpus (com
 `type-state-codes/e-state-undeclared-{neg,pos}`, sample `phase4-event-jsx-arrow-ghost-027`). ⚠ Some arrive
 through a COMPONENT prop (`onSave=`), where the name may be a component callback rather than a DOM event — the
 fix needs to tell the two apart, not just lowercase. (The `<each>` change altered 0 corpus artifacts.) A quoted top-level `ONCLICK="…${…}"`
-interpolates exactly like the lowercase form ([[g-quoted-event-attribute-interpolates-row-data-injection-s456]]).
+is refused like the lowercase form since S456 (E-ATTR-INTERP-EXECUTABLE; [[g-quoted-event-attribute-interpolates-row-data-injection-s456]]).
 
-### g-quoted-event-attribute-interpolates-row-data-injection-s456 — a QUOTED `on*` attribute containing `${…}` outside `<each>` (`<button onclick="hit('${@items[0].name}')">`) is compiled to `setAttribute("onclick", \`hit('${…}')\`)`: event-handler JavaScript built from interpolated data — a value `x');globalThis.__pwn=1;('` runs on click — `NEW S456; MED; open (needs a ruling)`
+### g-quoted-event-attribute-interpolates-row-data-injection-s456 — a QUOTED `on*` attribute containing `${…}` outside `<each>` (`<button onclick="hit('${@items[0].name}')">`) is compiled to `setAttribute("onclick", \`hit('${…}')\`)`: event-handler JavaScript built from interpolated data — a value `x');globalThis.__pwn=1;('` runs on click — `NEW S456; MED; RESOLVED S456`
 
-<!-- @gap id=g-quoted-event-attribute-interpolates-row-data-injection-s456 sev=MED status=open locus=compiler/src/codegen/emit-bindings.ts(top-level `template-attr` path: data-scrml-attr-tpl-<attr> + _scrml_effect setAttribute of a template literal; applies to on* attributes like any other) prov=review:S456-S239-round-2-confirmed-in-happy-dom -->
+<!-- @gap id=g-quoted-event-attribute-interpolates-row-data-injection-s456 sev=MED status=resolved resolved-by=S456-fix/s456-attr-injection-rulings locus=compiler/src/codegen/emit-bindings.ts(top-level `template-attr` path: data-scrml-attr-tpl-<attr> + _scrml_effect setAttribute of a template literal; applies to on* attributes like any other) prov=review:S456-S239-round-2-confirmed-in-happy-dom -->
 
 Pre-existing on `0aef3270d` at top level (not introduced by S456). Found in the S456 review: the first S456 fix
 round lowered a quoted `onclick="…"` in an `<each>` row through the same template path, which extended the sink to
@@ -90,6 +143,16 @@ time."*). Sentences that sanction `${…}` inside a quoted attribute, found by s
 No sentence found that addresses a quoted EVENT attribute (`on*`) specifically. The ruling needed: is
 `on*="…${x}…"` (a) a static string (§5.2 rule 1 — then `${` is literal text), (b) refused (as in `<each>` rows
 since S456), or (c) interpolated — and if (c), how the value is escaped for a JavaScript-string context.
+
+**RESOLVED S456 — answer (b), everywhere** (ruling "your recs on 1 and 2"; `fix/s456-attr-injection-rulings`).
+SPEC §5.2 executable-sink rule + §34 row E-ATTR-INTERP-EXECUTABLE (replaces the round-2 `<each>`-only
+E-CG-003): a quoted attribute whose name begins with `on` (any case; `on:` / `onserver:` / `onclient:`
+included — fail closed) containing `${…}` is refused at top level, in component bodies (used or not; the
+body is checked where the component expander first parses it, because expansion substitutes a prop into a
+quoted attribute textually), slot content, `<each>` rows, engine state-children, `<match>` arms and
+`for … lift`. One diagnostic per attribute. A quoted event attribute with no `${…}` stays static. The §3
+table, §4.18 and §5.5.3 now cross-reference the carve-out. Corpus (compiled at `20ce26bf5`, 2413 sources +
+flogence `src/`): 0 programs affected.
 
 ### g-foreign-slice-regex-quote-and-in-block-refusal-lost — a quote inside a regex literal in a `_={ … }=` slice hid its `return`; and a codegen refusal one block deep (E-FOREIGN-006/007, E-SQL-006, E-SESSION-VALUE) or E-LIFT-002 anywhere compiled exit 0 with only a `null /* E-… */` placeholder in the artifact — `NEW S456; HIGH; RESOLVED S456`
 

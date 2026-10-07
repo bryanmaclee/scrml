@@ -17,6 +17,7 @@ import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
 import { runAttributeInterpolation } from "./validators/attribute-interpolation.ts";
+import { ATTR_INTERP_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
@@ -1417,6 +1418,7 @@ function _compileScrmlImpl(options = {}) {
     return result;
   }
 
+  const _attrInterpExecutableSeen = new Set();
   function collectErrors(stageName, errors, filePath = null) {
     if (errors && errors.length > 0) {
       for (const e of errors) {
@@ -1456,6 +1458,14 @@ function _compileScrmlImpl(options = {}) {
           if (enriched.span && typeof enriched.span === "object" && !enriched.span.file) {
             enriched.span = { ...enriched.span, file: filePath };
           }
+        }
+        // §5.2 executable-sink rule (S456) — one E-ATTR-INTERP-EXECUTABLE per source attribute. VP-3 refuses
+        // it before codegen; the `<each>` row lowering asks the same question as a backstop
+        // and reports at the same attribute span, so the second report is dropped here.
+        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE && enriched.span && typeof enriched.span === "object") {
+          const k = `${enriched.span.file ?? enriched.filePath ?? ""}:${enriched.span.start}:${enriched.span.end}`;
+          if (_attrInterpExecutableSeen.has(k)) continue;
+          _attrInterpExecutableSeen.add(k);
         }
         allErrors.push(enriched);
         // s432 F3 — positioned redaction (a fragment attribute's echoed name).
