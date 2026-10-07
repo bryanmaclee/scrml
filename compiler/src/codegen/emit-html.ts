@@ -32,6 +32,7 @@ import { parsePredicateAnnotation, deriveHtmlAttrs } from "./emit-predicates.ts"
 // A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
 import { buildReactiveTypeMap, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard } from "./url-attr-guard.ts";
 // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
 // `collectEnumRenders` builds the file's variant -> renders-markup map;
 // `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` lower fallback / renders
@@ -3348,6 +3349,10 @@ export function generateHtml(
                 directiveJsExpr: lowered.jsExpr,
                 directiveRefs: lowered.refs,
                 directiveIsFormValue,
+                // §5.2 rule 3 (S457) — `href="${@u}"`: the data supplies the scheme.
+                ...(quotedUrlAttrNeedsGuard(String(tag), name, String(val.value ?? ""))
+                  ? { directiveUrlGuard: true }
+                  : {}),
               });
             }
           } else {
@@ -3647,6 +3652,9 @@ export function generateHtml(
                 ...(name === "value" && FORM_VALUE_ELEMENTS.has(tag)
                   ? { valueAttrIsFormValue: true }
                   : {}),
+                // §5.2 rule 3 (S457) — a URL attribute on this element: the runtime
+                // write goes through `_scrml_safe_url` (the data supplies the scheme).
+                ...(dynamicUrlAttrNeedsGuard(tag, name) ? { valueAttrUrlGuard: true } : {}),
                 refs: val.refs,
               });
             }

@@ -66,7 +66,7 @@ import {
   type TenantContext,
 } from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
-import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
+import { buildSsrEachRenderers, SSR_RENDER_HELPER, SSR_URL_GUARD_HELPER } from "./emit-ssr-render.ts";
 // g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,
 // sliced from the SINGLE client-runtime source, inlined into a standalone
 // `.server.js` that references `_scrml_map_*` (reachability-gated below). Without
@@ -6275,6 +6275,10 @@ export function generateServerJs(
       const _ssrRenderers = buildSsrEachRenderers(fileAST, _ssrSeededVarNames, errors, filePath);
       if (_ssrRenderers.length > 0) {
         for (const _hl of SSR_RENDER_HELPER.split("\n")) lines.push(_hl);
+        // §5.2 rule 3 (S457) — a row attribute that writes a data-supplied URL calls the guard.
+        if (_ssrRenderers.some((_r) => _r.fnLines.some((_fl) => _fl.includes("_scrml_safe_url(")))) {
+          for (const _hl of SSR_URL_GUARD_HELPER.split("\n")) lines.push(_hl);
+        }
         for (const _r of _ssrRenderers) {
           for (const _fl of _r.fnLines) lines.push(_fl);
           lines.push("");

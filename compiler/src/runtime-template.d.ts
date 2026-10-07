@@ -28,3 +28,6 @@ export declare const SERVER_STRUCTURAL_EQ_SOURCE: string;
 
 /** Runtime filename used in external mode. */
 export declare const RUNTIME_FILENAME: "scrml-runtime.js";
+
+/** S457 — the runtime URL scheme guard source (runtime-url-guard.js), inlined as the `urlguard` chunk. */
+export declare const URL_GUARD_RUNTIME_SOURCE: string;

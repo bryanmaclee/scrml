@@ -98,6 +98,9 @@
  *                 OQ-A4-G ratification (S91): Option γ — `requestIdleCallback`
  *                 browser-side with `setTimeout(fn, 1)` Safari fallback;
  *                 Bun-runtime primitive reserved as v0.4 extension point.
+ *   urlguard      _scrml_safe_url + the shared URL scheme reader (§5.2 rule 3, S457), inlined
+ *                 verbatim from compiler/src/runtime-url-guard.js. Activated by the post-emit
+ *                 `_scrml_safe_url(` scan in emit-client.ts.
  *   mount         _scrml_chunk_mount(id, tag) + _SCRML_MOUNTS registry
  *                 (§40.9.7, A-4.7). Chunk-side record-keeping for
  *                 admitted markup nodes. Activated by
@@ -146,6 +149,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'map',
   'ssr',
   'log',
+  'urlguard',
   // ---------------------------------------------------------------------
   // Stdlib registry chunks — inlined from compiler/runtime/stdlib/<name>.js
   // via `_scrml_stdlib.<name>`. Activated per-file by `detectRuntimeChunks`
@@ -306,6 +310,11 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // page emits none and ships without the chunk (minimal-runtime discipline).
   ssr:            "§52.8 SSR pre-render seed (chunk: 'ssr')",
   log:            "§20.6 log() location-transparent logging runtime (chunk: 'log')",
+  // §5.2 rule 3 (S457) — the runtime URL-attribute scheme guard `_scrml_safe_url` and the shared
+  // scheme reader it inlines from runtime-url-guard.js. Activated by a POST-EMIT scan
+  // (emit-client.ts POST_EMIT_HELPER_CHUNK_GATES) for a `_scrml_safe_url(` call, so a page that writes
+  // no data-derived URL attribute ships without it.
+  urlguard:       "§5.2 URL-attribute scheme guard runtime (chunk: 'urlguard')",
 
   // Function definition markers — 'function _name' starts at a line boundary.
   // Previous chunk ends after the preceding function/IIFE closing brace.

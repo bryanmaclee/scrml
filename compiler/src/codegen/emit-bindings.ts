@@ -5,6 +5,7 @@ import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
 import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
+import { quotedUrlAttrNeedsGuard, wrapUrlGuard } from "./url-attr-guard.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import { parsePredicateAnnotation, predicateToJsExpr, deriveHtmlAttrs } from "./emit-predicates.ts";
@@ -1010,10 +1011,16 @@ export function emitBindings(ctx: CompileContext): string[] {
             lines.push(`    _scrml_mount_track(_scrml_effect(() => { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; }));`);
           }
         } else {
-          lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+          // §5.2 rule 3 (S457) — a URL attribute whose literal prefix commits to no scheme
+          // (`href="${@u}"`): the data supplies the scheme, so the write goes through the
+          // runtime guard. A literal relative path / safe scheme stays byte-identical.
+          const valueJs = quotedUrlAttrNeedsGuard(mkTag, attrName, rawValue)
+            ? wrapUrlGuard(tplElemId, attrName, jsExpr)
+            : jsExpr;
+          lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
           // Auto-tracking effect handles all reactive dependencies automatically
           if (reactiveVars.size > 0) {
-            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
           }
         }
         lines.push(`  }`);

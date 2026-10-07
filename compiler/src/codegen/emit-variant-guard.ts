@@ -95,6 +95,7 @@
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
+import { wrapUrlGuard } from "./url-attr-guard.ts";
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
@@ -914,10 +915,13 @@ function emitArmWireFunction(
       }
     } else {
       // attr-template — set the interpolated attribute value once, then subscribe.
+      // §5.2 rule 3 (S457): a URL attribute whose literal prefix commits to no scheme
+      // (`directiveUrlGuard`, stamped by emit-html) writes through `_scrml_safe_url`.
       const attrName = binding.attrName as string;
-      lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+      const valueJs = binding.directiveUrlGuard === true ? wrapUrlGuard(EL, attrName, jsExpr) : jsExpr;
+      lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
       if (refs.length > 0 || readsRow(jsExpr)) {
-        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
+        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
       }
     }
     lines.push(`    }`);
@@ -975,6 +979,7 @@ function emitArmWireFunction(
       attrName,
       binding.valueAttrIsFormValue === true,
       EL,
+      binding.valueAttrUrlGuard === true,
     );
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);

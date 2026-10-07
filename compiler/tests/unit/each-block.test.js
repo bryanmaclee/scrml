@@ -696,8 +696,9 @@ function handle(id) {
     expect(errors).toEqual([]);
     // No false E-SCOPE-001 on the bare @. in attribute position (Locus 1).
     expect(errors).toEqual([]);
-    // href=@.email lowers to the value, not a literal.
-    expect(clientJs).toContain('.setAttribute("href", String(_scrml_each_item.email));');
+    // href=@.email lowers to the value, not a literal — through the §5.2 rule 3 (S457)
+    // runtime URL guard, since the row data supplies the scheme.
+    expect(clientJs).toMatch(/\.setAttribute\("href", _scrml_safe_url\([A-Za-z_0-9]+, "href", String\(_scrml_each_item\.email\)\)\);/);
   });
 
   test("class:/onclick/${} compose on a single per-item opener (the reproducer)", () => {

@@ -1,4 +1,5 @@
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
+import { wrapUrlGuard } from "./url-attr-guard.ts";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitHandlerStatementList } from "./emit-logic.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix } from "./emit-expr.ts";
@@ -107,6 +108,8 @@ interface LogicBinding {
   valueAttrKey?: string;
   /** `value` on input/textarea/select → write the live `.value` PROPERTY. */
   valueAttrIsFormValue?: boolean;
+  /** §5.2 rule 3 (S457): a URL attribute on its element → the write goes through `_scrml_safe_url`. */
+  valueAttrUrlGuard?: boolean;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -438,18 +441,25 @@ function buildServerFnNames(fnNameMap: Map<string, string>): Set<string> {
  * @param el          the element variable (default `el`). The arm wire fn passes
  *   a `_scrml_`-prefixed spelling when an arm name is itself `el`
  *   (g-arm-directive-binding-reads-arm-name round 2).
+ * @param urlGuard    §5.2 rule 3 (S457) — the attribute is a URL on its element
+ *   (`binding.valueAttrUrlGuard`, stamped by emit-html): the written string goes
+ *   through `_scrml_safe_url`, which returns it unchanged when its scheme is
+ *   admitted and `"about:blank"` (plus a log report) when it is not. Absence still
+ *   removes the attribute.
  */
 export function emitValueAttrApply(
   compiled: string,
   attrName: string,
   isFormValue: boolean,
   el = "el",
+  urlGuard = false,
 ): string {
+  const strValue = urlGuard ? wrapUrlGuard(el, attrName, "String(_scrml_x)") : "String(_scrml_x)";
   const write = isFormValue
     ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : String(_scrml_x); ` +
       `if (${el}.value !== _scrml_s) { ${el}.value = _scrml_s; }`
     : `if (_scrml_x === null || _scrml_x === undefined) { ${el}.removeAttribute(${JSON.stringify(attrName)}); } ` +
-      `else { ${el}.setAttribute(${JSON.stringify(attrName)}, String(_scrml_x)); }`;
+      `else { ${el}.setAttribute(${JSON.stringify(attrName)}, ${strValue}); }`;
   return (
     `{ const _scrml_w = function(_scrml_x) { ${write} }; ` +
     `const _scrml_v = (${compiled}); ` +
@@ -2287,6 +2297,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             compiled,
             attrName,
             binding.valueAttrIsFormValue === true,
+            "el",
+            binding.valueAttrUrlGuard === true,
           );
           // Rebindable — re-binds the attr effect scoped to a swapped region and
           // is region-tracked for teardown (same contract as the bool path).

@@ -292,6 +292,13 @@ export interface LogicBinding {
   valueAttrIsFormValue?: boolean;
 
   /**
+   * §5.2 rule 3 (S457) — the value attr is a URL on this element (`href=${@u}` on `<a>`, `data=` on
+   * `<object>`), so its runtime write goes through `_scrml_safe_url`. Stamped by emit-html (the one
+   * stage that knows the TAG) via `codegen/url-attr-guard.ts` `dynamicUrlAttrNeedsGuard`.
+   */
+  valueAttrUrlGuard?: boolean;
+
+  /**
    * i81 — the CSS-SAFE placeholder key for a reactive value attribute.
    *
    * `valueAttrName` is the ORIGINAL author-written name and is what reaches
@@ -485,6 +492,12 @@ export interface LogicBinding {
   attrName?: string;
   directiveJsExpr?: string;
   directiveRefs?: string[];
+  /**
+   * §5.2 rule 3 (S457) — an arm-body `attr-template` that is a URL attribute whose quoted literal
+   * prefix commits to no scheme (`href="${@u}"`): the wire fn wraps its write in `_scrml_safe_url`.
+   * Stamped by emit-html via `codegen/url-attr-guard.ts` `quotedUrlAttrNeedsGuard`.
+   */
+  directiveUrlGuard?: boolean;
 
   /**
    * i225 — form-control `value` marker for arm-body `attr-template` bindings.

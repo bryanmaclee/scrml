@@ -1,0 +1,20 @@
+<program>
+<bad> = "javascript:alert(1)"
+<good> = "/ok?a=1"
+<pic> = "data:image/png;base64,AAAA"
+<u> = "/start"
+<rows> = [{ id: 1, url: "JaVaScRiPt:alert(2)" }, { id: 2, url: "https://example.com/" }]
+<a id="q" href="${@bad}">quoted</a>
+<a id="e" href=${@bad}>expression</a>
+<a id="g" href=${@good}>safe</a>
+<img id="i" src=${@pic}/>
+<a id="h" href=${@pic}>raster on href</a>
+<a id="r" href="/rel/${@bad}">proven relative</a>
+<a id="d" href=${@u}>reactive</a>
+<button id="flip" onclick=${@u = "vbscript:x"}>flip</button>
+<ul>
+  <each in=@rows key=@.id as row>
+    <li><a class="row" id="row-${row.id}" href="${row.url}">row</a></li>
+  </each>
+</ul>
+</program>
