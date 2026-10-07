@@ -36,6 +36,7 @@ import { programStatementVerdicts } from "./schema-differ.js";
 import { resolveDbScopes } from "./db-ownership.ts";
 import { getNodes } from "./codegen/collect.ts";
 import { forEachProgramBodySql } from "./sql-one-statement.ts";
+import { programStatementMessage, programStatementKey } from "./codegen/sql-one-statement-guard.ts";
 
 /**
  * Whether any file compiled together declares a database (`<program db=>`, `<db src=>` — the
@@ -68,6 +69,8 @@ export interface ProgramStatementDiagnostic {
   message: string;
   span: unknown;
   severity: "error";
+  /** S457 — the one-report-per-body key shared with the codegen lowering check. */
+  sqlBodyKey: string;
 }
 
 /** A relation carrying `tenant_id` in a live SQLite file the compile opened (protect-analyzer.ts). */
@@ -95,15 +98,6 @@ function inSet(set: Iterable<string>): (name: string) => boolean {
   for (const t of set) if (typeof t === "string") s.add(t.toLowerCase());
   return (name: string) => s.has(name.toLowerCase());
 }
-
-/** The admitted program-body statements, for messages (SPEC §14.8.10 item (1)). */
-const ADMITTED_SUMMARY =
-  "A program-body `?{}` admits only: DML (`SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`, " +
-  "no `SELECT … INTO`); `CREATE [TEMP] TABLE [IF NOT EXISTS] name (col type, …)`; `ALTER TABLE name ADD " +
-  "[COLUMN] col type`; `CREATE VIRTUAL TABLE name USING fts5(…)` with the closed fts5 options; `CREATE " +
-  "[UNIQUE] INDEX [IF NOT EXISTS] name ON table (cols) [WHERE …]`; `BEGIN` / `COMMIT` / `ROLLBACK` / " +
-  "`SAVEPOINT` / `RELEASE`; and `PRAGMA table_info | table_xinfo | index_list | index_info | " +
-  "foreign_key_list | busy_timeout | journal_mode`.";
 
 /**
  * (1) Every program-body `?{}` statement, held to the CLOSED allow-list (S456 "a, fix F7/F9
@@ -133,28 +127,16 @@ export function programBodyUndeclaredTenantTables(
       if (reported.has(key)) continue;
       reported.add(key);
       const at = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-      if (d.verdict === "tenant") {
-        out.push({
-          code: "E-TENANT-UNDECLARED",
-          message:
-            `E-TENANT-UNDECLARED: this \`?{}\` statement gives \`${d.name}\` tenant data (${d.why}), and \`${d.name}\` is not declared ` +
-            `tenant-scoped: no \`<schema>\` and no \`<db tables=>\` of this compilation declares it, so the tenant ` +
-            `floor would not scope it and every tenant's rows would reach every request. ${FIX} (A temporary table ` +
-            `cannot be declared in \`<schema>\` — E-SCHEMA-014 — so keep tenant rows in a declared table.)`,
-          span: at,
-          severity: "error",
-        });
-        continue;
-      }
+      const code = d.verdict === "tenant" ? "E-TENANT-UNDECLARED" : "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED";
       out.push({
-        code: "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED",
-        message:
-          `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED: this \`?{}\` statement${d.lead ? ` (\`${d.lead}\` …)` : ""} is not ` +
-          `admitted in a program body: ${d.why}. Declare the relation in \`<schema>\` instead (§14.8.10 — a ` +
-          `statement the compiler cannot read exactly could create a \`tenant_id\` relation the tenant floor ` +
-          `does not scope). ${ADMITTED_SUMMARY}`,
+        code,
+        // One message for the stage and the codegen lowering check (sql-one-statement-guard.ts).
+        message: programStatementMessage({ code, lead: d.lead ?? "", name: d.name ?? null, why: d.why ?? "" }),
         span: at,
         severity: "error",
+        // S457 — the codegen lowering refuses the same body again (the authority); api.js keeps
+        // one report per body, this one (it carries the `?{` span).
+        sqlBodyKey: programStatementKey(code, filePath, sql),
       });
     }
   };

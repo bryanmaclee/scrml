@@ -30,11 +30,23 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 244 | 6 |
-| MED | 527 | 4 |
-| LOW | 292 | 0 |
+| HIGH | 243 | 6 |
+| MED | 529 | 4 |
+| LOW | 291 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-template-sql-ref-marker-unrestored-client-s457 — a `?{}` in a template literal that also holds `<#name>`, in a function with no other `?{}`, stays client-side and ships `__scrml_sql_ref__("?{`…SQL…`}")` — `NEW S457; MED; open`
+
+<!-- @gap id=g-template-sql-ref-marker-unrestored-client-s457 sev=MED status=open locus=compiler/src/expression-parser.ts(template raw with <#name> — marker never restored)+route inference prov=empirical:s457-sql-check-at-lowering-agent -->
+
+``let a = `t ${ ?{`SELECT v FROM notes`}.get() } ${ <#x> }` `` inside `function f`: route inference never sees the `?{}`, so `f` stays on the client; client.js calls the undefined `__scrml_sql_ref__` (ReferenceError at run time) and ships the SQL text to the browser; exit 0. Not an execution path (once on the server the S457 lowering check refuses it). Since the S457 `__scrml_` placeholder gate lands, the artifact is refused instead — the lowering is still owed.
+
+### g-match-arm-sql-run-lowered-as-unsafe-then-run-s457 — `?{…}.run()` inside a raw match arm emits `await _scrml_sql.unsafe("INSERT …", [(x)]) . run ( )`: the INSERT runs, then the handler throws TypeError — `NEW S457; MED; open`
+
+<!-- @gap id=g-match-arm-sql-run-lowered-as-unsafe-then-run-s457 sev=MED status=open locus=compiler/src/codegen/rewrite.ts(lowerSqlBareSite chain handling in a match-arm text path) prov=review:S457-sql-check-at-lowering-differential(CONFIRMED on base and head) -->
+
+Pre-existing; the write happens and the caller sees a crash.
 
 ### g-srcdoc-unquoted-expression-not-refused-s457 — `<iframe srcdoc=${@u}>` compiles clean and runs the data as HTML; S456 refuses only the quoted `srcdoc="${…}"` — `NEW S457; HIGH; open`
 
@@ -23491,7 +23503,9 @@ RESOLVED S457 (s457-sql-one-reader): rewriteSqlRefs lowers exactly the sites `sq
 
 ### g-sql-checker-and-lowering-read-different-text-s457 — the program-body SQL checks scan RAW scrml text while the emitter lowers REWRITTEN or structurally-parsed text, so a `?{` can be lowered that no check read — `NEW S457; HIGH; open (security; pre-existing)`
 
-<!-- @gap id=g-sql-checker-and-lowering-read-different-text-s457 sev=HIGH status=open locus=compiler/src/sql-in-expression-text.ts(scanExpressionTextForSql)+compiler/src/codegen/rewrite.ts(rewriteSqlRefs after rewriteServerReactiveRefs)+compiler/src/codegen/emit-server.ts(emitServerTemplateLit)+compiler/src/expression-parser.ts(template raw with <#name>) prov=review:S457-sql-one-reader-r2(CONFIRMED on SQLite, identical on base 0d8e9d8ce) -->
+<!-- @gap id=g-sql-checker-and-lowering-read-different-text-s457 sev=HIGH status=resolved resolved-by=S457-fix/s457-sql-check-at-lowering locus=compiler/src/sql-in-expression-text.ts(scanExpressionTextForSql)+compiler/src/codegen/rewrite.ts(rewriteSqlRefs after rewriteServerReactiveRefs)+compiler/src/codegen/emit-server.ts(emitServerTemplateLit)+compiler/src/expression-parser.ts(template raw with <#name>) prov=review:S457-sql-one-reader-r2(CONFIRMED on SQLite, identical on base 0d8e9d8ce) -->
+
+RESOLVED S457 (s457-sql-check-at-lowering): `sql-one-statement-guard.ts` `judgeDriverCallDetail` judges the SQL each emitted driver call sends against the §8.1.2 one-statement rule and the §14.8.10 item (1) allow-list, at every author-`?{}` lowering — emit-logic `case "sql"` (all driver branches; F3/F4 land here), rewrite.ts `lowerSqlMethodSite`/`lowerSqlBareSite` (F2), and the §8.10 hoist (declines). A refused site throws; the compile error points at the source `?{`, deduped by `sqlBodyKey`. Chromium-free differential review on SQLite: 241/253 refused shapes refused (the rest were reviewer syntax / the multi-statement nit, fixed in round 1), 390/390 legal cases byte-identical; corpus 2421 sources 0 newly refused.
 
 The S456 durable ("two readers of one text = a bypass") at the checker/emitter seam — the READING is shared, the TEXT is not. Three executed shapes, each compiling at exit 0 and emitting a `DROP TABLE` that ran against SQLite (base and head alike):
 - **F2** a keyword-named reactive cell before `/`: ``let a = `t ${ @new / ?{`DROP TABLE notes`}.run() }` `` — the checker reads `@new /` as a regex start (skips the site); `rewriteSqlRefs` runs after `rewriteServerReactiveRefs` and sees `_scrml_body["new"] /` (division) and lowers it. Also `@in @delete @typeof @void @return @await @yield @else @finally @throw @instanceof @do`; the bare `.unsafe` form passes `ATTACH DATABASE`.
@@ -23501,7 +23515,9 @@ The §8.1.2 one-statement rule is backstopped at codegen (judgeDriverCall); the 
 
 ### g-sql-site-locator-nested-paren-quadratic-s457 — `sqlSitesInExpressionText` is quadratic on deeply nested `((((x) / x) / x)…` — `NEW S457; LOW; open (perf, pre-existing class)`
 
-<!-- @gap id=g-sql-site-locator-nested-paren-quadratic-s457 sev=LOW status=open locus=compiler/src/sql-in-expression-text.ts(CodeSoFar.tail) prov=review:S457-sql-one-reader-r2 -->
+<!-- @gap id=g-sql-site-locator-nested-paren-quadratic-s457 sev=LOW status=resolved resolved-by=S457-fix/s457-sql-check-at-lowering locus=compiler/src/sql-in-expression-text.ts(CodeSoFar.tail) prov=review:S457-sql-one-reader-r2 -->
+
+RESOLVED S457 (s457-sql-check-at-lowering): CodeSoFar.tail after `)` hands regexAllowedAfter the units before the matching `(` plus "()" — 16k nesting 7.7 s → 21 ms; 200k random inputs base vs head 0 differences.
 
 16k nesting: 6.5 s on head vs 1.2-1.5 s on base (base also quadratic). Fix: hand `regexAllowedAfter` the units before the matching `(` plus `"()"`.
 

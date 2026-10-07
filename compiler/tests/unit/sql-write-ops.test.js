@@ -29,9 +29,10 @@
  *   §16 explicit call.args @var rewriting — emitLogicNode
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { rewriteSqlRefs, rewriteExpr, rewriteServerExpr, serverRewriteEmitted } from "../../src/codegen/rewrite.js";
 import { emitLogicNode } from "../../src/codegen/emit-logic.js";
+import { setProgramBodySqlPolicy } from "../../src/codegen/sql-one-statement-guard.ts";
 
 // ---------------------------------------------------------------------------
 // §1  INSERT with .run()
@@ -446,6 +447,25 @@ describe("§15 @var in SQL template params — server path (rewriteServerExpr)",
 // ---------------------------------------------------------------------------
 
 describe("§16 call.args @var rewriting — emitLogicNode with explicit .run(@var) args", () => {
+  // A bare `?` placeholder is outside the §14.8.10 item (1) closed lexical subset: in a
+  // compilation WITH a database it is refused (at the TENANT-SCHEMA stage, and — S457 — at the
+  // lowering). The legacy `?` + call.args path is reached only in a database-less compilation,
+  // which these tests now say explicitly (an emitter driven with no policy fails closed).
+  beforeEach(() => setProgramBodySqlPolicy({ hasDatabase: false, tenantTables: [] }));
+  afterEach(() => setProgramBodySqlPolicy(null));
+
+  test("S457: in a compilation with a database the bare-? lowering is refused (nothing sent)", () => {
+    setProgramBodySqlPolicy({ hasDatabase: true, tenantTables: [] });
+    const node = {
+      kind: "sql",
+      query: "SELECT * FROM users WHERE id = ?",
+      chainedCalls: [{ method: "run", args: "@userId" }],
+    };
+    const output = emitLogicNode(node);
+    expect(output).not.toContain("_scrml_sql.unsafe(");
+    expect(output).toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");
+  });
+
   test("sql node with bare ? placeholder and @var in call.args — args not dropped", () => {
     const node = {
       kind: "sql",

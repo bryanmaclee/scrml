@@ -26,7 +26,7 @@ import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
-import { sqlHoldsOneStatement, multipleStatementsThrowExpr, judgeDriverCall, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE } from "./sql-one-statement-guard.ts";
+import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -2080,7 +2080,19 @@ function _ensureBoundary(opts: EmitLogicOpts, context: string): EmitLogicOpts {
 
 export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "client" }): string {
   if (!node || typeof node !== "object") return "";
+  // §14.8.10 item (1) (S457) — a `?{}` the lowering refuses is reported at the statement that
+  // holds it when the site has no span of its own (a text-path site): track the statement being
+  // lowered, restoring the enclosing one on the way out.
+  if (!(node.span && typeof node.span.start === "number" && node.span.start > 0)) return _emitLogicNode(node, opts);
+  const _prevSqlSpan = swapSqlLoweringSpan(node.span);
+  try {
+    return _emitLogicNode(node, opts);
+  } finally {
+    swapSqlLoweringSpan(_prevSqlSpan);
+  }
+}
 
+function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
   opts = _ensureBoundary(opts, "emitLogicNode");
 
   // §20.6 — remember this statement's real source span so the log()
@@ -3664,7 +3676,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const { sql, params, segments } = extractSqlParams(_tenantSql);
       // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver
       // (sql-one-statement-guard.ts — every driver path runs a chained statement somewhere).
-      if (!sqlHoldsOneStatement(_tenantSql)) return `${multipleStatementsThrowExpr()};`;
+      if (!sqlHoldsOneStatement(_tenantSql)) return `${refuseMultipleStatements(_tenantSql, rawQuery, (node as any).span)};`;
 
       const renderParams = (): string[] => {
         const _sqlExprCtx = _makeExprCtx(opts);
@@ -3774,13 +3786,17 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // §8.1.2 (S456 fix round F1) — judge the driver call AS EMITTED: acorn reads the SQL
         // text the driver will receive (the tagged template's quasis must be the segments the
         // compiler read; one statement). Otherwise the site throws and nothing is sent.
-        const _verdict = judgeDriverCall(driverOf(args), segments);
+        // §14.8.10 item (1) (S457) — and the SAME text is held to the program-body statement
+        // allow-list here, at the lowering: a site lowered is a site checked, whatever reader
+        // found it (g-sql-checker-and-lowering-read-different-text-s457).
+        const { verdict: _verdict, refusal: _refusal } = judgeDriverCallDetail(driverOf(args), segments);
         if (_verdict !== "ok") {
           if (_verdict === "text-not-read") {
             const sink = (opts as any).preparedStmtErrors as CGError[] | undefined;
             if (sink) sink.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, (node as any).span ?? { start: 0, end: 0 }));
           }
-          return `${refusedDriverCallExpr(_verdict)};`;
+          if (_refusal) recordProgramStatementRefusal(_refusal, rawQuery, (node as any).span);
+          return `${refusedDriverCallExpr(_verdict, _refusal)};`;
         }
         if (!(opts as { sqlAttempt?: boolean }).sqlAttempt) return finish(`await ${driverOf(args)}`) + ";";
         const refs = args.map((_a, k) => `_scrml_p[${k}]`);
