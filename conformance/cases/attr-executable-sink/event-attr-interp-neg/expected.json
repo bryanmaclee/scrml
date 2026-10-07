@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-event-attr-interp-neg",
+  "description": "§5.2 executable-sink rule (S456): a QUOTED event-handler attribute containing `${…}` is refused at top level and in an `<each>` row, in any case (`onclick` / `ONCLICK`) — JavaScript is never built from interpolated text.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule, carve-out 1: \"A quoted event-handler attribute — any attribute whose name begins with `on`, in any letter case (`onclick`, `ONCLICK`, `on:click`, `onserver:…`) — whose value contains `${…}`\" SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE). Before S456 the top-level form compiled to `setAttribute(\"onclick\", `go('${…}')`)` — a value `x');…;('` ran on click.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": ["E-CG-003"],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

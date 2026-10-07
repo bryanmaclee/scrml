@@ -1,0 +1,6 @@
+<program>
+<v> = "abc"
+<b id="b" online="z-${@v}">t</b>
+<img id="i" src="data:image/png;base64,${@v}"/>
+<a id="s" href="sms:${@v}">s</a>
+</program>

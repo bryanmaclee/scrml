@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-srcdoc-interp-neg",
+  "description": "§5.2 executable-sink rule (S456): `${…}` in an iframe `srcdoc` (an HTML document, i.e. script) is refused.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule: a quoted `srcdoc` attribute whose value contains `${…}` SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE). Before S456 it compiled to `setAttribute(\"srcdoc\", `<p>${…}</p>`)` — an HTML-injection sink.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

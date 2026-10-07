@@ -1,0 +1,7 @@
+<program>
+<nm> = "a"
+${ function go(n) { log(n) } }
+<a id="j" href="JaVaScRiPt:go('${@nm}')">j</a>
+<form action="javascript:go('${@nm}')"><button>f</button></form>
+<iframe src="data:text/html,<b>${@nm}</b>"></iframe>
+</program>

@@ -1,0 +1,17 @@
+{
+  "id": "attr-executable-sink-safe-interp-pos",
+  "description": "§5.2 executable-sink rule (S456) controls: interpolation into a relative URL path, after a fixed `https:` or `mailto:` scheme, and a quoted event attribute with NO `${…}` all compile and render.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule refuses only an executable sink: an event attribute WITH `${…}`, `srcdoc` with `${…}`, or a URL whose LITERAL scheme is not one of `http:` / `https:` / `mailto:` / `tel:`. A scheme written literally cannot be changed by the interpolation that follows its `:`. A quoted event attribute with no `${…}` stays a static string (§5.2 rule 1).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "domAnchored": [
+      { "selector": "#rel", "attr": { "href": "/users/7" } },
+      { "selector": "#abs", "attr": { "href": "https://example.com/users/7" } },
+      { "selector": "#mail", "attr": { "href": "mailto:ada@example.com" } },
+      { "selector": "#h", "attr": { "onclick": "go(1)" } }
+    ]
+  }
+}
