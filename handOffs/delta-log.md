@@ -4305,3 +4305,7 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3765] land · #1340 s457 maps non-compliance (FACTS verbs, fix --help, bootstrap-conformance blocking step) · → #1340
 [3766] land · s457-url-scheme-runtime-guard — SPEC §5.2 rule 3; `_scrml_safe_url` at 17 emitters incl. SSR first paint; element-scoped; Chromium differential LAND-WITH-NITS (0 bypass in scope, 66,240-value fuzz) · @adv:g-quoted-url-attribute-data-supplied-scheme-s456
 [3767] finding · S457 reviews: svg <set to=> href sink CONFIRMED executable (LOW→HIGH); unquoted srcdoc=${@u} not refused (HIGH); user fn `id` kills click dispatch (HIGH, PA-reproduced); string `?{` clobbered by placeholder (HIGH, PA-reproduced); unquoted onclick call-chain drops callback (HIGH, PA-reproduced) · → known-gaps S457
+[3770] land · #1341 S457 runtime URL scheme guard (+ types decls, FACTS, bootstrap report regen) · @adv:g-quoted-url-attribute-data-supplied-scheme-s456
+[3771] land · #1342 s457-sql-one-reader · @adv:g-sql-slot-reader-regex-division-misreads-s456,g-rewrite-sql-refs-lowers-inside-js-literals-s456
+[3772] disp · s457-sql-check-at-lowering · s457-executable-sinks-srcdoc-svg · s457-runtime-local-rename-and-handler-truncation · → brief/s457b
+[3773] land · s457-is-some-core (#1333) — the placeholder gate split out pending the `__scrml_` prefix ruling (gate kept @ 934ac062c) · @adv:g-is-some-in-a-function-expression-body-emits-an-undefined-helper

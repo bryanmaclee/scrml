@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 245 | 6 |
+| HIGH | 244 | 6 |
 | MED | 527 | 4 |
 | LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
@@ -76,7 +76,7 @@ PA-reproduced at `0d8e9d8ce`: exit 0; only diagnostics W-LINT-013 (Vue shorthand
 
 <!-- @gap id=g-map-literal-in-function-expression-emits-undefined-helper-s457 sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts(escape-hatch raw route; no map-literal lowering) prov=empirical:s457-is-some-function-expression-agent -->
 
-Same preprocess-then-slice route as #1333. Silent at base (ReferenceError at run time); once the S457 #1333 fix lands its gate refuses it (E-CODEGEN-INVALID-LOGIC) — still needs its own lowering.
+Same preprocess-then-slice route as #1333. Silent (ReferenceError at run time) — still UNGUARDED: the S457 placeholder gate that refuses it is held pending the `__scrml_` prefix ruling (gate branch worktree-agent-a4d6f8b53831fd9ee @ 934ac062c). Needs its own lowering either way.
 
 ### g-match-in-function-expression-mangled-s457 — `match` inside a function-expression body emits `__scrml_match__(v, ""On" :> …)` — `NEW S457; MED; open (fails loud)`
 
@@ -18989,7 +18989,9 @@ Two lowering defects on the same §42 surface:
   `(x === null || x === undefined)`"*). Silent wrong answer, not a crash.
 
 — NEW S428-bryan (RELAYED from the S428 self-host migration dispatch, 5 post-migration instances reported; PA has NOT re-run these — the two sibling S428 findings that WERE re-run both reproduced exactly)
-<!-- @gap id=g-is-some-in-a-function-expression-body-emits-an-undefined-helper sev=HIGH status=open locus=searched:compiler/src/codegen/emit-expr.ts,compiler/src/codegen/emit-logic.ts prov=spec:§42.8-"is-not-SHALL-compile-to-(x-===-null-||-x-===-undefined)" -->
+<!-- @gap id=g-is-some-in-a-function-expression-body-emits-an-undefined-helper sev=HIGH status=resolved resolved-by=S457-fix/s457-is-some-core locus=compiler/src/codegen/rewrite.ts(escape-hatch raw route)+compiler/src/codegen/is-predicate-lowering.ts prov=spec:§42.8-"is-not-SHALL-compile-to-(x-===-null-||-x-===-undefined)" -->
+
+RESOLVED S457 (s457-is-some-core; adopter issue #1333). Root: a block-bodied function / arrow becomes an escape-hatch whose `raw` is sliced from the PREPROCESSED text, so the `__scrml_is_some__` placeholder rode into rewrite.ts, which had no rule for it. Now one lowering (`is-predicate-lowering.ts`) serves emit-expr and a rewrite.ts Pass 2.2 (scanner skips strings/comments/regexes). Also leaked in block arrows, `when` bodies, engine `effect=`, `<each>` rows, `${}` handlers and server fns. Second defect fixed: `(expr) is not` on the string path became `=== null` (wrong for undefined) — now the §42.8 both-halves form. scanLhsLeft stop list = `return throw case else do in instanceof yield`; a preceding `new` joins the operand. Three S239 differential rounds. The fail-closed placeholder GATE is held pending bryan's `__scrml_` prefix ruling (branch worktree-agent-a4d6f8b53831fd9ee @ 934ac062c) — until then [[g-map-literal-in-function-expression-emits-undefined-helper-s457]] ships silently, as on base.
 
 ### G-SELF-HOST-PARITY-HARNESS-EVALUATES-SCRML-SOURCE-AS-JAVASCRIPT — the one test guarding the self-host tree structurally required it to stay JS
 

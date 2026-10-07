@@ -39,9 +39,12 @@ let capturing = false;
 const realValidate = { ...(await import("../../src/codegen/validate-emit.ts")) };
 mock.module("../../src/codegen/validate-emit.ts", () => ({
   ...realValidate,
-  validateEmittedArtifacts: (artifacts) => {
+  // Forward EVERY argument: `mock.module` is process-global under bun, so this
+  // wrapper is what every later test file's compile calls too; an argument it
+  // dropped would silently change the gate for the rest of the run (S457).
+  validateEmittedArtifacts: (artifacts, ...rest) => {
     if (capturing) gated.push(...artifacts);
-    return realValidate.validateEmittedArtifacts(artifacts);
+    return realValidate.validateEmittedArtifacts(artifacts, ...rest);
   },
 }));
 const { compileScrml } = await import("../../src/api.js");

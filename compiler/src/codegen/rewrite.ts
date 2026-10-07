@@ -8,6 +8,7 @@ import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
 import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
+import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
 // columns a lowered `?{}` SELECT carries and wrap its result rows in the
 // `_scrml_protect_tag(...)` descriptor at query-lowering time (server only).
@@ -1319,16 +1320,18 @@ function _scanChainStartLeft(s: string, endIdx: number): number {
 // find the matching `(` (handling nested parens). Replaces the entire
 // `(expr) is X` with a temp-var form that evaluates `expr` exactly once.
 //
-//   (expr) is not not  →  ((expr) != null)   [presence]
-//   (expr) is some     →  ((expr) != null)   [presence]
-//   (expr) is not      →  ((expr) == null)   [absence]
+//   (expr) is not not  →  ((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)((expr))
+//   (expr) is some     →  (same — presence)
+//   (expr) is not      →  ((__scrml_is_v) => __scrml_is_v === null || __scrml_is_v === undefined)((expr))
+//   (x) is not         →  (x === null || x === undefined)   [trivial operand: no IIFE]
 //
-// Uses double-equals (== / !=) to match both null and undefined in one check.
-// Single-evaluation of `expr` is intrinsic to the paren form — `expr` appears
-// exactly once on the LHS of the comparison; `null` is a constant, no second
-// reference needed. (Prior emit interposed `(_scrml_tmp_N = (expr))` for the
-// LHS, but that tmpvar was never declared in the emitted ES-module scope,
-// throwing ReferenceError under strict mode — see S103 self-host fix.)
+// The lowering is the shared one (is-predicate-lowering.ts), so this string
+// path and emit-expr's structured path emit the same §42.8 form. The IIFE binds
+// `expr` once (§42.2.4). (It used to emit `((expr) == null)` — one comparison
+// covering both null and undefined — but the client pipeline's later
+// rewriteEqualityOps pass rewrote that `==` to `===`, dropping the `undefined`
+// half; #1333. An even earlier form interposed `(_scrml_tmp_N = (expr))`, a
+// never-declared temp — ReferenceError under strict mode, S103 self-host fix.)
 // Only the parenthesized form is handled here. Identifier/dotted paths are
 // handled by the existing regex patterns below (unchanged). §42.2.4 Phase A.
 function _rewriteParenthesizedIsOp(segment: string): string {
@@ -1415,10 +1418,20 @@ function _rewriteParenthesizedIsOp(segment: string): string {
         lhsExpr = segment.slice(parenStart, opIdx + 1); // e.g. "(regex.exec(str))"
       }
 
-      // Build the replacement: compare expr to null directly.
-      // Single-evaluation is intrinsic — lhsExpr appears once on the LHS.
-      const cmp = op === "absence" ? "==" : "!=";
-      const replacement = `(${lhsExpr} ${cmp} null)`;
+      // Build the replacement — the explicit §42.8 form, never `== null`.
+      // g-is-some-in-a-function-expression-body-emits-an-undefined-helper (#1333,
+      // second defect): the old `((expr) == null)` was correct JS on its own,
+      // but the client pipeline's LATER rewriteEqualityOps pass turns every
+      // `==` into `===`, so it shipped as `((expr) === null)` — `undefined`
+      // dropped, a silent wrong answer against §42.8 ("`is not` SHALL compile to
+      // `(x === null || x === undefined)`"). The shared lowering states both
+      // halves; a non-trivial operand is bound once by its IIFE (§42.2.4).
+      const operandText = isCallParen ? lhsExpr : lhsExpr.slice(1, -1).trim();
+      const trivial = isTrivialOperandText(operandText);
+      const operand = trivial ? operandText : lhsExpr;
+      const replacement = op === "absence"
+        ? lowerAbsenceCheck(operand, trivial)
+        : lowerPresenceCheck(operand, trivial);
 
       // Splice the replacement into the segment.
       const fullMatch = lhsExpr + suffix;
@@ -2869,6 +2882,14 @@ const clientPasses: RewritePass[] = [
   (s, ctx) => ctx.skipPresenceGuard ? s : rewritePresenceGuard(s),
   // Pass 2
   (s, ctx) => rewriteNotKeyword(s, ctx.errors),
+  // Pass 2.2 (#1333) — the §42/§43 `is`-predicate PLACEHOLDER calls
+  // (`__scrml_is_some__(x)` …) that an escape-hatch raw carries out of the
+  // expression parser's preprocessed text. AFTER rewriteNotKeyword (whose
+  // E-SYNTAX-010 scan would read this pass's own `null`/`undefined` as source,
+  // and which lowers a scrml `not` inside the operand first) and BEFORE every
+  // later pass (reactive refs see the lowered operand; the enum/variant passes
+  // would otherwise rewrite the `".V"` tag string). See is-predicate-lowering.ts.
+  (s, _ctx) => lowerIsPlaceholders(s),
   // Pass 2.5 (R24-BUG-1, S136) — word-form boolean operators `or`/`and` → `||`/`&&`.
   // Runs RIGHT AFTER rewriteNotKeyword (the sibling word-form keyword lowering)
   // and BEFORE rewriteReactiveRefs so `@or` / `@and` sigil prefixes are still
@@ -2952,6 +2973,9 @@ const serverPasses: RewritePass[] = [
   (s, ctx) => ctx.skipPresenceGuard ? s : rewritePresenceGuard(s),
   // Pass 2
   (s, _ctx) => rewriteNotKeyword(s),
+  // Pass 2.2 (#1333) — `is`-predicate placeholder calls; same position and
+  // reason as client Pass 2.2.
+  (s, _ctx) => lowerIsPlaceholders(s),
   // Pass 2.5 (R24-BUG-1, S136) — word-form boolean operators `or`/`and` → `||`/`&&`.
   // Same shape as client Pass 2.5; runs before reactive-ref rewriting.
   (s, _ctx) => rewriteBooleanKeywords(s),

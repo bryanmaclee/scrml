@@ -49,6 +49,7 @@ import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
+import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw } from "../expression-parser.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { emitSqlQueryShape, emitNestedGuardExpr } from "./emit-logic.js";
@@ -1935,7 +1936,7 @@ function isTrivialIsLhs(left: ExprNode): boolean {
 //     so the same name reused across callsites does NOT collide.
 //   * Length is intentionally short to keep output compact while preserving
 //     the `__scrml_` prefix collision-shield.
-const IS_OP_IIFE_LOCAL = "__scrml_is_v";
+// (Defined in is-predicate-lowering.ts — `IS_OP_IIFE_LOCAL` — with the lowering itself.)
 
 // ---------------------------------------------------------------------------
 // g-paren-binary-group-dropped-before-method (ss3, S210) — receiver-paren guard.
@@ -2636,29 +2637,24 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
     // esized form. That path remains intact for the older code paths still
     // routing through string rewrites; this AST emit path now matches the
     // single-eval guarantee for the same shapes.
+    // The lowering itself is shared with the string path (rewrite.ts) so the
+    // two cannot drift — is-predicate-lowering.ts (#1333).
     case "is-not": {
       if (isTrivialIsLhs(node.left)) {
         const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-        return `(${lhs} === null || ${lhs} === undefined)`;
+        return lowerAbsenceCheck(lhs, true);
       }
       // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
-      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} === null || ${IS_OP_IIFE_LOCAL} === undefined)(${left})`;
+      return lowerAbsenceCheck(left, false);
     }
-    case "is-some": {
-      if (isTrivialIsLhs(node.left)) {
-        const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-        return `(${lhs} !== null && ${lhs} !== undefined)`;
-      }
-      // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
-      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} !== null && ${IS_OP_IIFE_LOCAL} !== undefined)(${left})`;
-    }
+    case "is-some":
     case "is-not-not": {
       if (isTrivialIsLhs(node.left)) {
         const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-        return `(${lhs} !== null && ${lhs} !== undefined)`;
+        return lowerPresenceCheck(lhs, true);
       }
       // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
-      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} !== null && ${IS_OP_IIFE_LOCAL} !== undefined)(${left})`;
+      return lowerPresenceCheck(left, false);
     }
 
     // §43 enum membership: x is .Variant → x === "Variant" (unit variant) OR
@@ -2691,7 +2687,7 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
       // pattern matches `_scrml_engine_variant_tag` from the runtime template
       // but is inlined here so server boundary + escape-hatch contexts
       // don't depend on the runtime helper being in scope.
-      return `(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === ${rhs};})(${left})`;
+      return lowerVariantCheck(left, rhs);
     }
 
     default: {
