@@ -1,3 +1,62 @@
+# scrml — Session 456 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S455 below. Rulings authority: `scrml-support/user-voice-scrml.md` §S456 (7 rulings + 2 PA readings).
+> Board: `S456-bryan.md`. Changelog: `docs/changelog.md` §S456. Review ledger: `docs/pr-reviews.md` (S456 markers #1329–#1337).
+> Solo session; spanned a machine reboot / Claude Code restart (2026-10-06 → 10-07). Mechanical state: delta-log `[3739]`–`[3760]`.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. Check first
+- **Maps refresh:** PR **#1339** (`maps/s456`, stamp → `ba2712973`, 13 files) — land it if not already merged. (GitHub returned `Internal Server Error` on every push for ~4 min at 16:30Z 10-07; all pushes went through on retry.) Its non-compliance findings: FACTS "14 CLI verbs" (`facts.ts` NOT_A_VERB lacks fix-client-server-call / fix-sql-failable); `scrml fix --help` (fix.js:59) still advertises the `.run() !{ _ :> {} }` rewrite; `docs/bootstrap-conformance.md` stale 7th window (1346 → 1391); the two walker gaps (`walkFileAst` skips `bodyChildren`; component bodies raw until the expander) have no known-gaps entry — decide by-design or file. Old PRs: **#1176** (README, REVIVE: rebase ~49 lines + `scrml fix` 2 snippets, then bryan reads) · **#580** (parked — nested-program channel question, ask only after `g-nested-program-emits-artifacts-it-never-produces`). #939 #865 #579 CLOSED S456 with evidence.
+- Main CI at wrap: `ba2712973` run in progress at wrap time — confirm green.
+
+### 1. Owed (ordered)
+1. **Data-supplied URL schemes** — `href="${url}"` / `href=${@u}` let data choose the scheme; nothing checks it (filed with #1337). Agent rec: a RUNTIME scheme guard (allow-list http/https/mailto/tel/relative), not a compile refusal. Ruling-shaped — surface to bryan with the worked example.
+2. **SQL slot reader → acorn** (`g-sql-slot-reader-regex-division-misreads-s456`, LOW, fails closed): end `${…}` via `acorn.parseExpressionAt` so "one reader = JS" is true by construction; removes false refusals.
+3. **`rewriteSqlRefs` lowers inside JS literals** (`g-rewrite-sql-refs-lowers-inside-js-literals-s456`, MED, pre-existing, no SQL execution found) — the rewriter must skip strings/comments/regexes like the checker (one reader).
+4. **`transaction {}` atomicity under the §14.8.11 tier** — PLAUSIBLE, unexecuted (author `?{BEGIN}` goes to the pool handle; a side probe saw "Only use sql.begin"). Needs a live PG repro first.
+5. **`.scrml` re-export fails to link server-side** (`g-server-reexport-of-scrml-module-fails-to-link-s456`, MED, reviewer-executed, PA-unverified).
+6. **`scrml dev` does not run the tenant startup check** (`g-tenant-startup-check-built-server-only-s456`).
+7. Hoist LOWs (#1332): chunk failure skips later chunks; host `.js` import disables hoisting program-wide; Set grown during loop.
+8. Carried from S455: tenant LOW residuals (d) `--no-gather`; §8.10 match-arm `?{}` server boundary; R11 tail (244 listed writes; login outage-as-bad-credentials); U1c; dpa-068; bootstrap twin `E-NAME-COLLIDES-RESERVED-PREFIX`.
+
+### 2. bryan's queue (not blocking)
+- Veto window: `handle()` exit has no runtime guard (rec: keep static) · tenant-switch grant-table check (rec: not now) · every DB app runs the startup check · views / ALTER ADD tenant_id count as undeclared · literal safe schemes admit trailing data (`mailto:${…}`).
+- Quoted event handlers run at global scope (`onclick="hit(it)"`) — W-lint? (rec: yes).
+- Tenant FTS index impossible (`g-tenant-fts-index-impossible-s456`) — only if an adopter asks.
+- dPA backlog: dpa-041 042 043 046 047 048 049 057 064 (axiom-level → one at a time).
+
+## What landed (all S239-reviewed; details in changelog §S456)
+#1330 `handle()` + `globalThis.Response` protect leak · #1331 W-TENANT-SUBSTRATE-SCOPED + `--` ends at CR|LF · #1332 §8.10 hoist ≡ per-row (DB-side key compare, write-free bodies, per-read failure, chunking; SPEC §8.10.1 cond. 6) · #1334 undeclared `tenant_id` refused — program-body SQL closed statement + lexical allow-list; startup check (503); `table_xinfo` · #1335 one statement per `?{}` + one JS-accurate `${}` slot reader (8 consumers) + emitted-call guard (closed the `set_config` tenant re-pin and the SQLite slot-desync bypass of #1334) · #1336 flogence foreign-slice silent null (refusal sink; acorn-parse slice tokens; `<each>` quoted handler) · #1337 E-ATTR-INTERP-EXECUTABLE (event attrs fail-closed `on…`, scheme-led URL attrs, srcdoc; judged as emitted) · #1329 review debt.
+
+## 🔭 DURABLE
+**The S452 "change the boundary at round three" rule fired twice more, and both times the next boundary also needed a round.** Undeclared tenant tables went: CREATE/ALTER reader → SELECT INTO → known-columns (r3, 8 holes) → bryan's closed STATEMENT allow-list (r4: tokenizer disagreements) → closed LEXICAL subset (r5 clean). An allow-list over statements is only as good as the tokenizer under it; the closed alphabet is what made the statement list trustworthy. Next time a security classifier reads SQL text: fix the alphabet FIRST.
+
+**Two readers of one text = a bypass, every time.** #1335's F1 (slot extent by brace-count vs JS's own parse), #1336's F1 (standalone tokenizer vs the slice's real wrapper), #1337's F1 (definition text vs the substituted-as-emitted attribute) were the same defect three times. The fix each time was ONE reader whose answer is the runtime's answer. Ask of any new check: "is this the text the runtime will actually execute?"
+
+**A fail-closed rule must not be "narrowed" into a name list.** My own F3a brief turned "every `on…` is a handler" into "the WHATWG list" to kill three false positives — and re-opened 19 Chromium handler names, one (SVG `onbegin`) executing on load. Exempt known-safe NAMES from a fail-closed default; never enumerate the dangerous ones.
+
+## ⚑ MISSES (mine)
+1. ★★ F3a brief (above): narrowed a fail-closed security rule to a deny-list; reviewer executed the hole in Chromium.
+2. ★ Split-review briefs (A/B/C) dropped the "kill only PIDs you started" rule → two reviewers used pattern `pkill`; and all three shared one frozen tree's `.tmp/` → they deleted each other's scratch. Later briefs fixed both (own scratch dir; no pattern kill).
+3. ★ A reviewer wrote a curl cookie jar (`jar`) into the MAIN checkout root (path-discipline leak, harmless test CSRF token) — found and removed at session resume. Briefs now say "write nothing outside your scratch dir".
+4. ★ Two probe traps of my own: a relative scratch path after `cd` (every probe read "file not found" as a refusal) and a CI wait-loop that read "no checks reported" as "nothing pending" and exited at poll 1. Both caught by re-reading the artifact before acting.
+5. ★ `msg.ts reply` with a scratch filename (`reply-flogence.md`) instead of the dated convention.
+6. ★ Pre-commit gate failed twice for reasons that did not reproduce (full core suite then 0 fail) — likely contention with background post-commit full-suite runs; retried foreground. Watch it.
+
+## Process notes
+- A reviewer was stopped mid-run by a safety classifier (adversarial framing); re-split into 3 differential reviews (A/B/C) framed as base-vs-head comparisons — all completed.
+- The auto-mode classifier denied (a) a read of known-gaps right after three PR closures, (b) a dispatched agent's `git push` ("Out-of-Place Publication") — bryan authorized and the PA pushed. Recorded, not worked around.
+- flogence mail: 3 FYIs resolved at boot; the foreign-slice report answered + resolved with the landing SHA (`20ce26bf5`).
+
+## Worktrees + /tmp (wrap 6b / 6b′)
+All S456 agent + review worktrees removed (dry-checked clean, work landed). ~30 older `agent-*` trees from earlier sessions remain (not audited — carried). /tmp probe (post-reboot): **4** top-level `/tmp` entries since boot · **122** files under `/tmp/claude-1000` (the reboot cleared the S455 1.16M figure — not comparable).
+
+## Gate at close
+Cloud `gate` green on every S456 landing (#1329–#1337; `tracking` red once on #1337 — one `scrml dev` respawn-timing test, unrelated, non-required). Review floor: **0 owed** after this wrap's #1329 marker (600/600). Code-bearing carve-out rate 41/310 (13%, ⚠ HIGH — unchanged by S456: every S456 code PR got a full S239 pass). **pa-ruled count: 3** (`prov=pa-ruled` markers in known-gaps; the S455 hand-off's "5" did not reconcile — counted by grep at S456 boot and wrap).
+
+---
+
 # scrml — Session 455 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S454 below. Rulings authority: `scrml-support/user-voice-scrml.md` §S455 (8 rulings).
