@@ -154,3 +154,7 @@ Resumed after a network-outage kill (tip b4994a7fc + 1 uncommitted edit, express
 - Tests: conformance prop-substitution-scope-in-block-arrows (N1, executed), prop-substitution-loop-binder-shadows
   (N2 for-of shapes, executed), prop-substitution-string-escapes (N3, executed); unit +7 (JS-substitute scope cases,
   bind expr E-ATTR-010, C-style never writes the caller cell). Gate 30213 pass / 0 fail.
+
+## 2026-10-08 — pointer: round 4 (one scope model)
+- Round 4 (F5 F3 F7 F9 F1 F2 F4 N1 + the S458 code ruling E-COMPONENT-PROP-WRITE) is logged in
+  `docs/changes/s458-d1-round4/progress.md` (worktree agent-a2dd4a6ac2e78db31).
