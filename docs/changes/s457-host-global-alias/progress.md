@@ -29,3 +29,27 @@ Append-only. Times local (2026-10-07/08).
 - The runtime's own text is NOT rewritten: it is outside every scope a user binding is emitted into
   (separate script; embedded runtime sits outside the chunk IIFE; the rename pass fences it).
 - Base corpus capture: .tmp/cap-base (2425 sources, 7084 artifacts, 0 syntax-failing).
+
+## implementation (22:00-22:30)
+- runtime-template.js: `const _scrml_g = globalThis;` is the first runtime binding (core chunk, always shipped).
+- NEW codegen/host-global-alias.ts: HOST_GLOBAL_ALIAS, HOST_GLOBAL_NAMES, HOST_GLOBAL_ALIAS_DECL,
+  withHostGlobalAlias (prologue for server / library / tool / worker artifacts),
+  aliasHostGlobalsInRuntimeText (runtime text inlined into a user-reachable artifact).
+- fn-name-rename.ts: the scope walk factored into rewriteFreeRefs(code, policy); the rename is one
+  policy, NEW aliasFreeGlobalRefs is the other (same reader, so the two cannot disagree on "free").
+- Emitter string literals rewritten by a TS-AST codemod (.tmp/codemod.ts, not shipped): every host
+  global inside an emitted-JS literal in compiler/src/codegen -> `_scrml_g.<name>`; skipped:
+  matchers (includes/replace/test/...), JSON.stringify'd data, diagnostics (CGError/Error/throw),
+  name lists, type positions, method definitions, declarations, member names, nested strings and
+  comments of the emitted code. Excluded files: runtime-chunks.ts (markers), runtime-esm.ts (runtime),
+  emit-machine-property-tests.ts (generated bun tests), emit-html chunk-activation file (own script).
+  Hand fixes: emitted nested templates (`\${location.host}`, `\${JSON.stringify(...)}`, sqlite
+  `String(e)`), the matchers that read emitted text (emit-server `return new Response(` mediation
+  mark; emit-event-wiring anchor re-scope + the `document` scope literal; emit-reactive-wiring
+  lift-wrapper hoist regex).
+- Server copies of runtime text aliased: SERVER_URL_SHAPE_HELPER, SSR_URL_GUARD_HELPER,
+  SERVER_VALUE_NATIVE_MAP_HELPER, SERVER_STRUCTURAL_EQ_SOURCE.
+- E-CG-016: `globalThis` joins the reserved server bindings (`routes`, `fetch`) — the alias reads it.
+- NEW test compiler/tests/unit/s457-host-global-alias.test.js — 437 pass after the server-copy fix.
+- Pre-existing, NOT changed: `server function eval` / top-level `const eval` are refused only by the
+  emitted-artifact gate (E-CODEGEN-INVALID-LOGIC "compiler defect", strict-mode binding) — base too.
