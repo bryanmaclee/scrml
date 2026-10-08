@@ -93,6 +93,12 @@ const REFUSED = [
   ["img name= (document named property)", '<img src="/a.png" name="SECRETX">', "SECRETX"],
   ["id in the reserved _scrml namespace", '<p id="_scrml_error_boundary_log">SECRETX</p>', "SECRETX"],
   ["name naming a form member (belt and braces)", '<form><input name="action" value="SECRETX"></form>', "SECRETX"],
+  // S459 review HIGH — DOM clobbering shapes (Chromium-verified in the round-3 harness; here: refused,
+  // nothing written, ONE log).
+  ["clobber lastChild", '<form><input name="lastChild"><img src=x onerror="window.__pwn=40"></form>', "__pwn"],
+  ["clobber previousSibling", '<img src=x onerror="window.__pwn=41"><form><input name="previousSibling"></form>', "__pwn"],
+  ["clobber attributes (action)", '<form action="javascript:window.__pwn=42"><input name="attributes"><button>go</button></form>', "__pwn"],
+  ["clobber attributes (onclick)", '<form onclick="window.__pwn=43"><input name="attributes"><button type=button>go</button></form>', "__pwn"],
 ];
 
 describe("S458 'a' — runtime meta.emit refuses, writes nothing, logs once", () => {

@@ -1,0 +1,8 @@
+<program>
+<label> = "hi"
+<div id="host">
+^{
+  meta.emit("<p online=\"x\">" + meta.get("label") + "</p>")
+}
+</div>
+</program>

@@ -172,3 +172,23 @@ describe("nit 6 — tag-keyed message tables are null-prototype", () => {
     expect(rt._scrml_message_for({ tag: "Required" }, "Email")).toBe("Email is required.");
   });
 });
+
+describe("S459 round 3 item 4 — function parameters, lin and destructured names are meta locals", () => {
+  test("a function PARAMETER read in an emitting compile-time block is not a runtime variable (review F3)", () => {
+    const r = compile(`<program>\n<ul>\n^{\n  function item(s) { emit("<li>" + s + "</li>") }\n  item("q")\n}\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.html).toContain("<li>q</li>");
+  });
+
+  test("a parameter with a default value", () => {
+    const r = compile(`<program>\n<ul>\n^{\n  function pair(a, b = "d") { emit("<li>" + a + b + "</li>") }\n  pair("c")\n}\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.html).toContain("<li>cd</li>");
+  });
+
+  test("a `lin` local is a meta local (the carried S459 gap, closed)", () => {
+    const r = compile(`<program>\n<ul>\n^{\n  lin t = "<li>lin</li>"\n  emit(t)\n}\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.html).toContain("<li>lin</li>");
+  });
+});
