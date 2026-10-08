@@ -13,7 +13,7 @@
         ["Dave", "QA", "Active"]
     ]
 
-    emit("<table class=data-table>\n")
+    emit("<table class=\"data-table\">\n")
     emit("  <thead>\n    <tr>\n")
     for (const col of columns) {
         emit("      <th>" + col + "</th>\n")

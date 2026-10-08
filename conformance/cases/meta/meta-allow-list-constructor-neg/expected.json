@@ -1,0 +1,11 @@
+{
+  "id": "meta-allow-list-constructor-neg",
+  "description": "§22.12 closed allow-list (S457) — member access to `constructor` on ANY value inside a `^{}` body is E-META-001, the primitives included: `emit.constructor` is the evaluator's `Function`, a route from a compile-time body to the compiler's host realm. Refused by name on every value, whatever the receiver; the body is never evaluated.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "expect": {
+    "codes": ["E-META-001"],
+    "notCodes": ["E-META-EVAL-001"],
+    "severity": { "E-META-001": "error" }
+  }
+}

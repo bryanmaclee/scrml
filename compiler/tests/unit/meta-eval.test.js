@@ -271,8 +271,10 @@ describe("meta-eval", () => {
   // ---------------------------------------------------------------------------
 
   test("§12 evaluateMetaBlock reports error for invalid JS", () => {
+    // S457: `throw` is not scrml and is refused by the §22.12 allow-list before
+    // evaluation (E-META-001); a body that THROWS while evaluating is the case here.
     const body = [
-      bareExpr("throw new Error('test error')"),
+      bareExpr('reflect("NoSuchType")'),
     ];
     const errors = [];
     const result = evaluateMetaBlock(metaNode(body), new Map(), errors);
@@ -621,7 +623,7 @@ describe("meta-eval", () => {
   test("§23 multi-emit with attributes: form with class survives split emit calls", () => {
     // Bug #16: attributes on emit()'d elements were lost when parsed as fragments.
     const body = [
-      bareExpr('emit("<form class=profile-form>")'),
+      bareExpr('emit("<form class=\\"profile-form\\">")'),
       bareExpr('emit("<input>")'),
       bareExpr('emit("</form>")'),
     ];
@@ -637,6 +639,7 @@ describe("meta-eval", () => {
     // The form should have the class attribute preserved
     const classAttr = form.attrs?.find(a => a.name === "class");
     expect(classAttr).toBeDefined();
+    expect(classAttr.value).toEqual(expect.objectContaining({ kind: "string-literal", value: "profile-form" }));
   });
 
   test("§24 multi-emit with \\n: literal newline in emit() becomes real newline", () => {
@@ -797,7 +800,7 @@ describe("meta-eval", () => {
     // ran through splitBlocks+buildAST; post-M6.1 it runs through the C1
     // assembler. Same exemplar, same expected output shape.
     const body = [
-      bareExpr('emit("<p class=hi>x</>")'),
+      bareExpr('emit("<p class=\\"hi\\">x</>")'),
     ];
     const typeRegistry = new Map();
     const errors = [];

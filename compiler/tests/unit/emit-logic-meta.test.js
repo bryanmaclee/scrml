@@ -96,7 +96,7 @@ describe("emit-logic meta §1: empty body", () => {
 
 describe("emit-logic meta §2: _scrml_meta_effect wrapping", () => {
   test("meta body is wrapped in _scrml_meta_effect call", () => {
-    const node = makeMetaNode([makeBareExpr("console.log('hello')")], 1);
+    const node = makeMetaNode([makeBareExpr('meta.emit("hello")')], 1);
     const output = emitLogicNode(node);
     expect(output).toContain("_scrml_meta_effect(");
     expect(output).toContain("function(meta) {");
@@ -105,7 +105,7 @@ describe("emit-logic meta §2: _scrml_meta_effect wrapping", () => {
   });
 
   test("_scrml_meta_effect call opener and closer are on their own lines", () => {
-    const node = makeMetaNode([makeBareExpr("x = 1")], 2);
+    const node = makeMetaNode([makeBareExpr('meta.set("x", 1)')], 2);
     const output = emitLogicNode(node);
     const lines = output.split("\n");
     expect(lines[0].trim()).toMatch(/^_scrml_meta_effect\(/);
@@ -114,7 +114,7 @@ describe("emit-logic meta §2: _scrml_meta_effect wrapping", () => {
   });
 
   test("output does NOT use the old IIFE pattern", () => {
-    const node = makeMetaNode([makeBareExpr("x = 1")], 3);
+    const node = makeMetaNode([makeBareExpr('meta.set("x", 1)')], 3);
     const output = emitLogicNode(node);
     expect(output).not.toContain("(() => {");
     expect(output).not.toContain("})();");
@@ -203,9 +203,9 @@ describe("emit-logic meta §6: const-decl", () => {
 
 describe("emit-logic meta §7: bare-expr", () => {
   test("bare-expr is emitted as expression statement", () => {
-    const node = makeMetaNode([makeBareExpr("doSomething()")], 1);
+    const node = makeMetaNode([makeBareExpr('meta.emit("a")')], 1);
     const output = emitLogicNode(node);
-    expect(output).toContain("doSomething();");
+    expect(output).toContain('meta.emit("a");');
   });
 
   test("empty bare-expr produces no output inside function body", () => {
@@ -226,26 +226,26 @@ describe("emit-logic meta §8: multi-statement body", () => {
     const node = makeMetaNode([
       makeLetDecl("x", "1"),
       makeLetDecl("y", "2"),
-      makeBareExpr("console.log(x + y)"),
+      makeBareExpr("meta.emit(x + y)"),
     ], 1);
     const output = emitLogicNode(node);
     expect(output).toContain("let x = 1;");
     expect(output).toContain("let y = 2;");
-    expect(output).toContain("console.log(x + y);");
+    expect(output).toContain("meta.emit(x + y);");
     // All inside _scrml_meta_effect
     expect(output).toContain("_scrml_meta_effect(");
   });
 
   test("statements appear in original order", () => {
     const node = makeMetaNode([
-      makeBareExpr("first()"),
-      makeBareExpr("second()"),
-      makeBareExpr("third()"),
+      makeBareExpr('meta.emit("first")'),
+      makeBareExpr('meta.emit("second")'),
+      makeBareExpr('meta.emit("third")'),
     ], 1);
     const output = emitLogicNode(node);
-    const firstPos = output.indexOf("first()");
-    const secondPos = output.indexOf("second()");
-    const thirdPos = output.indexOf("third()");
+    const firstPos = output.indexOf("first");
+    const secondPos = output.indexOf("second");
+    const thirdPos = output.indexOf("third");
     expect(firstPos).toBeLessThan(secondPos);
     expect(secondPos).toBeLessThan(thirdPos);
   });
@@ -283,7 +283,7 @@ describe("emit-logic meta §10: state-decl", () => {
 
 describe("emit-logic meta §11: indentation", () => {
   test("body lines are indented with two spaces inside the function body", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 1);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 1);
     const output = emitLogicNode(node);
     const lines = output.split("\n");
     // Line 0: "_scrml_meta_effect(..."
@@ -295,7 +295,7 @@ describe("emit-logic meta §11: indentation", () => {
     // The body line (second-to-last line) must be indented with two spaces
     const bodyLine = lines[lines.length - 2];
     expect(bodyLine).toMatch(/^  /);
-    expect(bodyLine.trim()).toBe("x();");
+    expect(bodyLine.trim()).toBe('meta.emit("x");');
   });
 });
 
@@ -307,37 +307,37 @@ describe("emit-logic meta §12: meta object NOT in codegen output", () => {
   test("codegen output does NOT contain 'const meta = {'", () => {
     // Phase 2: the meta object is injected by _scrml_meta_effect at runtime.
     // Codegen must NOT emit 'const meta = { get: ..., set: ..., ... }'.
-    const node = makeMetaNode([makeBareExpr("x()")], 5);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 5);
     const output = emitLogicNode(node);
     expect(output).not.toContain("const meta = {");
   });
 
   test("codegen output does NOT contain meta.get property wiring", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 5);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 5);
     const output = emitLogicNode(node);
     expect(output).not.toContain("get: _scrml_reactive_get");
   });
 
   test("codegen output does NOT contain meta.set property wiring", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 5);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 5);
     const output = emitLogicNode(node);
     expect(output).not.toContain("set: _scrml_reactive_set");
   });
 
   test("codegen output does NOT contain meta.subscribe property wiring", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 5);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 5);
     const output = emitLogicNode(node);
     expect(output).not.toContain("subscribe: _scrml_reactive_subscribe");
   });
 
   test("codegen output does NOT contain meta.cleanup property wiring", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 5);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 5);
     const output = emitLogicNode(node);
     expect(output).not.toContain("cleanup: (fn)");
   });
 
   test("codegen output does NOT contain meta.emit property wiring", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 5);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 5);
     const output = emitLogicNode(node);
     expect(output).not.toContain("emit: (htmlString)");
   });
@@ -349,14 +349,14 @@ describe("emit-logic meta §12: meta object NOT in codegen output", () => {
 
 describe("emit-logic meta §13: scopeId as first argument", () => {
   test("scopeId is the first argument to _scrml_meta_effect", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 99);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 99);
     const output = emitLogicNode(node);
     // Output starts with: _scrml_meta_effect("_scrml_meta_99", function(meta) {
     expect(output).toMatch(/^_scrml_meta_effect\("_scrml_meta_99",/);
   });
 
   test("scopeId uses _scrml_meta_<id> format when node.id is present", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 42);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 42);
     const output = emitLogicNode(node);
     expect(output).toContain('"_scrml_meta_42"');
   });
@@ -368,17 +368,17 @@ describe("emit-logic meta §13: scopeId as first argument", () => {
 
 describe("emit-logic meta §14: body as second argument", () => {
   test("second argument to _scrml_meta_effect is a function expression", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 1);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 1);
     const output = emitLogicNode(node);
     expect(output).toContain("function(meta) {");
   });
 
   test("body statements appear inside the function body", () => {
-    const node = makeMetaNode([makeBareExpr("doWork()")], 7);
+    const node = makeMetaNode([makeBareExpr('meta.emit("doWork")')], 7);
     const output = emitLogicNode(node);
     // "doWork()" must appear after "function(meta) {" and before "})"
     const funcStart = output.indexOf("function(meta) {");
-    const bodyPos = output.indexOf("doWork()");
+    const bodyPos = output.indexOf("doWork");
     // Phase 3: the function body close "}" is followed by ", null, null);"
     // Find the last "}" before the 4-arg arguments
     const closer = "}, null, null);";
@@ -395,7 +395,7 @@ describe("emit-logic meta §14: body as second argument", () => {
 
 describe("emit-logic meta §15: meta parameter name", () => {
   test("the function parameter is named 'meta'", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 1);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 1);
     const output = emitLogicNode(node);
     expect(output).toContain("function(meta)");
   });
@@ -407,13 +407,13 @@ describe("emit-logic meta §15: meta parameter name", () => {
 
 describe("emit-logic meta §16: scopeId from node.id", () => {
   test("scopeId is _scrml_meta_<id> when node.id is present", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 99);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 99);
     const output = emitLogicNode(node);
     expect(output).toContain('"_scrml_meta_99"');
   });
 
   test("scopeId appears exactly once in output (only as first arg to _scrml_meta_effect)", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 12);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 12);
     const output = emitLogicNode(node);
     // In Phase 2, the scopeId only appears once — as the first argument.
     // (Unlike Phase 1 where it appeared in meta.emit, meta.cleanup, and meta.scopeId.)
@@ -430,7 +430,7 @@ describe("emit-logic meta §17: scopeId fallback via genVar", () => {
   test("scopeId falls back to genVar when node.id is absent", () => {
     resetVarCounter();
     // No id field — genVar("meta_scope") produces "_scrml_meta_scope_1"
-    const node = { kind: "meta", body: [makeBareExpr("x()")] };
+    const node = { kind: "meta", body: [makeBareExpr('meta.emit("x")')] };
     const output = emitLogicNode(node);
     expect(output).toContain("_scrml_meta_scope_");
     // The generated scope ID must appear in the _scrml_meta_effect call
@@ -445,7 +445,7 @@ describe("emit-logic meta §17: scopeId fallback via genVar", () => {
 
 describe("emit-logic meta §18: stable scopeId", () => {
   test("_scrml_meta_effect is called with a string scopeId as first arg", () => {
-    const node = makeMetaNode([makeBareExpr("x()")], 7);
+    const node = makeMetaNode([makeBareExpr('meta.emit("x")')], 7);
     const output = emitLogicNode(node);
     // First arg must be a string literal
     expect(output).toMatch(/_scrml_meta_effect\("[^"]+",/);
@@ -496,15 +496,16 @@ describe("emit-logic meta: reflect() in runtime meta bodies", () => {
   });
 
   test("§26 reflect(variable) in runtime meta -> meta.types.reflect(variable)", () => {
-    const node = makeMetaNode([makeBareExpr('reflect(selectedType)')], 2);
+    const node = { ...makeMetaNode([makeBareExpr('reflect(selectedType)')], 2), capturedNames: ["selectedType"] };
     const output = emitLogicNode(node);
-    expect(output).toContain('meta.types.reflect(selectedType)');
+    // S458 r3: a captured binding is read through the capture object.
+    expect(output).toContain('meta.types.reflect(_scrml_cap.selectedType)');
   });
 
   test("§27 reflect(variable) in let initializer", () => {
-    const node = makeMetaNode([makeLetDecl("info", "reflect(typeName)")], 3);
+    const node = { ...makeMetaNode([makeLetDecl("info", "reflect(typeName)")], 3), capturedNames: ["typeName"] };
     const output = emitLogicNode(node);
-    expect(output).toContain('meta.types.reflect(typeName)');
+    expect(output).toContain('meta.types.reflect(_scrml_cap.typeName)');
   });
 
   test("§28 reflect(KnownType) in const initializer", () => {
