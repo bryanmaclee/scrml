@@ -1,6 +1,6 @@
 {
   "id": "meta-eval-runtime-error-neg",
-  "description": "§22 E-META-EVAL-001 — a `^{}` block containing the `emit(...)` compile-time API pattern (which classifies the block as compile-time meta, §22.4) whose body THROWS when evaluated: `JSON.parse(\"{\")` is malformed JSON and raises a SyntaxError before `emit` is invoked. The `new Function(\"emit\",\"reflect\",body)` call throws, so meta-eval.ts catches it and fires E-META-EVAL-001 (compile-time meta evaluation failed).",
+  "description": "§22 E-META-EVAL-001 — a `^{}` block containing the `emit(...)` compile-time API pattern (which classifies the block as compile-time meta, §22.4) whose body THROWS when evaluated: `n.toFixed(-1)` raises a RangeError (the digits argument must be 0..100) before `emit` is invoked, so meta-eval.ts catches it and fires E-META-EVAL-001 (compile-time meta evaluation failed). S457: the body is scrml-native — the former `JSON.parse(\"{\")` reproducer named the JS-host `JSON` global, which the §22.12 closed allow-list refuses (E-META-001) before evaluation.",
   "language-version": "1.0",
   "source-test": "compiler/SPEC.md §22",
   "expect": {

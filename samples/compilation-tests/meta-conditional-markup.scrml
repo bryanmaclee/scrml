@@ -11,21 +11,21 @@
     const featureDebug = false;
 
     if (env == "production") {
-        emit("<meta name=robots content=indexfollow />\n");
+        emit("<meta name=\"robots\" content=\"indexfollow\" />\n");
     } else {
-        emit("<meta name=robots content=noindexnofollow />\n");
+        emit("<meta name=\"robots\" content=\"noindexnofollow\" />\n");
     }
 
     if (featureAnalytics) {
-        emit("<div class=analytics data-src=analytics>\n</div>\n");
+        emit("<div class=\"analytics\" data-src=\"analytics\">\n</div>\n");
     }
 
     if (featureDebug) {
-        emit("<div id=debug-panel>\n<p>Debug mode active</p>\n</div>\n");
+        emit("<div id=\"debug-panel\">\n<p>Debug mode active</p>\n</div>\n");
     }
 
     const theme = featureDark ? "dark" : "light";
-    emit("<div class=app-" + theme + ">\n  <h1>App</h1>\n</div>\n");
+    emit("<div class=\"app-" + theme + "\">\n  <h1>App</h1>\n</div>\n");
 }
 
 </>

@@ -1,0 +1,10 @@
+{
+  "id": "meta-proto-cell-name-pos",
+  "description": "§22.12 / §22.5.2 (S458 review F-A) — a cell named after a prototype member (`constructor`) is a legal cell, and `meta.get(\"constructor\")` inside a runtime `^{}` compiles clean. The runtime registries behind `meta.get` / `meta.set` / `meta.subscribe` are null-prototype objects read own-property only, so the read returns the cell's value (or the absence value), never the page's `Object` off a plain-object prototype. The compile-time refusal (member access to `constructor` on a VALUE) is a separate rule; a string-literal cell NAME is not a member access.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-META-001"]
+  }
+}

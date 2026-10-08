@@ -1,0 +1,11 @@
+# progress — s457-meta-allow-list (append-only)
+
+- 2026-10-07 start — worktree `.claude/worktrees/agent-a34b579141955a680`, base `d5875e972` (= origin/main). Brief committed `c0753a920`.
+- 2026-10-07 measure (base) — 100 corpus files carry `^{` (samples 74, conformance 17, examples 2, stdlib/compiler 3, docs 4); 62 compile clean on base. Snapshot by compile (errors + sha256 of all outputs), deterministic across two runs.
+- 2026-10-07 `18aaa236f` — meta-allow-list.ts (reader 1, scrml AST) replaces the S134 deny list in meta-checker.ts. Free identifiers resolved lexically; refused members on every value; non-literal computed keys refused; escape hatches / raw html-fragments checked as JS (fail closed when unparseable).
+- 2026-10-07 found: emit("…${x}…") is rewritten to a template literal by meta-eval's serializer (a second reader); captured enclosing declarations are prepended to the evaluated text unchecked; a body the checker REFUSED was still executed by meta-eval; emit() output skips E-SCRIPT-001 (an emitted `<script>` reached the HTML), §47.1.1, TS and RI (an emitted `server function` was lowered as a client function).
+- 2026-10-07 `e22d6af01` — meta-eval: reader 2 over the exact wrapped text it runs; refused blocks never run; evaluation in a fresh node:vm context with emit/reflect defined inside the realm (Bun's ShadowRealm measured NOT isolated — `process` and `Bun` visible inside); emit() output gate (standard markup / text / comments only; `<script>` E-SCRIPT-001; reserved prefix re-run).
+- 2026-10-07 strict-vs-table measured — with a closed JS-builtin table and without one, the corpus newly-refused set is identical (1 file). Brief's (a)-(d) enumeration + §41.5 + S457 user-voice -> no JS value builtins. Test fixtures using `String(x)` / `JSON` migrated (artifact).
+- 2026-10-07 `777245468` — strict allow-list; destructure patterns checked; SPEC §22.12 / §22.4.1 / §22.11 / §34 amended.
+- 2026-10-07 conformance — 5 new cases (4 neg, 1 pos); `docs/bootstrap-conformance.md` regenerated (`--write`) for them.
+- 2026-10-07 STOP condition — 1 newly refused corpus file: `samples/compilation-tests/gauntlet-s20-meta/meta-cleanup-001.scrml` (`setInterval`, `clearInterval` — already a SHALL-E-META-001 per §22.5.1; the deny list missed them because the expression was an opaque escape hatch). Not migrated; reported for bryan's ruling.
