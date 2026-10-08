@@ -369,6 +369,51 @@ export function collectStdlibSpecifiers(tabResults) {
   return names;
 }
 
+// `scrml:compiler` family — KNOWN-DEFERRED per S121 Wave 7 Unit E survey
+// (docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md
+// Option (d)). The umbrella shim + its 13 per-stage siblings ship a deferred
+// thunk that throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
+// ANY `scrml:compiler` or `scrml:compiler/*` import fires this warning at
+// compile time, regardless of whether the thunk shim is on disk, so adopters
+// see the deferral BEFORE deploy instead of at runtime via a thrown Error.
+function isCompilerFamily(name) {
+  return name === "compiler" || name.startsWith("compiler/");
+}
+
+function stdlibCompilerDeferredWarning(name) {
+  return {
+    code: "W-STDLIB-COMPILER-DEFERRED",
+    message:
+      `W-STDLIB-COMPILER-DEFERRED: scrml:${name} is currently deferred — `
+      + `the bundled shim is a thunk that throws at call time with attribution. `
+      + `The scrml:compiler family requires either an installable compiler package `
+      + `or a compile-time path-rewriter for the bundled shim; neither is in scope yet. `
+      + `For now, invoke the compiler via the CLI (\`scrml compile\`) or import directly `
+      + `from compiler/src/api.js. See `
+      + `docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md `
+      + `+ SPEC §34 (W-STDLIB-COMPILER-DEFERRED) + §41.17.`,
+    severity: "warning",
+    stage: "STDLIB-BUNDLE",
+    filePath: "",
+    line: 1,
+    column: 1,
+  };
+}
+
+function stdlibShimMissingWarning(name) {
+  return {
+    code: "W-STDLIB-SHIM-MISSING",
+    message:
+      `W-STDLIB-SHIM-MISSING: scrml:${name} has no runtime shim — imports will fail at runtime. `
+      + `Add compiler/runtime/stdlib/${name}.js.`,
+    severity: "warning",
+    stage: "STDLIB-BUNDLE",
+    filePath: "",
+    line: 1,
+    column: 1,
+  };
+}
+
 /**
  * Copy the runtime shim for each referenced `scrml:NAME` specifier into
  * `<outputDir>/_scrml/<name>.js` so emitted JS can `import` it via a relative
@@ -463,35 +508,9 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
     }
   }
 
-  // `scrml:compiler` family — KNOWN-DEFERRED per S121 Wave 7 Unit E survey
-  // (docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md
-  // Option (d)). The umbrella shim + its 13 per-stage siblings ship a deferred
-  // thunk that throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
-  // ANY `scrml:compiler` or `scrml:compiler/*` import fires this warning at
-  // compile time, regardless of whether the thunk shim is on disk, so adopters
-  // see the deferral BEFORE deploy instead of at runtime via a thrown Error.
-  function isCompilerFamily(name) {
-    return name === "compiler" || name.startsWith("compiler/");
-  }
+  // `scrml:compiler` family — see `isCompilerFamily` above.
   function emitCompilerDeferred(name) {
-    if (!Array.isArray(diagnostics)) return;
-    diagnostics.push({
-      code: "W-STDLIB-COMPILER-DEFERRED",
-      message:
-        `W-STDLIB-COMPILER-DEFERRED: scrml:${name} is currently deferred — `
-        + `the bundled shim is a thunk that throws at call time with attribution. `
-        + `The scrml:compiler family requires either an installable compiler package `
-        + `or a compile-time path-rewriter for the bundled shim; neither is in scope yet. `
-        + `For now, invoke the compiler via the CLI (\`scrml compile\`) or import directly `
-        + `from compiler/src/api.js. See `
-        + `docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md `
-        + `+ SPEC §34 (W-STDLIB-COMPILER-DEFERRED) + §41.17.`,
-      severity: "warning",
-      stage: "STDLIB-BUNDLE",
-      filePath: "",
-      line: 1,
-      column: 1,
-    });
+    if (Array.isArray(diagnostics)) diagnostics.push(stdlibCompilerDeferredWarning(name));
   }
 
   for (const name of names) {
@@ -508,17 +527,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
       if (isCompiler) {
         emitCompilerDeferred(name);
       } else if (Array.isArray(diagnostics)) {
-        diagnostics.push({
-          code: "W-STDLIB-SHIM-MISSING",
-          message:
-            `W-STDLIB-SHIM-MISSING: scrml:${name} has no runtime shim — imports will fail at runtime. `
-            + `Add compiler/runtime/stdlib/${name}.js.`,
-          severity: "warning",
-          stage: "STDLIB-BUNDLE",
-          filePath: "",
-          line: 1,
-          column: 1,
-        });
+        diagnostics.push(stdlibShimMissingWarning(name));
       }
       continue;
     }
@@ -566,6 +575,48 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
     }
   }
   return bundled;
+}
+
+/**
+ * The names `bundleStdlibForRun` WOULD bundle — every referenced name whose
+ * shim file exists — computed without touching the filesystem beyond an
+ * existence check. compileScrml decides the stdlib-import rewrites (and runs the
+ * emitted-JS parse gate over them) from this set BEFORE anything is written, so
+ * a compile that fails the gate leaves no `_scrml/` shims behind (SPEC §2.2.1).
+ * `bundleStdlibForRun` returns the same set once it has copied the shims.
+ * When `diagnostics` is supplied, pushes the same W-STDLIB-SHIM-MISSING /
+ * W-STDLIB-COMPILER-DEFERRED warnings `bundleStdlibForRun` would.
+ *
+ * @param {Set<string>} names
+ * @param {object[]} [diagnostics]
+ * @returns {Set<string>}
+ */
+export function planStdlibBundle(names, diagnostics) {
+  const planned = new Set();
+  if (!names) return planned;
+  for (const name of names) {
+    const shimExists = existsSync(join(STDLIB_RUNTIME_DIR, `${name}.js`));
+    if (shimExists) planned.add(name);
+    if (!Array.isArray(diagnostics)) continue;
+    // The same warnings, in the same order, `bundleStdlibForRun` pushes.
+    if (isCompilerFamily(name)) diagnostics.push(stdlibCompilerDeferredWarning(name));
+    else if (!shimExists) diagnostics.push(stdlibShimMissingWarning(name));
+  }
+  return planned;
+}
+
+/**
+ * The diagnostic-stream partition (S93): W-/I- prefixes and warning/info
+ * severities are non-fatal (`result.warnings`); everything else is an Error
+ * (`result.errors`) and fails the compile. ONE predicate, read by the final
+ * result split AND the §2.2.1 pre-write commit decision, so "this compile
+ * reported an error" and "this compile wrote nothing" cannot disagree.
+ */
+function isNonFatalDiagnostic(e) {
+  return e.code?.startsWith("W-") ||
+    e.code?.startsWith("I-") ||
+    e.severity === "warning" ||
+    e.severity === "info";
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,8 +1061,8 @@ export function compileScrml(options = {}) {
 /**
  * Deep-scrub the current compilation's placeholder token from every string in
  * `value` (in place; Maps, arrays and plain objects). The token never leaves
- * the compiler — not in an artifact (incl. one written on the error path,
- * g-impl1-artifacts-written-on-error-s451), a diagnostic, or a serve/LSP reply.
+ * the compiler — not in an artifact, a diagnostic, the in-memory `outputs` a
+ * failed compile still returns (it writes none — SPEC §2.2.1), or a serve/LSP reply.
  */
 function scrubPlaceholderTokenDeep(value, seen = new WeakSet()) {
   const token = currentPlaceholderToken();
@@ -1625,7 +1676,7 @@ function _compileScrmlImpl(options = {}) {
   if (bsResults.length === 0) {
     const errors = allErrors;
     const warnings = [];
-    return { errors, warnings, lintDiagnostics: allLintDiagnostics, fileCount: 0, outputDir: outputDir || "", durationMs: 0, outputs: new Map() };
+    return { errors, warnings, lintDiagnostics: allLintDiagnostics, fileCount: 0, artifactsWritten: false, outputDir: outputDir || "", durationMs: 0, outputs: new Map() };
   }
 
   // Stage 2.5: W-INTERP-IN-RAW-CONTENT info-level lint (SPEC §4.17).
@@ -3278,8 +3329,9 @@ function _compileScrmlImpl(options = {}) {
   }));
   // S457 — every placeholder is lowered by now; any that survived (a refused
   // construct) loses its compilation token here, before the emit gate reads,
-  // reports or any write lands — including the artifacts still written on the
-  // error path. The gate's shape test still sees `__scrml_<name>__`.
+  // reports or any write lands, and before the in-memory outputs a failed compile
+  // still returns (it writes none — SPEC §2.2.1). The gate's shape test still sees
+  // `__scrml_<name>__`.
   scrubPlaceholderTokenDeep(cgResult);
   // §6.6.9 / §20.5 (S449) — the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER
   // reports a server `@session` lowering the front end MISSED. When route
@@ -3642,7 +3694,29 @@ function _compileScrmlImpl(options = {}) {
   // Pre-write commit decision — see the `beforeWrite` option. The planned
   // `.server.js` set is read off `distServerKeyToSource` (the forward index built
   // through the write phase's `pathFor` transform), never re-derived here.
-  let writeCommitted = write;
+  //
+  // SPEC §2.2.1 (S451 5(b); impl#1 exception granted S457 "1a"): "A compile that
+  // reports one or more diagnostics of Error severity (§34) SHALL NOT produce a
+  // runnable artifact. After such a compile, either no output file of that
+  // compile exists, or the compile wrote no file — an output directory left by an
+  // earlier compile is left exactly as it was, neither overwritten in part nor
+  // deleted." So ANY fatal diagnostic known here refuses the write — not only the
+  // application-scope codes `commands/refusal-gate.js` names. The later fatal
+  // diagnostics are decided before the first byte too: the emitted-JS parse gate
+  // (E-CODEGEN-INVALID-LOGIC) and the dist-path collision check (E-CG-015) both
+  // run below before anything reaches `outputDir`. The callback is still asked
+  // when the compile already failed, so a command can add its own refusal
+  // diagnostics (build's E-MW-007 onion check) to the failure it reports.
+  //
+  // Two decisions, kept apart so a failed compile reports EXACTLY the
+  // diagnostics it reported before S457 (only what lands on disk changes):
+  //   `writeEligible` — the pre-S457 commit (write requested and the callback
+  //     did not refuse). It still gates the pre-write checks that produce
+  //     diagnostics: the stdlib bundle warnings, the emit gate, E-CG-015.
+  //   `writeAborted` (below) — whether a byte is written: eligible, AND no
+  //     fatal diagnostic before the decision, AND every pre-write check passed.
+  const hasFatalBeforeWrite = allErrors.some((e) => !isNonFatalDiagnostic(e));
+  let writeEligible = write;
   if (write && outputDir && typeof beforeWrite === "function") {
     const outputByAbsSource = new Map();
     for (const [fp, output] of cgResult.outputs ?? []) outputByAbsSource.set(resolve(fp), output);
@@ -3651,12 +3725,18 @@ function _compileScrmlImpl(options = {}) {
       const output = outputByAbsSource.get(absSource);
       if (output && output.serverJs) plannedServerUnits.push({ relPath, source: output.serverJs });
     }
-    writeCommitted = beforeWrite({ errors: allErrors, outputDir, plannedServerUnits }) !== false;
+    writeEligible = beforeWrite({ errors: allErrors, outputDir, plannedServerUnits }) !== false;
   }
 
-  const bundledStdlib = (writeCommitted && outputDir)
-    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
+  // The stdlib names this run bundles — decided WITHOUT writing, so the emit
+  // gate below checks the exact bytes the write phase would produce and the
+  // shims are copied only once the gate has passed (a gate failure used to leave
+  // `_scrml/*.js` behind in an otherwise-unwritten output directory).
+  const bundledStdlib = (writeEligible && outputDir)
+    ? planStdlibBundle(stdlibSpecifiers, allErrors)
     : new Set();
+  // Set true once the first byte of this compile reaches `outputDir`.
+  let artifactsWritten = false;
 
   // ---------------------------------------------------------------------------
   // Write output files
@@ -3677,13 +3757,18 @@ function _compileScrmlImpl(options = {}) {
   const clientSeeds = new Set();
   let clientAssets = [];
 
-  if (writeCommitted && outputDir) {
-    mkdirSync(outputDir, { recursive: true });
-
-    // `emitGateFailed` short-circuits ALL writes below (runtime chunk, per-file
-    // client/server/library, per-route chunks + manifest) when the emit gate
-    // rejects an artifact. Declared here so every sibling write block in this
-    // `if (write && outputDir)` scope can guard on it.
+  if (writeEligible && outputDir) {
+    // `writeAborted` short-circuits ALL writes below (stdlib shims, runtime chunk,
+    // per-file client/server/library, per-route chunks + manifest) when the
+    // compile has failed: a fatal diagnostic before the commit decision, the
+    // emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC), or the dist-path collision
+    // check (E-CG-015). Nothing — not even `outputDir` itself — is created before
+    // all of them have passed (SPEC §2.2.1: a compile that reports an error
+    // writes no file). Declared here so every sibling write block in this scope
+    // can guard on it.
+    let writeAborted = hasFatalBeforeWrite;
+    // `emitGateFailed` — the gate rejected an artifact; the per-file staging loop
+    // (which raises E-CG-015) does not run over a gate-rejected output set.
     let emitGateFailed = false;
 
     // -------------------------------------------------------------------------
@@ -3724,7 +3809,7 @@ function _compileScrmlImpl(options = {}) {
     // E-CODEGEN-INVALID-LOGIC on top of the real (already-surfaced) error is
     // actively misleading. The build still fails (the prior fatal error fails
     // it) and no artifacts are written. We use the same fatal/non-fatal
-    // partition as the final result split below (`isNonFatal`): only W-/I-
+    // partition as the final result split below (`isNonFatalDiagnostic`): only W-/I-
     // prefixes and warning/info severities are non-fatal.
     // (`clientDistSpaceTargets` / `clientRelocate` are computed above the
     // commit decision — shared by the plan, the gate phase and the write phase.)
@@ -3829,6 +3914,7 @@ function _compileScrmlImpl(options = {}) {
           });
         }
         emitGateFailed = true;
+        writeAborted = true;
         if (verbose) {
           log(`  [CG] Emit gate FAILED -- ${gateErrors.length} invalid artifact(s); no files written.`);
         }
@@ -3857,12 +3943,10 @@ function _compileScrmlImpl(options = {}) {
       hashedAssets.add(cgResult.chunksBootFilename);
     }
 
-    // In browser mode, write the shared runtime file (not needed in library mode)
-    if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
-      writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
-      clientSeeds.add(cgResult.runtimeFilename);
-      if (verbose) log(`  [CG] Wrote shared runtime: ${cgResult.runtimeFilename}`);
-    }
+    // Per-file artifacts are STAGED by `writeOutput` below and flushed only after
+    // every one has a collision-free dist path (E-CG-015), together with the
+    // stdlib shims and the shared runtime — see "Commit the staged writes".
+    const stagedWrites = []; // { targetDir, fullPath, contents }
 
     if (!emitGateFailed && cgResult.outputs) {
       // F-COMPILE-001 Option A: preserve source-tree structure in dist/.
@@ -3923,6 +4007,7 @@ function _compileScrmlImpl(options = {}) {
         if (prior !== undefined && prior !== filePath) {
           // Distinct source files compute to the same dist path.
           // Hard error per §47.9 / §10.10 default. Refuse to overwrite.
+          writeAborted = true;
           allErrors.push({
             stage: "CG",
             code: "E-CG-015",
@@ -3935,8 +4020,8 @@ function _compileScrmlImpl(options = {}) {
           });
           return false;
         }
-        mkdirSync(targetDir, { recursive: true });
-        writeFileSync(fullPath, contents);
+        // Staged, not yet written: flushed after the loop once no E-CG-015 fired.
+        stagedWrites.push({ targetDir, fullPath, contents });
         writtenPaths.set(fullPath, filePath);
         // §47.13 — a browser artifact (document, stylesheet, client bundle, hashed
         // or not, and a §4.12.4 worker bundle) seeds the client-asset manifest.
@@ -4263,6 +4348,46 @@ function _compileScrmlImpl(options = {}) {
     }
 
     // -------------------------------------------------------------------------
+    // Commit the staged writes (SPEC §2.2.1). Reached only when every pre-write
+    // check passed: no fatal diagnostic before the commit decision, the emit
+    // gate, and the E-CG-015 path-collision check over the whole output set. A
+    // collision found mid-loop used to leave the runtime and every artifact
+    // staged before it on disk; now the compile writes nothing at all.
+    // -------------------------------------------------------------------------
+    if (!writeAborted) {
+      mkdirSync(outputDir, { recursive: true });
+      artifactsWritten = true;
+      // No diagnostics sink: `planStdlibBundle` already pushed the bundle warnings.
+      const shimsBundled = bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, null);
+      // The stdlib-import rewrites were computed from `planStdlibBundle`; the
+      // copy must have bundled exactly that set or the rewritten specifiers
+      // point at files that are not there.
+      if (shimsBundled.size !== bundledStdlib.size || [...shimsBundled].some((n) => !bundledStdlib.has(n))) {
+        throw new Error(
+          `compileScrml: stdlib bundle plan diverged from the copy — planned ` +
+          `[${[...bundledStdlib].sort().join(", ")}], bundled [${[...shimsBundled].sort().join(", ")}]. ` +
+          "This is a compiler bug. Please report it.");
+      }
+      // In browser mode, write the shared runtime file (not needed in library mode)
+      if (mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
+        writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
+        clientSeeds.add(cgResult.runtimeFilename);
+        if (verbose) log(`  [CG] Wrote shared runtime: ${cgResult.runtimeFilename}`);
+      }
+      for (const w of stagedWrites) {
+        mkdirSync(w.targetDir, { recursive: true });
+        writeFileSync(w.fullPath, w.contents);
+      }
+    } else {
+      // Nothing was written; nothing this compile planned is reported as written.
+      fileCount = 0;
+      clientSeeds.clear();
+      writtenServerModules.clear();
+      hashedAssets.clear();
+      if (verbose) log(`  [CG] Write refused -- no files written to ${outputDir}.`);
+    }
+
+    // -------------------------------------------------------------------------
     // S91 A-4.1 — Per-route chunk file writes.
     //
     // When `--emit-per-route` is set AND runCG produced chunk descriptors,
@@ -4280,7 +4405,7 @@ function _compileScrmlImpl(options = {}) {
     // references the chunk by hash so adopter tooling can replay the
     // deterministic-from-source contract end-to-end.
     // -------------------------------------------------------------------------
-    if (!emitGateFailed && emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
+    if (!writeAborted && emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
       // S91 A-4.3 — surface per-tier byte totals in the verbose log so
       // adopters can sanity-check the tier-1 idle-prefetch payload
       // budget at a glance. S91 A-4.4 extends this to tier-2 chunks;
@@ -4412,7 +4537,7 @@ function _compileScrmlImpl(options = {}) {
     // (`import{t}from"./dep.js"`), which used to leave a copied dep unservable.
     // `collectClientAssets` still applies the denied-class check to every seed.
     // Fail-closed: a build with any relocation error copies NOTHING.
-    if (!emitGateFailed && clientHelperRelocator && clientHelperRelocator.errors.length === 0
+    if (!writeAborted && clientHelperRelocator && clientHelperRelocator.errors.length === 0
       && clientHelperRelocator.copies.size > 0) {
       for (const dest of clientHelperRelocator.copies.keys()) clientSeeds.add(relFromRoot(outputDir, dest));
       const n = clientHelperRelocator.writeCopies();
@@ -4424,7 +4549,7 @@ function _compileScrmlImpl(options = {}) {
     // record the result beside the build output. The manifest is a DOTFILE, so the
     // policy that reads it can never serve it. Not counted in `fileCount`: it is
     // compiler bookkeeping, not a compiled artifact.
-    if (!emitGateFailed) {
+    if (!writeAborted) {
       clientAssets = collectClientAssets(outputDir, clientSeeds);
       writeFileSync(
         join(outputDir, CLIENT_ASSET_MANIFEST),
@@ -4463,19 +4588,18 @@ function _compileScrmlImpl(options = {}) {
   // partition rule was {W- prefix OR severity:warning} → warnings; everything
   // else → errors. Info-level fell through to errors. Now: {W-/I- prefix OR
   // severity:warning/info} → warnings.
-  const isNonFatal = (e) =>
-    e.code?.startsWith("W-") ||
-    e.code?.startsWith("I-") ||
-    e.severity === "warning" ||
-    e.severity === "info";
-  const errors = allErrors.filter(e => !isNonFatal(e));
-  const warnings = allErrors.filter(isNonFatal);
+  const errors = allErrors.filter(e => !isNonFatalDiagnostic(e));
+  const warnings = allErrors.filter(isNonFatalDiagnostic);
 
   return {
     errors,
     warnings,
     lintDiagnostics: allLintDiagnostics,
     fileCount,
+    // SPEC §2.2.1 — true when this compile wrote its artifacts to `outputDir`.
+    // Always false when `errors` is non-empty: a compile that reports an Error
+    // writes no file and leaves an earlier build's output directory as it was.
+    artifactsWritten,
     outputDir: outputDir || "",
     durationMs,
     outputs: cgResult.outputs || new Map(),
@@ -4485,6 +4609,11 @@ function _compileScrmlImpl(options = {}) {
     // exercised (e.g. fatal upstream errors); callers fall back to the
     // legacy literal `RUNTIME_FILENAME` when needed.
     runtimeFilename: cgResult.runtimeFilename,
+    // The shared runtime's text, in memory (the bytes written to `runtimeFilename`
+    // on a successful compile). With `outputs`, it lets tooling and tests inspect a
+    // compile that reported an Error — which writes no file (SPEC §2.2.1). The
+    // function form mirrors `batchPlanJson` / `tokenSetJson`.
+    runtimeSource: () => cgResult.runtimeJs ?? "",
     // s444-csp-inline-chunks — under `emitPerRoute`, the build's same-origin
     // chunk-activation script (manifest + role bootstrap) and its dist-root
     // filename. Undefined when no chunks were emitted.

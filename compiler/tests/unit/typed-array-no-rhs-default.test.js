@@ -173,6 +173,9 @@ describe("§6.2 Shape 4 — typed-array no-RHS default to [] (AST)", () => {
   });
 });
 
+// The row reads `@.text` (the per-item read). It was `@text` — E-STATE-UNDECLARED, so
+// every compile of this fixture FAILED and the harness read the files the failed
+// compile still wrote; since SPEC §2.2.1 (S457 "1a") a failed compile writes none.
 const ARRAY_SRC = `type Todo {
   text: string
 }
@@ -182,7 +185,7 @@ const ARRAY_SRC = `type Todo {
 
   <view>
     <each in=@todos>
-      <p>\${@text}</p>
+      <p>\${@.text}</p>
     </each>
   </view>
 </program>`;

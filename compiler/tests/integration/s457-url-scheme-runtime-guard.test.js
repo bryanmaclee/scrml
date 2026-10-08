@@ -33,6 +33,12 @@ function compile(name, src) {
   const result = compileScrml({ inputFiles: [file], write: true, outputDir: dist, log: () => {} });
   const rd = (f) => (existsSync(join(dist, f)) ? readFileSync(join(dist, f), "utf8") : "");
   const errors = (result.errors ?? []).filter((d) => (d.severity ?? "error") === "error");
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file (no
+  // runtime either) — read its client / html from the in-memory outputs.
+  if ((result.errors ?? []).length > 0) {
+    const output = result.outputs.get(file) ?? {};
+    return { result, errors, client: output.clientJs ?? "", html: output.html ?? "", runtime: typeof result.runtimeSource === "function" ? result.runtimeSource() : "" };
+  }
   return { result, errors, client: rd(`${name}.client.js`), html: rd(`${name}.html`), runtime: rd(result.runtimeFilename ?? "scrml-runtime.js") };
 }
 

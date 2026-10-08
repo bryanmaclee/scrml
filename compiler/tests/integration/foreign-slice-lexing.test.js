@@ -40,7 +40,7 @@ function compileTo(name, src, { withDb = false } = {}) {
   const dist = join(dir, "dist");
   mkdirSync(dist, { recursive: true });
   const result = compileScrml({ inputFiles: [file], write: true, outputDir: dist, log: () => {} });
-  return { result, dir, dist, jsPath: join(dist, `${name}.js`) };
+  return { result, dir, dist, file, jsPath: join(dist, `${name}.js`) };
 }
 
 function runTool(name, src) {
@@ -337,7 +337,7 @@ function main(args: string[]): number {
   });
 
   test("review round 3 — the refusal is case-insensitive (ONCLICK / OnClick / oNcLiCk), and unquoted ONCLICK= / onClick= wire a `click` listener", () => {
-    const { result, dist } = compileTo("eachcase", `<program>
+    const { result, dist, file } = compileTo("eachcase", `<program>
 <items> = [{ name: "a" }]
 \${ function go(n) { log(n) } }
 <ul>
@@ -356,14 +356,17 @@ function main(args: string[]): number {
     // S456 ruling (SPEC §5.2 rule 6): the refusal is E-ATTR-INTERP-EXECUTABLE (VP-3), one per attribute.
     expect((result.errors ?? []).filter((d) => d.code === "E-ATTR-INTERP-EXECUTABLE").length).toBe(3);
     expect(errCodes(result)).not.toContain("E-CG-003");
-    const client = require("fs").readFileSync(join(dist, "eachcase.client.js"), "utf8");
+    // SPEC §2.2.1 (S457 "1a"): the refused compile writes NO file; the listener wiring
+    // of the admitted forms is read from the in-memory client output.
+    expect(require("fs").readdirSync(dist)).toEqual([]);
+    const client = result.outputs.get(file).clientJs;
     expect(client).not.toMatch(/_scrml_el_\d+\.setAttribute\("on/i);
     expect((client.match(/_scrml_el_\d+\.addEventListener\("click"/g) ?? []).length).toBe(2);
     expect(client).not.toMatch(/addEventListener\("(CLICK|Click)"/);
   });
 
   test("review round 2 — a QUOTED event attribute interpolating row data in an `<each>` row is refused (injection sink; E-ATTR-INTERP-EXECUTABLE since S456)", () => {
-    const { result, dist } = compileTo("eachinj", `<program>
+    const { result, dist, file } = compileTo("eachinj", `<program>
 <items> = [{ name: "a" }, { name: "x');globalThis.__pwn=1;('" }]
 <ul>
   <each in=@items as it>
@@ -375,7 +378,10 @@ function main(args: string[]): number {
     const e = (result.errors ?? []).filter((d) => d.code === "E-ATTR-INTERP-EXECUTABLE");
     expect(e.length).toBe(1);
     expect(e[0].message).toContain("JavaScript is never built from interpolated text");
-    const client = require("fs").readFileSync(join(dist, "eachinj.client.js"), "utf8");
+    // SPEC §2.2.1 (S457 "1a"): the refused compile writes NO file; its in-memory client
+    // output still carries no interpolated handler text.
+    expect(require("fs").readdirSync(dist)).toEqual([]);
+    const client = result.outputs.get(file).clientJs;
     expect(client).not.toMatch(/setAttribute\("onclick", `/);
   });
 

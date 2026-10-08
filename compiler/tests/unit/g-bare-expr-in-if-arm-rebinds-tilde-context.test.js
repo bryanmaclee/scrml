@@ -51,10 +51,11 @@ function compileToOutputs(source, suffix) {
   writeFileSync(tmpInput, source);
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
-    const clientPath = resolve(outDir, `${name}.client.js`);
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+    // in-memory output (a clean compile writes the same codegen).
     return {
       errors: result.errors ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs: result.outputs.get(tmpInput)?.clientJs ?? "",
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
