@@ -1,0 +1,27 @@
+${
+    type Address:struct = { street: string(.length >= 1), city: string(.length >= 1), zip: string(.length == 5) }
+    type Customer:struct = { name: string(.length >= 1), email: string(email), shipTo: Address, billTo: Address }
+    type Item:struct = { sku: string(.length >= 3), qty: integer(>0), price: number(>=0) }
+    type Order:struct = { id: integer(>0), customer: Customer, items: Item[], total: number(>=0) }
+
+    <order>: Order | not = not
+    <status>: string = "none"
+
+    function totalOf(o: Order) -> number(>=0) {
+        let t = 0
+        for (const it of o.items) { t = t + it.qty * it.price }
+        return t
+    }
+    function addItem(o: Order, it: Item) -> Order {
+        return { id: o.id, customer: o.customer, items: [...o.items, it], total: o.total + it.qty * it.price }
+    }
+    function shipTo(c: Customer) -> Address { return c.shipTo }
+    function place(o: Order) {
+        @order = o
+        @status = "placed"
+    }
+}
+<program>
+<button id="place" onclick=${place({ id: 1, customer: { name: "a", email: "a@b.co", shipTo: { street: "s", city: "c", zip: "12345" }, billTo: { street: "s", city: "c", zip: "12345" } }, items: [], total: 0 })}>place</button>
+<p id="st">${@status}</p>
+</program>

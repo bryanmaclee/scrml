@@ -39,7 +39,7 @@ import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
-import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
+import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER, appendJudgeDefinitions, judgeDefinitionsFor } from "./emit-predicates.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 // s445 — THE SQLite-file handle emission, shared with emit-server.ts.
@@ -438,6 +438,8 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
     if (inlinedNames.has(name)) continue;
     if (name.startsWith("_scrml_sql")) continue;
     if (TOOL_SELF_DEFINED_HELPERS.has(name)) continue;
+    // S458 2a-fix F3 — a function the module itself defines (a hoisted §53 judge).
+    if (body.includes(`function ${name}(`)) continue;
     if (errors) {
       errors.push(new CGError(
         "E-TOOL-005",
@@ -811,8 +813,11 @@ export function generateToolJs(
   // helpers) — shared with generateToolLibraryJs; must LEAD the module.
   // `true`: this module's §64.3 harness ends with `process.exit()`, so the sqlite
   // configure must be AWAITED or the WAL pragma is killed mid-flight (F2-2).
-  const header = assembleModuleHeaders(fileAST, filePath, body, errors, true);
-  return header + body + "\n" + harness.join("\n") + "\n";
+  // S458 2a-fix F3 — the hoisted §53 judges the body calls (before the helper scan:
+  // a judge may call the url shape judge).
+  const judgedBody = appendJudgeDefinitions(body);
+  const header = assembleModuleHeaders(fileAST, filePath, judgedBody, errors, true);
+  return header + judgedBody + "\n" + harness.join("\n") + "\n";
 }
 
 /** Escape a string for literal use inside a RegExp. */
@@ -959,7 +964,11 @@ function generateServeHarnessToolJs(
   // an overlapping report single.)
   drainToolAsyncSyncCallbackLeaks(fns, asyncFnNames, filePath, errors);
 
-  const extraBody = extraLines.join("\n");
+  // S458 2a-fix F3 — the hoisted §53 judges the composing fns call that the headless
+  // module does not already define (a module may not declare a function twice).
+  const _extraJoined = extraLines.join("\n");
+  const _extraJudges = judgeDefinitionsFor(headlessModule + "\n" + _extraJoined);
+  const extraBody = _extraJudges ? `${_extraJoined}\n\n${_extraJudges}\n` : _extraJoined;
 
   // Inline the runtime helpers the composing `main`/helpers reference that the
   // headless module does NOT already define (log/print/structural-eq); fail-closed
@@ -1073,6 +1082,7 @@ function buildServeExtraHelperHeader(
   for (const name of referenced) {
     if (inlinedNames.has(name)) continue;
     if (headlessModule.includes(name + "(")) continue; // headless defines/uses it
+    if (extraBody.includes(`function ${name}(`)) continue; // S458 2a-fix F3 — a hoisted §53 judge
     if (name.startsWith("_scrml_sql")) continue;         // db handle (headless db header)
     if (TOOL_SELF_DEFINED_HELPERS.has(name)) continue;
     if (errors) {
@@ -1345,5 +1355,6 @@ export function generateToolLibraryJs(
   // Headers must LEAD the module (ES imports hoist): ES imports, the Bun.SQL db
   // handle (the module's OWN <db src>, §44.7.1), and inlined runtime helpers the
   // in-process fn bodies reference — assembled shared with generateToolJs.
-  return assembleModuleHeaders(fileAST, filePath, body, errors) + body + "\n";
+  const judgedBody = appendJudgeDefinitions(body); // S458 2a-fix F3 — hoisted §53 judges
+  return assembleModuleHeaders(fileAST, filePath, judgedBody, errors) + judgedBody + "\n";
 }

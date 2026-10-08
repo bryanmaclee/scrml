@@ -21,7 +21,7 @@
  */
 
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
-import { describeJudge, type JudgeType } from "../refinement-obligations.ts";
+import { describeJudge, structJudgeDef, enumJudgeDef, type JudgeType } from "../refinement-obligations.ts";
 
 // ---------------------------------------------------------------------------
 // PredicateExpr mirror (matches type-system.ts — no import to avoid coupling)
@@ -205,28 +205,139 @@ export function judgeTypeExpr(j: JudgeType, valueExpr: string, depth = 0): strin
     }
     case "nullable":
       return `(${v} === null || ${v} === undefined || ${judgeTypeExpr(j.of, v, depth)})`;
-    case "struct": {
-      const parts = j.fields.map(([name, f]) => {
-        const access = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? `${v}.${name}` : `${v}[${JSON.stringify(name)}]`;
-        // a field read is a property access on an already-checked object: no side effects
-        return judgeTypeExpr(f, access, depth + 1);
-      });
-      return `(${v} !== null && typeof ${v} === "object" && !Array.isArray(${v}) && ${parts.join(" && ")})`;
-    }
+    case "struct":
+      // S458 2a-fix F3 — a struct is judged by ONE named function per type
+      // per bundle (hoisted; see judgeDefinitionsFor), never inlined: a struct
+      // reused k times per level used to grow the output k^depth.
+      return `${structJudgeName(j)}(${v})`;
+    case "enum":
+      return `${enumJudgeName(j)}(${v})`;
     case "anyOf":
       return `(${j.of.map((m) => judgeTypeExpr(m, v, depth)).join(" || ")})`;
     case "prim":
       return baseTypeGuard(j.baseType, v) ?? FAIL_CLOSED;
     case "any":
-      return "true /* an unrefined union member: not judged */";
+      return "true /* a union member of a kind with no runtime shape test (a map, a function) */";
     default:
       return FAIL_CLOSED;
   }
 }
 
-/** The human description of a judge (failure reports). */
+/** The human description of a judge (failure reports). A nested struct is named, not expanded. */
 export function describeJudgeType(j: JudgeType): string {
   return describeJudge(j, (p) => predicateToDisplayString(p as PredicateExpr));
+}
+
+// ---------------------------------------------------------------------------
+// S458 2a-fix F3 — hoisted struct judges.
+//
+// Each struct judge is ONE function per bundle, named by its type and a hash of
+// its content (`_scrml_judge_Link_1k2j3h`), so two sites judging the same type
+// call the same function, and a struct nested in another is a call, not a
+// copy. The definitions are registered here while the code is emitted, and
+// every emitter appends the ones its artifact calls (`judgeDefinitionsFor`)
+// before it scans its text for runtime helpers — a judge may call
+// `_scrml_url_shape_ok`, and that scan must see it.
+// ---------------------------------------------------------------------------
+
+const _judgeDefs = new Map<string, string>();
+
+/** A field read `obj.field` (or `obj["field"]`) as JS text. */
+function fieldAccess(obj: string, field: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(field) ? `${obj}.${field}` : `${obj}[${JSON.stringify(field)}]`;
+}
+
+function judgeComment(j: JudgeType): string {
+  return `// §53 judge — ${describeJudge(j, (p) => predicateToDisplayString(p as PredicateExpr), false, true).replace(/[\n\r]/g, " ")}`;
+}
+
+/** The hoisted judge function of struct judge `j` (registered on first use). */
+function structJudgeName(j: Extract<JudgeType, { k: "struct" }>): string {
+  const slug = String(j.name).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40) || "struct";
+  const name = `_scrml_judge_${slug}_${j.id}`;
+  if (_judgeDefs.has(name)) return name;
+  _judgeDefs.set(name, ""); // a recursive reference resolves to the name
+  // a field read is a property access on an already-checked object: no side effects
+  const parts = structJudgeDef(j.id).fields.map(([field, f]) => judgeTypeExpr(f, fieldAccess("v", field), 1));
+  _judgeDefs.set(name, [
+    judgeComment(j),
+    `function ${name}(v) {`,
+    `  return v !== null && typeof v === "object" && !Array.isArray(v)` + (parts.length ? " &&" : ";"),
+    ...parts.map((p, i) => `    ${p}${i < parts.length - 1 ? " &&" : ";"}`),
+    `}`,
+  ].join("\n"));
+  return name;
+}
+
+/**
+ * The hoisted judge function of enum judge `j`: a unit variant is its tag
+ * string; a payload variant is `{ variant, data }` whose refined payload
+ * fields are judged. Anything else — including an object spelling a UNIT
+ * variant — is not a value of the enum.
+ */
+function enumJudgeName(j: Extract<JudgeType, { k: "enum" }>): string {
+  const slug = String(j.name).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40) || "enum";
+  const name = `_scrml_judge_${slug}_${j.id}`;
+  if (_judgeDefs.has(name)) return name;
+  _judgeDefs.set(name, "");
+  const def = enumJudgeDef(j.id);
+  const units = def.variants.filter(([, f]) => f === null).map(([v]) => v);
+  const payloads = def.variants.filter(([, f]) => f !== null) as Array<[string, Array<[string, JudgeType]>]>;
+  const lines = [judgeComment(j), `function ${name}(v) {`];
+  lines.push(`  if (typeof v === "string") return ${JSON.stringify(units)}.includes(v);`);
+  if (payloads.length) {
+    lines.push(`  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;`);
+    lines.push(`  const d = v.data;`);
+    lines.push(`  switch (v.variant) {`);
+    for (const [variant, fields] of payloads) {
+      const parts = fields.map(([field, f]) => judgeTypeExpr(f, fieldAccess("d", field), 1));
+      lines.push(`    case ${JSON.stringify(variant)}: return d !== null && typeof d === "object"${parts.map((p) => ` && ${p}`).join("")};`);
+    }
+    lines.push(`    default: return false;`);
+    lines.push(`  }`);
+  } else {
+    lines.push(`  return false;`);
+  }
+  lines.push(`}`);
+  _judgeDefs.set(name, lines.join("\n"));
+  return name;
+}
+
+const JUDGE_REF = /\b(_scrml_judge_[A-Za-z0-9_]+)\(/g;
+const JUDGE_DEF = /\bfunction (_scrml_judge_[A-Za-z0-9_]+)\(/g;
+
+/**
+ * The definitions of every hoisted judge `js` calls (and the judges those call)
+ * that `js` does not already define — "" when there are none. Emitters append
+ * it to their artifact.
+ */
+export function judgeDefinitionsFor(js: string): string {
+  if (!js.includes("_scrml_judge_")) return "";
+  const defined = new Set<string>();
+  for (const m of js.matchAll(JUDGE_DEF)) defined.add(m[1]);
+  const queue = [...js.matchAll(JUDGE_REF)].map((m) => m[1]);
+  const out: string[] = [];
+  while (queue.length) {
+    const name = queue.shift()!;
+    if (defined.has(name)) continue;
+    const def = _judgeDefs.get(name);
+    if (!def) continue; // not a judge this compiler registered — left for the emit gates to report
+    defined.add(name);
+    out.push(def);
+    for (const m of def.matchAll(JUDGE_REF)) queue.push(m[1]);
+  }
+  return out.join("\n");
+}
+
+/** Is `name` a hoisted judge this compiler registered (its definition is appended on use)? */
+export function isHoistedJudgeName(name: string): boolean {
+  return name.startsWith("_scrml_judge_") && !!_judgeDefs.get(name);
+}
+
+/** `js` with the definitions of the hoisted judges it calls appended. */
+export function appendJudgeDefinitions(js: string): string {
+  const defs = judgeDefinitionsFor(js);
+  return defs ? `${js}${js.endsWith("\n") ? "" : "\n"}\n${defs}\n` : js;
 }
 
 /**
@@ -701,7 +812,7 @@ export function refinementAtPath(r: Refinement | null, path: readonly string[]):
     while (j && j.k === "nullable") j = j.of;
     if (!j) return null;
     if (j.k === "struct") {
-      const f = j.fields.find(([n]) => n === seg);
+      const f: [string, JudgeType] | undefined = structJudgeDef(j.id).fields.find(([n]) => n === seg);
       j = f ? f[1] : null;
     } else if (j.k === "array" && /^\d+$/.test(seg)) {
       j = j.of;

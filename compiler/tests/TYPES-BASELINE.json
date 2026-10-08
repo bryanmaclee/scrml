@@ -120,7 +120,7 @@
     "compiler/src/type-system.ts :: TS2352 :: Conversion of type 'ApiEndpoint' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1,
     "compiler/src/type-system.ts :: TS2352 :: Conversion of type 'IdentExpr' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1,
     "compiler/src/type-system.ts :: TS2353 :: Object literal may only specify known properties, and 'isServer' does not exist in type 'ScopeEntry'.": 8,
-    "compiler/src/type-system.ts :: TS2678 :: Type '\"machine\"' is not comparable to type '\"function\" | \"union\" | \"map\" | \"unknown\" | \"error\" | \"state\" | \"not\" | \"array\" | \"struct\" | \"asIs\" | \"predicated\" | \"primitive\" | \"enum\" | \"snippet\" | \"html-element\" | \"cssClass\" | \"meta-splice\" | \"ref-binding\"'.": 1,
+    "compiler/src/type-system.ts :: TS2678 :: Type '\"machine\"' is not comparable to type '\"function\" | \"union\" | \"map\" | \"unknown\" | \"error\" | \"state\" | \"not\" | \"array\" | \"struct\" | \"asIs\" | \"enum\" | \"predicated\" | \"primitive\" | \"snippet\" | \"html-element\" | \"cssClass\" | \"meta-splice\" | \"ref-binding\"'.": 1,
     "compiler/src/type-system.ts :: TS2769 :: No overload matches this call.": 1,
     "compiler/src/type-system.ts :: TS7016 :: Could not find a declaration file for module './html-elements.js'. 'compiler/src/html-elements.js' implicitly has an 'any' type.": 1,
     "compiler/src/types/ast.ts :: TS2304 :: Cannot find name 'ReactiveDebouncedDeclNode'.": 1

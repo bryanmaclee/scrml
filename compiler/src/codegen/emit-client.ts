@@ -39,6 +39,7 @@ import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-enc
 // attribute the variant SELECTOR keys off (both sides MUST use the same helper).
 import { collectThemeContext, themeVariantAttr } from "./emit-theme-reset.ts";
 import type { CompileContext } from "./context.ts";
+import { judgeDefinitionsFor } from "./emit-predicates.ts";
 export type { EncodingContext } from "./type-encoding.ts";
 export type { CompileContext } from "./context.ts";
 
@@ -3033,6 +3034,13 @@ export function generateClientJs(ctx: CompileContext): string {
   // entry either way — `_scrml_cs_message_for` does NOT contain
   // `_scrml_message_for` as a substring, and this scan runs BEFORE the rename
   // pass (which happens at bundle assembly in index.ts).
+  // S458 2a-fix F3 — the hoisted §53 judges this client calls, appended BEFORE the
+  // helper-chunk scan below (a judge may call `_scrml_url_shape_ok`, whose chunk
+  // that scan gates). Function declarations: they hoist within the chunk scope.
+  {
+    const _judgeDefs = judgeDefinitionsFor(lines.join("\n"));
+    if (_judgeDefs) lines.push("", _judgeDefs);
+  }
   const POST_EMIT_HELPER_CHUNK_GATES: Array<[string, string]> = [
     ["_scrml_structural_eq(", "equality"],
     ["_scrml_reset(", "reset"],

@@ -107,7 +107,7 @@ import {
 // §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
 // boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
-import { judgeTypeOf, wrapRefine, paramGuardStatement, isRefineCall, type JudgeType } from "./refinement-obligations.ts";
+import { judgeTypeOf, wrapRefine, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -3990,7 +3990,7 @@ function staticJudge(j: JudgeType, expr: unknown, span: Span, errors: TSError[])
       if (node.kind !== "object" || !Array.isArray(node.props)) return null;
       if (node.props.some((p) => p.kind !== "prop" || p.computed === true)) return null;
       const rs: Array<boolean | null> = [];
-      for (const [name, fj] of j.fields) {
+      for (const [name, fj] of structJudgeDef(j.id).fields) {
         const prop = node.props.find((p) => p.key === name || (p.key as { name?: unknown } | null)?.name === name);
         rs.push(prop ? staticJudge(fj, prop.value, span, errors) : null);
       }

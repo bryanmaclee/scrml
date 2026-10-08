@@ -61,8 +61,15 @@ function clientFn(js, name) {
   let i = head.index + head[0].length, depth = 1;
   for (; i < js.length && depth > 0; i++) { if (js[i] === "{") depth++; else if (js[i] === "}") depth--; }
   const cells = new Map();
+  // S458 2a-fix F3 — struct judges are hoisted functions; carry their definitions along.
+  const defs = [];
+  for (const m of js.matchAll(/function _scrml_judge_[A-Za-z0-9_]+\(v\) \{/g)) {
+    let j = m.index + m[0].length, d = 1;
+    for (; j < js.length && d > 0; j++) { if (js[j] === "{") d++; else if (js[j] === "}") d--; }
+    defs.push(js.slice(m.index, j));
+  }
   const f = new Function("_scrml_url_shape_ok", "_scrml_cs_reactive_set", "_scrml_cs_reactive_get",
-    `${js.slice(head.index, i)}; return ${head[1]};`)(
+    `${defs.join("\n")}\n${js.slice(head.index, i)}; return ${head[1]};`)(
     _scrml_url_shape_ok, (k, v) => cells.set(k, v), (k) => cells.get(k));
   f.cells = cells;
   return f;

@@ -34,20 +34,62 @@ import { placeholderName, isCompilerPlaceholderName } from "./placeholder-nonce.
  *   pred     — a §53 refinement: base type + predicate (+ label).
  *   array    — every element is `of`.
  *   nullable — `not` (null/undefined), or `of`.
- *   struct   — an object whose listed fields are each their judge (only the
- *              fields that carry a refinement are listed).
+ *   struct   — a REFERENCE to a struct judge (`structJudgeDef(id)`): an object
+ *              whose refined fields are each their judge.
+ *   enum     — a REFERENCE to an enum judge (`enumJudgeDef(id)`): one of the
+ *              enum's variants, a payload variant's refined fields judged.
  *   anyOf    — a union with a refined member: the value satisfies one member.
  *   prim     — an unrefined primitive union member (number/integer/string/boolean).
- *   any      — an unrefined, non-primitive union member: not judged (admits).
+ *   any      — a union member of a kind with no runtime shape test (a map, a
+ *              function, …): admitted.
+ *
+ * S458 2a-fix F3 — a struct / enum is a reference, never an inline copy: a
+ * struct reused k times per level used to be copied k^depth times into every
+ * judge, every stamp and every emitted check. The definitions live in one
+ * content-addressed registry (the same type always gets the same id, in any
+ * compilation), so a judge is linear in the size of the annotation it came from.
  */
 export type JudgeType =
   | { k: "pred"; baseType: string; predicate: unknown; label: string | null }
   | { k: "array"; of: JudgeType }
   | { k: "nullable"; of: JudgeType }
-  | { k: "struct"; name: string; fields: Array<[string, JudgeType]> }
+  | { k: "struct"; name: string; id: string }
+  | { k: "enum"; name: string; id: string }
   | { k: "anyOf"; of: JudgeType[] }
   | { k: "prim"; baseType: string }
   | { k: "any" };
+
+/** A struct judge: the refined fields (only those carrying a refinement are listed). */
+export interface StructJudgeDef { name: string; fields: Array<[string, JudgeType]> }
+/** An enum judge: every variant; a payload variant lists its refined payload fields (`null` = unit). */
+export interface EnumJudgeDef { name: string; variants: Array<[string, Array<[string, JudgeType]> | null]> }
+
+const _structDefs = new Map<string, StructJudgeDef>();
+const _enumDefs = new Map<string, EnumJudgeDef>();
+
+/** The struct judge `id` names (a `{ k: "struct" }` reference). */
+export function structJudgeDef(id: string): StructJudgeDef {
+  const d = _structDefs.get(id);
+  if (!d) throw new Error(`internal: no struct judge ${id}`);
+  return d;
+}
+
+/** The enum judge `id` names (a `{ k: "enum" }` reference). */
+export function enumJudgeDef(id: string): EnumJudgeDef {
+  const d = _enumDefs.get(id);
+  if (!d) throw new Error(`internal: no enum judge ${id}`);
+  return d;
+}
+
+/** FNV-1a 32-bit over `s`, base36 — a short, deterministic content id. */
+export function contentId(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
 
 /** Where a judged value was written — for the failure report. */
 export interface RefineWhere {
@@ -60,67 +102,154 @@ type AnyType = { kind?: string; [k: string]: unknown } | null | undefined;
 
 const PRIMS = new Set(["number", "integer", "int", "string", "boolean", "bool"]);
 
+// Memo per resolved type object: a type reached along many paths is judged once.
+// Only results computed with no recursion cut below them are memoized.
+const _judgeMemo = new WeakMap<object, JudgeType | null>();
+const _shapeMemo = new WeakMap<object, JudgeType>();
+
 /**
  * The judge for declared type `t`, or null when `t` carries no refinement
- * anywhere (nothing to check). Recursive types are cut at a struct already on
- * the path (its refined fields are judged at the first level).
+ * anywhere (nothing to check). A recursive type is cut where it re-enters a
+ * struct already on the path (that inner occurrence is not judged).
  */
 export function judgeTypeOf(t: AnyType, seen: Set<unknown> = new Set()): JudgeType | null {
   if (!t || typeof t !== "object") return null;
+  if (_judgeMemo.has(t)) return _judgeMemo.get(t)!;
+  const cuts = { n: 0 };
+  const j = judgeTypeOfInner(t, seen, cuts);
+  if (cuts.n === 0) _judgeMemo.set(t, j);
+  return j;
+}
+
+function judgeTypeOfInner(t: NonNullable<AnyType>, seen: Set<unknown>, cuts: { n: number }): JudgeType | null {
+  const sub = (x: AnyType): JudgeType | null => {
+    if (!x || typeof x !== "object") return null;
+    if (_judgeMemo.has(x)) return _judgeMemo.get(x)!;
+    const c = { n: 0 };
+    const r = judgeTypeOfInner(x, seen, c);
+    if (c.n === 0) _judgeMemo.set(x, r);
+    cuts.n += c.n;
+    return r;
+  };
   switch (t.kind) {
     case "predicated": {
       const pt = t as { baseType: string; predicate: unknown; label?: string | null };
       return { k: "pred", baseType: pt.baseType, predicate: pt.predicate, label: pt.label ?? null };
     }
     case "array": {
-      const of = judgeTypeOf((t as { element?: AnyType }).element, seen);
+      const of = sub((t as { element?: AnyType }).element);
       return of ? { k: "array", of } : null;
     }
     case "union": {
       const members = ((t as { members?: AnyType[] }).members ?? []) as AnyType[];
-      const judged = members.map((m) => judgeTypeOf(m, seen));
+      const judged = members.map((m) => sub(m));
       if (!judged.some((j) => j !== null)) return null;
       const nonNot = members.filter((m) => m && m.kind !== "not");
       const hasNot = nonNot.length !== members.length;
       // `T | not` (and `T?`): the common optional shape.
       if (hasNot && nonNot.length === 1) {
-        const of = judgeTypeOf(nonNot[0], seen);
+        const of = judged[members.indexOf(nonNot[0])];
         return of ? { k: "nullable", of } : null;
       }
+      // S458 2a-fix F2 — an unrefined member is judged by its SHAPE (a struct is
+      // an object, an enum value is one of its variants, an array is an array of
+      // its element's shape), never admitted wholesale: `number(>0) | Role` used
+      // to admit -5 because the `Role` arm was `true`.
       const of: JudgeType[] = [];
       for (let i = 0; i < members.length; i++) {
         const m = members[i];
-        if (!m) continue;
-        if (judged[i]) { of.push(judged[i] as JudgeType); continue; }
-        if (m.kind === "primitive" && typeof (m as { name?: unknown }).name === "string" && PRIMS.has((m as { name: string }).name)) {
-          const n = (m as { name: string }).name;
-          of.push({ k: "prim", baseType: n === "int" ? "integer" : n === "bool" ? "boolean" : n });
-        } else if (m.kind === "not") {
-          continue; // absence is the `nullable` wrapper below
-        } else {
-          of.push({ k: "any" });
-        }
+        if (!m || m.kind === "not") continue; // absence is the `nullable` wrapper below
+        of.push(judged[i] ?? shapeJudgeOf(m, seen, cuts));
       }
       const core: JudgeType = { k: "anyOf", of };
       return hasNot ? { k: "nullable", of: core } : core;
     }
     case "struct": {
-      if (seen.has(t)) return null;
+      if (seen.has(t)) { cuts.n++; return null; }
       seen.add(t);
       const fields: Array<[string, JudgeType]> = [];
       const fm = (t as { fields?: Map<string, AnyType> }).fields;
       if (fm instanceof Map) {
         for (const [name, ft] of fm) {
-          const j = judgeTypeOf(ft, seen);
+          const j = sub(ft);
           if (j) fields.push([name, j]);
         }
       }
       seen.delete(t);
-      return fields.length ? { k: "struct", name: String((t as { name?: unknown }).name ?? "struct"), fields } : null;
+      return fields.length ? registerStruct(String((t as { name?: unknown }).name ?? "struct"), fields) : null;
+    }
+    case "enum": {
+      // An enum is refined only through a payload field that carries a refinement.
+      if (seen.has(t)) { cuts.n++; return null; }
+      seen.add(t);
+      const def = enumVariantsJudged(t, sub);
+      seen.delete(t);
+      return def.some(([, f]) => f && f.length) ? registerEnum(String((t as { name?: unknown }).name ?? "enum"), def) : null;
     }
     default:
       return null;
   }
+}
+
+function enumVariantsJudged(t: NonNullable<AnyType>, sub: (x: AnyType) => JudgeType | null): Array<[string, Array<[string, JudgeType]> | null]> {
+  const out: Array<[string, Array<[string, JudgeType]> | null]> = [];
+  for (const v of ((t as { variants?: Array<{ name?: unknown; payload?: Map<string, AnyType> | null }> }).variants ?? [])) {
+    if (!v || typeof v.name !== "string") continue;
+    if (!(v.payload instanceof Map)) { out.push([v.name, null]); continue; }
+    const fields: Array<[string, JudgeType]> = [];
+    for (const [name, ft] of v.payload) {
+      const j = sub(ft);
+      if (j) fields.push([name, j]);
+    }
+    out.push([v.name, fields]);
+  }
+  return out;
+}
+
+function registerStruct(name: string, fields: Array<[string, JudgeType]>): JudgeType {
+  const id = contentId(`struct ${name} ${JSON.stringify(fields)}`);
+  if (!_structDefs.has(id)) _structDefs.set(id, { name, fields });
+  return { k: "struct", name, id };
+}
+
+function registerEnum(name: string, variants: Array<[string, Array<[string, JudgeType]> | null]>): JudgeType {
+  const id = contentId(`enum ${name} ${JSON.stringify(variants)}`);
+  if (!_enumDefs.has(id)) _enumDefs.set(id, { name, variants });
+  return { k: "enum", name, id };
+}
+
+/**
+ * The judge of an UNREFINED union member: its runtime shape. Refinements inside
+ * it are judged too (a refined member never reaches here).
+ */
+function shapeJudgeOf(m: NonNullable<AnyType>, seen: Set<unknown>, cuts: { n: number }): JudgeType {
+  if (_shapeMemo.has(m)) return _shapeMemo.get(m)!;
+  let r: JudgeType;
+  switch (m.kind) {
+    case "primitive": {
+      const n = (m as { name?: unknown }).name;
+      r = typeof n === "string" && PRIMS.has(n)
+        ? { k: "prim", baseType: n === "int" ? "integer" : n === "bool" ? "boolean" : n }
+        : { k: "any" };
+      break;
+    }
+    case "struct":
+      r = registerStruct(String((m as { name?: unknown }).name ?? "struct"), []);
+      break;
+    case "enum":
+      r = registerEnum(String((m as { name?: unknown }).name ?? "enum"),
+        enumVariantsJudged(m, (x) => (x && typeof x === "object" ? judgeTypeOf(x, seen) : null)));
+      break;
+    case "array": {
+      const el = (m as { element?: AnyType }).element;
+      r = { k: "array", of: el && typeof el === "object" ? (judgeTypeOf(el, seen) ?? shapeJudgeOf(el, seen, cuts)) : { k: "any" } };
+      break;
+    }
+    default:
+      r = { k: "any" };
+  }
+  _shapeMemo.set(m, r);
+  return r;
 }
 
 /** The compilation's refine placeholder callee name. */
@@ -166,13 +295,25 @@ export function paramGuardStatement(name: string, judge: JudgeType, fn: string, 
 }
 
 /** A short human description of a judge, for the failure report. */
-export function describeJudge(j: JudgeType, fmtPred: (p: unknown) => string): string {
+export function describeJudge(j: JudgeType, fmtPred: (p: unknown) => string, nested = false, expand = false): string {
   switch (j.k) {
     case "pred": return `${j.baseType}(${fmtPred(j.predicate)})${j.label ? ` [${j.label}]` : ""}`;
-    case "array": return `${describeJudge(j.of, fmtPred)}[]`;
-    case "nullable": return `${describeJudge(j.of, fmtPred)} | not`;
-    case "struct": return `${j.name} { ${j.fields.map(([n, f]) => `${n}: ${describeJudge(f, fmtPred)}`).join(", ")} }`;
-    case "anyOf": return j.of.map((m) => describeJudge(m, fmtPred)).join(" | ");
+    case "array": return `${describeJudge(j.of, fmtPred, nested)}[]`;
+    case "nullable": return `${describeJudge(j.of, fmtPred, nested)} | not`;
+    // S458 2a-fix F3 — a struct is described by reference (its name). Expanding it
+    // inlined the whole type into every failure report, nested types included; its
+    // fields are spelled once, on its hoisted judge (`expand` — that one level only).
+    case "struct": {
+      if (nested || !expand) return j.name;
+      const d = structJudgeDef(j.id);
+      return `${j.name} { ${d.fields.map(([n, f]) => `${n}: ${describeJudge(f, fmtPred, true)}`).join(", ")} }`;
+    }
+    case "enum": {
+      if (nested || !expand) return j.name;
+      const d = enumJudgeDef(j.id);
+      return `${j.name} { ${d.variants.map(([v, f]) => f === null ? v : `${v}(${f.map(([n, fj]) => `${n}: ${describeJudge(fj, fmtPred, true)}`).join(", ")})`).join(", ")} }`;
+    }
+    case "anyOf": return j.of.map((m) => describeJudge(m, fmtPred, nested)).join(" | ");
     case "prim": return j.baseType;
     case "any": return "…";
   }

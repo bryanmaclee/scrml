@@ -1,0 +1,14 @@
+{
+  "id": "refinement-union-nonprimitive-member-accept-neg",
+  "description": "S458 2a-fix F2 (union arm), the negative twin: a value of the unrefined non-primitive member is admitted. `pick(v: number(>0) | Role)` called with `.Editor` and `list(v: number(>0) | string[])` called with [\"x\", \"y\"] both run.",
+  "language-version": "1.0",
+  "spec": "§53.3.1",
+  "rationale": "§53.3.1: a value inhabits a union by inhabiting a member; `.Editor` is a Role, [\"x\", \"y\"] is a string[].",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#a" }, { "click": "#c" }],
+    "state": { "shown": "ok", "listed": "ok" },
+    "domAnchored": [{ "selector": "#out", "text": "ok" }, { "selector": "#lst", "text": "ok" }]
+  }
+}

@@ -1,0 +1,19 @@
+${
+    type Role:enum = { Admin, Editor }
+    <role>: Role = .Editor
+    <tags>: string[] = ["x", "y"]
+    <shown>: string = "none"
+    <listed>: string = "none"
+    function pick(v: number(>0) | Role) {
+        @shown = "ok"
+    }
+    function list(v: number(>0) | string[]) {
+        @listed = "ok"
+    }
+}
+<program>
+<button id="a" onclick=${pick(@role)}>a</button>
+<button id="c" onclick=${list(@tags)}>c</button>
+<p id="out">${@shown}</p>
+<p id="lst">${@listed}</p>
+</program>

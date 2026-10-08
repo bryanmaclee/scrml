@@ -23,7 +23,7 @@
 
 import { basename } from "path";
 import { emitLogicNode } from "./emit-logic.ts";
-import { needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
+import { needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER, appendJudgeDefinitions } from "./emit-predicates.ts";
 import { CGError } from "./errors.ts";
 import { SERVER_VALUE_NATIVE_MAP_HELPER, SERVER_STRUCTURAL_EQ_SOURCE } from "../runtime-template.js";
 
@@ -119,6 +119,7 @@ export function generateWorkerJs(
   // Then FAIL CLOSED: a `_scrml_*(` call the bundle neither defines nor inlines is a
   // compile error, not a ReferenceError on the first message.
   let body = lines.join("\n");
+  body = appendJudgeDefinitions(body); // S458 2a-fix F3 — the hoisted §53 judges the worker calls
   const footer: string[] = [];
   for (const { sig, src } of WORKER_RUNTIME_HELPERS) {
     if (body.includes(sig) && !body.includes(`function ${sig}`)) footer.push(src);

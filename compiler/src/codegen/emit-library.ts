@@ -22,7 +22,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
-import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER, needsUrlShapeHelper } from "./emit-predicates.ts";
+import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER, needsUrlShapeHelper, appendJudgeDefinitions, isHoistedJudgeName } from "./emit-predicates.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 // §59 value-native map/set runtime — the SAME marker-delimited slice of
 // `runtime-template.js` that `emit-server.ts` injects (g-value-native-map-set-
@@ -425,6 +425,8 @@ function unmetRuntimeHelperRefs(emitted: string): string[] {
     if (MAP_RUNTIME_PROVIDED_NAMES.has(name)) continue;
     // §53.6.1 — the `url` shape judge, inlined (as a header) by `withRuntimeHelpers`.
     if (name === URL_SHAPE_FN) continue;
+    // S458 2a-fix F3 — a hoisted §53 judge, appended by `withRuntimeHelpers`.
+    if (isHoistedJudgeName(name)) continue;
 
     unmet.add(name);
   }
@@ -442,6 +444,7 @@ function unmetRuntimeHelperRefs(emitted: string): string[] {
  * compiler runtime last without any resolution hazard.
  */
 function withRuntimeHelpers(moduleSrc: string): string {
+  moduleSrc = appendJudgeDefinitions(moduleSrc); // S458 2a-fix F3 — hoisted §53 judges (before the url scan)
   let out = moduleSrc;
   for (const { sig, src } of LIB_RUNTIME_HELPERS) {
     if (moduleSrc.includes(sig)) out += "\n" + src;
