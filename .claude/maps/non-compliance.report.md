@@ -1,6 +1,21 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# generated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
+# user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
+# event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
+# gate + re-export cycles / missing names refused, #1353 test, #1354 §53 refinement slice 1 (one reader, base-type-first
+# fail-closed judge), #1355 S458 wrap), incremental refresh in an isolated worktree @ `8ce6d61b5` = `origin/main`.**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 8 commits behind HEAD (watermark 125486345, HEAD
+# 8ce6d61b5)` — matches `git log --oneline 125486345..HEAD` (8).
+# ⛑ FIGURES AT `8ce6d61b5` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **306,600 lines / 257 files**
+# (+1 module: `codegen/fn-name-rename.ts`; `git ls-tree` incl. `.d.ts` = 258) · test files **1,655** by `git ls-tree -r
+# --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10) · `compiler/SPEC.md` **47,062** lines (+16) · conformance
+# **1423** `case.scrml` (+27: refinement 12, module 8, attr-executable-sink 7) · `bootstrap-conformance.ts --check`:
+# **current** · FACTS CLI verbs **12** · NO new diagnostic code this window (E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003,
+# E-DEPLOY-DB-TENANT-UNDECLARED gained emit sites/senses) · known-gaps heading/marker drift **68** (was 65) · `state.ts
+# --check` FAILS on `@generated:recent-sessions (master-list.md)` STALE. Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `125486345`), CARRIED. ━━━━━━━
 # ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
 # verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
 # slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
@@ -17,57 +32,7 @@
 # ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S456 STAMP — `9c556dc74` -> `ba2712973` (11 commits: #1326-#1337), incremental; scan mode INCREMENTAL (in-window
 # changed docs + SPEC §34 check of the 7 new codes + executed `facts.ts --check`, `bootstrap-conformance.ts --check`,
-# `state.ts --check`). New section `## Summary — S457 pass (this pass, stamp `125486345`)
-
-Window `ba2712973..125486345` (10 commits, #1338-#1348). Scan mode INCREMENTAL. Docs scanned: the in-window changed `.md`
-set outside `.claude/` and `handOffs/` (`compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `docs/{FACTS,bootstrap-conformance,
-changelog,known-gaps,pr-reviews}.md`, `hand-off.md`, `master-list.md`, 8 `docs/changes/s457-*/` dirs = historical by design,
-compliant) + a grep of current docs for the retired `refusal-gate.js` surface + identifiers added to SPEC this window
-(all found in `compiler/src`) + EXECUTED: `facts.ts --check` (PASS), `bootstrap-conformance.ts --check` (**current**),
-`state.ts --check`, `scrml fix --help`, and an API probe (`compileScrml({ write: true })` on a program raising
-`E-STATE-UNDECLARED` -> `artifactsWritten: false`, output dir not created). No new diagnostic code this window.
-Non-compliant: 3 (all new) · Uncertain: 3 (carried) · Prior findings closed: 4.
-
-### N-S457-1 — `docs/known-gaps.md:22787` `g-api-compile-write-true-ignores-application-scope-refusal` still `open`; #1348 fixed it
-**Reason:** grep-mismatch + executed (stale-open gap)
-**Detail:** heading `NEW S449; MED; open`, marker `status=open`; locus names `APPLICATION_SCOPE_REFUSALS` / the `beforeWrite`
-hook — `APPLICATION_SCOPE_REFUSALS` now exists only in a history comment (`commands/refusal-gate.js:18`). The gap's own fix
-direction ("apply the refusal inside `compileScrml` when `write` is true") is what #1348 shipped (`api.js:3718`). Executed
-this pass: API `write: true` + an Error -> nothing written. The sibling `g-impl1-artifacts-written-on-error-s451` was
-resolved; this one was missed. A dev agent reading it would re-fix a closed hole.
-**Suggested disposition:** update to match current — mark resolved-by `S457-fix/s457-no-artifacts-on-error`.
-
-### N-S457-2 — SPEC §34 rows attribute "the build writes no output" to `compiler/src/commands/refusal-gate.js`
-**Reason:** grep-mismatch (SPEC prose vs code)
-**Detail:** `compiler/SPEC.md:25670` (E-SESSION-AMBIENT-SERVER) and `:25869` (E-AUTH-ATTR-INVALID) say "The build writes no
-output (`compiler/src/commands/refusal-gate.js`)". At `125486345` that file holds only `noFilesWrittenLine` (40 lines); the
-refusal is `compileScrml`'s general §2.2.1 rule (`api.js:3718`). Behaviour stated is still true; the cited mechanism is
-not. Also `docs/known-gaps.md:11361` / `:21949` (resolved entries) cite `commands/refusal-gate.js` as the mechanism —
-historical, lower priority. `SPEC.md:239` (§2.2.1 provenance) is correct as written (quotes the old file as history).
-**Suggested disposition:** update to match current — replace the two parentheticals with "(SPEC §2.2.1; `compileScrml`)".
-
-### N-S457-3 — known-gaps heading/marker drift rose 61 -> 65, including this window's own resolutions
-**Reason:** content-heuristic (generated lint vs hand-written headings; `state.ts --check`)
-**Detail:** `docs/known-gaps.md:187` `g-string-url-refinement-admits-executable-schemes` — heading `NEW S457; MED; open
-(needs a ruling)`, marker `status=resolved` (#1347). `:3406` `g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001`
-— heading `open`, marker `resolved`. A reader of headings (the human-facing form) sees open gaps that are closed. The drift
-check is WARN-only, so it grows every session.
-**Suggested disposition:** update to match current (sync headings to markers); consider making the drift count non-increasing in the wrap gate.
-
-## Uncertain docs (needs human review) — S457 pass
-
-### Carried (unchanged, re-grepped at `125486345`)
-- `docs/known-gaps.md:10399` `G-SQL-ERROR-SURFACE-UNWIRED` — heading still `open`; premise narrowed by #1305.
-- `compiler/SPEC.md:20202` — "E-ERROR-016 … no compiler emits it yet" (impl#2 emits it).
-- `compiler/SPEC.md` E-CG-003 row and the `E-TENANT-WRITE` sentence — as in the S454 pass.
-
-## Prior findings CLOSED at `125486345`
-- **N-S455-1** (FACTS "CLI verbs 14") — CLOSED by #1340: `FACTS.md:29` = 12; `scripts/facts.ts:92` `NOT_A_VERB` lists both fix rule modules.
-- **N-S455-2** (`scrml fix --help` `.run()` rewrite) — CLOSED: executed `fix --help` now says every WRITE is listed.
-- **N-S455-3** (`docs/bootstrap-conformance.md` STALE 7 windows) — CLOSED: `--check` reports current; NEW blocking PR-only CI step guards it.
-- **S456 uncertain: walker gaps not filed** — CLOSED: filed as `g-walkfileast-skips-engine-and-match-bodies` (`known-gaps.md:167`, MED, open).
-
-## Summary — S456 pass` below.**
+# `state.ts --check`). New section `## Summary — S456 pass` below.**
 # ━━━━━━━ BELOW IS THE S455 HEADER (stamp `9c556dc74`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74` (20 commits: #1306-#1325), incremental; scan mode INCREMENTAL (in-window
 # changed docs + SPEC §34 grep cross-check of every code added in the `compiler/src` diff + executed `scrml fix --help`,
@@ -527,6 +492,119 @@ check is WARN-only, so it grows every session.
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S458 pass (this pass, stamp `8ce6d61b5`)
+
+Window `125486345..8ce6d61b5` (8 commits, #1345 #1349-#1355). Scan mode INCREMENTAL. Docs scanned: the in-window changed
+`.md` set outside `.claude/` and `handOffs/` (`compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `docs/{FACTS,bootstrap-conformance,
+changelog,known-gaps,pr-reviews}.md`, `hand-off.md`, `master-list.md`; 5 `docs/changes/s457-*/` + `s458-*/` dirs = historical
+by design, compliant) + SPEC §21 / §34 / §53 / §14.8.10 / §5.2 read against the code that changed + a repo-wide grep of current
+docs for the deleted `parsePredicateAnnotation` (only a test comment that says it is gone — compliant) + EXECUTED:
+`facts.ts --check` (PASS), `bootstrap-conformance.ts --check` (**current**), `state.ts --check` (FAIL: `recent-sessions`).
+SPEC kept pace with #1351 (§5.2 SVG animation / `srcdoc` / event text), #1352 dev half (§14.8.10 item 3, §47.14, §34
+E-DEPLOY-DB-TENANT-UNDECLARED) and #1354 (§34 E-CONTRACT-002, §53.11). It did NOT keep pace with the re-export half of #1352.
+Non-compliant: 3 new + 2 carried · Uncertain: 1 new + 3 carried · Prior findings closed: 0.
+
+### N-S458-1 — SPEC §21.4 / §34 silent on the re-export rules the code now enforces (code ahead of SPEC)
+**Reason:** spec mismatch (bidirectional: code ratifies X, SPEC silent)
+**Detail:** `compiler/SPEC.md:22520` §21.4 is one sentence ("Re-export follows standard ES module `export { name } from
+'source'` syntax"). At `8ce6d61b5` `module-resolver.js` implements and REJECTS on rules the SPEC does not state: `export * from`
+(no occurrence of `export *` anywhere in SPEC.md), ES star rules (explicit wins, no default, ambiguous names excluded —
+`ambiguousStarSources` :1021), an "ambiguous" E-IMPORT-004 on use, E-IMPORT-004 on a named RE-export of a missing name
+(`validateReExports` :1296), E-IMPORT-006 on a re-export of a missing file (:366-:381), and E-IMPORT-002 for cycles closed by
+re-export edges (§21.3 :22422 says "cycles in the import graph"). §34 rows `:25722` E-IMPORT-002 "Circular import detected",
+`:25724` E-IMPORT-004 "Imported name not found…", `:26143` E-IMPORT-006 "`import` specifier does not resolve" describe imports
+only. A dev agent reading the SPEC cannot learn that `export *` is supported or that a re-export can raise these codes.
+**Suggested disposition:** update to match current — SPEC amendment, direction = ratify the shipped behaviour (ES star semantics
++ the four rejection rules) into §21.4, target = §21.4 body + the three §34 rows. Recommend: amend; the behaviour came through
+three review rounds and the alternative (revert to spec) re-opens a server link failure.
+
+### N-S458-2 — known-gaps heading/marker drift 65 -> 68; this window's own resolutions still read `open`
+**Reason:** content-heuristic (`state.ts --check` drift list)
+**Detail:** `docs/known-gaps.md:283` `g-user-function-named-id-breaks-click-dispatch-s457` (heading `HIGH; open (silent)`,
+marker resolved by #1345), `:295` `g-onclick-unquoted-call-chain-drops-callback-s457` (heading open, marker resolved by #1345);
+`:363` `g-string-url-refinement-admits-executable-schemes` is N-S457-3's entry, still unsynced. Supersedes N-S457-3 (same class,
+count higher).
+**Suggested disposition:** update to match current (sync headings to markers); make the drift count non-increasing at wrap.
+
+### N-S458-3 — the maps' own S457/S456 line references went stale this window (self-finding; corrected here)
+**Reason:** grep-mismatch (map vs code)
+**Detail:** code moved under the S457 routing rows: `_scrml_safe_url` :208 -> :239, `_scrml_url_shape_ok` :234 -> :272,
+`url-attr-guard.ts` exports (:34/:39/:44 -> :61/:69/:84), `emit-predicates.ts` URL helpers (:56/:65/:72 -> :62/:71/:78),
+`api.js` commit point (:3718/:4351/:4602 -> :3815/:4454/:4699), `classifyInterpolatedAttrSink` :201 -> :297,
+`tenantStartupCheckLines` emit site `emit-server.ts` :7203 -> :7267. Also: the S457 pass inserted its `## Summary — S457 pass`
+section INSIDE a header comment line of this report (heading glued to `# … New section \``, orphan `## Summary — S456 pass\`
+below.**` line) — repaired this pass (section moved above the S456 summary, header line restored).
+**Suggested disposition:** done in-map (primary.map.md `## S458 — READ FIRST` carries the corrected refs); no doc action.
+
+### Carried non-compliant (re-grepped at `8ce6d61b5`, still open)
+- **N-S457-1** — `docs/known-gaps.md:22965` `g-api-compile-write-true-ignores-application-scope-refusal` still heading `open` /
+  marker `status=open`; fixed by #1348 (now `api.js:3815`).
+- **N-S457-2** — `compiler/SPEC.md:25675` (E-SESSION-AMBIENT-SERVER) and `:25874` (E-AUTH-ATTR-INVALID) still cite
+  `compiler/src/commands/refusal-gate.js` as the no-output mechanism.
+
+## Uncertain docs (needs human review) — S458 pass
+
+### `master-list.md:126-135` `@generated:recent-sessions` — `state.ts --check` FAILS at the wrap HEAD
+**Reason:** the S458 wrap (`8ce6d61b5`) regenerated the block for S457 but the block does not list the wrap commit itself; the
+gate fails on `main` right after a wrap.
+**What to check:** whether the generator can ever be current at a wrap commit (self-reference) — if not, the gate should exclude
+HEAD's own wrap or run post-commit; if yes, the S458 wrap skipped `state.ts --write`.
+
+### Carried (unchanged, re-grepped at `8ce6d61b5`)
+- `docs/known-gaps.md:10577` `G-SQL-ERROR-SURFACE-UNWIRED` — heading still `open`; premise narrowed by #1305.
+- `compiler/SPEC.md:20207` — E-ERROR-016 "no compiler emits it yet" (impl#2 emits it).
+- `compiler/SPEC.md` E-CG-003 row and the `E-TENANT-WRITE` sentence — as in the S454 pass.
+
+## Summary — S457 pass (this pass, stamp `125486345`)
+
+Window `ba2712973..125486345` (10 commits, #1338-#1348). Scan mode INCREMENTAL. Docs scanned: the in-window changed `.md`
+set outside `.claude/` and `handOffs/` (`compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `docs/{FACTS,bootstrap-conformance,
+changelog,known-gaps,pr-reviews}.md`, `hand-off.md`, `master-list.md`, 8 `docs/changes/s457-*/` dirs = historical by design,
+compliant) + a grep of current docs for the retired `refusal-gate.js` surface + identifiers added to SPEC this window
+(all found in `compiler/src`) + EXECUTED: `facts.ts --check` (PASS), `bootstrap-conformance.ts --check` (**current**),
+`state.ts --check`, `scrml fix --help`, and an API probe (`compileScrml({ write: true })` on a program raising
+`E-STATE-UNDECLARED` -> `artifactsWritten: false`, output dir not created). No new diagnostic code this window.
+Non-compliant: 3 (all new) · Uncertain: 3 (carried) · Prior findings closed: 4.
+
+### N-S457-1 — `docs/known-gaps.md:22787` `g-api-compile-write-true-ignores-application-scope-refusal` still `open`; #1348 fixed it
+**Reason:** grep-mismatch + executed (stale-open gap)
+**Detail:** heading `NEW S449; MED; open`, marker `status=open`; locus names `APPLICATION_SCOPE_REFUSALS` / the `beforeWrite`
+hook — `APPLICATION_SCOPE_REFUSALS` now exists only in a history comment (`commands/refusal-gate.js:18`). The gap's own fix
+direction ("apply the refusal inside `compileScrml` when `write` is true") is what #1348 shipped (`api.js:3718`). Executed
+this pass: API `write: true` + an Error -> nothing written. The sibling `g-impl1-artifacts-written-on-error-s451` was
+resolved; this one was missed. A dev agent reading it would re-fix a closed hole.
+**Suggested disposition:** update to match current — mark resolved-by `S457-fix/s457-no-artifacts-on-error`.
+
+### N-S457-2 — SPEC §34 rows attribute "the build writes no output" to `compiler/src/commands/refusal-gate.js`
+**Reason:** grep-mismatch (SPEC prose vs code)
+**Detail:** `compiler/SPEC.md:25670` (E-SESSION-AMBIENT-SERVER) and `:25869` (E-AUTH-ATTR-INVALID) say "The build writes no
+output (`compiler/src/commands/refusal-gate.js`)". At `125486345` that file holds only `noFilesWrittenLine` (40 lines); the
+refusal is `compileScrml`'s general §2.2.1 rule (`api.js:3718`). Behaviour stated is still true; the cited mechanism is
+not. Also `docs/known-gaps.md:11361` / `:21949` (resolved entries) cite `commands/refusal-gate.js` as the mechanism —
+historical, lower priority. `SPEC.md:239` (§2.2.1 provenance) is correct as written (quotes the old file as history).
+**Suggested disposition:** update to match current — replace the two parentheticals with "(SPEC §2.2.1; `compileScrml`)".
+
+### N-S457-3 — known-gaps heading/marker drift rose 61 -> 65, including this window's own resolutions
+**Reason:** content-heuristic (generated lint vs hand-written headings; `state.ts --check`)
+**Detail:** `docs/known-gaps.md:187` `g-string-url-refinement-admits-executable-schemes` — heading `NEW S457; MED; open
+(needs a ruling)`, marker `status=resolved` (#1347). `:3406` `g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001`
+— heading `open`, marker `resolved`. A reader of headings (the human-facing form) sees open gaps that are closed. The drift
+check is WARN-only, so it grows every session.
+**Suggested disposition:** update to match current (sync headings to markers); consider making the drift count non-increasing in the wrap gate.
+
+## Uncertain docs (needs human review) — S457 pass
+
+### Carried (unchanged, re-grepped at `125486345`)
+- `docs/known-gaps.md:10399` `G-SQL-ERROR-SURFACE-UNWIRED` — heading still `open`; premise narrowed by #1305.
+- `compiler/SPEC.md:20202` — "E-ERROR-016 … no compiler emits it yet" (impl#2 emits it).
+- `compiler/SPEC.md` E-CG-003 row and the `E-TENANT-WRITE` sentence — as in the S454 pass.
+
+## Prior findings CLOSED at `125486345`
+- **N-S455-1** (FACTS "CLI verbs 14") — CLOSED by #1340: `FACTS.md:29` = 12; `scripts/facts.ts:92` `NOT_A_VERB` lists both fix rule modules.
+- **N-S455-2** (`scrml fix --help` `.run()` rewrite) — CLOSED: executed `fix --help` now says every WRITE is listed.
+- **N-S455-3** (`docs/bootstrap-conformance.md` STALE 7 windows) — CLOSED: `--check` reports current; NEW blocking PR-only CI step guards it.
+- **S456 uncertain: walker gaps not filed** — CLOSED: filed as `g-walkfileast-skips-engine-and-match-bodies` (`known-gaps.md:167`, MED, open).
 
 ## Summary — S456 pass (this pass, stamp `ba2712973`)
 
