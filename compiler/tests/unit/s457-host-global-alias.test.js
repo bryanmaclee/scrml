@@ -60,7 +60,8 @@ const REPO = resolve(import.meta.dir, "../../..");
 describe("§1 the alias helpers", () => {
   test("the runtime declares the alias first, before any other runtime binding", () => {
     const firstDecl = SCRML_RUNTIME.match(/^(?:const|let|var|function)\s+[\w$]+.*$/m)?.[0];
-    expect(firstDecl.startsWith(`const ${HOST_GLOBAL_ALIAS} = globalThis;`)).toBe(true);
+    // `var`, like `_scrml_modules`: chunk scripts read it across script boundaries.
+    expect(firstDecl).toBe(`var ${HOST_GLOBAL_ALIAS} = globalThis;`);
   });
 
   test("withHostGlobalAlias declares the alias once, after the header comments", () => {

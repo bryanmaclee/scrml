@@ -899,9 +899,14 @@ function evalServerModule(
     // object whose `Bun` is the stub, so the compiler's `_scrml_g.Bun.file(…)` reads it.
     .replace(/^const _scrml_g = globalThis;.*$/m, "const _scrml_g = __scrml_host;");
   const BunStub = { file: () => ({ text: async () => html }) };
-  const host = Object.create(g);
-  // `Bun` is a read-only global: shadow it on the view with an own property.
-  Object.defineProperty(host, "Bun", { value: BunStub, writable: true, configurable: true, enumerable: true });
+  // The global object itself, except that `Bun` reads as the stub. Reads AND writes go to
+  // the real global (`_scrml_g.__scrml_session_store ??= …` must be the store this adapter
+  // seeds below, exactly as in a deploy).
+  // (A view that inherits from the global object; `Bun` is read-only + non-configurable on
+  // the real one, so it is an own property of the view. Writes are forwarded.)
+  const view = Object.create(g);
+  Object.defineProperty(view, "Bun", { value: BunStub, writable: true, configurable: true, enumerable: true });
+  const host = new Proxy(view, { set: (_t, k, v) => Reflect.set(g, k, v) });
   const wrapper = new Function(
     "_scrml_sql", "Bun", "Response", "crypto", "URL", "__scrml_host",
     `${runnable}\nreturn {` +

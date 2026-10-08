@@ -556,18 +556,18 @@ const _STDLIB_TIME_CHUNK     = _loadStdlibChunk("time");
  *     Infinite loop guard: MAX_RUNS = 100. Scope cleanup registered with _scrml_register_cleanup.
  */
 
-// The runtime's first binding, `const _scrml_g = globalThis;`, is the host-global
+// The runtime's first binding, `var _scrml_g = globalThis;`, is the host-global
 // alias (S457 2a, codegen/host-global-alias.ts): compiler-emitted code outside the
 // runtime spells every host global through it (`_scrml_g.document`,
 // `_scrml_g.fetch(…)`), so a user binding named after a host global cannot capture
-// a compiler reference. The explanation lives here, not in the shipped text: the
+// a compiler reference. `var`, like `_scrml_modules`: chunk scripts read it across
+// script boundaries. The explanation lives here, not in the shipped text: the
 // client runtime's gzip size is gated (runtime-size-ratchet, the SPA-counter <16 KB).
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
-const _scrml_g = globalThis;
+var _scrml_g = globalThis;
 const _scrml_state = {};
 const _scrml_subscribers = {};
-// S103 Phase 3 select-row chip-away (Candidate A) — value-indexed sub-registry
-// parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
+// Value-indexed sub-registry (S103) parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
 // register here under their static valueKey (the constant they compare the cell
 // to). At write time _scrml_reactive_set fires only the OLD-value bucket and
 // the NEW-value bucket — O(2) per write instead of O(N) over all rows.

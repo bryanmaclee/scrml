@@ -114,6 +114,8 @@ function loadTodoMVC() {
     window._scrml_reactive_get = _scrml_reactive_get;
     window._scrml_reactive_set = _scrml_reactive_set;
     window._scrml_reactive_subscribe = _scrml_reactive_subscribe;
+    // The host-global alias the client code reads every host global through (S457 2a).
+    if (typeof _scrml_g !== "undefined") window._scrml_g = _scrml_g;
     window._scrml_lift = _scrml_lift;
     if (typeof _scrml_reconcile_list !== "undefined") window._scrml_reconcile_list = _scrml_reconcile_list;
     if (typeof _scrml_deep_reactive !== "undefined") window._scrml_deep_reactive = _scrml_deep_reactive;

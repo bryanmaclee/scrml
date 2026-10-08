@@ -87,3 +87,20 @@ Append-only. Times local (2026-10-07/08).
   `globalThis`, and the foreign-seal helper's `typeof require` (module context, not a global).
 - Root-level tests 2239/0, e2e-render-map 259/0, self-host-v2 slices m1/m2/m3/m4/codec + lowered m1
   green after re-pinning two slice-codec emitted-shape reads.
+
+## follow-ups found by the wider tiers (2026-10-08)
+- Runtime alias is `var _scrml_g` (was `const`): chunk scripts read it ACROSS script boundaries,
+  like `var _scrml_modules`; a global-eval loader (browser-multifile-import's faithful separate-
+  script model) does not share a top-level `const` between evals.
+- `scrml fix` client-server-call / sql-failable read impl#1's Promise.all batches from emitted
+  client JS: `promiseAllBatches` now recognises `_scrml_g.Promise.all` (without it the fix would
+  have REWRITTEN batched calls it must only list — commands test caught it).
+- Conformance adapter: the SSR host view forwards writes to the real global (the adapter seeds
+  `globalThis.__scrml_session_store` for the authenticated viewer); `bun conformance/run.ts`
+  1346 pass + 50 xfail of 1396 (= base).
+- SPA-counter runtime gzip: base 16375 B vs the <16384 gate (9 B margin, pre-existing knife edge).
+  The alias line costs ~10 B; one shipped provenance tag shortened in the core chunk comment ->
+  16382 B. Margin 2 B.
+- Browser tier name-set gate PASS (48 asserted); self-host-v2 slices green; root-level 2239/0;
+  e2e-render-map 259/0; lsp+commands 718/0; bootstrap-conformance current; compile-floor PASS;
+  snippet-gate 122/0; types-gate unchanged; SPEC-INDEX OK.

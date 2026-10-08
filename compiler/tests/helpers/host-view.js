@@ -4,7 +4,8 @@
  * Compiler-emitted code reaches every host global through one alias the runtime
  * (or a server / worker / library artifact) declares first:
  *
- *     const _scrml_g = globalThis;
+ *     const _scrml_g = globalThis;      (a server / library / tool / worker artifact)
+ *     var _scrml_g = globalThis;        (the client runtime — chunk scripts read it)
  *
  * and spells `_scrml_g.fetch(…)`, `_scrml_g.document.querySelector(…)`,
  * `new _scrml_g.Response(…)` (codegen/host-global-alias.ts). That is what keeps a
@@ -23,7 +24,7 @@
  */
 
 /** The alias declaration every artifact (and the runtime) starts with. */
-const ALIAS_DECL = /^const _scrml_g = globalThis;.*$/m;
+const ALIAS_DECL = /^(const|var) _scrml_g = globalThis;.*$/m;
 
 /** A view of `globalThis` with `overrides` on top. */
 export function hostView(overrides = {}) {
@@ -41,6 +42,6 @@ export function hostView(overrides = {}) {
  * a test that passes for the wrong reason.
  */
 export function rebindHostAlias(js, binding = "__scrml_host__") {
-  if (!ALIAS_DECL.test(js)) throw new Error("rebindHostAlias: no `const _scrml_g = globalThis;` declaration in this code");
-  return js.replace(ALIAS_DECL, `const _scrml_g = ${binding};`);
+  if (!ALIAS_DECL.test(js)) throw new Error("rebindHostAlias: no `const|var _scrml_g = globalThis;` declaration in this code");
+  return js.replace(ALIAS_DECL, (_m, kw) => `${kw} _scrml_g = ${binding};`);
 }
