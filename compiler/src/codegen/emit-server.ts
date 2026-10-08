@@ -25,7 +25,7 @@ import {
   type SessionAttrName,
 } from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
-import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
+import { emitServerParamCheck, parsePredicateAnnotation, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
@@ -1504,6 +1504,10 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   // scope by `_scrml_foreign_seal` (foreign-seal.ts).
   if (emitted.includes(`${FOREIGN_SEAL_FN}(`)) {
     emitted = injectAfterHeader(emitted, SERVER_FOREIGN_SEAL_HELPER);
+  }
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check in a value-export fn.
+  if (needsUrlShapeHelper(emitted)) {
+    emitted = injectAfterHeader(emitted, SERVER_URL_SHAPE_HELPER);
   }
 
   return emitted;
@@ -6934,6 +6938,14 @@ export function generateServerJs(
   // inlined at the post-header boundary like the helpers above.
   if (finalEmitted.includes(`${FOREIGN_SEAL_FN}(`)) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_FOREIGN_SEAL_HELPER);
+  }
+
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check (a server-function parameter, a
+  // boundary-zone decl in a server body) calls `_scrml_url_shape_ok(`, defined in
+  // runtime-url-guard.js. Inlined once; skipped when the SSR first-paint URL guard copy (the same
+  // source) is already in the bundle.
+  if (needsUrlShapeHelper(finalEmitted)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_URL_SHAPE_HELPER);
   }
 
   // Phase-2 colorless-async — inject any collection-combinator helper

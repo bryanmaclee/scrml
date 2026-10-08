@@ -23,6 +23,7 @@
 
 import { basename } from "path";
 import { emitLogicNode } from "./emit-logic.ts";
+import { needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 
 /**
  * The file a nested worker program is written to, next to its page's HTML, and
@@ -104,7 +105,16 @@ export function generateWorkerJs(
     lines.push(`};`);
   }
 
-  return lines.join("\n");
+  // §53.6.1 (S457 "6a") — a worker has no scrml runtime, so a `string(url)` boundary check in a
+  // worker function would call an undefined `_scrml_url_shape_ok`. Inline the judge's source
+  // (runtime-url-guard.js) as a header, right after the banner line: a header, not a footer, because
+  // the source declares `const` sets the judge reads.
+  const body = lines.join("\n");
+  if (needsUrlShapeHelper(body)) {
+    const [banner, ...rest] = lines;
+    return [banner, SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "", ...rest].join("\n");
+  }
+  return body;
 }
 
 /**

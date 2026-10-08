@@ -30,11 +30,31 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 244 | 6 |
+| HIGH | 245 | 6 |
 | MED | 529 | 4 |
-| LOW | 292 | 0 |
+| LOW | 294 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-refinement-checks-absent-in-n-positions-s457 — §53 refinement checks are not emitted in nine positions (any refinement type) — `NEW S457; HIGH; open`
+
+<!-- @gap id=g-refinement-checks-absent-in-n-positions-s457 sev=HIGH status=open locus=searched:emit-logic.ts,emit-functions.ts,emit-server.ts,emit-worker.ts,emit-library.ts,emit-tool.ts,emit-parse-variant.ts prov=review:S457-differential-d48abd3f2(executed on base and head) -->
+
+§53.4.3 / §53.9 say these SHALL be checked; none are: (1) reassignment of a refined cell (`@u = v` with `v = "javascript:x"` accepted); (2) struct fields (`type T:struct = { u: string(url) }`); (3) top-level `const X: string(url) = f()`; (4) `<endpoint>` payload fields (parseVariant defers — a `javascript:` field returns 200; `<api>` responses likely the same); (5) schema/table fields; (6) a server function's refined return type; (7) library / tool / value-export function parameters; (8) a literal call argument (throws at runtime, not judged statically); (9) a refined parameter on a nested worker `<program>` function. SPEC §53.6.1 now lists these under impl#1 status. Silent: a refinement type promises a property the program does not have.
+
+### g-worker-bundle-runtime-helpers-not-inlined-s457 — a worker `<program>` bundle inlines only `_scrml_reply`; `==` on structs (`_scrml_structural_eq`) or a map literal (`_scrml_map_from_entries`) in a worker function throw ReferenceError at runtime, clean compile — `NEW S457; MED; open`
+
+<!-- @gap id=g-worker-bundle-runtime-helpers-not-inlined-s457 sev=MED status=open locus=compiler/src/codegen/emit-worker.ts(generateWorkerJs) prov=empirical:s457-string-url-agent -->
+
+The S457 `url` judge is now inlined (6a review N1). Fix: the sig→source table emit-tool / emit-library use, plus a fail-closed scan for unmet `_scrml_*(` refs.
+
+### g-server-param-contract-400-string-coercion-throws-s457 — the refined-parameter 400 response builds `value: String(param)`; `{"link":{"toString":1}}` makes `String()` throw and the handler crashes instead of 400 — `NEW S457; LOW; open`
+
+<!-- @gap id=g-server-param-contract-400-string-coercion-throws-s457 sev=LOW status=open locus=compiler/src/codegen/emit-predicates.ts(emitServerParamCheck, emitRuntimeCheck) prov=review:S457-differential-d48abd3f2 -->
+
+### g-stdlib-data-url-validator-admits-executable-schemes-s457 — `scrml:data` `url()` validator checks only that `new URL()` parses, so it accepts `javascript:`; its scrml source still uses try/catch — `NEW S457; LOW; open (ruling: follow string(url)?)`
+
+<!-- @gap id=g-stdlib-data-url-validator-admits-executable-schemes-s457 sev=LOW status=open locus=stdlib/data/validate.scrml(:200)+compiler/runtime/stdlib/data.js(:536) prov=empirical:s457-string-url-agent -->
 
 ### g-meta-code-runs-unsandboxed-in-the-compiler-process-s457 — `^{}` meta bodies are lowered to JS and run via `new Function` in the compiler process; Approach C is enforced by a fail-open name DENY list — `emit.constructor` reaches `Function` → `process`/`Bun` — `NEW S457; HIGH; open (security; fix dispatched: s457-meta-allow-list)`
 
@@ -160,7 +180,9 @@ artifact — the top-level case is E-COMPONENT-035, so the arm case is a conform
 
 ### g-string-url-refinement-admits-executable-schemes — the `string(url)` refinement admits `javascript:` / `data:` and refuses relative URLs — `NEW S457; MED; open (needs a ruling)`
 
-<!-- @gap id=g-string-url-refinement-admits-executable-schemes sev=MED status=open locus=searched:§53 url predicate (check = new URL() parses) prov=dd:scrml-support/docs/deep-dives/url-refinement-type-2026-10-07.md -->
+<!-- @gap id=g-string-url-refinement-admits-executable-schemes sev=MED status=resolved resolved-by=S457-fix/s457-string-url-executable-schemes locus=searched:§53 url predicate (check = new URL() parses) prov=dd:scrml-support/docs/deep-dives/url-refinement-type-2026-10-07.md -->
+
+RESOLVED S457 (ruling "6a"): `string(url)` = absolute URL + a §5.2 safe scheme (http/https/ftp/mailto/tel/sms) — one judge `_scrml_url_shape_ok` in runtime-url-guard.js at the static zone (type-system) and the runtime zone (client urlguard chunk; server / value-only / tool / library / worker inline). Refuses javascript:/vbscript:/data:/blob:/file:/ws: (PA reading: the full §5.2 safe set, fail closed). Relative URLs unchanged (still refused).
 
 From the S457 url-type deep-dive (Q2), agent-measured: `<u>: string(url) = "javascript:alert(1)"` compiles clean as
 statically proven; `"/users/1"` fails E-CONTRACT-001. The check is "does `new URL()` parse it", a form-input shape tied to
