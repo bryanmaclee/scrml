@@ -1,6 +1,21 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
+# user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
+# event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
+# gate + re-export cycles / missing names refused, #1353 test, #1354 §53 refinement slice 1 (one reader, base-type-first
+# fail-closed judge), #1355 S458 wrap), incremental refresh in an isolated worktree @ `8ce6d61b5` = `origin/main`.**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 8 commits behind HEAD (watermark 125486345, HEAD
+# 8ce6d61b5)` — matches `git log --oneline 125486345..HEAD` (8).
+# ⛑ FIGURES AT `8ce6d61b5` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **306,600 lines / 257 files**
+# (+1 module: `codegen/fn-name-rename.ts`; `git ls-tree` incl. `.d.ts` = 258) · test files **1,655** by `git ls-tree -r
+# --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10) · `compiler/SPEC.md` **47,062** lines (+16) · conformance
+# **1423** `case.scrml` (+27: refinement 12, module 8, attr-executable-sink 7) · `bootstrap-conformance.ts --check`:
+# **current** · FACTS CLI verbs **12** · NO new diagnostic code this window (E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003,
+# E-DEPLOY-DB-TENANT-UNDECLARED gained emit sites/senses) · known-gaps heading/marker drift **68** (was 65) · `state.ts
+# --check` FAILS on `@generated:recent-sessions (master-list.md)` STALE. Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `125486345`), CARRIED. ━━━━━━━
 # ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
 # verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
 # slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
@@ -978,6 +993,30 @@ existing node kinds, or through codegen-internal / schema-differ-internal shapes
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
 `ifRaw`/`ifCond` pair below), and now the #458 region shapes immediately below.
+
+## S458 — SHAPE DELTA (`125486345..8ce6d61b5`)
+
+### RefinementStampT  [compiler/src/type-system.ts:3750]  (module-local; stamped on AST nodes)
+baseType: string · predicate: PredicateExpr (may be an `error` predicate when unreadable) · label: string | null
+wrap?: RefinementWrap[]  ("array" | "nullable", OUTERMOST first: `T[]`, `T | not`, `T?`)
+Stamp sites: param `.refinement` (:11029), fn node `.returnRefinement` (:11089), decl `.predicateCheck` (+ `zone`, `sourceKind`) (:11614/:12152)
+
+### Refinement  [compiler/src/codegen/emit-predicates.ts:565]
+baseType: string · predicate: PredicateExpr · label: string | null · wrap?: Array<"array" | "nullable">
+Read via `refinementOf(stamp)` :574 — the ONLY codegen entry to a refinement.
+
+### JudgeShape  [compiler/src/codegen/emit-predicates.ts:146]
+baseType?: string · wrap?: Array<"array" | "nullable">
+
+### TenantStartupCheck / TenantGate  [compiler/src/codegen/tenant-startup-check.ts:247 / :252]
+`createTenantGate(checks)` :261 -> TenantGate (dev in-process gate). `TenantCheckHandle` :42 unchanged.
+
+### InterpolatedAttrSink  [compiler/src/attr-injection-sink.ts:286]  (moved from :190; union unchanged in kind set)
+`AttrElementContext` :169 (tag + attrs, NEW — lets SVG animation `attributeName` decide the sink)
+
+### Import graph record  [compiler/src/module-resolver.js `buildImportGraph` :183]
+re-export records keep the as-written specifier; NEW `unresolvedReExports` (:368) holds relative re-exports whose file does not exist (E-IMPORT-006) — excluded from exports.
+`ModuleError` for E-IMPORT-002 now carries `cycleFiles`.
 
 ## S457 — SHAPE DELTA (`ba2712973..125486345`)
 
