@@ -58,7 +58,10 @@
  *     (`HOST_GLOBAL_ALIAS_DECL`) whose own text is the only reader. An import binding
  *     is created before any module code runs, and the module's own top-level
  *     `globalThis` (a user `const globalThis`, a hoisted `function globalThis`) is not
- *     in that module's scope.
+ *     in that module's scope. A written `--mode library` `<base>.js` may be loaded by a
+ *     browser, which refuses a `data:` import under a `script-src 'self'` CSP: its
+ *     import is pointed at a written same-origin `_scrml/_global.js` instead
+ *     (`relocateHostGlobalImport`, applied by the api.js write phase).
  */
 
 import { aliasFreeGlobalRefs } from "./fn-name-rename.ts";
@@ -134,6 +137,39 @@ export function aliasHostGlobalsInRuntimeText(src: string): string {
  */
 export const HOST_GLOBAL_ALIAS_DECL =
   'import _scrml_g from "data:text/javascript,export default globalThis"; // host globals, under a name no scrml binding can reach (SPEC §47.1.1)';
+
+/** The `data:` specifier `HOST_GLOBAL_ALIAS_DECL` imports from. */
+export const HOST_GLOBAL_DATA_SPECIFIER = "data:text/javascript,export default globalThis";
+
+/**
+ * The same-origin home of the alias module, relative to the output directory, for a
+ * written artifact a BROWSER may load as an ES module: a `--mode library` `<base>.js`
+ * (the client-facing library, SPEC §12.6). A browser refuses a `data:` module import
+ * under `Content-Security-Policy: script-src 'self'` and the importing module never
+ * runs, so the write phase points that artifact at this file instead
+ * (`relocateHostGlobalImport`) and writes `HOST_GLOBAL_MODULE_TEXT` here, next to the
+ * stdlib shims in `_scrml/`. The leading `_` keeps it apart from every stdlib shim
+ * name. Server bundles, tools and test modules run under Bun / Node / Deno, which
+ * resolve the `data:` module natively, and keep it.
+ */
+export const HOST_GLOBAL_MODULE_PATH = "_scrml/_global.js";
+
+/** The text of `HOST_GLOBAL_MODULE_PATH`: the only reader of `globalThis`, in a module no user code shares. */
+export const HOST_GLOBAL_MODULE_TEXT =
+  "// scrml host-global alias module (SPEC §47.1.1): compiler output imports the global object from here\n" +
+  "export default globalThis;\n";
+
+/**
+ * `js` with its `HOST_GLOBAL_ALIAS_DECL` import pointed at `specifier` (a relative path
+ * to `HOST_GLOBAL_MODULE_PATH`) instead of the `data:` module. Returns `js` unchanged
+ * when it does not import the alias from the `data:` module.
+ */
+export function relocateHostGlobalImport(js: string, specifier: string): string {
+  if (!js || !js.includes(HOST_GLOBAL_ALIAS_DECL)) return js;
+  return js.split(HOST_GLOBAL_ALIAS_DECL).join(
+    HOST_GLOBAL_ALIAS_DECL.replace(`"${HOST_GLOBAL_DATA_SPECIFIER}"`, JSON.stringify(specifier)),
+  );
+}
 
 /** The alias in a classic-script artifact (a worker bundle): declared before, and outside, the IIFE the script's own code runs in. */
 export const HOST_GLOBAL_ALIAS_SCRIPT_DECL = "var _scrml_g = globalThis; // host globals; the worker's code runs in the IIFE below (SPEC §47.1.1)";

@@ -41,6 +41,7 @@ import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
 import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
+import { relocateHostGlobalImport, HOST_GLOBAL_MODULE_PATH, HOST_GLOBAL_MODULE_TEXT } from "./codegen/host-global-alias.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { withCompilationPlaceholderToken, scrubPlaceholderToken, currentPlaceholderToken } from "./placeholder-nonce.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
@@ -947,6 +948,21 @@ export function createClientHelperRelocator(outputDir, projectRoot) {
       return copies.size;
     },
   };
+}
+
+/**
+ * The import specifier, from an artifact written into `writeDir`, of the compiler's
+ * same-origin host-global alias module `<outputDir>/_scrml/_global.js`
+ * (codegen/host-global-alias.ts `HOST_GLOBAL_MODULE_PATH`).
+ *
+ * @param {string} writeDir
+ * @param {string} outputDir
+ * @returns {string}
+ */
+function hostGlobalModuleSpecifier(writeDir, outputDir) {
+  let rel = toPosixSpecifier(relative(resolve(writeDir), join(resolve(outputDir), HOST_GLOBAL_MODULE_PATH)));
+  if (!rel.startsWith(".")) rel = "./" + rel;
+  return rel;
 }
 
 /**
@@ -3961,6 +3977,7 @@ function _compileScrmlImpl(options = {}) {
         if (output.libraryJs) {
           let s = rewriteRelativeImportPaths(output.libraryJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, gateDir, outputDir, bundledStdlib);
+          s = relocateHostGlobalImport(s, hostGlobalModuleSpecifier(gateDir, outputDir));
           pushArtifact(filePath, `${base}.js`, s);
         }
         // #1045 F1 — the SAME two rewrites the write phase applies to client JS,
@@ -4044,6 +4061,7 @@ function _compileScrmlImpl(options = {}) {
     // every one has a collision-free dist path (E-CG-015), together with the
     // stdlib shims and the shared runtime — see "Commit the staged writes".
     const stagedWrites = []; // { targetDir, fullPath, contents }
+    let hostGlobalModuleNeeded = false; // a written library `<base>.js` imports `_scrml/_global.js`
 
     if (!emitGateFailed && cgResult.outputs) {
       // F-COMPILE-001 Option A: preserve source-tree structure in dist/.
@@ -4349,6 +4367,12 @@ function _compileScrmlImpl(options = {}) {
           const { targetDir } = pathFor(filePath, ".js");
           let s = rewriteRelativeImportPaths(output.libraryJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
+          // S458 — a browser may load the library module, and refuses a `data:` import
+          // under a `script-src 'self'` CSP: the alias comes from a written
+          // same-origin `_scrml/_global.js` instead (staged after this loop).
+          const relocated = relocateHostGlobalImport(s, hostGlobalModuleSpecifier(targetDir, outputDir));
+          if (relocated !== s) hostGlobalModuleNeeded = true;
+          s = relocated;
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
         if (output.clientJs) {
@@ -4440,6 +4464,29 @@ function _compileScrmlImpl(options = {}) {
             const { base } = pathFor(filePath, ".test.js");
             if (verbose) log(`  [CG] Wrote user tests: ${base}.test.js`);
           }
+        }
+      }
+
+      // S458 — the same-origin alias module a written library `<base>.js` imports
+      // (see relocateHostGlobalImport). A user source that would compile onto the
+      // same path is an E-CG-015 collision, as for any two artifacts.
+      if (hostGlobalModuleNeeded) {
+        const fullPath = join(outputDir, HOST_GLOBAL_MODULE_PATH);
+        const prior = writtenPaths.get(fullPath);
+        if (prior !== undefined) {
+          writeAborted = true;
+          allErrors.push({
+            stage: "CG",
+            code: "E-CG-015",
+            message:
+              `E-CG-015: conflicting output paths — \`${prior}\` compiles to \`${fullPath}\`, ` +
+              `where the compiler writes its host-global alias module. Rename the source file.`,
+            file: prior,
+            severity: "error",
+          });
+        } else {
+          stagedWrites.push({ targetDir: dirname(fullPath), fullPath, contents: HOST_GLOBAL_MODULE_TEXT });
+          writtenPaths.set(fullPath, "<scrml host-global alias module>");
         }
       }
     }
