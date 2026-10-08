@@ -1665,6 +1665,23 @@ function forEachChildNode(node: Record<string, unknown>, fn: (child: LogicNode) 
 /**
  * Walk an AST node tree and find all meta blocks, wherever they sit (total descent).
  */
+/**
+ * The `^{}` nodes that sit inside an `<each>` row template (an `each-block`'s body, at any
+ * depth). impl#1 emits no per-row `^{}` effect: the row renderer has no lowering for a meta
+ * node, so a runtime `^{}` there never ran (S458 final F7).
+ */
+function collectMetaInEachRows(nodes: LogicNode[]): WeakSet<object> {
+  const out = new WeakSet<object>();
+  const visit = (node: LogicNode, inRow: boolean): void => {
+    if (!node || typeof node !== "object") return;
+    if (inRow && isMetaKind(node.kind)) out.add(node);
+    const nowInRow = inRow || node.kind === "each-block";
+    forEachChildNode(node as Record<string, unknown>, (child) => visit(child, nowInRow));
+  };
+  for (const n of nodes) visit(n, false);
+  return out;
+}
+
 function findMetaBlocks(nodes: LogicNode[], visitor: (node: LogicNode) => void): void {
   if (!Array.isArray(nodes)) return;
   const visit = (node: LogicNode): void => {
@@ -1845,9 +1862,32 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
     );
     const enclosingNames = collectEnclosingNames(nodes);
     const nestedChecked = new WeakSet<object>();
+    const metaInEachRows = collectMetaInEachRows(nodes);
     findMetaBlocks(nodes, (metaNode) => {
       const body = metaNode.body || [];
       const isCompileTime = bodyUsesCompileTimeApis(body);
+
+      // S458 final F7 — a RUNTIME `^{}` inside an `<each>` row. impl#1 emits no per-row
+      // `^{}` effect (the row renderer has no lowering for it), so the block never ran and
+      // the row's `as` binding cannot be captured per row. Refused with that cause rather
+      // than as a free-identifier error on the `as` binding (or, with no such read, a
+      // silent drop). A compile-time `^{}` there (static emit()) is spliced as before.
+      if (!isCompileTime && body.length > 0 && metaInEachRows.has(metaNode)) {
+        // The row template is reachable under two keys of the each-block; report once.
+        if (metaNode._metaAllowListRefused === true) return;
+        allErrors.push(new MetaError(
+          "E-META-001",
+          `E-META-001: a runtime ^{} inside an <each> row is not supported — impl#1 does not emit a ` +
+          `per-row ^{} effect, so the row's \`as\` binding cannot be captured per row and the block ` +
+          `would never run (§22.5). Render the row from its binding directly (e.g. \`\${person.name}\`), ` +
+          `use a compile-time ^{} with emit() for static row markup, or move the runtime ^{} outside ` +
+          `the <each> and read the list with meta.get(…).`,
+          metaNode.span || { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
+        ));
+        metaNode._metaAllowListRefused = true;
+        metaNode._metaCompileTime = false;
+        return;
+      }
 
       // §22.12 (S457) — the CLOSED allow-list (meta-allow-list.ts), on every ^{} body
       // whatever its classification. Supersedes the S134 deny list of host names

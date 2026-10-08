@@ -53,7 +53,7 @@ type AnyNode = Record<string, any> & { type: string; start: number; end: number 
 
 export type MetaCaptureResult =
   | { ok: true; text: string; used: Set<string> }
-  | { ok: false; refused: string[] };
+  | { ok: false; refused: string[]; assigned?: string[] };
 
 function declarePattern(p: AnyNode | null, scope: Scope): void {
   if (!p) return;
@@ -111,6 +111,7 @@ export function rewriteMetaBodyCaptures(bodyText: string, captured: ReadonlySet<
   }
   const edits: Array<{ start: number; end: number; text: string }> = [];
   const refused = new Set<string>();
+  const assigned = new Set<string>();
   const used = new Set<string>();
 
   const reference = (id: AnyNode, scope: Scope, write: boolean, shorthand: boolean): void => {
@@ -119,7 +120,7 @@ export function rewriteMetaBodyCaptures(bodyText: string, captured: ReadonlySet<
     if (name.startsWith("_scrml_")) return;
     if (!write && SAFE_FREE_NAMES.has(name)) return;
     if (captured.has(name)) {
-      if (write) { refused.add(`${name} (assignment to a captured binding)`); return; }
+      if (write) { assigned.add(name); return; }
       used.add(name);
       const ref = `${META_CAPTURE_VAR}.${name}`;
       edits.push({ start: id.start, end: id.end, text: shorthand ? `${name}: ${ref}` : ref });
@@ -275,7 +276,7 @@ export function rewriteMetaBodyCaptures(bodyText: string, captured: ReadonlySet<
   const fn = (ast as any).body[0].expression as AnyNode;
   walkFunction(fn, new Scope(null));
 
-  if (refused.size > 0) return { ok: false, refused: [...refused] };
+  if (refused.size > 0 || assigned.size > 0) return { ok: false, refused: [...refused], assigned: [...assigned] };
 
   // Splice the edits (highest offset first), then strip the wrapper back off.
   edits.sort((a, b) => b.start - a.start);

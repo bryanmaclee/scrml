@@ -187,3 +187,113 @@ describe("S458 final F3 — a compile-time ^{} in a logic body is refused, never
     expect(errors).toEqual([]);
   });
 });
+
+describe("S458 final F1 — a meta primitive is only ever called directly", () => {
+  // §22.12: "A primitive's member outside this list (`emit.call`, `meta.unknown`) is outside
+  // the allow-list." Closed by construction: no value read, alias, destructure or member.
+  const RUNTIME_REFUSED = [
+    `meta.emit.apply(not, ["<p>a</p>"])`,
+    `const g = meta.get.bind(not)`,
+    `const t = meta.types.foo`,
+    `const s = meta.set.toString()`,
+    `const e = meta.emit\n  e.call(not, "<p>x</p>")`,
+    `const { emit } = meta`,
+    `const m = meta`,
+    `const n = new meta.emit("x")`,
+    `meta.emit.raw("x")`,
+    `const k = meta["get"]`,
+  ];
+  for (const stmt of RUNTIME_REFUSED) {
+    test(`runtime: ${stmt.split("\n")[0]} → E-META-001`, () => {
+      const r = compile(`<program>\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  ${stmt}\n}\n</div>\n</program>\n`);
+      expect(r.codes).toContain("E-META-001");
+    });
+  }
+  const COMPILE_TIME_REFUSED = [
+    `emit.call(not, "<p>a</p>")`,
+    `const e = emit\n  e("<p>x</p>")`,
+    `const n = reflect.name\n  emit("<p>a</p>")`,
+  ];
+  for (const stmt of COMPILE_TIME_REFUSED) {
+    test(`compile-time: ${stmt.split("\n")[0]} → E-META-001`, () => {
+      const r = compile(`<program>\n<div>\n^{\n  ${stmt}\n}\n</div>\n</program>\n`);
+      expect(r.codes).toContain("E-META-001");
+    });
+  }
+  test("controls: direct calls and the data members compile", () => {
+    for (const stmt of [
+      `meta.emit(meta.get("x"))`,
+      `meta.emit("<p>" + meta.scopeId.length + "</p>")`,
+      `const b = meta.bindings`,
+      `const r = meta.types.reflect("X")`,
+      `meta.interval(1000, () => { meta.emit("t") })`,
+    ]) {
+      const r = compile(`<program>\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  ${stmt}\n}\n</div>\n</program>\n`);
+      expect(r.codes).toEqual([]);
+    }
+    const ct = compile(`<program>\n<div>\n^{\n  emit("<p>a</p>")\n  emit.raw("<p>b</p>")\n}\n</div>\n</program>\n`);
+    expect(ct.codes).toEqual([]);
+  });
+});
+
+describe("S458 final F2 — caller / arguments / callee refused; runtime bodies are strict", () => {
+  for (const m of ["caller", "arguments", "callee"]) {
+    test(`runtime: f.${m} → E-META-001`, () => {
+      const r = compile(`<program>\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  const f = () => 1\n  meta.emit("<p>" + f.${m} + "</p>")\n}\n</div>\n</program>\n`);
+      expect(r.codes).toContain("E-META-001");
+      expect(r.messages.join("\n")).toContain(`member '${m}'`);
+    });
+    test(`compile-time: f.${m} → E-META-001`, () => {
+      const r = compile(`<program>\n<div>\n^{\n  const f = () => 1\n  emit("<p>" + f.${m} + "</p>")\n}\n</div>\n</program>\n`);
+      expect(r.codes).toContain("E-META-001");
+    });
+  }
+  test("the emitted runtime effect body opens with a \"use strict\" directive", () => {
+    const r = compile(`<program>\n<x> = 0\n<div>\n^{\n  meta.emit("<p>" + meta.get("x") + "</p>")\n}\n</div>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toMatch(/meta_effect\("_scrml_meta_\w+", function\(meta\) \{\n  "use strict";\n/);
+    expect(run(r.clientJs).out).toEqual(["<p>0</p>"]);
+  });
+});
+
+describe("S458 final F5/F6 — refusal messages name the source form, not an internal node kind", () => {
+  test("an unquoted emit() attribute says to quote the value", () => {
+    const r = compile(`<program>\n<div>\n^{\n  emit("<p class=nav>x</p>")\n}\n</div>\n</program>\n`);
+    expect(r.codes).toContain("E-META-EVAL-002");
+    const msg = r.messages.join("\n");
+    expect(msg).toContain("quote the attribute value");
+    expect(msg).not.toContain("variable-ref");
+  });
+  test("a plain `=` reassignment in a ^{} body is described as source, not 'tilde-decl'", () => {
+    const r = compile(`<program>\n<div>\n^{\n  let s = "a"\n  s = "b"\n  emit("<p>" + s + "</p>")\n}\n</div>\n</program>\n`);
+    expect(r.codes).toContain("E-META-001");
+    const msg = r.messages.join("\n");
+    expect(msg).not.toContain("tilde-decl");
+    expect(msg).toContain("reassigning a binding with a plain `=`");
+  });
+  test("a write to a captured binding: \"assigns to the captured binding `counter`\"", () => {
+    const r = compile(`<program>\n<x> = 0\n\${ let counter = 1 }\n<div>\n^{\n  meta.get("x")\n  counter += 1\n}\n</div>\n</program>\n`);
+    expect(r.codes).toContain("E-META-001");
+    const msg = r.messages.join("\n");
+    expect(msg).toContain("assigns to the captured binding `counter`");
+    expect(msg).not.toContain("(assignment to a captured binding)");
+  });
+});
+
+describe("S458 final F7 — a runtime ^{} in an <each> row is refused with its cause", () => {
+  test("reading the `as` binding: one E-META-001 saying per-row ^{} is unsupported (not 'person' is not available)", () => {
+    const r = compile(`<program>\n<people> = [{ name: "Ann" }]\n<ul>\n<each in=@people as person><li>^{ meta.emit(person.name) }</li></each>\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual(["E-META-001"]);
+    expect(r.messages[0]).toContain("a runtime ^{} inside an <each> row is not supported");
+    expect(r.messages[0]).not.toContain("'person' is not available");
+  });
+  test("a runtime ^{} in a row that reads no binding is refused too (it never ran — base dropped it)", () => {
+    const r = compile(`<program>\n<people> = [{ name: "Ann" }]\n<x> = 0\n<ul>\n<each in=@people as person><li>^{ meta.emit(meta.get("x")) }</li></each>\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual(["E-META-001"]);
+  });
+  test("a compile-time ^{} in a row splices its static markup into every row", () => {
+    const r = compile(`<program>\n<people> = [{ name: "Ann" }, { name: "Bo" }]\n<ul>\n<each in=@people as person>^{ emit("<li>row</li>") }</each>\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toContain(`"row"`);
+  });
+});

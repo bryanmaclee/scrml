@@ -712,8 +712,13 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
           const interpolated = v && typeof v === "object" && v.kind === "string-literal"
             && typeof (v as { value?: unknown }).value === "string" && ((v as { value: string }).value).includes("${");
           if (v && typeof v === "object" && (!EMIT_ATTR_VALUE_KINDS.has(String(v.kind)) || interpolated)) {
+            const what = interpolated
+              ? "a quoted value carrying `${`"
+              : String(v.kind) === "variable-ref"
+                ? "an unquoted value — quote the attribute value"
+                : "an expression value (a `${}`, a call or a reference)";
             refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` attribute ` +
-              `'${String(a.name)}' a '${String(v.kind)}'${interpolated ? " (interpolated)" : ""} value; impl#1 admits only plain ` +
+              `'${String(a.name)}' ${what} (\`${String(a.name)}="…"\`); impl#1 admits only plain ` +
               `attribute values — a literal string or no value — in emit() output (§22.4.1).`);
           }
         }
@@ -1034,9 +1039,10 @@ function processNodeList(
       for (const key of Object.keys(n)) {
         if (key === "span" || key === "tabSpan" || key === "loc") continue;
         const v = n[key];
-        // Markup position = a markup node's `children` (F3). A logic node's `body`, a
-        // branch, a loop / function body, … are statement lists, not markup positions.
-        const childMarkupPosition = key === "children" && node.kind !== "logic";
+        // Markup position (F3): below markup — an element's children, an `<each>` row, … —
+        // until a `${}` logic node is entered; from there on every array is a statement
+        // list (a body, a branch, a loop / function body) until a markup element again.
+        const childMarkupPosition = node.kind === "logic" ? false : (markupPosition || node.kind === "markup");
         if (Array.isArray(v) && v.some((el) => el && typeof el === "object" && typeof (el as ASTNode).kind === "string")) {
           if (processNodeList(v as ASTNode[], typeRegistry, errors, scopeDecls, filePath, nonMetaReads, childMarkupPosition)) changed = true;
         } else if (v && typeof v === "object" && typeof (v as ASTNode).kind === "string") {

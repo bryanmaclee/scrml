@@ -124,7 +124,7 @@ describe("S457 — runtime ^{} bodies are held to the same allow-list", () => {
     ["document", `const d = document.cookie`, "document"],
     ["window", `const w = window`, "window"],
     ["setInterval (use meta.interval)", `const id = setInterval(() => meta.emit("x"), 10)`, "setInterval"],
-    ["meta member outside the 12", `meta.unknownThing()`, "meta.unknownThing"],
+    ["meta member outside the 12", `meta.unknownThing()`, "meta.unknownThing(…)"],
     ["destructured constructor (no evaluator backstop at runtime)", `const { constructor: K } = meta.get`, "constructor"],
     ["JSON", `meta.emit(JSON.stringify(1))`, "JSON"],
     ["markup value (attribute expressions not walked — fail closed)", `const el = <div class="a"/>`, "markup value"],

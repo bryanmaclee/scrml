@@ -52,7 +52,16 @@ export const META_REFUSED_MEMBERS: ReadonlySet<string> = new Set([
   "__defineSetter__",
   "__lookupGetter__",
   "__lookupSetter__",
+  // Sloppy-mode reflective reach to a caller and its live arguments (S458 final F2).
+  // Runtime ^{} bodies are emitted under "use strict", where these throw; they are never
+  // meaningful in a ^{} body, so they are refused rather than left to the host.
+  "caller",
+  "arguments",
+  "callee",
 ]);
+
+/** The three members refused as sloppy-mode caller reach (message wording only). */
+const CALLER_REACH_MEMBERS: ReadonlySet<string> = new Set(["caller", "arguments", "callee"]);
 
 /** §22.5.1 — the 12 runtime `meta` members. */
 export const META_RUNTIME_MEMBERS: ReadonlySet<string> = new Set([
@@ -122,14 +131,93 @@ function freeIdentMessage(name: string): string {
 }
 
 function refusedMemberMessage(name: string): string {
-  return `E-META-001: member '${name}' is refused inside ^{} meta blocks on every value — it reaches ` +
-    `a constructor or prototype chain. ${META_ALLOWED_SET_TEXT}`;
+  const reach = CALLER_REACH_MEMBERS.has(name)
+    ? "it reaches a function's caller or its live arguments"
+    : "it reaches a constructor or prototype chain";
+  return `E-META-001: member '${name}' is refused inside ^{} meta blocks on every value — ${reach}. ` +
+    `${META_ALLOWED_SET_TEXT}`;
+}
+
+// ---------------------------------------------------------------------------
+// F1 (S458 final review) — a primitive is only ever CALLED, by construction
+// ---------------------------------------------------------------------------
+
+/** `meta` members that are functions: admitted only as the callee of a direct call. */
+const META_CALLED_MEMBERS: ReadonlySet<string> = new Set([
+  "get", "set", "subscribe", "emit", "cleanup", "interval", "timeout", "clearInterval", "clearTimeout",
+]);
+/** `meta` members that are data (a string / the frozen bindings object): read as values. */
+const META_VALUE_MEMBERS: ReadonlySet<string> = new Set(["scopeId", "bindings"]);
+
+/**
+ * Judge one access path rooted at a primitive (`["meta", "emit"]` for `meta.emit`), given
+ * whether it is the callee of a direct call. §22.12: "A primitive's member outside this
+ * list (`emit.call`, `meta.unknown`) is outside the allow-list." Enforced by construction
+ * rather than by a list of bad members: a primitive function may ONLY be called directly —
+ * `emit(…)`, `emit.raw(…)`, `reflect(…)`, `meta.<fn>(…)`, `meta.types.reflect(…)` — never
+ * read as a value, aliased (`const e = meta.emit`), destructured (`const { emit } = meta`),
+ * or have a member taken (`meta.emit.apply`, `meta.get.bind`, `meta.set.toString`).
+ * `meta.scopeId` / `meta.bindings` are data and are read like any value. Returns null when
+ * admitted, else the refusal message.
+ */
+function judgePrimitivePath(path: readonly string[], called: boolean): string | null {
+  const [root, m1, m2] = path;
+  if (root === "compiler") return null; // §22.4 reserved namespace — E-META-010's to report
+  let ok = false;
+  if (root === "emit") ok = called && (path.length === 1 || (path.length === 2 && m1 === "raw"));
+  else if (root === "reflect") ok = called && path.length === 1;
+  else if (root === "meta") {
+    if (m1 !== undefined && META_VALUE_MEMBERS.has(m1)) ok = true;
+    else if (m1 !== undefined && META_CALLED_MEMBERS.has(m1)) ok = called && path.length === 2;
+    else if (m1 === "types") ok = called && path.length === 3 && m2 === "reflect";
+  }
+  if (ok) return null;
+  const written = path.join(".");
+  return constructMessage(
+    `'${written}${called ? "(…)" : ""}' — a meta primitive may only be called directly ` +
+    `(emit(…), emit.raw(…), reflect(…), meta.get(…), meta.types.reflect(…), …); it cannot be read ` +
+    `as a value, aliased, destructured, or have a member taken (meta.scopeId and meta.bindings are ` +
+    `the data members)`,
+  );
 }
 
 const COMPUTED_KEY_WHAT =
   "a computed member access with a non-literal key (`x[k]` — `k` could name a constructor or " +
   "prototype; read an element with `x.at(i)`, iterate with `for … of`, or look a key up in a " +
   "Map with `.get(k)`)";
+
+/**
+ * The SOURCE form an AST statement / expression kind stands for, for a refusal message —
+ * never the internal node-kind name (S458 final F6).
+ */
+const SOURCE_FORM: Readonly<Record<string, string>> = {
+  "tilde-decl": "reassigning a binding with a plain `=` (`x = …`) — use a compound assignment (`x += …`) or declare a new `const`",
+  "reactive-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
+  "state-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
+  "type-decl": "a type declaration — declare types outside the ^{} block",
+  "import-decl": "an import — import at file scope",
+  "export-decl": "an export",
+  "try-stmt": "`try` / `catch`",
+  "throw-stmt": "`throw`",
+  "defer-stmt": "`defer`",
+  "when-effect": "a `when` effect",
+  "engine-decl": "an engine declaration",
+  "component-def": "a component definition",
+  "markup": "markup (build markup with emit() / meta.emit())",
+  "switch-stmt": "`switch`",
+  "do-while-stmt": "`do … while`",
+  "class-decl": "a class",
+  TryStatement: "`try` / `catch`",
+  ThrowStatement: "`throw`",
+  ClassDeclaration: "a class",
+  LabeledStatement: "a labelled statement",
+  WithStatement: "`with`",
+  DebuggerStatement: "`debugger`",
+};
+
+function sourceFormOf(kind: string, what: "statement" | "expression"): string {
+  return SOURCE_FORM[kind] ?? `a ${what} of a form not admitted here`;
+}
 
 function constructMessage(what: string): string {
   return `E-META-001: ${what} is not admitted inside ^{} meta blocks. ${META_ALLOWED_SET_TEXT}`;
@@ -467,7 +555,7 @@ function walkStmt(n: AnyNode, scope: Scope, ctx: MetaAllowListContext, report: R
       return;
     default: {
       // A statement kind this reader does not know — fail closed.
-      report(String(n.kind), constructMessage(`the statement form '${String(n.kind)}'`), span);
+      report(String(n.kind), constructMessage(sourceFormOf(String(n.kind), "statement")), span);
       return;
     }
   }
@@ -517,6 +605,16 @@ function rootIdentOf(e: AnyNode): string | null {
   return cur && cur.kind === "ident" ? String(cur.name) : null;
 }
 
+/** The primitive access path of a pure `ident(.member)*` chain whose root is a primitive, else null. */
+function primitivePathOf(e: AnyNode | undefined, scope: Scope, ctx: MetaAllowListContext): string[] | null {
+  const props: string[] = [];
+  let cur: AnyNode | undefined = e;
+  while (cur && cur.kind === "member") { props.unshift(String(cur.property)); cur = cur.object; }
+  if (!cur || cur.kind !== "ident") return null;
+  if (resolve(String(cur.name), scope, ctx).kind !== "primitive") return null;
+  return [String(cur.name), ...props];
+}
+
 function literalKeyOf(e: AnyNode): string | null {
   if (!e) return null;
   if (e.kind === "lit" && (e.litType === "string" || e.litType === "number")) return String(e.value);
@@ -534,6 +632,11 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
     case "ident": {
       const r = resolve(String(e.name), scope, ctx);
       if (r.kind === "refused") report(String(e.name), freeIdentMessage(String(e.name)), span);
+      else if (r.kind === "primitive") {
+        // Reached here = not the callee of a direct call (that case returns earlier).
+        const why = judgePrimitivePath([String(e.name)], false);
+        if (why) report(String(e.name), why, span);
+      }
       return;
     }
     case "lit": {
@@ -597,15 +700,13 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
     case "member": {
       const prop = String(e.property);
       if (META_REFUSED_MEMBERS.has(prop)) { report(prop, refusedMemberMessage(prop), span); X(e.object); return; }
-      if (e.object?.kind === "ident") {
-        const r = resolve(String(e.object.name), scope, ctx);
-        if (r.kind === "primitive") {
-          const members = r.members;
-          if (members && !members.has(prop)) {
-            report(`${e.object.name}.${prop}`, constructMessage(`'${e.object.name}.${prop}' (not in the closed member list of '${e.object.name}')`), span);
-          }
-          return;
-        }
+      // F1: a member chain rooted at a primitive, NOT in callee position (a direct call
+      // is judged in the call case and never reaches here).
+      const pp = primitivePathOf(e, scope, ctx);
+      if (pp) {
+        const why = judgePrimitivePath(pp, false);
+        if (why) report(pp.join("."), why, span);
+        return;
       }
       X(e.object);
       return;
@@ -631,6 +732,31 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
     case "call":
     case "new": {
       const callee = e.callee as AnyNode | undefined;
+      // F1: a primitive is admitted only as the callee of a DIRECT call (not `new`).
+      const cpp = primitivePathOf(callee, scope, ctx);
+      if (cpp && e.kind === "call") {
+        const why = judgePrimitivePath(cpp, true);
+        if (why) report(cpp.join("."), why, span);
+        // A refused member inside the path is still reported (e.g. meta.bindings.constructor(…)).
+        for (const m of cpp.slice(1)) if (META_REFUSED_MEMBERS.has(m)) report(m, refusedMemberMessage(m), span);
+        // §22.4.2 rule 1 — `reflect(TypeName)`: a bare PascalCase argument is a TYPE NAME
+        // (quoted to a string before evaluation), not a value read. An unknown one is
+        // E-META-003's to report.
+        if (cpp.length === 1 && cpp[0] === "reflect"
+            && (e.args ?? []).length === 1 && e.args[0]?.kind === "ident"
+            && /^[A-Z][A-Za-z0-9_$]*$/.test(String(e.args[0].name))
+            && resolve(String(e.args[0].name), scope, ctx).kind === "refused") {
+          return;
+        }
+        for (const a of e.args ?? []) X(a);
+        return;
+      }
+      if (cpp && e.kind !== "call") {
+        const why = judgePrimitivePath(cpp, false);
+        if (why) report(cpp.join("."), why, span);
+        for (const a of e.args ?? []) X(a);
+        return;
+      }
       if (callee?.kind === "ident") {
         const r = resolve(String(callee.name), scope, ctx);
         X(callee);
@@ -697,7 +823,7 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
       report("[markup value]", constructMessage("a markup value (build markup with emit() / meta.emit())"), span);
       return;
     default:
-      report(String(e.kind), constructMessage(`the expression form '${String(e.kind)}'`), span);
+      report(String(e.kind), constructMessage(sourceFormOf(String(e.kind), "expression")), span);
       return;
   }
 }
@@ -798,6 +924,28 @@ class EsChecker {
     if (META_REFUSED_MEMBERS.has(name)) this.report(name, refusedMemberMessage(name));
   }
 
+  /** Primitive access path of a pure non-computed `Identifier(.name)*` chain, else null. */
+  private primitivePath(e: any, scope: Scope): string[] | null {
+    const props: string[] = [];
+    let cur = e;
+    while (cur && cur.type === "MemberExpression") {
+      const nm = this.memberName(cur);
+      if (nm === null) return null;
+      props.unshift(nm);
+      cur = cur.object;
+    }
+    if (!cur || cur.type !== "Identifier") return null;
+    if (resolve(cur.name, scope, this.ctx).kind !== "primitive") return null;
+    return [cur.name, ...props];
+  }
+
+  private judgePath(path: string[], called: boolean): boolean {
+    const why = judgePrimitivePath(path, called);
+    if (why) this.report(path.join("."), why);
+    for (const m of path.slice(1)) if (META_REFUSED_MEMBERS.has(m)) this.report(m, refusedMemberMessage(m));
+    return why === null;
+  }
+
   private memberName(m: any): string | null {
     if (!m.computed && m.property?.type === "Identifier") return m.property.name;
     if (m.property?.type === "Literal") return String(m.property.value);
@@ -853,7 +1001,7 @@ class EsChecker {
         if (s.label) this.refuse("a labelled jump");
         return;
       case "EmptyStatement": return;
-      default: this.refuse(`the statement form '${s.type}'`); return;
+      default: this.report(s.type, constructMessage(sourceFormOf(s.type, "statement"))); return;
     }
   }
 
@@ -906,6 +1054,7 @@ class EsChecker {
       case "Identifier": {
         const r = resolve(e.name, scope, this.ctx);
         if (r.kind === "refused") this.report(e.name, freeIdentMessage(e.name));
+        else if (r.kind === "primitive") this.judgePath([e.name], false); // F1: not a direct callee
         return;
       }
       case "Literal": return;
@@ -947,15 +1096,13 @@ class EsChecker {
         } else if (META_REFUSED_MEMBERS.has(name)) {
           this.report(name, refusedMemberMessage(name));
         }
-        if (e.object.type === "Identifier") {
-          const r = resolve(e.object.name, scope, this.ctx);
-          if (r.kind === "primitive") {
-            const members = r.members;
-            if (members && (name === null || !members.has(name))) {
-              this.refuse(`'${e.object.name}.${name ?? "[…]"}' (not in the closed member list of '${e.object.name}')`);
-            }
-            return;
-          }
+        // F1: a member chain rooted at a primitive in a non-callee position.
+        const pp = this.primitivePath(e, scope);
+        if (pp) { this.judgePath(pp, false); return; }
+        if (e.object.type === "Identifier" && resolve(e.object.name, scope, this.ctx).kind === "primitive") {
+          // A computed member on a primitive (`meta[k]`) — no path; never admitted.
+          this.refuse(`a computed member access on '${e.object.name}'`);
+          return;
         }
         this.expr(e.object, scope);
         return;
@@ -963,6 +1110,12 @@ class EsChecker {
       case "CallExpression":
       case "NewExpression": {
         if (e.callee.type === "Super") { this.refuse("`super`"); return; }
+        const cpp = this.primitivePath(e.callee, scope);
+        if (cpp) {
+          this.judgePath(cpp, e.type === "CallExpression");
+          for (const a of e.arguments) this.expr(a, scope);
+          return;
+        }
         this.expr(e.callee, scope);
         for (const a of e.arguments) this.expr(a, scope);
         return;
@@ -976,7 +1129,7 @@ class EsChecker {
       case "ClassExpression": this.refuse("a class"); return;
       case "AwaitExpression": this.refuse("`await`"); return;
       case "YieldExpression": this.refuse("`yield`"); return;
-      default: this.refuse(`the expression form '${e.type}'`); return;
+      default: this.report(e.type, constructMessage(sourceFormOf(e.type, "expression"))); return;
     }
   }
 }
