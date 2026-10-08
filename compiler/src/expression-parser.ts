@@ -23,6 +23,7 @@ import * as acorn from "acorn";
 import { generate as astringGenerate } from "astring";
 import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
+import { boundNamesOf } from "./binding-names.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -3318,30 +3319,21 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
     if (p.type === "Identifier") {
       return { name: p.name as string };
     }
-    if (p.type === "RestElement") {
+    if (p.type === "RestElement" && (p as { argument: ESNode }).argument?.type === "Identifier") {
       const arg = (p as { argument: ESNode }).argument;
       return { name: arg.name as string ?? "", isRest: true };
     }
-    if (p.type === "AssignmentPattern") {
+    if (p.type === "AssignmentPattern" && (p as { left: ESNode }).left?.type === "Identifier") {
       const left = (p as { left: ESNode }).left;
       const right = (p as { right: ESNode }).right;
       const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
       return { name: left.name as string ?? "", defaultValue };
     }
-    // Destructured patterns — not yet structured. S458: the names the pattern BINDS are
-    // recorded (`boundNames`) so a consumer that resolves names in the body (component
-    // prop substitution) sees `({ label }) => label` read the PARAMETER, not a prop.
-    const boundNames: string[] = [];
-    const collect = (q: ESNode | null | undefined): void => {
-      if (!q) return;
-      if (q.type === "Identifier") boundNames.push(q.name as string);
-      else if (q.type === "ObjectPattern") for (const pr of (q.properties as ESNode[]) ?? []) collect((pr.type === "RestElement" ? pr.argument : pr.value) as ESNode);
-      else if (q.type === "ArrayPattern") for (const el of (q.elements as ESNode[]) ?? []) collect(el);
-      else if (q.type === "RestElement") collect(q.argument as ESNode);
-      else if (q.type === "AssignmentPattern") collect(q.left as ESNode);
-    };
-    collect(p);
-    return { name: "__destructured__", boundNames };
+    // Destructured patterns (a defaulted / rest one included) — not yet structured. S458:
+    // the names the pattern BINDS are recorded (`boundNames`, the shared binding-names.ts
+    // answer) so a consumer that resolves names in the body (component prop
+    // substitution) sees `({ label }) => label` read the PARAMETER, not a prop.
+    return { name: "__destructured__", boundNames: boundNamesOf(p) };
   });
 }
 

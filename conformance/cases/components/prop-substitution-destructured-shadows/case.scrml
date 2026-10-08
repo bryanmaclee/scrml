@@ -1,0 +1,23 @@
+<program>
+<v> = 7
+<out> = ""
+const C = <div class="c" props={ n: number }>
+    ${
+      function a1() { const { n } = { n: 1 }; return n + 1 }
+      function a2() { const [n] = [1]; return n + 1 }
+      function f3({ n }) { return n }
+      function f4([n]) { return n }
+      function f5(a, { n }) { return a + n }
+      function a6() { let s = 0; for (const [k, n] of [[1, 2]]) { s = n }; return s }
+      function a7() { let s = 0; for (const { n } of [{ n: 3 }]) { s = n }; return s }
+      function a8() { let s = 0; for (const [n, m] of [[4, 5]]) { s = n + m }; return s }
+      function f9({ n }) { n = n + 1; return n }
+      function run() {
+        @out = [a1(), a2(), f3({ n: 1 }), f4([1]), f5(1, { n: 2 }), a6(), a7(), a8(), f9({ n: 1 }), n].join(",")
+      }
+    }
+    <button class="r" onclick=run()>run</button>
+</>
+<C n=@v/>
+<p id="o">${@out}</p>
+</program>

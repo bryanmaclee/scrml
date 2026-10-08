@@ -27,6 +27,7 @@
  * prop is referenced — see `propNamesReferencedInUnparsedText`).
  */
 import { ScrmlParser } from "./scrml-acorn.ts";
+import { boundNamesOf } from "./binding-names.ts";
 
 type ES = { type: string; start: number; end: number; [k: string]: unknown };
 
@@ -44,37 +45,9 @@ const PARSE_OPTS = {
   allowReturnOutsideFunction: true,
 } as const;
 
-/** Every name a binding pattern declares (`a`, `{ a, b: c }`, `[d, ...e]`, `f = 1`). */
+/** Every name a binding pattern declares — the shared answer (binding-names.ts). */
 function patternNames(p: ES | null | undefined, out: string[] = []): string[] {
-  if (!p) return out;
-  switch (p.type) {
-    case "Identifier": out.push(p.name as string); break;
-    case "ObjectPattern":
-      for (const prop of (p.properties as ES[]) ?? []) {
-        if (prop.type === "RestElement") patternNames(prop.argument as ES, out);
-        else patternNames(prop.value as ES, out);
-      }
-      break;
-    case "ArrayPattern": for (const el of (p.elements as ES[]) ?? []) patternNames(el, out); break;
-    case "RestElement": patternNames(p.argument as ES, out); break;
-    case "AssignmentPattern": patternNames(p.left as ES, out); break;
-  }
-  return out;
-}
-
-/** Names declared DIRECTLY in a statement list (block scope; `var` / `function` included). */
-function declaredIn(stmts: ES[]): string[] {
-  const out: string[] = [];
-  for (const s of stmts ?? []) {
-    if (!s) continue;
-    if (s.type === "VariableDeclaration") {
-      for (const d of (s.declarations as ES[]) ?? []) patternNames(d.id as ES, out);
-    } else if ((s.type === "FunctionDeclaration" || s.type === "ClassDeclaration") && s.id) {
-      out.push((s.id as ES).name as string);
-    } else if (s.type === "ExportNamedDeclaration" && s.declaration) {
-      out.push(...declaredIn([s.declaration as ES]));
-    }
-  }
+  out.push(...boundNamesOf(p));
   return out;
 }
 
@@ -198,23 +171,31 @@ export function substitutePropsInJsSource(
       case "Literal": case "TemplateElement": case "ThisExpression": case "Super": case "EmptyStatement":
       case "DebuggerStatement": case "PrivateIdentifier":
         return;
+      // A statement list is walked IN ORDER with ONE scope set that its declarations grow
+      // (binding-names.ts rule 1: a declaration shadows from its point of declaration
+      // onward — the same rule the structured walker applies). A declaration statement
+      // adds its names to the `shadow` set it is visited with.
       case "Program": case "BlockStatement": case "StaticBlock": {
         const inner = new Set(shadow);
-        for (const n of declaredIn(node.body as ES[])) inner.add(n);
         for (const s of (node.body as ES[]) ?? []) visit(s, node, "body", inner);
         return;
       }
       case "SwitchStatement": {
         visit(node.discriminant as ES, node, "discriminant", shadow);
         const inner = new Set(shadow);
-        for (const c of (node.cases as ES[]) ?? []) for (const n of declaredIn(c.consequent as ES[])) inner.add(n);
         for (const c of (node.cases as ES[]) ?? []) { visit(c.test as ES, c, "test", inner); for (const s of (c.consequent as ES[]) ?? []) visit(s, c, "consequent", inner); }
         return;
       }
-      case "FunctionDeclaration": case "FunctionExpression": case "ArrowFunctionExpression":
+      case "FunctionDeclaration":
+        // The function's own name shadows from its header on — its body included.
+        if (node.id) shadow.add((node.id as ES).name as string);
+        visitFunction(node, shadow);
+        return;
+      case "FunctionExpression": case "ArrowFunctionExpression":
         visitFunction(node, shadow);
         return;
       case "ClassDeclaration": case "ClassExpression": {
+        if (node.type === "ClassDeclaration" && node.id) shadow.add((node.id as ES).name as string);
         const inner = new Set(shadow);
         if (node.id) inner.add((node.id as ES).name as string);
         if (node.superClass) visit(node.superClass as ES, node, "superClass", shadow);
@@ -222,19 +203,41 @@ export function substitutePropsInJsSource(
         return;
       }
       case "VariableDeclaration":
-        for (const d of (node.declarations as ES[]) ?? []) { visitPattern(d.id as ES, shadow); visit(d.init as ES, d, "init", shadow); }
+        // Each declarator's initializer is read BEFORE its own names shadow (`let n = n + 1`
+        // reads the prop); then its names shadow everything after it in this scope.
+        for (const d of (node.declarations as ES[]) ?? []) {
+          visit(d.init as ES, d, "init", shadow);
+          visitPattern(d.id as ES, shadow);
+          for (const n of patternNames(d.id as ES)) shadow.add(n);
+        }
         return;
       case "ForStatement": case "ForInStatement": case "ForOfStatement": {
         const inner = new Set(shadow);
         const head = (node.type === "ForStatement" ? node.init : node.left) as ES | null;
         if (head && head.type === "VariableDeclaration") for (const d of (head.declarations as ES[]) ?? []) for (const n of patternNames(d.id as ES)) inner.add(n);
         if (node.type === "ForStatement") {
-          visit(node.init as ES, node, "init", inner);
+          // `for (let n = n0; …)`: each initializer reads the ENCLOSING binding (rule 1).
+          if (head && head.type === "VariableDeclaration") {
+            const pre = new Set(shadow);
+            for (const d of (head.declarations as ES[]) ?? []) {
+              visit(d.init as ES, d, "init", pre);
+              visitPattern(d.id as ES, inner);
+              for (const n of patternNames(d.id as ES)) pre.add(n);
+            }
+          } else visit(node.init as ES, node, "init", inner);
           visit(node.test as ES, node, "test", inner);
           visit(node.update as ES, node, "update", inner);
         } else {
-          if (head && head.type !== "VariableDeclaration") visitAssignTarget(head, inner);
-          else visit(head, node, "left", inner);
+          // A KEYWORDLESS binder (`for (n of xs)`, `for ([k, v] of xs)`) declares a `const`
+          // (§50.8.5) and shadows like `for (const n of xs)`; only a member head
+          // (`for (o.k of xs)`) is an assignment target.
+          if (head && head.type === "MemberExpression") visitAssignTarget(head, inner);
+          else if (head && head.type !== "VariableDeclaration") {
+            for (const n of patternNames(head)) inner.add(n);
+            visitPattern(head, inner);
+          } else if (head) {
+            for (const d of (head.declarations as ES[]) ?? []) visitPattern(d.id as ES, inner);
+          }
           visit(node.right as ES, node, "right", shadow);
         }
         visit(node.body as ES, node, "body", inner);
@@ -288,8 +291,8 @@ export function substitutePropsInJsSource(
 
 /**
  * The names a `for` HEADER declares (`(let n = 0; n < 3; n++)` → `n`,
- * `(const [k, v] of xs)` → `k`, `v`), read from its parsed tree. Empty when the header
- * declares nothing or does not parse.
+ * `(const [k, v] of xs)` → `k`, `v`, the keywordless `(n of xs)` → `n`, §50.8.5), read
+ * from its parsed tree. Empty when the header declares nothing or does not parse.
  */
 export function bindingNamesOfForHeader(header: string): string[] {
   try {
@@ -297,31 +300,17 @@ export function bindingNamesOfForHeader(header: string): string[] {
     const stmt = ((ast.body as ES[]) ?? [])[0];
     if (!stmt) return [];
     const head = (stmt.type === "ForStatement" ? stmt.init : stmt.left) as ES | null;
-    if (!head || head.type !== "VariableDeclaration") return [];
-    const out: string[] = [];
-    for (const d of (head.declarations as ES[]) ?? []) patternNames(d.id as ES, out);
-    return out;
+    if (!head) return [];
+    if (head.type === "VariableDeclaration") {
+      const out: string[] = [];
+      for (const d of (head.declarations as ES[]) ?? []) patternNames(d.id as ES, out);
+      return out;
+    }
+    if (stmt.type !== "ForStatement" && head.type !== "MemberExpression") return patternNames(head);
+    return [];
   } catch {
     return [];
   }
-}
-
-/** The names one parameter's source text binds (`label`, `{ label, id }`, `[a, ...b]`, `x = 1`). */
-export function bindingNamesOfParamText(param: string): string[] {
-  try {
-    const ast = ScrmlParser.parseExpressionAt(`(${param}) => 0`, 0, PARSE_OPTS) as unknown as ES;
-    const out: string[] = [];
-    for (const p of (ast.params as ES[]) ?? []) patternNames(p, out);
-    return out;
-  } catch {
-    const m = /^\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)/.exec(param);
-    return m ? [m[1]] : [];
-  }
-}
-
-/** The names a binding PATTERN declares, from ESTree (shared with the expression parser's lambdas). */
-export function bindingNamesOfPattern(p: unknown): string[] {
-  return patternNames(p as ES);
 }
 
 /**

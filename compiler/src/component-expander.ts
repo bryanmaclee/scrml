@@ -51,8 +51,9 @@ import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 import {
-  substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader, bindingNamesOfParamText,
+  substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader,
 } from "./component-prop-js-substitute.ts";
+import { boundNamesOf, declareIn } from "./binding-names.ts";
 import type {
   Span,
   FileAST,
@@ -2017,11 +2018,8 @@ function substitutePropsInExprNode(
         return p;
       });
       const innerShadowed = new Set(shadowed);
-      for (const p of n.params) {
-        innerShadowed.add(p.name);
-        // S458 — a destructured parameter binds every name in its pattern.
-        for (const b of (p as { boundNames?: string[] }).boundNames ?? []) innerShadowed.add(b);
-      }
+      // Every name every parameter binds, destructured ones included (binding-names.ts).
+      declareIn(innerShadowed, n.params);
       let newBody: LambdaExpr["body"];
       if (n.body.kind === "expr") {
         newBody = { kind: "expr", value: substitutePropsInExprNode(n.body.value, propExprMap, innerShadowed) };
@@ -2116,6 +2114,65 @@ function rewriteTemplateInterpolations(
     i++;
   }
   return out.join("");
+}
+
+/**
+ * S458 (fourth round) — a destructuring pattern's DEFAULT values are expressions read in
+ * the enclosing scope (binding-names.ts rule 4). Codegen emits a pattern default from its
+ * `default` source text (emit-destructure-pattern.ts), so the text is substituted (on its
+ * parse — `substituteExprText`), and `defaultExpr` is kept in step for the type system.
+ */
+function substitutePropsInDestructurePattern(
+  pat: unknown,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): unknown {
+  if (!pat || typeof pat !== "object") return pat;
+  const r = pat as Record<string, unknown>;
+  const withDefault = (el: Record<string, unknown>): Record<string, unknown> => {
+    let out = el;
+    if (typeof el.default === "string" && el.default.trim() !== "") {
+      const d = substituteExprText(el.default, propExprMap, shadowed);
+      if (d !== el.default) out = { ...out, default: d };
+    }
+    if (el.defaultExpr && typeof el.defaultExpr === "object") {
+      out = { ...out, defaultExpr: substitutePropsInExprNode(el.defaultExpr as ExprNode, propExprMap, shadowed) };
+    }
+    if (el.kind === "nested" && el.pattern) {
+      out = { ...out, pattern: substitutePropsInDestructurePattern(el.pattern, propExprMap, shadowed) };
+    }
+    return out;
+  };
+  if (r.kind === "destructure-array" && Array.isArray(r.elements)) {
+    return { ...r, elements: (r.elements as Record<string, unknown>[]).map((e) => (e && typeof e === "object" ? withDefault(e) : e)) };
+  }
+  if (r.kind === "destructure-object" && Array.isArray(r.properties)) {
+    return { ...r, properties: (r.properties as Record<string, unknown>[]).map((e) => (e && typeof e === "object" ? withDefault(e) : e)) };
+  }
+  return pat;
+}
+
+/**
+ * S458 (fourth round) — one function-declaration parameter entry: its default (`n = k`,
+ * read in the parameter scope) and any destructuring defaults are substituted; the names
+ * it binds are never rewritten.
+ */
+function substitutePropsInParamEntry(
+  p: unknown,
+  propExprMap: Map<string, ExprNode>,
+  paramScope: Set<string>,
+): unknown {
+  if (!p || typeof p !== "object") return p;
+  const e = p as Record<string, unknown>;
+  let out = e;
+  if (typeof e.defaultValue === "string" && e.defaultValue.trim() !== "") {
+    const d = substituteExprText(e.defaultValue, propExprMap, paramScope);
+    if (d !== e.defaultValue) out = { ...out, defaultValue: d };
+  }
+  if (e.name && typeof e.name === "object") {
+    out = { ...out, name: substitutePropsInDestructurePattern(e.name, propExprMap, paramScope) };
+  }
+  return out;
 }
 
 /**
@@ -2253,15 +2310,18 @@ function substitutePropsInLogicStmt(
       const n = stmt as LetDeclNode | ConstDeclNode | TildeDeclNode | LinDeclNode | ReactiveDeclNode;
       const newInit = subInExpr(n.initExpr);
       const newNode = { ...n, initExpr: newInit } as typeof n;
-      // After this declaration, the name shadows any same-named prop for subsequent stmts.
-      // Reactive vars use @-prefix; we add both forms to be safe (if prop name is `count`,
-      // a `@count` reactive declaration shadows further refs).
+      // A destructuring pattern's DEFAULTS are expressions read in the enclosing scope
+      // (binding-names.ts rule 4) — substituted before the pattern's names shadow.
+      if (n.name && typeof n.name === "object") {
+        (newNode as { name: unknown }).name = substitutePropsInDestructurePattern(n.name, propExprMap, shadowed);
+      }
+      // After this declaration, every name it binds — a plain name or every name of a
+      // destructuring pattern, nested / renamed / rest included (binding-names.ts, the
+      // SAME answer the JS-text substituter uses) — shadows a same-named prop for the
+      // statements that follow (§15.10.1). A reactive `@count` shadows `@count`.
       if (n.name) {
-        if (n.kind === "state-decl") {
-          shadowed.add("@" + n.name);
-        } else {
-          shadowed.add(n.name);
-        }
+        if (n.kind === "state-decl" && typeof n.name === "string") shadowed.add("@" + n.name);
+        else declareIn(shadowed, n.name);
       }
       return newNode;
     }
@@ -2278,18 +2338,17 @@ function substitutePropsInLogicStmt(
     }
     case "function-decl": {
       const n = stmt as FunctionDeclNode;
-      // Function params shadow props inside the body.
-      const innerShadowed = new Set(shadowed);
-      for (const p of n.params ?? []) {
-        // Param strings may be "name", "name: Type", "name = default" or a destructuring
-        // pattern ("{ label, id }") — S458: every name the parameter binds, from its parse.
-        const typeless = String(p).replace(/^(\s*[A-Za-z_$][\w$]*)\s*:\s*[^=]*?(=|$)/, "$1 $2");
-        for (const b of bindingNamesOfParamText(typeless)) innerShadowed.add(b);
-      }
-      const newBody = substitutePropsInLogicStmts(n.body, propExprMap, innerShadowed);
-      // The function name shadows props in subsequent statements.
+      // The function's own name shadows from its header on, its body included
+      // (binding-names.ts rule 1).
       if (n.name) shadowed.add(n.name);
-      return { ...n, body: newBody } satisfies FunctionDeclNode;
+      // Every name every parameter binds — a parameter entry is a name, a `{ name:
+      // DestructurePattern }` entry, or source text (binding-names.ts) — shadows the prop
+      // in the body and in the parameter defaults (rule 2).
+      const innerShadowed = new Set(shadowed);
+      declareIn(innerShadowed, n.params ?? []);
+      const newParams = (n.params ?? []).map((p) => substitutePropsInParamEntry(p, propExprMap, innerShadowed));
+      const newBody = substitutePropsInLogicStmts(n.body, propExprMap, innerShadowed);
+      return { ...n, params: newParams as typeof n.params, body: newBody } satisfies FunctionDeclNode;
     }
     case "if-stmt":
     case "if-expr": {
@@ -2306,7 +2365,9 @@ function substitutePropsInLogicStmt(
       const n = stmt as ForExprNode | ForStmtNode;
       // Loop variable shadows props inside the body.
       const innerShadowed = new Set(shadowed);
-      if ((n as ForStmtNode).variable) innerShadowed.add((n as ForStmtNode).variable);
+      // A plain or destructured loop variable (binding-names.ts rule 3).
+      const loopVar = (n as ForStmtNode).variable;
+      if (loopVar) declareIn(innerShadowed, loopVar);
       // S458 N2 — a C-style header's own binder (`for (let n = 0; n < 3; n++)`) shadows
       // the prop in the header and the body; read from the parsed header.
       const header = (n as ForStmtNode & { iterable?: string }).iterable;
