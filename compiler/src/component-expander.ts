@@ -1513,7 +1513,9 @@ function registerAttrTextPropMaps(
   for (const a of callerAttrs ?? []) {
     if (!a || !a.name || !a.value) continue;
     const k = a.value.kind;
-    if (k === "variable-ref" || k === "expr" || k === "call-ref") expressionValued.add(a.name);
+    if (k === "variable-ref" || k === "expr" || k === "call-ref") {
+      expressionValued.add(a.name.startsWith("bind:") ? a.name.slice(5) : a.name);
+    }
   }
   const literal = new Map<string, string>();
   const expr = new Map<string, string>(props);
@@ -2575,6 +2577,17 @@ function substituteProps(
           const bareName = varVal.name.startsWith("@") ? varVal.name.slice(1) : varVal.name;
           if (propExprMap.has(bareName)) {
             const propExpr = propExprMap.get(bareName)!;
+            // §15.11.1 (S458): a body `bind:value=value` forwarding a bindable prop
+            // whose caller passed `bind:value=@text` stays a `bind:` to that CELL
+            // (a variable-ref `@text`), so the element's two-way binding writes the
+            // caller's cell — not an expression, which `bind:` rejects (E-ATTR-010).
+            if (
+              typeof attr.name === "string" && attr.name.startsWith("bind:")
+              && propExpr.kind === "ident" && typeof (propExpr as IdentExpr).name === "string"
+              && (propExpr as IdentExpr).name.startsWith("@")
+            ) {
+              return { ...attr, value: { ...varVal, name: (propExpr as IdentExpr).name, exprNode: propExpr } };
+            }
             let raw = "";
             try {
               raw = emitStringFromTree(propExpr);
@@ -3001,6 +3014,16 @@ function expandComponentNode(
       }
       continue;
     }
+    // §15.11.1 `bind:propName=@var` (S458): the bindable prop IS the caller's cell
+    // inside the body — every read AND write of `propName` is substituted with `@var`,
+    // so `visible = false` in a body handler writes `@showModal` and reads stay
+    // reactive. (Keyed by the PROP name; a plain `bind:` value is E-ATTR-010.)
+    if (attr.name.startsWith("bind:")) {
+      if (attr.value && attr.value.kind === "variable-ref" && attr.value.name.startsWith("@")) {
+        props.set(attr.name.slice(5), attr.value.name);
+      }
+      continue;
+    }
     // For other attributes: extract string value for prop substitution
     if (attr.value && attr.value.kind === "string-literal") {
       props.set(attr.name, attr.value.value);
@@ -3340,17 +3363,13 @@ function expandComponentNode(
     );
   }
 
-  // §15.11.1: collect bind: prop wiring metadata for codegen
-  // _bindProps: Array<{ propName: string, callerVar: string }>
-  // propName is the component's prop name, callerVar is the @var name (without @)
-  const _bindProps: Array<{ propName: string; callerVar: string }> = [];
-  for (const attr of callerAttrs) {
-    if (!attr || !attr.name || !attr.name.startsWith("bind:")) continue;
-    const propName = attr.name.slice(5);
-    if (attr.value && attr.value.kind === "variable-ref" && attr.value.name.startsWith("@")) {
-      _bindProps.push({ propName, callerVar: attr.value.name.slice(1) }); // strip @
-    }
-  }
+  // §15.11.1 (S458): NO `_bindProps` sync metadata. A `bind:propName=@var` prop is
+  // substituted with `@var` throughout the body (the props-map build above), so the
+  // body reads and writes the caller's cell directly — the two-way channel IS the
+  // cell. The former codegen sync mirrored the caller's cell into a GLOBAL cell
+  // named after the prop (`visible`), which every instance shared: two instances
+  // bound to different cells cross-wrote each other through it, and the body's
+  // `visible = false` never reached it (an undeclared JS global).
 
   // Resolve `if=` conditions that reference optional snippet props at compile time.
   // When an element has `if=(not (propName is not))` and the optional snippet prop
@@ -3432,7 +3451,6 @@ function expandComponentNode(
     // S458 "D1" — the caller's declared-prop attr nodes, OFF `attrs` (see the merge
     // above). Read by the type system only; no emitter reads this field.
     ...(callSiteProps.length > 0 ? { _callSiteProps: callSiteProps } : {}),
-    ...(_bindProps.length > 0 ? { _bindProps } : {}),
     ...(__propContractChecks.length > 0 ? { __propContractChecks } : {}),
   } as MarkupNode;
 

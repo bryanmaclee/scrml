@@ -49,3 +49,24 @@ Every position leaks: top `title="Top" … id="c-top"` + bool disabled binding; 
 - Gates: e2e-render-map 259/0, root 2239/0, corpus-compile-floor PASS, browser-baseline PASS, conformance/run.ts
   1348/1398 + 50 xfail (no new xfail), types-gate OK, s34-census PASS, snippet-gate PASS, delta-lint PASS.
   STALE (PA-owned, not edited): compiler/SPEC-INDEX.md (regen-spec-index --check), docs/FACTS.md facts-table.
+
+## 2026-10-07 — step 3: PA fix round — wire the `bind:` component-prop write-back (option 1)
+Governing (§15.11.1): "The compiler SHALL generate bidirectional synchronisation for `bind:` component props.
+Changes to `@var` in the parent SHALL propagate into the component. Changes to the bindable prop inside the component
+SHALL propagate back to `@var` in the parent." Worked example: "When the user clicks "Close" inside the modal,
+`visible = false` writes back through the bind channel to `@showModal`, which the parent owns."
+- Fix (CE): `bind:propName=@var` is now keyed by the PROP name in the substitution map, so every body read AND write
+  of `propName` becomes `@var` — reads reactive, writes `_scrml_cs_reactive_set("showModal", …)` in every form
+  (`=`, `+=`, `++`, inside handlers, body functions, `if` bodies) and every position (top, `<each>`, `lift`, match arm).
+- Removed the `_bindProps` stamp. Its codegen mirrored the caller cell into a GLOBAL cell named after the prop
+  (`visible`), shared by every instance: measured before the removal, two Modals bound to `@showModal` / `@other`
+  cross-wrote each other (conformance bind-prop-write-back failed: closing #m2 set `@showModal` false). The
+  emit-reactive-wiring / emit-client `_bindProps` consumers are now dormant (no producer).
+- A body `<input bind:value=value>` forwarding the bind prop stays a `bind:` to the caller cell (`@text`), not an
+  expression (which `bind:` rejects with E-ATTR-010).
+- Not reachable: §15.11.1's Modal example verbatim — its `${...}` children spread fails every component with
+  E-COMPONENT-021 (pre-existing, also on base; G-COMPONENT-CHILDREN-SPREAD-SYNTAX-REJECTED-E-COMPONENT-021). The
+  executed case is the example minus the spread.
+- Tests: callback-props §H/§I rewritten (no `_bindProps`; write-back lowers to the caller cell; a grep for a bare JS
+  write to the prop name / a cell keyed by it); conformance bind-prop-write-back (Modal, two independent instances),
+  bind-prop-write-back-positions (4 positions × 3 write forms), bind-prop-forwarded-to-input — all executed in happy-dom.
