@@ -6484,7 +6484,16 @@ function _scrml_ssr_seed_apply_scoped(keyFn, skipShell) {
   for (var _k in _seed) {
     if (Object.prototype.hasOwnProperty.call(_seed, _k)) {
       if (_shell && Object.prototype.hasOwnProperty.call(_shell, _k)) continue; // shell cell — persist the live value
-      _scrml_reactive_set(keyFn ? keyFn(_k) : _k, _seed[_k]);
+      try {
+        _scrml_reactive_set(keyFn ? keyFn(_k) : _k, _seed[_k]);
+      } catch (_e) {
+        // §52.8 / §53 — a seeded value the cell's refinement refuses is not applied:
+        // the cell keeps its initial value, the refusal is reported, and seeding
+        // and boot continue (as a persist= restore takes its default, §6.14.2 r3).
+        if (!(_e && String(_e.message).indexOf("E-CONTRACT-") === 0)) throw _e;
+        if (typeof _scrml_error_boundary_log === "function") _scrml_error_boundary_log("ssr-seed", _e);
+        else if (typeof console !== "undefined" && typeof console.error === "function") console.error("[scrml ssr-seed]", _e);
+      }
     }
   }
 }
