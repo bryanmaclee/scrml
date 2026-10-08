@@ -18,8 +18,10 @@
  *       a name in a comment, a string literal, markup text or a plain attribute value
  *       does not count. Residual: markup lifted INSIDE a logic body is tokenized as
  *       logic, so its text words count as code (under-reports only there).
- *   A compile that THROWS leaves its unit unchecked: listed, counted, and above the
- *   recorded ceiling (THROWN_CEILING) the scan is incomplete (exit 2).
+ *   A compile that THROWS leaves its unit unchecked: listed, and any `[mode] <unit>` that
+ *   throws but is not pinned in KNOWN_THROWS (host-global-scan.known-throws.txt) makes the
+ *   scan incomplete (exit 2). Pinned by NAME, not a count: a count lets a new thrower hide
+ *   behind a known one getting fixed.
  *   Debug: `--author-names <file.scrml>` prints the identifiers R1 counts for one file.
  *   R2  an artifact that reads `_scrml_g` declares or imports it — or, for a classic
  *       client chunk, the runtime it loads declares it.
@@ -55,8 +57,10 @@
  * examples-only static check (compiler/tests/unit/s457-host-global-alias.test.js).
  *
  * USAGE
- *   bun scripts/host-global-scan.ts [--check] [--concurrency N] [--roots a,b] [--modes m1,m2]
- * EXIT 0 = no violation · 1 = violations (listed) · 2 = the scan itself failed / scanned nothing / more compiles threw than THROWN_CEILING.
+ *   bun scripts/host-global-scan.ts [--check] [--prune] [--concurrency N] [--roots a,b] [--modes m1,m2]
+ *   --prune  rewrite the known-throws file without the in-scope entries that no longer throw
+ *            (the list may only shrink by tooling; adding a key is a deliberate hand edit).
+ * EXIT 0 = no violation · 1 = violations (listed) · 2 = the scan itself failed / scanned nothing / a compile threw that is not in KNOWN_THROWS.
  */
 import { readdirSync, readFileSync, writeFileSync, statSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { join, relative, dirname, resolve } from "path";
@@ -224,6 +228,18 @@ function walkJs(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * A short, position-free class for a compile throw — the trailing comment on a KNOWN_THROWS line
+ * (informational; the gate matches the `[mode] <unit>` key only).
+ */
+function errorClass(e: unknown): string {
+  const msg = String((e as Error)?.message ?? e).split("\n")[0];
+  const m = /^\[scrml ([\w-]+)\][^:]*:\s*(.*?)\s*\(\d+:\d+\)/.exec(msg);
+  if (m) return `${m[1]}: ${m[2]}`;
+  const name = (e as Error)?.name ?? "Error";
+  return `${name}: ${msg.slice(0, 120)}`;
+}
+
 type Violation = { rule: "R1" | "R2" | "R3" | "R4"; mode: string; unit: string; artifact: string; detail: string };
 
 async function runShard(units: string[][], modes: Mode[]) {
@@ -237,7 +253,7 @@ async function runShard(units: string[][], modes: Mode[]) {
   };
   const violations: Violation[] = [];
   const unparsed: string[] = [];
-  const thrown: string[] = [];
+  const thrown: { key: string; error: string }[] = [];
   const unreadAuthor: string[] = [];
   let artifacts = 0, compiled = 0;
   const RT_START = "// --- scrml reactive runtime ---";
@@ -269,7 +285,7 @@ async function runShard(units: string[][], modes: Mode[]) {
         catch (e) {
           // A compiler crash means this unit's artifacts went unchecked: counted and listed, and
           // the scan does not report clean while any unit threw (fail toward reporting).
-          thrown.push(`[${mode}] ${unit} — ${String((e as Error)?.message ?? e).split("\n")[0].slice(0, 200)}`);
+          thrown.push({ key: `[${mode}] ${unit}`, error: errorClass(e) });
           continue;
         }
         if (!r || r.artifactsWritten === false) continue;
@@ -435,7 +451,7 @@ const violations: Violation[] = done.flatMap((r: any) => r.violations);
 const artifacts = done.reduce((a: number, r: any) => a + r.artifacts, 0);
 const compiled = done.reduce((a: number, r: any) => a + r.compiled, 0);
 const unparsed: string[] = done.flatMap((r: any) => r.unparsed);
-const thrown: string[] = done.flatMap((r: any) => r.thrown);
+const thrown: { key: string; error: string }[] = done.flatMap((r: any) => r.thrown);
 const unreadAuthor: string[] = [...new Set<string>(done.flatMap((r: any) => r.unreadAuthor))];
 const secs = ((Date.now() - t0) / 1000).toFixed(0);
 console.log(`host-global-scan: ${units.length} units × modes [${modes.join(", ")}] — ${compiled} compiles, ${thrown.length} threw, ${artifacts} artifacts scanned, ${violations.length} violation(s), ${secs}s`);
@@ -457,17 +473,40 @@ if (unreadAuthor.length > 0) {
 }
 if (thrown.length > 0) {
   console.error(`host-global-scan: ${thrown.length} compile(s) THREW — their artifacts were not checked:`);
-  for (const u of thrown) console.error(`    ${u}`);
+  for (const t of thrown) console.error(`    ${t.key}  # ${t.error}`);
+}
+// A compile that throws leaves its unit unchecked. Every throw the full default run sees is
+// pinned BY NAME in KNOWN_THROWS (one `[mode] <unit>` key per line, the error class as a trailing
+// `#` comment), each pre-existing and reproducing on main. A throw whose key is not pinned is a
+// compiler regression shrinking this gate's coverage: the scan is incomplete, exit 2 — even when
+// the total count went down (a count let a new thrower hide behind a fixed one). A pinned key that
+// no longer throws is reported, not failed: remove it (or run with --prune). The list only shrinks.
+const KNOWN_THROWS = join(import.meta.dir, "host-global-scan.known-throws.txt");
+const knownLines = existsSync(KNOWN_THROWS) ? readFileSync(KNOWN_THROWS, "utf8").split("\n") : [];
+const keyOf = (line: string) => line.replace(/\s+#.*$/, "").trim();
+const known = new Set(knownLines.map(keyOf).filter((k) => k && !k.startsWith("#")));
+const thrownKeys = new Set(thrown.map((t) => t.key));
+const newThrows = thrown.filter((t) => !known.has(t.key));
+// "no longer throws" is only judged for keys this run covered: its modes, and a unit under one of
+// its roots (by path, so a pinned unit that was deleted or moved is reported too).
+const inScope = (k: string) => {
+  const m = /^\[(\w+)\] (.+)$/.exec(k);
+  return !!m && (modes as string[]).includes(m[1]) && roots.some((r) => { const p = r.replace(/\/+$/, ""); return m[2] === p || m[2].startsWith(p + "/"); });
+};
+const fixedKeys = [...known].filter((k) => !thrownKeys.has(k) && inScope(k)).sort();
+if (fixedKeys.length > 0 && !shardFailed) {
+  console.log(`  (fixed — ${fixedKeys.length} pinned throw(s) no longer throw; remove from ${relative(REPO, KNOWN_THROWS)}${flag("--prune") ? " — pruned" : " or run with --prune"}:)`);
+  for (const k of fixedKeys) console.log(`    ${k}`);
+  if (flag("--prune")) {
+    const drop = new Set(fixedKeys);
+    writeFileSync(KNOWN_THROWS, knownLines.filter((l) => !drop.has(keyOf(l))).join("\n"));
+  }
 }
 if (shardFailed) { console.error("host-global-scan: a shard failed (above) — the scan is incomplete"); process.exit(2); }
 if (violations.length > 0) process.exit(1);
-// A compile that throws leaves its unit unchecked. The full default run is known to see
-// THROWN_CEILING throws, every one pre-existing and reproducing on main 49b7fcc1d (115 are the
-// esm-mode `[scrml emit-client-esm] failed to parse a client chunk` throw, on sources that carry
-// a compile error; 4 are samples/gauntlet-s19-phase4/nested-comments.scrml overflowing the stack
-// in default / esm / embed / build). More than
-// that is a compiler regression shrinking this gate's coverage: the scan is incomplete, exit 2.
-// The ceiling may only be LOWERED (as those crashes are fixed).
-const THROWN_CEILING = 119;
-if (thrown.length > THROWN_CEILING) { console.error(`host-global-scan: incomplete — ${thrown.length} compiles threw, above the recorded ${THROWN_CEILING} (listed above)`); process.exit(2); }
+if (newThrows.length > 0) {
+  console.error(`host-global-scan: incomplete — ${newThrows.length} compile(s) threw that ${relative(REPO, KNOWN_THROWS)} does not pin (their artifacts went unchecked):`);
+  for (const t of newThrows) console.error(`    ${t.key}  # ${t.error}`);
+  process.exit(2);
+}
 process.exit(0);
