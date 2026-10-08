@@ -228,7 +228,7 @@ export function _scrml_emit_attr_name_verdict(ns, tag, name) {
 export function _scrml_emit_attr_value_verdict(name, value, tag) {
   const lowerName = _scrml_emit_fold_name(name);
   if ((lowerName === "id" || lowerName === "name") && /^_{1,2}scrml/i.test(String(value).trim())) {
-    return "a " + lowerName + "= value in the compiler-reserved _scrml / __scrml namespace";
+    return (lowerName === "id" ? "an " : "a ") + lowerName + "= value in the compiler-reserved _scrml / __scrml namespace";
   }
   return "";
 }
@@ -278,12 +278,12 @@ export function _scrml_emit_named_value_verdict(ns, tag, lowerName, value, hasNa
   const ofDocument = (lowerName === "name" && _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME.has(tag))
     || (lowerName === "id" && (tag === "object" || (tag === "img" && hasNameAttr === true)));
   if (ofDocument && isMember(members.document, members.documentProto)) {
-    return "a " + lowerName + "= value on <" + tag + "> that names a member of document (the element " +
+    return (lowerName === "id" ? "an " : "a ") + lowerName + "= value on <" + tag + "> that names a member of document (the element " +
       "would shadow that member)";
   }
   const ofForm = inForm === true && (_scrml_emit_is_form_control(ns, tag, isCustom) || tag === "img");
   if (ofForm && isMember(members.form, members.formProto)) {
-    return "a " + lowerName + "= value on <" + tag + "> inside a form that names a member of the form " +
+    return (lowerName === "id" ? "an " : "a ") + lowerName + "= value on <" + tag + "> inside a form that names a member of the form " +
       "(the element would shadow that member)";
   }
   return "";
