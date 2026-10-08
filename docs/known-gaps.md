@@ -30,11 +30,23 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 243 | 6 |
+| HIGH | 244 | 6 |
 | MED | 529 | 4 |
-| LOW | 291 | 0 |
+| LOW | 292 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-meta-code-runs-unsandboxed-in-the-compiler-process-s457 — `^{}` meta bodies are lowered to JS and run via `new Function` in the compiler process; Approach C is enforced by a fail-open name DENY list — `emit.constructor` reaches `Function` → `process`/`Bun` — `NEW S457; HIGH; open (security; fix dispatched: s457-meta-allow-list)`
+
+<!-- @gap id=g-meta-code-runs-unsandboxed-in-the-compiler-process-s457 sev=HIGH status=open locus=compiler/src/meta-eval.ts(:479 new Function)+compiler/src/meta-checker.ts(META_BUILTINS deny list) prov=spec:§22.12-"The general-developer `^{}` body parser SHALL accept only scrml-native + this enumerated primitive set" -->
+
+CONFIRMED by two S457 reviewers: a compile-time `^{}` body compiled that emitted `typeof process` via `emit.constructor`; built-in prototypes patched via `"".constructor.prototype`; reaches `process.getBuiltinModule('node:async_hooks')`. bryan S457: "I don't want JS there. I would prefer scrml." — §22.2 / §22.12 (S114 Approach C) already ratify a scrml-native body + a closed primitive set. Fix: a closed ALLOW-LIST over the parsed body (+ refuse constructor/prototype reach), `emit()` output through every ordinary source check. Until it lands, the placeholder unforgeability (§47.1.1) holds only against non-meta source.
+
+### g-compile-crash-path-not-token-scrubbed-s457 — a thrown internal error's stack (printed by `compile`, returned by `serve`) is redacted but not placeholder-token-scrubbed; Set members / Map keys not visited by the deep scrub — `NEW S457; LOW; open (harmless: the token is dead once its compile ends)`
+
+<!-- @gap id=g-compile-crash-path-not-token-scrubbed-s457 sev=LOW status=open locus=compiler/src/api.js(_compileScrmlChokepoint redactThrown)+compiler/src/commands/serve.js(err.stack)+compiler/src/placeholder-nonce.ts(scrubPlaceholderTokenDeep) prov=review:S457-prefix-r4 -->
+
+Also: stale bare-variant placeholder regexes at `codegen/rewrite.ts` (~:2299) and `codegen/emit-expr.ts` (~:4482) match only author spellings now — delete or point at the token form.
 
 ### g-template-sql-ref-marker-unrestored-client-s457 — a `?{}` in a template literal that also holds `<#name>`, in a function with no other `?{}`, stays client-side and ships `__scrml_sql_ref__("?{`…SQL…`}")` — `NEW S457; MED; open`
 
@@ -88,7 +100,7 @@ PA-reproduced at `0d8e9d8ce`: exit 0; only diagnostics W-LINT-013 (Vue shorthand
 
 <!-- @gap id=g-map-literal-in-function-expression-emits-undefined-helper-s457 sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts(escape-hatch raw route; no map-literal lowering) prov=empirical:s457-is-some-function-expression-agent -->
 
-Same preprocess-then-slice route as #1333. Silent (ReferenceError at run time) — still UNGUARDED: the S457 placeholder gate that refuses it is held pending the `__scrml_` prefix ruling (gate branch worktree-agent-a4d6f8b53831fd9ee @ 934ac062c). Needs its own lowering either way.
+Same preprocess-then-slice route as #1333. S457 (s457-scrml-prefix-gate): no longer silent — the placeholder gate refuses the artifact (E-CODEGEN-INVALID-LOGIC), nothing written. The lowering is still owed: `[:]` in a block-bodied callback cannot compile until it is written.
 
 ### g-match-in-function-expression-mangled-s457 — `match` inside a function-expression body emits `__scrml_match__(v, ""On" :> …)` — `NEW S457; MED; open (fails loud)`
 

@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1392 of 1392 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1394 of 1394 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1392 of 1392 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 4.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 518 | 37.2% |
-| UNSUPPORTED | 697 | 50.1% |
+| NOT-TWINNED | 520 | 37.3% |
+| UNSUPPORTED | 697 | 50.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -34,7 +34,7 @@ Legacy-dialect cases graded on their generated §66 twin: **637** — PASS 76 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (518 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (520 cases; a case counts once per distinct reason):
 
 - 61 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 59 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -46,7 +46,7 @@ NOT-TWINNED by reason (518 cases; a case counts once per distinct reason):
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
-- 26 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
+- 28 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 23 — rhs-decl: declaration in a markup position (⚑ O38)
 - 19 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
@@ -101,7 +101,7 @@ NOT-TWINNED by reason (518 cases; a case counts once per distinct reason):
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
-| codegen | 2 | · | · | · | · | 1 | 1 | · | · |
+| codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 32 | · | · | 2 | · | 29 | 1 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
@@ -1117,7 +1117,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (518)
+### NOT-TWINNED (520)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1157,6 +1157,8 @@ none
 - `channel/watches-client-write` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/watches-derived-const-ok` — not mechanical: const-cell: declaration in a markup position (⚑ O38)
 - `codegen/cg-001-server-block-warn-pos` — not mechanical: program-move: `markup <p>` outside `<program>` (where it renders is not mechanical)
+- `codegen/reserved-prefix-double-underscore-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `codegen/reserved-prefix-double-underscore-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `components/ambient-engine-cell` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-non-bindable-prop-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-non-bindable-prop-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)

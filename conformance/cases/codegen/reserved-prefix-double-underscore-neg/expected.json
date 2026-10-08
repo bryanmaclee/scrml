@@ -1,0 +1,15 @@
+{
+  "id": "codegen-reserved-prefix-double-underscore-neg",
+  "description": "§47.1.1 (S457 \"a for __scrml_\") — `__scrml_` text in a comment, a string or markup text is not a name and does not fire, and neither do the parser's own placeholders: `is some` inside a block-bodied callback (#1333) compiles clean and runs, so @msg becomes \"some\" after one click. (-neg: the code does not fire.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/is-predicate-in-function-expression-1333.test.js",
+  "spec": "§47.1.1",
+  "rationale": "§47.1.1 S457 ruling: the `__scrml_` reservation is decided on the parsed tree like `_scrml_` — string literals, comments and markup text are not inspected — and the expression parser's own placeholders carry a per-compilation unguessable token, which is the only exemption, so `is some` inside a callback compiles. §42.2.2a: `v is some` is true for 5.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-NAME-COLLIDES-RESERVED-PREFIX", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "msg": "some" },
+    "domAnchored": [{ "selector": "#out", "text": "some" }]
+  }
+}

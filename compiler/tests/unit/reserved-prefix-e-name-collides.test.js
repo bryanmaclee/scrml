@@ -279,7 +279,7 @@ describe("occurrences that are not names are not flagged", () => {
   });
 
   test("the prefix only counts at the START of a name", () => {
-    expect(flagged(prog("${ const my_scrml_x = 1\nconst __scrml_y = 2\nconst scrml_z = 3 }"))).toEqual([]);
+    expect(flagged(prog("${ const my_scrml_x = 1\nconst ___scrml_y = 2\nconst scrml_z = 3 }"))).toEqual([]);
   });
 
   test("`_{}` foreign code is opaque (§23.2.3) and is not inspected", () => {
@@ -290,7 +290,10 @@ describe("occurrences that are not names are not flagged", () => {
     expect(isReservedPrefixName("_scrml_x")).toBe(true);
     expect(isReservedPrefixName("@_scrml_x")).toBe(true);
     expect(isReservedPrefixName("_scrml")).toBe(false);
-    expect(isReservedPrefixName("__scrml_x")).toBe(false);
+    // S457 "a for __scrml_" — the double-underscore prefix is reserved too.
+    expect(isReservedPrefixName("__scrml_x")).toBe(true);
+    expect(isReservedPrefixName("@__scrml_x__")).toBe(true);
+    expect(isReservedPrefixName("___scrml_x")).toBe(false);
     expect(isReservedPrefixName("x_scrml_")).toBe(false);
   });
 });
