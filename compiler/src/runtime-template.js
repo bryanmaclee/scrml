@@ -4961,7 +4961,10 @@ const _scrml_messages_registered = Object.create(null);
 // Tag → validator name mapping for Level-1 inline override lookup. Mirrors
 // the validator-catalog at compile time but lives here so Level-1 lookup
 // is self-contained at runtime. Custom maps to "custom" (developer-defined).
-const _SCRML_TAG_TO_VALIDATOR = {
+// Both tag-keyed tables (this one and _SCRML_DEFAULT_MESSAGES) are null-prototype: they are
+// indexed by error.tag, which is data, so a tag such as "constructor" or "toString" reads
+// nothing rather than an Object.prototype member (S459).
+const _SCRML_TAG_TO_VALIDATOR = Object.assign(Object.create(null), {
   Required:        "req",
   NotSome:         "is some",
   LengthFailed:    "length",
@@ -4977,7 +4980,7 @@ const _SCRML_TAG_TO_VALIDATOR = {
   OneOfFailed:     "oneOf",
   NotInFailed:     "notIn",
   Custom:          "custom",
-};
+});
 
 // Format a relational-predicate payload like { op: ">=", value: 2 } → ">= 2".
 // Used by LengthFailed default. Payload may be null/undefined defensively.
@@ -4999,7 +5002,7 @@ function _scrml_format_set(s) {
 // ValidationError enum at SPEC §55.9 (e.g., MinFailed has \`threshold\`).
 // Uses string concatenation rather than template literals so we don't have to
 // escape every \\\${} inside this template-literal runtime source.
-const _SCRML_DEFAULT_MESSAGES = {
+const _SCRML_DEFAULT_MESSAGES = Object.assign(Object.create(null), {
   Required:        function (f) { return f + " is required."; },
   NotSome:         function (f) { return f + " is required."; },
   LengthFailed:    function (f, p) { return f + " length must satisfy " + _scrml_format_predicate(p) + "."; },
@@ -5015,7 +5018,7 @@ const _SCRML_DEFAULT_MESSAGES = {
   OneOfFailed:     function (f, p) { return f + " must be one of: " + _scrml_format_set(p) + "."; },
   NotInFailed:     function (f, p) { return f + " cannot be any of: " + _scrml_format_set(p) + "."; },
   Custom:          function (f, p) { return f + " failed validation (" + p + ")."; },
-};
+});
 
 // Fallback for unknown/future tags. Keeps messageFor total — never throws,
 // never returns undefined.

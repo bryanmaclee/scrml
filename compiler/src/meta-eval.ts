@@ -245,6 +245,86 @@ function restoreEmitBackticks(code: string): string {
   );
 }
 
+/**
+ * A statement a compile-time `^{}` body contains that this serializer cannot turn into the
+ * text the evaluator runs. Thrown — never swallowed into "" — so a statement is either
+ * EMITTED or the block is REFUSED (E-META-EVAL-001 naming the form); it is never dropped
+ * (S459 addendum 1: `while`, `function` and `match` used to fall through to `return ""`,
+ * so a `while` loop building `<li>`s rendered `<ul></ul>` with no diagnostic).
+ */
+export class MetaSerializeRefusal extends Error {
+  constructor(what: string) {
+    super(
+      `E-META-EVAL-001: this compile-time ^{} contains ${what}, which impl#1 cannot evaluate at ` +
+      `compile time, so the block is refused rather than evaluated without it (§22.4 — a ` +
+      `compile-time block is evaluated and its result inlined; nothing in it may be dropped).`,
+    );
+    this.name = "MetaSerializeRefusal";
+  }
+}
+
+/** The source form of a statement kind the serializer refuses — never the internal node name. */
+const SERIALIZE_REFUSED_FORM: Readonly<Record<string, string>> = {
+  "match-stmt": "a `match` statement (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)",
+  "match-arm-inline": "a `match` arm (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)",
+  "match-arm-block": "a `match` arm (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)",
+  "lift-expr": "a `lift`",
+  "sql": "a `?{}` SQL block",
+  "state-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
+  "meta": "a nested `^{}`",
+};
+
+function serializeRefusedForm(kind: string): string {
+  return SERIALIZE_REFUSED_FORM[kind] ?? "a statement of a form impl#1 cannot evaluate here";
+}
+
+const PLAIN_JS_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * A `let` / `const` / `lin` whose value the serializer can write exactly: a plain name
+ * bound to its `initExpr` / `init` text, or no initializer. Any other value form the AST
+ * carries (`match`, value-form `if` / `for`, `?{}`, …) or a destructuring pattern is refused —
+ * the check is over the node's structure (every `*Expr` key other than `initExpr`), so a value
+ * form added later is refused until it is serialized, never silently written as `let x;`.
+ */
+function serializeDecl(n: Record<string, unknown>, keyword: "let" | "const", locals: Set<string>): string {
+  if (typeof n.name !== "string" || !PLAIN_JS_NAME.test(n.name)) {
+    throw new MetaSerializeRefusal("a destructuring declaration (impl#1 does not evaluate one in compile-time meta — " +
+      "bind each value with its own `const`)");
+  }
+  for (const [k, v] of Object.entries(n)) {
+    if (v == null || k === "initExpr") continue;
+    if (k === "sqlNode") throw new MetaSerializeRefusal("a `?{}` SQL block");
+    if (/Expr$/.test(k)) {
+      throw new MetaSerializeRefusal(k === "matchExpr"
+        ? "a `match` value (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)"
+        : "a declaration whose value is a statement form (a value-form `if` / `for` / …)");
+    }
+  }
+  const str = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null | undefined);
+  return str != null && String(str).trim() !== ""
+    ? `${keyword} ${n.name} = ${rewriteReflectCalls(String(str), locals)};`
+    : `${keyword} ${n.name};`;
+}
+
+/** A plain `function name(a, b = 1) { … }` declaration's parameter list, as JS. */
+function serializeParams(params: unknown): string {
+  const out: string[] = [];
+  for (const p of Array.isArray(params) ? params : []) {
+    const rec = (p && typeof p === "object") ? p as Record<string, unknown> : null;
+    const name = typeof p === "string" ? p.replace(/^\s*lin\s+/, "").split(/[:=]/)[0].trim()
+      : typeof rec?.name === "string" ? rec.name : "";
+    if (!PLAIN_JS_NAME.test(name)) {
+      throw new MetaSerializeRefusal("a function parameter pattern impl#1 cannot evaluate in compile-time meta");
+    }
+    const dflt = typeof p === "string"
+      ? (p.includes("=") ? p.slice(p.indexOf("=") + 1).trim() : "")
+      : typeof rec?.defaultValue === "string" ? rec.defaultValue.trim() : "";
+    out.push(dflt ? `${name} = ${dflt}` : name);
+  }
+  return out.join(", ");
+}
+
 function serializeBody(nodes: LogicStatement[], locals: Set<string> = new Set()): string {
   if (!Array.isArray(nodes)) return "";
   const parts: string[] = [];
@@ -271,15 +351,44 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
       return `${rewriteReflectCalls(bareStr, locals)};`;
     }
 
-    case "let-decl": {
-      const letStr = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null);
-      return letStr != null ? `let ${n.name} = ${rewriteReflectCalls(letStr, locals)};` : `let ${n.name};`;
+    case "let-decl":
+      return serializeDecl(n, "let", locals);
+
+    case "const-decl":
+      return serializeDecl(n, "const", locals);
+
+    // `lin`: a value used exactly once — the compiler checks the use; the binding itself is
+    // never reassigned, so it evaluates as a `const`.
+    case "lin-decl":
+      return serializeDecl(n, "const", locals);
+
+    case "while-stmt": {
+      const whileCond = n.condExpr ? emitStringFromTree(n.condExpr as ExprNode) : (n.condition as string | undefined);
+      if (typeof whileCond !== "string" || whileCond.trim() === "") {
+        throw new MetaSerializeRefusal("a `while` loop whose condition impl#1 cannot read");
+      }
+      return `while (${whileCond}) {\n${serializeBody((n.body || []) as LogicStatement[], locals)}\n}`;
     }
 
-    case "const-decl": {
-      const constStr = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null);
-      return constStr != null ? `const ${n.name} = ${rewriteReflectCalls(constStr, locals)};` : `const ${n.name};`;
+    case "break-stmt":
+    case "continue-stmt": {
+      const kw = node.kind === "break-stmt" ? "break" : "continue";
+      return typeof n.label === "string" && n.label ? `${kw} ${n.label};` : `${kw};`;
     }
+
+    case "function-decl": {
+      // A plain `function` declaration. `fn` is E-PARSE-002 inside `^{}`; a server, failable
+      // or generator function has no compile-time meaning — refused, not dropped.
+      if (n.fnKind !== "function" || n.isServer === true || n.canFail === true || n.isGenerator === true
+        || typeof n.name !== "string" || !PLAIN_JS_NAME.test(n.name)) {
+        throw new MetaSerializeRefusal("a function declaration of a form impl#1 cannot evaluate in compile-time meta " +
+          "(only a plain `function name(…) { … }` is)");
+      }
+      return `function ${n.name}(${serializeParams(n.params)}) {\n${serializeBody((n.body || []) as LogicStatement[], locals)}\n}`;
+    }
+
+    case "comment":
+      return "";
 
     case "for-loop": {
       // Phase 4d: ExprNode-first, string fallback for iterable
@@ -308,10 +417,7 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
       if (n.rawInit !== undefined || n.rawTest !== undefined || n.rawUpdate !== undefined) {
         return `for (${n.rawInit || ""}; ${n.rawTest || ""}; ${n.rawUpdate || ""}) {\n${loopBody}\n}`;
       }
-      // Last resort: try ExprNode then expr field
-      if (n.exprNode) return `${emitStringFromTree(n.exprNode as ExprNode)};`;
-      if (n.expr) return `${n.expr};`;
-      return "";
+      throw new MetaSerializeRefusal("a `for` loop of a form impl#1 cannot read");
     }
 
     case "if-stmt": {
@@ -358,10 +464,11 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
     }
 
     default:
-      // For unrecognized nodes, try ExprNode then expr field or skip
-      if (n.exprNode) return `${emitStringFromTree(n.exprNode as ExprNode)};`;
-      if (n.expr) return `${n.expr};`;
-      return "";
+      // FAIL CLOSED (S459 addendum 1). A statement kind this serializer does not write is
+      // refused, never returned as "" — reader 1 (meta-allow-list.ts) admitting a kind does
+      // not make it evaluable, and a dropped statement changes what the block emits with no
+      // diagnostic.
+      throw new MetaSerializeRefusal(serializeRefusedForm(String(node.kind)));
   }
 }
 
@@ -989,8 +1096,23 @@ function processNodeList(
       // is NEVER executed — before S457 a refused body still ran here.
       const refused = (node as Record<string, unknown>)._metaAllowListRefused === true;
 
+      // S459 addendum 1 — a statement the serializer cannot write refuses the block
+      // (E-META-EVAL-001 naming the form); it is never evaluated without that statement.
+      let bodyText: string | null = null;
       if (isCompileTime && !hasReactiveVars && !hasNestedMeta && !refused) {
-        const bodyText = serializeBody((body || []) as LogicStatement[], collectMetaLocals((body || []) as LogicStatement[]));
+        try {
+          bodyText = serializeBody((body || []) as LogicStatement[], collectMetaLocals((body || []) as LogicStatement[]));
+        } catch (e) {
+          if (!(e instanceof MetaSerializeRefusal)) throw e;
+          errors.push(new MetaEvalError(
+            "E-META-EVAL-001",
+            e.message,
+            (node as { span?: Span }).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
+          ));
+        }
+      }
+
+      if (bodyText !== null) {
         const bodyDeclared = topLevelDeclaredNames(bodyText);
         const captured = selectCapturedDecls(scopeDecls, identifierReads(`(function () {\n${bodyText}\n})`), bodyDeclared);
         const precedingDecls = captured.length > 0 ? captured.map((d) => d.code).join("\n") : undefined;
