@@ -137,7 +137,7 @@ describe("Mixed-case for-lift hoist (follow-on Bug 5)", () => {
     const effectBody = clientJs.slice(effectIdx);
     // The effect body must NOT declare a fresh wrapper with document.createElement("div").
     // (It CAN contain _scrml_lift(wrapper) — that references the outer-scope const.)
-    expect(effectBody).not.toMatch(/const _scrml_list_wrapper_\d+ = document\.createElement/);
+    expect(effectBody).not.toMatch(/const _scrml_list_wrapper_\d+ = _scrml_g\.document\.createElement/);
   });
 
   test("_scrml_effect_static appears exactly once (no duplicate registrations)", () => {
@@ -196,7 +196,7 @@ describe("Mixed-case for-lift hoist (follow-on Bug 5)", () => {
     expect(effectStaticIdx).toBeGreaterThan(-1);
     // No outer effect that re-runs on reactive reads — only effect_static.
     const prefix = clientJs.slice(0, wrapperIdx);
-    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = document.querySelector");
+    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = _scrml_g.document.querySelector");
     expect(lastTargetAssign).toBeGreaterThan(-1);
     const between = prefix.slice(lastTargetAssign);
     const opens = (between.match(/_scrml_effect\(function\(\)/g) || []).length;

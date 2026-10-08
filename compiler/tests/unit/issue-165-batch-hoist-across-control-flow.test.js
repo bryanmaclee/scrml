@@ -165,7 +165,7 @@ describe("#165 §2: no regression — consecutive server calls with no control f
 `;
     const code = compileSource("batch.scrml", src);
     const fn = fnBody(code, "caseD");
-    expect(fn).toMatch(/const \[a, b\] = await Promise\.all\(\[/);
+    expect(fn).toMatch(/const \[a, b\] = await _scrml_g\.Promise\.all\(\[/);
     expect(fn).toMatch(/_scrml_fetch_bump_\d+\("D1"\)/);
     expect(fn).toMatch(/_scrml_fetch_bump_\d+\("D2"\)/);
   });

@@ -65,7 +65,7 @@ function runClientJs(clientJs, finalExpression) {
     const _scrml_default_set = () => {};
     const _scrml_init_set = () => {};
   `;
-  const fn = new Function(shims + "\n" + unwrapChunkScope(clientJs) + "\n" + `return (${finalExpression});`);
+  const fn = new Function(shims + "\n" + unwrapChunkScope(clientJs, { hostAlias: true }) + "\n" + `return (${finalExpression});`);
   return fn();
 }
 

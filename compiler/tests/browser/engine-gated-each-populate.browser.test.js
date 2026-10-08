@@ -128,7 +128,7 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
   test("each render fn reads the source cell BEFORE the mount guard (Mode 1 fix)", () => {
     const clientJs = foldChunkNamespacing(compileToOutputs(BUTTON_SRC, "button").clientJs);
     const getIdx = clientJs.indexOf('const _scrml_items = _scrml_reactive_get("todos");');
-    const mountIdx = clientJs.indexOf("const _scrml_mount = _scrml_find_each_anchor(document,");
+    const mountIdx = clientJs.indexOf("const _scrml_mount = _scrml_find_each_anchor(_scrml_g.document,");
     expect(getIdx).toBeGreaterThan(-1);
     expect(mountIdx).toBeGreaterThan(-1);
     expect(getIdx).toBeLessThan(mountIdx);

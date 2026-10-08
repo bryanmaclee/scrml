@@ -25,6 +25,8 @@ import { _scrml_url_shape_ok, _SCRML_SAFE_URL_SCHEMES } from "../../src/runtime-
 import { resolveTypeExpr, checkPredicateLiteral } from "../../src/type-system.js";
 import { predicateToJsExpr, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "../../src/codegen/emit-predicates.ts";
 import { URL_GUARD_RUNTIME_SOURCE } from "../../src/runtime-template.js";
+import { aliasHostGlobalsInRuntimeText } from "../../src/codegen/host-global-alias.ts";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 // The scheme shapes the S457 runtime URL guard tests use: case, tab / CR / LF inside the scheme,
 // leading C0 controls and spaces, and every non-safe scheme family.
@@ -213,7 +215,7 @@ describe("C — runtime zone: every boundary check calls the one judge", () => {
       // client: decl boundary check + bind:value handler
       expect(out.clientJs).toContain("_scrml_url_shape_ok(");
       expect(out.clientJs).toContain("_scrml_url_shape_ok(event.target.value)");
-      expect(out.clientJs).not.toContain("new URL(");
+      expect(out.clientJs).not.toMatch(/new (?:_scrml_g\.)?URL\(/);
       // the shipped runtime carries the 'urlguard' chunk (gated on the call)
       expect((out.runtimeJs.match(/function _scrml_url_shape_ok\(/g) ?? []).length).toBe(1);
       // server: the param check calls it; the bundle inlines the definition once
@@ -276,7 +278,9 @@ describe("C — runtime zone: every boundary check calls the one judge", () => {
   });
 
   test("the server helper is the runtime-url-guard.js source; never inlined twice", () => {
-    expect(SERVER_URL_SHAPE_HELPER).toContain(URL_GUARD_RUNTIME_SOURCE);
+    // The server copy is the same source with its host globals spelled through the
+    // bundle's alias (S457 2a): it shares the module scope with user bindings.
+    expect(SERVER_URL_SHAPE_HELPER).toContain(aliasHostGlobalsInRuntimeText(URL_GUARD_RUNTIME_SOURCE));
     expect(needsUrlShapeHelper("if (!(_scrml_url_shape_ok(x))) {}")).toBe(true);
     expect(needsUrlShapeHelper(SERVER_URL_SHAPE_HELPER + "\nif (!(_scrml_url_shape_ok(x))) {}")).toBe(false);
     expect(needsUrlShapeHelper("const a = 1;")).toBe(false);
@@ -349,7 +353,9 @@ describe("D — run it", () => {
       // Execute the worker script the way a Worker would: a fresh scope with `self`.
       const posted = [];
       const self = { postMessage: (m) => posted.push(m), onmessage: null };
-      new Function("self", workerJs)(self);
+      // The bundle reaches `self` through its host-global alias (S457 2a): a view of
+      // the global object whose `self` is this stand-in.
+      new Function("__scrml_host__", rebindHostAlias(workerJs))(hostView({ self }));
       expect(typeof self.onmessage).toBe("function");
       self.onmessage({ data: { id: 1, data: "https://scrml.dev/" } });
       self.onmessage({ data: { id: 2, data: "mailto:a@b.c" } });

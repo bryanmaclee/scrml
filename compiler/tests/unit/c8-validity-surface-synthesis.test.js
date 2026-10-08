@@ -288,7 +288,7 @@ describe("C8 §C8.4 — Compound `submitted` + document submit listener", () => 
     const child = compoundChild("name", "", []);
     const parent = compoundParent("signup", [child]);
     const out = emitLogicNode(parent, clientOpts());
-    expect(out).toContain('typeof document !== "undefined"');
+    expect(out).toContain('typeof _scrml_g.document !== "undefined"');
   });
 });
 

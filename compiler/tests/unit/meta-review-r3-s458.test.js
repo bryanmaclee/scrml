@@ -231,10 +231,10 @@ describe("S458 r3b/final F4 — meta.bindings is the §22.5.2 per-run snapshot; 
     };
     const emitted = emitLogicNode(node);
     // meta.bindings: a per-run thunk over plain-value entries.
-    expect(emitted).toMatch(/\(\) => Object\.freeze\(\{\s*counter: counter/);
+    expect(emitted).toMatch(/\(\) => _scrml_g\.Object\.freeze\(\{\s*counter: counter/);
     // The body's own reference goes through the internal object, not meta.bindings.
     expect(emitted).toContain("_scrml_cap.counter");
-    expect(emitted).toMatch(/const _scrml_cap = Object\.freeze\(\{\s*get counter\(\) \{ return counter; \}/);
+    expect(emitted).toMatch(/const _scrml_cap = _scrml_g\.Object\.freeze\(\{\s*get counter\(\) \{ return counter; \}/);
     // eslint-disable-next-line no-new-func
     const harness = new Function(`
       ${SCRML_RUNTIME}

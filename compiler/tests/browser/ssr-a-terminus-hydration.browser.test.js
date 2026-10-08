@@ -35,6 +35,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -126,11 +127,13 @@ async function composeFirstPaint(serverJs, html, dbRows) {
     constructor(body, init) { this._body = body; this.status = init?.status; }
     async text() { return this._body; }
   }
+  // The bundle reaches host globals through its alias `_scrml_g` (S457 2a): the stubs
+  // reach it through a view of the global object.
   const wrapper = new Function(
-    "_scrml_sql", "Bun", "Response",
-    `${runnable}\nreturn { _scrml_ssr_compose_handler };`,
+    "_scrml_sql", "Bun", "Response", "__scrml_host__",
+    `${rebindHostAlias(runnable)}\nreturn { _scrml_ssr_compose_handler };`,
   );
-  const mod = wrapper(_scrml_sql, BunStub, ResponseStub);
+  const mod = wrapper(_scrml_sql, BunStub, ResponseStub, hostView({ Bun: BunStub, Response: ResponseStub }));
   const resp = await mod._scrml_ssr_compose_handler({});
   return await resp.text();
 }

@@ -249,7 +249,7 @@ export function emitCompoundSynthSurface(
   // `true` per JS spec).
   // -------------------------------------------------------------------------
   lines.push(
-    `_scrml_derived_declare(${JSON.stringify(isValidKey)}, () => Object.values(_scrml_derived_get(${JSON.stringify(errorsKey)})).every(arr => arr.length === 0));`,
+    `_scrml_derived_declare(${JSON.stringify(isValidKey)}, () => _scrml_g.Object.values(_scrml_derived_get(${JSON.stringify(errorsKey)})).every(arr => arr.length === 0));`,
   );
   lines.push(
     `_scrml_derived_subscribe(${JSON.stringify(isValidKey)}, ${JSON.stringify(errorsKey)});`,
@@ -313,9 +313,9 @@ export function emitCompoundSynthSurface(
   // server-boundary skip already triggered at the top of this function, but
   // detectRuntimeChunks may include this module's emission for tree-shaking
   // edge cases — guarding `typeof document !== "undefined"` is harmless.
-  lines.push(`if (typeof document !== "undefined") {`);
+  lines.push(`if (typeof _scrml_g.document !== "undefined") {`);
   lines.push(
-    `  document.addEventListener("submit", () => {`,
+    `  _scrml_g.document.addEventListener("submit", () => {`,
   );
   lines.push(
     `    if (_scrml_reactive_get(${JSON.stringify(submittedKey)}) !== true) {`,

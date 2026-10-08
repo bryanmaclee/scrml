@@ -226,7 +226,7 @@ describe("g-each-shorthand-rcdata-parent — S328 silent data loss", () => {
 
     // Emitted-code assertion — the RCDATA `.value` lowering, matching the
     // bare-body `_rcdataValueExpr` path.
-    expect(app.clientJs).toContain(".value = String(");
+    expect(app.clientJs).toContain(".value = _scrml_g.String(");
   });
 
   test("<textarea : …> survives a same-key reconcile without gaining an element child", () => {

@@ -233,8 +233,9 @@ describe("codegen defence in depth — a multi-statement body never reaches the 
       // The guarded emission, evaluated as emitted.
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       const emitted = rewriteSqlRefs(`?{${BT}${MULTI}${BT}}`, "_scrml_sql");
-      const run = new AsyncFunction("_scrml_sql", `return ${emitted};`);
-      await expect(run(sql)).rejects.toThrow(CODE);
+      // `_scrml_g`: the bundle's host-global alias (S457 2a).
+      const run = new AsyncFunction("_scrml_sql", "_scrml_g", `return ${emitted};`);
+      await expect(run(sql, globalThis)).rejects.toThrow(CODE);
       expect(await count()).toBe(2);
       // A single statement with a trailing `;` still runs.
       const one = new AsyncFunction("_scrml_sql", `return ${rewriteSqlRefs(`?{${BT}INSERT INTO log (msg) VALUES ('c');${BT}}`, "_scrml_sql")};`);

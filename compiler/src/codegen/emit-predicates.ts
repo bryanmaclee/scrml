@@ -21,6 +21,7 @@
  */
 
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
+import { aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 
 // ---------------------------------------------------------------------------
 // PredicateExpr mirror (matches type-system.ts — no import to avoid coupling)
@@ -67,11 +68,16 @@ export const URL_SHAPE_FN = "_scrml_url_shape_ok";
  * calls `_scrml_url_shape_ok(` (a `string(url)` server-function parameter or a boundary-zone decl).
  * The same source the client 'urlguard' chunk inlines. A bundle that already carries it (the SSR
  * first-paint URL guard copy) must not inline it twice — see `needsUrlShapeHelper`.
+ *
+ * The copy shares its module scope with user bindings (a server function called by another is
+ * a module-scope `async function <name>`), so its host-global references are spelled through
+ * the `_scrml_g` alias (codegen/host-global-alias.ts) — a `server function URL` must not
+ * become the judge's `new URL(…)`.
  */
 export const SERVER_URL_SHAPE_HELPER: string = [
   "",
   "// --- §53.6.1 `url` named shape + §5.2 URL scheme reader (inlined copy; source: runtime-url-guard.js) ---",
-  URL_GUARD_RUNTIME_SOURCE,
+  aliasHostGlobalsInRuntimeText(URL_GUARD_RUNTIME_SOURCE),
 ].join("\n");
 
 /** Does `emitted` call the `url` shape judge without already defining it? */
@@ -151,8 +157,8 @@ export interface JudgeShape {
 /** JS boolean: is `v` a value of `baseType`? `null` = no base guard (enum subset). */
 function baseTypeGuard(baseType: string | undefined, v: string): string | null {
   switch (baseType) {
-    case "number": return `typeof ${v} === "number" && !Number.isNaN(${v})`;
-    case "integer": return `Number.isInteger(${v})`;
+    case "number": return `typeof ${v} === "number" && !_scrml_g.Number.isNaN(${v})`;
+    case "integer": return `_scrml_g.Number.isInteger(${v})`;
     case "string": return `typeof ${v} === "string"`;
     case "boolean": return `typeof ${v} === "boolean"`;
     default: return null;
@@ -171,7 +177,7 @@ export function judgeExpr(predicate: PredicateExpr, valueExpr: string, shape: Ju
     if (at < wrap.length) {
       if (wrap[at] === "nullable") return `(${v} === null || ${v} === undefined || ${inner(v, at + 1)})`;
       const el = `_scrml_el${at}`;
-      return `(Array.isArray(${v}) && ${v}.every((${el}) => ${inner(el, at + 1)}))`;
+      return `(_scrml_g.Array.isArray(${v}) && ${v}.every((${el}) => ${inner(el, at + 1)}))`;
     }
     const guard = baseTypeGuard(shape.baseType, v);
     const pred = predicateToJsExpr(predicate, v);
@@ -186,7 +192,7 @@ export function judgeExpr(predicate: PredicateExpr, valueExpr: string, shape: Ju
  * parameter into a 500) and does not echo a structured attacker value.
  */
 function safeValueText(v: string): string {
-  return `(typeof ${v} === "string" || typeof ${v} === "number" || typeof ${v} === "boolean" ? String(${v}) : typeof ${v})`;
+  return `(typeof ${v} === "string" || typeof ${v} === "number" || typeof ${v} === "boolean" ? _scrml_g.String(${v}) : typeof ${v})`;
 }
 
 export function predicateToJsExpr(pred: PredicateExpr, valueExpr: string): string {
@@ -360,7 +366,7 @@ export function emitRuntimeCheck(
   const lines: string[] = [];
   lines.push(`// §53.4.5 E-CONTRACT-001-RT boundary check for '${varName}'${labelPart}`);
   lines.push(`if (!(${checkExpr})) {`);
-  lines.push(`  throw new Error(`);
+  lines.push(`  throw new _scrml_g.Error(`);
   lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
   lines.push(`    "  Variable: " + ${JSON.stringify(varName + labelPart)} + "\\n" +`);
   lines.push(`    "  Constraint: (" + ${JSON.stringify(displayPred)} + ")\\n" +`);
@@ -405,7 +411,7 @@ export function emitServerParamCheck(
   const lines: string[] = [];
   lines.push(`${indent}// §53.9.4 E-CONTRACT-001-RT server-side boundary check: '${paramName}'${labelPart}`);
   lines.push(`${indent}if (!(${checkExpr})) {`);
-  lines.push(`${indent}  return new Response(JSON.stringify({`);
+  lines.push(`${indent}  return new _scrml_g.Response(_scrml_g.JSON.stringify({`);
   lines.push(`${indent}    error: "E-CONTRACT-001-RT: Value constraint violated at runtime.",`);
   lines.push(`${indent}    constraint: ${JSON.stringify(`(${displayPred})`)},`);
   lines.push(`${indent}    parameter: ${JSON.stringify(paramName + labelPart)},`);

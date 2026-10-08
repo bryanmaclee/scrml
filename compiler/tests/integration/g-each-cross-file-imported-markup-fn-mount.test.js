@@ -71,9 +71,9 @@ describe("g-each cross-file imported markup fn — mounts (not String())", () =>
     expect(errors).toEqual([]);
     // mounted: built into a `_scrml_mv_v_N = ( badge(...) )` + instanceof Node guard
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*badge\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
     // NOT stringified
-    expect(js).not.toMatch(/textContent = String\(\s*badge\s*\(/);
+    expect(js).not.toMatch(/textContent = (?:_scrml_g\.)?String\(\s*badge\s*\(/);
   });
 
   test("FAIL-SAFE: imported STRING fn `${plain(it.name)}` stays a text node", () => {
@@ -88,8 +88,8 @@ describe("g-each cross-file imported markup fn — mounts (not String())", () =>
     const { errors, js } = compileApp(BADGES, appUsing(`${D}{b(it.name)}`, "badge as b, plain"));
     expect(errors).toEqual([]);
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*b\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
-    expect(js).not.toMatch(/textContent = String\(\s*b\s*\(/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
+    expect(js).not.toMatch(/textContent = (?:_scrml_g\.)?String\(\s*b\s*\(/);
   });
 
   test("local wrapper of an imported markup fn closes via the seeded fixpoint", () => {
@@ -111,8 +111,8 @@ fn localWrap(n: string) { return badge(n) }
     expect(errors).toEqual([]);
     // a same-file fn is name-mangled to `_scrml_localWrap_N`
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*_scrml_localWrap_\d+\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
-    expect(js).not.toMatch(/textContent = String\(\s*_scrml_localWrap_\d+\s*\(/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
+    expect(js).not.toMatch(/textContent = (?:_scrml_g\.)?String\(\s*_scrml_localWrap_\d+\s*\(/);
   });
 
   test("exported WRAPPER of an imported markup fn mounts downstream (cross-module fixpoint)", () => {
@@ -138,8 +138,8 @@ type Row:struct = { id: string, name: string }
     const js = readFileSync(join(outDir, "app.client.js"), "utf8");
     expect(errors.map((e) => e.code)).toEqual([]);
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*wrap\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
-    expect(js).not.toMatch(/textContent = String\(\s*wrap\s*\(/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
+    expect(js).not.toMatch(/textContent = (?:_scrml_g\.)?String\(\s*wrap\s*\(/);
   });
 
   test("N-hop chain of exported wrappers closes (badge -> wrap -> wrap2)", () => {
@@ -168,7 +168,7 @@ type Row:struct = { id: string, name: string }
     const js = readFileSync(join(outDir, "app.client.js"), "utf8");
     expect(errors.map((e) => e.code)).toEqual([]);
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*wrap2\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
   });
 
   test("direct consumption of a NAMED-RE-EXPORTED markup fn mounts (barrel -> app)", () => {
@@ -191,7 +191,7 @@ type Row:struct = { id: string, name: string }
     const js = readFileSync(join(outDir, "app.client.js"), "utf8");
     expect(errors.map((e) => e.code)).toEqual([]);
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*badge\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
   });
 
   test("FAIL-SAFE: a NESTED markup fn does not falsely flag a same-named string EXPORT", () => {
@@ -233,6 +233,6 @@ fn sameFileBadge(n: string) { return <span class="s">${D}{n}</span> }
     expect(errors.map((e) => e.code)).toEqual([]);
     // same-file fn is name-mangled to `_scrml_sameFileBadge_N`
     expect(js).toMatch(/_scrml_mv_v_\d+ = \(\s*_scrml_sameFileBadge_\d+\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
   });
 });

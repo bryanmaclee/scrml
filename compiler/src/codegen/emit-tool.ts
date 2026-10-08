@@ -26,6 +26,7 @@
  * `serverFnNames` peer-await mechanism.
  */
 
+import { withHostGlobalAlias, stripHostGlobalAliasDecl, aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 import type { CompileContext } from "./context.ts";
 import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE } from "./sql-handle-name.ts";
 import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
@@ -93,7 +94,9 @@ function serveBindHelperLines(): string[] {
   out.push("const _scrml_bind = (() => {");
   for (const fn of SERVE_BIND_FNS) {
     // Not re-indented: a template literal spanning lines must keep its text exactly.
-    out.push(fn.toString().replace(/\r\n/g, "\n"));
+    // S457 2a — host globals through the module's `_scrml_g` alias: this text shares the
+    // module scope with the program's own bindings.
+    out.push(aliasHostGlobalsInRuntimeText(fn.toString().replace(/\r\n/g, "\n")));
   }
   out.push(`  function host(raw) {`);
   out.push(`    if (raw === undefined) return ${JSON.stringify(DEFAULT_HOST)};`);
@@ -101,28 +104,28 @@ function serveBindHelperLines(): string[] {
   out.push(`      ? { message: "is set but empty. Unset it to bind loopback, or name an address (e.g. 0.0.0.0 for every interface)." }`);
   out.push(`      : hostRefusal(raw);`);
   out.push(`    if (refused) {`);
-  out.push(`      console.error(\`scrml serve-target: ${SERVE_HOST_ENV} \${refused.message}\`);`);
-  out.push(`      process.exit(1);`);
+  out.push(`      _scrml_g.console.error(\`scrml serve-target: ${SERVE_HOST_ENV} \${refused.message}\`);`);
+  out.push(`      _scrml_g.process.exit(1);`);
   out.push(`    }`);
   out.push(`    return raw;`);
   out.push(`  }`);
   out.push(`  function listen(config, host) {`);
   out.push(`    const plan = bindPlan(host);`);
-  out.push(`    const serve = (c) => Bun.serve(c);`);
-  out.push(`    const { server, bound } = bindListeners(serve, config, plan, plan.twin, () => probeIPv6(serve), (m) => console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:")), (err) => {`);
+  out.push(`    const serve = (c) => _scrml_g.Bun.serve(c);`);
+  out.push(`    const { server, bound } = bindListeners(serve, config, plan, plan.twin, () => probeIPv6(serve), (m) => _scrml_g.console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:")), (err) => {`);
   out.push(`      const where = config.port === 0 ? "an ephemeral port" : \`port \${config.port}\`;`);
-  out.push(`      console.error(`);
+  out.push(`      _scrml_g.console.error(`);
   out.push(`        \`scrml serve-target: could not listen on host "\${host}" at \${where} — tried \${plan.primary}. \` +`);
   out.push(`        \`The address is not one of this machine's, the name does not resolve, or the port is already in use. \` +`);
   out.push(`        \`Set ${SERVE_HOST_ENV} to an address this machine owns (0.0.0.0 = every interface), or change serve=. \` +`);
   out.push(`        \`Underlying error: \${[err && err.code, err && err.message].filter(Boolean).join(" ")}\`,`);
   out.push(`      );`);
-  out.push(`      process.exit(1);`);
+  out.push(`      _scrml_g.process.exit(1);`);
   out.push(`    });`);
   out.push(`    if (isLoopbackHost(host)) {`);
-  out.push(`      console.error(\`scrml serve-target listening on \${displayUrlFor(bound, host, server.port)}\`);`);
+  out.push(`      _scrml_g.console.error(\`scrml serve-target listening on \${displayUrlFor(bound, host, server.port)}\`);`);
   out.push(`    } else {`);
-  out.push(`      console.error(\`scrml serve-target listening on \${bound.join(" + ")} port \${server.port} — reachable from the network. Anyone who can reach this machine can use it.\`);`);
+  out.push(`      _scrml_g.console.error(\`scrml serve-target listening on \${bound.join(" + ")} port \${server.port} — reachable from the network. Anyone who can reach this machine can use it.\`);`);
   out.push(`    }`);
   out.push(`    return server;`);
   out.push(`  }`);
@@ -771,13 +774,13 @@ export function generateToolJs(
       || (typeof mainFn.returnTypeAnnotation === "string" && (mainFn.returnTypeAnnotation as string).trim().length > 0);
     if (hasReturn) {
       // Numeric-return → exit-harness: the return value IS the process exit code.
-      harness.push("const _scrml_exit_code = await main(process.argv.slice(2));");
-      harness.push("process.exit(_scrml_exit_code);");
+      harness.push("const _scrml_exit_code = await main(_scrml_g.process.argv.slice(2));");
+      harness.push("_scrml_g.process.exit(_scrml_exit_code);");
     } else {
       // No declared return → invoke-only: await setup, then decline to force the
       // process down — natural Bun/Node event-loop liveness decides (an active
       // Bun.serve / stdin handle keeps it alive; a drained loop exits 0).
-      harness.push("await main(process.argv.slice(2));");
+      harness.push("await main(_scrml_g.process.argv.slice(2));");
     }
   } else {
     // No main — E-TOOL-001 already fired at TS; emit an honest no-op so the
@@ -812,7 +815,8 @@ export function generateToolJs(
   // `true`: this module's §64.3 harness ends with `process.exit()`, so the sqlite
   // configure must be AWAITED or the WAL pragma is killed mid-flight (F2-2).
   const header = assembleModuleHeaders(fileAST, filePath, body, errors, true);
-  return header + body + "\n" + harness.join("\n") + "\n";
+  // S457 2a — host globals are spelled `_scrml_g.<name>`; declare the alias.
+  return withHostGlobalAlias(header + body + "\n" + harness.join("\n") + "\n") as string;
 }
 
 /** Escape a string for literal use inside a RegExp. */
@@ -990,9 +994,11 @@ function generateServeHarnessToolJs(
   // refused SCRML_HOST exits before any user code in this module runs. (Static
   // ES imports still evaluate first — the language cannot order code ahead of them.)
   for (const line of serveBindHelperLines()) out.push(line);
-  out.push(`const _scrml_serve_host = _scrml_bind.host(process.env.${SERVE_HOST_ENV});`);
+  out.push(`const _scrml_serve_host = _scrml_bind.host(_scrml_g.process.env.${SERVE_HOST_ENV});`);
   out.push("");
-  out.push(headlessModule.replace(/\n+$/, ""));
+  // The embedded bundle's own alias line is dropped: the alias is declared once, at the
+  // top of THIS module (below), because the bind helper above already reads it.
+  out.push(stripHostGlobalAliasDecl(headlessModule).replace(/\n+$/, ""));
   out.push("");
   if (extraHelperHeader) { out.push(extraHelperHeader.replace(/\n+$/, "")); out.push(""); }
   if (extraBody.trim()) { out.push(extraBody.replace(/\n+$/, "")); out.push(""); }
@@ -1006,7 +1012,7 @@ function generateServeHarnessToolJs(
   if (mainFn) {
     // §64.3 compose — run the no-return setup `main` BEFORE the serve-harness holds
     // the process (a numeric-return main + serve= is E-TOOL-SERVE-MAIN-EXITS at TS).
-    out.push("await main(process.argv.slice(2));");
+    out.push("await main(_scrml_g.process.argv.slice(2));");
   }
   out.push(`const _scrml_serve_port = ${portJs};`);
   out.push(`const _scrml_server = _scrml_bind.listen({`);
@@ -1015,7 +1021,7 @@ function generateServeHarnessToolJs(
   // truncated by Bun's 10s default).
   out.push("  idleTimeout: 120,");
   out.push("  async fetch(request, server) {");
-  out.push("    const url = new URL(request.url);");
+  out.push("    const url = new _scrml_g.URL(request.url);");
   out.push("    for (const _scrml_route of routes) {");
   out.push("      if ((_scrml_route.path === url.pathname || _scrml_route.path === \"/*\") && _scrml_route.method === request.method) {");
   // A WS upgrade route needs the `server` handle for `server.upgrade`; an HTTP
@@ -1023,7 +1029,7 @@ function generateServeHarnessToolJs(
   out.push("        return _scrml_route.isWebSocket ? _scrml_route.handler(request, server) : _scrml_route.handler(request);");
   out.push("      }");
   out.push("    }");
-  out.push("    return new Response(\"Not Found\", { status: 404 });");
+  out.push("    return new _scrml_g.Response(\"Not Found\", { status: 404 });");
   out.push("  },");
   if (hasWs) out.push("  websocket: _scrml_ws_handlers,");
   out.push("}, _scrml_serve_host);");
@@ -1032,11 +1038,12 @@ function generateServeHarnessToolJs(
   // and it is the in-process boot/drive/STOP seam for a harness test (the DD H6
   // conformance shape — `_scrml_active_server.stop(true)`). Unconditional: a
   // headless serve-target has no client, so exposing its own server is harmless.
-  out.push("globalThis._scrml_active_server = _scrml_server;");
+  out.push("_scrml_g._scrml_active_server = _scrml_server;");
   // The operator-visible startup line (STDERR — stdout stays clean for machine
   // output) is printed by `_scrml_bind.listen`, naming what actually bound.
   out.push("");
-  return out.join("\n");
+  // S457 2a — host globals are spelled `_scrml_g.<name>`; declare the alias first.
+  return withHostGlobalAlias(out.join("\n")) as string;
 }
 
 /**
@@ -1345,5 +1352,5 @@ export function generateToolLibraryJs(
   // Headers must LEAD the module (ES imports hoist): ES imports, the Bun.SQL db
   // handle (the module's OWN <db src>, §44.7.1), and inlined runtime helpers the
   // in-process fn bodies reference — assembled shared with generateToolJs.
-  return assembleModuleHeaders(fileAST, filePath, body, errors) + body + "\n";
+  return withHostGlobalAlias(assembleModuleHeaders(fileAST, filePath, body, errors) + body + "\n") as string;
 }

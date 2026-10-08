@@ -273,7 +273,7 @@ describe("R25-Bug-37 §8 — composition with Bug 40 `:`-shorthand body", () => 
     // Bug 37: filter arrow preserved.
     expect(clientJs).toMatch(/filter\(c => c\.foo == 1\)/);
     // Bug 40: `:`-shorthand body wired via textContent.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.foo\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.foo\)/);
   });
 });
 

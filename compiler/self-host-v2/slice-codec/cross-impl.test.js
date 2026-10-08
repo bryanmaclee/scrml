@@ -160,9 +160,10 @@ describe("shared shapes — bootstrap-encoded values decode identically in impl#
 // impl#1's runtime enum constructors, as its server artifact emits them (its runtime value
 // keys `data` by field name; the bootstrap's is positional — the codec maps between them).
 function extractConst(src, name) {
-  const m = src.match(new RegExp(`const ${name} = Object\\.freeze\\(.*\\);`));
+  // impl#1 spells host globals through its alias `_scrml_g` (S457 2a).
+  const m = src.match(new RegExp(`const ${name} = _scrml_g\\.Object\\.freeze\\(.*\\);`));
   if (m === null) throw new Error(`impl#1 emitted no ${name}`);
-  return new Function(m[0] + `; return ${name};`)();
+  return new Function("_scrml_g", m[0] + `; return ${name};`)(globalThis);
 }
 const I1Shape = extractConst(serverJs, "Shape");
 
@@ -237,7 +238,7 @@ describe("DIVERGENCES — impl#1 vs §57 (pinned; see progress.md)", () => {
 
   test("D5: impl#1 serializes server-fn ARGUMENTS with plain JSON.stringify (no envelope for a `T | not` argument)", () => {
     // `echo(n: int | not)`: the argument is stringified raw, so `echo(not)` sends `{"n":null}`.
-    expect(clientJs).toMatch(/const _scrml_body = JSON\.stringify\(\{\s*"n": n,\s*\}\);/);
+    expect(clientJs).toMatch(/const _scrml_body = _scrml_g\.JSON\.stringify\(\{\s*"n": n,\s*\}\);/);
     expect(clientJs).not.toContain("_scrml_wire_encode");
   });
 });

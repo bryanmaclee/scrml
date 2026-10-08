@@ -1,4 +1,5 @@
 import { CGError } from "./errors.ts";
+import { withHostGlobalAlias } from "./host-global-alias.ts";
 import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
@@ -36,7 +37,7 @@ import { tenantStartupCheckLines, type TenantCheckHandle } from "./tenant-startu
 /** §19.10.6 (S449 review F1) — the SSE stream's `finally` backstop call. Emitted with
  *  every SSE route; dropped again when the module declares no `?{}` handle (and so
  *  carries no transaction runtime to call). */
-const SSE_STREAM_END_LINE = "        if (await _scrml_db_stream_end()) { try { _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\ndata: ' + JSON.stringify({ error: { kind: \"TransactionLeftOpen\", message: \"the stream ended with its database transaction still open; its writes were rolled back (SPEC §19.10.6)\" } }) + '\\n\\n')); } catch (_scrml_enqErr) { /* the client is already gone */ } }";
+const SSE_STREAM_END_LINE = "        if (await _scrml_db_stream_end()) { try { _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\ndata: ' + _scrml_g.JSON.stringify({ error: { kind: \"TransactionLeftOpen\", message: \"the stream ended with its database transaction still open; its writes were rolled back (SPEC §19.10.6)\" } }) + '\\n\\n')); } catch (_scrml_enqErr) { /* the client is already gone */ } }";
 import { dbAttrValue, resolveDbScopes, dbHandlesWithin, type DbScopeResolution, type DbHandle } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE, DEFAULT_SQL_HANDLE, setFileSqlFallback, fallbackSqlHandle } from "./sql-handle-name.ts";
@@ -1495,7 +1496,8 @@ export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): str
   // de-duplication memory is still the run's, so a construct runCG already reported is not
   // reported twice.
   try {
-    return _generateValueOnlyServerJs(fileAST, errors);
+    // S457 2a — the module reads host globals through `_scrml_g` (inlined helpers, value lowerings).
+    return withHostGlobalAlias(_generateValueOnlyServerJs(fileAST, errors)) as string;
   } finally {
     // With no `errors` channel the refusals stay in the sink for the next drain.
     if (errors) for (const e of drainRefusedLowerings()) errors.push(e);
@@ -1945,7 +1947,7 @@ export function generateServerJs(
   // message text to the implementation; `fn` is unchanged, and a typed scrml
   // failure (`__scrml_error`) still passes through — the flow analyses those.
   const _cpsErrorPrologue = (fnName: string): string[] => _protectActive
-    ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
+    ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) _scrml_g.console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
     : [];
   // …and the envelope itself is a client egress: a typed scrml failure thrown
   // with a row in its payload goes through the same snapshot + strip as a
@@ -1955,7 +1957,7 @@ export function generateServerJs(
     : "_scrml_error_payload";
   const _cpsErrorMessage: string = _protectActive
     ? `"the server could not complete this call (details are in the server log)"`
-    : `String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
+    : `_scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
 
   // §14.8.10 — tenant-row isolation floor context. Built from BOTH the §14.8.9
   // `<db>`-derived schema registry AND the app's own `<schema>` declarations —
@@ -2098,20 +2100,20 @@ export function generateServerJs(
   // absent: a silent no-op here is exactly how the two limbs drifted apart in the
   // first place.
   const _markMediatedResponses = (emitted: string[], what: string): string[] => {
-    const _opener = emitted.findIndex((l) => l.includes("return new Response("));
+    const _opener = emitted.findIndex((l) => l.includes("return new _scrml_g.Response("));
     if (_opener === -1) {
       throw new Error(
-        `emit-server: ${what} was expected to emit a compiler-owned \`return new Response(\` for ` +
+        `emit-server: ${what} was expected to emit a compiler-owned \`return new _scrml_g.Response(\` for ` +
         `mediation marking and did not. If that emitter stopped producing a Response this call is ` +
         `dead and should be removed; if it changed shape, the §14.8.9 runtime guard will refuse the ` +
         `compiler's own response. Do not silence this by making the mark optional.`,
       );
     }
     const _out = emitted.slice();
-    // `return new Response(<args>);` -> `return _scrml_protect_mediated(new Response(<args>));`
+    // `return new _scrml_g.Response(<args>);` -> `return _scrml_protect_mediated(new _scrml_g.Response(<args>));`
     // The construction spans several lines, so the opener is wrapped and the
     // matching final `);` of that statement is closed one paren deeper.
-    _out[_opener] = _out[_opener].replace("return new Response(", "return _scrml_protect_mediated(new Response(");
+    _out[_opener] = _out[_opener].replace("return new _scrml_g.Response(", "return _scrml_protect_mediated(new _scrml_g.Response(");
     const _closer = _out.findIndex((l, i) => i > _opener && /\}\);\s*$/.test(l));
     if (_closer === -1) {
       throw new Error(`emit-server: ${what} — could not find the closing \`});\` of its Response construction.`);
@@ -2150,21 +2152,21 @@ export function generateServerJs(
       `${indent}// for one. Refuse the whole payload with a shaped 500 rather than letting`,
       `${indent}// the redact throw out of the handler and lose every unrelated cell.`,
       `${indent}for (const _scrml_mh_cell of [${_cells}]) {`,
-      `${indent}  if (_scrml_mh_cell instanceof Response) return _scrml_protect_opaque_refusal();`,
+      `${indent}  if (_scrml_mh_cell instanceof _scrml_g.Response) return _scrml_protect_opaque_refusal();`,
       `${indent}}`,
     ];
   };
 
   const _opaqueResultGuard = (resultVar: string, indent: string): string[] => {
     if (!_protectActive) {
-      return [`${indent}if (${resultVar} instanceof Response) return ${resultVar};`];
+      return [`${indent}if (${resultVar} instanceof _scrml_g.Response) return ${resultVar};`];
     }
     return [
       `${indent}// §14.8.9 — PROVENANCE first, then shape. A response the COMPILER built`,
       `${indent}// is already mediated; a null-body one carries no payload to mediate;`,
       `${indent}// anything else is an author-owned body the floor cannot read (helper).`,
-      `${indent}if (${resultVar} instanceof Response) {`,
-      `${indent}  if (${resultVar}[Symbol.for("scrml.protect.mediated")]) return ${resultVar};`,
+      `${indent}if (${resultVar} instanceof _scrml_g.Response) {`,
+      `${indent}  if (${resultVar}[_scrml_g.Symbol.for("scrml.protect.mediated")]) return ${resultVar};`,
       `${indent}  if (${resultVar}.body === null) return ${resultVar};`,
       `${indent}  return _scrml_protect_opaque_refusal();`,
       `${indent}}`,
@@ -2612,9 +2614,9 @@ export function generateServerJs(
     return [
       `${indent}// §38.6 broadcast/disconnect built-ins for channel "${channelName}"`,
       `${indent}const broadcast = (_scrml_data) => {`,
-      `${indent}  const _scrml_srv = (typeof globalThis !== "undefined" && globalThis._scrml_active_server) || null;`,
+      `${indent}  const _scrml_srv = (typeof _scrml_g !== "undefined" && _scrml_g._scrml_active_server) || null;`,
       `${indent}  if (_scrml_srv && typeof _scrml_srv.publish === "function") {`,
-      `${indent}    _scrml_srv.publish(${topicExpr}, JSON.stringify(${_broadcastData}));`,
+      `${indent}    _scrml_srv.publish(${topicExpr}, _scrml_g.JSON.stringify(${_broadcastData}));`,
       `${indent}  }`,
       `${indent}};`,
       `${indent}const disconnect = () => { /* §38.6: no-op from HTTP-routed server fn (no current client) */ };`,
@@ -3063,7 +3065,7 @@ export function generateServerJs(
     // opt-out path and (in secure mode) as the shape the B4b non-https warn reuses.
     lines.push("function _scrml_is_secure_req(req) {");
     lines.push("  try {");
-    lines.push("    const _u = new URL(req.url);");
+    lines.push("    const _u = new _scrml_g.URL(req.url);");
     lines.push("    const _proto = (req.headers.get('x-forwarded-proto') || _u.protocol.replace(':','')).toLowerCase();");
     lines.push("    const _host = _u.hostname;");
     lines.push("    const _isLocal = _host === 'localhost' || _host === '127.0.0.1' || _host === '::1' || _host === '';");
@@ -3098,13 +3100,13 @@ export function generateServerJs(
       lines.push("function _scrml_warn_insecure_cookie(req) {");
       lines.push("  if (_scrml_insecure_cookie_warned) return;");
       lines.push("  try {");
-      lines.push("    const _u = new URL(req.url);");
+      lines.push("    const _u = new _scrml_g.URL(req.url);");
       lines.push("    const _proto = (req.headers.get('x-forwarded-proto') || _u.protocol.replace(':','')).toLowerCase();");
       lines.push("    const _host = _u.hostname;");
       lines.push("    const _isLocal = _host === 'localhost' || _host === '127.0.0.1' || _host === '::1' || _host === '';");
       lines.push("    if (_proto !== 'https' && !_isLocal) {");
       lines.push("      _scrml_insecure_cookie_warned = true;");
-      lines.push("      console.warn(\"scrml: session cookie set Secure over http on a non-local host — the browser will reject it. Front with TLS, or set `session-secure=false` to run without Secure (insecure).\");");
+      lines.push("      _scrml_g.console.warn(\"scrml: session cookie set Secure over http on a non-local host — the browser will reject it. Front with TLS, or set `session-secure=false` to run without Secure (insecure).\");");
       lines.push("    }");
       lines.push("  } catch {}");
       lines.push("}");
@@ -3185,13 +3187,13 @@ export function generateServerJs(
     lines.push("function _scrml_serverload_auth(req, requiredRole) {");
     lines.push("  const _cu = _scrml_current_user(req);");
     lines.push("  if (!_cu.isAuth) {");
-    lines.push("    return new Response(JSON.stringify({ error: \"unauthenticated\" }), {");
+    lines.push("    return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: \"unauthenticated\" }), {");
     lines.push("      status: 401,");
     lines.push("      headers: { \"Content-Type\": \"application/json\" },");
     lines.push("    });");
     lines.push("  }");
     lines.push("  if (requiredRole && _cu.role !== requiredRole) {");
-    lines.push("    return new Response(JSON.stringify({ error: \"forbidden\" }), {");
+    lines.push("    return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: \"forbidden\" }), {");
     lines.push("      status: 403,");
     lines.push("      headers: { \"Content-Type\": \"application/json\" },");
     lines.push("    });");
@@ -3278,7 +3280,7 @@ export function generateServerJs(
       // `g-session-get-reserved-key-read-disclosure` (HIGH, open, routed to
       // bryan): a reserved-key READ policy is a language-surface ruling, and is
       // deliberately NOT decided here.
-      lines.push("    get(key) { return Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null; },");
+      lines.push("    get(key) { return _scrml_g.Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null; },");
       // S239-2 FIX A — a REAL in-request clear: wipe the working record AND the
       // pending changes so a subsequent `set()` builds a CLEAN session inheriting
       // none of the prior principal's fields. `_reset` stays sticky.
@@ -3303,14 +3305,14 @@ export function generateServerJs(
       // `destroy()` happened this request (a re-established session). A same-identity
       // preference-only `session.set` updates IN PLACE under the SAME sid, so a
       // concurrent/in-flight request holding that sid is NOT silently logged out.
-      lines.push("    const _identityWrite = Object.prototype.hasOwnProperty.call(sess._changes, 'userId') || sess._reset;");
+      lines.push("    const _identityWrite = _scrml_g.Object.prototype.hasOwnProperty.call(sess._changes, 'userId') || sess._reset;");
       lines.push("    if (_identityWrite) {");
       // S239 FIX 1 (fixation) + S239-2 FIX A (role-bleed): the new record is built
       // from THIS request's `session.set` changes ALONE — NEVER merged with the old
       // (or destroyed) principal's stored record, so a switch-user / re-login
       // inherits none of the prior identity's fields (role especially). Fresh sid;
       // the old record is deleted so a planted/leaked sid is not resurrectable.
-      lines.push("      const _newSid = crypto.randomUUID();");
+      lines.push("      const _newSid = _scrml_g.crypto.randomUUID();");
       lines.push("      _scrml_session_store.set(_newSid, { ...sess._changes }, _scrml_session_max_age);");
       lines.push("      if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid);");
       lines.push(`      return \`${_sessionCookieName}=\${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=\${_scrml_session_max_age}\` + _sec;`);
@@ -3321,7 +3323,7 @@ export function generateServerJs(
       // stored record so server-owned fields (a mid-body-minted csrf token) + the
       // existing userId/role survive.
       lines.push("    const _existing = sess.sid ? _scrml_session_store.get(sess.sid) : null;");
-      lines.push("    const _sid = _existing ? sess.sid : crypto.randomUUID();");
+      lines.push("    const _sid = _existing ? sess.sid : _scrml_g.crypto.randomUUID();");
       lines.push("    const _merged = { ...(_existing || {}), ...sess._changes };");
       lines.push("    _scrml_session_store.set(_sid, _merged, _scrml_session_max_age);");
       lines.push(`    return \`${_sessionCookieName}=\${_sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=\${_scrml_session_max_age}\` + _sec;`);
@@ -3377,11 +3379,11 @@ export function generateServerJs(
       // `set` returns false so an assignment THROUGH the binding is a loud
       // strict-mode TypeError, never a silent shadow write to the session object.
       lines.push("function _scrml_session_bind(_s) {");
-      lines.push("  return new Proxy(_s, {");
+      lines.push("  return new _scrml_g.Proxy(_s, {");
       lines.push("    get(t, k) {");
-      lines.push("      if (typeof k === 'symbol') return Reflect.get(t, k, t);");
-      lines.push("      if (k === 'userId' || k === 'role' || k === 'isAuth') return Reflect.get(t, k, t);");
-      lines.push("      if (k === 'set' || k === 'get' || k === 'destroy') return Reflect.get(t, k, t).bind(t);");
+      lines.push("      if (typeof k === 'symbol') return _scrml_g.Reflect.get(t, k, t);");
+      lines.push("      if (k === 'userId' || k === 'role' || k === 'isAuth') return _scrml_g.Reflect.get(t, k, t);");
+      lines.push("      if (k === 'set' || k === 'get' || k === 'destroy') return _scrml_g.Reflect.get(t, k, t).bind(t);");
       lines.push("      return t.get(k);");
       lines.push("    },");
       lines.push("    set() { return false; },");
@@ -3420,7 +3422,7 @@ export function generateServerJs(
     lines.push(`function _scrml_auth_check(req) {`);
     lines.push(`  const session = _scrml_session_middleware(req);`);
     lines.push(`  if (!session.isAuth) {`);
-    lines.push(`    return new Response(null, {`);
+    lines.push(`    return new _scrml_g.Response(null, {`);
     lines.push(`      status: 302,`);
     lines.push(`      headers: { Location: ${JSON.stringify(loginRedirect)} },`);
     lines.push(`    });`);
@@ -3444,7 +3446,7 @@ export function generateServerJs(
     if (csrf === "auto") {
       lines.push("// --- CSRF token generation and validation ---");
       lines.push("function _scrml_generate_csrf() {");
-      lines.push("  return crypto.randomUUID();");
+      lines.push("  return _scrml_g.crypto.randomUUID();");
       lines.push("}");
       lines.push("");
       lines.push("function _scrml_validate_csrf(req, session) {");
@@ -3473,7 +3475,7 @@ export function generateServerJs(
     if (csrf === "auto") {
       lines.push("    const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);");
       lines.push("    if (_scrml_sessionForCsrf.csrfToken && !_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {");
-      lines.push("      return new Response(JSON.stringify({ error: \"CSRF validation failed\" }), {");
+      lines.push("      return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: \"CSRF validation failed\" }), {");
       lines.push("        status: 403,");
       lines.push("        headers: {");
       lines.push("          \"Content-Type\": \"application/json\",");
@@ -3493,7 +3495,7 @@ export function generateServerJs(
     lines.push(_secureCookieMode
       ? "    const _dsec = '; Secure';"
       : "    const _dsec = _scrml_is_secure_req(_scrml_req) ? '; Secure' : '';");
-    lines.push("    return new Response(JSON.stringify({ ok: true }), {");
+    lines.push("    return new _scrml_g.Response(_scrml_g.JSON.stringify({ ok: true }), {");
     lines.push("      status: 200,");
     lines.push("      headers: {");
     lines.push(`        'Set-Cookie': '${_sessionCookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _dsec,`);
@@ -3530,7 +3532,7 @@ export function generateServerJs(
     } else {
       lines.push("    const _body = { isAuth: _s.isAuth, userId: _s.userId, role: _s.role };");
     }
-    lines.push("    return new Response(JSON.stringify(_body), {");
+    lines.push("    return new _scrml_g.Response(_scrml_g.JSON.stringify(_body), {");
     lines.push("      status: 200,");
     lines.push(`      headers: { "Content-Type": "application/json" },`);
     lines.push("    });");
@@ -3557,7 +3559,7 @@ export function generateServerJs(
     lines.push(`function _scrml_auth_check(req) {`);
     lines.push(`  const session = _scrml_session_middleware(req);`);
     lines.push(`  if (!session.isAuth) {`);
-    lines.push(`    return new Response(null, {`);
+    lines.push(`    return new _scrml_g.Response(null, {`);
     lines.push(`      status: 302,`);
     lines.push(`      headers: { Location: ${JSON.stringify("/login")} },`);
     lines.push(`    });`);
@@ -3584,7 +3586,7 @@ export function generateServerJs(
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
     // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
     lines.push("  const existing = cookieHeader.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/)?.[1] || null;");
-    lines.push("  return existing || crypto.randomUUID();");
+    lines.push("  return existing || _scrml_g.crypto.randomUUID();");
     lines.push("}");
     lines.push("");
     lines.push("function _scrml_validate_csrf(req) {");
@@ -3647,7 +3649,7 @@ export function generateServerJs(
       lines.push("  path: '/*',");
       lines.push("  method: 'OPTIONS',");
       lines.push("  handler: function(_scrml_req) {");
-      lines.push("    return new Response(null, { status: 204, headers: _scrml_cors_headers() });");
+      lines.push("    return new _scrml_g.Response(null, { status: 204, headers: _scrml_cors_headers() });");
       lines.push("  },");
       lines.push("};");
       lines.push("");
@@ -3659,23 +3661,23 @@ export function generateServerJs(
       const unit: string = parts[1];
       const windowMs: number = unit === 'sec' ? 1000 : unit === 'min' ? 60000 : 3600000;
       lines.push("// §39.2.4 Rate limiter (in-memory sliding window, per IP)");
-      lines.push("const _scrml_rate_map = new Map();");
+      lines.push("const _scrml_rate_map = new _scrml_g.Map();");
       lines.push(`const _scrml_rate_limit = ${limit};`);
       lines.push(`const _scrml_rate_window = ${windowMs};`);
       lines.push("function _scrml_check_ratelimit(req) {");
       lines.push("  const forwarded = req.headers.get('x-forwarded-for');");
       lines.push("  const ip = forwarded ? forwarded.split(',')[0].trim()");
-      lines.push("    : (typeof Bun !== 'undefined' && Bun.requestIP ? (Bun.requestIP(req)?.address ?? 'unknown') : 'unknown');");
-      lines.push("  const now = Date.now();");
+      lines.push("    : (typeof _scrml_g.Bun !== 'undefined' && _scrml_g.Bun.requestIP ? (_scrml_g.Bun.requestIP(req)?.address ?? 'unknown') : 'unknown');");
+      lines.push("  const now = _scrml_g.Date.now();");
       lines.push("  const windowStart = now - _scrml_rate_window;");
       lines.push("  const hits = (_scrml_rate_map.get(ip) ?? []).filter(t => t > windowStart);");
       lines.push("  hits.push(now);");
       lines.push("  _scrml_rate_map.set(ip, hits);");
       lines.push("  if (hits.length > _scrml_rate_limit) {");
-      lines.push(`    const retryAfter = Math.ceil(_scrml_rate_window / 1000);`);
-      lines.push("    return new Response(JSON.stringify({ error: 'Too Many Requests' }), {");
+      lines.push(`    const retryAfter = _scrml_g.Math.ceil(_scrml_rate_window / 1000);`);
+      lines.push("    return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: 'Too Many Requests' }), {");
       lines.push("      status: 429,");
-      lines.push("      headers: { 'Content-Type': 'application/json', 'Retry-After': String(retryAfter) },");
+      lines.push("      headers: { 'Content-Type': 'application/json', 'Retry-After': _scrml_g.String(retryAfter) },");
       lines.push("    });");
       lines.push("  }");
       lines.push("  return null;");
@@ -3711,7 +3713,7 @@ export function generateServerJs(
       lines.push("// Mirrors the route loop below (exact-case method) so 'counted' and");
       lines.push("// 'routed' always agree. WebSocket upgrades are excluded per §40.3.4.");
       lines.push("function _scrml_is_rate_limited_route(req) {");
-      lines.push("  const url = new URL(req.url, 'http://localhost');");
+      lines.push("  const url = new _scrml_g.URL(req.url, 'http://localhost');");
       lines.push("  for (const route of routes) {");
       lines.push("    if (route.isWebSocket) continue;");
       lines.push("    if (route.path === url.pathname && route.method === req.method) return true;");
@@ -3738,9 +3740,9 @@ export function generateServerJs(
       lines.push("// §39.2.2 Request/response logging");
       lines.push("function _scrml_log_request(method, path, status, ms) {");
       if (logMode === 'structured') {
-        lines.push("  process.stdout.write(JSON.stringify({ ts: new Date().toISOString(), method, path, status, ms }) + '\\n');");
+        lines.push("  _scrml_g.process.stdout.write(_scrml_g.JSON.stringify({ ts: new _scrml_g.Date().toISOString(), method, path, status, ms }) + '\\n');");
       } else {
-        lines.push("  process.stdout.write(method + ' ' + path + ' ' + status + ' ' + ms + 'ms\\n');");
+        lines.push("  _scrml_g.process.stdout.write(method + ' ' + path + ' ' + status + ' ' + ms + 'ms\\n');");
       }
       lines.push("}");
       lines.push("");
@@ -3765,9 +3767,9 @@ export function generateServerJs(
       // `resolve()` itself still honours §40.3.2 ("returns a Bun Response").
       lines.push("// §40.3.2 — the 'no route matched' Response resolve() hands to handle().");
       lines.push("// Tagged so the composable `fetch` export can map an untouched one back to null.");
-      lines.push("const _scrml_mw_no_match_set = new WeakSet();");
+      lines.push("const _scrml_mw_no_match_set = new _scrml_g.WeakSet();");
       lines.push("function _scrml_mw_no_match() {");
-      lines.push("  const response = new Response('Not found', { status: 404 });");
+      lines.push("  const response = new _scrml_g.Response('Not found', { status: 404 });");
       lines.push("  _scrml_mw_no_match_set.add(response);");
       lines.push("  return response;");
       lines.push("}");
@@ -3800,12 +3802,12 @@ export function generateServerJs(
       lines.push("    // limiter and ahead of handle() PRE, so an author handle() never sees a");
       lines.push("    // browser preflight (it carries no credentials to satisfy an auth check).");
       lines.push("    if (_scrml_mw_req.method === 'OPTIONS') {");
-      lines.push("      return new Response(null, { status: 204, headers: _scrml_cors_headers() });");
+      lines.push("      return new _scrml_g.Response(null, { status: 204, headers: _scrml_cors_headers() });");
       lines.push("    }");
     }
 
     if (_scrml_hasLog) {
-      lines.push("    const _scrml_mw_t0 = Date.now();");
+      lines.push("    const _scrml_mw_t0 = _scrml_g.Date.now();");
     }
 
     if (_scrml_hasRatelimit) {
@@ -3844,7 +3846,7 @@ export function generateServerJs(
       lines.push("      const resolve = async (_scrml_resolve_req) => {");
       lines.push("        const _scrml_resolved = await downstream(_scrml_resolve_req);");
       lines.push("        // §40.3.2 — resolve() always yields a Response so handle() POST-middleware is total.");
-      lines.push("        return _scrml_resolved instanceof Response");
+      lines.push("        return _scrml_resolved instanceof _scrml_g.Response");
       lines.push("          ? _scrml_resolved");
       lines.push("          : _scrml_mw_no_match();");
       lines.push("      };");
@@ -3880,21 +3882,21 @@ export function generateServerJs(
     }
 
     if (_scrml_hasSecureHeaders) {
-      lines.push("    if (_scrml_mw_result instanceof Response) _scrml_apply_security_headers(_scrml_mw_result);");
+      lines.push("    if (_scrml_mw_result instanceof _scrml_g.Response) _scrml_apply_security_headers(_scrml_mw_result);");
     }
 
     if (_scrml_hasCors) {
-      lines.push("    if (_scrml_mw_result instanceof Response) {");
+      lines.push("    if (_scrml_mw_result instanceof _scrml_g.Response) {");
       lines.push("      const _scrml_cors_h = _scrml_cors_headers();");
-      lines.push("      for (const [k, v] of Object.entries(_scrml_cors_h)) {");
+      lines.push("      for (const [k, v] of _scrml_g.Object.entries(_scrml_cors_h)) {");
       lines.push("        _scrml_mw_result.headers.set(k, v);");
       lines.push("      }");
       lines.push("    }");
     }
 
     if (_scrml_hasLog) {
-      lines.push("    const _scrml_mw_status = _scrml_mw_result instanceof Response ? _scrml_mw_result.status : 200;");
-      lines.push("    _scrml_log_request(_scrml_mw_req.method, new URL(_scrml_mw_req.url, 'http://localhost').pathname, _scrml_mw_status, Date.now() - _scrml_mw_t0);");
+      lines.push("    const _scrml_mw_status = _scrml_mw_result instanceof _scrml_g.Response ? _scrml_mw_result.status : 200;");
+      lines.push("    _scrml_log_request(_scrml_mw_req.method, new _scrml_g.URL(_scrml_mw_req.url, 'http://localhost').pathname, _scrml_mw_status, _scrml_g.Date.now() - _scrml_mw_t0);");
     }
 
     lines.push("    return _scrml_mw_result;");
@@ -4389,9 +4391,9 @@ export function generateServerJs(
 
       lines.push(`async function ${handlerName}(_scrml_req) {`);
 
-      lines.push(`  const _scrml_url = new URL(_scrml_req.url, 'http://localhost');`);
+      lines.push(`  const _scrml_url = new _scrml_g.URL(_scrml_req.url, 'http://localhost');`);
       lines.push(`  const route = {`);
-      lines.push(`    query: Object.fromEntries(_scrml_url.searchParams),`);
+      lines.push(`    query: _scrml_g.Object.fromEntries(_scrml_url.searchParams),`);
       lines.push(`    lastEventId: _scrml_req.headers.get('Last-Event-ID') ?? null,`);
       lines.push(`  };`);
 
@@ -4423,7 +4425,7 @@ export function generateServerJs(
         // Absence is canonical JS `null` per SPEC §42.5/§42.8 (W-CG-UNDEFINED-
         // INTERPOLATION). The `=== null || === undefined` presence check is the
         // exempt paired form (route.query[k] is `undefined` for an absent key).
-        lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return null; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !Number.isNaN(Number(_v))) return Number(_v); return _v; })();`);
+        lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return null; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !_scrml_g.Number.isNaN(_scrml_g.Number(_v))) return _scrml_g.Number(_v); return _v; })();`);
       }
 
       // Fork 2A: the cookie-session auth-check is web-app-only (a headless SSE
@@ -4434,8 +4436,8 @@ export function generateServerJs(
         lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
       }
 
-      lines.push(`  const _scrml_enc = new TextEncoder();`);
-      lines.push(`  const _scrml_stream = new ReadableStream({`);
+      lines.push(`  const _scrml_enc = new _scrml_g.TextEncoder();`);
+      lines.push(`  const _scrml_stream = new _scrml_g.ReadableStream({`);
       lines.push(`    async start(_scrml_ctrl) {`);
       lines.push(`      try {`);
       lines.push(`        async function* _scrml_gen() {`);
@@ -4519,12 +4521,12 @@ export function generateServerJs(
       lines.push(`          if (_scrml_hasEvent) {`);
       lines.push(`            _scrml_chunk += \`event: \${_scrml_val.event}\\n\`;`);
       lines.push(`            if (_scrml_val.id != null) _scrml_chunk += \`id: \${_scrml_val.id}\\n\`;`);
-      lines.push(`            _scrml_chunk += \`data: \${JSON.stringify(${_sseEventData})}\\n\\n\`;`);
+      lines.push(`            _scrml_chunk += \`data: \${_scrml_g.JSON.stringify(${_sseEventData})}\\n\\n\`;`);
       lines.push(`          } else {`);
       lines.push(`            if (_scrml_val && typeof _scrml_val === 'object' && 'id' in _scrml_val) {`);
       lines.push(`              _scrml_chunk += \`id: \${_scrml_val.id}\\n\`;`);
       lines.push(`            }`);
-      lines.push(`            _scrml_chunk += \`data: \${JSON.stringify(${_sseBareData})}\\n\\n\`;`);
+      lines.push(`            _scrml_chunk += \`data: \${_scrml_g.JSON.stringify(${_sseBareData})}\\n\\n\`;`);
       lines.push(`          }`);
       lines.push(`          _scrml_ctrl.enqueue(_scrml_enc.encode(_scrml_chunk));`);
       lines.push(`        }`);
@@ -4545,9 +4547,9 @@ export function generateServerJs(
         lines.push(`        if (_scrml_err && _scrml_err.__scrml_protect_opaque) {`);
         lines.push(`          // §14.8.9 — surface the refusal on BOTH channels: the client gets a`);
         lines.push(`          // terminal \`error\` frame it can act on, the operator gets a log line.`);
-        lines.push(`          console.error("[scrml §14.8.9] " + _scrml_err.message);`);
+        lines.push(`          _scrml_g.console.error("[scrml §14.8.9] " + _scrml_err.message);`);
         lines.push(`          try {`);
-        lines.push(`            _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\n' + 'data: ' + JSON.stringify({ error: { kind: "ProtectOpaqueEgress", message: "the server refused a stream frame it cannot redact: a \`protect=\` column could not be proven absent (SPEC §14.8.9)" } }) + '\\n\\n'));`);
+        lines.push(`            _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\n' + 'data: ' + _scrml_g.JSON.stringify({ error: { kind: "ProtectOpaqueEgress", message: "the server refused a stream frame it cannot redact: a \`protect=\` column could not be proven absent (SPEC §14.8.9)" } }) + '\\n\\n'));`);
         lines.push(`          } catch (_scrml_enqErr) { /* controller already closed — the log line still fired */ }`);
         lines.push(`        }`);
       }
@@ -4567,7 +4569,7 @@ export function generateServerJs(
       lines.push(`    },`);
       lines.push(`    cancel() { /* client disconnected — cleanup handled in finally */ },`);
       lines.push(`  });`);
-      lines.push(`  return new Response(_scrml_stream, {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_stream, {`);
       lines.push(`    headers: {`);
       lines.push(`      'Content-Type': 'text/event-stream',`);
       lines.push(`      'Cache-Control': 'no-cache',`);
@@ -4747,8 +4749,8 @@ export function generateServerJs(
     lines.push(`async function ${handlerName}(_scrml_req) {`);
 
     lines.push(`  // route.query injection (SPEC §20.3)`);
-    lines.push(`  const _scrml_url = new URL(_scrml_req.url, 'http://localhost');`);
-    lines.push(`  const route = { query: Object.fromEntries(_scrml_url.searchParams) };`);
+    lines.push(`  const _scrml_url = new _scrml_g.URL(_scrml_req.url, 'http://localhost');`);
+    lines.push(`  const route = { query: _scrml_g.Object.fromEntries(_scrml_url.searchParams) };`);
     // §20.5 — the insertion point for this handler's `@currentUser` binding. The
     // body below is emitted line-by-line and only THEN can we tell whether it
     // referenced `_scrml_currentUser` (a `?{}` may reach it through several
@@ -4781,7 +4783,7 @@ export function generateServerJs(
       lines.push(`    if (_scrml_sessionForCsrf.csrfToken) {`);
       lines.push(`      _scrml_csrf_403_headers["Set-Cookie"] = \`scrml_csrf=\${_scrml_sessionForCsrf.csrfToken}; Path=/; SameSite=Strict\`;`);
       lines.push(`    }`);
-      lines.push(`    return new Response(JSON.stringify({ error: "CSRF validation failed" }), {`);
+      lines.push(`    return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: "CSRF validation failed" }), {`);
       lines.push(`      status: 403,`);
       lines.push(`      headers: _scrml_csrf_403_headers,`);
       lines.push(`    });`);
@@ -4798,7 +4800,7 @@ export function generateServerJs(
       // _scrml_csrf_token is always valid here (existing or freshly-minted by
       // _scrml_ensure_csrf_cookie above). Re-emitting it on valid-cookie
       // requests is a no-op refresh.
-      lines.push(`    return new Response(JSON.stringify({ error: "CSRF validation failed" }), {`);
+      lines.push(`    return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: "CSRF validation failed" }), {`);
       lines.push(`      status: 403,`);
       lines.push(`      headers: {`);
       lines.push(`        "Content-Type": "application/json",`);
@@ -4838,7 +4840,7 @@ export function generateServerJs(
         lines.push(`  if (_scrml_idem_key) {`);
         lines.push(`    const _scrml_idem_hit = await _scrml_idempotency_lookup(_scrml_idem_key);`);
         lines.push(`    if (_scrml_idem_hit) {`);
-        lines.push(`      return new Response(_scrml_idem_hit.response_body, {`);
+        lines.push(`      return new _scrml_g.Response(_scrml_idem_hit.response_body, {`);
         lines.push(`        status: _scrml_idem_hit.response_status,`);
         lines.push(`        headers: { "Content-Type": "application/json", "Set-Cookie": \`scrml_csrf=\${_scrml_csrf_token}; Path=/; SameSite=Strict\` },`);
         lines.push(`      });`);
@@ -5099,13 +5101,13 @@ export function generateServerJs(
       // retry returns the same payload without re-executing the body.
       if (_ext5Dedup) {
         lines.push(`  // A9 Ext 5: store success response under idempotency key`);
-        lines.push(`  const _scrml_resp_body = JSON.stringify(${_resultExprCsrf});`);
+        lines.push(`  const _scrml_resp_body = _scrml_g.JSON.stringify(${_resultExprCsrf});`);
         lines.push(`  if (_scrml_idem_key) {`);
         lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
         lines.push(`  }`);
-        lines.push(`  return new Response(_scrml_resp_body, {`);
+        lines.push(`  return new _scrml_g.Response(_scrml_resp_body, {`);
       } else {
-        lines.push(`  return new Response(JSON.stringify(${_resultExprCsrf}), {`);
+        lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify(${_resultExprCsrf}), {`);
       }
       lines.push(`    status: 200,`);
       lines.push(`    headers: {`);
@@ -5141,7 +5143,7 @@ export function generateServerJs(
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
         lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
+        lines.push(`    return new _scrml_g.Response(_scrml_g.JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: {`);
         lines.push(`        "Content-Type": "application/json",`);
@@ -5227,7 +5229,7 @@ export function generateServerJs(
         lines.push(`  if (_scrml_idem_key) {`);
         lines.push(`    const _scrml_idem_hit = await _scrml_idempotency_lookup(_scrml_idem_key);`);
         lines.push(`    if (_scrml_idem_hit) {`);
-        lines.push(`      return new Response(_scrml_idem_hit.response_body, {`);
+        lines.push(`      return new _scrml_g.Response(_scrml_idem_hit.response_body, {`);
         lines.push(`        status: _scrml_idem_hit.response_status,`);
         lines.push(`        headers: { "Content-Type": "application/json" },`);
         lines.push(`      });`);
@@ -5434,13 +5436,13 @@ export function generateServerJs(
         if (_ext5DedupNonCsrf) {
           lines.push(`  // A9 Ext 5: store success response under idempotency key`);
         }
-        lines.push(`  const _scrml_resp_body = JSON.stringify(${_resultExprNonCsrf});`);
+        lines.push(`  const _scrml_resp_body = _scrml_g.JSON.stringify(${_resultExprNonCsrf});`);
         if (_ext5DedupNonCsrf) {
           lines.push(`  if (_scrml_idem_key) {`);
           lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
           lines.push(`  }`);
         }
-        lines.push(`  return new Response(_scrml_resp_body, {`);
+        lines.push(`  return new _scrml_g.Response(_scrml_resp_body, {`);
         lines.push(`    status: 200,`);
         lines.push(`    headers: { "Content-Type": "application/json" },`);
         lines.push(`  });`);
@@ -5454,7 +5456,7 @@ export function generateServerJs(
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
         lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
+        lines.push(`    return new _scrml_g.Response(_scrml_g.JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: { "Content-Type": "application/json" },`);
         lines.push(`    });`);
@@ -5590,7 +5592,7 @@ export function generateServerJs(
       const out: string[] = [];
       const bodyRaw = typeof arm?.bodyRaw === "string" ? arm.bodyRaw.trim() : "";
       if (arm?.bodyForm === "self-closing" || bodyRaw === "") {
-        out.push(`return new Response(null, { status: 204 });`);
+        out.push(`return new _scrml_g.Response(null, { status: 204 });`);
         return out;
       }
       const expr = emitExprField(null, bodyRaw, {
@@ -5653,9 +5655,9 @@ export function generateServerJs(
       // §14.8.9 — the §61 `<endpoint>` JSON envelope is a client egress; redact
       // at the sink (the arm value's `?{}` was protect-tagged at lowering).
       if (_protectActive || _tenantActive) {
-        out.push(`return new Response(JSON.stringify(${_egressRedact("_scrml_result")}), {`);
+        out.push(`return new _scrml_g.Response(_scrml_g.JSON.stringify(${_egressRedact("_scrml_result")}), {`);
       } else {
-        out.push(`return new Response(JSON.stringify(_scrml_result), {`);
+        out.push(`return new _scrml_g.Response(_scrml_g.JSON.stringify(_scrml_result), {`);
       }
       out.push(`  status: 200,`);
       out.push(`  headers: { "Content-Type": "application/json" },`);
@@ -5677,7 +5679,7 @@ export function generateServerJs(
     lines.push(`    case "InvalidPayload": _scrml_message = "request payload field '" + _scrml_data.field + "' is invalid: " + _scrml_data.reason; break;`);
     lines.push(`    default: _scrml_message = "request body is malformed: " + _scrml_data.reason;`);
     lines.push(`  }`);
-    lines.push(`  return new Response(JSON.stringify({ error: { kind: _scrml_decoded.variant, message: _scrml_message } }), {`);
+    lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: { kind: _scrml_decoded.variant, message: _scrml_message } }), {`);
     lines.push(`    status: 400,`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
     lines.push(`  });`);
@@ -5770,7 +5772,7 @@ export function generateServerJs(
       if (_wildcardArm) {
         for (const _l of emitEndpointArmEnvelope(_wildcardArm, _epDecl)) lines.push(`      ${_l}`);
       } else {
-        lines.push(`      return new Response(JSON.stringify({ error: { kind: "UnknownVariant", message: "endpoint received an unhandled variant '" + _scrml_tag + "'" } }), {`);
+        lines.push(`      return new _scrml_g.Response(_scrml_g.JSON.stringify({ error: { kind: "UnknownVariant", message: "endpoint received an unhandled variant '" + _scrml_tag + "'" } }), {`);
         lines.push(`        status: 400,`);
         lines.push(`        headers: { "Content-Type": "application/json" },`);
         lines.push(`      });`);
@@ -6002,11 +6004,11 @@ export function generateServerJs(
     const _mhAnyGated = mhEntries.some((e) => e.authExpr !== null);
     if (!_mhAnyGated) {
       // All cells public — the original coalesced form (byte-identical, pre-S255).
-      lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await Promise.all([`);
-      for (const e of mhEntries) lines.push(`    Promise.resolve(${e.expr}),`);
+      lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await _scrml_g.Promise.all([`);
+      for (const e of mhEntries) lines.push(`    _scrml_g.Promise.resolve(${e.expr}),`);
       lines.push(`  ]);`);
       for (const l of _mountHydrateOpaqueGuard(mhEntries.length, "  ")) lines.push(l);
-      lines.push(`  return new Response(JSON.stringify({`);
+      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify({`);
       // §14.8.9 / §14.8.10 — REDACT AT THIS SINK. `/__mountHydrate` is a client
       // egress: each `_scrml_mh_v<i>` is a `server @var` loader's result, which
       // for a `?{}` loader is a PROTECT-TAGGED row set. `JSON.stringify` ignores
@@ -6037,14 +6039,14 @@ export function generateServerJs(
       // is included in the keyed response only when authorized. Unauthorized cells
       // are simply absent from the response (the client leaves them unhydrated).
       lines.push(`  const _scrml_cu = _scrml_current_user(_scrml_req);`);
-      lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await Promise.all([`);
+      lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await _scrml_g.Promise.all([`);
       for (const e of mhEntries) {
         // §42.5/§42.8 — scrml absence is `null`, never `undefined`. The unauthorized
         // branch value is discarded (the cell is not included in _scrml_mh_out below),
         // but emit `null` to keep the output canon + quiet W-CG-UNDEFINED-INTERPOLATION.
         lines.push(e.authExpr === null
-          ? `    Promise.resolve(${e.expr}),`
-          : `    (${e.authExpr}) ? Promise.resolve(${e.expr}) : Promise.resolve(null),`);
+          ? `    _scrml_g.Promise.resolve(${e.expr}),`
+          : `    (${e.authExpr}) ? _scrml_g.Promise.resolve(${e.expr}) : _scrml_g.Promise.resolve(null),`);
       }
       lines.push(`  ]);`);
       for (const l of _mountHydrateOpaqueGuard(mhEntries.length, "  ")) lines.push(l);
@@ -6060,7 +6062,7 @@ export function generateServerJs(
           ? `  _scrml_mh_out[${JSON.stringify(e.name)}] = ${_mhVal};`
           : `  if (${e.authExpr}) _scrml_mh_out[${JSON.stringify(e.name)}] = ${_mhVal};`);
       });
-      lines.push(`  return new Response(JSON.stringify(_scrml_mh_out), {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify(_scrml_mh_out), {`);
       lines.push(`    status: 200,`);
       lines.push(`    headers: { "Content-Type": "application/json" },`);
       lines.push(`  });`);
@@ -6122,10 +6124,10 @@ export function generateServerJs(
       if (_slTenant) _rowsExpr = wrapWithTenantScope(_rowsExpr, { kind: "read", table, keys: [{ col: "tenant_id", add: null }] });
       if (_slProtCols && _slProtCols.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._slProtCols])})`;
       lines.push(`  const _scrml_rows = ${_rowsExpr};`);
-      lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_rows")}), {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify(${_egressRedact("_scrml_rows")}), {`);
     } else {
       lines.push(`  const _scrml_rows = await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${table}\`;`);
-      lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify(_scrml_rows), {`);
     }
     lines.push(`    status: 200,`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
@@ -6188,9 +6190,9 @@ export function generateServerJs(
     // `?{}` was lowered through rewriteSqlRefs (protect-tagged when it carries a
     // protected column); redact at the sink so the descriptor is honored.
     if (_protectActive || _tenantActive) {
-      lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_result")}), {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify(${_egressRedact("_scrml_result")}), {`);
     } else {
-      lines.push(`  return new Response(JSON.stringify(_scrml_result), {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_g.JSON.stringify(_scrml_result), {`);
     }
     lines.push(`    status: 200,`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
@@ -6407,17 +6409,17 @@ export function generateServerJs(
         const _vn = decl.name as string;
         const _expr = emitExprField((decl as any).initExpr, (decl as any).init ?? "null", { mode: "server" });
         if (_protectActive || _tenantActive) {
-          lines.push(`  { const _scrml_cv = await Promise.resolve(${_expr});`);
+          lines.push(`  { const _scrml_cv = await _scrml_g.Promise.resolve(${_expr});`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_cv")}; }`);
         } else {
-          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await Promise.resolve(${_expr});`);
+          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await _scrml_g.Promise.resolve(${_expr});`);
         }
       }
       // Read the sibling compiled <base>.html. Always `let`: the enclosing gate
       // guarantees `_hasSsrSeed || _csrfMetaInject`, so _scrml_html is reassigned
       // by at least one of the meta injection, the each-mount fills, or the seed
       // injection below.
-      lines.push(`  let _scrml_html = await Bun.file(new URL(${JSON.stringify("./" + _ssrHtmlBase + ".html")}, import.meta.url)).text();`);
+      lines.push(`  let _scrml_html = await _scrml_g.Bun.file(new _scrml_g.URL(${JSON.stringify("./" + _ssrHtmlBase + ".html")}, import.meta.url)).text();`);
       // §52.8 A-terminus — fill each server-authority <each> mount with its
       // server-rendered (redacted) rows so view-source of the first paint shows
       // the data, not an empty placeholder. data-scrml-key markers ride each row.
@@ -6433,7 +6435,7 @@ export function generateServerJs(
       // UUID; the `[<>"]` strip is a defensive guard so it can never break out of
       // the attribute even if the token format ever changes.
       if (_csrfMetaInject) {
-        lines.push(`  const _scrml_csrf_meta_token = String((_scrml_session_middleware(_scrml_req).csrfToken) || "").replace(/[<>"]/g, "");`);
+        lines.push(`  const _scrml_csrf_meta_token = _scrml_g.String((_scrml_session_middleware(_scrml_req).csrfToken) || "").replace(/[<>"]/g, "");`);
         // FUNCTION replacer: a string 2nd-arg honors $&/$'/$`/$$ — a token containing
         // a $-sequence would otherwise expand into page content. The token is stripped
         // of [<>"] but NOT $, so the replacer form is the safe splice.
@@ -6458,7 +6460,7 @@ export function generateServerJs(
         // `\u003c` JSON escape, which parses back to `<` and guarantees the payload
         // can never contain the `</script` that would end the data block early (a
         // `</script>` inside revealed string data stays inert).
-        lines.push(`  const _scrml_seed_json = JSON.stringify(_scrml_ssr_state).replace(/</g, String.fromCharCode(92) + "u003c");`);
+        lines.push(`  const _scrml_seed_json = _scrml_g.JSON.stringify(_scrml_ssr_state).replace(/</g, _scrml_g.String.fromCharCode(92) + "u003c");`);
         lines.push(`  const _scrml_seed_tag = '<script type="application/json" id="__scrml_ssr_state">' + _scrml_seed_json + "</script>";`);
         // FUNCTION replacer: the seed JSON embeds server-authority cell/row values; a
         // string 2nd-arg would honor $&/$'/$`/$$ in that data and duplicate/corrupt the
@@ -6468,7 +6470,7 @@ export function generateServerJs(
         lines.push(`    ? _scrml_html.replace("</head>", () => _scrml_seed_tag + "</head>")`);
         lines.push(`    : _scrml_seed_tag + _scrml_html;`);
       }
-      lines.push(`  return new Response(_scrml_html, {`);
+      lines.push(`  return new _scrml_g.Response(_scrml_html, {`);
       lines.push(`    status: 200,`);
       lines.push(`    headers: { "Content-Type": "text/html; charset=utf-8" },`);
       lines.push(`  });`);
@@ -6576,11 +6578,11 @@ export function generateServerJs(
       lines.push("  const origin = req.headers.get('origin');");
       lines.push("  if (origin === null) return true;");
       lines.push("  try {");
-      lines.push("    const _o = new URL(origin);");
-      lines.push("    const _u = new URL(req.url);");
+      lines.push("    const _o = new _scrml_g.URL(origin);");
+      lines.push("    const _u = new _scrml_g.URL(req.url);");
       lines.push("    const _host = (req.headers.get('x-forwarded-host') || '').split(',')[0].trim() || _u.host;");
       lines.push("    const _proto = ((req.headers.get('x-forwarded-proto') || '').split(',')[0].trim() || _u.protocol.replace(':', '')).toLowerCase().replace(/^ws(s?)$/, 'http$1');");
-      lines.push("    const _self = new URL(_proto + '://' + _host);");
+      lines.push("    const _self = new _scrml_g.URL(_proto + '://' + _host);");
       lines.push("    if (_o.host !== _self.host) return false;");
       lines.push("    return _o.protocol === _self.protocol || (_o.protocol === 'https:' && _self.protocol === 'http:');");
       lines.push("  } catch {");
@@ -6688,7 +6690,7 @@ export function generateServerJs(
       // `fetch` maps an untouched tagged 404 back to `null` below.
       lines.push("// Route dispatch — the DOWNSTREAM of the §40.3 handle() onion.");
       lines.push("async function _scrml_route_dispatch(request) {");
-      lines.push("  const url = new URL(request.url, 'http://localhost');");
+      lines.push("  const url = new _scrml_g.URL(request.url, 'http://localhost');");
       lines.push("  for (const r of routes) {");
       lines.push("    if (r.path === url.pathname && r.method === request.method) {");
       lines.push("      return r.handler(request);");
@@ -6712,7 +6714,7 @@ export function generateServerJs(
       lines.push("}");
     } else {
       lines.push("export async function fetch(request) {");
-      lines.push("  const url = new URL(request.url, 'http://localhost');");
+      lines.push("  const url = new _scrml_g.URL(request.url, 'http://localhost');");
       lines.push("  for (const r of routes) {");
       lines.push("    if (r.path === url.pathname && r.method === request.method) {");
       lines.push("      return r.handler(request);");
@@ -6821,7 +6823,7 @@ export function generateServerJs(
       "async function _scrml_idempotency_lookup(key) {",
       "  if (!key) return null;",
       "  await _scrml_idempotency_ensure_table();",
-      "  const now = Date.now();",
+      "  const now = _scrml_g.Date.now();",
       "  const rows = await _scrml_sql`SELECT response_body, response_status, expires_at FROM _scrml_idempotency_keys WHERE key = ${key} LIMIT 1`;",
       "  if (!rows || rows.length === 0) return null;",
       "  const row = rows[0];",
@@ -6831,7 +6833,7 @@ export function generateServerJs(
       "async function _scrml_idempotency_store(key, body, status) {",
       "  if (!key) return;",
       "  await _scrml_idempotency_ensure_table();",
-      "  const now = Date.now();",
+      "  const now = _scrml_g.Date.now();",
       "  const expires = now + _SCRML_IDEMPOTENCY_TTL_MS;",
       "  try {",
       "    await _scrml_sql`INSERT INTO _scrml_idempotency_keys (key, response_body, response_status, created_at, expires_at) VALUES (${key}, ${body}, ${status}, ${now}, ${expires})`;",
@@ -7642,9 +7644,11 @@ export function generateServerJs(
   setServerSessionContextSpan(null);
   for (const _e of drainServerAmbientSessionRefusalErrors(filePath, resolveSpanLineCol)) errors.push(_e);
 
-
-
-  return finalEmitted;
+  // S457 2a — the bundle spells host globals `_scrml_g.<name>` (a server function
+  // called by another is a module-scope `async function <name>`, so a bare
+  // `Response` could be the author's); declare the alias first, above every helper
+  // that reads it at load (codegen/host-global-alias.ts).
+  return withHostGlobalAlias(finalEmitted) as string;
 }
 
 // ---------------------------------------------------------------------------

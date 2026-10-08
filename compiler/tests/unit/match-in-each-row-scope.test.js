@@ -173,7 +173,7 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     expect(each.params).toBe("_scrml_each_root, g");
     expect(each.body).toContain("const _scrml_items = g.items;");
     // located inside THIS arm's root (never the per-id anchor cache)
-    expect(each.body).toContain("document.createTreeWalker(_scrml_each_root, NodeFilter.SHOW_COMMENT)");
+    expect(each.body).toContain("_scrml_g.document.createTreeWalker(_scrml_each_root, _scrml_g.NodeFilter.SHOW_COMMENT)");
     expect(each.body).not.toContain("_scrml_find_each_anchor");
     // not registered for the module-scope remount path
     expect(js).not.toMatch(new RegExp(`_scrml_each_renderers\\[[^\\]]*\\] = ${each.name};`));

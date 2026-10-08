@@ -103,6 +103,8 @@ async function clientMapOps() {
   const opsFile = join(dir, "ops.mjs");
   writeFileSync(
     opsFile,
+    // The server copy reads host globals through the bundle's alias (S457 2a).
+    "const _scrml_g = globalThis;\n" +
     SERVER_VALUE_NATIVE_MAP_HELPER +
       "\nexport { _scrml_map_get, _scrml_map_size, _scrml_map_keys, _scrml_map_has, _scrml_map_insert };\n",
   );

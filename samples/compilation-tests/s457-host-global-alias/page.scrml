@@ -1,0 +1,31 @@
+// S457 2a fixture — user bindings named after host globals, in every artifact kind
+// (client chunk, server bundle, worker bundle), plus a value-only module import.
+// Scanned by scripts/host-global-scan.ts; every compiler reference must go through
+// `_scrml_g`, and no user binding may sit at the top level of a classic script.
+<program>
+  <v> = 0
+  <w> = 0
+  ${
+    import { SAME_SHAPE } from './models.scrml'
+  }
+  const location = "user-location"
+  function fetch(x) { return x }
+  function document(x) { return x }
+  server function Response(x) { return x + 1 }
+  server function JSON(x) { return x * 2 }
+  server function check() { return SAME_SHAPE ? Response(JSON(5)) : 0 }
+  function go() { @v = check() + fetch(0) + document(0) }
+
+  <program name="echo">
+    function postMessage(x) { return x }
+    function self(x) { return x }
+    when message(n) {
+      send(postMessage(n) + self(0))
+    }
+  </program>
+
+<div>
+  <button onclick=go()>go</button>
+  <p>${@v} ${location}</p>
+</div>
+</program>

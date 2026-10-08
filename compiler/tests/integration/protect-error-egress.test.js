@@ -153,7 +153,7 @@ describe("§14.8.9 P3 — an error never carries a protected value to the client
     writeFileSync(file, SRC(' auth="none"').replace('<db src="./app.db" tables="users" protect="passwordHash"/>', '<db src="./app.db" tables="users"/>'));
     const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
     const serverJs = [...result.outputs.values()][0]?.serverJs ?? "";
-    expect(serverJs).toContain("message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)");
+    expect(serverJs).toContain("message: _scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)");
   });
 });
 

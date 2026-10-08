@@ -115,7 +115,7 @@ describe("bug72 §2 — inner @. lowers to the inner each iter var (§17.7.3 inn
       // The interpolated inner @. must render the inner each's current value.
       // Bug 64 (S159): live-keyed per-item text — textContent assignment inside
       // the per-item effect; the inner @. still lowers to _scrml_each_item.
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item)");
+      expect(r.clientJs).toContain(".textContent = _scrml_g.String(_scrml_each_item)");
       // The inner source is the outer iter var's field (row.cells) — proving the
       // outer scope (row) and inner scope (_scrml_each_item) are both present + distinct.
       expect(r.clientJs).toContain("row.cells");
@@ -177,7 +177,7 @@ describe("bug72 §4 — `as` alias on inner each lowers to the alias var", () =>
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Bug 64 (S159): live-keyed per-item text; the inner @. still lowers to
       // the `cell` alias.
-      expect(r.clientJs).toContain(".textContent = String(cell)");
+      expect(r.clientJs).toContain(".textContent = _scrml_g.String(cell)");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -211,10 +211,10 @@ describe("bug72 §5 — @. per-item attr value inside nested each compiles clean
       // PUNCT, which pre-fix forced the lift onto the string-fallback path) now
       // lowers to the inner iter var. Both the attr and the interpolation read
       // _scrml_each_item, proving the lift stayed on the structured markup path.
-      expect(r.clientJs).toContain('setAttribute("title", String(_scrml_each_item))');
+      expect(r.clientJs).toContain('setAttribute("title", _scrml_g.String(_scrml_each_item))');
       // Bug 64 (S159): live-keyed per-item text — textContent assignment inside
       // the per-item effect; the inner @. still lowers to _scrml_each_item.
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item)");
+      expect(r.clientJs).toContain(".textContent = _scrml_g.String(_scrml_each_item)");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -248,7 +248,7 @@ describe("bug72 §6 — nested <each> inside an if inside the for-lift compiles 
       expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
       // Bug 64 (S159): live-keyed per-item text — textContent assignment inside
       // the per-item effect; the inner @. still lowers to _scrml_each_item.
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item)");
+      expect(r.clientJs).toContain(".textContent = _scrml_g.String(_scrml_each_item)");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);

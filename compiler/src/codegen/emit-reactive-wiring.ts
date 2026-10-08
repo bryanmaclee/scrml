@@ -73,7 +73,7 @@ function stripReconcileCalls(code: string): string {
  *
  * The emit shape produced by emit-control-flow.ts (reactive for-lift branch
  * at line 190-245) is always:
- *   const _scrml_list_wrapper_N = document.createElement("div");
+ *   const _scrml_list_wrapper_N = _scrml_g.document.createElement("div");
  *   _scrml_lift(_scrml_list_wrapper_N);                        ← left in place
  *   function _scrml_create_item_M(var, _scrml_idx) { ... }     ← hoisted
  *   function _scrml_render_list_P() {
@@ -89,7 +89,7 @@ function stripReconcileCalls(code: string): string {
  * with its reconciled children intact.
  */
 function hoistForLiftSetup(combinedCode: string): { hoistedSetup: string; remaining: string } {
-  const wrapperRegex = /^( *)const (_scrml_list_wrapper_\d+) = document\.createElement\("div"\);\s*\n/m;
+  const wrapperRegex = /^( *)const (_scrml_list_wrapper_\d+) = _scrml_g\.document\.createElement\("div"\);\s*\n/m;
   const hoisted: string[] = [];
   let remaining = combinedCode;
 
@@ -1479,7 +1479,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         emitMountDeferredLiftGroup(chunkLines, fnLines, stmts, codes, codeStmts, combinedCode, groupHasReactiveDeps);
         lines.push(...chunkLines);
       } else {
-        emitLiftGroup(lines, `document.querySelector('[data-scrml-logic="${pid}"]')`, stmts, combinedCode, groupHasReactiveDeps);
+        emitLiftGroup(lines, `_scrml_g.document.querySelector('[data-scrml-logic="${pid}"]')`, stmts, combinedCode, groupHasReactiveDeps);
       }
     } else {
       lines.push(combinedCode);
@@ -1576,7 +1576,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         // the soft-nav shell-skip would silently stop working. This is the ONLY
         // chunk-declared global the runtime reads by name — audited, not assumed.
         lines.push(`var _scrml_shell_cells = { ${entries} };`);
-        lines.push(`if (typeof globalThis !== "undefined") globalThis._scrml_shell_cells = _scrml_shell_cells;`);
+        lines.push(`if (typeof _scrml_g !== "undefined") _scrml_g._scrml_shell_cells = _scrml_shell_cells;`);
       }
     }
     lines.push("_scrml_ssr_seed_apply();");
@@ -1760,7 +1760,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // inheritance; §25.5 custom-prop inheritance). A prior `bridge.scoped`
       // ternary targeted an undefined `_scrml_el` stub for a per-instance runtime
       // that does not exist → `ReferenceError: _scrml_el is not defined` on load.
-      const target = `document.documentElement`;
+      const target = `_scrml_g.document.documentElement`;
 
       if (bridge.isExpression) {
         const exprJs: string = bridge.expr.replace(
@@ -2357,7 +2357,7 @@ function emitApiUrlExpr(base: string, path: string, argsVar: string): string {
     // `${user.id}` -> field `user`), mirroring the W3 pathParamNames rule.
     const lead = inner.match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
     const field = lead ? lead[0] : inner;
-    parts.push(`encodeURIComponent(String(${argsVar}[${JSON.stringify(field)}]))`);
+    parts.push(`_scrml_g.encodeURIComponent(_scrml_g.String(${argsVar}[${JSON.stringify(field)}]))`);
     last = m.index + m[0].length;
   }
   parts.push(JSON.stringify(path.slice(last)));
@@ -2456,15 +2456,15 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     // Request init: method always; body for body-carrying methods (the args
     // object serialized as JSON, §60.4 — the args value IS the request shape).
     if (carriesBody) {
-      lines.push(`    var _res = await fetch(${urlExpr}, {`);
+      lines.push(`    var _res = await _scrml_g.fetch(${urlExpr}, {`);
       lines.push(`      method: ${JSON.stringify(method)},`);
       lines.push(`      headers: { "Content-Type": "application/json" },`);
-      lines.push(`      body: JSON.stringify(_args),`);
+      lines.push(`      body: _scrml_g.JSON.stringify(_args),`);
       lines.push(`    });`);
     } else {
-      lines.push(`    var _res = await fetch(${urlExpr}, { method: ${JSON.stringify(method)} });`);
+      lines.push(`    var _res = await _scrml_g.fetch(${urlExpr}, { method: ${JSON.stringify(method)} });`);
     }
-    lines.push(`    if (!_res.ok) throw new Error("HTTP " + _res.status);`);
+    lines.push(`    if (!_res.ok) throw new _scrml_g.Error("HTTP " + _res.status);`);
     lines.push(`    var _body = await _res.json();`);
     lines.push(`    if (!${mountedVar} || _seq !== ${seqVar}) return;`);
     if (endpoint.responseEnum) {
@@ -2555,8 +2555,8 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   lines.push(`  ${stateVar}.error = null;`);
   lines.push(`  if (${stateVar}.data !== null) { ${stateVar}.stale = true; }`);
   lines.push(`  try {`);
-  lines.push(`    var _res = await fetch(${urlExpr}, { method: ${JSON.stringify(method)} });`);
-  lines.push(`    if (!_res.ok) throw new Error("HTTP " + _res.status);`);
+  lines.push(`    var _res = await _scrml_g.fetch(${urlExpr}, { method: ${JSON.stringify(method)} });`);
+  lines.push(`    if (!_res.ok) throw new _scrml_g.Error("HTTP " + _res.status);`);
   lines.push(`    var _data = await _res.json();`);
   lines.push(`    if (!${mountedVar} || _seq !== ${seqVar}) return;`);
   lines.push(`    ${stateVar}.data = _data;`);
@@ -2642,7 +2642,7 @@ function emitTimeoutNode(node: any, errors: CGError[], filePath: string): string
   lines.push(`// <timeout${timeoutId ? ` id="${timeoutId}"` : ""} delay=${delayMs}>`);
 
   // Emit the setTimeout call
-  lines.push(`var ${timerVar} = setTimeout(function() {`);
+  lines.push(`var ${timerVar} = _scrml_g.setTimeout(function() {`);
   if (bodyCode) {
     lines.push(`    ${bodyCode}`);
   }
@@ -2654,11 +2654,11 @@ function emitTimeoutNode(node: any, errors: CGError[], filePath: string): string
   // Emit cancel function and initial fired state if id is present
   if (timeoutId) {
     lines.push(`_scrml_reactive_set(${JSON.stringify(timeoutId + "_fired")}, false);`);
-    lines.push(`function ${timeoutId}_cancel() { clearTimeout(${timerVar}); }`);
+    lines.push(`function ${timeoutId}_cancel() { _scrml_g.clearTimeout(${timerVar}); }`);
   }
 
   // Register scope cleanup — cancel timeout on teardown (§6.7.2, step 2)
-  lines.push(`_scrml_register_cleanup(function() { clearTimeout(${timerVar}); });`);
+  lines.push(`_scrml_register_cleanup(function() { _scrml_g.clearTimeout(${timerVar}); });`);
 
   return lines;
 }

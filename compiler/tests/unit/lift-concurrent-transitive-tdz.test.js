@@ -131,7 +131,7 @@ describe("S212 Facet A: transitive batch-exclusion — sync local depending on a
       /Promise\.all\(\[[\s\S]*?_scrml_fetch_loadProfileRows[\s\S]*?_scrml_tokenize_\d+\(query\)[\s\S]*?\]\)/,
     );
     // And the destructure binds both names.
-    expect(body).toMatch(/const \[rows, qtf\] = await Promise\.all\(\[/);
+    expect(body).toMatch(/const \[rows, qtf\] = await _scrml_g\.Promise\.all\(\[/);
   });
 });
 
@@ -170,7 +170,7 @@ describe("S212 Facet B: a reassigned `let` is never lifted into the const Promis
     expect(body).toMatch(/let acc = \[\];/);
 
     // It must NOT appear inside the destructured `const [...]` of the batch.
-    expect(body).not.toMatch(/const \[[^\]]*\bacc\b[^\]]*\] = await Promise\.all/);
+    expect(body).not.toMatch(/const \[[^\]]*\bacc\b[^\]]*\] = await (?:_scrml_g\.)?Promise\.all/);
 
     // The reassignment must be present (and is now legal against a `let`).
     expect(body).toMatch(/acc = acc\.concat/);
@@ -179,6 +179,6 @@ describe("S212 Facet B: a reassigned `let` is never lifted into the const Promis
   test("the independent consts (rows, qtf) STILL batch (feature not regressed)", () => {
     const code = compileSource("facet-b-feature.scrml", src);
     const body = fnBody(code, "function _scrml_accumulate");
-    expect(body).toMatch(/const \[rows, qtf\] = await Promise\.all\(\[/);
+    expect(body).toMatch(/const \[rows, qtf\] = await _scrml_g\.Promise\.all\(\[/);
   });
 });

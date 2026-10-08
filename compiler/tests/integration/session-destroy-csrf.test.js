@@ -119,7 +119,8 @@ async function runClient(sid, metaToken, deny) {
   const meta = { content: metaToken, getAttribute() { return this.content; }, setAttribute(_, v) { this.content = v; } };
   globalThis.document = { get cookie() { return visible(); }, querySelector: (s) => (s.includes("csrf-token") ? meta : null) };
   globalThis.window = { location: { href: "/" } };
-  const session = new Function(block + "\\nreturn session;")();
+  // \`_scrml_g\`: the runtime's host-global alias (S457 2a) the emitted block reads through.
+  const session = new Function("const _scrml_g = globalThis;\\n" + block + "\\nreturn session;")();
   await new Promise((r) => setTimeout(r, 50));
   const before = JSON.stringify(session.current);
   const result = await session.destroy();

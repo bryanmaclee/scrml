@@ -459,9 +459,9 @@ export function emitValueAttrApply(
   urlGuard = false,
   urlGuardTarget: string | null = null,
 ): string {
-  const strValue = urlGuard ? wrapUrlGuard(el, attrName, "String(_scrml_x)", urlGuardTarget) : "String(_scrml_x)";
+  const strValue = urlGuard ? wrapUrlGuard(el, attrName, "_scrml_g.String(_scrml_x)", urlGuardTarget) : "_scrml_g.String(_scrml_x)";
   const write = isFormValue
-    ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : String(_scrml_x); ` +
+    ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : _scrml_g.String(_scrml_x); ` +
       `if (${el}.value !== _scrml_s) { ${el}.value = _scrml_s; }`
     : `if (_scrml_x === null || _scrml_x === undefined) { ${el}.removeAttribute(${JSON.stringify(attrName)}); } ` +
       `else { ${el}.setAttribute(${JSON.stringify(attrName)}, ${strValue}); }`;
@@ -1547,8 +1547,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       sink.push(`${ind}  }`);
       sink.push(`${ind}}`);
     };
-    if (rebind) wrap("(_scrml_root || document)", reactiveRewire, "    ");
-    else wrap("document", lines, "  ");
+    if (rebind) wrap("(_scrml_root || _scrml_g.document)", reactiveRewire, "    ");
+    else wrap("_scrml_g.document", lines, "  ");
   };
   const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void =>
     pushRebindableSel(`[data-scrml-logic="${placeholderId}"]`, body, rebind);
@@ -1574,7 +1574,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       return;
     }
     for (const l of blk) {
-      reactiveRewire.push("  " + l.replace("const _scrml_el = document.querySelector(", "const _scrml_el = (_scrml_root || document).querySelector("));
+      reactiveRewire.push("  " + l.replace("const _scrml_el = _scrml_g.document.querySelector(", "const _scrml_el = (_scrml_root || _scrml_g.document).querySelector("));
     }
   };
   // Wrap an effect/subscription-creating expression so its disposer is
@@ -1625,9 +1625,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
 
       // Emit a single document.addEventListener with ancestor walk
-      lines.push(`  document.addEventListener(${JSON.stringify(domEvent)}, function(event) {`);
+      lines.push(`  _scrml_g.document.addEventListener(${JSON.stringify(domEvent)}, function(event) {`);
       lines.push(`    let t = event.target;`);
-      lines.push(`    while (t && t !== document) {`);
+      lines.push(`    while (t && t !== _scrml_g.document) {`);
       lines.push(`      const id = t.getAttribute(${JSON.stringify("data-scrml-bind-" + eventName)});`);
       lines.push(`      if (id && ${registryVarName}[id]) { ${registryVarName}[id](event); return; }`);
       if (armOwned) {
@@ -1657,7 +1657,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // `_scrml_nav_rewire(document)` AND re-attaches scoped to the swapped
       // `root` on a soft nav (the swapped-in nodes are fresh; delegable
       // click/submit live on `document` and survive on their own).
-      nonDelegatedRewire.push(`    (_scrml_root || document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(_scrml_el) {`);
+      nonDelegatedRewire.push(`    (_scrml_root || _scrml_g.document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(_scrml_el) {`);
       nonDelegatedRewire.push(`      const _scrml_id = _scrml_el.getAttribute('data-scrml-bind-${eventName}');`);
       nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) _scrml_el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
       nonDelegatedRewire.push(`    });`);
@@ -1893,7 +1893,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
         const blk: string[] = [];
         blk.push(`  {`);
-        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
+        blk.push(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
         blk.push(`    if (_scrml_el) {`);
         for (const l of rcdataInner) blk.push(`      ${l}`);
         blk.push(`    }`);
@@ -1944,7 +1944,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const blk: string[] = [];
         blk.push(`  // <errors of=...> element wiring (C11)`);
         blk.push(`  {`);
-        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-errors-anchor=${JSON.stringify(anchorId)}]');`);
+        blk.push(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-errors-anchor=${JSON.stringify(anchorId)}]');`);
         blk.push(`    if (_scrml_el) {`);
         // Local messageFor — prefers a global C10 implementation, falls back
         // to a stub returning the tag string.
@@ -1952,8 +1952,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         blk.push(`        ? _scrml_message_for`);
         blk.push(`        : function (errTag, _field) {`);
         blk.push(`            if (errTag == null) return "";`);
-        blk.push(`            if (typeof errTag === "object" && errTag.tag != null) return String(errTag.tag);`);
-        blk.push(`            return String(errTag);`);
+        blk.push(`            if (typeof errTag === "object" && errTag.tag != null) return _scrml_g.String(errTag.tag);`);
+        blk.push(`            return _scrml_g.String(errTag);`);
         blk.push(`          };`);
         // Body-override factory — when absent, the default render shape per
         // SPEC line 25190.
@@ -1964,7 +1964,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           blk.push(`      const bodyFn_${suffix} = ${bodyFn};`);
           blk.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
           blk.push(`        const out = bodyFn_${suffix}(errTag);`);
-          blk.push(`        return (out == null) ? "" : String(out);`);
+          blk.push(`        return (out == null) ? "" : _scrml_g.String(out);`);
           blk.push(`      };`);
         } else {
           // Default render — thread `cellName` as the 3rd arg so `_scrml_message_for`
@@ -1982,10 +1982,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         if (isRollup) {
           // Compound rollup: src is an object map {field: [tags]}.
           blk.push(`        if (!src || typeof src !== "object") { _scrml_el.innerHTML = ""; return; }`);
-          blk.push(`        const entries = Object.entries(src);`);
+          blk.push(`        const entries = _scrml_g.Object.entries(src);`);
           blk.push(`        const parts = [];`);
           blk.push(`        for (const [fieldKey, arr] of entries) {`);
-          blk.push(`          if (!Array.isArray(arr) || arr.length === 0) continue;`);
+          blk.push(`          if (!_scrml_g.Array.isArray(arr) || arr.length === 0) continue;`);
           // Rollup cell name = compound prefix + "." + iterated field key
           // (e.g. "signup" + "." + "name" → "signup.name"), matching the
           // per-(cell,validator) inline-override registration key.
@@ -1998,7 +1998,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           blk.push(`        _scrml_el.innerHTML = parts.join("");`);
         } else {
           // Per-field: src is an array of tags. `inlineCellName` IS the cell.
-          blk.push(`        if (!Array.isArray(src) || src.length === 0) { _scrml_el.innerHTML = ""; return; }`);
+          blk.push(`        if (!_scrml_g.Array.isArray(src) || src.length === 0) { _scrml_el.innerHTML = ""; return; }`);
           if (allFlag) {
             blk.push(`        const parts = [];`);
             blk.push(`        for (const tag of src) parts.push(renderOne_${suffix}(tag, ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)}));`);
@@ -2058,7 +2058,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const blk: string[] = [];
         blk.push(`  // <render of=@cell/> element wiring (render-expr-primitive)`);
         blk.push(`  {`);
-        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
+        blk.push(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
         blk.push(`    if (_scrml_el) {`);
         blk.push(`      const render_${suffix} = function() {`);
         blk.push(`        const _hv = (${acc});`);
@@ -2124,7 +2124,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // rehydrate), the whole controller is skipped so no dead effect stacks.
           reactiveRewire.push(`    {`);
           reactiveRewire.push(`      // if= mount/unmount controller — marker ${mid}, template ${tid}`);
-          reactiveRewire.push(`      var _scrml_ifm_${suffix} = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(mid)}, (_scrml_root || document)) : null;`);
+          reactiveRewire.push(`      var _scrml_ifm_${suffix} = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(mid)}, (_scrml_root || _scrml_g.document)) : null;`);
           reactiveRewire.push(`      if (_scrml_ifm_${suffix}) {`);
           reactiveRewire.push(`        var _scrml_ifa_${suffix} = _scrml_ifm_${suffix}.parentElement || null;`);
           reactiveRewire.push(`        let _scrml_mr_${suffix} = null;`);
@@ -2136,7 +2136,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             reactiveRewire.push(`          if (_scrml_pend_${suffix} === null) return;`);
             reactiveRewire.push(`          const _p = _scrml_pend_${suffix};`);
             reactiveRewire.push(`          _scrml_pend_${suffix} = null;`);
-            reactiveRewire.push(`          if (_p.timer !== null && typeof clearTimeout === "function") clearTimeout(_p.timer);`);
+            reactiveRewire.push(`          if (_p.timer !== null && typeof _scrml_g.clearTimeout === "function") _scrml_g.clearTimeout(_p.timer);`);
             reactiveRewire.push(`          _scrml_unmount_scope(_p.node, _p.scope);`);
             reactiveRewire.push(`        }`);
           }
@@ -2145,7 +2145,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             reactiveRewire.push(`          _scrml_if_endexit_${suffix}();`);
           }
           reactiveRewire.push(`          _scrml_ms_${suffix} = _scrml_create_scope();`);
-          reactiveRewire.push(`          _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)}, (_scrml_root || document));`);
+          reactiveRewire.push(`          _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)}, (_scrml_root || _scrml_g.document));`);
           // Bind the mounted subtree: its listeners, `${…}` effects, reactive
           // attrs, nested if= controllers and <each> renderers were emitted as
           // root-scoped blocks in _scrml_nav_rewire and matched nothing while the
@@ -2190,7 +2190,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             reactiveRewire.push(`            _scrml_ex_${suffix}.classList.add(${exitClass});`);
             reactiveRewire.push(`            _scrml_pend_${suffix} = { node: _scrml_ex_${suffix}, scope: _scrml_exs_${suffix}, timer: null };`);
             reactiveRewire.push(`            _scrml_ex_${suffix}.addEventListener("animationend", function _scrml_ae() { _scrml_ex_${suffix}.removeEventListener("animationend", _scrml_ae); _scrml_if_endexit_${suffix}(); }, { once: true });`);
-            reactiveRewire.push(`            if (typeof setTimeout === "function") _scrml_pend_${suffix}.timer = setTimeout(_scrml_if_endexit_${suffix}, 600);`);
+            reactiveRewire.push(`            if (typeof _scrml_g.setTimeout === "function") _scrml_pend_${suffix}.timer = _scrml_g.setTimeout(_scrml_if_endexit_${suffix}, 600);`);
           } else {
             reactiveRewire.push(`            _scrml_unmount_scope(_scrml_mr_${suffix}, _scrml_ms_${suffix});`);
             reactiveRewire.push(`            _scrml_mr_${suffix} = null;`);
@@ -2450,7 +2450,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const inTpl = binding.insideMountTemplate === true;
         const blk: string[] = [];
         blk.push(`  {`);
-        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+        blk.push(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
         blk.push(`    if (_scrml_el) {`);
         blk.push(`      ${isAsync ? "async " : ""}function ${renderFn}() {`);
         blk.push(`        let _scrml_eb_result;`);
@@ -2532,7 +2532,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
         pushAnchorBlock([
           `  {`,
-          `    const _scrml_el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`,
+          `    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-logic="${placeholderId}"]');`,
           `    if (_scrml_el) {`,
           `      (async () => { try { _scrml_el.textContent = await (${rewrittenExpr}); } catch (_e) { _scrml_el.textContent = ""; } })();`,
           `    }`,
@@ -2788,14 +2788,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       for (const branch of allBranches) {
         const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
         if (branch.branchMode === "mount") {
-          reactiveRewire.push(`      var _scrml_chain_${branchSlug}_marker = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(branch.markerId)}, (_scrml_root || document)) : null;`);
+          reactiveRewire.push(`      var _scrml_chain_${branchSlug}_marker = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(branch.markerId)}, (_scrml_root || _scrml_g.document)) : null;`);
           reactiveRewire.push(`      if (_scrml_chain_${branchSlug}_marker) { _scrml_chain_${chainSlug}_present = true; if (!_scrml_chain_${chainSlug}_anchor) _scrml_chain_${chainSlug}_anchor = _scrml_chain_${branchSlug}_marker.parentElement || null; }`);
           reactiveRewire.push(`      let _scrml_chain_${branchSlug}_root = null;`);
           reactiveRewire.push(`      let _scrml_chain_${branchSlug}_scope = null;`);
         } else {
           // display-mode: resolve wrapper at startup (the emit-html-emitted
           // `<div data-scrml-chain-branch="<branchId>">`), scoped to root.
-          reactiveRewire.push(`      const _scrml_chain_${branchSlug}_wrapper = (_scrml_root || document).querySelector('[data-scrml-chain-branch="${branch.branchId}"]');`);
+          reactiveRewire.push(`      const _scrml_chain_${branchSlug}_wrapper = (_scrml_root || _scrml_g.document).querySelector('[data-scrml-chain-branch="${branch.branchId}"]');`);
           reactiveRewire.push(`      if (_scrml_chain_${branchSlug}_wrapper) { _scrml_chain_${chainSlug}_present = true; if (!_scrml_chain_${chainSlug}_anchor) _scrml_chain_${chainSlug}_anchor = _scrml_chain_${branchSlug}_wrapper; }`);
         }
       }
@@ -2857,7 +2857,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         reactiveRewire.push(`            case ${JSON.stringify(branch.branchId)}:`);
         if (branch.branchMode === "mount") {
           reactiveRewire.push(`              _scrml_chain_${branchSlug}_scope = _scrml_create_scope();`);
-          reactiveRewire.push(`              _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)}, (_scrml_root || document));`);
+          reactiveRewire.push(`              _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)}, (_scrml_root || _scrml_g.document));`);
           // §17.1.1 Phase 2 — a chain branch may now carry wiring (events, `${…}`,
           // bind:, a nested if=, an `<each>`), so the branch needs the same
           // mount-time rebind + scoped teardown the standalone `if=` gets.
@@ -2909,7 +2909,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     for (const l of nonDelegatedRewire) lines.push(l);
     for (const l of reactiveRewire) lines.push(l);
     lines.push("  }");
-    lines.push("  _scrml_nav_rewire(document);");
+    lines.push("  _scrml_nav_rewire(_scrml_g.document);");
     lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
     // §17.1 — everything an `if=` subtree needs re-bound on mount. TWO root-scoped
     // wiring passes exist per file and a mount needs both: `_scrml_nav_rewire`
@@ -2933,11 +2933,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // page, shared test document) cannot re-fire a stale boot whose selectors
   // resolve onto a LATER chunk's nodes (the S345 cross-file gate red).
   lines.push("}");
-  lines.push('if (typeof document === "undefined") { return; }');
+  lines.push('if (typeof _scrml_g.document === "undefined") { return; }');
   lines.push('if (typeof _scrml_chunk_loading !== "undefined" && _scrml_chunk_loading) {');
   lines.push("  _scrml_boot();");
   lines.push("} else {");
-  lines.push('  document.addEventListener("DOMContentLoaded", _scrml_boot, { once: true });');
+  lines.push('  _scrml_g.document.addEventListener("DOMContentLoaded", _scrml_boot, { once: true });');
   lines.push("}");
   lines.push("})();");
 
