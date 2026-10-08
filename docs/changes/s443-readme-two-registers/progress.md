@@ -19,3 +19,4 @@
 ## S459 tighten
 
 - 2026-10-08T16:41Z — setup: branch s459-readme-tighten from 172247211; brief copied to S459-TIGHTEN-BRIEF.md
+- 2026-10-08T16:45Z — moved 10 sections to docs/readme/*.md (License links straight to LICENSE: the section was a pointer only); README 550 → 356 lines, ending in a `## More` link list. Three word edits: two where "above" went false (features, documentation), one back-link to the README (note-from-the-dev). Snippet drift 27/0 (README 9 + tutorial 18, unchanged); full gate 128/0; links 102/102; moved bodies differ from the original only in link targets plus those 3 edits.
