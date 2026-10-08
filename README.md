@@ -195,7 +195,7 @@ You wrote a schema, three database functions, some state, three handlers and a s
 
 **State is the declaration primitive.** `<count> = 0` declares a reactive cell; `@count` reads or writes it. Compound, derived (`const <total> = expr`), input-bound and validated cells are the same primitive with different attributes. The compiler tracks the dependency graph and updates the DOM on change.
 
-**Engines are the centerpiece.** When state goes from "a few booleans" to "this app has phases," you promote it up a tier ladder without rewriting the markup tree: `if=` chains, then `<match for=Type>`, then `<engine for=Type>`. The engine declares the legal transitions, runs effects, and refuses to compile while any variant lacks a UI block.
+**Engines are the centerpiece.** When state goes from "a few booleans" to "this app has phases," you promote it up a [tier ladder](docs/readme/tier-ladder.md) without rewriting the markup tree: `if=` chains, then `<match for=Type>`, then `<engine for=Type>`. The engine declares the legal transitions, runs effects, and refuses to compile while any variant lacks a UI block.
 
 **Full-stack in one file.** Markup, logic, styles, SQL, server functions, error handling and realtime channels all go in `.scrml`. The compiler works out what runs on the server and splits the file. There are no route files and no API layer to drift out of sync.
 

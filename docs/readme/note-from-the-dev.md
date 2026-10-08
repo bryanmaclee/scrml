@@ -1,6 +1,6 @@
 # A note from the dev
 
-Everything in the main body of this README compiles with the current compiler, and CI checks that on every push. The one section that doesn't, *[Where the language is going](../../README.md#where-the-language-is-going)*, says so. That section is the language as designed; the compiler is catching up to it. I am working full-bore to get the compiler there. I am just one guy.
+Everything in the main body of the README compiles with the current compiler, and CI checks that on every push. The one section that doesn't, *[Where the language is going](../../README.md#where-the-language-is-going)*, says so. That section is the language as designed; the compiler is catching up to it. I am working full-bore to get the compiler there. I am just one guy.
 
 If you are here (and reading this). Hello, My name is Bryan MacLee. I am co-owner of a small trucking company in rural Ut. I run the business, drive, mechanic, apparently I'm the HR department. I am also a husband, father and sometimes, a wannabe coder.
 
