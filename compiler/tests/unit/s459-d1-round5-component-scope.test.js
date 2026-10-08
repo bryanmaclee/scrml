@@ -269,3 +269,19 @@ const Fn = <div class="f" props={ onGo?: () => void }>
     expect(spans).toContainEqual([6, 44]);
   });
 });
+
+describe("round 7 — E-TYPE-046 shares the presence-narrowing reader (forms it now also accepts / still refuses)", () => {
+  const has046 = (src) => compile(src).codes.includes("E-TYPE-046");
+  const cell = `<user>: { name: string } | not\n`;
+  test("`&&` right operand and `||` right operand of a negated test narrow", () => {
+    expect(has046(`<program>\n${cell}<p>\${@user && @user.name}</p>\n</program>`)).toBe(false);
+    expect(has046(`<program>\n${cell}<p>\${!@user || @user.name}</p>\n</program>`)).toBe(false);
+  });
+  test("an early return on `!@user` narrows the rest of the body", () => {
+    expect(has046(`<program>\n${cell}\${ function f() { if (!@user) return ""; return @user.name } }\n<p>\${f()}</p>\n</program>`)).toBe(false);
+  });
+  test("a test that reads but does not prove presence does not narrow", () => {
+    expect(has046(`<program>\n${cell}<p>\${@user || @user.name}</p>\n</program>`)).toBe(true);
+    expect(has046(`<program>\n${cell}\${ function f() { if (@user is not) { return @user.name } return "" } }\n<p>\${f()}</p>\n</program>`)).toBe(true);
+  });
+});

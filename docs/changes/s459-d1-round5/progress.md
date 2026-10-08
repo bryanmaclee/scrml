@@ -130,3 +130,64 @@
 - Gates: core suite 0 fail on every code commit (pre-commit); conformance/run.ts 1405/1455 + 50 xfail, 0 fail;
   browser-baseline --check PASS (48 asserted); e2e-render-map 259/0; compiler/tests/*.test.js 2239/0; types-gate OK;
   bootstrap-conformance current.
+
+# Round 7 (PA review of 270f2812e = DO-NOT-LAND on item 1; addendum in BRIEF.md)
+
+## 2026-10-08 — reproduced (s459-rev-d1r6 probes on 270f2812e)
+- Item 1 HELD: all 12 p2 single-instance probes refused E-TYPE-031 (early return `is not` / `!`, else of `is not`,
+  `onGo?.()` in a function and an arrow, `if=onGo` + `onclick=onGo()`). My round-6 note "cannot false-positive a
+  real guard" was FALSE: the model treated a test that READS the prop as a guard of its consequent only, and the
+  bare call-ref was hard-coded unguarded.
+- Item 3 HELD: `onGo=${not}` -> E-TYPE-031 "non-function value"; with the check removed the emit was `not()` -> `!()`.
+- Item 5 HELD: f/sqcomment.scrml -> 3:19, inside the comment.
+
+## step 1 — the ONE §42 presence-narrowing reader (2ff88ab0d)
+- Found the existing reader: type-system `checkOptionalMemberAccess` (E-TYPE-046, §42.3.5) carried its own
+  narrowing walker (discriminateCondition / earlyReturnNarrowedCell / markupNarrowedCells / given / match / if /
+  ternary). It runs at TS on post-CE ASTs keyed by `@cell` names, so it cannot be CALLED at the expander stage as
+  is. Fix: EXTRACTED into `compiler/src/presence-narrowing.ts` (receiver-agnostic: `receiverKey` + `onExpr`), and
+  E-TYPE-046 now runs through it; the component E-TYPE-031 check is its second consumer. The bespoke round-6 guard
+  model is deleted from both substituters (component-prop-js-substitute.ts restored to 040eefc53).
+- Component adapter (`checkOptionalFnPropCalls`, once per DEFINITION): substitute the body with a marker per
+  optional function prop (the expander's ONE scope model decides what IS the prop — a shadowing local is never
+  marked), parse handler values with the type system's own check view `parseHandlerStatementsForCheck` (an arrow
+  yields its body; the body re-parse leaves values as raw text), walk with the shared reader; a call / member hop
+  through a marker that is not `?.` and not proven present fires.
+- Narrowing forms (§42.3.5 quoted in the module header): optional call; `if=`/`show=`/`else-if=` on the element
+  (now covers its OWN other attributes — the element and its handlers exist only while the guard holds) or an
+  ancestor; `given`; `match`; early return (any test whose FALSE-facts prove presence: `is not`, `!p`, `== not`,
+  `!a || !b`); `is some` / truthy / `!= not` consequent; else of a negated test; ternary branches; `&&` right
+  (TRUE-facts of the left); `||` right (FALSE-facts of the left). `narrowsWhen(cond, truth)` composes `!`/`&&`/`||`.
+- E-TYPE-046 consequence (same reader, so it widens too — NEWLY ACCEPTING, correct per §42.3.5): `@u && @u.name`,
+  `!@u || @u.name`, `if (!@u) return …`, `@u == not` early return, `if=` covering the element's own attributes.
+  Measured: base fired E-TYPE-046 twice on `${@u && @u.name}` / `${!@u || @u.name}`, head zero. Pinned in unit.
+- Lenient false negatives now CAUGHT: `if (p is not) { p() }`, `!p && p()`, `p || p()`, `p ? 0 : p()`, `p.call()`,
+  `if (p()) {}`, `class=${p()}` (conformance callback-prop-absence-unsafe-forms-reject, 7).
+  NOT caught (reported, not a call or hop): `run(onGo)` passing the `fn | not` value to a parameter (reviewer
+  fn-ref-passed) — E-TYPE-046 has the same boundary; it would need argument typing (§7.5.1 position 3, Nominal).
+- `given` / `match` in a component body still fail E-COMPONENT-020/021/035 (carried, pre-existing) — the reader
+  handles both, but no component can reach them today.
+- Item 2: reported at the offending call — the call's ANCHOR (its attribute value or `${}` block, body-relative
+  spans) is located in the source, then it is the i-th call/hop of the prop there.
+- Item 3: `not` admitted for an OPTIONAL function prop (refused for a required one); the raw-text substituter now
+  groups a `not` value, so `onGo()` -> `(null)()` (valid JS, never reached under a guard).
+- Item 4: SPEC §34 E-TYPE-031 row re-measured (`grep -rn '"E-TYPE-031"' compiler/src`): 21 push sites, five
+  positions — (d) a literal / `not`-to-required for a function prop, (e) the unguarded optional-function-prop call.
+  Notes that scripts/s34-census.ts does not check the count. s34-census --check-new PASS.
+- Item 5: the locator is whitespace-insensitive and skips source comments (and treats `//` inside `"…"` as text);
+  the fallback span's line/col is computed from the source (the def span's own line/col were wrong).
+- Conformance: callback-prop-absence-safe-forms (11 forms × none/some, executed), -absence-unsafe-forms-reject (7),
+  -pass-not (executed); non-function-reject +`${not}` to a required prop (3). Unit +5. Gate 32611 / 0 fail.
+
+## step 2 — merge origin/main (437fbde63; main had moved past 49b7fcc1d) — b31be0ec8
+- Conflicts: SPEC-INDEX / FACTS / bootstrap-conformance only -> took main's, regenerated by script (--check PASS).
+  Gate 32818 / 0 fail.
+
+## step 3 — gates + differential (round 7)
+- Differential: base = HEAD tree (b31be0ec8) with the r7 compiler diff (270f2812e..2ff88ab0d, compiler/src +
+  native-parser) reverse-applied, i.e. 270f2812e + main; head = b31be0ec8; same 2509 sources. 0 newly failing; 2 newly
+  passing (callback-prop-absence-safe-forms, callback-prop-pass-not — refused on base); text-only 2 (the E-TYPE-031
+  message + span on the two reject cases); 164 differing artifacts = 162 scratch-path only + 2 real
+  (callback-prop-bare-call-form, callback-prop-optional-guarded: an omitted optional prop now lowers as `(null)()` /
+  `if((null))` — the `not` grouping, same behaviour). ZERO corpus files outside the new cases changed — including
+  no E-TYPE-046 change anywhere in the corpus from the widened narrowing.
