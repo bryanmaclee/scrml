@@ -161,7 +161,7 @@ function _scrml_meta_emit_violation(root) {
         const value = String(call(dom.attrValue, a));
         const nameVerdict = _scrml_emit_attr_name_verdict(ns, tag, name);
         if (nameVerdict !== "") return nameVerdict;
-        const valueVerdict = _scrml_emit_attr_value_verdict(name, value);
+        const valueVerdict = _scrml_emit_attr_value_verdict(name, value, tag);
         if (valueVerdict !== "") return valueVerdict + " on <" + tag + ">";
         if ((name === "id" || name === "name") && shadowing === "" && _scrml_meta_emit_shadows_member(value)) {
           // Recorded, not returned: the walk goes on, so a refusal names what the shadowing would have

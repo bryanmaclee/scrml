@@ -82,3 +82,29 @@ describe("S458 item 3 — ordinary data-* attributes still pass", () => {
     expect(r.html).toContain("data-scrml-meta=");
   });
 });
+
+describe("PA-ruled S459: meta descriptive attrs; http-equiv refused", () => {
+  test("<meta name content> / charset / property / media compile clean (the corpus sample's shape)", () => {
+    const r = compile(emitOf('<meta name="robots" content="index, follow"/><meta charset="utf-8"/>' +
+      '<meta property="og:title" content="T"/><meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000"/>'));
+    expect(r.codes).toEqual([]);
+    expect(r.html).toContain('name="robots"');
+    expect(r.html).toContain('property="og:title"');
+  });
+
+  test("http-equiv is refused outright (meta refresh is a navigation sink)", () => {
+    const r = compile(emitOf('<meta http-equiv="refresh" content="0;url=https://x"/>'));
+    expect(r.codes).toContain("E-META-EVAL-002");
+    expect(r.messages.some((m) => m.includes("http-equiv="))).toBe(true);
+  });
+
+  test("content is scoped to <meta> — on any other element it is not on the list", () => {
+    const r = compile(emitOf('<p content="x">p</p>'));
+    expect(r.codes).toContain("E-META-EVAL-002");
+  });
+
+  test("the id/name belt applies to <meta name>: a DOM-member spelling is refused, a metadata token is fine", () => {
+    expect(compile(emitOf('<meta name="querySelector" content="x"/>')).codes).toContain("E-META-EVAL-002");
+    expect(compile(emitOf('<meta name="twitter:card" content="x"/>')).codes).toEqual([]);
+  });
+});

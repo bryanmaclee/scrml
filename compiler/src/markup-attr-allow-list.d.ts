@@ -12,5 +12,5 @@ export declare const _SCRML_EMIT_NS_MATHML: string;
 export declare function _scrml_emit_fold_name(name: unknown): string;
 export declare function _scrml_emit_reserved_attr_name(lowerName: string): boolean;
 export declare function _scrml_emit_attr_name_verdict(ns: string | null | undefined, tag: string, name: unknown): string;
-export declare function _scrml_emit_attr_value_verdict(name: unknown, value: unknown): string;
+export declare function _scrml_emit_attr_value_verdict(name: unknown, value: unknown, tag: string): string;
 export declare function _scrml_emit_child_ns(parentNs: string, parentTag: string, childTag: string): string;

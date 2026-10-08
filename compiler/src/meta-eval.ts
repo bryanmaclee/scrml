@@ -991,10 +991,10 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
           }
           const v = a?.value as { kind?: string } | undefined;
           if (v && typeof v === "object" && v.kind === "string-literal") {
-            const valueVerdict = _scrml_emit_attr_value_verdict(String(a.name), String((v as { value?: unknown }).value ?? ""));
+            const valueVerdict = _scrml_emit_attr_value_verdict(String(a.name), String((v as { value?: unknown }).value ?? ""), lowerTag);
             if (valueVerdict !== "") {
               refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` ${valueVerdict} ` +
-                `(§22.4.1, §47.1.1).`);
+                `(§22.4.1).`);
               continue;
             }
           }

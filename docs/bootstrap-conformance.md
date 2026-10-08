@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1442 of 1442 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1445 of 1445 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1442 of 1442 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.9% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 526 | 36.5% |
-| UNSUPPORTED | 739 | 51.2% |
+| NOT-TWINNED | 526 | 36.4% |
+| UNSUPPORTED | 742 | 51.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,11 +26,11 @@ Scope: **1442 of 1442 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 524 · parse-reject 215.
+UNSUPPORTED by reason: bootstrap-unsupported 525 · parse-reject 217.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **675** — PASS 76 · FAIL 52 · UNSUPPORTED 547. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **676** — PASS 76 · FAIL 52 · UNSUPPORTED 548. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -130,7 +130,7 @@ NOT-TWINNED by reason (526 cases; a case counts once per distinct reason):
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| meta | 36 | · | · | · | · | 1 | 35 | · | · |
+| meta | 39 | · | · | · | · | 1 | 38 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 40 | · | · | 10 | · | 8 | 22 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
@@ -419,7 +419,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (739)
+### UNSUPPORTED (742)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -872,10 +872,13 @@ none
 - `meta/meta-emit-data-attr-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
 - `meta/meta-emit-document-clobber-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
 - `meta/meta-emit-legit-attrs-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
+- `meta/meta-emit-meta-descriptive-pos` — parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-emit-meta-http-equiv-neg` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-emit-normalize-escape` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-emit-raw-escape` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-emit-reserved-attr-neg` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-emit-runtime-bare-scope-attr-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
+- `meta/meta-emit-runtime-meta-http-equiv-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
 - `meta/meta-emit-runtime-reserved-attr-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
 - `meta/meta-emit-script-neg` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-emit-splice-render-rt` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level

@@ -46,6 +46,16 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   abbr: ["td", "th"],
   accept: ["input"],
   "accept-charset": ["form"],
+  // `<meta>`'s DESCRIPTIVE attributes (PA-ruled S459: meta descriptive attrs; http-equiv refused).
+  // `content` is inert only while the element has no `http-equiv` — `http-equiv="refresh"` with
+  // `content="0;url=javascript:…"` is an executable navigation (S456 filed meta refresh as a URL
+  // sink). `http-equiv` is on no list, so it is refused outright, and THAT is what makes admitting
+  // `content` safe — which is why `content` is scoped to `<meta>` here, never admitted globally.
+  // (The runtime gate refuses the `<meta>` element itself; these names matter for compile-time
+  // `emit()` output, e.g. `<meta name="robots" content="index, follow">`.)
+  charset: ["meta"],
+  content: ["meta"],
+  property: ["meta"],
   alt: ["img", "area", "input"],
   autocomplete: ["form", "input", "select", "textarea"],
   autoplay: ["audio", "video"],
@@ -78,12 +88,12 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   low: ["meter"],
   max: ["input", "meter", "progress"],
   maxlength: ["input", "textarea"],
-  media: ["source"],
+  media: ["source", "meta"],
   min: ["input", "meter"],
   minlength: ["input", "textarea"],
   multiple: ["input", "select"],
   muted: ["audio", "video"],
-  name: ["button", "fieldset", "input", "output", "select", "textarea", "map", "details"],
+  name: ["button", "fieldset", "input", "output", "select", "textarea", "map", "details", "meta"],
   novalidate: ["form"],
   open: ["details", "dialog"],
   optimum: ["meter"],
@@ -193,14 +203,23 @@ export function _scrml_emit_attr_name_verdict(ns, tag, name) {
     "emitted markup)";
 }
 
-// The value half of the judge (names already admitted): an `id` / `name` whose value begins with the
-// compiler-reserved prefix `_scrml` / `__scrml` (§47.1.1) is refused — such an element would become a
-// `window._scrml…` named property, which the runtime's own `typeof _scrml_x === "function"` probes
-// would then find. Returns "" or a reason naming the attribute (never its value).
-export function _scrml_emit_attr_value_verdict(name, value) {
+// The value half of the judge (names already admitted). `tag` is the element's lowercased local name.
+//   - An `id` / `name` whose value begins with the compiler-reserved prefix `_scrml` / `__scrml`
+//     (§47.1.1) is refused — such an element would become a `window._scrml…` named property, which
+//     the runtime's own `typeof _scrml_x === "function"` probes would then find.
+//   - A `<meta name=…>` value must be a lowercase metadata token (`robots`, `theme-color`,
+//     `og:title`, `twitter:card` — letters, digits, `-` `_` `.` `:`), so a DOM-member spelling such
+//     as `querySelector` is refused at compile time as well as run time (PA-ruled S459: the id/name
+//     clobbering belt applies to `<meta name>`; the compiler has no live DOM to read members from,
+//     and every camelCase member fails this shape).
+// Returns "" or a reason naming the attribute (never its value).
+export function _scrml_emit_attr_value_verdict(name, value, tag) {
   const lowerName = _scrml_emit_fold_name(name);
   if ((lowerName === "id" || lowerName === "name") && /^_{1,2}scrml/i.test(String(value).trim())) {
     return "a " + lowerName + "= value in the compiler-reserved _scrml / __scrml namespace";
+  }
+  if (lowerName === "name" && String(tag).toLowerCase() === "meta" && !/^[a-z0-9]+(?:[-_.:][a-z0-9]+)*$/.test(String(value))) {
+    return "a name= value on <meta> that is not a lowercase metadata token";
   }
   return "";
 }
