@@ -875,6 +875,14 @@ function collectNonMetaReads(nodes: ASTNode[]): Set<string> {
       // RUNTIME meta body stays in the client and reads its captures through the emitted
       // closure, so those reads DO keep a declaration alive (round 3 LOW).
       if (bodyUsesCompileTimeApis((node.body as unknown[]) ?? [])) return;
+      // A RUNTIME meta node's `meta.bindings` object (§22.5.2) names EVERY binding in scope
+      // at its site (`name: name`), read or not — each such declaration must stay in the
+      // client (S458 final F3: a `const` captured by a sibling compile-time `^{}` was
+      // stripped while the runtime block's bindings object still referenced it).
+      const scope = node.capturedScope;
+      if (Array.isArray(scope)) {
+        for (const e of scope) if (e && typeof (e as { name?: unknown }).name === "string") out.add((e as { name: string }).name);
+      }
     }
     for (const k of ["init", "expr", "raw", "condition", "content", "iterable"]) addText(node[k]);
     for (const k of ["initExpr", "exprNode", "condExpr", "iterExpr", "matchExpr", "headerExpr"]) addTree(node[k]);
@@ -888,6 +896,16 @@ function collectNonMetaReads(nodes: ASTNode[]): Set<string> {
   return out;
 }
 
+/** A node an emit leaves behind that renders nothing: whitespace-only text or a comment. */
+function isBlankNode(n: ASTNode): boolean {
+  if (!n || typeof n !== "object") return true;
+  const r = n as Record<string, unknown>;
+  if (r.kind === "comment") return true;
+  if (r.kind !== "text") return false;
+  const v = r.value ?? r.text ?? r.content;
+  return typeof v !== "string" || v.trim() === "";
+}
+
 function processNodeList(
   nodes: ASTNode[],
   typeRegistry: TypeRegistry,
@@ -895,6 +913,7 @@ function processNodeList(
   outerScope?: ScopeDecl[],
   filePath: string = "",
   nonMetaReads?: ReadonlySet<string>,
+  markupPosition: boolean = true,
 ): boolean {
   if (!Array.isArray(nodes)) return false;
 
@@ -950,6 +969,29 @@ function processNodeList(
 
         const replacementNodes = evaluateMetaBlock(node as MetaNode, typeRegistry, errors, precedingDecls, filePath);
 
+        // §22.4 "inline the result": the result of `emit()` is MARKUP, so it is inlined
+        // only where markup sits — the file's top level or a markup element's children.
+        // A compile-time `^{}` inside a `${}` logic body — a statement list, an `if` /
+        // `else` branch, a loop, a match arm, a function — has no markup position to
+        // receive it: the branch exists only at run time, and markup spliced into a
+        // statement list was dropped by codegen with no diagnostic (S458 final F3). The
+        // SPEC defines no splice there, so it is refused, never silently dropped. A body
+        // that emits nothing (e.g. only `reflect()` into a local) is unaffected.
+        if (replacementNodes !== null && !markupPosition && replacementNodes.some((rn) => !isBlankNode(rn))) {
+          errors.push(new MetaEvalError(
+            "E-META-EVAL-002",
+            `This compile-time ^{} emits markup from inside a \${} logic block ` +
+            `(a statement list, an if/else branch, a loop, a match arm or a function body). ` +
+            `Compile-time emit() output is inlined where markup sits, and a logic body has no markup ` +
+            `position to receive it — a branch that exists only at run time cannot be filled at compile ` +
+            `time. Move the ^{} into the markup (e.g. inside the element the branch renders), or, if the ` +
+            `output depends on a run-time condition, use a runtime ^{} with meta.emit() (§22.4, §22.5.1).`,
+            (node as { span?: Span }).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
+          ));
+          i++;
+          continue;
+        }
+
         if (replacementNodes !== null) {
           // Mark the declarations this meta block consumed as compile-time-only so they
           // are stripped from client JS output — but ONLY those NO non-meta code reads
@@ -992,13 +1034,16 @@ function processNodeList(
       for (const key of Object.keys(n)) {
         if (key === "span" || key === "tabSpan" || key === "loc") continue;
         const v = n[key];
+        // Markup position = a markup node's `children` (F3). A logic node's `body`, a
+        // branch, a loop / function body, … are statement lists, not markup positions.
+        const childMarkupPosition = key === "children" && node.kind !== "logic";
         if (Array.isArray(v) && v.some((el) => el && typeof el === "object" && typeof (el as ASTNode).kind === "string")) {
-          if (processNodeList(v as ASTNode[], typeRegistry, errors, scopeDecls, filePath, nonMetaReads)) changed = true;
+          if (processNodeList(v as ASTNode[], typeRegistry, errors, scopeDecls, filePath, nonMetaReads, childMarkupPosition)) changed = true;
         } else if (v && typeof v === "object" && typeof (v as ASTNode).kind === "string") {
           // A single child node held directly (e.g. a ternary branch) — wrap so a meta
           // there is still reached. (It cannot be spliced in place, but a meta is only
-          // spliced from an array; a lone meta child is left for codegen to handle.)
-          if (processNodeList([v as ASTNode], typeRegistry, errors, scopeDecls, filePath, nonMetaReads)) changed = true;
+          // spliced from an array; a lone meta is never a markup position.)
+          if (processNodeList([v as ASTNode], typeRegistry, errors, scopeDecls, filePath, nonMetaReads, false)) changed = true;
         }
       }
     }

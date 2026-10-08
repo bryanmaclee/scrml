@@ -138,3 +138,52 @@ describe("S458 final F4 — meta timers refuse a delay that is not a finite numb
     });
   }
 });
+
+describe("S458 final F3 — a compile-time ^{} in a logic body is refused, never silently dropped", () => {
+  // §22.4: "The compiler SHALL evaluate compile-time meta blocks during compilation and
+  // inline the result." emit() output is markup; a ${} statement list / branch / loop /
+  // function has no markup position, and the spliced markup was dropped by codegen with
+  // no diagnostic (base: emitted as a runtime effect calling a free `emit`).
+  const cases = {
+    "if branch (the review repro)": `\${ const tag = "T"\n  if (@n > 0) { ^{ emit("<p>" + tag + "</p>") } } else { ^{ meta.emit("<p>else</p>") } } }`,
+    "else branch": `\${ if (@n > 0) { log("x") } else { ^{ emit("<p>e</p>") } } }`,
+    "top of a logic block": `\${ ^{ emit("<p>X</p>") } }`,
+    "for-of body": `\${ for (const i of [1, 2]) { ^{ emit("<p>i</p>") } } }`,
+    "function body": `\${ function go() { ^{ emit("<p>f</p>") } } }`,
+  };
+  for (const [where, logic] of Object.entries(cases)) {
+    test(`refused in a ${where} (E-META-EVAL-002 naming the cause)`, () => {
+      const r = compile(`<program>\n<n> = 1\n<div>\n${logic}\n</div>\n</program>\n`);
+      expect(r.codes).toContain("E-META-EVAL-002");
+      expect(r.messages.join("\n")).toContain("emits markup from inside a ${} logic block");
+    });
+  }
+
+  test("a compile-time ^{} in markup position still splices (top level and inside an element)", () => {
+    const r = compile(`<program>\n<x> = 0\n^{ emit("<p>top</p>") }\n<div>\n^{ emit("<i>in</i>") }\n</div>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+  });
+
+  test("a compile-time ^{} in a logic body that emits nothing is not refused", () => {
+    const r = compile(`<program>\n<n> = 1\n<div>\n\${ if (@n > 0) { ^{ emit("  ") } } }\n</div>\n</program>\n`);
+    expect(r.codes).not.toContain("E-META-EVAL-002");
+  });
+
+  test("the runtime ^{} in an else branch runs when the branch is taken (meta.emit)", () => {
+    const r = compile(`<program>\n<n> = 0\n<div>\n\${ if (@n > 0) { log("pos") } else { ^{ meta.emit("<p>else</p>") } } }\n</div>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    const { out, errors } = run(r.clientJs);
+    expect(out).toEqual(["<p>else</p>"]);
+    expect(errors).toEqual([]);
+  });
+
+  test("a declaration captured by a compile-time ^{} stays in the client when a runtime ^{} binds it in meta.bindings", () => {
+    const r = compile(`<program>\n<x> = 0\n\${ const tag = "T" }\n^{ emit("<p>" + tag + "</p>") }\n<div>\n^{ meta.emit("<b>" + meta.get("x") + "</b>") }\n</div>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toContain("tag: tag");
+    expect(r.clientJs).toContain(`const tag = "T"`);
+    const { out, errors } = run(r.clientJs);
+    expect(out).toEqual(["<b>0</b>"]);
+    expect(errors).toEqual([]);
+  });
+});
