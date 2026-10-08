@@ -132,7 +132,13 @@ describe("scrml dev's app server refuses while an undeclared tenant table exists
     const empty = mkdtempSync(join(tmpdir(), "s457-dev-empty-"));
     await loadServerRoutes(empty);
     rmSync(empty, { recursive: true, force: true });
-    rmSync(root, { recursive: true, force: true });
+    // Windows keeps the loaded server module's SQLite file locked for the life of the
+    // process (EBUSY); the test preload's per-process temp root removes it at exit.
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (e) {
+      if (!(process.platform === "win32" && e?.code === "EBUSY")) throw e;
+    }
   });
 
   test("the module's check is mounted as a gate, not a route; every request answers 503", async () => {
