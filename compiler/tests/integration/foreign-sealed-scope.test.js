@@ -337,6 +337,27 @@ describe("§23.2.4a — tool host I/O form (executed with bun)", () => {
     expect(stdout).toContain("dyn=.md");
   });
 
+  // S458 (s458-alias-r3) — under Node an ES module has no `import.meta.require`; the seal
+  // builds the module's require with `module.createRequire(import.meta.url)`.
+  test.skipIf(!Bun.which("node"))("under Node the slice gets a working require too", () => {
+    const { result, dist } = runTool("hostctx_node", `<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        _={
+            const path = require("node:path");
+            console.log("req=" + path.basename("/a/b.txt"));
+            console.log("dir=" + (typeof __dirname) + "/" + (typeof __filename));
+        }=
+        return 0
+    }
+</program>`);
+    expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+    const run = Bun.spawnSync({ cmd: ["node", join(dist, "hostctx_node.js")], stdout: "pipe", stderr: "pipe" });
+    expect(run.stderr.toString()).toBe("");
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout.toString()).toContain("req=b.txt");
+    expect(run.stdout.toString()).toContain("dir=string/string");
+  });
+
   test("the slice text survives being carried as source: backticks, ${}, backslashes, regex", () => {
     // The slice travels inside a template literal in the artifact; its COOKED value
     // must be the author's text byte for byte (same output as the old in-place IIFE).

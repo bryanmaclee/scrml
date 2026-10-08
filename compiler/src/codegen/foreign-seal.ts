@@ -67,7 +67,9 @@ export const FOREIGN_SEAL_FN = "_scrml_foreign_seal";
  * no `import`, no top-level `await` (the conformance adapter evaluates a server module with
  * `new Function`, rewriting `import.meta` to a plain object); `require` / `__dirname` /
  * `__filename` are read off `import.meta` (Bun: `.require` / `.dir` / `.path`; Node:
- * `.dirname` / `.filename`) and bound only when present — never by their bare names, which a
+ * `.dirname` / `.filename`, and `require` built by `module.createRequire(import.meta.url)`,
+ * the `module` builtin reached through `process.getBuiltinModule` since an `import` is not
+ * allowed here) and bound only when present — never by their bare names, which a
  * user binding in this module's scope could own (S457 2a). No literal `undefined` either: the server-output
  * lint W-CG-UNDEFINED-INTERPOLATION flags it (scrml absence is `null`, §42) — so a host name
  * the module lacks is left UNBOUND in the slice rather than bound to an absent value.
@@ -101,7 +103,13 @@ function _scrml_foreign_seal(site, source) {
     // the module's own scope, where a server function or binding named require /
     // __dirname / __filename would otherwise be what the slice receives (S457 2a).
     const _scrml_meta = import.meta;
-    const _scrml_require = _scrml_meta.require;
+    let _scrml_require = _scrml_meta.require;
+    // Node gives an ES module no require of its own: build the module's one from its URL.
+    if (typeof _scrml_require !== "function" && typeof _scrml_meta.url === "string") {
+      const _scrml_proc = _scrml_g.process;
+      const _scrml_mod = _scrml_proc && typeof _scrml_proc.getBuiltinModule === "function" ? _scrml_proc.getBuiltinModule("module") : null;
+      if (_scrml_mod && typeof _scrml_mod.createRequire === "function") _scrml_require = _scrml_mod.createRequire(_scrml_meta.url);
+    }
     const _scrml_dirname = _scrml_meta.dir ?? _scrml_meta.dirname;
     const _scrml_filename = _scrml_meta.path ?? _scrml_meta.filename;
     if (typeof _scrml_require === "function") { hostNames.push("require"); hostValues.push(_scrml_require); }
