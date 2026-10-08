@@ -6,7 +6,7 @@
   "rationale": "§15.10.1 Shadowing: 'A `for-stmt` loop variable … shadows props within their respective scopes.'",
   "expect": {
     "codes": [],
-    "notCodes": ["E-ASSIGN-004", "E-SCOPE-001"],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-ASSIGN-004", "E-SCOPE-001"],
     "input": [{ "click": ".c .r" }],
     "state": { "out": 43, "v": 7 },
     "domAnchored": [{ "selector": "#o", "text": "43" }]

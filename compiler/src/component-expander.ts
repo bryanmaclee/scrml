@@ -3623,10 +3623,10 @@ function expandComponentNode(
     _expansionSiteSpan: node.span,
   }));
 
-  // S458 F2 — refuse every body write to a prop the caller did not bind. SPEC names
-  // no code for it; E-ASSIGN-004 (a `const` binding as an assignment target) is the
-  // closest §34 text — a non-`bind` prop is "captured once at mount" (§15.13.2).
-  // ROUTED FOR A RULING (S458 report). A write is never lowered onto the caller's cell.
+  // S458 F2 — refuse every body write to a prop the caller did not bind with `bind:`
+  // (by-value, or an unbound bindable prop): E-COMPONENT-PROP-WRITE (§15.11.1, §34 —
+  // ruling user-voice S458 "your recs on both D1 codes"). A write is never lowered onto
+  // the caller's cell.
   _propWriteCtx = prevWriteCtx;
   for (const name of writeCtx.written) {
     const decl = ((def.propsDecl ?? []) as PropDecl[]).find((p: PropDecl) => p.name === name);
@@ -3637,8 +3637,9 @@ function expandComponentNode(
       : `\`${name}\` is a by-value prop — captured once at mount (§15.13.2) — and only a ` +
         `\`bind\` prop the caller binds may be written (§15.11.1).`;
     ceErrors.push(makeCEError(
-      "E-ASSIGN-004",
-      `E-ASSIGN-004: the body of \`<${componentName}>\` writes its prop \`${name}\`. ${why} ` +
+      "E-COMPONENT-PROP-WRITE",
+      `E-COMPONENT-PROP-WRITE: the body of \`<${componentName}>\` writes its prop \`${name}\`, ` +
+      `which is passed by value — bind it with \`bind:\` at the call site to write back. ${why} ` +
       `Declare \`bind ${name}: T\` and bind it at the call site (\`<${componentName} ` +
       `bind:${name}=@cell/>\`), or copy the prop into a cell the component owns.`,
       node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
@@ -3646,9 +3647,9 @@ function expandComponentNode(
   }
 
   // S458 (third round) — a prop referenced in text the compiler cannot parse is NOT
-  // text-substituted; the identifier would reach the page unbound, so it is refused.
-  // E-SCOPE-001 ("Unquoted identifier not resolvable in scope") is the closest §34 text:
-  // the prop's binding does not reach unparsed text. ROUTED with the S458 report.
+  // text-substituted; the identifier would reach the page unbound, so it is refused:
+  // E-SCOPE-001, whose §34 row names this case (ruling user-voice S458 "your recs on
+  // both D1 codes").
   for (const [name, text] of writeCtx.unsubstitutable) {
     const shown = text.length > 80 ? text.slice(0, 77) + "..." : text;
     ceErrors.push(makeCEError(

@@ -6,7 +6,7 @@
   "rationale": "§15.10.1 Shadowing: 'Prop substitution SHALL be shadowing-aware … A `lambda` parameter with the same name is in scope … A local `let`, `const` … with the same name appears earlier in the same lexical scope'; 'Member-access expressions SHALL substitute only the leftmost identifier'. An object key is a property NAME, not an identifier reference.",
   "expect": {
     "codes": [],
-    "notCodes": ["E-ASSIGN-004", "E-SCOPE-001", "E-CODEGEN-INVALID-LOGIC"],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-ASSIGN-004", "E-SCOPE-001", "E-CODEGEN-INVALID-LOGIC"],
     "input": [{ "click": ".c .r" }],
     "state": { "out": "2|true|11|inner|9|P1|AB+CD" },
     "domAnchored": [

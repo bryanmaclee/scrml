@@ -6,7 +6,7 @@
   "rationale": "§15.10.1 Shadowing: a local declaration, a lambda/function parameter and a `for-stmt` loop variable shadow a same-named prop in their scopes; a destructuring pattern binds every name in it.",
   "expect": {
     "codes": [],
-    "notCodes": ["E-ASSIGN-004", "E-SCOPE-001"],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-ASSIGN-004", "E-SCOPE-001"],
     "input": [{ "click": ".c .r" }],
     "state": { "v": 7, "out": "2,2,1,1,3,2,3,9,2,7" },
     "domAnchored": [{ "selector": "#o", "text": "2,2,1,1,3,2,3,9,2,7" }]

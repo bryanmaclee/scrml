@@ -6,7 +6,7 @@
   "rationale": "§17 (for/lift normative statements): 'A keywordless loop binder — `x` in `for (x of collection)` — is `const` (§50.8.5)'. §15.10.1: 'A `for-stmt` loop variable … shadows props within their respective scopes.'",
   "expect": {
     "codes": [],
-    "notCodes": ["E-ASSIGN-004", "E-SCOPE-001"],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-ASSIGN-004", "E-SCOPE-001"],
     "input": [{ "click": ".c .r" }],
     "state": { "v": 7, "w": 5, "out": "3,7,16,7,5" },
     "domAnchored": [{ "selector": "#o", "text": "3,7,16,7,5" }]

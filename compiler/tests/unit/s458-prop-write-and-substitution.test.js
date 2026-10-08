@@ -3,7 +3,7 @@
  * `bind:`-bound prop may be written.
  *
  *   F1 precedence / one simultaneous pass / string-literal content (substituteExprText)
- *   F2 a body write to a by-value prop is refused (E-ASSIGN-004 — routed for a ruling),
+ *   F2 a body write to a by-value prop is refused (E-COMPONENT-PROP-WRITE — S458 ruling),
  *      never lowered onto the caller's cell; `bind:value=value` forwards only a bound prop
  *   F3 `bind:prop=@derived` is E-DERIVED-WRITE at the bind site
  *   F5 a write to an unbound bindable prop with a default is refused; `bind:n=@v.k` is E-ATTR-010
@@ -80,13 +80,13 @@ const V = <span class="v" title="\${visible ? 'visible' : 'hidden'}" props={ vis
 
 describe("F2 — only a `bind:`-bound prop is writable", () => {
   for (const [label, call] of [["${expr} caller", "<C n=${@v}/>"], ["@cell caller", "<C n=@v/>"]]) {
-    test(`a body write to a by-value prop (${label}) is E-ASSIGN-004, and @v is never written`, () => {
+    test(`a body write to a by-value prop (${label}) is E-COMPONENT-PROP-WRITE, and @v is never written`, () => {
       const { codes, wrote } = compile(`<program>
 <v> = 1
 const C = <div props={ n: number }><button onclick=\${ n = n + 1 }>+</button></div>
 ${call}
 </program>`);
-      expect(codes).toContain("E-ASSIGN-004");
+      expect(codes).toContain("E-COMPONENT-PROP-WRITE");
       expect(wrote).toBe(false);
     });
   }
@@ -97,7 +97,7 @@ ${call}
 const C = <div props={ n: number }><button onclick=\${ n++ }>a</button><button onclick=\${ n += 2 }>b</button></div>
 <C n=@v/>
 </program>`);
-    expect(codes).toContain("E-ASSIGN-004");
+    expect(codes).toContain("E-COMPONENT-PROP-WRITE");
   });
 
   test("`<input bind:value=value>` with a PLAIN caller `value=@text` is a write to a by-value prop", () => {
@@ -106,7 +106,7 @@ const C = <div props={ n: number }><button onclick=\${ n++ }>a</button><button o
 const TF = <input type="text" bind:value=value props={ value: string }/>
 <TF value=@text/>
 </program>`);
-    expect(codes).toContain("E-ASSIGN-004");
+    expect(codes).toContain("E-COMPONENT-PROP-WRITE");
     expect(wrote).toBe(false);
   });
 
@@ -125,7 +125,7 @@ const C = <div props={ n: number }><span>\${n + 1}</span></div>
 const C = <div props={ n: number }><button onclick=\${ (n) => { n = 2 } }>x</button></div>
 <C n=@v/>
 </program>`);
-    expect(codes).not.toContain("E-ASSIGN-004");
+    expect(codes).not.toContain("E-COMPONENT-PROP-WRITE");
   });
 });
 
@@ -149,12 +149,12 @@ const C = <div props={ bind n: number }><span>\${n}</span></div>
     expect(codes).toContain("E-ATTR-010");
   });
 
-  test("a body write to an UNBOUND bindable prop with a default is E-ASSIGN-004, not `5 = …`", () => {
+  test("a body write to an UNBOUND bindable prop with a default is E-COMPONENT-PROP-WRITE, not `5 = …`", () => {
     const { codes, wrote } = compile(`<program>
 const D = <div props={ bind n: number = 5 }><button onclick=\${ n = n + 1 }>+</button></div>
 <D/>
 </program>`);
-    expect(codes).toContain("E-ASSIGN-004");
+    expect(codes).toContain("E-COMPONENT-PROP-WRITE");
     expect(wrote).toBe(false);
   });
 });
@@ -227,7 +227,7 @@ const C = <div props={ n: number }>
 </div>
 <C n=@v/>
 </program>`);
-    expect(codes).not.toContain("E-ASSIGN-004");
+    expect(codes).not.toContain("E-COMPONENT-PROP-WRITE");
     // Pre-existing (main too): a declaration-form C-style init is dropped by the component
     // re-parse, so the loop variable is unresolved — loud, never the caller's cell.
     // only the cell's own initialisation writes @v

@@ -102,7 +102,7 @@ const C = <div props={ bind n: number }>
     // the only write to @v is its own initialization
     expect(r.clientJs.match(/_scrml_cs_reactive_set\("v"/g)?.length).toBe(1);
   });
-  test("by-value prop: a destructured parameter write is legal (no E-ASSIGN-004); a prop read outside still substitutes", () => {
+  test("by-value prop: a destructured parameter write is legal (no E-COMPONENT-PROP-WRITE); a prop read outside still substitutes", () => {
     const r = compile(`<program>
 <v> = 7
 <o> = 0
