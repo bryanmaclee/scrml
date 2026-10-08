@@ -1,0 +1,4 @@
+${
+    import { w } from './b.scrml'
+}
+<p>${w()}</>

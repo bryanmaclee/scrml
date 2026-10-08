@@ -3499,6 +3499,16 @@ function _compileScrmlImpl(options = {}) {
     // kind + missing-name set), so a route-mis-inferred helper imported by many
     // per-route server bundles fires once, not once per bundle.
     const seen = new Set();
+    // S458 (review F4) — an import of a name two `export *` bind differently is already
+    // E-IMPORT-004 ("ambiguous", module-resolver.js). Its importer/target pair emits no
+    // server link for that name; a "has no server content" / "missing export" warning on
+    // the same pair would only misdirect, so that pair stays silent here.
+    const ambiguousPairs = new Set();
+    for (const e of allErrors) {
+      if (e && e.code === "E-IMPORT-004" && e.ambiguousStarName && e.importerFile && e.targetFile) {
+        ambiguousPairs.add(resolve(e.importerFile) + "\n" + resolve(e.targetFile));
+      }
+    }
     for (const [filePath, output] of cgResult.outputs) {
       if (!output.serverJs) continue;
       const importerBase = basename(filePath, ".scrml");
@@ -3511,6 +3521,7 @@ function _compileScrmlImpl(options = {}) {
         const targetAbs = serverImportTargetSource(filePath, relServer);
         const target = outputByAbsSource.get(targetAbs);
         if (!target) continue; // external / cross-unit / vendor — not our invariant
+        if (ambiguousPairs.has(resolve(filePath) + "\n" + resolve(targetAbs))) continue; // S458 F4
         const targetBase = basename(targetAbs, ".scrml");
 
         if (!target.serverJs) {

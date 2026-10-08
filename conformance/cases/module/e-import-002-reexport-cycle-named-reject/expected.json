@@ -1,0 +1,8 @@
+{
+  "id": "e-import-002-reexport-cycle-named-reject",
+  "description": "§21.3 / §21.4 — a cycle closed by NAMED re-exports (x.scrml `export { B } from './y.scrml'`; y.scrml `export { A } from './x.scrml'`) is a circular import and fires E-IMPORT-002. Uses the `files` convention: x.scrml and y.scrml are aux siblings.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: \"Circular imports SHALL be a compile error (E-IMPORT-002). The compiler SHALL detect cycles in the import graph before any stage runs and report all files in the cycle.\" A re-export links its source module exactly like an import (§21.4: standard ES `export { name } from 'source'`), so it is an edge of the import graph. Before S458 the cycle compiled clean and the page's client chunks threw at load (S458 review F1). The cycle is the one error: the names it leaves unresolvable are not reported again as E-IMPORT-004.",
+  "expect": { "codes": ["E-IMPORT-002"], "notCodes": ["E-IMPORT-004"] }
+}

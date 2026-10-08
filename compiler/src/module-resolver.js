@@ -9,7 +9,8 @@
  *   2. Circular dependency detection (E-IMPORT-002)
  *   3. Topological sort for compilation order
  *   4. Export registry building from FileAST export declarations
- *   5. Import validation (E-IMPORT-004: name not found in exports)
+ *   5. Import validation (E-IMPORT-004: name not found in exports — imports and,
+ *      S458, named re-exports; an ambiguous `export *` name says so)
  *   6. Import specifier validation (E-IMPORT-005: bare specifier — npm without vendor:)
  *
  * Error codes:
@@ -592,6 +593,19 @@ function checkHostImport(imp, absSource, importerPath, compileSet, hostRecords) 
 /**
  * Detect circular imports in the import graph.
  *
+ * S458 (review F1) — a RE-EXPORT (`export { X } from "./m.scrml"`, `export * from
+ * "./m.scrml"`) is an edge of the import graph exactly like an `import`: the
+ * re-exporting module links its source module (ES module semantics, §21.4), so a cycle
+ * closed by a re-export is a circular import (§21.3: "Circular imports SHALL be a
+ * compile error (E-IMPORT-002). The compiler SHALL detect cycles in the import graph
+ * before any stage runs and report all files in the cycle."). Before this only
+ * `imports` were walked, so a re-export cycle compiled clean and failed at run time
+ * (the page loaded the two client chunks in an order neither could satisfy; a pure
+ * `export { K } from` cycle killed `_server.js` at boot with a SyntaxError).
+ *
+ * Each error carries `cycleFiles` (the posix paths of every file in the cycle) so a
+ * later check can stay silent about names a cycle makes unresolvable.
+ *
  * @param {Map<string, object>} graph — import graph from buildImportGraph
  * @returns {ModuleError[]} — E-IMPORT-002 errors for each cycle detected
  */
@@ -600,18 +614,26 @@ export function detectCircularImports(graph, hostRecords = null) {
   const visited = new Set();
   const inStack = new Set();
 
-  function dfs(filePath, path) {
+  // `path[i]` links `path[i + 1]` through `vias[i]` ("import" | "re-export").
+  function dfs(filePath, path, vias) {
     if (inStack.has(filePath)) {
       // Found a cycle
       const cycleStart = path.indexOf(filePath);
       const cycle = path.slice(cycleStart).concat(filePath);
+      const cycleVias = vias.slice(cycleStart);
       const cycleStr = cycle.map(p => p.split("/").pop()).join(" -> ");
-      errors.push(new ModuleError(
+      const viaReExport = cycleVias.includes("re-export");
+      const err = new ModuleError(
         "E-IMPORT-002",
         `E-IMPORT-002: Circular import detected: ${cycleStr}. ` +
+        (viaReExport
+          ? "A re-export (`export { … } from` / `export * from`) links its source module exactly like an import, so it closes the cycle too. "
+          : "") +
         `Break the cycle by extracting shared code into a third file that both can import.`,
         null,
-      ));
+      );
+      err.cycleFiles = cycle.slice(0, -1).map((p) => toPosix(p));
+      errors.push(err);
       return;
     }
     if (visited.has(filePath)) return;
@@ -622,7 +644,12 @@ export function detectCircularImports(graph, hostRecords = null) {
     const entry = graph.get(filePath);
     if (entry) {
       for (const imp of entry.imports) {
-        dfs(imp.absSource, [...path, filePath]);
+        dfs(imp.absSource, [...path, filePath], [...vias, "import"]);
+      }
+      // S458 F1 — re-export edges, named and `export *` alike.
+      for (const exp of entry.exports ?? []) {
+        if (!exp || !exp.reExportSource) continue;
+        dfs(exp.reExportSource, [...path, filePath], [...vias, "re-export"]);
       }
     } else if (hostRecords) {
       // §21.3.1 — a host module's recorded scrml-side imports close an
@@ -630,7 +657,7 @@ export function detectCircularImports(graph, hostRecords = null) {
       const host = hostRecords.get(filePath);
       if (host) {
         for (const target of host.scrmlTargets) {
-          dfs(target, [...path, filePath]);
+          dfs(target, [...path, filePath], [...vias, "import"]);
         }
       }
     }
@@ -639,7 +666,7 @@ export function detectCircularImports(graph, hostRecords = null) {
   }
 
   for (const filePath of graph.keys()) {
-    dfs(filePath, []);
+    dfs(filePath, [], []);
   }
 
   return errors;
@@ -736,6 +763,8 @@ export function topologicalSort(graph) {
  */
 export function buildExportRegistry(graph) {
   const registry = new PathKeyedMap();
+  // S458 F3 — a fresh re-export resolution memo for this build.
+  _bindingMemos.delete(graph);
 
   // ---- Pass 1 — build initial registry from direct + engine + per-name entries.
   // Re-exports land with `kind: "re-export"` and carry `_reExportSource` +
@@ -887,29 +916,106 @@ export function buildExportRegistry(graph) {
  * @param {string} name
  * @returns {{ filePath: string, name: string, localName: string, kind: string } | null}
  */
-export function resolveExportedBinding(graph, filePath, name, _seen = new Set()) {
-  const key = toPosix(filePath) + "\0" + name;
-  if (_seen.has(key)) return null;
-  _seen.add(key);
+export function resolveExportedBinding(graph, filePath, name) {
+  return _resolveBinding(graph, filePath, name, new Set(), bindingMemoFor(graph)).binding;
+}
+
+// S458 (review F3) — per-graph memo of `resolveExportedBinding`, keyed `file\0name`.
+// Without it an `export *` lattice re-resolved every name down every path: two modules
+// per level, each starring both modules of the next level, made one lookup 2^depth
+// calls (depth 16 × 11 names took 34.9 s). A graph is built once per compilation and
+// its export records are not re-shaped afterwards, so the memo lives as long as the
+// graph object; `buildExportRegistry` starts a fresh one for the graph it is given.
+const _bindingMemos = new WeakMap();
+function bindingMemoFor(graph) {
+  let memo = _bindingMemos.get(graph);
+  if (!memo) {
+    memo = new Map();
+    _bindingMemos.set(graph, memo);
+  }
+  return memo;
+}
+
+/**
+ * The resolver behind `resolveExportedBinding`. Returns `{ binding, tainted }`:
+ * `tainted` is true when the answer passed through a re-export CYCLE (a key already on
+ * the resolution path), so it depends on where the walk started and is not memoized —
+ * only path-independent answers enter the memo. (A cycle is also E-IMPORT-002.)
+ */
+function _resolveBinding(graph, filePath, name, seen, memo) {
+  const key = toPosix(filePath) + "\u0000" + name;
+  if (memo.has(key)) return { binding: memo.get(key), tainted: false };
+  if (seen.has(key)) return { binding: null, tainted: true };
+  seen.add(key);
+  const done = (binding, tainted) => {
+    seen.delete(key);
+    if (!tainted) memo.set(key, binding);
+    return { binding, tainted };
+  };
   const entry = graph.get(filePath);
-  if (!entry || !Array.isArray(entry.exports)) return null;
+  if (!entry || !Array.isArray(entry.exports)) return done(null, false);
   for (const exp of entry.exports) {
     if (exp.isReExportAll || exp.name !== name) continue;
     if (exp.reExportSource) {
-      return resolveExportedBinding(graph, exp.reExportSource, exp.localName ?? name, _seen);
+      const r = _resolveBinding(graph, exp.reExportSource, exp.localName ?? name, seen, memo);
+      return done(r.binding, r.tainted);
     }
-    return { filePath: toPosix(filePath), name, localName: exp.localName ?? name, kind: exp.kind };
+    return done({ filePath: toPosix(filePath), name, localName: exp.localName ?? name, kind: exp.kind }, false);
   }
-  if (name === "default") return null;
+  if (name === "default") return done(null, false);
   let found = null;
+  let tainted = false;
   for (const exp of entry.exports) {
     if (!exp.isReExportAll || !exp.reExportSource) continue;
-    const b = resolveExportedBinding(graph, exp.reExportSource, name, new Set(_seen));
+    const r = _resolveBinding(graph, exp.reExportSource, name, seen, memo);
+    if (r.tainted) tainted = true;
+    const b = r.binding;
     if (!b) continue;
-    if (found && (found.filePath !== b.filePath || found.name !== b.name)) return null;
+    if (found && (found.filePath !== b.filePath || found.name !== b.name)) return done(null, tainted);
     found = b;
   }
-  return found;
+  return done(found, tainted);
+}
+
+/**
+ * S458 (review F4) — is `name` AMBIGUOUS in `filePath`: not explicitly exported there,
+ * and two or more of its `export *` sources resolve it to DIFFERENT declarations (the
+ * ES rule: such a name is exported by neither star)? Returns the distinct
+ * `{ specifier, binding }` pairs (one per declaration, in source order) when it is, else
+ * null.
+ *
+ * @param {Map<string, object>} graph
+ * @param {string} filePath
+ * @param {string} name
+ * @returns {Array<{ specifier: string, binding: { filePath: string, name: string } }> | null}
+ */
+export function ambiguousStarSources(graph, filePath, name) {
+  const entry = graph?.get?.(filePath);
+  if (!entry || !Array.isArray(entry.exports) || name === "default") return null;
+  if (entry.exports.some((e) => !e.isReExportAll && e.name === name)) return null;
+  const distinct = [];
+  for (const exp of entry.exports) {
+    if (!exp.isReExportAll || !exp.reExportSource) continue;
+    const b = resolveExportedBinding(graph, exp.reExportSource, name);
+    if (!b) continue;
+    if (distinct.some((d) => d.binding.filePath === b.filePath && d.binding.name === b.name)) continue;
+    distinct.push({ specifier: exp.reExportSpecifier ?? exp.reExportSource, binding: b });
+  }
+  return distinct.length >= 2 ? distinct : null;
+}
+
+/** "`export * from "./c.scrml"` and `export * from "./d.scrml"`" — for the F4 message. */
+function describeStarSources(sources) {
+  const parts = sources.map((s) => `\`export * from "${s.specifier}"\``);
+  return parts.length === 2 ? `${parts[0]} and ${parts[1]}` : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** The E-IMPORT-004 text for a name two `export *` bind differently (S458 F4). */
+function ambiguousNameMessage(name, moduleSpec, sources) {
+  return `E-IMPORT-004: \`${name}\` is ambiguous in \`${moduleSpec}\`: its ${describeStarSources(sources)} ` +
+    `each export a different \`${name}\`, so (ES module rule) neither is exported. ` +
+    `Import \`${name}\` from the module that declares the one you mean, or choose one in \`${moduleSpec}\` ` +
+    `with an explicit \`export { ${name} } from "${sources[0].specifier}"\`.`;
 }
 
 /**
@@ -1044,6 +1150,17 @@ export function validateImports(graph, exportRegistry) {
 
       for (const name of imp.names) {
         if (!targetExports.has(name)) {
+          // S458 F4 — a name two `export *` bind differently is not missing, it is
+          // ambiguous: say so, naming both stars.
+          const ambiguous = ambiguousStarSources(graph, imp.absSource, name);
+          if (ambiguous) {
+            const err = new ModuleError("E-IMPORT-004", ambiguousNameMessage(name, imp.source, ambiguous), imp.span);
+            err.ambiguousStarName = name;
+            err.importerFile = toPosix(filePath);
+            err.targetFile = toPosix(imp.absSource);
+            errors.push(err);
+            continue;
+          }
           errors.push(new ModuleError(
             "E-IMPORT-004",
             `E-IMPORT-004: \`${name}\` is not exported by \`${imp.source}\`. ` +
@@ -1055,6 +1172,60 @@ export function validateImports(graph, exportRegistry) {
     }
   }
 
+  return errors;
+}
+
+/**
+ * S458 (review F2) — validate every NAMED re-export against its source module.
+ *
+ * §21.3: "Importing a name that is not exported by the target file SHALL be a compile
+ * error (E-IMPORT-004: `Name` is not exported by `./file.scrml`)." A named re-export
+ * (`export { X } from "./m.scrml"`, §21.4) binds `X` from `./m.scrml` exactly as an
+ * import does, so a name `./m.scrml` does not export is the same error, reported at the
+ * re-export. Before this it was silent: the registry kept an unresolved entry, and an
+ * importer of `X` got nothing at run time.
+ *
+ * `export *` is NOT checked here: it binds only the names its source does export.
+ * A source outside the compile set (a `.js` module, an external file) is not ours to
+ * judge, the same rule `validateImports` applies. A file in a re-export or import
+ * CYCLE (`cycleFiles`, from E-IMPORT-002) is skipped — the cycle is the error, and it
+ * leaves every name through it unresolvable.
+ *
+ * @param {Map<string, object>} graph
+ * @param {Set<string>} [cycleFiles] — posix paths of every file in a reported cycle
+ * @returns {ModuleError[]}
+ */
+export function validateReExports(graph, cycleFiles = new Set()) {
+  const errors = [];
+  for (const [filePath, entry] of graph) {
+    if (!entry || !Array.isArray(entry.exports)) continue;
+    if (cycleFiles.has(toPosix(filePath))) continue;
+    for (const exp of entry.exports) {
+      if (!exp || exp.isReExportAll || !exp.reExportSource) continue;
+      if (!graph.has(exp.reExportSource)) continue;
+      if (cycleFiles.has(toPosix(exp.reExportSource))) continue;
+      const imported = exp.localName ?? exp.name;
+      if (resolveExportedBinding(graph, exp.reExportSource, imported)) continue;
+      const spec = exp.reExportSpecifier ?? exp.reExportSource;
+      const span = exp.span ? { ...exp.span, file: exp.span.file ?? filePath } : null;
+      const ambiguous = ambiguousStarSources(graph, exp.reExportSource, imported);
+      if (ambiguous) {
+        const err = new ModuleError("E-IMPORT-004", ambiguousNameMessage(imported, spec, ambiguous), span);
+        err.ambiguousStarName = imported;
+        err.importerFile = toPosix(filePath);
+        err.targetFile = toPosix(exp.reExportSource);
+        errors.push(err);
+        continue;
+      }
+      errors.push(new ModuleError(
+        "E-IMPORT-004",
+        `E-IMPORT-004: \`${imported}\` is not exported by \`${spec}\`, so it cannot be re-exported ` +
+        `(\`export { ${imported === exp.name ? imported : `${imported} as ${exp.name}`} } from "${spec}"\`). ` +
+        `Check \`${spec}\` for its exports, add \`export ${imported}\` there, or remove the name from the re-export.`,
+        span,
+      ));
+    }
+  }
   return errors;
 }
 
@@ -1089,6 +1260,11 @@ export function resolveModules(fileASTs) {
   // Step 4: Validate imports
   const importErrors = validateImports(graph, exportRegistry);
   allErrors.push(...importErrors);
+
+  // Step 4b (S458 F2): validate named re-exports against their source modules.
+  const cycleFiles = new Set();
+  for (const e of circularErrors) for (const f of e.cycleFiles ?? []) cycleFiles.add(f);
+  allErrors.push(...validateReExports(graph, cycleFiles));
 
   // Step 5: Topological sort
   const compilationOrder = topologicalSort(graph);
