@@ -13,8 +13,8 @@
  *   (b) its own local bindings (lexically scoped, not a flat name bag);
  *   (c) the bindings captured from the enclosing scope (§22.3);
  *   (d) the closed primitive set — compile-time `emit` / `emit.raw` / `reflect` (§22.4)
- *       and the runtime `meta` object's 12 members (§22.5.1);
- *   plus (e) the closed value-builtin table below (each with a CLOSED member list).
+ *       and the runtime `meta` object's 12 members (§22.5.1).
+ *   No JS value builtin (`Object`, `JSON`, `Math`, `String`, …) is on the list.
  *
  * Any other free identifier is E-META-001. Independently of names, these are refused on
  * ANY value (primitives included — `emit.constructor` reaches the host `Function`):
@@ -24,9 +24,8 @@
  *   - a computed member key that is not a literal (`x[k]` — `k` could hold "constructor");
  *   - `this`, `import(…)`, `import.meta`, `new.target`, `super`, classes, `with`, tagged
  *     templates, getters / setters in object literals;
- *   - a value builtin used as a bare value (`const O = Object`) or through a member not
- *     on its list (`Object.getPrototypeOf`, `Object.defineProperty`);
- *   - an assignment / update / `delete` whose target is rooted at a builtin or primitive.
+ *   - a primitive's member outside its closed list (`emit.call`, `meta.unknown`);
+ *   - an assignment / update / `delete` whose target is rooted at a primitive.
  *
  * Two readers, one rule. `checkMetaBodyNodes` walks the scrml AST of a `^{}` body (both
  * compile-time and runtime classifications; meta-checker.ts, Stage 6.5 MC).
@@ -76,52 +75,14 @@ const PRIMITIVE_MEMBERS: ReadonlyMap<string, ReadonlySet<string> | null> = new M
   ["compiler", null],
 ]);
 
-/** One admitted value builtin: may it be called / constructed, and which members. */
-interface BuiltinSpec {
-  callable: boolean;
-  constructable: boolean;
-  members: ReadonlySet<string>;
-}
-
-const MATH_MEMBERS = [
-  "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "clz32",
-  "cos", "cosh", "exp", "expm1", "floor", "fround", "hypot", "imul", "log", "log10", "log1p",
-  "log2", "max", "min", "pow", "random", "round", "sign", "sin", "sinh", "sqrt", "tan", "tanh",
-  "trunc", "E", "LN10", "LN2", "LOG10E", "LOG2E", "PI", "SQRT1_2", "SQRT2",
-];
-
-/**
- * The closed value-builtin table. Every entry is a pure data / arithmetic surface; none of
- * the listed members returns a prototype, a constructor, a property descriptor or a
- * function that compiles source text. Members NOT listed (`Object.getPrototypeOf`,
- * `Object.defineProperty`, `Object.getOwnPropertyDescriptor`, `Object.setPrototypeOf`, …)
- * are refused. The builtin name itself may not be used as a bare value.
+/*
+ * No JS value builtin is on the allow-list (S457). `Object`, `Array`, `JSON`, `Math`,
+ * `String`, `Number`, `Date`, `Map`, `Set`, `parseInt`, `NaN`, `undefined`, … are JS-host
+ * ambient globals, not scrml (§41.5: "There is no ambient `Math` global in scrml") — the
+ * S457 measurement found no corpus `^{}` body that compiled clean and needed one. Methods
+ * on VALUES (`s.toUpperCase()`, `xs.map(f)`, `xs.at(i)`, `info.fields.length`) are not
+ * free identifiers and stay available, subject to the refused-member rule.
  */
-export const META_BUILTIN_VALUES: ReadonlyMap<string, BuiltinSpec> = new Map<string, BuiltinSpec>([
-  ["Object", { callable: false, constructable: false, members: new Set(["keys", "values", "entries", "fromEntries", "freeze", "isFrozen", "assign", "hasOwn"]) }],
-  ["Array", { callable: false, constructable: false, members: new Set(["isArray", "from", "of"]) }],
-  ["JSON", { callable: false, constructable: false, members: new Set(["stringify", "parse"]) }],
-  ["Math", { callable: false, constructable: false, members: new Set(MATH_MEMBERS) }],
-  ["String", { callable: true, constructable: false, members: new Set(["fromCharCode", "fromCodePoint"]) }],
-  ["Number", { callable: true, constructable: false, members: new Set([
-    "isInteger", "isSafeInteger", "isFinite", "isNaN", "parseFloat", "parseInt", "EPSILON",
-    "MAX_SAFE_INTEGER", "MIN_SAFE_INTEGER", "MAX_VALUE", "MIN_VALUE", "POSITIVE_INFINITY",
-    "NEGATIVE_INFINITY", "NaN",
-  ]) }],
-  ["Boolean", { callable: true, constructable: false, members: new Set() }],
-  ["Date", { callable: true, constructable: true, members: new Set(["now", "UTC", "parse"]) }],
-  ["RegExp", { callable: true, constructable: true, members: new Set() }],
-  ["Error", { callable: true, constructable: true, members: new Set() }],
-  ["Map", { callable: false, constructable: true, members: new Set() }],
-  ["Set", { callable: false, constructable: true, members: new Set() }],
-  ["parseInt", { callable: true, constructable: false, members: new Set() }],
-  ["parseFloat", { callable: true, constructable: false, members: new Set() }],
-  ["isNaN", { callable: true, constructable: false, members: new Set() }],
-  ["isFinite", { callable: true, constructable: false, members: new Set() }],
-]);
-
-/** Value identifiers that are plain values (no members of interest, no host reach). */
-const PLAIN_VALUE_GLOBALS: ReadonlySet<string> = new Set(["NaN", "Infinity", "undefined"]);
 
 /** The allowed-set sentence every refusal message carries. */
 export const META_ALLOWED_SET_TEXT =
@@ -192,7 +153,6 @@ class Scope {
 type Resolution =
   | { kind: "local" }
   | { kind: "primitive"; members: ReadonlySet<string> | null }
-  | { kind: "builtin"; spec: BuiltinSpec }
   | { kind: "plain" }
   | { kind: "refused" };
 
@@ -211,9 +171,6 @@ function resolve(name: string, scope: Scope, ctx: MetaAllowListContext): Resolut
   if (ctx.typeNames.has(name)) return { kind: "local" };       // (a) type name
   if (name === "not") return { kind: "plain" };                // (a) §42 absence
   if (PRIMITIVE_MEMBERS.has(name)) return { kind: "primitive", members: PRIMITIVE_MEMBERS.get(name) ?? null }; // (d)
-  const b = META_BUILTIN_VALUES.get(name);
-  if (b) return { kind: "builtin", spec: b };                  // (e)
-  if (PLAIN_VALUE_GLOBALS.has(name)) return { kind: "plain" };
   return { kind: "refused" };
 }
 
@@ -261,8 +218,61 @@ function bindingNamesFromPatternText(text: string): string[] {
   return names;
 }
 
+/** Binding names of a structured destructure pattern (`DestructurePattern`, A5). */
+function patternBindNames(p: AnyNode | undefined, out: string[]): void {
+  if (!p || typeof p !== "object") return;
+  if (p.kind === "destructure-object") {
+    for (const pr of p.properties ?? []) {
+      if (pr?.kind === "name" && typeof pr.bindName === "string") out.push(pr.bindName);
+      else if (pr?.kind === "nested") patternBindNames(pr.pattern, out);
+    }
+  } else if (p.kind === "destructure-array") {
+    for (const el of p.elements ?? []) {
+      if (el?.kind === "name" && typeof el.name === "string") out.push(el.name);
+      else if (el?.kind === "nested") patternBindNames(el.pattern, out);
+    }
+  }
+  if (typeof p.rest === "string" && p.rest) out.push(p.rest);
+}
+
+/**
+ * Check a structured destructure pattern: a field name is a member READ of the
+ * destructured value, so it is held to the member rules (`const { constructor: C } = x`
+ * is `x.constructor`). Default values are walked as expressions.
+ */
+function checkPattern(p: AnyNode | undefined, scope: Scope, ctx: MetaAllowListContext, report: Report, span?: Span): void {
+  if (!p || typeof p !== "object") return;
+  const dflt = (d: AnyNode) => {
+    if (d.defaultExpr) walkExpr(d.defaultExpr, scope, ctx, report, span);
+    else if (typeof d.default === "string" && d.default.trim()) walkRawText(d.default, "expr", scope, ctx, report, span);
+  };
+  if (p.kind === "destructure-object") {
+    for (const pr of p.properties ?? []) {
+      if (!pr) continue;
+      const field = String(pr.fieldName ?? "").replace(/^(["'])(.*)\1$/, "$2");
+      if (META_REFUSED_MEMBERS.has(field)) report(field, refusedMemberMessage(field), span);
+      else if (!/^[A-Za-z_$][A-Za-z0-9_$]*$|^[0-9]+$/.test(field)) {
+        report("[computed key]", constructMessage(COMPUTED_KEY_WHAT), span);
+      }
+      dflt(pr);
+      if (pr.kind === "nested") checkPattern(pr.pattern, scope, ctx, report, span);
+    }
+  } else if (p.kind === "destructure-array") {
+    for (const el of p.elements ?? []) {
+      if (!el) continue;
+      dflt(el);
+      if (el.kind === "nested") checkPattern(el.pattern, scope, ctx, report, span);
+    }
+  }
+}
+
 function declaredNameOf(stmt: AnyNode): string[] {
   if (typeof stmt.name === "string" && stmt.name) return [stmt.name];
+  if (stmt.name && typeof stmt.name === "object") {
+    const out: string[] = [];
+    patternBindNames(stmt.name, out);
+    return out;
+  }
   // Destructured declaration: the init carries `{ a, b } = expr`.
   const init = typeof stmt.init === "string" ? stmt.init : "";
   const eq = init.indexOf("=");
@@ -354,6 +364,7 @@ function walkStmt(n: AnyNode, scope: Scope, ctx: MetaAllowListContext, report: R
     case "const-decl":
     case "lin-decl":
     case "state-decl": {
+      if (n.name && typeof n.name === "object") checkPattern(n.name, scope, ctx, report, span);
       if (n.initExpr) X(n.initExpr);
       else if (n.matchExpr) X(n.matchExpr);
       else if (n.sqlNode) { /* `?{}` — SQL, not JS; E-META-007 governs it at runtime */ }
@@ -389,6 +400,11 @@ function walkStmt(n: AnyNode, scope: Scope, ctx: MetaAllowListContext, report: R
       const inner = scope.child();
       if (typeof n.variable === "string" && n.variable) {
         for (const nm of bindingNamesFromPatternText(n.variable)) inner.names.add(nm);
+      } else if (n.variable && typeof n.variable === "object") {
+        const names: string[] = [];
+        patternBindNames(n.variable, names);
+        for (const nm of names) inner.names.add(nm);
+        checkPattern(n.variable, scope, ctx, report, span);
       }
       if (typeof n.indexVariable === "string" && n.indexVariable) inner.names.add(n.indexVariable);
       for (const k of ["rawInit", "rawTest", "rawUpdate"]) {
@@ -507,9 +523,6 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
     case "ident": {
       const r = resolve(String(e.name), scope, ctx);
       if (r.kind === "refused") report(String(e.name), freeIdentMessage(String(e.name)), span);
-      else if (r.kind === "builtin") {
-        report(String(e.name), constructMessage(`the builtin '${e.name}' used as a bare value (only its listed members may be read)`), span);
-      }
       return;
     }
     case "lit": {
@@ -575,8 +588,8 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
       if (META_REFUSED_MEMBERS.has(prop)) { report(prop, refusedMemberMessage(prop), span); X(e.object); return; }
       if (e.object?.kind === "ident") {
         const r = resolve(String(e.object.name), scope, ctx);
-        if (r.kind === "builtin" || r.kind === "primitive") {
-          const members = r.kind === "builtin" ? r.spec.members : r.members;
+        if (r.kind === "primitive") {
+          const members = r.members;
           if (members && !members.has(prop)) {
             report(`${e.object.name}.${prop}`, constructMessage(`'${e.object.name}.${prop}' (not in the closed member list of '${e.object.name}')`), span);
           }
@@ -596,7 +609,7 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
       }
       if (e.object?.kind === "ident") {
         const r = resolve(String(e.object.name), scope, ctx);
-        if (r.kind === "builtin" || r.kind === "primitive") {
+        if (r.kind === "primitive") {
           report(`${e.object.name}[…]`, constructMessage(`a computed member access on '${e.object.name}'`), span);
           return;
         }
@@ -609,10 +622,7 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
       const callee = e.callee as AnyNode | undefined;
       if (callee?.kind === "ident") {
         const r = resolve(String(callee.name), scope, ctx);
-        if (r.kind === "builtin") {
-          const ok = e.kind === "new" ? r.spec.constructable : r.spec.callable;
-          if (!ok) report(String(callee.name), constructMessage(`${e.kind === "new" ? "constructing" : "calling"} '${callee.name}'`), span);
-        } else X(callee);
+        X(callee);
         // §22.4.2 rule 1 — `reflect(TypeName)`: a bare PascalCase argument is a TYPE NAME
         // (quoted to a string before evaluation), not a value read. An unknown one is
         // E-META-003's to report.
@@ -629,6 +639,17 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
     case "lambda": {
       const inner = scope.child();
       for (const p of e.params ?? []) {
+        // A destructured parameter reaches this tree as `__destructured__` (or an
+        // empty name under a default) — its pattern is not represented, so its keys
+        // cannot be checked. Fail closed.
+        if (!p || typeof p.name !== "string" || p.name === "" || p.name === "__destructured__") {
+          report("[destructured parameter]", constructMessage(
+            "a destructured function parameter (destructure inside the body instead: " +
+            "`item => { const { a, b } = item … }`)"), span);
+          // The block is refused; its body's names are unbound here, so walking it
+          // would only add misleading follow-on errors.
+          return;
+        }
         if (p?.defaultValue) X(p.defaultValue);
         if (typeof p?.name === "string") for (const nm of bindingNamesFromPatternText(p.name)) inner.names.add(nm);
       }
@@ -672,7 +693,7 @@ function checkWriteTarget(t: AnyNode | undefined, scope: Scope, ctx: MetaAllowLi
   const root = rootIdentOf(t);
   if (!root) return;
   const r = resolve(root, scope, ctx);
-  if (r.kind === "builtin" || r.kind === "primitive" || r.kind === "plain") {
+  if (r.kind === "primitive" || r.kind === "plain") {
     report(root, constructMessage(`writing to a member of '${root}'`), span);
   }
 }
@@ -836,7 +857,7 @@ class EsChecker {
     while (cur && (cur.type === "MemberExpression")) cur = cur.object;
     if (cur && cur.type === "Identifier" && cur !== t) {
       const r = resolve(cur.name, scope, this.ctx);
-      if (r.kind === "builtin" || r.kind === "primitive" || r.kind === "plain") this.refuse(`writing to a member of '${cur.name}'`);
+      if (r.kind === "primitive" || r.kind === "plain") this.refuse(`writing to a member of '${cur.name}'`);
     }
     if (t.type === "Identifier") {
       const r = resolve(t.name, scope, this.ctx);
@@ -871,7 +892,6 @@ class EsChecker {
       case "Identifier": {
         const r = resolve(e.name, scope, this.ctx);
         if (r.kind === "refused") this.report(e.name, freeIdentMessage(e.name));
-        else if (r.kind === "builtin") this.refuse(`the builtin '${e.name}' used as a bare value (only its listed members may be read)`);
         return;
       }
       case "Literal": return;
@@ -915,8 +935,8 @@ class EsChecker {
         }
         if (e.object.type === "Identifier") {
           const r = resolve(e.object.name, scope, this.ctx);
-          if (r.kind === "builtin" || r.kind === "primitive") {
-            const members = r.kind === "builtin" ? r.spec.members : r.members;
+          if (r.kind === "primitive") {
+            const members = r.members;
             if (members && (name === null || !members.has(name))) {
               this.refuse(`'${e.object.name}.${name ?? "[…]"}' (not in the closed member list of '${e.object.name}')`);
             }
@@ -929,13 +949,7 @@ class EsChecker {
       case "CallExpression":
       case "NewExpression": {
         if (e.callee.type === "Super") { this.refuse("`super`"); return; }
-        if (e.callee.type === "Identifier") {
-          const r = resolve(e.callee.name, scope, this.ctx);
-          if (r.kind === "builtin") {
-            const ok = e.type === "NewExpression" ? r.spec.constructable : r.spec.callable;
-            if (!ok) this.refuse(`${e.type === "NewExpression" ? "constructing" : "calling"} '${e.callee.name}'`);
-          } else this.expr(e.callee, scope);
-        } else this.expr(e.callee, scope);
+        this.expr(e.callee, scope);
         for (const a of e.arguments) this.expr(a, scope);
         return;
       }

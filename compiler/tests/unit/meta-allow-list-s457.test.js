@@ -72,7 +72,13 @@ const COMPILE_TIME_ESCAPES = [
   ["__lookupGetter__", `const g = emit.__lookupGetter__("x")`],
   ["process", `process.exit(3)`],
   ["Bun", `Bun.write("/tmp/x", "y")`],
-  ["write to a builtin member", `JSON.stringify = emit`],
+  ["write to a primitive member", `emit.raw = reflect`],
+  ["JS-host builtin Object", `const k = Object.keys({ a: 1 })`],
+  ["JS-host builtin JSON", `const s = JSON.stringify(1)`],
+  ["JS-host builtin Math", `const m = Math.max(1, 2)`],
+  ["JS-host undefined", `const u = undefined`],
+  ["runtime-only const destructure of constructor", `const { constructor: C } = emit\n  C("${PWN}")()`],
+  ["destructured lambda parameter", `const f = ({ constructor: C }) => C\n  f(emit)("${PWN}")()`],
 ];
 
 describe("S457 — compile-time escape attempts are E-META-001 and never run", () => {
@@ -119,6 +125,8 @@ describe("S457 — runtime ^{} bodies are held to the same allow-list", () => {
     ["window", `const w = window`, "window"],
     ["setInterval (use meta.interval)", `const id = setInterval(() => meta.emit("x"), 10)`, "setInterval"],
     ["meta member outside the 12", `meta.unknownThing()`, "meta.unknownThing"],
+    ["destructured constructor (no evaluator backstop at runtime)", `const { constructor: K } = meta.get`, "constructor"],
+    ["JSON", `meta.emit(JSON.stringify(1))`, "JSON"],
   ];
   for (const [label, stmt, name] of RUNTIME) {
     test(label, () => {
@@ -173,7 +181,7 @@ describe("S457 — the executed text is checked, not only the scrml AST", () => 
 // ---------------------------------------------------------------------------
 
 describe("S457 — legitimate meta bodies still compile", () => {
-  test("locals, loops, lambdas, closed builtin members, reflect, emit, emit.raw", () => {
+  test("locals, loops, lambdas, value methods, reflect, emit, emit.raw", () => {
     const src = `<program>
 type Color:enum = { Red, Green }
 \${ const title = "Palette" }
@@ -181,14 +189,13 @@ type Color:enum = { Red, Green }
   const info = reflect(Color)
   const names = info.variants.map(v => v.toLowerCase())
   const joined = names.join(", ")
-  const n = Math.max(names.length, 1)
-  const keys = Object.keys({ a: 1, b: 2 })
-  const s = JSON.stringify(keys)
+  const n = names.length
   emit("<h2>" + title + "</h2>")
   for (const name of names) {
-    emit("<p>" + name + " " + String(n) + "</p>")
+    emit("<p>" + name + " " + n + "</p>")
   }
-  emit.raw("<pre>" + joined + s + "</pre>")
+  emit("<p>" + names.at(0) + "</p>")
+  emit.raw("<pre>" + joined + "</pre>")
 }
 </program>
 `;

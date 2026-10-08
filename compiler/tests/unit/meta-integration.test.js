@@ -145,7 +145,7 @@ describe("meta-integration §2: runtime ^{} @var reads", () => {
 <p>count: \${@count}</>
 ^{
   const x = @count
-  meta.emit(String(x))
+  meta.emit("" + (x))
 }
 </>
 `;
@@ -172,7 +172,7 @@ describe("meta-integration §2: runtime ^{} @var reads", () => {
 \${ <value> = "hello" }
 <p>\${@value}</>
 ^{
-  meta.emit(String(@value))
+  meta.emit("" + (@value))
 }
 </>
 `;
@@ -397,7 +397,7 @@ describe("meta-integration §7: ^{} alongside component definition", () => {
 <count> = 0
 <Badge/>
 ^{
-  meta.emit(String(@count))
+  meta.emit("" + (@count))
 }
 `;
     const { clientJs, errors } = compileSource(source, "meta-component-reactive.scrml");

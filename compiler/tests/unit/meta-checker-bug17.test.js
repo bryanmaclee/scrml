@@ -263,30 +263,19 @@ describe("Bug 17 — runtime ^{} bare-expression form", () => {
 // ---------------------------------------------------------------------------
 
 describe("Bug 17 — negative controls (no E-META-001)", () => {
-  test("bug17-NC-1 runtime ^{} referencing META_BUILTINS (Object/JSON/Math) does NOT fire E-META-001", () => {
-    {
+  test("bug17-NC-1 (S457 flip) runtime ^{} referencing Object / JSON / Math DOES fire E-META-001", () => {
+    // Pre-S457 these were admitted as "META_BUILTINS". Under the §22.12 closed
+    // allow-list they are JS-host ambient globals, not scrml (§41.5: no ambient
+    // `Math` in scrml), so each is refused like any other host name.
+    for (const [name, init] of [
+      ["Object", "Object.keys({ a: 1 })"],
+      ["JSON", 'JSON.stringify({ a: 1 })'],
+      ["Math", "Math.max(1, 2, 3)"],
+    ]) {
       const errors = [];
-      const meta = makeMetaNode([
-        makeConstDecl("keys", "Object.keys({ a: 1 })"),
-      ]);
+      const meta = makeMetaNode([makeConstDecl("x", init)]);
       checkMetaBlockForJsHostGlobals(meta, "/test.scrml", errors);
-      expect(errors.filter((e) => e.code === "E-META-001")).toHaveLength(0);
-    }
-    {
-      const errors = [];
-      const meta = makeMetaNode([
-        makeConstDecl("s", 'JSON.stringify({ a: 1 })'),
-      ]);
-      checkMetaBlockForJsHostGlobals(meta, "/test.scrml", errors);
-      expect(errors.filter((e) => e.code === "E-META-001")).toHaveLength(0);
-    }
-    {
-      const errors = [];
-      const meta = makeMetaNode([
-        makeConstDecl("m", "Math.max(1, 2, 3)"),
-      ]);
-      checkMetaBlockForJsHostGlobals(meta, "/test.scrml", errors);
-      expect(errors.filter((e) => e.code === "E-META-001")).toHaveLength(0);
+      expect(hasEMeta001For(errors, name)).toBe(true);
     }
   });
 
