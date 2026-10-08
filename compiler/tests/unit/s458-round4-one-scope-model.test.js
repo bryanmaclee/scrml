@@ -120,3 +120,32 @@ const C = <div props={ n: number }>
     expect(r.clientJs.match(/_scrml_cs_reactive_set\("v"/g)?.length).toBe(1);
   });
 });
+
+describe("markup binders and lift targets share the statement scope (F7, F9)", () => {
+  test("`<each … as label>` is a declaration: never rewritten, shadows the prop in the body", () => {
+    const r = compile(`<program>
+<xs> = ["a"]
+const C = <div props={ label: string, items: string[] }>
+    <ul><each in=items as label><li>\${label}</li></each></ul>
+    <p>\${label}</p>
+</>
+<C label="Lbl" items=@xs/>
+</program>`);
+    expect(r.codes).toEqual([]);
+    // the prop value appears once (the <p> outside the each), never as the binder
+    expect((r.clientJs.match(/Lbl/g) ?? []).length).toBeLessThanOrEqual(1);
+    expect(r.clientJs).not.toMatch(/\("Lbl"\s*,/);
+  });
+  test("a prop in a lifted markup target is substituted (bare / for); a loop binder shadows it", () => {
+    const r = compile(`<program>
+const C = <div props={ label: string }>
+    <ul>\${ lift <li>\${label}</li> }</ul>
+    <ul>\${ for (x of [1]) { lift <li>\${label}\${x}</li> } }</ul>
+    <ul>\${ for (label of ["s"]) { lift <li>\${label}</li> } }</ul>
+</>
+<C label="Lbl"/>
+</program>`);
+    expect(r.codes).toEqual([]);
+    expect((r.clientJs.match(/Lbl/g) ?? []).length).toBe(2);
+  });
+});

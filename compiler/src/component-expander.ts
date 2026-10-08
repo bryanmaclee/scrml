@@ -1553,6 +1553,49 @@ function registerAttrTextPropMaps(
     if (!expressionValued.has(name)) literal.set(name, value);
   }
   attrTextPropMapsByExprMap.set(propExprMap, { literal });
+  stringPropsByExprMap.set(propExprMap, props);
+}
+
+/**
+ * S458 (fourth round) — the string `props` map of the expansion an ExprNode map belongs
+ * to, so the statement walker (which carries only the ExprNode map and a shadow set) can
+ * hand markup it meets — a `lift <li>…</li>` target, a markup child of an `if` / `for`
+ * body — to `substituteProps` with the SAME scope.
+ */
+const stringPropsByExprMap = new WeakMap<Map<string, ExprNode>, Map<string, string>>();
+
+/**
+ * S458 (fourth round) — the prop maps as seen inside a scope where `shadow` names are
+ * bound (a loop / each binder, a local, a parameter): the shadowed props are simply ABSENT,
+ * so no substitution path below — markup text, attribute values, nested logic, nested
+ * `<each>` — can rewrite them. Unchanged maps are returned as-is.
+ */
+function scopedPropMaps(
+  props: Map<string, string>,
+  propExprMap: Map<string, ExprNode> | undefined,
+  shadow: Iterable<string>,
+): { props: Map<string, string>; propExprMap: Map<string, ExprNode> | undefined } {
+  const hidden = [...shadow].filter((n) => props.has(n) || (propExprMap?.has(n) ?? false));
+  if (hidden.length === 0) return { props, propExprMap };
+  const drop = new Set(hidden);
+  const p2 = new Map([...props].filter(([k]) => !drop.has(k)));
+  if (!propExprMap) return { props: p2, propExprMap };
+  const e2 = new Map([...propExprMap].filter(([k]) => !drop.has(k)));
+  const literal = attrTextPropMaps(props, propExprMap).literal;
+  attrTextPropMapsByExprMap.set(e2, { literal: new Map([...literal].filter(([k]) => !drop.has(k))) });
+  stringPropsByExprMap.set(e2, p2);
+  return { props: p2, propExprMap: e2 };
+}
+
+/** Substitute props in a markup node met by the statement walker, under its shadow set. */
+function substitutePropsInMarkupFromStmt(
+  node: ASTNode,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): ASTNode {
+  const props = stringPropsByExprMap.get(propExprMap) ?? new Map<string, string>();
+  const scoped = scopedPropMaps(props, propExprMap, shadowed);
+  return substituteProps(node, scoped.props, scoped.propExprMap);
 }
 function attrTextPropMaps(props: Map<string, string>, propExprMap?: Map<string, ExprNode>): AttrTextPropMaps {
   const registered = propExprMap ? attrTextPropMapsByExprMap.get(propExprMap) : undefined;
@@ -2458,16 +2501,21 @@ function substitutePropsInLogicStmt(
     }
     case "lift-expr": {
       const n = stmt as LiftExprNode;
-      // LiftTarget can be inline markup or an expression; we only walk the expr case.
-      // Markup target case is handled by recursion into MarkupNode children via substituteProps.
+      // S458 (fourth round, F9) — a lift TARGET is substituted HERE, in the statement's
+      // scope (a `for` binder / local named like a prop shadows it in the lifted markup).
+      // LiftTarget = `{ kind: "markup", node }` | `{ kind: "expr", expr, exprNode? }`.
       const tgt = (n as any).expr;
+      if (tgt && typeof tgt === "object" && tgt.kind === "markup" && tgt.node && typeof tgt.node === "object") {
+        return { ...n, expr: { ...tgt, node: substitutePropsInMarkupFromStmt(tgt.node as ASTNode, propExprMap, shadowed) } } as LiftExprNode;
+      }
+      if (tgt && typeof tgt === "object" && tgt.kind === "expr") {
+        const next: Record<string, unknown> = { ...tgt };
+        if (tgt.exprNode) next.exprNode = substitutePropsInExprNode(tgt.exprNode as ExprNode, propExprMap, shadowed);
+        if (typeof tgt.expr === "string" && tgt.expr.trim() !== "") next.expr = substituteExprText(tgt.expr, propExprMap, shadowed);
+        return { ...n, expr: next } as unknown as LiftExprNode;
+      }
       if (tgt && typeof tgt === "object" && tgt.kind && (tgt.kind === "ident" || tgt.kind === "lit" || tgt.kind === "binary" || tgt.kind === "call" || tgt.kind === "member" || tgt.kind === "lambda" || tgt.kind === "ternary")) {
         return { ...n, expr: substitutePropsInExprNode(tgt as ExprNode, propExprMap, shadowed) } as LiftExprNode;
-      }
-      // Otherwise recurse via substituteProps for the markup-target case
-      if (tgt && typeof tgt === "object" && tgt.kind === "markup") {
-        // We need access to the (string) props for markup recursion; the caller
-        // (substituteProps) will handle this case via its array-walk fallback.
       }
       return n;
     }
@@ -2545,10 +2593,10 @@ function substitutePropsInLogicStmt(
       } satisfies TransactionBlockNode;
     }
     case "markup":
-      // Defer to substituteProps for markup nodes that appear as logic-body children.
-      // We do not have the (string) props map here — return as-is; the outer
-      // substituteProps walker will descend into markup via its array-walk fallback.
-      return stmt;
+    case "state":
+      // A markup node that is a logic-body child (at any depth — an `if` / `for` body
+      // included) is substituted in the statement's scope (S458 fourth round).
+      return substitutePropsInMarkupFromStmt(stmt as unknown as ASTNode, propExprMap, shadowed) as unknown as LogicStatement;
     case "meta": {
       const n = stmt as MetaNode;
       return {
@@ -2836,18 +2884,9 @@ function substituteProps(
       propExprMap,
       new Set<string>(),
     );
+    // Markup body items and `lift` targets are substituted by the statement walker, in
+    // their statement's scope (S458 fourth round).
     cloned.body = newBody;
-    // Also recurse into any markup children embedded as body items (e.g. lift target markup)
-    cloned.body = (cloned.body as LogicStatement[]).map((item: any) => {
-      if (item && typeof item === "object" && (item.kind === "markup" || item.kind === "state")) {
-        return substituteProps(item as ASTNode, props, propExprMap) as LogicStatement;
-      }
-      // Lift-expr with markup target: descend into the markup
-      if (item && item.kind === "lift-expr" && item.expr && typeof item.expr === "object" && (item.expr.kind === "markup" || item.expr.kind === "state")) {
-        return { ...item, expr: substituteProps(item.expr as ASTNode, props, propExprMap) } as LogicStatement;
-      }
-      return item;
-    });
     return cloned as unknown as ASTNode;
   }
 
@@ -2871,18 +2910,19 @@ function substituteProps(
   //   at module scope). Substitute the prop into those string fields here, then
   //   fall through to the generic array-recursion for the child node lists.
   if (cloned.kind === "each-block" || cloned.kind === "match-block") {
-    for (const field of ["inExprRaw", "ofExprRaw", "keyExprRaw", "asName", "onExprRaw"]) {
+    // S458 (fourth round, F7) — `<each … as x>`: `x` is a DECLARATION (the item binder).
+    // It is never substituted, and inside the each body (and its `key=`, read per item)
+    // it shadows a same-named prop (binding-names.ts rule 3). `in=` / `of=` are read in
+    // the enclosing scope.
+    const binder = cloned.kind === "each-block" && typeof cloned.asName === "string" ? boundNamesOf(cloned.asName) : [];
+    const inner = scopedPropMaps(props, propExprMap, binder);
+    for (const field of ["inExprRaw", "ofExprRaw", "keyExprRaw", "onExprRaw"]) {
       const cur = cloned[field];
       if (typeof cur === "string" && cur.length > 0) {
         // S458 F1: the expression fields go through the structural substituter
         // (an expression-valued caller `items=${@list}` is in `propExprMap` only).
-        // `asName` is a BINDER NAME, not an expression — the one remaining text
-        // rewrite of a prop name in the expander, kept byte-identical (whether a
-        // binder named like a prop should shadow it in the body is a separate
-        // question, not changed here).
-        const sub = field === "asName"
-          ? substitutePropsInRawExpr(cur, props)
-          : (propExprMap && propExprMap.size > 0 ? substituteExprText(cur, propExprMap, new Set()) : cur);
+        const map = field === "keyExprRaw" ? inner.propExprMap : propExprMap;
+        const sub = map && map.size > 0 ? substituteExprText(cur, map, new Set()) : cur;
         if (sub !== cur) cloned[field] = sub;
       }
     }
@@ -2891,7 +2931,7 @@ function substituteProps(
       if (Array.isArray(cloned[key])) {
         cloned[key] = (cloned[key] as unknown[]).map((item: unknown) =>
           item && typeof item === "object" && (item as Record<string, unknown>).kind
-            ? substituteProps(item as ASTNode, props, propExprMap)
+            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap)
             : item,
         );
       }
@@ -2916,35 +2956,6 @@ function substituteProps(
   }
 
   return cloned as unknown as ASTNode;
-}
-
-/**
- * each-in-enclosing-scope (S153) — substitute prop references inside a structural
- * raw-expression string (an each-block's `in=`/`of=`/`key=`/`as=` value, or a
- * match-block's `on=` value).
- *
- * `props` maps prop-name → caller value (e.g. `items` → `@todos`). We replace
- * each prop name appearing as a STANDALONE leading identifier with its caller
- * value, so `items` → `@todos` and `items.foo` → `@todos.foo`, but NOT:
- *   - a member-access tail (`x.items` keeps `.items` — `items` there is a field),
- *   - the contextual sigil member (`@.items` keeps `.items`),
- *   - a substring of a longer identifier (`myitems` is untouched).
- *
- * The negative-lookbehind on `.`/word-char + word-boundary trailing edge gives
- * exactly that. Conservative — when no prop matches, the string is returned as-is.
- */
-function substitutePropsInRawExpr(raw: string, props: Map<string, string>): string {
-  if (!raw || props.size === 0) return raw;
-  let out = raw;
-  for (const [name, value] of props.entries()) {
-    if (!name) continue;
-    // Match `name` as a standalone leading identifier: not preceded by `.` or a
-    // word char (so `@.name` / `x.name` / `myname` are excluded), and followed by
-    // a non-ident char or end (so the full identifier is `name`, not `nameX`).
-    const re = new RegExp(`(^|[^.A-Za-z0-9_$])(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![A-Za-z0-9_$])`, "g");
-    out = out.replace(re, (_m, pre) => `${pre}${value}`);
-  }
-  return out;
 }
 
 

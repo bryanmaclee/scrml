@@ -37,3 +37,18 @@
   arrow emits `for ( n of … )` (no `const`) — an implicit-global write / strict-mode ReferenceError.
 - Tests: conformance bind-prop-destructured-local-shadows (F5 b1–b4), prop-substitution-destructured-shadows
   (F3 table), prop-substitution-keywordless-loop-binder (F2) — all executed; unit s458-round4-one-scope-model.
+
+## 2026-10-08 — step 2: markup binders + lift targets in the statement scope (F7, F9)
+- Commit 1 gate: 32631 pass / 0 fail (pre-commit hook).
+- F7: `<each … as x>` — the binder is never substituted (the last text rewrite of a prop name in the expander,
+  `substitutePropsInRawExpr`, is DELETED); inside the each body and its `key=` the binder shadows the prop.
+  Mechanism: `scopedPropMaps(props, propExprMap, shadow)` — the prop maps with the shadowed props ABSENT, so
+  every downstream path (text, attrs, nested logic, nested each) is covered by construction.
+- F9: the `lift-expr` walker substitutes `{ kind: "markup", node }` targets (and `{ kind: "expr" }` targets —
+  the old ExprNode-kind check never matched the real LiftTarget shape) in the statement's scope; a `markup` /
+  `state` node that is a logic-body child at ANY depth (`if` / `for` bodies) is substituted there too (it was
+  only handled at the top level). The top-level second pass over body items is removed (no double substitution).
+  The string `props` map is registered per ExprNode map (`stringPropsByExprMap`) so the walker can hand markup
+  to `substituteProps`.
+- Base flip (540bc7f1e compiler files by copy): all 5 round-4 probes FAIL on base (F2 base: "Left side of
+  for-of statement is not a reference"), PASS on head. conformance/run.ts 1386/1436 + 50 xfail, 0 fail.
