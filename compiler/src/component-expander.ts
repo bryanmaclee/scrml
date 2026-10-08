@@ -1297,7 +1297,24 @@ function parseComponentDef(
     ceErrors.push(makeComponentEngineScopeError(engine, name, filePath));
   }
 
-  if (parseErrors.length > 0) {
+  // s457 4a — a refused unquoted attribute value (the shared reader's
+  // E-ATTR-UNQUOTED-OPERATOR / E-ATTR-MULTI-STATEMENT) is reported as itself,
+  // anchored at the definition: the body DID parse (the value recovers as
+  // `absent`), so failing the whole def as E-COMPONENT-021 would cascade into
+  // E-COMPONENT-020 / -035 at every use site and bury the real cause.
+  const ATTR_VALUE_REFUSALS = new Set(["E-ATTR-UNQUOTED-OPERATOR", "E-ATTR-MULTI-STATEMENT"]);
+  for (const e of parseErrors) {
+    if (!ATTR_VALUE_REFUSALS.has(e.code)) continue;
+    ceErrors.push(makeCEError(
+      e.code,
+      `${e.message} (in component \`${name}\`)`,
+      span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+  const structuralParseErrors = parseErrors.filter((e) => !ATTR_VALUE_REFUSALS.has(e.code));
+
+  if (structuralParseErrors.length > 0) {
+    const parseErrors = structuralParseErrors;
     const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     ceErrors.push(makeCEError(
       "E-COMPONENT-021",

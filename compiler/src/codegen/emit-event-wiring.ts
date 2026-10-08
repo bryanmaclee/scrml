@@ -21,7 +21,7 @@ import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, type ColorOpts } from "./js-async-analysis.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, recordListenerSource, type ColorOpts } from "./js-async-analysis.ts";
 import { _clientSseFnNames } from "./scheduling.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
@@ -496,13 +496,18 @@ function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileConte
   const facts = clientAsyncFactsOf(ctx);
   const resolveFree = freeAsyncResolverFromFacts(facts);
   const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree, opts);
+  // s457 3a — the listener's source attribute, for the E-EVENT-UNBOUND check
+  // over the assembled client text (codegen/listener-event-check.ts).
+  const attrName = typeof opts.boundaryId === "string" ? (opts.boundaryId.split(/\s+/)[0] || null) : null;
   if (!colored) {
     // s441 fix round — fail CLOSED on handler text the analysis cannot read.
     const u = unanalyzableHandlerUses(handlerExpr, resolveFree);
     if (u) for (const err of jsAsyncUsesErrors(u, span, ctx.filePath)) ctx.errors.push(err);
+    recordListenerSource(handlerExpr, span, attrName);
     return handlerExpr;
   }
   for (const err of jsAsyncUsesErrors(colored, span, ctx.filePath)) ctx.errors.push(err);
+  recordListenerSource(colored.code, span, attrName);
   return colored.code;
 }
 

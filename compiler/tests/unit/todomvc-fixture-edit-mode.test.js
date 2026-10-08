@@ -126,7 +126,7 @@ beforeAll(() => {
   \${
     for (let item of @items) {
       lift <li data-id=\${item.id}>
-        <span if=@editingId == item.id>editing</span>
+        <span if=(@editingId == item.id)>editing</span>
       </li>
     }
   }

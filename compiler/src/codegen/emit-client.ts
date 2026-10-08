@@ -15,7 +15,8 @@ import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments
 import { renameUserFnRefsScoped } from "./fn-name-rename.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
-import { setActiveClientAsync } from "./js-async-analysis.ts";
+import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.ts";
+import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
@@ -2002,6 +2003,8 @@ export function generateClientJs(ctx: CompileContext): string {
   const csrfEnabled = ctx.csrfEnabled;
   const filePath: string = fileAST.filePath;
   const lines: string[] = [];
+  // s457 3a — this file's listener → source-attribute registry (E-EVENT-UNBOUND).
+  resetListenerSources();
 
   // S22 §1a slice 2: publish the file's variant→payload-field lookup so that
   // emitMatchExpr can resolve positional bindings `.Circle(r)` to field names.
@@ -3190,6 +3193,16 @@ export function generateClientJs(ctx: CompileContext): string {
   // reserved at the top of generateClientJs. By this point all emit-* walks
   // have run and tagged their AST-shape-derived chunks; the chunk set is now
   // final.
+  // s457 3a — E-EVENT-UNBOUND on the assembled listeners. Runs BEFORE the
+  // user-fn rename; a user top-level `function event` is already emitted under
+  // its encoded name here, so when one exists a free `event` IS that function
+  // (the rename resolves it) and the check stands down. A file-level `const` /
+  // `let event` is a declaration of this text and binds by scope.
+  // See codegen/listener-event-check.ts.
+  clientStage(ctx, "event-unbound-check", () => {
+    if (fnNameMap && fnNameMap.has("event")) return;
+    for (const e of eventUnboundErrors(lines.join("\n"), filePath)) errors.push(e);
+  });
   const runtimeSource = clientStage(ctx, "assemble-runtime", () => assembleRuntime(ctx.usedRuntimeChunks));
   let clientCode: string;
   if (fnNameMap && fnNameMap.size > 0) {

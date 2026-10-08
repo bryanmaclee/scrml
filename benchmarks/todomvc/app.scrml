@@ -178,12 +178,12 @@
             ${
                 for (let todo of @visibleTodos) {
                     lift <li class="todo-item" data-id=${todo.id}>
-                        <div class="view" if=@editingId != todo.id>
+                        <div class="view" if=(@editingId != todo.id)>
                             <input class="toggle" type="checkbox" checked=${todo.completed} onclick=toggleTodo(todo.id)/>
                             <label ondblclick=startEdit(todo.id, todo.title)>${todo.title}</>
                             <button class="destroy" onclick=deleteTodo(todo.id)/>
                         </div>
-                        <input class="edit" type="text" if=@editingId == todo.id bind:value=@editText onkeydown=handleEditKey() onblur=commitEdit(todo.id) />
+                        <input class="edit" type="text" if=(@editingId == todo.id) bind:value=@editText onkeydown=handleEditKey() onblur=commitEdit(todo.id) />
                     </li>
                 }
             }

@@ -8064,145 +8064,6 @@ const RESERVED_AMBIENT_PROJECTION_NAMES: ReadonlySet<string> = new Set([
  *   - name collision with declared struct/enum types: already covered by the
  *     type registry check.
  */
-/**
- * s457 3a (E-EVENT-UNBOUND) — the first reference to `event` in an event-handler
- * value whose listener the COMPILER writes, or null.
- *
- * SPEC §5.2: "The native event object is NOT passed to `fn` — it is available
- * only inside the wrapper closure"; §5.2.3: "This amendment does not add an
- * event-object binding to the inline block." A bare call (`oninput=f(event.x)`),
- * a bare expression or assignment, a handler reference, an inline block
- * (`{ … }`) and a `${…}` value that is not itself a function all run inside a
- * listener the compiler builds; its parameter is `_scrml_event`, outside the
- * user namespace (§47.1.1). So a free `event` there names nothing the author
- * declared: refused, pointing at `${(e) => …}` — the form that takes the event
- * (ruling user-voice-scrml.md S457 "3a"). A `${…}` value that IS a function
- * (`${(e) => f(e)}`, `${fn(e) { … }}`) is the listener itself and is not
- * judged here.
- *
- * Scope-aware enough to stay quiet on a user binding: when the handler itself
- * binds `event` anywhere (a lambda parameter, a `const`/`let`, a loop variable)
- * nothing is reported — a conservative miss, never a false refusal. A binding
- * OUTSIDE the handler (a file-level `const event`, `function event`, an `<each
- * … as event>` row) is the caller's check (`checkHandlerEventBinding`).
- */
-function findUnboundHandlerEventRef(value: Record<string, unknown>): { span: Span | null } | null {
-  const roots: unknown[] = [];
-  if (value.kind === "call-ref") {
-    if (Array.isArray(value.argExprNodes)) roots.push(...(value.argExprNodes as unknown[]));
-    else if (Array.isArray(value.args)) {
-      // Unparsed args: a word-boundary test on the raw text, strings excluded.
-      for (const a of value.args as unknown[]) {
-        if (typeof a !== "string") continue;
-        const noStrings = a.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
-        if (/(?<![.\w$])event\b/.test(noStrings)) return { span: (value.span as Span) ?? null };
-      }
-    }
-  } else if (value.kind === "expr") {
-    // (A handler REFERENCE `onclick=event` is a `variable-ref`: its unresolved
-    // name is already E-SCOPE-001 in visitAttr — not reported twice.)
-    const block = value.handlerBlock as { stmts?: unknown[] } | undefined;
-    if (block && Array.isArray(block.stmts)) roots.push(...block.stmts);
-    else if (value.exprNode && typeof value.exprNode === "object") {
-      const top = value.exprNode as Record<string, unknown>;
-      if (top.kind === "lambda") return null; // the value IS the listener
-      roots.push(top);
-    }
-  }
-  if (roots.length === 0) return null;
-
-  let found: { span: Span | null } | null = null;
-  let bindsEvent = false;
-  const seen = new Set<unknown>();
-  const isEventName = (n: unknown) => n === "event";
-  const visit = (node: unknown): void => {
-    if (bindsEvent || !node || typeof node !== "object" || seen.has(node)) return;
-    seen.add(node);
-    if (Array.isArray(node)) { for (const x of node) visit(x); return; }
-    const rec = node as Record<string, unknown>;
-    const kind = typeof rec.kind === "string" ? rec.kind : "";
-    // Binders of `event` inside the handler.
-    if (Array.isArray(rec.params)) {
-      for (const p of rec.params as unknown[]) {
-        if (isEventName(p) || (p && typeof p === "object" && isEventName((p as Record<string, unknown>).name))) {
-          bindsEvent = true; return;
-        }
-      }
-    }
-    if (kind.endsWith("-decl") && isEventName(rec.name)) { bindsEvent = true; return; }
-    for (const k of ["variable", "binding", "iterVar", "varName", "itemName", "alias"]) {
-      if (isEventName(rec[k])) { bindsEvent = true; return; }
-    }
-    if (kind === "ident") {
-      const name = typeof rec.name === "string" ? rec.name : "";
-      if (!found && (name === "event" || name.startsWith("event.") || name.startsWith("event["))) {
-        found = { span: (rec.span as Span) ?? null };
-      }
-      return;
-    }
-    if (kind === "escape-hatch" && typeof rec.raw === "string" && !rec.raw.trimStart().startsWith("`")) {
-      // Text the expression parser could not structure (a lifted `{ … }` handler
-      // value arrives as one). Strings out, then a word test that skips member
-      // names (`x.event`) and object keys (`{ event: 1 }`); a binder in the text
-      // (`event =>`, `(event) =>`, `const event`) suppresses the report.
-      const text = rec.raw.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
-      const paramLists = [...text.matchAll(/\(([^()]*)\)\s*=>|\bfunction\s*[\w$]*\s*\(([^()]*)\)/g)].map((m) => m[1] ?? m[2] ?? "");
-      if (/\b(?:const|let|var)\s+event\b|\bevent\s*=>/.test(text) || paramLists.some((p) => /\bevent\b/.test(p))) {
-        bindsEvent = true; return;
-      }
-      if (!found && /(?<![.\w$]\s*)\bevent\b(?!\s*:)/.test(text)) found = { span: (rec.span as Span) ?? null };
-      return;
-    }
-    if (kind === "lit" || kind === "escape-hatch") {
-      // Template-literal interpolations (`\`${event.type}\``) — the shared ident walker reads them.
-      forEachIdentInExprNode(rec as unknown as ExprNode, (id) => {
-        const name = typeof id.name === "string" ? id.name : "";
-        if (!found && (name === "event" || name.startsWith("event."))) {
-          found = { span: (id.span as unknown as Span) ?? null };
-        }
-      });
-      return;
-    }
-    for (const k of Object.keys(rec)) {
-      if (k === "span" || k.startsWith("_") || k === "resolvedType") continue;
-      const v = rec[k];
-      if (v && typeof v === "object") visit(v);
-    }
-  };
-  for (const r of roots) visit(r);
-  return bindsEvent ? null : found;
-}
-
-/**
- * s457 3a — the event-handler attribute VALUES of a lifted tag that survived
- * only as space-joined token text (`< li onclick = { f ( event . type ) } > x
- * < / li >`, the lift parser's string fallback). A value is a balanced
- * `{ … }` / `( … )` / `[ … ]` group, or the run to the next `name =` / `>` at
- * depth 0. Strings are opaque.
- */
-function liftFallbackHandlerValues(raw: string): string[] {
-  const out: string[] = [];
-  const re = /(?:^|\s)on[\w:-]*\s*=\s*/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(raw)) !== null) {
-    let i = m.index + m[0].length;
-    let depth = 0;
-    let str: string | null = null;
-    const start = i;
-    for (; i < raw.length; i++) {
-      const c = raw[i];
-      if (str) { if (c === "\\") { i++; continue; } if (c === str) str = null; continue; }
-      if (c === '"' || c === "'" || c === "`") { str = c; continue; }
-      if (c === "{" || c === "(" || c === "[") { depth++; continue; }
-      if (c === "}" || c === ")" || c === "]") { depth--; if (depth === 0 && (raw[start] === "{" || raw[start] === "(" || raw[start] === "[")) { i++; break; } continue; }
-      if (depth === 0 && (c === ">" || /^\s+[\w:-]+\s*=(?!=)/.test(raw.slice(i, i + 40)))) break;
-    }
-    out.push(raw.slice(start, i));
-    re.lastIndex = i;
-  }
-  return out;
-}
-
 function checkLogicExprIdents(
   exprNode: unknown,
   span: Span,
@@ -12970,53 +12831,6 @@ function annotateNodes(
             ));
           }
         }
-        // s457 3a — E-EVENT-UNBOUND in LIFTED markup. The lifted subtree is not
-        // walked by visitAttr (see Bug 70 above), but its handlers are wrapped by
-        // the same compiler-written listener (emit-lift, `function(_scrml_event)`),
-        // so a free `event` there is the same refusal.
-        if (liftExpr && (liftExpr.kind === "markup" || (liftExpr as { node?: unknown }).node)) {
-          const liftRoot = (liftExpr as { node?: unknown }).node ?? liftExpr;
-          const seenLift = new Set<unknown>();
-          const walkLift = (node: unknown): void => {
-            if (!node || typeof node !== "object" || seenLift.has(node)) return;
-            seenLift.add(node);
-            if (Array.isArray(node)) { for (const x of node) walkLift(x); return; }
-            const rec = node as Record<string, unknown>;
-            if (rec.kind === "markup" && Array.isArray(rec.attrs)) {
-              for (const a of rec.attrs as ASTNodeLike[]) {
-                if (a && typeof a.name === "string" && isEventHandlerAttrName(a.name) && a.value) {
-                  checkHandlerEventBinding(a, a.value as ASTNodeLike, rec as ASTNodeLike);
-                }
-              }
-            }
-            for (const k of ["children", "body", "expr", "node", "nodes"]) {
-              const v = rec[k];
-              if (v && typeof v === "object") walkLift(v);
-            }
-          };
-          walkLift(liftRoot);
-        } else if (liftExpr && liftExpr.kind === "expr") {
-          // A lifted tag the lift parser could not structure (an inline-block
-          // `{ … }` handler value is one) survives as escape-hatch TEXT that
-          // emit-lift re-reads; scan its handler-attribute values.
-          const eh = liftExpr.exprNode as { kind?: string; raw?: unknown } | undefined;
-          const raw = eh && eh.kind === "escape-hatch" && typeof eh.raw === "string" ? eh.raw : "";
-          if (/^\s*<\s*[A-Za-z]/.test(raw)) {
-            for (const handlerText of liftFallbackHandlerValues(raw)) {
-              const ref = findUnboundHandlerEventRef({ kind: "expr", exprNode: { kind: "escape-hatch", raw: handlerText } });
-              if (ref && !(scopeChain.lookup("event") || fnAllDeclared.has("event") || fileDeclaresEvent())) {
-                errors.push(new TSError(
-                  "E-EVENT-UNBOUND",
-                  `E-EVENT-UNBOUND: \`event\` in a lifted element's event handler is not bound. A bare or ` +
-                  `inline-block handler does not receive the event object (SPEC §5.2, §5.2.3). Take the event ` +
-                  `as a parameter of a function you write: \`onclick=\${(e) => …}\`.`,
-                  ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span,
-                ));
-                break;
-              }
-            }
-          }
-        }
         resolvedType = tAsIs();
         break;
       }
@@ -14796,75 +14610,6 @@ function annotateNodes(
     }
   }
 
-  // s457 3a — whether the author declared a name `event` anywhere in the file
-  // OUTSIDE a handler (a `const` / `let` / `function event`, an `<each … as
-  // event>` row): then a handler's `event` may be that binding, which the
-  // compiler-written listener no longer shadows. Conservative — a declaration
-  // anywhere in the file suppresses E-EVENT-UNBOUND. Computed once, lazily.
-  let fileDeclaresEventMemo: boolean | null = null;
-  function fileDeclaresEvent(): boolean {
-    if (fileDeclaresEventMemo !== null) return fileDeclaresEventMemo;
-    let hit = false;
-    const seen = new Set<unknown>();
-    const walk = (node: unknown): void => {
-      if (hit || !node || typeof node !== "object" || seen.has(node)) return;
-      seen.add(node);
-      if (Array.isArray(node)) { for (const x of node) walk(x); return; }
-      const rec = node as Record<string, unknown>;
-      const kind = typeof rec.kind === "string" ? rec.kind : "";
-      if ((kind.endsWith("-decl") || kind === "function-decl") && rec.name === "event" && rec._isReactiveAssign !== true) {
-        hit = true; return;
-      }
-      // A loop / `<each>` binder named `event` (`for (event of …)`, `<each … as event>`).
-      for (const k of ["asName", "variable", "iterVar", "itemName", "binding"]) {
-        if (rec[k] === "event") { hit = true; return; }
-      }
-      if (Array.isArray(rec.asNames) && (rec.asNames as unknown[]).includes("event")) { hit = true; return; }
-      if ((kind === "markup" || kind === "each") && Array.isArray(rec.attrs)) {
-        for (const a of rec.attrs as Array<Record<string, unknown>>) {
-          const v = a && (a.value as Record<string, unknown> | undefined);
-          if (a && a.name === "as" && v && (v.name === "event" || v.value === "event")) { hit = true; return; }
-        }
-      }
-      for (const k of ["nodes", "body", "children", "ast", "stmts", "consequent", "alternate"]) {
-        const v = rec[k];
-        if (v && typeof v === "object") walk(v);
-      }
-    };
-    walk((fileAST as Record<string, unknown>).nodes ?? (fileAST as Record<string, unknown>).ast);
-    fileDeclaresEventMemo = hit;
-    return hit;
-  }
-
-  function checkHandlerEventBinding(attr: ASTNodeLike, value: ASTNodeLike, parent: ASTNodeLike): void {
-    const ref = findUnboundHandlerEventRef(value as Record<string, unknown>);
-    if (!ref) return;
-    if (scopeChain.lookup("event") || fnAllDeclared.has("event") || fileDeclaresEvent()) return;
-    const attrName = attr.name as string;
-    const v = value as Record<string, unknown>;
-    let shown = "";
-    if (v.kind === "call-ref") shown = `${String(v.name)}(${(Array.isArray(v.args) ? v.args : []).map(String).join(", ")})`;
-    else if (v.kind === "variable-ref") shown = String(v.name ?? "");
-    else if (typeof v.raw === "string") shown = v.raw.trim();
-    const param = /(?<![.\w$])e\b/.test(shown) ? "ev" : "e";
-    const renamed = shown.replace(/(?<![.\w$])event\b/g, param);
-    const isBlock = !!(v.handlerBlock) || /;/.test(renamed);
-    const fix = shown.length > 0
-      ? (isBlock ? `\`${attrName}=\${(${param}) => { ${renamed} }}\`` : `\`${attrName}=\${(${param}) => ${renamed}}\``)
-      : `\`${attrName}=\${(e) => …}\``;
-    // The handler VALUE's span: an ExprNode span inside it carries offsets but
-    // not always a file line/column (it printed as 1:1).
-    const span = (value.span ?? attr.span ?? parent?.span ?? ref.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
-    errors.push(new TSError(
-      "E-EVENT-UNBOUND",
-      `E-EVENT-UNBOUND: \`event\` in the \`${attrName}=\` handler is not bound. A bare or inline-block ` +
-      `handler does not receive the event object (SPEC §5.2, §5.2.3) — nothing in the handler declares ` +
-      `\`event\`, and the compiler's listener parameter is not visible to it. Take the event as a parameter ` +
-      `of a function you write: ${fix}.`,
-      span,
-    ));
-  }
-
   function visitAttr(attr: ASTNodeLike, parent: ASTNodeLike): void {
     if (!attr || !attr.value) return;
 
@@ -14880,13 +14625,6 @@ function annotateNodes(
     // attr (`<input value=42>`) still errors (`value` is not allowlisted).
 
     const value = attr.value as ASTNodeLike;
-
-    // s457 3a — E-EVENT-UNBOUND: a free `event` in a handler whose listener the
-    // compiler writes (bare call / expression / reference, inline block, a
-    // non-function `${…}`). See findUnboundHandlerEventRef.
-    if (typeof attr.name === "string" && isEventHandlerAttrName(attr.name)) {
-      checkHandlerEventBinding(attr, value, parent);
-    }
 
     // §19.4.3 / §19.4.4 — an unhandled `!` call in an event-handler value is
     // E-ERROR-002 in EVERY form (S439 ruling #14 + S440 "restore conformance").
@@ -15151,8 +14889,9 @@ function annotateNodes(
       const handlerBlock = (value as Record<string, unknown>).handlerBlock as { stmts?: unknown[] } | undefined;
       if (handlerBlock && Array.isArray(handlerBlock.stmts)) {
         scopeChain.push(`handler:${attr.name as string}`);
-        // s457 3a — the handler scope binds no `event` (§5.2 / §5.2.3; a free
-        // `event` here is E-EVENT-UNBOUND, checked above).
+        // s457 3a — the handler scope binds no `event` (§5.2 / §5.2.3); a free
+        // `event` in a compiler-written listener is E-EVENT-UNBOUND, judged on
+        // the emitted text (codegen/listener-event-check.ts).
         // WRITE targets. A function body's `@x = …` is write-checked by SYM B3,
         // which never descends into `<each>` / `<match>` bodies (SPEC §34: SYM is
         // the wrong layer there — it over-fires on loop locals). This walk

@@ -224,14 +224,29 @@ describe("§3 4a — a value that cannot be read whole is refused, never truncat
 
 // ---------------------------------------------------------------------------
 describe("§4 3a — the wrapper does not bind `event`; a free `event` is E-EVENT-UNBOUND", () => {
+  // s457 3a (S458 fix round) — judged on the EMITTED listener with Acorn's scope
+  // model (codegen/listener-event-check.ts), so every front end and every binder
+  // position is covered: component bodies (native re-parse), `<match>` arms,
+  // lifted markup, `^{ emit() }` markup; a binder elsewhere in the handler or the
+  // file does not silence it (review F3 / F4).
   const refused = [
-    [`<input oninput=f(event.target.value)>`, "`oninput=${(e) => f(e.target.value)}`"],
-    [`<button onclick={ f(event.type) }>go</button>`, "`onclick=${(e) => f(e.type)}`"],
-    [`<button onclick=\${ f(event.type) }>go</button>`, "`onclick=${(e) => f(e.type)}`"],
-    [`<button onclick=@msg = event.type>go</button>`, "`onclick=${(e) => @msg = e.type}`"],
+    [`<input oninput=f(event.target.value)>`, "`oninput=${(e) => …}`"],
+    [`<button onclick={ f(event.type) }>go</button>`, "`onclick=${(e) => …}`"],
+    [`<button onclick=\${ f(event.type) }>go</button>`, "`onclick=${(e) => …}`"],
+    [`<button onclick=@msg = event.type>go</button>`, "`onclick=${(e) => …}`"],
     [`<button onclick={ [1].forEach(x => f(event.type)) }>go</button>`, "(e) =>"],
     ["<button onclick={ @msg = `t ${event.type}` }>go</button>", "(e) =>"],
     [`<ul><each in=@list as it><li><button onclick=f(event.type)>r</button></li></each></ul>`, "(e) =>"],
+    // F4 — a binder of `event` elsewhere in the handler binds only its own scope
+    [`<button onclick={ [1].map((event) => event); f(event.type) }>go</button>`, "(e) =>"],
+    // F3 — a function-local `const event` elsewhere in the file binds nothing here
+    [`<button onclick=f(event.type)>go</button>\n\${ function k() { const event = 1; return event } }`, "(e) =>"],
+    // F1 — the native-parser positions
+    [`\${ const Btn = <button props={ label: string } onclick={ f(event.type) }>\${label}</> }\n<Btn label="a"/>`, "(e) =>"],
+    [`\${ const Btn = <button props={ label: string } onclick=@msg = event.type>\${label}</> }\n<Btn label="a"/>`, "(e) =>"],
+    [`type Ph:enum = { A }\n<ph>: Ph = .A\n<match for=Ph on=@ph><A><button onclick=f(event.type)>x</button></A></match>`, "(e) =>"],
+    [`^{ emit("<button onclick=f(event.type)>e</button>") }`, "(e) =>"],
+    [`<div>\${ lift <button onclick=f(event.type)>x</button> }</div>`, "(e) =>"],
   ];
   for (const [markup, fix] of refused) {
     test(`${markup}`, () => {
@@ -242,6 +257,9 @@ describe("§4 3a — the wrapper does not bind `event`; a free `event` is E-EVEN
   }
 
   const clean = [
+    `<button onclick=f(event)>go</button>\n\${ const event = "x" }`,
+    `<ul>\${ for (event of @list) { lift <li><button onclick=f(event.name)>r</button></li> } }</ul>`,
+    `<ul><each in=@list as event><li><button onclick=f(event.name)>r</button></li></each></ul>`,
     `<button onclick=\${(e) => f(e.type)}>go</button>`,
     `<button onclick=\${(event) => f(event.type)}>go</button>`,
     `<button onclick={ [1].forEach(event => f(event)) }>go</button>`,
@@ -310,5 +328,62 @@ describe("§4 3a — the wrapper does not bind `event`; a free `event` is E-EVEN
     ));
     expect(codes).toEqual([]);
     expect(clientJs).toMatch(/_scrml_cs_reactive_set\("msg", "hi"\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("§5 4a — ONE reader: the native re-parse paths and lifted markup read the same (S458 F1/F2)", () => {
+  // Component bodies, `<match>` arms and `^{ emit() }` markup are re-parsed by
+  // the native parser (tag-frame.js); lifted markup by the lift tag parser. Both
+  // now call the TAB tokenizer's reader (compiler/src/unquoted-attr-value.ts).
+  const COMP = (attrs) => `\${ const Btn = <button props={ label: string } ${attrs}>\${label}</> }\n<Btn label="a"/>`;
+  const ARM = (markup) => `type Ph:enum = { A, B }\n<ph>: Ph = .A\n<match for=Ph on=@ph><A>${markup}</A><B><p>b</p></B></match>`;
+  const read = [
+    ["component body", COMP(`onclick=@count = @count + 1`)],
+    ["<match> arm", ARM(`<button onclick=@count = @count + 1>x</button>`)],
+    ["lifted markup", `<div>\${ lift <button onclick=@count = @count + 1>x</button> }</div>`],
+    ["^{ emit() } markup", `^{ emit("<button onclick=@count = @count + 1>e</button>") }`],
+  ];
+  for (const [where, markup] of read) {
+    test(`${where}: \`onclick=@count = @count + 1\` keeps its \`+ 1\``, () => {
+      const { codes, clientJs } = compileToOutputs(page(markup));
+      expect(codes).toEqual([]);
+      expect(clientJs).toMatch(/_scrml_cs_reactive_set\("count", _scrml_cs_reactive_get\("count"\) \+ 1\)/);
+    });
+  }
+
+  test("component body: `onclick=mk(1) .then(g)` keeps `.then(g)`", () => {
+    const { codes, clientJs } = compileToOutputs(page(COMP(`onclick=mk(1) .then(g)`)));
+    expect(codes).toEqual([]);
+    expect(clientJs).toMatch(/_scrml_mk_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/);
+  });
+
+  const refused = [
+    ["component body", COMP(`title=@msg + "x"`)],
+    ["<match> arm", ARM(`<p title=@msg + "x">x</p>`)],
+    ["lifted markup", `<div>\${ lift <p title=@msg + "x">x</p> }</div>`],
+    ["^{ emit() } markup", `^{ emit("<p title=@msg + 1>e</p>") }`],
+  ];
+  for (const [where, markup] of refused) {
+    test(`${where}: \`title=@msg + …\` is E-ATTR-UNQUOTED-OPERATOR`, () => {
+      expect(compileToOutputs(page(markup)).codes).toContain("E-ATTR-UNQUOTED-OPERATOR");
+    });
+  }
+
+  test("F6 — a refused attribute in a component body is reported as itself, without the E-COMPONENT cascade", () => {
+    const { codes } = compileToOutputs(page(COMP(`title=@msg + "x"`)));
+    expect(codes).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+  });
+
+  test("lifted markup: `title=fmt(1).trim()` is the attribute value", () => {
+    const { codes, clientJs } = compileToOutputs(page(`<div>\${ lift <p id="t" title=fmt(1).trim()>x</p> }</div>`));
+    expect(codes).toEqual([]);
+    expect(clientJs).toMatch(/setAttribute\("title", String\(_scrml_fmt_\d+\(1\)\.trim\(\)/);
+  });
+
+  test("F5 — literal text after an unquoted value is pointed at the quoted form", () => {
+    const { errors } = compileToOutputs(page(`<a href=https://example.com/x>x</a>`));
+    expect(errors.map((e) => e.code)).toContain("E-ATTR-UNQUOTED-OPERATOR");
+    expect(errors.find((e) => e.code === "E-ATTR-UNQUOTED-OPERATOR").message).toContain('`href="https://example.com/x"`');
   });
 });

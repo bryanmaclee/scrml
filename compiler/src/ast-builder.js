@@ -107,6 +107,7 @@ import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName, bareHandlerStatementsText, attrShapedTokenInStatements } from "./multi-statement-scan.ts";
+import { unquotedRejectDiagnostic, isUnquotedValueStart, readUnquotedAttrValue } from "./unquoted-attr-value.ts";
 import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -4178,64 +4179,19 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // the rejected condition does not cascade into a misleading
             // E-CTX-001 / E-SCOPE-001 downstream.
             //
-            // s457 4a — the same token now also carries the refusals of the ONE
-            // unquoted-value reader (`reason`): an operator after a non-handler
-            // value ("operator"), text after a value that cannot begin an
-            // attribute ("stray"), and a tag close `>` after inline whitespace
-            // ("gt" — `onclick=@big = @n > 1>`: a comparison and a tag close
-            // read the same). Each is refused, never silently truncated.
-            let _rej;
-            try { _rej = JSON.parse(valTok.text); } catch { _rej = { name, value: valTok.text, op: "" }; }
-            const _opName = _rej.op || "an operator";
-            const _shown = (_rej.value || "").trim();
-            const _reason = _rej.reason || "operator";
-            const _isCond = name === "if" || name === "show" || name === "else-if";
-            const _isHandler = isEventHandlerAttrName(name);
-            let _msg;
-            if (_isCond && _reason === "operator") {
-              _msg =
-                `E-ATTR-UNQUOTED-OPERATOR: \`${name}=\` is an unquoted condition — it cannot contain ` +
-                `the operator \`${_opName}\`. An unquoted attribute condition admits only the atomic ` +
-                `forms (\`@var\`, \`obj.prop\`, \`fn()\`, or prefix \`!\`). Parenthesize or quote the ` +
-                `operator condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`;
-            } else {
-              const _what = _reason === "gt"
-                ? `is followed by \`>\` after a space. Unquoted, \`>\` there closes the tag, so a comparison ` +
-                  `(\`a > b\`) and a value followed by the end of the tag read the same`
-                : _reason === "stray"
-                  ? `is followed by \`${_opName}\`, which cannot begin an attribute: an unquoted value ends at ` +
-                    `whitespace, so the text after it would be dropped`
-                  : `is followed by the operator \`${_opName}\`. An unquoted value is an identifier, a member ` +
-                    `chain or a call (§5.1); an expression with an operator needs a delimiter`;
-              const _fix = _isHandler
-                ? `Delimit the handler: \`${name}={ ${_shown} }\` (an inline block, §5.2.3) or ` +
-                  `\`${name}=\${() => …}\`.`
-                : _isCond
-                  ? `Parenthesize or quote the condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`
-                  : `Delimit the value: \`${name}=(${_shown})\` or \`${name}=\${${_shown}}\`.`;
-              _msg = `E-ATTR-UNQUOTED-OPERATOR: the unquoted value of \`${name}=\` ${_what}. ${_fix}`;
-              if (_reason === "gt") {
-                _msg += ` If the \`>\` is the end of the tag, remove the space before it.`;
-              }
-            }
-            let _code = "E-ATTR-UNQUOTED-OPERATOR";
-            if (_reason === "stray" && _opName === ";" && !_isHandler) {
-              // §5.2.4 — a `;` after a bare NON-handler value is a statement
-              // list where ONE expression belongs (`title=f(); g()`).
-              _code = "E-ATTR-MULTI-STATEMENT";
-              _msg =
-                `E-ATTR-MULTI-STATEMENT: The value of attribute \`${name}\` is followed by \`;\` — a statement ` +
-                `list — but a non-handler attribute value is ONE expression, and a bare value has nothing to ` +
-                `bound it. Write a single expression, or move the statements into a function and use its ` +
-                `result (\`function compute() { … }\` then \`${name}=compute()\`). Only an event-handler ` +
-                `attribute (\`on…=\`) takes a statement list (SPEC §5.2.3, §5.2.4).`;
-            }
-            const _err = new TABError(_code, _msg, valSpan);
+            // s457 4a — the same token carries every refusal of the ONE
+            // unquoted-value reader (unquoted-attr-value.ts, `reason`); the
+            // diagnostic text is the reader module's, shared with the native
+            // parser (one reader, one message).
+            const _d = unquotedRejectDiagnostic(name, valTok.text);
+            const _err = new TABError(_d.code, _d.message, valSpan);
             // Kept so _forwardSubparseErrors can rebuild it with a file-true
             // span when it fires inside an `<each>` / engine / `<match>` sub-build.
-            _err.baseMessage = _msg;
+            _err.baseMessage = _d.message;
             errors.push(_err);
-            value = { kind: "absent" };
+            // `_refused`: the value WAS written and was refused above — later
+            // checks that read `absent` as "no value given" (E-ATTR-013) skip it.
+            value = { kind: "absent", _refused: true };
           } else {
             // E-ATTR-001: unexpected token type as attribute value
             errors.push(new TABError(
@@ -4321,7 +4277,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
                 `Valid forms: \`${name}=@myVar\`, \`${name}=obj.prop\`, \`${name}=(expr)\`, \`${name}=fn()\`.`,
                 attrSpan,
               ));
-            } else if (value.kind === "absent") {
+            } else if (value.kind === "absent" && !value._refused) {
               errors.push(new TABError(
                 "E-ATTR-013",
                 `E-ATTR-013: \`${name}\` requires a boolean expression. ` +
@@ -6901,6 +6857,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Parse attributes until > or /> or </> (malformed)
     const attrs = [];
     let selfClosing = false;
+    // s457 4a — the shared unquoted-value reader's per-opener state.
+    const liftUnquotedState = { inParenList: false, handlerSemicolonTail: false };
     while (true) {
       const t = peek();
       if (t.kind === "EOF") return null;
@@ -6923,7 +6881,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Check for =
         if (peek().kind === "PUNCT" && peek().text === "=") {
           consume(); // =
-          const value = _parseLiftAttrValue(attrSpan);
+          const value = _parseLiftAttrValue(attrSpan, attrName, liftUnquotedState);
           if (value === null) return null;
           // S446 (S439 #4) — a `${…}` event handler on lifted markup carries its
           // §5.2.3 statement list (`value.handlerBlock`) exactly as top-level and
@@ -6942,7 +6900,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           if (value.kind === "expr") delete value._liftInnerOffset;
           // §5.2.4 (S450) — lifted / `for … lift` markup attributes are parsed
           // here, not in parseAttributes: the same non-handler check.
-          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, isEngineEffectSite(tag, null));
+          // (A value read by the shared unquoted-value reader was already judged
+          // by parseAttributes — `_sharedReader` — and is not judged twice.)
+          if (value._sharedReader) delete value._sharedReader;
+          else checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, isEngineEffectSite(tag, null));
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -7149,8 +7110,56 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return name;
   }
 
+  /**
+   * s457 4a — an unquoted value on lifted markup, read by THE shared reader
+   * (unquoted-attr-value.ts) from the logic block's own source text, then
+   * converted by parseAttributes exactly as the TAB path converts the same
+   * token. Returns undefined (cursor untouched) when the value is not an
+   * unquoted value, the block's source text is not available, or the reader's
+   * end falls inside a logic token (the token-stream reader below then keeps
+   * its reading). The lift parser had its own reader of this text, so the S457
+   * rulings did not hold in lifted markup (S458 review: the third reader).
+   */
+  function _parseLiftAttrValueShared(attrSpan, attrName, liftState) {
+    const t = peek();
+    if (!attrName || !liftState || !t || t.kind === "EOF" || !t.span || typeof t.span.start !== "number") return undefined;
+    if (!parentBlock || typeof parentBlock.raw !== "string" || !parentBlock.span || typeof parentBlock.span.start !== "number") return undefined;
+    const base = parentBlock.span.start;
+    const raw = parentBlock.raw;
+    const off = t.span.start - base;
+    if (off < 0 || off >= raw.length || !isUnquotedValueStart(raw[off])) return undefined;
+    // The token must BE the text at that offset (a block whose raw is not the
+    // token source — a synthesized fragment — keeps the token reader).
+    if (t.kind === "STRING" || typeof t.text !== "string" || t.text.length === 0 || !raw.startsWith(t.text, off)) return undefined;
+    // ...and the attribute NAME must sit where its span says (a re-based /
+    // synthesized logic body whose offsets do not index its raw text).
+    const nameOff = attrSpan && typeof attrSpan.start === "number" ? attrSpan.start - base : -1;
+    if (nameOff < 0 || !raw.startsWith(attrName, nameOff)) return undefined;
+    // The `<each>` contextual sigil `@.` keeps its dedicated branch (Bug 72).
+    if (raw[off] === "@" && raw[off + 1] === ".") return undefined;
+    const saved = i;
+    const r = readUnquotedAttrValue(raw, off, attrName, liftState);
+    const absEnd = base + r.end;
+    while (peek().kind !== "EOF" && peek().span && peek().span.start < absEnd) {
+      if (peek().span.end > absEnd) { i = saved; return undefined; }
+      consume();
+    }
+    const tokSpan = (start, end) => ({ start, end, line: t.span.line, col: t.span.col });
+    const toks = [
+      { kind: "ATTR_NAME", text: attrName, span: tokSpan(attrSpan.start, attrSpan.end) },
+      { kind: "ATTR_EQ", text: "=", span: tokSpan(t.span.start, t.span.start) },
+      { kind: r.kind, text: r.text, span: tokSpan(t.span.start, absEnd) },
+    ];
+    const parsed = parseAttributes(toks, filePath, errors);
+    const value = parsed.length > 0 ? parsed[0].value : { kind: "absent" };
+    if (value && typeof value === "object") value._sharedReader = true;
+    return value;
+  }
+
   /** Parse one attribute value after `=` into a structured value object. */
-  function _parseLiftAttrValue(attrSpan) {
+  function _parseLiftAttrValue(attrSpan, attrName, liftState) {
+    const _shared = _parseLiftAttrValueShared(attrSpan, attrName, liftState);
+    if (_shared !== undefined) return _shared;
     // C10 fix (gate-found-tail) — when collecting the tokens of a lift markup
     // attribute value into a `parts` array, STRING tokens carry their content
     // WITHOUT delimiters (the tokenizer strips quotes — see readString). A
