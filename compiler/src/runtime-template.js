@@ -3652,6 +3652,51 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
     : 100;
   const MAX_RUNS = _scrml_runtime_max_runs; // infinite loop guard (overridable; see globalThis.__scrml_max_meta_runs)
 
+  // §22.5.1 timer primitives (meta.interval / meta.timeout / meta.clearInterval /
+  // meta.clearTimeout). Every timer is bound to THIS meta block's scope: the
+  // registry maps an opaque id (a fresh frozen token object — never a host
+  // timer handle or a number, so meta.clearInterval cannot cancel a timer this
+  // scope did not register, including another scope's) to { kind, handle }.
+  // clearScopeTimers() clears every still-active
+  // timer in LIFO registration order; it runs before each re-run and on scope
+  // destroy, BEFORE the meta.cleanup callbacks (§22.5.1 "Timer primitives
+  // lifetime").
+  const timers = new Map();
+  let nextTimerId = 0;
+
+  function clearScopeTimers() {
+    const live = Array.from(timers.values());
+    timers.clear();
+    for (let i = live.length - 1; i >= 0; i--) {
+      if (live[i].kind === "interval") clearInterval(live[i].handle);
+      else clearTimeout(live[i].handle);
+    }
+  }
+
+  function startTimer(kind, ms, callback) {
+    // A host timer given a string evaluates it as code; only a function is admitted.
+    if (typeof callback !== "function") {
+      throw new TypeError("meta." + kind + "(ms, callback): callback must be a function");
+    }
+    const id = Object.freeze({ scope: scopeId, timer: ++nextTimerId });
+    function run() {
+      if (kind === "timeout") timers.delete(id);
+      try { callback(); } catch(e) { console.error("[scrml] meta " + kind + " callback error in " + scopeId + ":", e); }
+    }
+    const handle = kind === "interval" ? setInterval(run, ms) : setTimeout(run, ms);
+    timers.set(id, { kind: kind, handle: handle });
+    return id;
+  }
+
+  function stopTimer(kind, id) {
+    const entry = timers.get(id);
+    // Already cleared / already fired / another kind's id: a no-op (§22.5.1).
+    if (entry === undefined || entry.kind !== kind) return;
+    timers.delete(id);
+    if (kind === "interval") clearInterval(entry.handle);
+    else clearTimeout(entry.handle);
+  }
+
   function trackingGet(name) {
     // Record dependency if we are inside a tracking context
     if (_scrml_tracking_stack.length > 0) {
@@ -3670,7 +3715,8 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
       return;
     }
 
-    // Run cleanup callbacks from the previous execution (LIFO order)
+    // Clear the previous execution's timers, then run its cleanup callbacks (LIFO order)
+    clearScopeTimers();
     for (let i = cleanupFns.length - 1; i >= 0; i--) {
       try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect cleanup error:", e); }
     }
@@ -3706,6 +3752,10 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
       subscribe: _scrml_reactive_subscribe,
       emit: function(htmlString) { _scrml_meta_emit(scopeId, htmlString); },
       cleanup: function(cleanupFn) { cleanupFns.push(cleanupFn); },
+      interval: function(ms, callback) { return startTimer("interval", ms, callback); },
+      timeout: function(ms, callback) { return startTimer("timeout", ms, callback); },
+      clearInterval: function(id) { stopTimer("interval", id); },
+      clearTimeout: function(id) { stopTimer("timeout", id); },
       scopeId: scopeId,
       bindings: capturedBindings != null ? capturedBindings : null,
       types: {
@@ -3753,6 +3803,7 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
   // Register scope-level cleanup: runs when _scrml_destroy_scope(scopeId) is called.
   // Fires all accumulated per-run cleanups and unsubscribes all reactive dependencies.
   _scrml_register_cleanup(function() {
+    clearScopeTimers();
     for (let i = cleanupFns.length - 1; i >= 0; i--) {
       try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect final cleanup error:", e); }
     }

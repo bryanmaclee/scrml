@@ -1,5 +1,10 @@
 // Phase 5 gauntlet: meta.cleanup() registration (§22.5.1)
-// Runtime meta with cleanup callback. Should compile clean.
+// Runtime meta with a cleanup callback. Should compile clean.
+// The repeating timer is the scope-bound `meta.interval` primitive (§22.5.1) —
+// a JS-host `setInterval` / `clearInterval` inside `^{}` is E-META-001. The
+// explicit `meta.clearInterval` inside the cleanup is redundant (the runtime
+// clears the scope's timers before cleanup callbacks run) but safe — it is the
+// cleanup registration this test exercises.
 
 <program>
 ${
@@ -8,12 +13,12 @@ ${
 
 <div>
   ^{
-    let id = setInterval(() => {
+    let id = meta.interval(meta.get("interval"), () => {
       meta.emit(`<p>tick</p>`)
-    }, meta.get("interval"))
+    })
 
     meta.cleanup(() => {
-      clearInterval(id)
+      meta.clearInterval(id)
     })
   }
 </div>
