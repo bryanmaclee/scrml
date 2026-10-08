@@ -76,3 +76,32 @@
   predecessor's measurement. `corpus-compile-floor --check` PASS; `snippet-gate` 122/122.
 - [2026-10-07] `regen-spec-index.ts --check` OK (0 stale). `facts.ts --check` FAIL: `@generated:facts-table` STALE —
   needs `bun scripts/facts.ts --write` (denied to this agent by the harness classifier; PA to run).
+- [2026-10-07] FIX ROUND (PA S458 review: F1 MED, F2-F4 LOW). Governing §21.3: "Circular imports SHALL be a compile error
+  (E-IMPORT-002). The compiler SHALL detect cycles in the import graph before any stage runs and report all files in
+  the cycle." / "Importing a name that is not exported by the target file SHALL be a compile error (E-IMPORT-004 …)".
+  Reproduced on 0b2e11e31 (.tmp/repro.ts, compileScrml): f1-named / f1-pure / f1-star / f1-mixed (x re-exports from y,
+  y imports x) all compile with 0 errors; f2 `export { K, Nope } from "./c.scrml"` 0 errors; f4 two stars binding `w`
+  differently -> E-IMPORT-004 "not exported … add `export w`" + W-SERVER-IMPORT-UNEMITTED "b.scrml has no server
+  content"; f3 lattice depth 12 full compile 2370 ms, depth 16 77892 ms.
+  Fix (module-resolver.js): detectCircularImports walks `exports[].reExportSource` (named + star) as edges, message
+  notes the re-export, errors carry cycleFiles; new validateReExports (named re-exports, in-graph source, cycle files
+  skipped) wired as resolveModules step 4b; resolveExportedBinding memoized per graph (WeakMap, reset in
+  buildExportRegistry; cycle-tainted answers not memoized); ambiguousStarSources + "ambiguous" E-IMPORT-004 text in
+  validateImports and validateReExports (errors carry ambiguousStarName/importerFile/targetFile). api.js
+  checkServerImportInvariant skips importer/target pairs with an ambiguous E-IMPORT-004.
+  After: all four F1 shapes E-IMPORT-002 (pure cycle: no extra E-IMPORT-004); f2 E-IMPORT-004 at the re-export; f4
+  ambiguous message, no W; depth 16 full compile 253 ms.
+  Tests: unit/s458-reexport-review-fixes 13 pass; conformance +6 (module/e-import-002-reexport-cycle-named-reject,
+  -cycle-star-reject, -import-cycle-mixed-reject, e-import-004-reexport-missing-name-reject, -ambiguous-star-reject,
+  -chain-clean) all PASS; run 1352/1402 + 50 xfail. types:check OK unchanged. SPEC not touched (§21.3 already governs).
+- [2026-10-07] Fix committed 091b1c6aa (hook: 32180 pass / 58 skip / 12 todo / 0 fail, 32250 tests, 1487 files).
+  browser-baseline --check PASS (48 asserted). Corpus by COMPILE, corpus-emit-differential base = git-archived
+  46ed1f8ff vs head 091b1c6aa: common sources 2425 (+20 new = the 6 new conformance dirs), compile-failure SET delta
+  0 newly failing / 0 newly passing; diagnostic-CODE change in 1 source: stdlib/data/index.scrml (already failing on
+  base with E-CODEGEN-INVALID-LOGIC; head E-IMPORT-004 instead) — `export { tableFor, TableSort } from
+  './table-for.scrml'` while table-for.scrml declares `type TableSort:struct` WITHOUT `export` (line 112). A real,
+  previously silent §21.3 violation in stdlib; NOT migrated (PA instruction). Adopter blast radius: an app doing
+  `import { pick } from "scrml:data"` compiles clean on head and base (the stdlib module is not in the user graph).
+  Effective syntax delta 0; script-goggle +12 = library chunks of the new conformance sources (module syntax). Artifact
+  diffs after path normalization: 38, all examples/23-trucking-dispatch (the s457 re-export change, identical to the
+  pre-fix measurement) — the F-round itself changes no emitted artifact.
