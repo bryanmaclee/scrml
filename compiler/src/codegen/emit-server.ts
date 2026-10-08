@@ -4838,7 +4838,7 @@ export function generateServerJs(
         if (_pAnnotation) {
           const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
-            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ");
+            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ", _pParsed);
             // ⚑ GATED ON `_protectActive`. The mark only means anything to the
             // §14.8.9 guard, which only exists on a protect path — but emitting
             // it unconditionally referenced `_scrml_protect_mediated`, which
@@ -5123,7 +5123,7 @@ export function generateServerJs(
         if (_pAnnotation) {
           const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
-            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "  ");
+            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "  ", _pParsed);
             for (const l of _pLines) lines.push(l);
           }
         }

@@ -27,7 +27,13 @@ import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
 // ---------------------------------------------------------------------------
 
 interface PredicateExpr {
-  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set";
+  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set"
+    | "on-length" | "pattern" | "value-set" | "req";
+  // S458 — §55.1 shared-core kinds: `pattern` (value = regex source, flags),
+  // `value-set` (variantMode oneOf/notIn over literal `values`), `on-length`
+  // (`operand` judged on `.length`), `req` (non-empty).
+  flags?: string;
+  values?: Array<number | string>;
   op?: string;
   value?: number | string;
   prop?: string;
@@ -120,24 +126,110 @@ const NAMED_SHAPE_HTML: Record<string, Record<string, string>> = {
 // somehow does cannot ship a check that admits everything.
 const FAIL_CLOSED = "false /* §53 S458: unjudgeable predicate — refused */";
 
+/** A predicate operand as a JS literal: numbers as-is, strings quoted. */
+function jsLiteral(v: number | string): string {
+  return typeof v === "string" ? JSON.stringify(v) : String(v);
+}
+
+// ---------------------------------------------------------------------------
+// The ONE judge (S458) — base type first, then containers, then the predicate.
+//
+// `predicateToJsExpr` alone judges a value already known to be of the base type;
+// over HTTP / postMessage / argv / a decoded payload it is not. `number(>0)`
+// used to admit "5" and [5] (`"5" > 0`, `[5] > 0`), `integer(>0)` admitted 0.5,
+// `string(.length >= 1)` admitted ["a","b"] and {length: 5}, and a property
+// predicate on null / a missing field THREW (a server 500). The judge tests the
+// base type first, which also guards the property access.
+// ---------------------------------------------------------------------------
+
+/** What the judge needs: the refinement, plus any containers around it. */
+export interface JudgeShape {
+  baseType?: string;
+  wrap?: Array<"array" | "nullable">;
+}
+
+/** JS boolean: is `v` a value of `baseType`? `null` = no base guard (enum subset). */
+function baseTypeGuard(baseType: string | undefined, v: string): string | null {
+  switch (baseType) {
+    case "number": return `typeof ${v} === "number" && !Number.isNaN(${v})`;
+    case "integer": return `Number.isInteger(${v})`;
+    case "string": return `typeof ${v} === "string"`;
+    case "boolean": return `typeof ${v} === "boolean"`;
+    default: return null;
+  }
+}
+
+/**
+ * The full judge for `valueExpr` against `predicate` under `shape`: containers
+ * (an array is judged element-wise, `not` inhabits a nullable), then the base
+ * type, then the predicate. `valueExpr` must be a side-effect-free reference
+ * (a parameter or temp name) — it is read more than once.
+ */
+export function judgeExpr(predicate: PredicateExpr, valueExpr: string, shape: JudgeShape = {}): string {
+  const wrap = shape.wrap ?? [];
+  const inner = (v: string, at: number): string => {
+    if (at < wrap.length) {
+      if (wrap[at] === "nullable") return `(${v} === null || ${v} === undefined || ${inner(v, at + 1)})`;
+      const el = `_scrml_el${at}`;
+      return `(Array.isArray(${v}) && ${v}.every((${el}) => ${inner(el, at + 1)}))`;
+    }
+    const guard = baseTypeGuard(shape.baseType, v);
+    const pred = predicateToJsExpr(predicate, v);
+    return guard ? `(${guard} && ${pred})` : pred;
+  };
+  return inner(valueExpr, 0);
+}
+
+/**
+ * A failure report's rendering of the offending value that cannot throw
+ * (`String(v)` throws for `{ toString: 1 }`, which turned a refused server
+ * parameter into a 500) and does not echo a structured attacker value.
+ */
+function safeValueText(v: string): string {
+  return `(typeof ${v} === "string" || typeof ${v} === "number" || typeof ${v} === "boolean" ? String(${v}) : typeof ${v})`;
+}
+
 export function predicateToJsExpr(pred: PredicateExpr, valueExpr: string): string {
   if (!pred || !pred.kind) return FAIL_CLOSED;
 
   switch (pred.kind) {
     case "comparison": {
       const op = pred.op ?? ">";
-      const val = pred.value ?? 0;
-      // comparison predicate: just `value op N`
-      return `(${valueExpr} ${op} ${val})`;
+      // comparison predicate: just `value op N`. S458 — a string operand
+      // (`eq("x")`) is emitted as a quoted JS string literal, never as bare text.
+      return `(${valueExpr} ${op} ${jsLiteral(pred.value ?? 0)})`;
     }
 
     case "property": {
-      // property predicate: `.length > N` etc.
+      // property predicate: `.length > N`, `.kind == "a"` etc. S458 — a string
+      // value is quoted (it used to be emitted bare: `.kind == "foo"` became
+      // `(v.kind == foo)`, a ReferenceError on every call).
       const prop = pred.prop ?? "length";
       const op = pred.op ?? ">";
-      const val = pred.value ?? 0;
-      return `(${valueExpr}.${prop} ${op} ${val})`;
+      return `(${valueExpr}.${prop} ${op} ${jsLiteral(pred.value ?? 0)})`;
     }
+
+    case "on-length":
+      // §55.1 `length(pred)` — the inner predicate judged on `.length`.
+      return pred.operand ? predicateToJsExpr(pred.operand, `${valueExpr}.length`) : FAIL_CLOSED;
+
+    case "pattern": {
+      // §55.1 `pattern(/re/flags)` — a regex literal; its source was read and
+      // validated by the type stage (it is a well-formed RegExp body).
+      const src = String(pred.value ?? "");
+      if (/[\n\r]/.test(src)) return FAIL_CLOSED;
+      return `(/${src}/${pred.flags ?? ""}.test(${valueExpr}))`;
+    }
+
+    case "value-set": {
+      // §55.1 `oneOf([…])` / `notIn([…])` over literal values.
+      const inSet = `${JSON.stringify(pred.values ?? [])}.includes(${valueExpr})`;
+      return pred.variantMode === "notIn" ? `(!${inSet})` : `(${inSet})`;
+    }
+
+    case "req":
+      // §55.1 `req` — non-empty (`""` fails; absence is refused by the base guard).
+      return `(${valueExpr} !== "")`;
 
     case "named-shape": {
       const shapeName = pred.name ?? "";
@@ -199,9 +291,17 @@ function predicateToDisplayString(pred: PredicateExpr): string {
 
   switch (pred.kind) {
     case "comparison":
-      return `${pred.op}${pred.value}`;
+      return `${pred.op}${jsLiteral(pred.value ?? 0)}`;
     case "property":
-      return `.${pred.prop} ${pred.op} ${pred.value}`;
+      return `.${pred.prop} ${pred.op} ${jsLiteral(pred.value ?? 0)}`;
+    case "on-length":
+      return `length(${pred.operand ? predicateToDisplayString(pred.operand) : "?"})`;
+    case "pattern":
+      return `pattern(/${pred.value ?? ""}/${pred.flags ?? ""})`;
+    case "value-set":
+      return `${pred.variantMode ?? "oneOf"}(${JSON.stringify(pred.values ?? [])})`;
+    case "req":
+      return "req";
     case "named-shape":
       return pred.name ?? "(unknown-shape)";
     case "and": {
@@ -249,8 +349,10 @@ export function emitRuntimeCheck(
   varName: string,
   label: string | null = null,
   location = "",
+  shape: JudgeShape = {},
 ): string[] {
-  const checkExpr = predicateToJsExpr(predicate, valueExpr);
+  // S458 — the one judge: base type, containers, predicate.
+  const checkExpr = judgeExpr(predicate, valueExpr, shape);
   const displayPred = predicateToDisplayString(predicate);
   const labelPart = label ? ` [${label}]` : "";
   const locationPart = location ? ` (${location})` : "";
@@ -262,7 +364,7 @@ export function emitRuntimeCheck(
   lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
   lines.push(`    "  Variable: " + ${JSON.stringify(varName + labelPart)} + "\\n" +`);
   lines.push(`    "  Constraint: (" + ${JSON.stringify(displayPred)} + ")\\n" +`);
-  lines.push(`    "  Value: " + String(${valueExpr}) + "\\n" +`);
+  lines.push(`    "  Value: " + ${safeValueText(valueExpr)} + "\\n" +`);
   lines.push(`    "  Location: " + ${JSON.stringify(locationPart || varName)}`);
   lines.push(`  );`);
   lines.push(`}`);
@@ -292,8 +394,11 @@ export function emitServerParamCheck(
   label: string | null,
   fnName: string,
   indent = "  ",
+  shape: JudgeShape = {},
 ): string[] {
-  const checkExpr = predicateToJsExpr(predicate, paramName);
+  // S458 — the one judge: base type, containers, predicate. A value of the
+  // wrong base type (or a missing field) is a clean 400, not a thrown 500.
+  const checkExpr = judgeExpr(predicate, paramName, shape);
   const displayPred = predicateToDisplayString(predicate);
   const labelPart = label ? ` [${label}]` : "";
 
@@ -305,7 +410,7 @@ export function emitServerParamCheck(
   lines.push(`${indent}    constraint: ${JSON.stringify(`(${displayPred})`)},`);
   lines.push(`${indent}    parameter: ${JSON.stringify(paramName + labelPart)},`);
   lines.push(`${indent}    function: ${JSON.stringify(fnName)},`);
-  lines.push(`${indent}    value: String(${paramName}),`);
+  lines.push(`${indent}    value: ${safeValueText(paramName)},`);
   lines.push(`${indent}  }), { status: 400, headers: { "Content-Type": "application/json" } });`);
   lines.push(`${indent}}`);
 
@@ -461,16 +566,22 @@ export interface Refinement {
   baseType: string;
   predicate: PredicateExpr;
   label: string | null;
+  /** Containers around the refined value, outermost first (`T[]`, `T | not`). */
+  wrap?: Array<"array" | "nullable">;
 }
 
 /** The refinement carried by a TS stamp (param / fn return / decl), or null. */
 export function refinementOf(stamp: unknown): Refinement | null {
   if (!stamp || typeof stamp !== "object") return null;
-  const r = stamp as { predicate?: unknown; baseType?: unknown; label?: unknown };
+  const r = stamp as { predicate?: unknown; baseType?: unknown; label?: unknown; wrap?: unknown };
   if (!r.predicate || typeof r.predicate !== "object") return null;
+  const wrap = Array.isArray(r.wrap)
+    ? (r.wrap as unknown[]).filter((w): w is "array" | "nullable" => w === "array" || w === "nullable")
+    : [];
   return {
     baseType: typeof r.baseType === "string" ? r.baseType : "",
     predicate: r.predicate as PredicateExpr,
     label: typeof r.label === "string" ? r.label : null,
+    ...(wrap.length ? { wrap } : {}),
   };
 }

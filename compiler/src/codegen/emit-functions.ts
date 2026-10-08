@@ -155,6 +155,7 @@ function emitClientParamChecks(
       paramNames[i],
       parsed.label,
       `fn ${fnName}, parameter '${paramNames[i]}'`,
+      parsed,
     );
     for (const l of checkLines) out.push(`${indent}${l}`);
   }

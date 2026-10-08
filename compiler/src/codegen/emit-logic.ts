@@ -2390,7 +2390,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
           return [
             `const ${_checkTmpVar} = ${rhs};`,
             ..._checkLines,
@@ -2409,7 +2409,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
         return [`const ${_checkTmpVar} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`, ..._checkLines, `let ${node.name} = ${_checkTmpVar};`].join("\n");
       }
       return `let ${_letDeclLhs} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`;
@@ -3119,7 +3119,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
           return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
@@ -3135,7 +3135,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
         return _appendSidecar([`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n"));
       }
       return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
@@ -3163,6 +3163,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           `<return value of ${_fnName}>`,
           _label,
           `fn ${_fnName}, return statement`,
+          _retPredInfo,
         );
         return [
           `const ${_tmpVar} = ${retExprStr};`,
