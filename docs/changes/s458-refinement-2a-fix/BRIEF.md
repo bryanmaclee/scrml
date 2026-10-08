@@ -1,0 +1,47 @@
+# BRIEF — s458-refinement-2a-fix (continue the §53 refinement arc; the previous agent ran out of context)
+
+CHANGE-ID: `s458-refinement-2a-fix`. Agent: scrml-js-codegen-engineer, isolation worktree.
+BASE: after the F4 checks, `git reset --hard bacf30adf` (tip of local branch `worktree-agent-a8d0ca5626d2a3728` = refinement slice 2a merged with main c4eb2c589; confirm `git rev-parse worktree-agent-a8d0ca5626d2a3728` starts with bacf30adf). Then your F4 step-3 BRIEF commit.
+
+READ FIRST (the context the previous agent had): `docs/changes/s458-refinement-every-position/PLAN.md` (the design + the 9+2 positions + rulings) and `progress.md` (slice 1 and slice 2a: what was built and why — `compiler/src/refinement-obligations.ts` JudgeType/judgeTypeOf, desugarFnRefinements in type-system.ts, emitRefineExpr / emitParamGuardStatement / judgeTypeExpr in emit-predicates.ts, the `__scrml_refine_<nonce>__` placeholder, worker helper inlining). SPEC §53 (esp. §53.4 zones, §53.6.1, §53.9) IN FULL. Rulings (bryan, S458, user-voice "your recs on R1-R5"): R2 server non-param E-CONTRACT-001-RT → 500 no value echo (done in 2a); R3 a refined derived cell whose recompute fails → throw (reported), prior value kept; R4/R1 are later slices — do NOT do them.
+
+The S239 differential review of 2a (base c4eb2c589 vs bacf30adf) = DO-NOT-LAND. The PA reproduced F1. Server paths, R2, placeholder safety, returns and the corpus sweep (0 outcome changes) held. Fix, each as its own commit(s):
+
+F1 HIGH (regression, silent): a cell whose type needs the whole-type judge (struct with any refined field, or a union) carries a stamp with `judge` + a placeholder `predicate:{kind:"error"}`; emit-bindings' bind:value gate calls `predicateToJsExpr(predicate)` → `if (false /* §53 S458: unjudgeable predicate — refused */)`, so with `type P:struct = { name: string, n: number(>0) }`, `<p>: P = …`, `<input bind:value=@p.name/>` (name NOT refined) never writes the cell (base wrote it via `_scrml_deep_set`); same for `bind:value=@u` on `number(>0) | string`. Make it structurally impossible for any consumer to read `predicate` off a judge-carrying stamp (one accessor), and the bind gate uses the bound FIELD's own judge by path (none for an unrefined field).
+F2 MED-HIGH (claimed by 2a but unchecked; BASE == HEAD): inline handler writes `onclick=${@n = @m}`, writes in for/lift rows, arrow bodies in functions, reactive cell FIELD writes (`@l.u = "javascript:…"`, `@l.n = -5`), array element writes into a refined `T[]` (`@ls[0] = -5`, `@ls.push(-5)`, local `a[0] = -5`), `++`/`--` (`@n--` from 1 on `number(>0)`), `Object.assign`, annotated destructure `let { n }: Link = …`, and unions with a non-primitive unrefined member (`number(>0) | Role`, `number(>0) | string[]` → judge `{k:"any"}` → admits -5). BOUNDARY CHANGE for reactive cells (patching positions keeps leaking — 2a's own miss list proves it): put the judge at the RUNTIME CELL WRITE PATH. Emit a per-cell judge registration once (the cell's judge, hoisted — see F3), and make every runtime write primitive that commits a cell value (`_scrml_cs_reactive_set` and its server/channel/sync/persist/reset/request-result/engine variants, the deep-set field-write path, the array-mutation lowerings, `++`/`--` lowerings) consult it before committing; a refused write throws E-CONTRACT-001-RT and leaves the prior value. Cell writes are then covered BY CONSTRUCTION wherever they originate. Keep the AST obligations for LOCALS, params, returns and literals (no setter there) — and extend them to local field/element writes, `++`/`--`, arrow bodies. Fix the union arm: a non-primitive member gets its real judge (struct / enum / array), never `any`. PROVE the boundary with an executed grid over every write-originating feature: handlers (all forms), arrows, `<each>`/lift rows, CPS-split `@cell = serverFn()`, `<request>` results, channel sync, `persist=` restore, `reset()`, engine payload transitions, `bind:value` — for each, state whether it routes through the guarded setter (executed). Refused writes must not break legitimate updates (a refined cell initialised then legitimately updated; `T | not` writes of `not`).
+F3 MED (exponential output): every judge and its constraint text is inlined per site; a struct reused k times per level grows k^depth (stress: 4-level structs, 40 refined fields, 30 functions → 37 s, 3.2 GB, 34 MB client JS; base 0.9 s). Hoist ONE named judge function per type per bundle and call it; constraint text by reference. Show the stress case is linear (time, RSS, size) and a realistic Order/Customer/Address/Item model unchanged or smaller.
+F4 LOW: `unmetWorkerHelperRefs` strips `//` comments and quoted strings but not template literals / block comments → ``const t = `see _scrml_foo(1) docs` `` in a worker is refused as "a compiler defect". Scan the emitter's own call list, or strip with a real tokenizer.
+R3 (2b, after F1–F4 are committed, separate commits): a refined derived cell whose recompute fails → throw (reported via the existing error surface) and keep its prior value; plus `g-refinement-predicate-contradicts-base-s458` (`number(eq("x"))`, `number(length(>1))`, `number(.length > 1)` → E-CONTRACT-002 at the declaration), `g-enum-subset-judge-admits-object-and-skips-payload-s458` (a plain object `{"variant":"Admin"}` must not pass a unit-variant subset; payload fields validated), `g-bind-value-check-skips-base-type-s458` (thread the coerced write value to the check). If 2b grows large, stop after F1–F4 with a FINAL_SHA and report; the PA will re-review that first.
+
+Discipline: governing sentence quoted per item in progress.md (append — do not rewrite the previous agent's entries); executed probes base (c4eb2c589) vs head; conformance pos + neg per item; corpus emit differential base vs head with every delta classified; direction-of-change with measured population; full gates incl. the browser-tier CI step; `git merge origin/main` before the final report (main may have moved). Do not edit PA-owned docs (known-gaps, FACTS — FACTS/SPEC-INDEX may be regenerated by script only if their --check fails). Report: FINAL_SHA per stop + gap-entry texts.
+
+[SHARED BLOCK FOLLOWS]
+## CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (F4) — path-discipline incidents to date: 4 (S99) + S385 stash race + S456 cookie-jar leak
+
+1. `pwd` — MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`. Otherwise STOP and report.
+   `git rev-parse --show-toplevel` must equal `pwd`. `git status --short` must be clean.
+2. Base: `git fetch origin`; follow the BASE line of your brief exactly.
+3. Your FIRST commit archives this entire prompt verbatim to `docs/changes/<CHANGE-ID>/BRIEF.md` with the message
+   `WIP(<CHANGE-ID>): start at $(pwd)` (the PA verifies the worktree prefix in this message).
+4. `bun install` (worktrees do not inherit node_modules), then `bun run pretest` run plainly from the worktree CWD
+   (NOT `bun --cwd <path> run …` — that silently no-ops). Verify `samples/compilation-tests/dist/` was populated.
+5. Every Read/Edit/Write uses an ABSOLUTE path under YOUR worktree root. Never `cd` into `/home/bryan-maclee/scrmlMaster/scrml`
+   (the main checkout). Use `git -C "$WT"`. Write NOTHING outside your worktree (scratch: `$WT/.tmp/`, delete before your final report).
+   `TMPDIR` must NOT point inside any repo — leave it unset.
+6. NEVER `git stash` (the stash is shared across every worktree). Base-vs-build flips by FILE COPY.
+7. NEVER `pkill -f` / `killall` on a command string — kill only PIDs you started.
+8. Commit after every meaningful change (WIP commits fine); keep `docs/changes/<CHANGE-ID>/progress.md` (append-only, timestamped) AND append a short pointer entry to `docs/changes/s458-refinement-every-position/progress.md`.
+   A clean `git status` + committed branch tip before your final report is mandatory. Do not push; the PA lands.
+   The pre-commit hook runs the core suite (~4-8 min under load) — give commits a long timeout; never read a commit's success from a piped exit code, check `git log`. Before any full-suite run or commit, wait until `free -g | awk '/Mem/{print $7}'` ≥ 4 (poll every 30s, max 20 polls). If one test fails only under load, re-run it alone and retry; report it.
+   CONTEXT BUDGET: the previous agent on this arc ran out of context. Keep tool output small (pipe long outputs through `tail`/`grep`, never dump whole files or full test logs), and if you sense you are past ~70% of your budget, commit, write a precise "next step" in progress.md, and report.
+9. Do NOT edit these shared, PA-owned docs: `docs/known-gaps.md`, `docs/changelog.md`, `master-list.md`, `hand-off.md`, `docs/pr-reviews.md`, `handOffs/**`. Put gap-entry text in your final report.
+10. Never `--no-verify`, never change `core.hooksPath`, never disable a hook.
+
+## MAPS — REQUIRED FIRST READ
+Read `.claude/maps/primary.map.md` first, follow its Task-Shape Routing; treat map content as a hypothesis. Report which entry was load-bearing (or "not load-bearing").
+
+## Rules of the house (short)
+- SPEC `compiler/SPEC.md` is normative; quote the governing sentence in progress.md before changing behaviour.
+- A locus named in this brief is a PA HYPOTHESIS; verify it.
+- No `null`/`undefined` in scrml source; `not` is absence. No try/catch/async/await in scrml source.
+- Final report: worktree path · branch · FINAL_SHA · files touched · tests + results · empirical check output · direction-of-change with measurement · gap-entry text · anything deferred.
