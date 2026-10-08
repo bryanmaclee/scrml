@@ -36,3 +36,16 @@ Every position leaks: top `title="Top" … id="c-top"` + bool disabled binding; 
   (honest: the junk root write was the cells' only consumer; the each-in-lifted-component drop is the open gap);
   conformance dup-reject moved to bare form; 2 new cases (declared-prop-not-root-attr, declared-prop-explicit-root-write).
 - Gate: unit+integration+conformance 29907 pass / 0 fail.
+
+## 2026-10-07 — step 2: corpus measurement + gates
+- `scripts/corpus-emit-differential.ts`, base = this worktree with the 3 compiler files flipped back to 46ed1f8ff by
+  file copy (same corpus both sides), head = f81b341ca. 2427 sources; compile outcome 0 newly failing / 2 newly passing
+  (bind-non-bindable-prop-clean: spurious E-ATTR-011 gone; declared-prop-explicit-root-write: new case);
+  artifacts 7056/7089 byte-identical, 33 differing; syntax-failing 0/0; server-fn call sites unchanged.
+- Every differing artifact classified "accidental leak removed" (title tooltips on Card roots, label/status/items/load/
+  customerName/role/name/currentDriverId/… junk writes, a bogus `Save` event listener from `onSave`); the rest are
+  renumbered ids (`_scrml_risky_5`→`_3`, `_lift_el_108`→`_107`). ZERO "intended attribute" deltas — no source migration.
+- Diagnostic deltas: E-ATTR-011 → E-DG-002 on bind-non-bindable-prop-{clean,reject}; trucking +3 E-DG-002 (load-detail).
+- Gates: e2e-render-map 259/0, root 2239/0, corpus-compile-floor PASS, browser-baseline PASS, conformance/run.ts
+  1348/1398 + 50 xfail (no new xfail), types-gate OK, s34-census PASS, snippet-gate PASS, delta-lint PASS.
+  STALE (PA-owned, not edited): compiler/SPEC-INDEX.md (regen-spec-index --check), docs/FACTS.md facts-table.
