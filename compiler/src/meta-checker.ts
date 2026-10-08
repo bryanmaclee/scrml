@@ -1740,16 +1740,28 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
       const body = metaNode.body || [];
       const isCompileTime = bodyUsesCompileTimeApis(body);
 
-      checkMetaBlock(metaNode, fileAST.scopeChain, typeRegistry, filePath, allErrors, outerCompileTimeConsts);
-
       // §22.12 (S457) — the CLOSED allow-list (meta-allow-list.ts), on every ^{} body
       // whatever its classification. Supersedes the S134 deny list of host names
       // (`checkMetaBlockForJsHostGlobals`), which failed open. A refused block is
       // marked so meta-eval never executes it.
-      checkMetaBlockAllowList(metaNode, filePath, allErrors, {
-        captured: new Set([...fileScopeNames, ...(enclosingNames.get(metaNode) ?? [])]),
+      const captured = new Set([...fileScopeNames, ...(enclosingNames.get(metaNode) ?? [])]);
+      const allowListErrors: MetaError[] = [];
+      checkMetaBlockAllowList(metaNode, filePath, allowListErrors, {
+        captured,
         typeNames: new Set(typeRegistry.keys()),
       }, nestedChecked);
+
+      // §22.4 compile-time "runtime variable" check. A name that is no binding of the
+      // file at all (`globalThis`, `process`) is not a runtime variable — it is a host
+      // name, and the allow-list's message (naming the allowed set) is the one of record.
+      const phaseErrors: MetaError[] = [];
+      checkMetaBlock(metaNode, fileAST.scopeChain, typeRegistry, filePath, phaseErrors, outerCompileTimeConsts);
+      for (const e of phaseErrors) {
+        const m = /^E-META-001: Runtime variable '([^']+)'/.exec(e.message);
+        if (m && !captured.has(m[1]) && allowListErrors.some((a) => a.message.includes(`'${m[1]}'`))) continue;
+        allErrors.push(e);
+      }
+      allErrors.push(...allowListErrors);
 
       checkReflectCalls(body, typeRegistry, filePath, metaNode.span, allErrors);
 

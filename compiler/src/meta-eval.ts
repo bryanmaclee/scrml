@@ -38,6 +38,10 @@ import { exprNodeContainsReactiveRef, emitStringFromTree } from "./expression-pa
 import type { Span, FileAST, ASTNode, ExprNode, MetaNode, LogicStatement } from "./types/ast.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
+import * as vm from "node:vm";
+import { checkExecutedMetaJs } from "./meta-allow-list.ts";
+import { isStandardMarkupElementName } from "./html-elements.js";
+import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -446,6 +450,7 @@ function evaluateMetaBlock(
   typeRegistry: TypeRegistry,
   errors: MetaEvalError[],
   precedingDecls?: string,
+  filePath: string = "",
 ): ASTNode[] | null {
   const body = metaNode.body;
   if (!Array.isArray(body) || body.length === 0) return null;
@@ -459,33 +464,48 @@ function evaluateMetaBlock(
   // that are in scope (compile-time constants from sibling nodes).
   const bodyCode = (precedingDecls ? precedingDecls + "\n" : "") + serializeBody(body, metaLocals);
 
-  // Build the emit() and reflect() functions
-  const emitted: Array<{ code: string; raw: boolean }> = [];
-  function emitFn(code: unknown): void {
-    if (typeof code === "string") {
-      emitted.push({ code, raw: false });
-    } else {
-      emitted.push({ code: String(code), raw: false });
+  const site = metaNode.span || { file: "unknown", start: 0, end: 0, line: 1, col: 1 };
+
+  // §22.12 (S457) — the text below is the EXACT text the evaluator runs. The closed
+  // allow-list is checked on THIS text (meta-allow-list.ts reader 2), not only on the
+  // scrml AST the checker saw: serialization rewrites the body (the `emit("…${x}…")` ->
+  // template-literal restore, reflect(T) quoting) and prepends the captured
+  // declarations, and a check of anything but the executed text is a second reader.
+  const wrapped = `(function (emit, reflect) {\n"use strict";\n${bodyCode}\n})`;
+  const violations = checkExecutedMetaJs(wrapped, {
+    captured: new Set<string>(),
+    typeNames: new Set(registryTypeNames(typeRegistry)),
+  });
+  if (violations.length > 0) {
+    // Name the source of a violation the ^{} body itself does not contain: the
+    // declarations the block captures from its enclosing scope run in the same text.
+    let where = "";
+    if (precedingDecls) {
+      const bodyOnly = `(function (emit, reflect) {\n"use strict";\n${serializeBody(body, metaLocals)}\n})`;
+      const own = new Set(checkExecutedMetaJs(bodyOnly, {
+        captured: new Set<string>(),
+        typeNames: new Set(registryTypeNames(typeRegistry)),
+      }).map((v) => v.message));
+      if (violations.some((v) => !own.has(v.message))) {
+        where = " (found in a declaration this compile-time ^{} block captures from its enclosing scope — " +
+          "captured declarations are evaluated with the block, so they are held to the same allow-list)";
+      }
     }
+    for (const v of violations) errors.push(new MetaEvalError("E-META-001", v.message + where, site));
+    return null;
   }
-  (emitFn as unknown as Record<string, unknown>).raw = (html: unknown): void => {
-    emitted.push({ code: typeof html === "string" ? html : String(html), raw: true });
-  };
 
-  const reflectFn = createReflect(typeRegistry);
-
-  // Execute using new Function()
-  try {
-    const fn = new Function("emit", "reflect", bodyCode);
-    fn(emitFn, reflectFn);
-  } catch (e) {
+  // Execute in a fresh realm (defence in depth — the allow-list above is the authority).
+  const run = runInMetaRealm(wrapped, typeRegistry);
+  if (!run.ok) {
     errors.push(new MetaEvalError(
       "E-META-EVAL-001",
-      `Compile-time meta evaluation failed: ${(e as Error).message}`,
-      metaNode.span || { file: "unknown", start: 0, end: 0, line: 1, col: 1 },
+      `Compile-time meta evaluation failed: ${run.message}`,
+      site,
     ));
     return null;
   }
+  const emitted = run.emitted;
 
   // If nothing was emitted, remove the meta node (replace with nothing)
   if (emitted.length === 0) return [];
@@ -499,7 +519,172 @@ function evaluateMetaBlock(
   const combined = emitted
     .map(e => e.raw ? e.code : normalizeEmitCode(e.code))
     .join("");
-  return reparseEmitted(combined, errors, /* raw= */ true);
+  const nodes = reparseEmitted(combined, errors, /* raw= */ true);
+  if (!checkEmittedNodes(nodes, site, filePath, errors)) return null;
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// The evaluation realm (S457, defence in depth)
+// ---------------------------------------------------------------------------
+
+function registryTypeNames(typeRegistry: TypeRegistry): string[] {
+  const r = typeRegistry as unknown;
+  if (r instanceof Map) return [...(r as Map<string, unknown>).keys()];
+  return Object.keys(typeRegistry ?? {});
+}
+
+/**
+ * The realm-side prelude. `emit` / `emit.raw` / `reflect` are defined INSIDE the realm,
+ * so no compiler-process object is reachable from the body (a host function passed in
+ * would hand the body the host `Function` through `.constructor`). Data crosses the
+ * boundary only as strings: the reflect table goes in as JSON, the emitted list comes
+ * back as JSON, serialized with the realm's `JSON.stringify` captured before the body
+ * runs.
+ */
+const META_REALM_PRELUDE = `(function (tableJson) {
+  "use strict";
+  const parse = JSON.parse;
+  const stringify = JSON.stringify;
+  const hasOwn = Object.prototype.hasOwnProperty;
+  const table = parse(tableJson);
+  const out = [];
+  function emit(code) { out[out.length] = { code: typeof code === "string" ? code : String(code), raw: false }; }
+  emit.raw = function (html) { out[out.length] = { code: typeof html === "string" ? html : String(html), raw: true }; };
+  function reflect(typeName) {
+    if (!typeName || typeof typeName !== "string") {
+      throw new Error("reflect() requires a type name string, got: " + typeof typeName);
+    }
+    if (!hasOwn.call(table, typeName)) {
+      throw new Error("E-META-003: reflect() called on unknown type '" + typeName + "'. " +
+        "The type must be declared before the ^{} block that calls reflect().");
+    }
+    return parse(table[typeName]);
+  }
+  return function (body) { body(emit, reflect); return stringify(out); };
+})`;
+
+type RealmResult =
+  | { ok: true; emitted: Array<{ code: string; raw: boolean }> }
+  | { ok: false; message: string };
+
+/**
+ * Run the checked, wrapped body in a fresh `node:vm` context whose global object has no
+ * `process` / `Bun` / `require` and whose builtins are the realm's own. This is NOT the
+ * security boundary (the allow-list is) — it bounds the damage of a hole in it.
+ */
+function runInMetaRealm(wrapped: string, typeRegistry: TypeRegistry): RealmResult {
+  const reflect = createReflect(typeRegistry as unknown as Map<string, never>);
+  const table: Record<string, string> = {};
+  for (const name of registryTypeNames(typeRegistry)) table[name] = JSON.stringify(reflect(name));
+  let json: unknown;
+  try {
+    const context = vm.createContext(Object.create(null));
+    const makeRunner = vm.runInContext(META_REALM_PRELUDE, context) as (t: string) => (b: unknown) => unknown;
+    const runner = makeRunner(JSON.stringify(table));
+    const body = vm.runInContext(wrapped, context);
+    json = runner(body);
+  } catch (e) {
+    let message = "unknown error";
+    try {
+      message = e !== null && typeof e === "object" && typeof (e as { message?: unknown }).message === "string"
+        ? (e as { message: string }).message
+        : String(e);
+    } catch { /* a hostile thrown value — keep the generic message */ }
+    return { ok: false, message };
+  }
+  if (typeof json !== "string") return { ok: false, message: "the meta body did not produce an emit list" };
+  const parsed: unknown = JSON.parse(json);
+  const emitted: Array<{ code: string; raw: boolean }> = [];
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      if (item && typeof item === "object" && typeof (item as { code?: unknown }).code === "string") {
+        emitted.push({ code: (item as { code: string }).code, raw: (item as { raw?: unknown }).raw === true });
+      }
+    }
+  }
+  return { ok: true, emitted };
+}
+
+// ---------------------------------------------------------------------------
+// The emitted-output gate (§22.4.1, S457)
+// ---------------------------------------------------------------------------
+
+/** Attribute value kinds admitted in emit() output — all plain markup attribute forms. */
+const EMIT_ATTR_VALUE_KINDS = new Set(["string-literal", "variable-ref", "call-ref", "expr", "absent"]);
+
+/**
+ * `emit()` output re-enters the pipeline AFTER the type system, route inference and
+ * every front-end check have run (ME is Stage 6.5), so a construct those stages own
+ * would reach code generation unchecked — measured S457: an emitted `<script>`
+ * reached the HTML (E-SCRIPT-001 is a block-splitter check the re-parse does not
+ * apply), an emitted `server function` was lowered as a CLIENT function, and an
+ * emitted `_scrml_` declaration passed §47.1.1. impl#1 therefore admits in emit()
+ * output only what the post-ME stages check exactly as they check source: HTML
+ * elements, text and comments, with plain attribute values. Everything else is
+ * refused (fail closed). The §5.2 executable-sink rule runs over the spliced nodes
+ * post-ME (api.js Stage 6.55); §47.1.1 runs on them here.
+ */
+function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, errors: MetaEvalError[]): boolean {
+  let ok = true;
+  const reported = new Set<string>();
+  const refuse = (code: string, message: string): void => {
+    ok = false;
+    if (reported.has(message)) return;
+    reported.add(message);
+    errors.push(new MetaEvalError(code, message, site));
+  };
+  const visit = (list: unknown[]): void => {
+    for (const n0 of list) {
+      if (!n0 || typeof n0 !== "object") continue;
+      const n = n0 as Record<string, unknown>;
+      if (n.kind === "text" || n.kind === "comment") continue;
+      if (n.kind === "markup") {
+        const tag = typeof n.tag === "string" ? n.tag : "";
+        if (tag.toLowerCase() === "script") {
+          refuse("E-SCRIPT-001", "E-SCRIPT-001: `<script>` element in ^{} emit() output. scrml does not admit " +
+            "`<script>` at all (§4.17) — emit() output is held to the same rule as source.");
+          continue;
+        }
+        if (tag.toLowerCase() === "style") {
+          refuse("E-STYLE-001", "E-STYLE-001: `<style>` element in ^{} emit() output. scrml does not admit " +
+            "`<style>` (CSS lives in `#{}`, §9) — emit() output is held to the same rule as source.");
+          continue;
+        }
+        if (!isStandardMarkupElementName(tag)) {
+          refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output contains \`<${tag}>\`. impl#1 admits only ` +
+            `standard markup elements (HTML / SVG / MathML / custom elements), text and comments in emit() output ` +
+            `(§22.4.1): a component or a scrml structural element would reach code generation without the stages ` +
+            `that expand and check it in source.`);
+          continue;
+        }
+        for (const a of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
+          const v = a?.value as { kind?: string } | undefined;
+          if (v && typeof v === "object" && !EMIT_ATTR_VALUE_KINDS.has(String(v.kind))) {
+            refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` attribute ` +
+              `'${String(a.name)}' a '${String(v.kind)}' value, which impl#1 does not admit in emit() output (§22.4.1).`);
+          }
+        }
+        if (Array.isArray(n.children)) visit(n.children);
+        continue;
+      }
+      refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output contains a '${String(n.kind)}' construct. impl#1 ` +
+        `admits only HTML elements, text and comments in emit() output (§22.4.1): logic, \`?{}\`, functions and ` +
+        `declarations emitted after the type system and route inference have run would reach code generation unchecked.`);
+    }
+  };
+  visit(nodes);
+  // §47.1.1 — the reserved `_scrml_` prefix, on the emitted tree (the source-tree run at
+  // Stage 3 never saw it).
+  for (const d of runReservedPrefixCheck({ filePath, nodes } as unknown as FileAST)) {
+    ok = false;
+    errors.push(new MetaEvalError(
+      String(d.code),
+      `${String(d.message)} (in ^{} emit() output)`,
+      site,
+    ));
+  }
+  return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +700,7 @@ function processNodeList(
   errors: MetaEvalError[],
   outerScope?: string,
   outerDeclNodes?: ASTNode[],
+  filePath: string = "",
 ): boolean {
   if (!Array.isArray(nodes)) return false;
 
@@ -577,10 +763,14 @@ function processNodeList(
       // E-META-EVAL-001 "Unexpected string literal…" crash.
       const hasNestedMeta = bodyContainsNestedMeta((body || []) as any);
 
-      if (isCompileTime && !hasReactiveVars && !hasNestedMeta) {
+      // §22.12 (S457): a body the meta-checker refused (closed allow-list, E-META-001)
+      // is NEVER executed — before S457 a refused body still ran here.
+      const refused = (node as Record<string, unknown>)._metaAllowListRefused === true;
+
+      if (isCompileTime && !hasReactiveVars && !hasNestedMeta && !refused) {
         const precedingDecls = scopeParts.length > 0 ? scopeParts.join("\n") : undefined;
 
-        const replacementNodes = evaluateMetaBlock(node as MetaNode, typeRegistry, errors, precedingDecls);
+        const replacementNodes = evaluateMetaBlock(node as MetaNode, typeRegistry, errors, precedingDecls, filePath);
 
         if (replacementNodes !== null) {
           // Mark preceding declarations consumed by this meta block as compile-time-only
@@ -612,10 +802,10 @@ function processNodeList(
     const n = node as Record<string, unknown>;
     const currentScope = scopeParts.length > 0 ? scopeParts.join("\n") : undefined;
     if (Array.isArray(n.children)) {
-      if (processNodeList(n.children as ASTNode[], typeRegistry, errors, currentScope, declNodes)) changed = true;
+      if (processNodeList(n.children as ASTNode[], typeRegistry, errors, currentScope, declNodes, filePath)) changed = true;
     }
     if (Array.isArray(n.body) && node.kind !== "meta") {
-      if (processNodeList(n.body as ASTNode[], typeRegistry, errors, currentScope, declNodes)) changed = true;
+      if (processNodeList(n.body as ASTNode[], typeRegistry, errors, currentScope, declNodes, filePath)) changed = true;
     }
 
     i++;
@@ -665,7 +855,7 @@ export function runMetaEval(input: MetaEvalInput): MetaEvalOutput {
     const nodes = (fileAST.ast?.nodes ?? (fileAST as unknown as { nodes?: ASTNode[] }).nodes ?? []) as ASTNode[];
 
     // Process all meta blocks
-    processNodeList(nodes, typeRegistry, allErrors);
+    processNodeList(nodes, typeRegistry, allErrors, undefined, undefined, fileAST.filePath ?? "");
   }
 
   return {
@@ -687,4 +877,6 @@ export {
   reparseEmitted,
   evaluateMetaBlock,
   processNodeList,
+  runInMetaRealm,
+  checkEmittedNodes,
 };

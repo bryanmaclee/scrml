@@ -271,8 +271,10 @@ describe("meta-eval", () => {
   // ---------------------------------------------------------------------------
 
   test("§12 evaluateMetaBlock reports error for invalid JS", () => {
+    // S457: `throw` is not scrml and is refused by the §22.12 allow-list before
+    // evaluation (E-META-001); a body that THROWS while evaluating is the case here.
     const body = [
-      bareExpr("throw new Error('test error')"),
+      bareExpr('reflect("NoSuchType")'),
     ];
     const errors = [];
     const result = evaluateMetaBlock(metaNode(body), new Map(), errors);
