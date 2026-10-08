@@ -165,6 +165,25 @@ describe("N4 — every way to write the stored value is judged", () => {
     expect(rt.plain("rows").every((r) => r.n > 0)).toBe(true);
   });
 
+  test("no raw stored object leaks: sort / reverse return the cell's proxy; a property descriptor's value is the proxy; freezing an object in place is refused", () => {
+    const rt = load(page(`<rows>: L[] = [{ u: "a", n: 1 }, { u: "b", n: 2 }]\n  <ls>: number(>0)[] = [1, 2]`), "leaks");
+    const k = rt.key("rows");
+    const sorted = rt.state[k].sort((a, b) => b.n - a.n);
+    expect(throwsContract(() => { sorted[0].n = -5; })).toBe(true);
+    const rev = rt.state[k].reverse();
+    expect(throwsContract(() => { rev[0].n = -5; })).toBe(true);
+    const d = Object.getOwnPropertyDescriptor(rt.state[k], "0");
+    expect(throwsContract(() => { d.value.n = -5; })).toBe(true);
+    const all = Object.getOwnPropertyDescriptors(rt.state[k]);
+    expect(throwsContract(() => { all["1"].value.n = -5; })).toBe(true);
+    expect(throwsContract(() => Object.freeze(rt.state[k]))).toBe(true);
+    expect(rt.plain("rows").every((r) => r.n > 0)).toBe(true);
+    Object.freeze(rt.state[k][0]);                 // only primitives inside: nothing can be reached around the cell
+    expect(Object.isFrozen(rt.state[k][0])).toBe(true);
+    Object.freeze(rt.state[rt.key("ls")]);
+    expect(rt.plain("ls")).toEqual([1, 2]);
+  });
+
   test("fill / copyWithin: every changed slot gets its own judged copy", () => {
     const rt = load(page(`<rows>: L[] = [{ u: "a", n: 1 }, { u: "b", n: 2 }, { u: "c", n: 3 }]\n  <ls>: number(>0)[] = [1, 2, 3]`), "fill");
     const k = rt.key("rows"), ls = rt.key("ls");

@@ -6973,7 +6973,8 @@ function _scrml_refine_mutate(inner, raw, p, prop, method, args) {
   const out = method.apply(inner, call);
   if (prop === "pop" || prop === "shift") _scrml_refine_release(raw, out);
   else if (prop === "splice") for (const x of out) _scrml_refine_release(raw, x);
-  return out;
+  // sort / reverse return the array itself: hand back the cell's proxy, never the raw array
+  return out === raw ? _scrml_deep_reactive(raw) : out;
 }
 // fill / copyWithin: the call is worked out on a plain clone first (native
 // semantics), then every slot it changes is written with its own copy.
@@ -7102,6 +7103,12 @@ const _scrml_refine_handler = {
       throw _scrml_refine_error(_scrml_refine_judges[p.key], desc.get || desc.set, "an accessor property (its value cannot be judged)");
     }
     const has = Object.prototype.hasOwnProperty.call(raw, prop);
+    // A non-configurable property holding an object would have to be reported raw by
+    // Object.getOwnPropertyDescriptor (a proxy invariant) — reachable outside the cell — so it is refused.
+    const held = "value" in desc ? desc.value : raw[prop];
+    if (desc.configurable === false && held !== null && typeof held === "object") {
+      throw _scrml_refine_error(_scrml_refine_judges[p.key], held, "a non-configurable property holding an object (it could be reached around the cell)");
+    }
     if (!("value" in desc) && has) return Reflect.defineProperty(inner, prop, desc); // attributes only: the value is unchanged
     const isArr = Array.isArray(raw);
     const old = raw[prop];
@@ -7131,6 +7138,15 @@ const _scrml_refine_handler = {
       }
     }
     return ok;
+  },
+  // Object.getOwnPropertyDescriptor(@x, k).value is the stored value as the cell hands it
+  // out (its judging proxy), never the raw object.
+  getOwnPropertyDescriptor(inner, prop) {
+    const desc = Reflect.getOwnPropertyDescriptor(inner, prop);
+    if (desc !== undefined && desc.configurable && "value" in desc && desc.value !== null && typeof desc.value === "object") {
+      desc.value = _scrml_deep_reactive(desc.value);
+    }
+    return desc;
   },
   setPrototypeOf(inner, proto) {
     const raw = _scrml_proxy_targets.get(inner);
