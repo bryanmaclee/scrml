@@ -70,3 +70,53 @@
 - Found, pre-existing, NOT fixed (outside scope): a bare assignment to ANY parameter inside a function body
   (`function g(n) { n = 6; return n }`, top level, no component) emits `const n = 6` -> E-CODEGEN-INVALID-LOGIC
   ("Identifier 'n' has already been declared"): codegen's tilde-decl rebind test does not see parameters.
+
+# Round 6 (PA re-review of a793e24e5 = LAND-WITH-NITS; addendum in BRIEF.md)
+
+## 2026-10-08 — reproduced (reviewer probes s459-rev-d1r5, run on a793e24e5)
+- F1: p4/liftnested `#o` 9 (want 7); p5/liftnestedread `.t` L (want S). F4: p6/cbomit + cbomitlambda no E-TYPE-031,
+  cbnonfn no diagnostic (`"x"()`). F2: f/metasq.scrml -> E-META-EVAL-002 (naming E-ATTR-001). F3: f/sqspan.scrml
+  reported at the def span (2:12). L4: E-COMPONENT-010 said `n="value"` for a bind prop.
+- p4/ifleak + fileif (reviewer `?` placeholders): a `${}` inside an `if=` element declares at the enclosing scope —
+  consistent with the file-scope rule outside components (no element scope); not in the PA list, left as is.
+
+## step 1 — F1 (040eefc53)
+- HELD. `substitutePropsInMarkupFromStmt` now passes `new Set(shadowed)` as the markup's scope; `substituteProps`'
+  scope parameter is REQUIRED (the only call site that dropped it was this one — grep of all 8 call sites).
+- types-gate was red on the branch (round-4 TS2352 casts in expression-parser `convertParams`): fixed by field
+  casts, baseline rewritten (2 component-expander entries gone).
+- Conformance component-scope-lift-nested-{write (#o 7/9), read (L, S, t-S, L after the lift)}.
+
+## step 2 — F4 (3d103bfa5)
+- HELD. §15.11.4 "an unguarded call to a potentially-absent function-typed prop SHALL be a compile error
+  (E-TYPE-031 …)" — implemented as a property of the DEFINITION (the prop is `fn | not` in the body whatever a
+  caller passes), reported once per component; every call form (bare call-ref, expr lambda, block arrow via the
+  JS-text substituter's new `onCall` hook, body functions). Guard = a region under a test reading the prop
+  (if-consequent, `&&` right operand, ternary consequent), marked in the shadow sets (`PROP_GUARD_PREFIX`).
+  Lenient by design (any read in the test counts) so it cannot false-positive a real guard.
+- §15.11.4 "A type mismatch SHALL be E-TYPE-031": a LITERAL value for a function-typed prop is E-TYPE-031
+  (names / expressions are not judged here — no type is known at CE).
+- Printer bug found on the way, fixed: a lambda / assignment / conditional as a ternary CONDITION was not
+  parenthesized (emit-expr `emitTernary`, `emitStringFromTree`) — `onGo ? onGo() : 0` with a lambda caller emitted
+  `() => h() ? … : 0`.
+- Found, pre-existing, NOT fixed: a top-level function referenced as a VALUE (not called) is not mangled —
+  `${() => h && h()}` emits `h && _scrml_h_3()` -> ReferenceError (outside components too). It bites the guarded
+  callback idiom when the caller passes a NAMED function (`if (onGo) …` with `onGo=h` in an arrow); the
+  handler-statement form works. The guarded conformance case passes lambdas for that reason.
+- Corpus pre-measure: only one corpus file declares an optional function prop
+  (samples/compilation-tests/gauntlet-r10-ts-components.scrml) and it already fails E-COMPONENT-021 on base.
+- Conformance callback-prop-{optional-unguarded-reject (3), optional-guarded (hhhhh), non-function-reject (2)}.
+
+## step 3 — F2 / F3 / L4 (d017f8db7, one commit to spare a 10-minute hook)
+- F2 HELD, intended: a language-wide consequence of round-5 L2 — compile-time `^{ emit(...) }` markup is re-parsed
+  by the same native reader, so `'…'` there is E-META-EVAL-002 (naming E-ATTR-001). Pinned:
+  meta/emit-single-quoted-attr-reject + clean twin meta/emit-single-quote-inside-attr-clean (`onclick="go('a')"`).
+- F3 HELD, refined: the def span's line/col themselves are wrong (start offset right, line/col relative to the
+  block) AND the body re-parse reads a normalized copy (indentation stripped, `</>` -> `< / >`), so its offsets
+  cannot address the file. The refused bytes are now located in the definition's source range (k-th occurrence)
+  and reported at their own line/col (sqspan -> 6:24). Cross-file definitions fall back to the def span.
+- L4 HELD: E-COMPONENT-010 for a bind prop: "Bind it at the call site: `<C bind:n=@cell/>`".
+
+## Carried (round 6)
+- Two instances of a component with a body-level `let` / function crash or collide ("Cannot declare a let variable
+  twice"; a body `function f` is emitted once per instance under one name) — pre-existing on base.
