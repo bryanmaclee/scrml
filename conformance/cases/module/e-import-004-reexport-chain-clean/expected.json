@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-reexport-chain-clean",
+  "description": "§21.3 / §21.4 — the clean counterpart of the S458 re-export negatives: b.scrml re-exports K by name from c.scrml and stars d.scrml (which itself stars c.scrml and declares L). No cycle, every re-exported name exists, and K reached through both b's named re-export and d's star is the SAME binding (not ambiguous): no E-IMPORT-002, no E-IMPORT-004.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.4: an explicit export wins over every `export *`, and one declaration reached by several paths is not ambiguous (ES module semantics). An acyclic re-export graph whose names all resolve compiles clean (S458 review F1/F2/F4 positive control).",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-002", "E-IMPORT-004"] }
+}

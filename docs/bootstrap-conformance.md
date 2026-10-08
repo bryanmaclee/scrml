@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1403 of 1403 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1411 of 1411 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1403 of 1403 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 4.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 524 | 37.3% |
-| UNSUPPORTED | 702 | 50.0% |
+| NOT-TWINNED | 524 | 37.1% |
+| UNSUPPORTED | 710 | 50.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,11 +26,11 @@ Scope: **1403 of 1403 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 502 · parse-reject 200.
+UNSUPPORTED by reason: bootstrap-unsupported 503 · parse-reject 207.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **642** — PASS 76 · FAIL 52 · UNSUPPORTED 514. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **650** — PASS 76 · FAIL 52 · UNSUPPORTED 522. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -130,7 +130,7 @@ NOT-TWINNED by reason (524 cases; a case counts once per distinct reason):
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | meta | 17 | · | · | · | · | 1 | 16 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 32 | · | · | 10 | · | 8 | 14 | · | · |
+| module | 40 | · | · | 10 | · | 8 | 22 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | page | 1 | · | · | · | · | 1 | · | · | · |
@@ -417,7 +417,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (702)
+### UNSUPPORTED (710)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -880,8 +880,16 @@ none
 - `module/e-import-001-export-inside-logic-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-002-acyclic-import-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-002-circular-import-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-reexport-cycle-named-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-reexport-cycle-star-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-reexport-import-cycle-mixed-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-003-host-import-inside-logic-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `module/e-import-003-import-inside-fn-reject` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `module/e-import-004-reexport-ambiguous-star-reject` — twin · bootstrap-unsupported: function `w` is also declared in `c.scrml` — the bootstrap links one namespace, so every use of `w` would resolve to the first one (a silent mis-link); it is refused instead (a bootstrap slice limit, 
+- `module/e-import-004-reexport-chain-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-004-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-006-reexport-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-006-reexport-star-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `*` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-008-plain-import-clean` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
 - `module/e-import-pinned-const-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-scope-010-filescope-distinct-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)

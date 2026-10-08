@@ -31,10 +31,26 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 244 | 6 |
-| MED | 532 | 4 |
+| MED | 534 | 4 |
 | LOW | 298 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-component-through-reexport-unexpanded-s458 — a component imported through a `.scrml` re-export (`export { Card } from "./c.scrml"` in b, `import { Card } from "./b.scrml"`) is not expanded: E-COMPONENT-020 / E-COMPONENT-035 — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-component-through-reexport-unexpanded-s458 sev=MED status=open locus=compiler/src/component-expander.ts(import worklist pushes sourceKey = the re-exporter, never follows resolveExportedBinding — PA-located, not traced) prov=empirical:s458-reexport-dev-tenant-current -->
+
+Same on main before S458 (not a regression). The re-export resolver `resolveExportedBinding` (module-resolver.js) already answers where the binding is declared; the CE should consult it.
+
+### g-enum-type-through-export-star-untyped-s458 — an enum reached through `export *` from a `.scrml` module has no type in the importer: a parameter typed with it is `asIs`, and `match` on it is E-TYPE-025 (the named re-export types correctly) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-enum-type-through-export-star-untyped-s458 sev=MED status=open locus=searched:compiler/src/type-system.ts(imported type resolution),compiler/src/module-resolver.js(buildExportRegistry star branch) prov=empirical:s458-reexport-dev-tenant-current -->
+
+### g-stdlib-data-function-expression-body-loses-braces-s458 — `stdlib/data/index.scrml` fails E-CODEGEN-INVALID-LOGIC: function-expression bodies in `validate.scrml` / `transform.scrml` are emitted without their braces (`function ( value , data ) if ( …`) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-stdlib-data-function-expression-body-loses-braces-s458 sev=MED status=open locus=searched:stdlib/data/validate.scrml(:143 emitted line),stdlib/data/transform.scrml(:69 emitted line) — emitter not traced prov=empirical:s458-reexport-dev-tenant-current -->
+
+Found while landing the re-export checks (which also fixed the `TableSort` re-export of an unexported type — `table-for.scrml` now exports it). Apps importing `scrml:data` are unaffected (stdlib modules are not part of the app's import graph), but the shape — a function expression whose body is a block — may reach user code: check before assuming it is stdlib-only.
 
 ### g-toplevel-camelcase-onclick-wiring-s458 — camelCase `onClick=` at top level / in emit-html is not wired the way lift now wires every §5.2 rule-1 `on…` name as a listener — `NEW S458; LOW; open`
 
@@ -23633,8 +23649,10 @@ RESOLVED S457 (s457-sql-check-at-lowering): CodeSoFar.tail after `)` hands regex
 <!-- @gap id=g-sql-slot-extent-brace-count-bypass-s456 sev=HIGH status=resolved locus=compiler/src/codegen/sql-lex.ts(jsInterpolationEnd; liveSqlInterpolations)+compiler/src/schema-differ.js(programSqlTokens)+compiler/src/codegen/sql-one-statement-guard.ts(judgeDriverCall) prov=review:s456-S239-one-statement-F1;ruling:user-voice-scrml.md-S456-"one statement per seams reasonable. push" -->
 **CONFIRMED (S239 review of a0348bd4f; PA-reproduced on main d2bc3a065 — present since #1334):** `?{`INSERT INTO notes (v) VALUES (${ x + '{' }); CREATE TABLE leak (tenant_id text, secret text) /* } */`}.run()` → 0 diagnostics, emitted verbatim, the `leak` table created on Bun.SQL sqlite; `…; DELETE FROM invoices /* } */` with `.acrossTenants()` deleted every tenant's rows. Root: two readers brace-counted the slot (they agreed with each other); the third reader — JavaScript, parsing the emitted tagged template — did not. **RESOLVED:** one reader of a slot's extent, read as JS reads a template substitution (`codegen/sql-lex.ts` `jsInterpolationEnd`, used by `liveSqlInterpolations`); the program-body token walk takes its slots from it; the codegen guard parses the emitted driver call with acorn and refuses (E-SQL-001 + throw) a tagged template whose SQL text differs from the compiler's segments, and a multi-statement one. Sweep (progress.md): protect-flow `sqlSkeleton`, protect-egress `blankSqlNoise`, `hoist-sql-shape`, `db-ownership`, `sql-table-refs`, scheduling `sqlNodeIsReadOnly`, type-system `sqlIsPersistWrite` moved to the shared reader; the tenant-subset and protect-egress lexers keep their fail-closed payload restriction + cross-check. SPEC §8.1.2 "One reader of a slot's extent".
 
-### g-tenant-startup-check-built-server-only-s456 — the S456 undeclared-tenant-table startup check runs only in the `_server.js` `scrml build` writes; `scrml dev` and a `scrml compile` module served by another host do not run it — `NEW S456; MED; open`
-<!-- @gap id=g-tenant-startup-check-built-server-only-s456 sev=MED status=open locus=compiler/src/commands/dev.js+compiler/src/codegen/tenant-startup-check.ts prov=ruling:user-voice-scrml.md-S456-"b,-startup-check-lands-with-it" -->
+### g-tenant-startup-check-built-server-only-s456 — the S456 undeclared-tenant-table startup check runs only in the `_server.js` `scrml build` writes; `scrml dev` and a `scrml compile` module served by another host do not run it — `NEW S456; MED; RESOLVED S458 (s458-reexport-dev-tenant-current)`
+<!-- @gap id=g-tenant-startup-check-built-server-only-s456 sev=MED status=resolved resolved-by=s458-reexport-dev-tenant-current locus=compiler/src/commands/dev.js+compiler/src/codegen/tenant-startup-check.ts prov=ruling:user-voice-scrml.md-S456-"b,-startup-check-lands-with-it" -->
+
+**RESOLVED S458** (S457 agent commit `4d2d91ad1`, landed via s458-reexport-dev-tenant-current): `scrml dev` runs the same startup gate as the built `_server.js` (logic moved to `codegen/tenant-startup-check.ts`); executed: dirty SQLite → 503 on health/page/route in both hosts, clean → served, unreachable Postgres → 503 in both (fail-closed, §14.8.10 item 3 — note: `scrml dev` on a Postgres app with no live database now refuses the page too). Residual (pre-existing): once passed, the gate never re-checks a table added at runtime.
 The ruling names "the built server". Every server module already exports `_scrml_tenant_startup_check`, so `scrml dev` could run it at module load and surface a finding through its compile-failure channel; a module mounted by a foreign host has no hook. Direction: wire dev (a PA call — dev serving a developer's own data is the lower-risk surface), and decide whether a module should refuse at load.
 
 ### g-tenant-small-residuals-s455 — tenant LOWs from the S455 reviews — `NEW S455; LOW; NARROWED S456 ((a),(b),(c) resolved; (d) open)`
@@ -23701,6 +23719,8 @@ Reviewer-executed: `${fmt(1)}` from `./fmt.js` in markup → a read-only loop ho
 
 ### g-server-reexport-of-scrml-module-fails-to-link-s456 — `export { w as helper } from "./c.scrml"` in a `.scrml` module is not emitted in its `.server.js`, so the importer fails to link ("Export named 'helper' not found") — `NEW S456; MED; open (pre-existing; reviewer-executed, PA-unverified)`
 <!-- @gap id=g-server-reexport-of-scrml-module-fails-to-link-s456 sev=MED status=open locus=searched:not traced (emit-server re-export emission) prov=review:s456-S239-hoist-r2-N3 -->
+
+**S458 — PARTIAL** (s458-reexport-dev-tenant-current; S457 commits `d9fad95ac` `700cb88aa` + S458 review fixes): a `.scrml` re-export (named, renamed, `export *`) reaches the server bundle, the client registry and the page script order; a named re-exported enum works on the client; re-export cycles are `E-IMPORT-002` (§21.3), a named re-export of a missing name or from a missing file is `E-IMPORT-004` / `E-IMPORT-006`, an ambiguous star name gets an ambiguity message; `export *` resolution memoised. Remaining: g-component-through-reexport-unexpanded-s458, g-enum-type-through-export-star-untyped-s458.
 Found by the S456 hoist re-review. Side effect for §8.10: when the re-exporting module also has a local pure `function helper`, the hoist write-scan links the import to the LOCAL fact and hoists — harmless only while the re-export does not link at all. Fix the emission and the write-scan's re-export resolution together.
 
 ### g-impl1-hoist-sqlite-only-s456 — §8.10 Tier 2 hoisting now applies only when every database of the compilation is SQLite — `NEW S456; LOW; open`

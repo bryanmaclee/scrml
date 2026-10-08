@@ -1,0 +1,8 @@
+{
+  "id": "e-import-002-reexport-import-cycle-mixed-reject",
+  "description": "§21.3 / §21.4 — a cycle with one re-export edge and one import edge (x.scrml `export { B } from './y.scrml'`; y.scrml `import { A } from './x.scrml'`) fires E-IMPORT-002. x.scrml and y.scrml are aux siblings (`files` convention).",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: \"The compiler SHALL detect cycles in the import graph before any stage runs and report all files in the cycle.\" Import and re-export edges are one graph: a cycle mixing the two is still a cycle (S458 review F1).",
+  "expect": { "codes": ["E-IMPORT-002"], "notCodes": [] }
+}
