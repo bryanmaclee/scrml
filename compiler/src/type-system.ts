@@ -14815,6 +14815,11 @@ function annotateNodes(
       if ((kind.endsWith("-decl") || kind === "function-decl") && rec.name === "event" && rec._isReactiveAssign !== true) {
         hit = true; return;
       }
+      // A loop / `<each>` binder named `event` (`for (event of …)`, `<each … as event>`).
+      for (const k of ["asName", "variable", "iterVar", "itemName", "binding"]) {
+        if (rec[k] === "event") { hit = true; return; }
+      }
+      if (Array.isArray(rec.asNames) && (rec.asNames as unknown[]).includes("event")) { hit = true; return; }
       if ((kind === "markup" || kind === "each") && Array.isArray(rec.attrs)) {
         for (const a of rec.attrs as Array<Record<string, unknown>>) {
           const v = a && (a.value as Record<string, unknown> | undefined);

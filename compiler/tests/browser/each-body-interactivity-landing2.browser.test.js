@@ -92,7 +92,7 @@ describe("each-body-interactivity L2 §1 — emitted wiring", () => {
 
   test("onclick lowers to addEventListener calling the handler with the item id", () => {
     const { clientJs } = compileToOutputs(REPRO_SRC);
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ /);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ /);
     expect(clientJs).toMatch(/_scrml_toggle_\d+\(_scrml_each_item\.id\);/);
     expect(clientJs).not.toContain('setAttribute("onclick"');
   });

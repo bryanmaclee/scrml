@@ -1827,8 +1827,9 @@ An event-handler attribute additionally admits the `${…}` expression form (§5
 Event handler attributes support two equivalent forms for passing arguments:
 
 1. **Call-ref form:** `onclick=handler(arg)` — the compiler auto-wraps the call in a
-   closure: `function(event) { handler(arg); }`. Arguments are forwarded to the handler
-   as-is. This does NOT invoke the function immediately at render time.
+   listener that calls `handler(arg)` when the event fires. Arguments are forwarded to the
+   handler as-is; the event object is not, and the value does not bind `event` (§5.2, S457).
+   This does NOT invoke the function immediately at render time.
 
 2. **Expression form:** `onclick=${() => handler(arg)}` — the `${...}` expression is
    used directly as the event handler. This form is useful when you need access to the
@@ -1880,8 +1881,8 @@ The `onclick=${() => deleteItem(item.id)}` wrapper creates a closure that captur
 <button onclick=deleteItem(id)>Delete</>
 ```
 
-The compiler auto-wraps this as `function(event) { deleteItem(id); }`, which is
-equivalent to the expression form for simple cases.
+The compiler auto-wraps this in a listener that calls `deleteItem(id)` when the button is
+clicked, which is equivalent to the expression form for simple cases.
 
 #### 5.2.2 Event Handler Binding Forms — Complete Reference
 
@@ -2096,14 +2097,14 @@ compiler expands to both a value attribute and an `oninput` event handler.
 bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
 ```
 
-**Supported forms:**
+**Supported forms:** *(S457 — the expansions are written in the function form, `${(e) => …}`: a handler the compiler wraps does not bind `event`, §5.2. Notational; the expansion's meaning is unchanged.)*
 
 | Source form | Compiler expands to |
 |---|---|
-| `bind:value=@var` | `value=@var oninput=${@var = event.target.value}` |
-| `bind:checked=@var` | `checked=@var onchange=${@var = event.target.checked}` |
-| `bind:selected=@var` | `selected=@var onchange=${@var = event.target.value}` |
-| `bind:group=@var` | Radio group binding: `checked=${@var === value} onchange=${@var = event.target.value}` |
+| `bind:value=@var` | `value=@var oninput=${(e) => @var = e.target.value}` |
+| `bind:checked=@var` | `checked=@var onchange=${(e) => @var = e.target.checked}` |
+| `bind:selected=@var` | `selected=@var onchange=${(e) => @var = e.target.value}` |
+| `bind:group=@var` | Radio group binding: `checked=${@var === value} onchange=${(e) => @var = e.target.value}` |
 
 **Normative statements:**
 
@@ -2153,7 +2154,7 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
 - A programmatic write to a `@variable` that is the target of a `bind:value` or
   `bind:checked` binding SHALL propagate to the bound DOM element through the reactive
   system. No separate bidirectional-sync mechanism exists or is required. The compiler
-  desugars `bind:value=@var` to `value=@var oninput=${@var = event.target.value}`. The
+  desugars `bind:value=@var` to `value=@var oninput=${(e) => @var = e.target.value}`. The
   `value=@var` part is a reactive attribute expression: whenever `@var` is written — whether
   by the generated `oninput` handler (user input) or by any programmatic assignment in
   logic code — the reactive system re-evaluates `value=@var` and updates the DOM element's
@@ -2167,7 +2168,7 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
 <p>Hello, ${@name}!</>
 ```
 
-The compiler generates: `<input value=@name oninput=${@name = event.target.value}>`.
+The compiler generates: `<input value=@name oninput=${(e) => @name = e.target.value}>`.
 Typing in the input updates `@name` reactively. The `<p>` re-renders on each change.
 
 **Worked example — valid (checkbox):**
@@ -10192,7 +10193,7 @@ The compiler SHALL:
   >
   > **Direction of change (pa-base §8): semantics-changed.** No program's acceptance changes. A body whose independent server calls are not all provably read-only now runs them in source order instead of concurrently; its results can differ only where the old order was a race. **impl#1 divergence:** impl#1's `const` / `let` declaration batch still groups such calls into one `Promise.all` (`g-const-batch-parallelizes-side-effecting-server-calls`, now governed by this sentence); impl#1 is frozen for language semantics (S447), so it is filed, not fixed. The O-059-3 fail-closed clause above is this section's reading of "provably" while O-059-3 is open (flagged for veto).
 - These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `<onMount>` / `on mount` body (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
-- **A cell write from a server call in an event handler (S450).** The one exemption from awaiting is the handler whose SOLE root statement is the write: `onclick=@x = save()`, its braced single-statement form `onclick={@x = save()}`, `onclick=${@x = save()}`, and the guarded `@x = f() !{ … }` (§19.4.3) written alone. That write MAY run fire-and-forget — the handler does not wait for it, and no statement of the handler runs after it. In every other position the write SHALL be awaited in place, so the next statement observes the resolved value: when it is one of two or more root statements (`onclick={ @x = save(); @y = @x + 1 }`), and when it is nested at any depth inside an `if` / `else if` / `else` limb, a `for` / `for … of` / `while` body, or a block of a handler (`onclick=${ if (@c) { @x = save(); @y = @x + 1 } }`), or inside a `match` statement written as one of the handler's root statements. A `match` arm or other construct the compiler lowers to an inline function is part of the handler's statement sequence, and is awaited with it. A §36 server generator (SSE) write is a subscription, not a value, and is never awaited at any position. Because the write is now awaited, an event-control call after it in the handler (`onclick=${ if (@c) { @x = save(); event.preventDefault() } }`, and the closure form) is `E-EVENT-CONTROL-AFTER-AWAIT` (above); put the control call before the write. The rule holds for every DELEGABLE handler position (`click`, `submit`, …): top level, an `<each>` row, a `for … lift` row, and a delegable handler inside an engine or `<match>` element arm. Since S454 it also holds for a non-delegable handler (`input`, `focus`, …) inside an engine or `<match>` element arm. *(S454 — supersedes: "A non-delegable handler (`input`, `focus`, …) inside an engine or `<match>` element arm is not yet covered (carried gap below)." Provenance: ruling:user-voice-scrml.md S454 "a yes, b yes, root fix"; impl#1 `e95198a6a` closed `g-engine-arm-rewired-handler-skips-async-coloring`. Direction of change: semantics-changed + newly-rejecting at that site only — see §19.6.8 B7's direction note; corpus impact measured zero.)*
+- **A cell write from a server call in an event handler (S450).** The one exemption from awaiting is the handler whose SOLE root statement is the write: `onclick=@x = save()`, its braced single-statement form `onclick={@x = save()}`, `onclick=${@x = save()}`, and the guarded `@x = f() !{ … }` (§19.4.3) written alone. That write MAY run fire-and-forget — the handler does not wait for it, and no statement of the handler runs after it. In every other position the write SHALL be awaited in place, so the next statement observes the resolved value: when it is one of two or more root statements (`onclick={ @x = save(); @y = @x + 1 }`), and when it is nested at any depth inside an `if` / `else if` / `else` limb, a `for` / `for … of` / `while` body, or a block of a handler (`onclick=${ if (@c) { @x = save(); @y = @x + 1 } }`), or inside a `match` statement written as one of the handler's root statements. A `match` arm or other construct the compiler lowers to an inline function is part of the handler's statement sequence, and is awaited with it. A §36 server generator (SSE) write is a subscription, not a value, and is never awaited at any position. Because the write is now awaited, an event-control call after it in the handler (`onclick=${(e) => { if (@c) { @x = save(); e.preventDefault() } }}`, and the closure form; S457 — a handler that uses the event takes it as a parameter, §5.2) is `E-EVENT-CONTROL-AFTER-AWAIT` (above); put the control call before the write. The rule holds for every DELEGABLE handler position (`click`, `submit`, …): top level, an `<each>` row, a `for … lift` row, and a delegable handler inside an engine or `<match>` element arm. Since S454 it also holds for a non-delegable handler (`input`, `focus`, …) inside an engine or `<match>` element arm. *(S454 — supersedes: "A non-delegable handler (`input`, `focus`, …) inside an engine or `<match>` element arm is not yet covered (carried gap below)." Provenance: ruling:user-voice-scrml.md S454 "a yes, b yes, root fix"; impl#1 `e95198a6a` closed `g-engine-arm-rewired-handler-skips-async-coloring`. Direction of change: semantics-changed + newly-rejecting at that site only — see §19.6.8 B7's direction note; corpus impact measured zero.)*
 
 > **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — "(iii) nested-sequence stale read: keep the fire-and-forget skip only when the cell write is the handler's SOLE root statement, await in place everywhere else." · extends the S446 statement-list fix (PR #1217, ruling:user-voice-scrml.md S439 #4) from top-level lists to every position · s450-handler-nested-server-write-await
 >

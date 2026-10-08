@@ -260,7 +260,7 @@ ${
             // In Zig there is no equivalent -- you wire inputs manually.
             // From a "Zig mental model" perspective, bind:value is fine because
             // it is one explicit directive with a well-defined expansion
-            // (§5.4: desugars to value=@var oninput=${@var=event.target.value}).
+            // (§5.4: desugars to value=@var oninput=${(e) => @var=e.target.value}).
             // The expansion is visible in the spec. Not hidden behavior.
             <input type="text" bind:value=@newName placeholder="e.g. release-wasm"/>
         </div>
@@ -273,7 +273,7 @@ ${
             // Even if it were, @newPlatform is a string so .variants would give me
             // Platform enum values I cannot compare with @newPlatform without toEnum().
             // Manual select options are the only reliable working pattern.
-            <select oninput=updateNewPlatform(event.target.value)>
+            <select oninput=${(e) => updateNewPlatform(e.target.value)}>
                 <option value="Linux">Linux x64/
                 <option value="MacOS">macOS ARM64/
                 <option value="Windows">Windows x64/
@@ -283,7 +283,7 @@ ${
 
         <div class="form-row">
             <label>Optimization/
-            <select oninput=updateNewOptimization(event.target.value)>
+            <select oninput=${(e) => updateNewOptimization(e.target.value)}>
                 <option value="Debug">Debug/
                 <option value="ReleaseSafe">ReleaseSafe/
                 <option value="ReleaseFast">ReleaseFast/
