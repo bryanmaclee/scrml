@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `8ce6d61b5` — wrap(s458): six PRs landed (#1345 #1350–#1354); five review-gated branches parked at the weekly API limit; refinement slice 1 in; S458 gaps + review markers (#1355) — **pushed**
+- `3a4a3639a` — wrap(s458): addendum — post-reset rulings, #1355–#1357, branch landing order (#1358) — **pushed**
 - `46ed1f8ff` — wrap(s457): injection sinks and SQL checks moved to the text the runtime executes, `__scrml_` reserved, failed compiles write nothing — 8 PRs, four branches in flight (#1349) — **pushed**
 - `9d1a633ff` — wrap(s456): tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting per-row-equivalent, flogence's silent null slice (#1338) — **pushed**
 - `d068cc145` — wrap(s455): the tenant schema boundary moved to allow-lists and one SQL subset, R11 migrated reads-only, the foreign slice sealed, #1305's lowering made whole, N+1 hoisting fail-closed (#1326) — **pushed**
