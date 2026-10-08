@@ -40022,7 +40022,7 @@ defined in the initial release:
 | Shape name | Base type | Predicate (informative) | HTML attribute generated |
 |---|---|---|---|
 | `email` | `string` | RFC 5322 local+domain structure | `type="email"` |
-| `url` | `string` | URL.canParse(value) passes | `type="url"` |
+| `url` | `string` | URL.canParse(value) passes AND the scheme is in the §5.2 safe set (normative — see below) | `type="url"` |
 | `uuid` | `string` | `[0-9a-f]{8}-[0-9a-f]{4}-...` pattern | `pattern="..."` |
 | `phone` | `string` | E.164 or local 7-15 digit format | `type="tel"` |
 | `date` | `string` | ISO 8601 `YYYY-MM-DD` | `type="date"` |
@@ -40030,7 +40030,32 @@ defined in the initial release:
 | `color` | `string` | Hex `#RRGGBB` or CSS color name | `type="color"` |
 
 The normative predicate implementations are compiler-defined. The informative predicates above
-describe the intent.
+describe the intent, except for the `url` scheme rule, which is normative:
+
+**The `url` shape refuses non-safe schemes.** A value SHALL satisfy `url` only when (1) it is a
+string that the WHATWG URL parser accepts as an absolute URL (no base URL), AND (2) the scheme it
+commits to, read by the §5.2 URL scheme reader (leading C0 controls and spaces stripped, ASCII tab /
+LF / CR removed anywhere, compared lowercased), is one of the §5.2 safe schemes: `http`, `https`,
+`ftp`, `mailto`, `tel`, `sms`. Every other scheme — `javascript:`, `vbscript:`, `data:`, `blob:`,
+`file:`, and any scheme not named — SHALL fail the predicate. `data:` fails in every form,
+including the raster `data:image/…` that §5.2 admits on an image-source attribute: a value type does
+not know which attribute it will reach, so it fails closed. Wherever §53 enforces a refinement, this
+is the `url` predicate it enforces: a string literal that fails it is a compile-time `E-CONTRACT-001`
+(static zone, §53.4.2 rule 2), and a boundary-zone value that fails it raises `E-CONTRACT-001-RT`
+(§53.4.5). The static and the runtime check SHALL be the same predicate, and the scheme SHALL be read
+by the same reader §5.2 rules 2 and 3 use (one reader, one safe-scheme set). A relative URL
+(`/users/1`, `?q=1`) does not satisfy `url` (condition 1) — unchanged by this rule.
+
+*Implementation status (impl#1, S457).* The `url` predicate is checked at: a refined declaration's
+initializer (literal → static; other value → boundary), including a declaration inside a nested worker
+`<program>` function; a client function parameter (§53.9.1); the `bind:value` input check (§53.7.2);
+and a server-function parameter (§53.9.4). The positions where impl#1 emits no §53 check for ANY
+refinement — not only `url` — are tracked as a known gap and are not narrowed by this rule: reassignment
+of a refined cell (`@u = v`), struct fields, a top-level `const X: string(url) = f()`, `<endpoint>`
+payload fields, schema / table fields, a server function's refined return type, library / tool /
+value-export function parameters, and a literal call argument.
+
+> **Provenance:** ruling:user-voice-scrml.md S457 "6a" ("1a 2a 3a 4a 5 dd it 6a" — `string(url)` refuses executable schemes) · closes gap g-string-url-refinement-admits-executable-schemes · **supersedes:** the informative-only "URL.canParse(value) passes" predicate, under which `string(url) = "javascript:alert(1)"` was statically proven.
 
 ### §53.6.2 Registry Extensibility
 

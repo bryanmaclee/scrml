@@ -20,6 +20,8 @@
  * `node.predicateCheck.predicate` objects already present in the TypedFileAST.
  */
 
+import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
+
 // ---------------------------------------------------------------------------
 // PredicateExpr mirror (matches type-system.ts — no import to avoid coupling)
 // ---------------------------------------------------------------------------
@@ -50,9 +52,35 @@ interface PredicateExpr {
 // The compiler emits a runtime expression that validates the string.
 // ---------------------------------------------------------------------------
 
+/** The runtime judge of the `url` named shape (runtime-url-guard.js). Emitted text gates its inlining. */
+export const URL_SHAPE_FN = "_scrml_url_shape_ok";
+
+/**
+ * The server copy of the `url` shape judge: the whole of runtime-url-guard.js (the reader, the
+ * safe-scheme set and `_scrml_url_shape_ok`), for a server bundle / library module / tool / worker whose body
+ * calls `_scrml_url_shape_ok(` (a `string(url)` server-function parameter or a boundary-zone decl).
+ * The same source the client 'urlguard' chunk inlines. A bundle that already carries it (the SSR
+ * first-paint URL guard copy) must not inline it twice — see `needsUrlShapeHelper`.
+ */
+export const SERVER_URL_SHAPE_HELPER: string = [
+  "",
+  "// --- §53.6.1 `url` named shape + §5.2 URL scheme reader (inlined copy; source: runtime-url-guard.js) ---",
+  URL_GUARD_RUNTIME_SOURCE,
+].join("\n");
+
+/** Does `emitted` call the `url` shape judge without already defining it? */
+export function needsUrlShapeHelper(emitted: string): boolean {
+  return emitted.includes(`${URL_SHAPE_FN}(`) && !emitted.includes(`function ${URL_SHAPE_FN}(`);
+}
+
 const NAMED_SHAPE_RUNTIME: Record<string, string> = {
   email: `(typeof __V__ === "string" && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(__V__))`,
-  url: `(typeof __V__ === "string" && (() => { try { return !!new URL(__V__); } catch { return false; } })())`,
+  // §53.6.1 / S457 "6a" — `_scrml_url_shape_ok` is defined ONCE, in compiler/src/runtime-url-guard.js
+  // (the §5.2 scheme reader's file): an absolute URL whose scheme is in the §5.2 safe set. The client
+  // runtime carries it in the 'urlguard' chunk (emit-client.ts post-emit gate on this call); a server
+  // bundle that calls it inlines the same source (emit-server.ts). The type checker's static zone
+  // calls the same function, so the two zones cannot disagree.
+  url: `${URL_SHAPE_FN}(__V__)`,
   uuid: `(typeof __V__ === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(__V__))`,
   phone: `(typeof __V__ === "string" && /^[+]?[0-9\\s\\-().]{7,15}$/.test(__V__))`,
   date: `(typeof __V__ === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(__V__))`,
