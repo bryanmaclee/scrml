@@ -1,0 +1,10 @@
+<program>
+<u>: string(url) = "https://example.com"
+${
+  function setIt() {
+    @u = "javascript:alert(1)"
+  }
+}
+<p id="out">${@u}</p>
+<button onclick=setIt()>x</button>
+</program>

@@ -12,7 +12,7 @@ ${
 
     // Server function: reads protected "password" field — compiler generates server route.
     server function authenticate(username, password) -> { id: number, username: string } {
-        let row = ?{`SELECT id, username, password FROM users WHERE username = ${username}`}.get()
+        let row = ?{`SELECT id, username, password FROM users WHERE username = ${username}`}.get() !{ _ :> not }
         if (row is not) {
             fail AuthError("Invalid username or password")
         }

@@ -186,7 +186,7 @@ describe("§H _dbScope annotation invariants", () => {
     expect(node._dbScope).toBeUndefined();
   });
 
-  test("scoped dbVar increments per program scope", () => {
+  test("scoped dbVar: default database `_scrml_sql`, each further database `_scrml_sql_<n>`", () => {
     const node1 = makeProgramNode("postgres://localhost/db1");
     const node2 = makeProgramNode("./local.db");
     const ast = makeFileAST([node1, node2]);
@@ -196,8 +196,8 @@ describe("§H _dbScope annotation invariants", () => {
       depGraph: { nodes: new Map(), edges: [] },
       protectAnalysis: { views: new Map() },
     });
-    expect(node1._dbScope.dbVar).toBe("_scrml_sql_1");
-    expect(node2._dbScope.dbVar).toBe("_scrml_sql_2");
+    expect(node1._dbScope.dbVar).toBe("_scrml_sql"); // §8.1.1 (S451): the default database keeps `_scrml_sql`
+    expect(node2._dbScope.dbVar).toBe("_scrml_sql_1");
     expect(node1._dbScope.driver).toBe("postgres");
     expect(node2._dbScope.driver).toBe("sqlite");
   });

@@ -26,6 +26,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 function runUpToSYM(source, filePath = "msg-codegen.scrml") {
   const bs = splitBlocks(filePath, source);
@@ -76,7 +77,7 @@ function emitClient(source) {
 // at markup-attribute handler sites must be observed through the real compile).
 function compileFullClient(source, baseName = "msg-route") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const tmpDir = resolve("/tmp", "scrml-msg-route", `case-${uniq}`);
+  const tmpDir = resolve(tmpdir(), "scrml-msg-route", `case-${uniq}`);
   const tmpInput = resolve(tmpDir, `${baseName}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -145,17 +146,17 @@ describe("§51.0.S codegen — message-arm dispatch table emission", () => {
     expect(js).toMatch(/"_":\s*function/);
   });
 
-  test("arm fn binds message payload from _msgData (§18.7)", () => {
+  test("arm fn binds message payload from _scrml_msg_data (§18.7)", () => {
     const { js } = emitClient(WORKED);
-    // .Drop(col) → message-payload binding col from _msgData.
-    expect(js).toContain('var col = _msgData ? _msgData["col"] : null;');
+    // .Drop(col) → message-payload binding col from _scrml_msg_data.
+    expect(js).toContain('var col = _scrml_msg_data ? _scrml_msg_data["col"] : null;');
   });
 
-  test("arm fn binds state payload from _stateData (§51.0.B.1)", () => {
+  test("arm fn binds state payload from _scrml_state_data (§51.0.B.1)", () => {
     const { js } = emitClient(WORKED);
-    // .Dragging(id) state binding → id from _stateData (in scope for the
+    // .Dragging(id) state binding → id from _scrml_state_data (in scope for the
     // (Dragging × Drop) / (Dragging × End) arms).
-    expect(js).toContain('var id = _stateData ? _stateData["id"] : null;');
+    expect(js).toContain('var id = _scrml_state_data ? _scrml_state_data["id"] : null;');
   });
 
   test("arm body effect lowers to _scrml_reactive_set, NOT a re-declaration", () => {

@@ -1,0 +1,15 @@
+{
+  "id": "protect-handle-globalthis-response-clean",
+  "description": "§14.8.9 S456 negative control — handle() builds its response with `globalThis.Response` / an alias of it from NON-protected fields of a protected row: compiles, no E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-handle-response-egress.test.js",
+  "rationale": "The S456 fix recognizes the Response constructor by value and makes handle()'s return a sink; neither may reject a handle() that sends only non-protected data (§40 keeps handle() an author-owned escape hatch).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-PROTECT-006",
+      "E-PROTECT-005"
+    ]
+  }
+}

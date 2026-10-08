@@ -3,14 +3,14 @@ ${
     <a> : Row[] = []
     <b> : Row[] = []
     function loadA() : Row[] {
-        rows = ?{`SELECT id, text FROM a`}
+        rows = ?{`SELECT id, text FROM a`} !{ _ :> [] }
         return rows
     }
     function loadB() : Row[] {
-        rows = ?{`SELECT id, text FROM b`}
+        rows = ?{`SELECT id, text FROM b`} !{ _ :> [] }
         return rows
     }
 }
-<button id="load-a" onclick=@a = loadA()>A</>
-<button id="load-b" onclick=@b = loadB()>B</>
+<button id="load-a" onclick={ @a = loadA() !{ .Transport(_) :> { return } } }>A</>
+<button id="load-b" onclick={ @b = loadB() !{ .Transport(_) :> { return } } }>B</>
 <p id="counts">A:${@a.length} B:${@b.length}</>

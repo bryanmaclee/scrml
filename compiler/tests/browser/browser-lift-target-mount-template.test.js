@@ -21,7 +21,7 @@
  * case below fails on the pre-fix compiler.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
@@ -286,7 +286,13 @@ type LE:enum = { NotFound(id: string) renders <p class="rend">No #\${id}</p>, Ne
 <div if=@show><render of=@err/></div>
 </program>
 `, "render");
-    expect(texts("p.rend")).toEqual(["No 42"]);
+    // S441 round 5e — the source text is `No #${id}`, so the render is
+    // `No #42`. This expectation used to be "No 42": it encoded a content-loss
+    // bug (the `renders` markup was rebuilt from logic tokens, which dropped
+    // the `#` — the logic tokenizer has no token for it — and joined the rest
+    // with spaces). dpa-045 (S442): free text is literal and "Whitespace is
+    // kept exactly"; `#` before `${` is content, not the `#{` CSS exit.
+    expect(texts("p.rend")).toEqual(["No #42"]);
   });
 
   test("<errors of=…/> renders the field's error", () => {
@@ -511,4 +517,11 @@ describe("round 2: file scope, nested mounts, effect lifetime", () => {
     expect(ticks() - t0).toBe(1); // exactly the live mount's one row effect
     expect(texts("ul li")).toEqual(["AA", "b", "C4"]);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

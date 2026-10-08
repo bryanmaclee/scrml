@@ -1,0 +1,12 @@
+<program>
+${
+  type Role:enum = { Admin, Editor, Viewer }
+  function promote(r: Role oneOf([.Admin, .Editor])) {
+    return r
+  }
+  function relay(v) {
+    return promote(v)
+  }
+}
+<p>${relay(.Admin)}</p>
+</program>

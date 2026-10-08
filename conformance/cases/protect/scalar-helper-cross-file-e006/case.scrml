@@ -6,11 +6,11 @@
     ${
       import { pick } from './helper.scrml'
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return pick(u)
       }
     }
   </db>
   <user> = not
-  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

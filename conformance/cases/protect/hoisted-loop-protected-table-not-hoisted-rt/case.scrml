@@ -1,0 +1,53 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, secret TEXT)`}
+  </schema>
+  <!-- §8.10 × §14.8.9: a keyed read in a loop over a table with a protected
+       column is NOT hoisted, so every row passes the per-query protect strip. -->
+  <db src="app.db" protect="secret" tables="users">
+    ${
+      function aliased(items) {
+        let out = []
+        for (const it of items) {
+          const row = ?{`SELECT id, secret AS s FROM users WHERE id = ${it.id}`}.get()
+          out.push(row)
+        }
+        return out
+      }
+      function computed(items) {
+        let out = []
+        for (const it of items) {
+          const row = ?{`SELECT id, lower(secret) AS x FROM users WHERE id = ${it.id}`}.get()
+          out.push(row)
+        }
+        return out
+      }
+      function aliasedAll(items) {
+        let out = []
+        for (const it of items) {
+          const rows = ?{`SELECT id, secret AS s FROM users WHERE id = ${it.id}`}.all()
+          out.push(rows)
+        }
+        return out
+      }
+      function plain(items) {
+        let out = []
+        for (const it of items) {
+          const row = ?{`SELECT id, name FROM users WHERE id = ${it.id}`}.get()
+          out.push(row)
+        }
+        return out
+      }
+    }
+  </db>
+  <a> = not
+  <b> = not
+  <c> = not
+  <d> = not
+  <button id="load" onclick={
+    @a = aliased([{ id: 7 }]) !{ .Transport(_) :> { return } }
+    @b = computed([{ id: 7 }]) !{ .Transport(_) :> { return } }
+    @c = aliasedAll([{ id: 7 }]) !{ .Transport(_) :> { return } }
+    @d = plain([{ id: 7 }]) !{ .Transport(_) :> { return } }
+  }>load</button>
+</program>

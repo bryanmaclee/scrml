@@ -9,7 +9,9 @@
  * rendered text is byte-identical to the `as e` + `e.key`/`e.value` baseline
  * (the correctness anchor: the terse form is pure sugar).
  *
- * Covers BOTH parsers (legacy BS+TAB and `--parser=scrml-native`).
+ * Covered BOTH parsers (legacy BS+TAB and `--parser=scrml-native`) until S449
+ * retired the full-pipeline flag; the default pipeline remains. (impl#1 never
+ * routes an each-bearing body through the native parser.)
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -17,6 +19,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 // {key,value} struct array — the destructure derives `.key`/`.value` regardless
 // of whether the source is a real map (parser/codegen are field-name-agnostic).
@@ -42,7 +45,7 @@ type Entry:struct = { key: string, value: number }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-d2c-browser");
+const tmpRoot = resolve(tmpdir(), "scrml-d2c-browser");
 
 function compileToOutputs(source, baseName, parser) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -89,7 +92,7 @@ describe("each-as-tuple-destructure §runtime — k/v bind across iteration", ()
     try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
   });
 
-  for (const parser of [null, "scrml-native"]) {
+  for (const parser of [null]) {
     const label = parser ? "native" : "legacy";
 
     test(`(${label}) \`as (k, v)\` renders both bound fields for every entry`, () => {

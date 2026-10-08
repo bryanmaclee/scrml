@@ -11,8 +11,10 @@ ${
 
 <match on=@ph>
     <Idle>
-        <button id="one" onclick={ risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } }>one</button>
-        <button id="seq" onclick={ risky() !{ | .Empty :> @r = @r + 10 | .Bad :> @r = 2 }; @msg = "y" }>seq</button>
+        <button id="one" onclick={ risky() !{ .Empty :> @r = 1
+                                              .Bad :> @r = 2 } }>one</button>
+        <button id="seq" onclick={ risky() !{ .Empty :> @r = @r + 10
+                                              .Bad :> @r = 2 }; @msg = "y" }>seq</button>
     </>
     <Loading><p>Loading</p></>
 </>

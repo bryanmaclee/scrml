@@ -2,8 +2,8 @@
 ${
     <admins> = []
     function loadByRole(role: string) {
-        return ?{`SELECT id, name FROM users WHERE role = ${role} ORDER BY id`}.all()
+        return ?{`SELECT id, name FROM users WHERE role = ${role} ORDER BY id`}.all() !{ _ :> [] }
     }
 }
-<button id="load" onclick=@admins = loadByRole("admin")>Load admins</>
+<button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(_) :> { return } } }>Load admins</>
 </program>

@@ -53,6 +53,11 @@ export function registerFileSource(filePath: string, source: string): void {
   _indexByFile.delete(filePath);
 }
 
+/** The registered source text of `filePath`, or `undefined` (S457 — diagnostic positioning). */
+export function registeredFileSource(filePath: string): string | undefined {
+  return filePath ? _sourceByFile.get(filePath) : undefined;
+}
+
 /** Clear all registered sources (test isolation; new-compile hygiene). */
 export function resetLogLoc(): void {
   _sourceByFile.clear();

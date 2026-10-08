@@ -61,8 +61,8 @@
 
       function submit() {
         saveNote(@draft.note) !{
-          | .TooShort     :> { @phase = Phase.Failed("Too short.") ; return }
-          | .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved.") ; return }
+          .TooShort     :> { @phase = Phase.Failed("Too short.") ; return }
+          .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved.") ; return }
         }
         @lastSaved = @draft.note
         reset(@draft)

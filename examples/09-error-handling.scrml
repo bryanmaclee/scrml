@@ -18,8 +18,9 @@
 // outbox table via a `?{}` INSERT (the canonical "write to outbox, a worker
 // delivers the email" pattern). Because the body touches a `?{}` SQL block,
 // §12 body-content inference places submit on the SERVER — no `server`
-// keyword required (Insight 26). A zero-row insert surfaces SubmitFailed,
-// so the error path is real, not hypothetical.
+// keyword required (Insight 26). The server refuses a duplicate submission
+// (the same email + body already queued) with SubmitFailed, so the error path
+// is real, not hypothetical.
 //
 // NOTE — this is NOT the `<errorBoundary>` idiom. The variant-`renders`
 // clause + `<errorBoundary fallback=...>` pair (§19.6) is a SEPARATE,
@@ -76,10 +77,10 @@
     // submit() queues the message server-side and is failable. The `?{}`
     // INSERT escalates the function to the server (§12 Trigger 1) — the
     // database write never runs on the client. A real app's outbox worker
-    // would pick up the queued row and deliver the email; here an insert that
-    // returns no row (the DB rejected the write) surfaces SubmitFailed.
-    // `.run()` returns void (§8.5.1) — the write outcome is read from a
-    // `RETURNING` clause via `.get()`, never from a field on `.run()`.
+    // would pick up the queued row and deliver the email. A message already
+    // queued (same email + body) is refused with SubmitFailed — a server-side
+    // rule the client cannot check. (An INSERT either writes its row or throws;
+    // it never "returns no row", so the refusal is decided BEFORE the write.)
     function submit(name: string, email: string, body: string) ! ContactError {
         ?{`
           CREATE TABLE IF NOT EXISTS contact_messages (
@@ -90,12 +91,14 @@
             received_at timestamp DEFAULT CURRENT_TIMESTAMP
           )
         `}.run()
-        const queued = ?{`
+        const already = ?{`
+          SELECT id FROM contact_messages WHERE email = ${email} AND body = ${body}
+        `}.get()
+        if (already is some) fail .SubmitFailed("this message was already sent")
+        ?{`
           INSERT INTO contact_messages (name, email, body)
           VALUES (${name}, ${email}, ${body})
-          RETURNING id
-        `}.get()
-        if (queued is not) fail .SubmitFailed("message could not be queued")
+        `}.run()
     }
 
     // handleSubmit() is the whole lesson. Each `!{}` handler does ONE thing:
@@ -107,11 +110,11 @@
         @phase = .Submitting
 
         validate() !{
-            | err :> { @phase = .Failed(err); return }
+            _ err :> { @phase = .Failed(err); return }
         }
 
         submit(@name, @email, @body) !{
-            | err :> { @phase = .Failed(err); return }
+            _ err :> { @phase = .Failed(err); return }
         }
 
         @phase = .Succeeded

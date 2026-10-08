@@ -1,0 +1,16 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pin INTEGER)`}
+  </schema>
+  <db src="app.db" protect="pin" tables="users">
+    ${
+      import { hash } from "scrml:crypto"
+      function pinFingerprint(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        return hash("md5", u.pin)
+      }
+    }
+  </db>
+  <fp> = not
+  <button id="load" onclick={ @fp = pinFingerprint(1) !{ .Transport(_) :> { return } } }>load</button>
+</program>

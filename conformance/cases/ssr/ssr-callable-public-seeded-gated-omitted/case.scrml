@@ -5,8 +5,8 @@
 </schema>
 <db src="app.db" tables="secretlist,publiclist"></db>
 ${
-  server function loadSecret() { return ?{`SELECT * FROM secretlist`}.all() }
-  server function loadPublic() { return ?{`SELECT * FROM publiclist`}.all() }
+  server function loadSecret() { return ?{`SELECT * FROM secretlist`}.all() !{ _ :> [] } }
+  server function loadPublic() { return ?{`SELECT * FROM publiclist`}.all() !{ _ :> [] } }
   <secretCell server> = loadSecret()
   <publicCell server auth="none"> = loadPublic()
 }

@@ -1,0 +1,9 @@
+<program>
+${
+  function pick() {
+    return "javascript:alert(1)"
+  }
+  const X: string(url) = pick()
+}
+<p id="out">${X}</p>
+</program>

@@ -5,7 +5,7 @@
  * WHY THIS EXISTS (Windows EBUSY teardown flake)
  * ------------------------------------------------
  * A compiled scrml server module declares, at module top-level,
- *   `const _scrml_sql = new SQL("sqlite:<file>")`
+ *   `const _scrml_sql = new SQL(_scrml_sqlite_owned("<file>", …))` (or a lazy `_scrml_sqlite_referenced(…)`)
  * (a Bun.SQL handle) and — correctly, for a long-lived server — never closes
  * it. When a test dynamic-imports such a module, that connection opens an OS
  * handle on the `.db` file and holds it for the lifetime of the test PROCESS.
@@ -31,31 +31,71 @@
  */
 
 import { readFileSync, writeFileSync, rmSync, existsSync } from "fs";
+import { resolve } from "path";
 
 // Every cache-busted `import()` yields a FRESH module instance holding a FRESH
 // open SQL handle, so we must track and close each one — not just the last.
 const _openModules = new Set();
 
 /**
- * Rewrite the emitted relative SQLite connection string to an absolute path
- * (so the runtime queries hit the seeded test DB regardless of CWD), append a
- * disposal hook that closes the module's `_scrml_sql` handle, dynamic-import
- * the module (cache-busted → fresh in-process handle), register it for later
- * cleanup, and return it.
+ * s445 — the database file an emitted module's default `_scrml_sql` handle opens
+ * (SPEC §8.1.1 / §47.14), read from its text exactly as the emitted helper resolves
+ * it at runtime with `SCRML_DATA_DIR` unset: the recorded project-root-relative path
+ * (`_scrml_sqlite_owned` / `_scrml_sqlite_referenced`, first argument) joined to the
+ * recorded `_scrml_project_root`; an absolute recorded path names itself.
  *
- * The connection rewrite is byte-identical to the bespoke `.replace(...)` the
- * affected tests previously inlined.
+ * @param {string} text  The emitted module's source.
+ * @returns {{ file: string, owns: boolean } | null}
+ */
+export function emittedDbFile(text) {
+  const m = /const _scrml_sql = (?:_scrml_db_guard\()?(?:new SQL\()?_scrml_sqlite_(owned|referenced)\(("(?:[^"\\]|\\.)*")/.exec(text);
+  if (!m) return null;
+  const dbPath = JSON.parse(m[2]);
+  if (/^(?:\/|[A-Za-z]:[\\/])/.test(dbPath)) return { file: resolve(dbPath), owns: m[1] === "owned" };
+  const r = /const _scrml_project_root = ("(?:[^"\\]|\\.)*");/.exec(text);
+  if (!r) throw new Error("emittedDbFile: no _scrml_project_root in the module");
+  return { file: resolve(JSON.parse(r[1]), dbPath), owns: m[1] === "owned" };
+}
+
+/**
+ * s445 — assert that the compiled module at `serverJsPath` opens exactly
+ * `absDbPath` (see `emittedDbFile`). Replaces the old test-side rewrite of a
+ * CWD-relative `sqlite:` literal: a regression to a CWD-relative (or any other) path
+ * fails here instead of opening another file.
+ *
+ * @param {string} serverJsPath  Absolute path to the compiled module.
+ * @param {string} absDbPath     Absolute path of the database it must open.
+ */
+export function assertOpensDb(serverJsPath, absDbPath) {
+  const found = emittedDbFile(readFileSync(serverJsPath, "utf-8"));
+  if (!found) throw new Error(`assertOpensDb: ${serverJsPath} has no SQLite-file handle`);
+  if (found.file !== resolve(absDbPath)) {
+    throw new Error(`assertOpensDb: ${serverJsPath} opens ${found.file}, not ${absDbPath}`);
+  }
+}
+
+/**
+ * Append a disposal hook that closes the module's `_scrml_sql` handle,
+ * dynamic-import the module (cache-busted → fresh in-process handle), register
+ * it for later cleanup, and return it.
+ *
+ * s445 — this used to REWRITE the emitted `new SQL("sqlite:./items.db")` literal
+ * to the seeded file's absolute path, because that literal was opened relative
+ * to the test process's CWD. The emitted handle now names the database relative
+ * to the DECLARING .scrml file (the file the compiler read), anchored at the
+ * module itself, so no rewrite is needed — and this helper instead ASSERTS that
+ * the module opens exactly `absDbPath`, so a regression to a CWD-relative (or
+ * any other) path fails here rather than quietly opening another file.
  *
  * @param {string} serverJsPath  Absolute path to the compiled `.server.js`.
  * @param {string} absDbPath     Absolute path to the seeded SQLite file.
  * @returns {Promise<object>}    The imported module namespace.
  */
 export async function patchAndImport(serverJsPath, absDbPath) {
-  const patched =
-    readFileSync(serverJsPath, "utf-8").replace(
-      'const _scrml_sql = new SQL("sqlite:./items.db");',
-      `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
-    ) + `\nexport const __closeSql = async () => { await _scrml_sql.close(); };\n`;
+  const text = readFileSync(serverJsPath, "utf-8");
+  // A module whose program never reaches the database declares no handle at all.
+  if (/const _scrml_sql = (?:_scrml_db_guard\()?(?:new SQL\()?_scrml_sqlite_/.test(text)) assertOpensDb(serverJsPath, absDbPath);
+  const patched = text + `\nexport const __closeSql = async () => { await _scrml_sql.close(); };\n`;
   writeFileSync(serverJsPath, patched);
 
   const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);

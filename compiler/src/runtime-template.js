@@ -27,6 +27,17 @@ const _VALIDATOR_RUNTIME_SOURCE = readFileSync(
 ).replace(/^export /gm, "");
 
 /**
+ * SPEC §5.2 rule 3 (S457) — the URL-attribute scheme guard. `runtime-url-guard.js` is the ONE source
+ * of the URL scheme reader and the safe-scheme sets: the compiler imports it as a module
+ * (attr-injection-sink.ts), and the runtime inlines its source verbatim here (chunk 'urlguard', the
+ * validator-runtime pattern above: `export ` stripped, every declaration at column 0).
+ */
+export const URL_GUARD_RUNTIME_SOURCE = readFileSync(
+  join(__runtime_template_dir, "runtime-url-guard.js"),
+  "utf8",
+).replace(/^export /gm, "");
+
+/**
  * Stdlib shim loader. Reads a hand-written `compiler/runtime/stdlib/<name>.js`
  * shim, strips `export ` prefixes, collects the exported names, and produces
  * a runtime chunk string that registers the names on `_scrml_stdlib.<name>`.
@@ -6584,6 +6595,13 @@ function _scrml_log(side, loc) {
   }
 }
 
+// §5.2 URL-attribute scheme guard runtime (chunk: 'urlguard')
+//
+// _scrml_safe_url(el, name, value) — every URL-attribute write whose value the compiler could not
+// prove safe (the data supplies the scheme: href="\${url}", href=\${@u}, an <each> row's src=@.img)
+// goes through it. Inlined verbatim from compiler/src/runtime-url-guard.js — the same reader the
+// compile-time rule uses. Activated by a POST-EMIT scan for "_scrml_safe_url(" (emit-client.ts).
+${URL_GUARD_RUNTIME_SOURCE}
 ${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**

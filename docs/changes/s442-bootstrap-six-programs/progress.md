@@ -264,3 +264,26 @@ compiled clean with `s` absent from Core; item 2 — pop / shift / filter under 
   conformance (impl#1) 1063/1070 + 7 xfail (main grew 1054 → 1070) · footprint 18/18 runtime, 587 not-yet, 455
   front-end · mutations 170/170 RED · bite: CG 32 + CSS 32 certified (mirrors reproduced) + FRONT 12 certified ·
   five pre-existing programs byte-identical to base (dumpcore).
+
+## STEP 1 — merge of origin/main 3c627cf2 (branch worktree-agent-a337dc820eb4a91db)
+- #1159 was still OPEN (not on main) at fetch; main carried #1155 / #1153 / #1158 only — no bootstrap file touched,
+  auto-merge. Merge commit 1905225a, pushed. slice suites, mutations 170/170, bite CG 32 + CSS 32 + FRONT 12,
+  dumpcore byte-identical — all green.
+
+## O19 RESIDUE (branch s442-o19-residue, cut from 1905225a)
+Reproduced (scratchpad/r3probe.js): `<c:int s:int=7/>` at program level and as a child field (with / without a
+use-site value) compiled clean — `s` dropped / `[object Object]`; `@r.xs.pop()` on `type R:struct = { xs: … }` named
+`@r` and was judged by `r`'s own `let` (reported "granted" even for `xs: string[free, append]`).
+- O19: an own TYPE (other than the `:struct` container marker) with no initializer, plus typed attributes → refused
+  naming O19 (`hasOwnType`). Twins: `<c:int/>` with no attributes takes the use-site value (`1|3`); `<g:struct x:int=1/>`
+  is not refused.
+- Sub-field removal: `@r.xs.pop()` / `.shift()` is E-BOOTSTRAP-UNSUPPORTED naming `@r.xs.pop()` — "an edit of a
+  sub-field sequence" (it would be judged by `xs`'s own grants, dpa-052 Q6, which the bootstrap does not track —
+  refused exactly as `.push` on a sub-field already is). All removal messages name the place (`placeKey`).
+- Tests: slice-m4/review-r3.test.js (6). Mutation rows: 3 new, 2 re-sited. Mutations 173/173 RED; bite CG 32 + CSS 32
+  + FRONT 12; five pre-existing programs byte-identical; slice suites green.
+
+## s444 UPDATE (docs/changes/s444-core-additions-dpa058/progress.md)
+Core gained Attr.Bind, Expr.Host (`Date.now()`), Expr.Lambda / SeqCall, View.Star, removal edits and ElemAt; the
+dpa-058 ruling was built. §66.19.5 and §66.19.2 now compile clean from their VERBATIM sources and run — see the s444
+status table (66.19.1 / .3 / .6 / .5 / .2 DONE; .4 BLOCKED).

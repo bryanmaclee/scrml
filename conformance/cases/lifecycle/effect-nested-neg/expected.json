@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-effect-nested-neg",
+  "description": "§6.7.4 negative twin: two SIBLING effects are not nested — NOT E-LIFECYCLE-016.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4: \"a second trigger is a second sibling `<effect>`\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "E-LIFECYCLE-016"
+    ]
+  }
+}

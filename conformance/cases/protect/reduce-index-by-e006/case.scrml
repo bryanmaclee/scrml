@@ -5,11 +5,11 @@
   <db src="app.db" protect="passwordHash" tables="users">
     ${
       function getUser(id) {
-        let rows = ?{`SELECT * FROM users`}.all()
+        let rows = ?{`SELECT * FROM users`}.all() !{ _ :> [] }
         return rows.reduce((acc, r) => { acc[r.passwordHash] = r.id; return acc }, {})
       }
     }
   </db>
   <user> = not
-  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

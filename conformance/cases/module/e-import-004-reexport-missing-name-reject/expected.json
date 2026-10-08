@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-reexport-missing-name-reject",
+  "description": "§21.3 / §21.4 — b.scrml re-exports `{ K, Nope }` from c.scrml, which exports only K: E-IMPORT-004 at the re-export. b.scrml and c.scrml are aux siblings (`files` convention), so E-IMPORT-006 does not fire.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: \"Importing a name that is not exported by the target file SHALL be a compile error (E-IMPORT-004 ...).\" A named re-export binds the name from its source exactly as an import does (§21.4), so re-exporting a name the source does not export is the same error. Before S458 it was silent (S458 review F2).",
+  "expect": { "codes": ["E-IMPORT-004"], "notCodes": ["E-IMPORT-006", "E-IMPORT-002"] }
+}

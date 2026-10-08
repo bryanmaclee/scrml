@@ -34,6 +34,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { collectReactiveVarNames } from "../../src/codegen/reactive-deps.ts";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // helpers — file-based pipeline compile (mirrors computed-delay.test.js)
@@ -42,7 +43,7 @@ import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 function compileToClientJs(source, suffix = "engine-var-markup") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -281,13 +282,13 @@ describe("Bug 1.5 §2 — end-to-end ${@engineVar} markup interpolation gets rea
     expect(clientJs.length).toBeGreaterThan(0);
 
     // Pre-fix: the placeholder span had NO wiring. Post-fix: the lift-site
-    // emits `_scrml_render_value(el, _scrml_reactive_get("marioState"))` PLUS an
+    // emits `_scrml_render_value(_scrml_el, _scrml_reactive_get("marioState"))` PLUS an
     // `_scrml_effect(...)` subscription so writes to @marioState propagate.
     // markup-value-in-expression-2026-06-17: the display routes through the
-    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
+    // node-aware `_scrml_render_value(_scrml_el, expr)` helper (was `el.textContent =`).
     expect(clientJs).toContain('_scrml_reactive_get("marioState")');
     expect(clientJs).toMatch(
-      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("marioState"\)\)/,
+      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(_scrml_el,\s*_scrml_reactive_get\("marioState"\)\)/,
     );
   });
 
@@ -334,12 +335,12 @@ describe("Bug 1.5 §2 — end-to-end ${@engineVar} markup interpolation gets rea
     expect(clientJs).toContain('_scrml_reactive_get("marioState")');
     expect(clientJs).toContain('_scrml_reactive_get("healthRisk")');
     // markup-value-in-expression-2026-06-17: the display routes through the
-    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
+    // node-aware `_scrml_render_value(_scrml_el, expr)` helper (was `el.textContent =`).
     expect(clientJs).toMatch(
-      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("marioState"\)\)/,
+      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(_scrml_el,\s*_scrml_reactive_get\("marioState"\)\)/,
     );
     expect(clientJs).toMatch(
-      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("healthRisk"\)\)/,
+      /_scrml_effect\s*\(\s*function\s*\(\s*\)\s*\{\s*_scrml_render_value\(_scrml_el,\s*_scrml_reactive_get\("healthRisk"\)\)/,
     );
   });
 });

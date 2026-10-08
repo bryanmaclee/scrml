@@ -349,6 +349,23 @@ function go() { @v = decide() }
     });
   }
 
+  // s444 — the message states the fail-closed rule honestly: the compiler cannot
+  // PROVE the receiver awaits (it may well await), so the hazard is a CONDITIONAL,
+  // never an assertion that the receiver "gets an unawaited Promise".
+  test("message: fail-closed framing, conditional hazard, remedies + data-inversion migration", () => {
+    const o = serverNested(`function drive(f) { return f(hash) }\n  return drive(m) ? "a" : "r"`);
+    const msg = o.errors.find((x) => x.code === ESCAPE).message;
+    expect(msg).toContain("cannot prove that whoever receives it awaits");
+    expect(msg).toContain("the value is refused (fail-closed)");
+    expect(msg).toContain("if the receiver does not await a call, it gets a Promise, which is always truthy");
+    expect(msg).toContain("(§13.2)");
+    expect(msg).toContain("Call it directly — `m(…)`");
+    expect(msg).toContain("`.flatMap`");
+    expect(msg).toContain("pass data instead of the function");
+    expect(msg).toContain("hand the receiver the result");
+    expect(msg).not.toContain("Whoever calls it through that value gets an unawaited Promise");
+  });
+
   test("a server fn referenced as a value on the SERVER (escalated caller) → escape", () => {
     const o = compileFile(`<program>
 <v> = "unset"
@@ -754,7 +771,13 @@ ${attr}
   test("control: preventDefault BEFORE the first await compiles and runs synchronously", () => {
     const o = app(`<form onsubmit=\${ event.preventDefault(); @v = isOk(1) ? "a" : "r" }><button>s</button></form>`);
     expect(o.codes).toEqual([]);
-    expect(handlers(o.clientJs)[0]).toMatch(/^async function\(event\) \{ event\.preventDefault\(\);/);
+    // S453 (bryan S449 ruling A3) — `try {` now opens the async listener's body
+    // for the rejection log. What this control pins is that `preventDefault()`
+    // is still the FIRST thing the listener runs, BEFORE any await — which is
+    // exactly why S453 wraps in place rather than wrapping the listener in an
+    // async IIFE (that would push preventDefault past a microtask boundary,
+    // after the browser committed the submit).
+    expect(handlers(o.clientJs)[0]).toMatch(/^async function\(event\) \{ try \{ event\.preventDefault\(\);/);
   });
   test("round 3 (N2): a `const ev = event` alias after the await → error", () => {
     const o = app(`<form onsubmit=\${ const ev = event; @v = isOk(1) ? "a" : "r"; ev.preventDefault() }><button>s</button></form>`);
@@ -898,14 +921,23 @@ describe("js-async-analysis", () => {
     expect(analyzeRawJsFragment(`h => { return m(h`, facts)).toBeNull();
   });
 
+  // S453 (bryan S449 ruling A3) — `colorAsyncFunctionExpr` is the listener seam,
+  // so a body it colours async is now also wrapped in
+  // `try { … } catch (_scrml_async_err) { _scrml_error_boundary_log(<id>, …) }`
+  // (`"event handler"` is DEFAULT_HANDLER_BOUNDARY_ID — no site passed one).
+  // These two pins are about the AWAIT PLACEMENT, which is unchanged; the wrap
+  // is threaded through so they keep biting on the parenthesization.
+  const wrapped = (inner, id = "event handler") =>
+    `{ try { ${inner} } catch (_scrml_async_err) { _scrml_error_boundary_log(${JSON.stringify(id)}, _scrml_async_err); } }`;
+
   test("function expr: paren-correct await for a tight tail, deeper edits nest correctly", () => {
     const r = colorAsyncFunctionExpr(`function(e) { const t = isOk(1).ok; return a(b)(isOk(2)) }`, facts);
-    expect(r.code).toBe(`async function(e) { const t = (await isOk(1)).ok; return a(b)(await isOk(2)) }`);
+    expect(r.code).toBe(`async function(e) ${wrapped("const t = (await isOk(1)).ok; return a(b)(await isOk(2))")}`);
   });
 
   test("function expr: a combinator chained on a lifted combinator keeps its receiver parenthesized", () => {
     const r = colorAsyncFunctionExpr(`function(e) { const r = xs.filter(x => isOk(x)).map(x => x + 1); }`, facts);
-    expect(r.code).toBe(`async function(e) { const r = (await _scrml_filterAsync(xs, async x => await isOk(x))).map(x => x + 1); }`);
+    expect(r.code).toBe(`async function(e) ${wrapped("const r = (await _scrml_filterAsync(xs, async x => await isOk(x))).map(x => x + 1);")}`);
   });
 
   test("statements: nested helpers color transitively (a → b → isOk)", () => {

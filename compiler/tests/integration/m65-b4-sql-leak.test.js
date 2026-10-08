@@ -1,14 +1,20 @@
 /**
  * m65-b4-sql-leak.test.js — M6.5.b.4 (FIX-NATIVE, SECURITY) END-TO-END GATE.
  *
- * THE LOAD-BEARING TEST. The M6.7-STOP leak is NATIVE-PIPELINE-ONLY: under
- * the LIVE parser the bare `?{}` is already `kind:"sql"` and W-CG-001 fires,
- * so the default full suite (which runs under live) does NOT catch the leak.
- * This test drives the NATIVE pipeline (`parser: "scrml-native"`) EXPLICITLY
- * through codegen and asserts:
- *   1. server-only SQL at non-server scope does NOT reach client.js, AND
- *   2. W-CG-001 fires (the server-only block IS detected and suppressed),
- * matching the LIVE pipeline behaviour exactly.
+ * The M6.7-STOP leak was NATIVE-ONLY: under the LIVE parser the bare `?{}` is
+ * already `kind:"sql"` and W-CG-001 fires. This file used to drive the whole
+ * pipeline through the retired `parser: "scrml-native"` flag.
+ *
+ * S449 RE-POINT (security coverage kept, on the paths that exist):
+ *   1. the native tree — `nativeParseFile` (the entry impl#1 calls for
+ *      component / `^{}` / `<match>` re-parse) promotes both forms to a
+ *      `kind:"sql"` statement, which is what isServerOnlyNode classifies;
+ *   2. the PRODUCTION native path — a component whose body holds a `?{}` is
+ *      re-parsed by `nativeParseFile` inside component-expander (no
+ *      live-fallback pattern matches it); its SQL must not reach client.js and
+ *      W-CG-001 must fire;
+ *   3. the default pipeline — the original top-level shapes, no client SQL +
+ *      W-CG-001.
  *
  * Covers both the bare `?{}` -> kind:"sql" form AND the chained
  * `?{}.get()` form. As of F2a (native-sql-chained-form-f2a-2026-06-04) the
@@ -22,20 +28,19 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { nativeAst, findNodes, errorsOf } from "../helpers/native-ast.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
 
-function compile(source, slug, parser) {
-  const name = `${slug}-${parser || "live"}-${++_tmp}`;
+function compile(source, slug) {
+  const name = `${slug}-live-${++_tmp}`;
   const tmpDir = resolve(testDir, `_tmp_m65b4_${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
-    const opts = { inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") };
-    if (parser) opts.parser = parser;
-    const result = compileScrml(opts);
+    const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") });
     let clientJs = "";
     let serverJs = "";
     for (const [, out] of result.outputs || new Map()) {
@@ -70,33 +75,59 @@ const CHAINED_SQL = `<program db="postgres"></>
 // A client-side SQL exec would surface as one of these tokens in client.js.
 const CLIENT_SQL_LEAK = /_scrml_sql|SELECT secret|DELETE FROM credentials/;
 
-describe("M6.5.b.4 — server-only SQL must NOT leak into client.js (native pipeline)", () => {
-  test("PRIMARY: bare ?{} at non-server scope — NO SQL in NATIVE client.js", () => {
-    const { clientJs } = compile(BARE_SQL, "bare", "scrml-native");
+// A component whose body holds a server-only `?{}`. component-expander
+// re-parses this body with `nativeParseFile` (none of its live-fallback
+// patterns — hard-keyword binding, template interpolation, <each>/<match>,
+// render call — matches), so the native `kind:"sql"` promotion is what keeps
+// the query out of the client.
+const COMPONENT_SQL = `<program db="postgres">
+\${
+  const Leaky = <div>\${ ?{\`SELECT secret FROM credentials\`} }</div>
+}
+<Leaky/>
+</program>`;
+
+describe("M6.5.b.4 — native tree: both ?{} forms promote to kind:\"sql\"", () => {
+  test("bare ?{} at non-server scope", () => {
+    const r = nativeAst(BARE_SQL);
+    expect(errorsOf(r)).toEqual([]);
+    const sql = findNodes(r.ast, (n) => n.kind === "sql");
+    expect(sql).toHaveLength(1);
+    expect(sql[0].query).toBe("SELECT secret FROM credentials");
+  });
+
+  test("chained ?{}.run() at non-server scope", () => {
+    const r = nativeAst(CHAINED_SQL);
+    expect(errorsOf(r)).toEqual([]);
+    const sql = findNodes(r.ast, (n) => n.kind === "sql");
+    expect(sql).toHaveLength(1);
+    expect(sql[0].query).toBe("DELETE FROM credentials");
+    expect(sql[0].chainedCalls.map((c) => c.method)).toEqual(["run"]);
+  });
+});
+
+describe("M6.5.b.4 — server-only SQL in a component body (production native re-parse path)", () => {
+  test("NO SQL in client.js", () => {
+    const { clientJs } = compile(COMPONENT_SQL, "component");
     expect(CLIENT_SQL_LEAK.test(clientJs)).toBe(false);
   });
 
-  test("PRIMARY: bare ?{} fires W-CG-001 under NATIVE (server-only detected)", () => {
-    const { warnings } = compile(BARE_SQL, "bare", "scrml-native");
+  test("W-CG-001 fires (server-only detected)", () => {
+    const { warnings } = compile(COMPONENT_SQL, "component");
     expect(warnings.some((w) => w.code === "W-CG-001")).toBe(true);
   });
+});
 
-  test("PRIMARY: NATIVE client.js matches LIVE (no client SQL on either)", () => {
-    const live = compile(BARE_SQL, "bare", null);
-    const native = compile(BARE_SQL, "bare", "scrml-native");
+describe("M6.5.b.4 — server-only SQL at non-server scope (default pipeline)", () => {
+  test("bare ?{} — NO SQL in client.js, W-CG-001 fires", () => {
+    const live = compile(BARE_SQL, "bare");
     expect(CLIENT_SQL_LEAK.test(live.clientJs)).toBe(false);
-    expect(CLIENT_SQL_LEAK.test(native.clientJs)).toBe(false);
     expect(live.warnings.some((w) => w.code === "W-CG-001")).toBe(true);
-    expect(native.warnings.some((w) => w.code === "W-CG-001")).toBe(true);
   });
 
-  test("chained ?{}.run() at non-server scope — NO SQL in NATIVE client.js", () => {
-    const { clientJs } = compile(CHAINED_SQL, "chained", "scrml-native");
-    expect(CLIENT_SQL_LEAK.test(clientJs)).toBe(false);
-  });
-
-  test("chained ?{}.run() fires W-CG-001 under NATIVE (kind:sql server-only detected)", () => {
-    const { warnings } = compile(CHAINED_SQL, "chained", "scrml-native");
-    expect(warnings.some((w) => w.code === "W-CG-001")).toBe(true);
+  test("chained ?{}.run() — NO SQL in client.js, W-CG-001 fires", () => {
+    const live = compile(CHAINED_SQL, "chained");
+    expect(CLIENT_SQL_LEAK.test(live.clientJs)).toBe(false);
+    expect(live.warnings.some((w) => w.code === "W-CG-001")).toBe(true);
   });
 });

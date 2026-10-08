@@ -5,7 +5,7 @@
 //
 // SYMPTOM (pre-fix): a NON-self-closing markup element used as a VALUE in
 // expression position (a `lift <li>x</li>` arg, `const <x> = <tag>...</tag>`,
-// etc.) failed under `--parser=scrml-native` with E-STMT-MISSING-SEMICOLON +
+// etc.) failed in the native parser with E-STMT-MISSING-SEMICOLON +
 // E-STMT-UNCLOSED-BLOCK, while the default pipeline compiled clean. The
 // self-closing form `lift <li/>` worked.
 //
@@ -24,32 +24,33 @@
 //      translate-stmt.js): the markup-value SLICE SOURCE is threaded onto the
 //      MarkupValue node + through synthLiveChildren so child text recovers.
 //
-// GATE: native output must be BYTE-IDENTICAL to the default pipeline (the
-// R26 byte-parity gate) across single / nested / interpolation / with-attrs
-// shapes, with zero E-STMT-MISSING-SEMICOLON / E-STMT-UNCLOSED-BLOCK and a
-// `node --check`-valid client.js. The self-closing case must STAY working.
+// S449 RE-POINT: the gate used to be a full compile under the retired
+// full-pipeline `--parser=scrml-native` flag, byte-compared with the default
+// pipeline. The lexer + markup-value bridge run in production inside
+// `nativeParseFile` (component / `^{}` / `<match>` re-parse), so the gate is
+// now: `nativeParseFile` parses every shape with zero errors (no
+// E-STMT-MISSING-SEMICOLON / E-STMT-UNCLOSED-BLOCK) and recovers the child text
+// (the two tree assertions at the bottom), and each shape compiles clean
+// through the default pipeline. The self-closing case must STAY working.
 
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
-import { normalizeChunkToken } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-// compileWith — compile `source` under `parser` (null = default live BS+TAB;
-// "scrml-native" = native pipeline). Returns errors + warnings + client.js text.
-function compileWith(source, parser, suffix) {
+// compileDefault — compile `source` through the default pipeline.
+function compileDefault(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-closetag-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-closetag-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
-    const opts = { inputFiles: [tmpInput], write: true, outputDir: outDir };
-    if (parser) opts.parser = parser;
-    const result = compileScrml(opts);
+    const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs };
@@ -123,7 +124,7 @@ const SELF_CLOSING = [
   "</program>",
 ].join("\n");
 
-describe("native markup-as-value close-tag span — R26 byte-parity", () => {
+describe("native markup-as-value close-tag span", () => {
   const shapes = [
     ["single paired", SINGLE, "single"],
     ["nested element", NESTED, "nested"],
@@ -133,18 +134,17 @@ describe("native markup-as-value close-tag span — R26 byte-parity", () => {
   ];
 
   for (const [label, src, suffix] of shapes) {
-    test(`${label}: native compiles clean — zero E-STMT-MISSING-SEMICOLON / E-STMT-UNCLOSED-BLOCK`, () => {
-      const nat = compileWith(src, "scrml-native", suffix);
-      expect(stmtErrors(nat.errors)).toEqual([]);
-      // No fatal errors at all (the markup-as-value parses + emits).
-      expect(nat.errors.filter((e) => e.severity !== "warning" && e.severity !== "info")).toEqual([]);
+    test(`${label}: nativeParseFile parses clean — zero E-STMT-MISSING-SEMICOLON / E-STMT-UNCLOSED-BLOCK`, () => {
+      const nat = nativeParseFile(`/closetag/${suffix}.scrml`, src);
+      expect(stmtErrors(nat.errors ?? [])).toEqual([]);
+      expect((nat.errors ?? []).filter((e) => e.severity !== "warning" && e.severity !== "info")).toEqual([]);
+      expect(findLiftExpr(nat.ast)).not.toBeNull();
     });
 
-    test(`${label}: native client.js is byte-identical to default (R26 byte-parity)`, () => {
-      const def = compileWith(src, null, `${suffix}-d`);
-      const nat = compileWith(src, "scrml-native", `${suffix}-n`);
-      expect(nat.clientJs.length).toBeGreaterThan(0);
-      expect(normalizeChunkToken(nat.clientJs)).toBe(normalizeChunkToken(def.clientJs));
+    test(`${label}: default pipeline compiles clean and emits client.js`, () => {
+      const def = compileDefault(src, `${suffix}-d`);
+      expect(def.errors.filter((e) => e.severity !== "warning" && e.severity !== "info")).toEqual([]);
+      expect(def.clientJs.length).toBeGreaterThan(0);
     });
   }
 

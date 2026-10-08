@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-reexport-ambiguous-star-reject",
+  "description": "§21.3 / §21.4 — b.scrml has `export * from './c.scrml'` and `export * from './d.scrml'`, and both c and d declare their own `w`. `import { w } from './b.scrml'` fires E-IMPORT-004 (the name is ambiguous, so b exports neither). b, c and d are aux siblings (`files` convention).",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.4: re-export follows standard ES module semantics, under which a name two `export *` resolve to DIFFERENT declarations is exported by neither. Importing it is therefore §21.3 E-IMPORT-004; the message says the name is ambiguous and names both stars (S458 review F4).",
+  "expect": { "codes": ["E-IMPORT-004"], "notCodes": ["E-IMPORT-006", "E-IMPORT-002"] }
+}

@@ -588,6 +588,14 @@ function processNodeList(
           for (const dn of declNodes) {
             (dn as Record<string, unknown>)._compileTimeOnly = true;
           }
+          // §5.2 executable-sink rule (S456) — the emitted nodes' spans point into the
+          // re-parsed emit text (`__meta_emit__`); record the `^{}` block's own span so the
+          // post-ME check can anchor a refusal where the author can find it.
+          for (const rn of replacementNodes) {
+            if (rn && typeof rn === "object" && (node as { span?: Span }).span) {
+              (rn as Record<string, unknown>)._metaEmitSiteSpan = (node as { span?: Span }).span;
+            }
+          }
           // Splice the replacement nodes in place of the meta node
           nodes.splice(i, 1, ...replacementNodes);
           changed = true;

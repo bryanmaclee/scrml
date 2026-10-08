@@ -34,19 +34,20 @@
  * <onTransition> body ran.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { foldChunkNamespacing, unwrapChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
 function compile(source, suffix = "bug-ab-direct") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -139,8 +140,8 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
       // Emit-level guards: the fire-hooks machinery must EXIST and be wired.
       expect(cj).toContain("function __scrml_engine_mode_fire_hooks");
       // Both engine-direct edges present, each incrementing transitions.
-      expect(cj).toContain(`if (fromVariant === "Nav" && toVariant === "Edit")`);
-      expect(cj).toContain(`if (fromVariant === "Edit" && toVariant === "Nav")`);
+      expect(cj).toContain(`if (_scrml_from === "Nav" && _scrml_to === "Edit")`);
+      expect(cj).toContain(`if (_scrml_from === "Edit" && _scrml_to === "Nav")`);
       // The effect body is emitted (NOT just the <transitions>=0 init).
       const effectMatches = cj.match(
         /_scrml_reactive_set\("transitions", _scrml_reactive_get\("transitions"\) \+ 1\)/g,
@@ -245,4 +246,11 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
       cleanup();
     }
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

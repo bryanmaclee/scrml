@@ -61,6 +61,14 @@ ${
             .If(cond: x) :> "If"
             .Return(e: x) :> "Return"
             .Eval(e: x) :> "Eval"
+            .Suspend(bind: x) :> "Suspend"
+            .ResetSurface(of: x) :> "ResetSurface"
+            .Defer(body: x) :> "Defer"
+            .Unpersist(decl: x) :> "Unpersist"
+            .Attempt(result: x) :> "Attempt"
+            .Fail(err: x) :> "Fail"
+            .Join(k: x) :> "Join"
+            .Jump(k: x) :> "Jump"
         }
     }
 
@@ -76,6 +84,11 @@ ${
             .StructOf(ty: x) :> "StructOf"
             .Handle(inst: x) :> "Handle"
             .InitOf(decl: x) :> "InitOf"
+            .Host(call: x) :> "Host"
+            .Lambda(params: x) :> "Lambda"
+            .SeqCall(op: x) :> "SeqCall"
+            .Validity(of: x) :> "Validity"
+            .ServerCall(fn: x) :> "ServerCall"
         }
     }
 
@@ -112,6 +125,10 @@ ${
             .PositionWrite :> "PositionWrite"
             .FieldAt(path: x) :> "FieldAt"
             .Transition :> "Transition"
+            .RemoveEnd :> "RemoveEnd"
+            .RemoveFront :> "RemoveFront"
+            .RemoveAnywhere :> "RemoveAnywhere"
+            .ElemAt(index: x) :> "ElemAt"
         }
     }
 
@@ -124,6 +141,10 @@ ${
             .Each(src: x) :> "Each"
             .Instance(decl: x) :> "Instance"
             .Slot :> "Slot"
+            .Star(decl: x) :> "Star"
+            .Effect(deps: x) :> "Effect"
+            .ResetOn(triggers: x) :> "ResetOn"
+            .Errors(of: x) :> "Errors"
         }
     }
 
@@ -131,7 +152,10 @@ ${
         return match a {
             .Static(name: x) :> "Static"
             .Bound(name: x) :> "Bound"
+            .Show(test: x) :> "Show"
             .On(event: x) :> "On"
+            .Bind(kind: x) :> "Bind"
+            .Gate(values: x) :> "Gate"
         }
     }
 }

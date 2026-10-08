@@ -1051,6 +1051,11 @@ ${
             .StructOf(ty: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -1136,7 +1141,7 @@ ${
     fn mkField(sym: Sym, ty: Type, init: Expr, mode: FieldMode, grants: GrantSet, cap: Sym | not) -> Field {
         return {
             sym: sym, ty: ty, init: init, mode: mode, role: FieldRole.Child, grants: grants,
-            graph: not, exported: false, wcap: cap,
+            graph: not, exported: false, wcap: cap, vals: [], persist: not,
         }
     }
 
@@ -1192,16 +1197,17 @@ ${
 
     export fn ingest(files: IFile[]) -> Ingested {
         const prog: Sym = mkSym(0, "program")
-        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [] }
+        const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [], dbs: [], reset: false, sqlError: not, serverCallError: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
         const ast: INode = files[0].ast
         // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
-        // `fileShape` summarize nodes mapped one by one. The hoisted lists (`imports`,
+        // `fileShape` summarize nodes mapped one by one; `precgTopLevelProgramSpan` is
+        // identity (impl#1's PRECG records which <program> node it configured, by span — S445 F2). The hoisted lists (`imports`,
         // `exports`, `components`, `typeDecls`, `machineDecls`, `channelDecls`) and the
         // configs (`authConfig`, `middlewareConfig`, `mcpConfig`) are NOT listed: non-empty,
         // each is a not-yet.
         const fileWhy: string[] = unmapped(ast, "file", ["nodes"], ["filePath", "hasProgramRoot", "hasResetExpr",
-            "hasEqualityExpr", "hasChunkedMarkupTag", "hasForStmt", "fileShape"])
+            "hasEqualityExpr", "hasChunkedMarkupTag", "hasForStmt", "fileShape", "precgTopLevelProgramSpan"])
         const items: Items = collect(nodesAt(ast, "nodes"))
 
         // Pass 1: every declaration gets its Sym before any body is lowered.
@@ -1236,7 +1242,7 @@ ${
             }
             const body: LS = lowerStmts(fcx, nodesAt(f.n, "body"))
             why = why.concat(pi.why).concat(body.why)
-            fns = fns.concat([{ sym: fnInfos[j].sym, params: pi.params, body: block(body.stmts), pure: strAt(f.n, "fnKind") == "fn" }])
+            fns = fns.concat([{ sym: fnInfos[j].sym, params: pi.params, body: block(body.stmts), pure: strAt(f.n, "fnKind") == "fn", err: not, waits: false }])
             j = j + 1
         }
 
@@ -1249,7 +1255,7 @@ ${
             sym: prog, kind: DeclKind.Program, single: true, fields: fs.fields,
             renders: vs.views, wiring: [], handles: [],
         }
-        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [] }
+        const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not }   // the hybrid's stylesheet is css-ingest's (slice-m3)
         return { core: core, why: dedupeStr(why) }
     }
 
@@ -1306,6 +1312,11 @@ ${
             .StructOf(ty: x) :> "Expr.StructOf"
             .Handle(inst: x) :> "Expr.Handle"
             .InitOf(decl: x) :> "Expr.InitOf"
+            .Host(call: x) :> "Expr.Host"
+            .Lambda(params: x) :> "Expr.Lambda"
+            .SeqCall(op: x) :> "Expr.SeqCall"
+            .Validity(of: x) :> "Expr.Validity"
+            .ServerCall(fn: x) :> "Expr.ServerCall"
         }
     }
 

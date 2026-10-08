@@ -144,6 +144,14 @@ ELEMENT_ATTR_REGISTRY.set("program", {
       supportsInterpolation: false,
       allowedValues: ["auto", "sqlite", "postgres", "mysql", "redis", "none"],
     })],
+    // §19.10.6 (S449 C) — transaction concurrency for the program's database.
+    // "serialized" (the default): one transaction at a time per handle.
+    // "concurrent": Postgres / MySQL only — one reserved pool connection per
+    // transaction (E-SQL-010 on a SQLite database).
+    ["transactions", attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["serialized", "concurrent"],
+    })],
     // §19.9.6 / §8.9.5 — S79 adopter-override knobs (duration / integer; malformed
     // is silently re-defaulted per spec — value not enforced here).
     ["idempotency-ttl",   attrSpec({ supportsInterpolation: false })],

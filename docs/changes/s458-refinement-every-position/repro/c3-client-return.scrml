@@ -1,0 +1,8 @@
+<program>
+${
+  function pick(v) -> string(url) {
+    return v
+  }
+}
+<p>${pick("https://example.com")}</p>
+</program>

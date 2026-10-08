@@ -1,0 +1,33 @@
+{
+  "id": "server-db-sql-hoisted-loop-reassign-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): the loop's single keyed read REASSIGNS an existing binding — `row = ?{…}.get()` directly in the body, inside an `if`, and on a `let row` declared OUTSIDE the loop; unhandled and handled (`!{ _ :> not }`). The hoisted Map lookup assigns the binding. Pre-S455 the direct reassignment re-declared it (`const row = …` / `var row = …` beside `let row` — E-CODEGEN-INVALID-LOGIC / a load-time SyntaxError), and the one inside an `if` read `not` on success (the nested read was never rewritten). The hoisted loop body also lowered without the enclosing scope's declared names, so the outer-binding form could not be told from a fresh declaration.",
+  "language-version": "1.0",
+  "spec": "§8.10, §19.8.3",
+  "rationale": "§8.10: \"A for-loop whose body contains a single keyed `?{}` read SHALL be rewritten to a single `WHERE IN (...)` pre-fetch plus per-iteration `Map` lookup.\" §8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop\" — the un-rewritten loop assigns the existing binding.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "direct": "hello,none",
+      "inIf": "hello,none",
+      "outer": "hello,none",
+      "handledDirect": "hello,none",
+      "handledInIf": "hello,none",
+      "handledFailed": "none,none"
+    },
+    "domAnchored": [
+      { "selector": "#direct", "text": "hello,none" },
+      { "selector": "#handledInIf", "text": "hello,none" }
+    ]
+  }
+}

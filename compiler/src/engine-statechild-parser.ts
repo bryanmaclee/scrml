@@ -2073,18 +2073,24 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
  * §51.0.S.2.3 (S154 — #14 event-payload-transition, PARSER batch 1) — parse
  * the leading `(state × message)` arms out of an engine state-child `bodyRaw`.
  *
- * Arm grammar (the JS-style match arm shape, §51.0.S.2.3 reusing §18):
+ * Arm grammar — a §18.2 `match-arm` (§51.0.S.2.3 as amended S452):
  *
- *     | .Variant(binding) :> body
- *     | .End             :> .Idle
- *     | .Drop(col)       :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
- *     | _                :> @<engineVar>          (wildcard, §51.0.S.2.4)
+ *     .Variant(binding) :> body
+ *     .End              :> .Idle
+ *     .Drop(col)        :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+ *     _                 :> @<engineVar>          (wildcard, §51.0.S.2.4)
  *
- * Body-separation rule: the leading CONTIGUOUS run of `|`-arms (after the
- * body's leading whitespace) forms the message-dispatch table; scanning stops
- * at the first non-`|` content at the top level, which is the state-child's
- * RENDER body. Returns the parsed arms PLUS `renderBodyStart` — the byte
- * offset within `bodyRaw` where the (possibly-empty) render body begins.
+ * The pre-S452 `|`-led spelling (`| .Variant(binding) :> body`) is
+ * soft-deprecated (§19.4.5) and parses to the SAME entry; a body may mix the
+ * two. A pipe-less head is strict — `.V` / `::V` / `T.V` / `T::V` (optionally
+ * `( … )`) or `_` / `else`, then the arm arrow on the same line, at the start of
+ * a line (see `pipelessHeadAt`).
+ *
+ * Body-separation rule: the leading CONTIGUOUS run of arms (after the body's
+ * leading whitespace) forms the message-dispatch table; scanning stops at the
+ * first non-arm content at the top level, which is the state-child's RENDER
+ * body. Returns the parsed arms PLUS `renderBodyStart` — the byte offset
+ * within `bodyRaw` where the (possibly-empty) render body begins.
  *
  * **Why a dedicated parser (not `parseMatchArms`)?** `parseMatchArms`
  * (match-statechild-parser.ts) parses the TAG-shaped block-form match arm
@@ -2111,8 +2117,9 @@ export function parseMessageArms(
   let pos = 0;
 
   // Skip leading whitespace + comments to reach the first arm candidate. The
-  // arm region is the leading contiguous `|`-run; if the first non-trivia char
-  // is not `|`, there are no message arms and the whole body is render body.
+  // arm region is the leading contiguous run of arms; if the first non-trivia
+  // item is not an arm, there are no message arms and the whole body is render
+  // body.
   function skipTrivia(at: number): number {
     let p = at;
     for (;;) {
@@ -2134,46 +2141,137 @@ export function parseMessageArms(
     return null;
   }
 
+  // S452 (§51.0.S.2.3 as amended; §19.4.5) — the PIPE-LESS arm head. A message
+  // arm is a §18.2 `match-arm` with no leading `|`. The head is EXACTLY one of
+  //     .V   ::V   T.V   T::V        optionally followed by `( … )`
+  //     _    else                    (the catch-all)
+  // and then the arm arrow (`:>`, or deprecated `=>` / `->`) on the SAME line.
+  // No paren-free binder (`.V m :>` is `!{}`-legacy-only, §19.4.5) and no
+  // alternation; a bare name is not a pattern. Anything else is not a head —
+  // the arm run ends and the line is render content, exactly as before.
+  // Returns the leaf variant name + wildcard flag + the offset just past the
+  // pattern name (where the shared `( … )` / arrow scan resumes), or null.
+  const isIdStart = (c: string | undefined) => !!c && /[A-Za-z_$]/.test(c);
+  const isIdChar = (c: string | undefined) => !!c && /[A-Za-z0-9_$]/.test(c);
+  function readIdent(at: number): number {
+    let q = at;
+    while (q < len && isIdChar(bodyRaw[q])) q++;
+    return q;
+  }
+  function pipelessHeadAt(at: number): { variantName: string; isWildcard: boolean; p: number } | null {
+    let variantName = "";
+    let isWildcard = false;
+    let p = at;
+    if (bodyRaw[p] === "_" && !isIdChar(bodyRaw[p + 1])) {
+      isWildcard = true; variantName = "_"; p += 1;
+    } else if (bodyRaw.startsWith("else", p) && !isIdChar(bodyRaw[p + 4])) {
+      // `else` is §18.2's catch-all spelling — the same entry as `_`.
+      isWildcard = true; variantName = "_"; p += 4;
+    } else {
+      // Optional type qualifier `T` (then a `.` / `::` is mandatory).
+      if (isIdStart(bodyRaw[p])) p = readIdent(p);
+      let sep = 0;
+      if (bodyRaw[p] === ".") sep = 1;
+      else if (bodyRaw[p] === ":" && bodyRaw[p + 1] === ":") sep = 2;
+      if (sep === 0) return null; // a bare name (or anything else) is not a pattern
+      if (!isIdStart(bodyRaw[p + sep])) return null; // `.5`, `.(`, `T.` …
+      const vStart = p + sep;
+      p = readIdent(vStart);
+      variantName = bodyRaw.slice(vStart, p);
+      // `a.b.c` / `T.V::W` — a path, not a head.
+      if (bodyRaw[p] === "." || (bodyRaw[p] === ":" && bodyRaw[p + 1] === ":")) return null;
+    }
+    // Lookahead (same line): optional `( … )`, then the arm arrow. Without the
+    // arrow this is not an arm head.
+    let q = p;
+    while (q < len && (bodyRaw[q] === " " || bodyRaw[q] === "\t")) q++;
+    if (!isWildcard && bodyRaw[q] === "(") {
+      let depth = 1;
+      let r = q + 1;
+      let inDQ = false;
+      let inSQ = false;
+      while (r < len && depth > 0) {
+        const c = bodyRaw[r]!;
+        if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") r++; r++; continue; }
+        if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") r++; r++; continue; }
+        if (c === '"') { inDQ = true; r++; continue; }
+        if (c === "'") { inSQ = true; r++; continue; }
+        if (c === "\n") return null; // a head's binding list is on its line
+        if (c === "(") { depth++; r++; continue; }
+        if (c === ")") { depth--; if (depth === 0) break; r++; continue; }
+        r++;
+      }
+      if (depth !== 0) return null;
+      q = r + 1;
+      while (q < len && (bodyRaw[q] === " " || bodyRaw[q] === "\t")) q++;
+    }
+    if (!arrowAt(q)) return null;
+    return { variantName, isWildcard, p };
+  }
+
   pos = skipTrivia(pos);
-  // If nothing starts with `|`, there is no message-arm table.
-  if (pos >= len || bodyRaw[pos] !== "|") {
+  // If the body does not open with an arm (`|`-led or a pipe-less head), there
+  // is no message-arm table.
+  if (pos >= len || (bodyRaw[pos] !== "|" && !pipelessHeadAt(pos))) {
     return { arms, renderBodyStart: 0 };
   }
 
   // `renderBodyStart` defaults to "end of arm region"; updated after each arm.
   let renderBodyStart = pos;
+  let isFirstArm = true;
 
   while (pos < len) {
     const triviaStart = skipTrivia(pos);
-    if (triviaStart >= len || bodyRaw[triviaStart] !== "|") {
+    // S452 — the leading run of arm heads, piped, pipe-less or mixed. A
+    // pipe-less head is only recognised at the START of a line (or the body):
+    // one arm per line (§18.2), so arm-shaped text later on a line — e.g. after
+    // a block body's `}` — is never read as a new arm, and a `.`/`::` glued to a
+    // preceding token can never reach this check.
+    const pipelessHead = (triviaStart < len && bodyRaw[triviaStart] !== "|" &&
+      (isFirstArm || bodyRaw.slice(pos, triviaStart).includes("\n")))
+      ? pipelessHeadAt(triviaStart)
+      : null;
+    if (triviaStart >= len || (bodyRaw[triviaStart] !== "|" && !pipelessHead)) {
       // No further arm — the arm region ends here. The render body (if any)
       // starts at the first non-arm content.
       renderBodyStart = triviaStart;
       break;
     }
+    isFirstArm = false;
     const armStart = triviaStart;
-    let p = triviaStart + 1; // consume `|`
-    while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+    let p = triviaStart;
 
     // -- Pattern --------------------------------------------------------------
     // Wildcard `_` OR a (possibly qualified) variant pattern `.Variant` /
     // `MsgType.Variant`. Capture the leaf variant name (last dotted segment).
     let variantName = "";
     let isWildcard = false;
-    if (bodyRaw[p] === "_" && !/[A-Za-z0-9_$]/.test(bodyRaw[p + 1] ?? "")) {
-      isWildcard = true;
-      variantName = "_";
-      p += 1;
+    let patternStart = triviaStart; // §19.4.5 — where the arm pattern begins (past a legacy `|`)
+    if (pipelessHead) {
+      // S452 pipe-less head — already validated by `pipelessHeadAt`.
+      variantName = pipelessHead.variantName;
+      isWildcard = pipelessHead.isWildcard;
+      p = pipelessHead.p;
     } else {
-      // Leading `.` for the bare-variant form (§51.0.S worked examples use
-      // `.Variant`); a qualified `MsgType.Variant` is also accepted.
-      if (bodyRaw[p] === ".") p += 1;
-      const patStart = p;
-      while (p < len && /[A-Za-z0-9_$.]/.test(bodyRaw[p]!)) p++;
-      const patText = bodyRaw.slice(patStart, p);
-      // Leaf segment (the variant ident) — last component of a dotted path.
-      const dotIdx = patText.lastIndexOf(".");
-      variantName = dotIdx >= 0 ? patText.slice(dotIdx + 1) : patText;
+      // `|`-led (soft-deprecated, §19.4.5) — recognition unchanged from S154.
+      p = triviaStart + 1; // consume `|`
+      while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+      patternStart = p;
+      if (bodyRaw[p] === "_" && !/[A-Za-z0-9_$]/.test(bodyRaw[p + 1] ?? "")) {
+        isWildcard = true;
+        variantName = "_";
+        p += 1;
+      } else {
+        // Leading `.` for the bare-variant form (§51.0.S worked examples use
+        // `.Variant`); a qualified `MsgType.Variant` is also accepted.
+        if (bodyRaw[p] === ".") p += 1;
+        const patStart = p;
+        while (p < len && /[A-Za-z0-9_$.]/.test(bodyRaw[p]!)) p++;
+        const patText = bodyRaw.slice(patStart, p);
+        // Leaf segment (the variant ident) — last component of a dotted path.
+        const dotIdx = patText.lastIndexOf(".");
+        variantName = dotIdx >= 0 ? patText.slice(dotIdx + 1) : patText;
+      }
     }
 
     // -- Payload bindings `(...)` ---------------------------------------------
@@ -2214,6 +2312,7 @@ export function parseMessageArms(
 
     // -- Arm arrow `:>` / `=>` / `->` -----------------------------------------
     while (p < len && /\s/.test(bodyRaw[p]!)) p++;
+    const arrowStart = p;
     const arrow = arrowAt(p);
     if (!arrow) {
       // Malformed arm (no arm-arrow). Recognition-only: stop the arm scan; the
@@ -2304,6 +2403,16 @@ export function parseMessageArms(
       isBlockBody,
       spanStart: armStart,
       spanEnd: p,
+      // §19.4.5 / §51.0.S.2.3 (S452) — a `|`-led arm is soft-deprecated; the
+      // pattern as written (between the `|` and the arrow) feeds the
+      // W-ARM-PIPE-LEGACY lint (symbol-table.ts) and `scrml fix`
+      // (commands/fix-arm-pipe.js). `patternStart` is a `bodyRaw` offset.
+      ...(pipelessHead ? {} : {
+        legacyPipe: {
+          pattern: bodyRaw.slice(patternStart, arrowStart).trim(),
+          patternStart,
+        },
+      }),
     });
     renderBodyStart = p;
     // Advance the outer cursor past this arm. Guard against a non-advancing
@@ -2649,8 +2758,12 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       // `:`-form is single-expression, terminated by a newline). Surfaces
       // W-COLON-SHORTHAND-LEGACY-PLACEMENT (§34) — the canonical placement is
       // inside-opener (handled above).
+      // S452 — `::` is never this introducer (mirrors the block splitter's
+      // guard in `tryConsumeAfterCloseColonShorthand`): a body opening with
+      // `::V(x) :> …` is a pipe-less message arm (§51.0.S.2.3), not a legacy
+      // `: expr` body.
       const afterOpener = rulesRaw.slice(bodyStart);
-      const colonShortcutMatch = afterOpener.match(/^\s*:\s*([^\n]*)/);
+      const colonShortcutMatch = afterOpener.match(/^\s*:(?!:)\s*([^\n]*)/);
       if (colonShortcutMatch) {
         const colonStart = bodyStart + colonShortcutMatch[0].indexOf(":");
         const lineEnd = bodyStart + colonShortcutMatch[0].length;
@@ -2790,6 +2903,9 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       payloadBindings,
       // ---- §51.0.S NEW (S154 — #14 event-payload-transition) ----
       messageArms,
+      // §19.4.5 (S452) — `rulesRaw` offset of `bodyRaw` (a message arm's
+      // `spanStart` / `legacyPipe.patternStart` are `bodyRaw` offsets).
+      bodyRawOffset: bodyStart,
     });
     i = nextI;
   }

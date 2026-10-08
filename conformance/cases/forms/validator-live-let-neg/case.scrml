@@ -1,0 +1,8 @@
+// §55.5.2 — a `let` validated value set only from logic is LIVE: no E-VALIDATOR-DEAD; its surface follows the logic's writes.
+<program>
+    let <accent:string="" req/>
+    <main>
+        <button id="pick" onclick=(@accent = "teal")>teal</button>
+        <p id="v">${@accent.isValid}</p>
+    </main>
+</program>

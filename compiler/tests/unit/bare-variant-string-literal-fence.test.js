@@ -44,10 +44,9 @@ function compileSrcToClient(src, basename = "fence-test") {
       outputDir: tmpDir,
       log: () => {},
     });
-    const clientPath = path.join(tmpDir, `${basename}.client.js`);
-    const client = fs.existsSync(clientPath)
-      ? fs.readFileSync(clientPath, "utf-8")
-      : null;
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+    // in-memory output (a clean compile writes the same codegen).
+    const client = r.outputs.get(srcPath)?.clientJs ?? null;
     return { client, errors: (r.errors ?? []).map((e) => e.code) };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

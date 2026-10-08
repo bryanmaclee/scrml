@@ -1,0 +1,4 @@
+<n> = 0
+${ function bump() { @n = @n + 1; return @n } }
+<p id="t" title=(() => { bump(); return "tip; " + @n })()>hover me</p>
+<button id="b" onclick={ bump(); bump() }>bump</button>

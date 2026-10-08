@@ -35,8 +35,9 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-ivf-render");
+const tmpRoot = resolve(tmpdir(), "scrml-ivf-render");
 
 function compileToOutputs(source, baseName = "ivf") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

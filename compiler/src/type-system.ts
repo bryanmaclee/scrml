@@ -73,15 +73,17 @@
  */
 
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
-import { parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
+import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
 // type error here, not a silent `asIs` at some adopter's decl site.
 import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
+import { replaceLiveSqlInterpolations } from "./codegen/sql-lex.ts";
 import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
@@ -102,6 +104,9 @@ import {
   readLiteralIdentAttr,
   isWatchesChannel,
 } from "./channel-watches.ts";
+// §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
+// boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
+import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -798,7 +803,13 @@ interface RefBindingType {
 // Predicate expression — recursive representation of the boolean expression
 // inside the outer parens of a predicated type annotation.
 interface PredicateExpr {
-  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set";
+  // S458 — `on-length` (§55.1 `length(pred)`: `operand` judged on `.length`),
+  // `pattern` (`value` = regex source, `flags`), `value-set` (`variantMode`
+  // oneOf/notIn over literal `values`), `req` (non-empty).
+  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set"
+    | "on-length" | "pattern" | "value-set" | "req";
+  flags?: string;            // pattern
+  values?: Array<number | string>; // value-set
   op?: string;               // comparison / property
   value?: number | string;   // comparison / property
   prop?: string;             // property
@@ -859,6 +870,16 @@ interface VariantDef {
   name: string;
   payload: Map<string, ResolvedType> | null;
   renders: { markup: string } | null;
+}
+
+/**
+ * §18.7 — the resolved subject enum of a `match`, stamped by TS on the match
+ * node as `__matchSubjectVariants` for codegen: each variant's name and its
+ * payload field names in declaration order (`null` = unit variant).
+ */
+interface MatchSubjectVariant {
+  name: string;
+  fields: string[] | null;
 }
 
 // §51.3 — Machine type (named override graph for an enum/struct type)
@@ -1012,6 +1033,13 @@ interface ScopeEntry {
    * the render fence inspects it; never type-driving.
    */
   declNode?: ASTNodeLike;
+  /**
+   * §14.10 — the binding's `resolvedType` comes from a written TYPE ANNOTATION
+   * (`let e: Expr = …`), so a later reassignment `e = .V` has a declared
+   * position type ("a previously-declared … local with a known type").
+   * Not set when the type was merely inferred from an initializer.
+   */
+  annotated?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1536,7 +1564,9 @@ const NAMED_SHAPES: Map<string, NamedShape> = new Map([
 // in the other.
 const SHAPE_STATIC_PREDICATES: Map<string, (v: string) => boolean> = new Map([
   ["email", (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)],
-  ["url",   (v) => { try { new URL(v); return true; } catch { return false; } }],
+  // `url` is not a copy: the static and runtime zones call the same function (runtime-url-guard.js),
+  // which refuses every scheme outside §5.2's safe set (S457 "6a").
+  ["url",   (v) => _scrml_url_shape_ok(v)],
   ["uuid",  (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)],
   ["phone", (v) => /^[+]?[0-9\s\-().]{7,15}$/.test(v)],
   ["date",  (v) => /^\d{4}-\d{2}-\d{2}$/.test(v)],
@@ -1702,6 +1732,51 @@ function splitTopLevel(s: string, delimiters: string[]): string[] {
  * External @identifier references set hasExternalRef: true (E-CONTRACT-003).
  * Parse failures produce { kind: "error", message: "..." }.
  */
+/**
+ * S458 — §55.1 shared-core words that take an argument, as read inside a
+ * refinement predicate's parentheses. The comparison words map to the
+ * comparison operator they denote (`min(0)` is `>=0`); `length`, `pattern`,
+ * `oneOf`, `notIn` have their own predicate kinds.
+ */
+/**
+ * S458 — index of the `)` that closes the `(` at `openIdx` in a refinement
+ * annotation, or -1. String literals (`"…"`, `'…'`, with `\` escapes) and regex
+ * literals (`/…/`, with escapes and `[…]` classes) are skipped: a parenthesis
+ * inside them is text. `/` never means division inside a predicate.
+ */
+function findPredicateClose(text: string, openIdx: number): number {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
+      continue;
+    }
+    if (c === "/") {
+      let inClass = false;
+      for (i++; i < text.length; i++) {
+        const d = text[i];
+        if (d === "\\") { i++; continue; }
+        if (d === "[") inClass = true;
+        else if (d === "]") inClass = false;
+        else if (d === "/" && !inClass) break;
+      }
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+const SHARED_CORE_FNS: Map<string, string> = new Map([
+  ["min", ">="], ["max", "<="], ["gt", ">"], ["lt", "<"], ["gte", ">="], ["lte", "<="], ["eq", "=="], ["neq", "!="],
+  ["length", ""], ["pattern", ""], ["oneOf", ""], ["notIn", ""],
+]);
+
 function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: boolean } {
   const trimmed = raw.trim();
   let hasExternalRef = false;
@@ -1717,10 +1792,18 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     | { t: "or" }
     | { t: "not" }
     | { t: "lp" }
-    | { t: "rp" };
+    | { t: "rp" }
+    // S458 — §55.1 shared-core vocabulary in refinement-type position (§53.6.1,
+    // §55.3): `oneOf([…])` / `notIn([…])` lists and `pattern(/re/flags)`.
+    | { t: "lb" }
+    | { t: "rb" }
+    | { t: "comma" }
+    | { t: "regex"; v: string; flags: string };
 
   const tokens: PToken[] = [];
   let i = 0;
+  const malformed = (message: string) =>
+    Object.assign({ kind: "error" as const, message }, { hasExternalRef });
 
   while (i < trimmed.length) {
     // Skip whitespace
@@ -1741,6 +1824,35 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     if (ch === "!") { tokens.push({ t: "not" }); i++; continue; }
     if (ch === "(") { tokens.push({ t: "lp" }); i++; continue; }
     if (ch === ")") { tokens.push({ t: "rp" }); i++; continue; }
+    if (ch === "[") { tokens.push({ t: "lb" }); i++; continue; }
+    if (ch === "]") { tokens.push({ t: "rb" }); i++; continue; }
+    if (ch === ",") { tokens.push({ t: "comma" }); i++; continue; }
+
+    // S458 — a regex literal (`pattern(/^a+$/i)`). `/` is never division in this
+    // grammar (there is no arithmetic), so a `/` always opens a regex. Read to the
+    // closing `/` that is neither escaped nor inside a `[…]` class, then flags.
+    if (ch === "/") {
+      let j = i + 1;
+      let inClass = false;
+      let src = "";
+      while (j < trimmed.length) {
+        const c = trimmed[j];
+        if (c === "\\" && j + 1 < trimmed.length) { src += c + trimmed[j + 1]; j += 2; continue; }
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) break;
+        src += c;
+        j++;
+      }
+      if (j >= trimmed.length) return malformed("unterminated regex literal in inline predicate");
+      j++; // closing '/'
+      let flags = "";
+      while (j < trimmed.length && /[a-z]/.test(trimmed[j])) { flags += trimmed[j]; j++; }
+      try { new RegExp(src, flags); } catch { return malformed(`invalid regex /${src}/${flags} in inline predicate`); }
+      tokens.push({ t: "regex", v: src, flags });
+      i = j;
+      continue;
+    }
 
     // External reference @identifier
     if (ch === "@") {
@@ -1754,14 +1866,26 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     // Property access .identifier
     if (ch === ".") {
       let prop = "."; i++;
+      // S458 — a parameter annotation reaches here re-joined from tokens, with a
+      // space after the dot (`string(. length>=1)` for source `.length >= 1`).
+      // Whitespace between `.` and the property name is not significant; reading
+      // `.` as an empty property made the README flagship's
+      // `text: string(.length >= 1)` an unreadable predicate that was silently
+      // never checked.
+      while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
       while (i < trimmed.length && /[A-Za-z0-9_]/.test(trimmed[i])) { prop += trimmed[i]; i++; }
       tokens.push({ t: "prop", v: prop });
       continue;
     }
 
-    // Negative number: "-" followed by a digit
-    if (ch === "-" && i + 1 < trimmed.length && /[0-9]/.test(trimmed[i + 1])) {
+    // Negative number: "-" followed by a digit. S458 — whitespace may separate
+    // the sign from the digits: a return type / struct field annotation reaches
+    // here re-joined from tokens (`number ( >= - 1 )` for source `number(>= -1)`).
+    // `-` is only ever a sign in this grammar (there is no arithmetic). Before
+    // S458 the unknown `-` was SKIPPED, so `>= -1` silently read as `>= 1`.
+    if (ch === "-" && /^-\s*[0-9]/.test(trimmed.slice(i))) {
       let num = "-"; i++;
+      while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
       while (i < trimmed.length && /[0-9.]/.test(trimmed[i])) { num += trimmed[i]; i++; }
       tokens.push({ t: "num", v: parseFloat(num) });
       continue;
@@ -1777,9 +1901,16 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
 
     // String literal
     if (ch === "'" || ch === '"') {
+      // S458 — escapes are cooked (`"a\"b"` is `a"b`), and an unterminated
+      // string is malformed rather than silently closed at end of text.
       const q = ch; let str = ""; i++;
-      while (i < trimmed.length && trimmed[i] !== q) { str += trimmed[i]; i++; }
-      if (i < trimmed.length) i++;
+      const ESC: Record<string, string> = { n: "\n", t: "\t", r: "\r", "\\": "\\", '"': '"', "'": "'" };
+      while (i < trimmed.length && trimmed[i] !== q) {
+        if (trimmed[i] === "\\" && i + 1 < trimmed.length) { str += ESC[trimmed[i + 1]] ?? trimmed[i + 1]; i += 2; continue; }
+        str += trimmed[i]; i++;
+      }
+      if (i >= trimmed.length) return malformed("unterminated string literal in inline predicate");
+      i++;
       tokens.push({ t: "str", v: str });
       continue;
     }
@@ -1792,7 +1923,14 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
       continue;
     }
 
-    i++; // skip unknown char
+    // S458 F1 — a character the §53.2.1 grammar does not contain is NOT skipped.
+    // Skipping it let `string(pattern(/^a$/))` read as the bare shape `pattern`
+    // (and its regex's `@`-free remainder vanish), which the judge then could not
+    // judge. The predicate is malformed; say so.
+    return Object.assign(
+      { kind: "error" as const, message: `unexpected character '${ch}' in inline predicate` },
+      { hasExternalRef },
+    );
   }
 
   let pos = 0;
@@ -1835,7 +1973,8 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     if (t.t === "lp") {
       consume();
       const expr = parseOr();
-      if (peek()?.t === "rp") consume();
+      if (peek()?.t !== "rp") return { kind: "error", message: "unclosed '(' in inline predicate" };
+      consume();
       return expr;
     }
 
@@ -1870,11 +2009,86 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
 
     if (t.t === "ident") {
       const it = consume() as { t: "ident"; v: string };
-      return { kind: "named-shape", name: it.v };
+      const name = it.v;
+      // S458 — §55.1 shared-core vocabulary in refinement-type position
+      // (§53.6.1: it "MAY appear … in refinement-type position"; §55.3 shows
+      // `string(pattern(/…/))` and `number(min(0) && max(100))`). Each word is
+      // lowered to a predicate the one judge already knows, or to one of three
+      // new kinds (`on-length`, `pattern`, `value-set`, plus `req`).
+      if (name === "req" && peek()?.t !== "lp") return { kind: "req" };
+      if (peek()?.t === "lp" && SHARED_CORE_FNS.has(name)) {
+        consume(); // '('
+        const closeOr = (p: PredicateExpr): PredicateExpr => {
+          if (peek()?.t !== "rp") return { kind: "error", message: `expected ')' after ${name}(…)` };
+          consume();
+          return p;
+        };
+        if (name === "length") {
+          // length(predicate) — the inner predicate is judged on `.length`.
+          return closeOr({ kind: "on-length", operand: parseOr() });
+        }
+        if (name === "pattern") {
+          const rt = peek();
+          if (rt?.t !== "regex") return { kind: "error", message: "pattern(…) takes a regex literal, e.g. pattern(/^[a-z]+$/)" };
+          consume();
+          const r = rt as { t: "regex"; v: string; flags: string };
+          return closeOr({ kind: "pattern", value: r.v, flags: r.flags });
+        }
+        if (name === "oneOf" || name === "notIn") {
+          if (peek()?.t !== "lb") return { kind: "error", message: `${name}(…) takes a list, e.g. ${name}(["a", "b"])` };
+          consume();
+          const values: Array<number | string> = [];
+          while (peek() && peek()!.t !== "rb") {
+            const vt = consume();
+            if (vt.t === "num" || vt.t === "str") values.push((vt as { v: number | string }).v);
+            else if (vt.t === "extref") return { kind: "named-shape", name: (vt as { v: string }).v };
+            else return { kind: "error", message: `${name}([…]) takes literal values` };
+            if (peek()?.t === "comma") consume();
+            else if (peek()?.t !== "rb") return { kind: "error", message: `expected ',' or ']' in ${name}([…])` };
+          }
+          if (peek()?.t !== "rb") return { kind: "error", message: `unclosed '[' in ${name}([…])` };
+          consume();
+          return closeOr({ kind: "value-set", variantMode: name as "oneOf" | "notIn", values });
+        }
+        // min / max / gt / lt / gte / lte / eq / neq — one literal argument.
+        const at = peek();
+        if (at?.t === "extref") {
+          // Cross-field args (`gte(@startDate)`) reference external state —
+          // §53.3.1 / E-CONTRACT-003, reported by checkRefinementJudgeable.
+          consume();
+          return { kind: "named-shape", name: (at as { v: string }).v };
+        }
+        const numericOnly = name !== "eq" && name !== "neq";
+        if (at?.t === "num" || (!numericOnly && at?.t === "str")) {
+          consume();
+          return closeOr({ kind: "comparison", op: SHARED_CORE_FNS.get(name)!, value: (at as { v: number | string }).v });
+        }
+        return { kind: "error", message: `${name}(…) takes a ${numericOnly ? "number" : "number or string"} literal` };
+      }
+      return { kind: "named-shape", name };
     }
 
     if (t.t === "num") {
-      consume();
+      // §53.2.1 range form: `numeric-literal comparison-op "value" comparison-op
+      // numeric-literal` (`number(0 < value < 10)`). Lowered to the conjunction of
+      // the two value-relative comparisons, so it is judged exactly like
+      // `number(>0 && <10)`.
+      const lo = (consume() as { t: "num"; v: number }).v;
+      const op1 = peek();
+      const vId = tokens[pos + 1];
+      const op2 = tokens[pos + 2];
+      const hi = tokens[pos + 3];
+      if (op1?.t === "op" && vId?.t === "ident" && (vId as { v: string }).v === "value"
+          && op2?.t === "op" && hi?.t === "num") {
+        pos += 4;
+        const flip: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!=" };
+        const leftOp = flip[(op1 as { v: string }).v];
+        return {
+          kind: "and",
+          left: { kind: "comparison", op: leftOp, value: lo },
+          right: { kind: "comparison", op: (op2 as { v: string }).v, value: (hi as { v: number }).v },
+        };
+      }
       return { kind: "error", message: "bare number not a valid predicate primary" };
     }
 
@@ -1886,6 +2100,15 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
   }
 
   const result = parseOr();
+  // S458 F1 — every token SHALL be consumed. A predicate the grammar cannot read
+  // whole (`number(>0 foo)`, `number(min(0))`'s `(0)` tail) used to keep its
+  // first primary and silently drop the rest.
+  if (pos < tokens.length) {
+    return Object.assign(
+      { kind: "error" as const, message: "unexpected trailing tokens in inline predicate" },
+      { hasExternalRef },
+    );
+  }
   return Object.assign(result, { hasExternalRef });
 }
 
@@ -1894,6 +2117,29 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
  * Returns true/false if provable, null if undeterminable (needs runtime check).
  */
 function evaluatePredicateOnLiteral(pred: PredicateExpr, value: number | string): boolean | null {
+  if (pred.kind === "comparison" && typeof pred.value === "string") {
+    // S458 — `eq("x")` / `neq("x")`: string equality against a string literal.
+    if (typeof value !== "string") return null;
+    if (pred.op === "==") return value === pred.value;
+    if (pred.op === "!=") return value !== pred.value;
+    return null;
+  }
+  // S458 — §55.1 shared-core kinds in refinement position.
+  if (pred.kind === "on-length") {
+    if (typeof value !== "string") return null;
+    return pred.operand ? evaluatePredicateOnLiteral(pred.operand, value.length) : null;
+  }
+  if (pred.kind === "pattern") {
+    if (typeof value !== "string") return null;
+    try { return new RegExp(String(pred.value ?? ""), pred.flags ?? "").test(value); } catch { return null; }
+  }
+  if (pred.kind === "value-set") {
+    const has = (pred.values ?? []).includes(value);
+    return pred.variantMode === "notIn" ? !has : has;
+  }
+  if (pred.kind === "req") {
+    return typeof value === "string" ? value !== "" : true;
+  }
   if (pred.kind === "comparison") {
     if (typeof value !== "number") return null;
     const rhs = pred.value as number;
@@ -3135,33 +3381,64 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
     if (parenIdx > 0) {
       const base = trimmed.slice(0, parenIdx).trim();
       if (PRED_BASES.has(base)) {
-        // Find matching close paren (depth-aware)
-        let depth = 0;
-        let closeIdx = -1;
-        for (let pi = parenIdx; pi < trimmed.length; pi++) {
-          if (trimmed[pi] === "(") depth++;
-          else if (trimmed[pi] === ")") {
-            depth--;
-            if (depth === 0) { closeIdx = pi; break; }
-          }
+        // Find the matching close paren (depth-aware). S458 — a `(` / `)` inside a
+        // string literal or a regex literal is text, not grouping:
+        // `string(pattern(/a)b/))` used to end the predicate at the regex's `)`.
+        const closeIdx = findPredicateClose(trimmed, parenIdx);
+        if (closeIdx < 0) {
+          // S458 F1 — `number((>0)` never closes. Refined-looking but unreadable:
+          // a refinement carrying an `error` predicate, not an untyped annotation.
+          return tPredicated(
+            base as "number" | "string" | "boolean" | "integer",
+            Object.assign({ kind: "error" as const, message: "unbalanced parentheses in inline predicate" }, { hasExternalRef: false }),
+            null,
+          );
         }
         if (closeIdx > parenIdx) {
           const predicateStr = trimmed.slice(parenIdx + 1, closeIdx);
-          // Optional label: [identifier] after closing paren
+          // Optional label: [identifier] after closing paren. S458 — the tail
+          // after `)` SHALL be empty, exactly one `[label]`, or array suffixes.
+          // `[]` suffixes (`string(url)[]` — an ARRAY of refined strings) fall
+          // through to the postfix-array branch below, which resolves the
+          // element. ANY other tail (`number(>0) foo`, `number(>0)!`,
+          // `[a] [b]`, `[a-b]`) is malformed: a refinement carrying an `error`
+          // predicate — refused with a diagnostic, never silently untyped (base
+          // ignored such a tail and checked the predicate; S458 slice 1 briefly
+          // let it fall through to `asIs`).
           let label: string | null = null;
           const rest = trimmed.slice(closeIdx + 1).trim();
-          if (rest.startsWith("[") && rest.endsWith("]")) {
-            label = rest.slice(1, -1).trim();
+          const labelMatch = rest.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]$/);
+          // §42 `T?` is sugar for `T | not` (desugared before type checking).
+          if (rest === "?") {
+            return tUnion([
+              tPredicated(base as "number" | "string" | "boolean" | "integer", parsePredicateExpr(predicateStr), null),
+              tNot(),
+            ]);
           }
-          const parsed = parsePredicateExpr(predicateStr);
-          if (parsed.kind !== "error") {
+          if (rest !== "" && !labelMatch && !/^(\[\s*\]\s*)+$/.test(rest)) {
+            return tPredicated(
+              base as "number" | "string" | "boolean" | "integer",
+              Object.assign(
+                { kind: "error" as const, message: `unexpected text after the predicate: '${rest}'` },
+                { hasExternalRef: false },
+              ),
+              null,
+            );
+          }
+          if (rest === "" || labelMatch) {
+            if (labelMatch) label = labelMatch[1];
+            const parsed = parsePredicateExpr(predicateStr);
+            // S458 F1 — a malformed predicate is NOT an untyped annotation. It
+            // used to fall through to `asIs` (no check, no diagnostic). It now
+            // stays a predicated type carrying an `error` predicate, which
+            // `checkRefinementJudgeable` reports as E-CONTRACT-002 at the
+            // declaration and the codegen judge fails closed on.
             return tPredicated(
               base as "number" | "string" | "boolean" | "integer",
               parsed,
               label,
             );
           }
-          // parse error — fall through to asIs
         }
       }
     }
@@ -3346,8 +3623,12 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
  */
 function formatPredicateExpr(pred: PredicateExpr): string {
   switch (pred.kind) {
-    case "comparison": return (pred.op ?? "") + String(pred.value ?? "");
-    case "property":   return "." + (pred.prop ?? "") + (pred.op ?? "") + String(pred.value ?? "");
+    case "comparison": return (pred.op ?? "") + (typeof pred.value === "string" ? JSON.stringify(pred.value) : String(pred.value ?? ""));
+    case "property":   return "." + (pred.prop ?? "") + (pred.op ?? "") + (typeof pred.value === "string" ? JSON.stringify(pred.value) : String(pred.value ?? ""));
+    case "on-length":  return "length(" + (pred.operand ? formatPredicateExpr(pred.operand) : "?") + ")";
+    case "pattern":    return "pattern(/" + String(pred.value ?? "") + "/" + (pred.flags ?? "") + ")";
+    case "value-set":  return (pred.variantMode ?? "oneOf") + "(" + JSON.stringify(pred.values ?? []) + ")";
+    case "req":        return "req";
     case "named-shape": return pred.name ?? "?";
     case "and":        return formatPredicateExpr(pred.left!) + " && " + formatPredicateExpr(pred.right!);
     case "or":         return "(" + formatPredicateExpr(pred.left!) + " || " + formatPredicateExpr(pred.right!) + ")";
@@ -3355,6 +3636,193 @@ function formatPredicateExpr(pred: PredicateExpr): string {
     case "error":      return "?invalid?";
     default:           return "?";
   }
+}
+
+/**
+ * S458 F1 — predicates already reported by `checkRefinementJudgeable`. The
+ * literal path (`checkPredicateLiteral`) consults this so a declaration whose
+ * predicate is unjudgeable reports once, not once per zone classification.
+ */
+const _judgeabilityReported: WeakSet<object> = new WeakSet();
+
+/**
+ * S458 F1 (§53.6.3, §53.11, §53.3.1) — every refinement annotation the reader
+ * classifies as refined SHALL be judgeable, in EVERY zone. Before S458 the
+ * E-CONTRACT-002 / -003 diagnostics fired only inside `checkPredicateLiteral`,
+ * i.e. only when the initializer was a literal; a boundary-zone `string(ssn)`,
+ * `string(pattern(/…/))` or `number(min(0))` compiled clean to a runtime check
+ * of `true`. This is called at each site where a refinement is DECLARED
+ * (variable / cell / parameter / return annotation, struct field, enum payload
+ * field), so the type itself is refused, wherever and however it is used.
+ *
+ * Walks `t` through union members and array elements. Does not descend into a
+ * named struct/enum's fields — those are checked once at their own `type` decl.
+ * An enum-subset error marker (baseType "enum") is owned by
+ * `maybeRejectEnumSubsetMarker` and skipped here.
+ *
+ * Emits E-CONTRACT-002 (malformed predicate, or a named shape not in the
+ * registry — including the §55.1 shared-core names, which impl#1 does not yet
+ * read in refinement-type position) and E-CONTRACT-003 (external reference).
+ * Returns true when the type is judgeable.
+ */
+function checkRefinementJudgeable(
+  t: ResolvedType | null | undefined,
+  span: Span,
+  errors: TSError[],
+  annotText?: string,
+): boolean {
+  if (!t || typeof t !== "object") return true;
+  if (t.kind === "union") {
+    let ok = true;
+    for (const m of (t as UnionType).members ?? []) ok = checkRefinementJudgeable(m, span, errors, annotText) && ok;
+    return ok;
+  }
+  if (t.kind === "array") {
+    return checkRefinementJudgeable((t as { element?: ResolvedType }).element, span, errors, annotText);
+  }
+  if (t.kind !== "predicated") return true;
+  const pt = t as PredicatedType;
+  if (pt.baseType === "enum") return true;
+  const pred = pt.predicate as PredicateExpr & { hasExternalRef?: boolean };
+  if (!pred || typeof pred !== "object") return true;
+  if (_judgeabilityReported.has(pred)) return false;
+  const shown = annotText ? `\`${annotText.trim()}\`` : `${pt.baseType}(${formatPredicateExpr(pred)})`;
+
+  const problems: Array<{ code: string; message: string }> = [];
+  const extRefs: string[] = [];
+  const unknownShapes: string[] = [];
+  let malformed: string | null = null;
+  const walk = (p: PredicateExpr | undefined): void => {
+    if (!p) return;
+    switch (p.kind) {
+      case "error": if (malformed === null) malformed = p.message ?? "malformed predicate"; return;
+      case "named-shape":
+        if (p.name && p.name.startsWith("@")) extRefs.push(p.name);
+        else if (!p.name || !NAMED_SHAPES.has(p.name)) unknownShapes.push(p.name ?? "?");
+        return;
+      case "and": case "or": walk(p.left); walk(p.right); return;
+      case "not": case "on-length": walk(p.operand); return;
+      default: return;
+    }
+  };
+  walk(pred);
+  const isExternal = extRefs.length > 0 || pred.hasExternalRef === true;
+  if (isExternal) {
+    problems.push({
+      code: "E-CONTRACT-003",
+      message:
+        "E-CONTRACT-003: Inline predicate references an external reactive variable" +
+        (extRefs.length ? ` (${extRefs.join(", ")})` : "") + " in " + shown + ". " +
+        "Inline predicates must be stateless — they may only reference the incoming value. " +
+        "For constraints that depend on external state, use <engine>.",
+    });
+  } else if (malformed !== null) {
+    problems.push({
+      code: "E-CONTRACT-002",
+      message:
+        `E-CONTRACT-002: Inline predicate ${shown} is malformed (${malformed}), so it cannot be enforced. ` +
+        "§53.2.1 predicates are comparisons (`>0`), property comparisons (`.length > 7`, `.kind == \"a\"`), " +
+        "the range form (`0 < value < 10`), built-in named shapes (" + Array.from(NAMED_SHAPES.keys()).join(", ") + "), " +
+        "and the §55.1 shared-core words (`req`, `length(>=2)`, `pattern(/re/)`, `min(0)`, `max(9)`, `gt`, `lt`, " +
+        "`gte`, `lte`, `eq`, `neq`, `oneOf([…])`, `notIn([…])`), combined with `&&`, `||`, `!` and parentheses.",
+    });
+  } else if (unknownShapes.length > 0) {
+    problems.push({
+      code: "E-CONTRACT-002",
+      message:
+        "E-CONTRACT-002: Named shape '" + unknownShapes[0] + "' not found in the shape registry (in " + shown + "). " +
+        "Built-in shapes: " + Array.from(NAMED_SHAPES.keys()).join(", ") + ". " +
+        "To register a custom shape, use a ^{} meta block.",
+    });
+  }
+  if (problems.length === 0) return true;
+  _judgeabilityReported.add(pred);
+  for (const p of problems) errors.push(new TSError(p.code, p.message, span));
+  return false;
+}
+
+/**
+ * S458 one reader — the refinement a codegen consumer judges, as plain
+ * (clone-safe) data read off the TS-resolved type. `null` when the type carries
+ * no TOP-LEVEL refinement. Codegen never re-parses an annotation string.
+ */
+type RefinementWrap = "array" | "nullable";
+interface RefinementStampT {
+  baseType: string;
+  predicate: PredicateExpr;
+  label: string | null;
+  /**
+   * S458 — the containers around the refined value, OUTERMOST first:
+   * `string(url)[]` → ["array"]; `string(url) | not` / `string(url)?` →
+   * ["nullable"]; `(number(>0) | not)[]` → ["array", "nullable"]. Absent when
+   * the annotation IS the refinement. The judge descends them (an array is
+   * judged element-wise; `not` inhabits a nullable).
+   */
+  wrap?: RefinementWrap[];
+}
+
+/** The refinement inside `t` and the containers around it, or null. */
+function refinementShape(t: ResolvedType | null | undefined): RefinementStampT | null {
+  const wrap: RefinementWrap[] = [];
+  let cur: ResolvedType | null | undefined = t;
+  for (let guard = 0; cur && guard < 16; guard++) {
+    if (cur.kind === "predicated") {
+      const pt = cur as PredicatedType;
+      return { baseType: pt.baseType, predicate: pt.predicate, label: pt.label ?? null, ...(wrap.length ? { wrap } : {}) };
+    }
+    if (cur.kind === "array") { wrap.push("array"); cur = (cur as { element?: ResolvedType }).element; continue; }
+    if (cur.kind === "union") {
+      const ms = (cur as UnionType).members ?? [];
+      const nonNot = ms.filter((m) => m.kind !== "not");
+      if (ms.length === 2 && nonNot.length === 1) { wrap.push("nullable"); cur = nonNot[0]; continue; }
+      return null;
+    }
+    return null;
+  }
+  return null;
+}
+
+function refinementStamp(t: ResolvedType | null | undefined): RefinementStampT | null {
+  return refinementShape(t);
+}
+
+/**
+ * S458 — static zone for a refinement inside containers (`T[]`, `T | not`).
+ * Returns true when the initializer is proven (every leaf a literal satisfying
+ * the predicate, or `not` into a nullable), false when a literal leaf refutes it
+ * (E-CONTRACT-001 pushed by `checkPredicateLiteral`), null when it cannot be
+ * decided at compile time (→ boundary: a runtime check is emitted).
+ */
+function staticRefinedInit(
+  shape: RefinementStampT,
+  wrapAt: number,
+  initExpr: unknown,
+  span: Span,
+  errors: TSError[],
+): boolean | null {
+  const node = initExpr as { kind?: string; litType?: string; elements?: unknown[] } | null;
+  if (!node || typeof node !== "object") return null;
+  const w = shape.wrap ?? [];
+  if (wrapAt < w.length) {
+    if (w[wrapAt] === "nullable") {
+      if (node.kind === "lit" && node.litType === "not") return true;
+      return staticRefinedInit(shape, wrapAt + 1, initExpr, span, errors);
+    }
+    // array
+    if (node.kind !== "array" || !Array.isArray(node.elements)) return null;
+    let result: boolean | null = true;
+    for (const el of node.elements) {
+      const r = staticRefinedInit(shape, wrapAt + 1, el, span, errors);
+      if (r === false) result = false;
+      else if (r === null && result !== false) result = null;
+    }
+    return result;
+  }
+  const info = classifyLiteralFromExprNode(node as never);
+  if (info.kind !== "literal") return null;
+  if (typeof info.value === "boolean" && shape.baseType === "boolean") return null;
+  const pt: PredicatedType = { kind: "predicated", baseType: shape.baseType as PredicatedType["baseType"], predicate: shape.predicate, label: shape.label };
+  return checkPredicateLiteral(pt, info.value, span, errors);
 }
 
 /**
@@ -3376,36 +3844,36 @@ function checkPredicateLiteral(
   span: Span,
   errors: TSError[],
 ): boolean | null {
-  // E-CONTRACT-003: predicate references external reactive variable
-  if ((predType.predicate as PredicateExpr & { hasExternalRef?: boolean }).hasExternalRef) {
-    errors.push(new TSError(
-      "E-CONTRACT-003",
-      "E-CONTRACT-003: Inline predicate references an external reactive variable. " +
-        "Inline predicates must be stateless — they may only reference the incoming value. " +
-        "For constraints that depend on external state, use <engine>.",
-      span,
-    ));
-    return null;
-  }
+  // E-CONTRACT-002 / E-CONTRACT-003 — S458 F1: ONE judgeability check, shared
+  // with every declaration site (`checkRefinementJudgeable` reports a given
+  // predicate once). An unjudgeable predicate is not evaluated.
+  if (!checkRefinementJudgeable(predType, span, errors)) return null;
 
-  // E-CONTRACT-002: check for unknown named shapes
-  function checkNamedShapes(pred: PredicateExpr): void {
-    if (pred.kind === "named-shape" && pred.name && !pred.name.startsWith("@") && !NAMED_SHAPES.has(pred.name)) {
+  // S458 — the BASE type first, exactly as the runtime judge does
+  // (emit-predicates judgeExpr): a literal that is not a value of the base type
+  // does not inhabit the refinement. `let q: integer(>0) = 1.5` and
+  // `<n>: number(>0) = "5"` used to compile with no error AND no runtime check.
+  {
+    const base = predType.baseType;
+    const okBase =
+      base === "number" ? typeof value === "number" && !Number.isNaN(value)
+      : base === "integer" ? typeof value === "number" && Number.isInteger(value)
+      : base === "string" ? typeof value === "string"
+      : base === "boolean" ? typeof value === "boolean"
+      : true;
+    if (!okBase) {
       errors.push(new TSError(
-        "E-CONTRACT-002",
-        "E-CONTRACT-002: Named shape '" + pred.name + "' not found in the shape registry. " +
-          "Built-in shapes: " + Array.from(NAMED_SHAPES.keys()).join(", ") + ". " +
-          "To register a custom shape, use a ^{} meta block.",
+        "E-CONTRACT-001",
+        "E-CONTRACT-001: Value constraint violated. " +
+          "Type: " + base + "(" + formatPredicateExpr(predType.predicate) + ")" +
+          (predType.label ? " [" + predType.label + "]" : "") + ". " +
+          "Value " + (typeof value === "string" ? JSON.stringify(value) : String(value)) +
+          " is not " + (base === "integer" ? "an integer" : "a " + base) + ".",
         span,
       ));
+      return false;
     }
-    if ((pred.kind === "and" || pred.kind === "or") && pred.left && pred.right) {
-      checkNamedShapes(pred.left);
-      checkNamedShapes(pred.right);
-    }
-    if (pred.kind === "not" && pred.operand) checkNamedShapes(pred.operand);
   }
-  checkNamedShapes(predType.predicate);
 
   // E-CONTRACT-001: static literal evaluation
   if (typeof value === "boolean") return null;
@@ -3912,10 +4380,21 @@ function classifyPredicateZone(
       // here would silently DELETE that guard in exchange for a compile-time
       // check that does not happen. So the zone is unchanged from what this
       // position had before the widening — which is also the honest answer.
-      if (typeof sourceInfo.value === "boolean") return "boundary";
-      // T-PRED-1: evaluate predicate against literal at compile time
-      checkPredicateLiteral(targetType, sourceInfo.value, span, errors);
-      return "static";
+      // S458 — a boolean literal into a NON-boolean base is a base-type
+      // mismatch, decidable now: checkPredicateLiteral reports E-CONTRACT-001.
+      if (typeof sourceInfo.value === "boolean") {
+        if (targetType.baseType !== "boolean") {
+          checkPredicateLiteral(targetType, sourceInfo.value, span, errors);
+          return "static";
+        }
+        return "boundary";
+      }
+      // T-PRED-1: evaluate predicate against literal at compile time.
+      // S458 — the static zone is a PROOF (§53.4.2): a literal the evaluator
+      // cannot decide (`null` — e.g. a string literal into `number(>0)`, a base-
+      // type mismatch) is not proven, so it keeps the runtime check, whose base-
+      // type guard refuses it. It used to be called "static" and elided.
+      return checkPredicateLiteral(targetType, sourceInfo.value, span, errors) === null ? "boundary" : "static";
 
     case "literal-type-only":
       // The TYPE is known, the value is not (an interpolated template). There
@@ -6904,9 +7383,10 @@ export function rejectWritesToDerivedVars(
  * W-AUTH-004 lane), not a persisted client-controlled value.
  */
 function sqlIsPersistWrite(query: string): boolean {
-  const q = query
-    .replace(/\$\{[^}]*\}/g, " ")      // strip interpolations (leader is a bare keyword)
-    .replace(/--[^\n]*/g, " ")         // line comments
+  // strip interpolations (leader is a bare keyword) — the emitter's JS-aware slot extents,
+  // never a `[^}]*` re-derivation (S456 fix round F1 sweep)
+  const q = replaceLiveSqlInterpolations(query, () => " ")
+    .replace(/--[^\r\n]*/g, " ")         // line comments
     .replace(/\/\*[\s\S]*?\*\//g, " ") // block comments
     .replace(/\s+/g, " ")
     .trim();
@@ -8903,6 +9383,8 @@ function annotateNodes(
    * Consumed by the `E-AUTH-005` check in the `state-decl` case.
    */
   appHasServerContext: boolean,
+  /** §14.10 — imported functions' declared parameter types, for call-arg bare variants only. */
+  importedFnSignatures?: Map<string, FnSignature>,
 ): Map<string, ResolvedType> {
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
@@ -9215,6 +9697,18 @@ function annotateNodes(
     params: Array<{ name: string; type: ResolvedType }>;
     returnType: ResolvedType;
   }>();
+  // S446 r5/r6 — names declared as a function more than once ANYWHERE in the
+  // file. `fnSignatures` is one by-name map (the last declaration collected
+  // wins), so for such a name it may describe a declaration other than the one
+  // a call resolves to; the call-argument pass refuses it (fail closed). Counted
+  // by a GENERIC walk over every key of every node — `collectFnErrorTypes`
+  // descends `body`/`children` only and misses declarations inside if/else
+  // blocks, match-arm blocks, if-chain branches, loop bodies, lambda bodies, ….
+  const fnNamesDeclaredTwice = countFnDeclaredTwice(
+    (fileAST.nodes as unknown[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as unknown[] | undefined)
+      ?? [],
+  );
 
   // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — infer an OBJECT-LITERAL
   // return struct type for an UN-ANNOTATED function whose body returns an object
@@ -9245,8 +9739,12 @@ function annotateNodes(
     const localSqlRows = new Map<string, ResolvedType>();
     const _sink: TSError[] = [];
     const collectLocalSql = (nodes: ASTNodeLike[]): void => {
-      for (const s of nodes) {
-        if (!s || typeof s !== "object") continue;
+      for (const s0 of nodes) {
+        if (!s0 || typeof s0 !== "object") continue;
+        // S455 (§19.8.3) — `const X = ?{…}.get() !{…}`: the guard wraps the
+        // declaration; it binds `X` exactly as the unhandled one does (the
+        // declaration's own visit types it from `sqlNode` the same way).
+        const s = (handledSqlGuardInner(s0) ?? s0) as ASTNodeLike;
         if ((s.kind === "const-decl" || s.kind === "let-decl") && typeof s.name === "string") {
           const sqlNode = (s as Record<string, unknown>).sqlNode as ASTNodeLike | undefined;
           if (sqlNode && sqlNode.kind === "sql") {
@@ -9357,6 +9855,10 @@ function annotateNodes(
             // fns are NOT touched (this is the `else` of `returnAnnot` present).
             returnType = inferReturnTypeFromBody(n) ?? returnType;
           }
+          // S446 r5 — a name declared as a function more than once in the file
+          // (a nested `fn h` beside a top-level `fn h`) has ONE by-name entry
+          // here, the last one collected — not necessarily the declaration a
+          // given call resolves to. Recorded so the call-argument pass refuses it.
           fnSignatures.set(n.name as string, { params: sigParams, returnType });
         } catch {
           // Defensive: never break the existing collectFnErrorTypes pass on
@@ -9403,6 +9905,20 @@ function annotateNodes(
     ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
     ?? []
   );
+
+  // §14.10 — the call-argument bare-variant walker's signature table: this
+  // file's functions PLUS the functions it imports (their DECLARED parameter
+  // types, resolved in the exporting file's scope). A local function of the
+  // same name wins. Kept separate from `fnSignatures`, whose other readers
+  // (return-type propagation, formFor onsubmit) stay file-local.
+  // S446 r5 — a name declared as a function more than once in the file has NO
+  // entry (fail closed: its call arguments stay unstamped), and it does not
+  // fall back to an imported signature of the same name either.
+  const callArgFnSignatures: Map<string, FnSignature> = new Map(importedFnSignatures ?? []);
+  for (const [name, sig] of fnSignatures) {
+    if (fnNamesDeclaredTwice.has(name)) callArgFnSignatures.delete(name);
+    else callArgFnSignatures.set(name, sig);
+  }
 
   // ---------------------------------------------------------------------------
   // §41.13 / §53.10 — parseVariant call-site recognition pass.
@@ -10506,6 +11022,11 @@ function annotateNodes(
                 // parameter type (`fn promote(r: Role oneOf(.A .. .B))`).
                 const paramSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
                 maybeRejectEnumSubsetMarker(resolved, paramSpan, errors);
+                // S458 F1 + one reader — refuse an unjudgeable refinement, and
+                // stamp the RESOLVED refinement on the param so every codegen
+                // consumer reads this type, never the annotation string again.
+                checkRefinementJudgeable(resolved, paramSpan, errors, paramAnnot);
+                if (paramObj) paramObj.refinement = refinementStamp(resolved);
               }
               const paramEntry: ScopeEntry = { kind: "variable", resolvedType: paramResolvedType };
               if (paramIsLin) paramEntry.isLin = true;
@@ -10557,6 +11078,17 @@ function annotateNodes(
         // suppress duplicate W-CPS-NEEDS-FAILABLE warnings when the caller
         // is `!`-typed (per body-split soundness design dive §3.4).
         const _enclosingFnCanFail = n.canFail === true;
+        // S458 one reader — the RESOLVED return refinement (§53.9.3), stamped for
+        // codegen, plus the F1 judgeability check on the return annotation.
+        {
+          const retAnnot = (n as ASTNodeLike).returnTypeAnnotation as string | undefined;
+          if (typeof retAnnot === "string" && retAnnot.trim().length > 0) {
+            const retType = resolveTypeExpr(retAnnot, typeRegistry);
+            const retSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            checkRefinementJudgeable(retType, retSpan, errors, retAnnot);
+            (n as ASTNodeLike).returnRefinement = refinementStamp(retType);
+          }
+        }
         // S84 v0.2.4 #5-followon (Gap B.3): push the enclosing function's
         // return type onto the stack so nested return-stmts (including
         // those inside if/while/for/match-arm bodies) see the right
@@ -10985,6 +11517,18 @@ function annotateNodes(
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
             for (const fieldType of (resolvedType as StructType).fields.values()) {
               maybeRejectEnumSubsetMarker(fieldType, declSpan, errors);
+              // S458 F1 — an unjudgeable refinement on a field is refused here.
+              checkRefinementJudgeable(fieldType, declSpan, errors);
+            }
+          }
+          // S458 F1 — the same for every enum variant payload field (the
+          // parseVariant / <endpoint> / <api> decode reads these types).
+          if (resolvedType.kind === "enum") {
+            const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            for (const v of (resolvedType as EnumType).variants ?? []) {
+              if (v.payload instanceof Map) {
+                for (const pType of v.payload.values()) checkRefinementJudgeable(pType as ResolvedType, declSpan, errors);
+              }
             }
           }
         } else {
@@ -11047,6 +11591,9 @@ function annotateNodes(
           {
             const letMapSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
             checkMapKeyComparability(letAnnoType, letMapSpan, errors);
+            // S458 F1 — a refinement the reader cannot judge is refused at the
+            // declaration, whatever the initializer's zone.
+            checkRefinementJudgeable(letAnnoType, letMapSpan, errors, letAnnot);
           }
           if (letAnnoType.kind === "predicated") {
             resolvedType = letAnnoType;
@@ -11066,6 +11613,8 @@ function annotateNodes(
             // check emission on `zone === "boundary"` (additive, non-breaking).
             (n as ASTNodeLike).predicateCheck = {
               predicate: letAnnoType.predicate,
+              baseType: letAnnoType.baseType,
+              label: letAnnoType.label ?? null,
               zone: letZone,
               sourceKind: letSourceInfo.kind,
             };
@@ -11074,6 +11623,19 @@ function annotateNodes(
             // (e.g. enum-typed variables used in `is .Variant` checks). §S19.
             if (letAnnoType && letAnnoType.kind !== "asIs") {
               resolvedType = letAnnoType;
+            }
+            // S458 — a refinement inside containers (`string(url)[]`,
+            // `string(url) | not`, `string(url)?`) is judged too: element-wise
+            // for an array, `not` admitted for a nullable. Literal initializers
+            // are proven / refuted statically, anything else is the boundary.
+            {
+              const _letShape = refinementShape(letAnnoType);
+              if (_letShape && _letShape.wrap) {
+                const _sp = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                const _ini = (n as any).initExpr;
+                const _proven = _ini ? staticRefinedInit(_letShape, 0, _ini, _sp, errors) : null;
+                (n as ASTNodeLike).predicateCheck = { ..._letShape, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
+              }
             }
             // §7.5.1 position 1 — E-TYPE-031 literal-mismatch for unpredicated
             // primitive annotations (number/string/boolean). This is the ONE
@@ -11289,7 +11851,7 @@ function annotateNodes(
             // ordering rationale as comparison-site: resolve bare variants
             // at typed-function call-arg positions before the LHS-driven
             // walk runs, so the no-context branch doesn't fire on them.
-            inferBareVariantsAtCallArgs(initExprForScope, fnSignatures, letSpan, errors);
+            inferBareVariantsAtCallArgs(initExprForScope, callArgFnSignatures, letSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass. `const x = @m.getOr(.City, 0)`
             // / `@m[.City]` — the bare KEY variant resolves against the map's
             // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
@@ -11409,11 +11971,15 @@ function annotateNodes(
             kind: "variable",
             resolvedType,
             ...(_isConstBinding ? { isConst: true } : {}),
+            ...(letAnnot ? { annotated: true } : {}),
           });
         }
         // S19 Phase 2: visit embedded match-expr so exhaustiveness/arm checks fire.
         const mxn = (n as { matchExpr?: ASTNodeLike }).matchExpr;
         if (mxn && typeof mxn === "object") {
+          // §14.10 — `const e: Expr = match …`: each arm result sits at the
+          // annotated declaration's position (see stampArmResultVariants).
+          if (letAnnot) stampArmResultVariants(mxn, resolvedType);
           visitNode(mxn);
         }
         break;
@@ -11566,6 +12132,8 @@ function annotateNodes(
           {
             const reactMapSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
             checkMapKeyComparability(reactAnnoType, reactMapSpan, errors);
+            // S458 F1 — same rule as the let/const site.
+            checkRefinementJudgeable(reactAnnoType, reactMapSpan, errors, reactAnnot);
           }
           if (reactAnnoType.kind === "predicated") {
             resolvedType = reactAnnoType;
@@ -11583,10 +12151,22 @@ function annotateNodes(
             // `zone === "boundary"` (additive, non-breaking).
             (n as ASTNodeLike).predicateCheck = {
               predicate: reactAnnoType.predicate,
+              baseType: reactAnnoType.baseType,
+              label: reactAnnoType.label ?? null,
               zone: reactZone,
               sourceKind: reactSourceInfo.kind,
             };
           } else {
+            // S458 — a refinement inside containers, as at the let/const site.
+            {
+              const _cellShape = refinementShape(reactAnnoType);
+              if (_cellShape && _cellShape.wrap) {
+                const _sp = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                const _ini = (n as any).initExpr;
+                const _proven = _ini ? staticRefinedInit(_cellShape, 0, _ini, _sp, errors) : null;
+                (n as ASTNodeLike).predicateCheck = { ..._cellShape, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
+              }
+            }
             // §7.5.1 position 2 — E-TYPE-031 on an annotated STATE-CELL
             // declaration. Same rule, same literal set and same message as
             // position 1 above (`let` / `const`); this is the reactive-decl
@@ -11844,7 +12424,7 @@ function annotateNodes(
             // where `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not
             // `Tok`). Was ordered AFTER struct-nav → the cross-enum call-arg
             // resolved too late.
-            inferBareVariantsAtCallArgs(reactInitExprNode, fnSignatures, reactSpan, errors);
+            inferBareVariantsAtCallArgs(reactInitExprNode, callArgFnSignatures, reactSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass. `@m = @m.insert(.City, v)` —
             // the bare KEY variant resolves against the map's declared key enum
             // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
@@ -12205,7 +12785,23 @@ function annotateNodes(
           // (parsed as a bare-expr) fails closed with E-WASM-NOMINAL; skip the ident
           // walk (which would mis-flag `extern` / the call char `r` as undeclared).
           if (beExprNode && !tryFireWasmCallCharNominal((n as Record<string, unknown>).expr, beSpan, errors)) {
+            const _errsBeforeBe = errors.length;
             checkLogicExprIdents(beExprNode, beSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+            // S441 (SPEC §4.18.7) — a lone identifier as a whole run at a
+            // `<program>` / `<page>` / `<channel>` body-top is valid code, so an
+            // undeclared one is E-SCOPE-001; if it was meant as displayed text
+            // the diagnostic SHOULD name the declared-prose forms.
+            if ((n as Record<string, unknown>)._bodyTopBareRun === true) {
+              const _word = (beExprNode as { name?: string }).name ?? "";
+              for (let _k = _errsBeforeBe; _k < errors.length; _k++) {
+                const _e = errors[_k] as { code?: string; message?: string };
+                if (_e && _e.code === "E-SCOPE-001" && typeof _e.message === "string") {
+                  _e.message += ` A \`<program>\` / \`<page>\` / \`<channel>\` body is code ` +
+                    `(§40.8, S441); if \`${_word}\` was meant as displayed text, declare it: ` +
+                    `\`<p>${_word}</p>\` or \`"${_word}"\`.`;
+                }
+              }
+            }
             // §54.6.3 Phase 4e: transition-call legality check
             checkTransitionCallsInExpr(beExprNode, beSpan, scopeChain, stateTypeRegistry, errors);
             // §54.6.4 Phase 4f: terminal-substate mutation check
@@ -12232,7 +12828,7 @@ function annotateNodes(
             checkEqPayloadVariantOperands(beExprNode, typeRegistry, beSpan, errors);
             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference at
             // bare-expr top-level (e.g. `applyState(.V)` as its own stmt).
-            inferBareVariantsAtCallArgs(beExprNode, fnSignatures, beSpan, errors);
+            inferBareVariantsAtCallArgs(beExprNode, callArgFnSignatures, beSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
             // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
             // against the map's declared key enum + stamps.
@@ -12431,7 +13027,11 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "guarded-expr": {
         const guardedNode = n.guardedNode as ASTNodeLike | undefined;
-        const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; failExpr?: unknown; armArrow?: string; span?: Span}> | undefined) ?? [];
+        const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; failExpr?: unknown; armArrow?: string; legacyPipe?: { pattern?: string; canonical?: string }; span?: Span}> | undefined) ?? [];
+
+        // §19.4.5 W-ARM-PIPE-LEGACY is fired once per file by checkArmPipeLegacy
+        // (processFile) — it must also reach standalone error-effect handlers and
+        // handlers nested in an arm body, which this case does not visit.
 
         // §18.2 / §34 — W-MATCH-ARROW-LEGACY (S147), `!{}`-handler-arm lockstep.
         // The match and `!{}` handler arms share the §18.2 arm-arrow rule:
@@ -12497,6 +13097,65 @@ function annotateNodes(
         // Step 3: look up the function's errorType from our pre-built map.
         const errorTypeName = calleeName ? (fnErrorTypes.get(calleeName) ?? null) : null;
 
+        // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
+        // parseErrorTokens as `arm.typeQualifier`) must name the handled error
+        // type. Dispatch is by variant name only, so `F.Bad(m)` on an `E`
+        // handler silently matched `E.Bad`, and `S.Empty` was a silent dead
+        // arm. The unqualified foreign variant (`.Zap :>`) is NOT checked here
+        // (g-impl1-handler-arm-foreign-variant-accepted).
+        //
+        // S452 r5 — compare the ENUMS both names resolve to, not the names, so a
+        // type alias on either side (`type A = E`, `function f()! -> A`, arm
+        // `E.Bad`) is the same type. The registry holds a `type A = <RHS>` alias
+        // as `asIs`; its RHS (fileAST.typeDecls, `typeKind: ""`) is resolved with
+        // the checker's own `resolveTypeExpr`, following alias-to-alias names.
+        // If either side does not resolve to an enum (an imported alias this
+        // compile cannot see, a non-enum), the check is SKIPPED — unverifiable,
+        // not wrong (as for an unknown callee).
+        if (errorTypeName) {
+          const _aliasRhs = new Map<string, string>();
+          const _tds = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
+            ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined)
+            ?? []);
+          for (const d of _tds) {
+            if (!d) continue;
+            const k = d.typeKind;
+            if (k === "" || k === undefined || k === null) {
+              const raw = String(d.raw ?? "").trim();
+              if (d.name && raw && !raw.startsWith("{")) _aliasRhs.set(String(d.name), raw);
+            }
+          }
+          const enumNameOf = (name: string): string | null => {
+            let cur = name;
+            for (let hop = 0; hop < 16; hop++) {
+              const t = typeRegistry.get(cur);
+              if (t && t.kind === "enum") return (t as EnumType).name ?? cur;
+              const rhs = _aliasRhs.get(cur);
+              if (!rhs) return null;
+              if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rhs)) { cur = rhs; continue; }
+              const r = resolveTypeExpr(rhs, typeRegistry);
+              return r && r.kind === "enum" ? ((r as EnumType).name ?? null) : null;
+            }
+            return null;
+          };
+          const handledEnum = enumNameOf(errorTypeName);
+          for (const arm of errorArms as Array<{ typeQualifier?: string; pattern?: string; span?: Span }>) {
+            const q = arm.typeQualifier;
+            if (!q || q === errorTypeName || !handledEnum) continue;
+            const qEnum = enumNameOf(q);
+            if (!qEnum || qEnum === handledEnum) continue;
+            const v = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
+            const named = (x: string, e: string) => (x === e ? "`" + x + "`" : "`" + x + "` (= `" + e + "`)");
+            errors.push(new TSError(
+              "E-TYPE-ARM-QUALIFIER-MISMATCH",
+              `E-TYPE-ARM-QUALIFIER-MISMATCH: the \`!{}\` handler arm \`${q}.${v}\` names the enum ${named(q, qEnum)}, ` +
+              `but the handled call fails with ${named(errorTypeName, handledEnum)}. Qualify the arm with \`${errorTypeName}\` ` +
+              `(\`${errorTypeName}.${v}\`) or write it bare (\`.${v}\`).`,
+              ((arm.span ?? n.span) as Span),
+            ));
+          }
+        }
+
         // Step 4: if we have a named errorType, look it up in the typeRegistry.
         if (errorTypeName) {
           const errorEnumType = typeRegistry.get(errorTypeName);
@@ -12534,6 +13193,14 @@ function annotateNodes(
               }
             }
           }
+        }
+
+        // §19.8.3 (S454 fix round, F1) — a `!{}` on a `?{}` query is checked
+        // against `SqlError` "like any other `!{}` handler". The query is the
+        // whole guarded statement (`?{…}.run() !{…}`), a declaration / return's
+        // structured `sqlNode`, or an expression-position query operand.
+        if (!errorTypeName && guardedNode && _guardedNodeHandlesSql(guardedNode)) {
+          _checkHandlerExhaustive("SqlError", SQL_ERROR_EXHAUSTIVE_VARIANTS, errorArms.map((a) => String(a.pattern ?? "")), n.span as Span);
         }
 
         // S28 — scope-check each arm's handler body with arm.binding pushed
@@ -12753,7 +13420,7 @@ function annotateNodes(
             // call-arg walker would correctly resolve. Each helper stamps
             // `_bareVariantInferredAtBinaryExpr` on resolved idents so the
             // downstream walkers can deduplicate.
-            inferBareVariantsAtCallArgs(ifCondExpr, fnSignatures, ifCondSpan, errors);
+            inferBareVariantsAtCallArgs(ifCondExpr, callArgFnSignatures, ifCondSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
             // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
             // map's declared key enum + stamps.
@@ -12924,7 +13591,18 @@ function annotateNodes(
               }
             }
           }
-          for (const child of armBody) visitNode(child);
+          // F17 (g-impl1-match-miscompiles-hit-by-the-bootstrap) — an
+          // OBJECT-LITERAL arm body (`.V(x) :> { k: x }`) parses into a single
+          // `bare-expr` whose exprNode holds only the FIRST key as an ident, so
+          // walking it scope-checked the KEY `k` as a reference (a false
+          // E-SCOPE-001 — or, when a same-named binding was in scope, nothing,
+          // and the value expressions went unchecked). Codegen already lowers
+          // this body as the object value (emit-logic
+          // `_objectLiteralArmFromStructuredBody`, from the node's raw `expr`
+          // text); check the SAME object expression here instead.
+          const objectBody = objectLiteralArmBodyNode(armBody, filePath);
+          if (objectBody) visitNode(objectBody);
+          else for (const child of armBody) visitNode(child);
           scopeChain.pop();
         }
         resolvedType = tAsIs();
@@ -13030,6 +13708,11 @@ function annotateNodes(
         // value-return match was silently accepted.
         const retMatchExpr = (n as { matchExpr?: ASTNodeLike }).matchExpr;
         if (retMatchExpr && typeof retMatchExpr === "object") {
+          // §14.10 — each arm RESULT of a returned match sits at the function's
+          // declared return position (see stampArmResultVariants).
+          stampArmResultVariants(retMatchExpr, enclosingFnReturnTypeStack.length > 0
+            ? enclosingFnReturnTypeStack[enclosingFnReturnTypeStack.length - 1]
+            : null);
           visitNode(retMatchExpr);
         }
         // GITI-038 — a returned function expression (`return function name(){…}`)
@@ -13093,7 +13776,7 @@ function annotateNodes(
           // E-VARIANT-AMBIGUOUS on a call-arg whose param enum differs from
           // the fn's return type (`return wrap(.Paren)` where
           // `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not `Tok`).
-          inferBareVariantsAtCallArgs(retExprNode, fnSignatures, retSpan, errors);
+          inferBareVariantsAtCallArgs(retExprNode, callArgFnSignatures, retSpan, errors, scopeChain);
           // §59.4 / §14.10 — map-KEY-arg pre-pass in a return value
           // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
           // the map's declared key enum + stamps, so the return-type-context
@@ -13173,6 +13856,20 @@ function annotateNodes(
         const tildInitExpr = (n as Record<string, unknown>).initExpr;
         if (tildInitExpr) {
           checkLogicExprIdents(tildInitExpr, tildSpan, scopeChain, typeRegistry, errors, n.name as string | undefined, fnAllDeclared);
+          // §14.10 — bare variants in the assigned value. A call argument takes
+          // its callee's DECLARED parameter type (same pre-pass, same ordering as
+          // let/return); a reassignment of a local whose type was WRITTEN
+          // (`let e: Expr = …; e = .Neg(k)`) takes that declared type. Any other
+          // position stays unstamped — codegen then never guesses the enum.
+          inferBareVariantsAtCallArgs(tildInitExpr, callArgFnSignatures, tildSpan, errors, scopeChain);
+          if (typeof n.name === "string") {
+            const prior = scopeChain.lookup(n.name) as ScopeEntry | undefined;
+            const rt = prior && prior.kind === "variable" && prior.annotated === true ? prior.resolvedType : null;
+            if (rt && (rt.kind === "enum" || rt.kind === "union"
+                || (rt.kind === "predicated" && (rt as PredicatedType).baseType === "enum"))) {
+              inferBareVariantsInExpr(tildInitExpr, rt, tildSpan, errors);
+            }
+          }
         }
         // §50.8.5 E-ASSIGN-004 — STATEMENT-form `const` reassignment.
         //
@@ -15004,7 +15701,129 @@ function annotateNodes(
     }
   }
 
+  // §19.7 / §19.4.3 / §19.8.3 (S454 fix round, F1) — handler exhaustiveness for
+  // the handlers the statement walk above never sees: a `!{}` INSIDE an
+  // expression, and a `match` whose scrutinee is a `?{}` query.
+  _checkExpressionPositionHandlers(topNodes);
+
   return nodeTypes;
+
+  // ---------------------------------------------------------------------------
+  // S454 fix round (F1) — handler exhaustiveness in every position.
+  //
+  // §19.7.3: "In logic context, matching a `!` function result SHALL require
+  // exhaustive coverage of all variants (success and error). Missing variants
+  // SHALL trigger E-TYPE-020." and "A `_` wildcard arm SHALL satisfy
+  // exhaustiveness for remaining unmatched variants". A `!{}` handler is checked
+  // the same way (E-TYPE-080, §34: "Non-exhaustive error handler: not all error
+  // variants covered"), and §19.8.3: "The handler is checked for exhaustiveness
+  // against `SqlError` like any other `!{}` handler." Before this, only a
+  // WHOLE-STATEMENT `!{}` on a call to a same-file `!` function was checked; a
+  // handler inside an expression (`if (q() !{ .A :> false })`) and every handler
+  // on a `?{}` were not — and an unmatched failure then flowed on as the value.
+  // ---------------------------------------------------------------------------
+
+  /** Is the statement a `!{}` guards a `?{}` query? */
+  function _guardedNodeHandlesSql(g: ASTNodeLike): boolean {
+    // S455 — the shared predicate (sql-attempt.ts): also `lift ?{…} !{…}`, whose
+    // query hangs off `expr.node` and was never checked against SqlError.
+    return handledSqlOfGuardedNode(g) !== null;
+  }
+
+  /** The variant name an arm pattern names, or "_" for a catch-all. */
+  function _armVariant(pattern: string): string {
+    let p = pattern.trim().replace(/^\|\s*/, "");
+    if (p === "_" || p === "else" || /^_\s+[A-Za-z_$]/.test(p) || p.startsWith("_(")) return "_";
+    p = p.replace(/\(.*$/s, "").trim();          // payload binder
+    p = p.replace(/\s+[A-Za-z_$][\w$]*$/, "");    // paren-free binder (`| ::V m`)
+    p = p.replace(/^(?:[A-Za-z_$][\w$]*)?(?:::|\.)/, ""); // `::V` / `.V` / `T.V` / `T::V`
+    return p.trim();
+  }
+
+  /** E-TYPE-080 when `patterns` neither include a catch-all nor cover `variants`. */
+  function _checkHandlerExhaustive(typeName: string, variants: readonly string[], patterns: string[], span: Span): void {
+    const heads = patterns.map(_armVariant);
+    if (heads.includes("_")) return;
+    const missing = variants.filter((v) => !heads.includes(v));
+    if (missing.length === 0) return;
+    errors.push(new TSError(
+      "E-TYPE-080",
+      `E-TYPE-080: Non-exhaustive error handler for \`${typeName}\`. ` +
+      `Missing variant(s): ${missing.join(", ")}. ` +
+      `Add the missing arms or a \`_ :>\` arm to handle all remaining variants` +
+      (typeName === "SqlError" ? ` (the compiler MAY add SqlError variants, §19.8.4, so \`_ :>\` keeps the handler total).` : `.`),
+      span,
+    ));
+  }
+
+  /** The error enum's variant names for a handled operand, or null when unknown. */
+  function _operandErrorVariants(operand: ExprNode): { typeName: string; variants: readonly string[] } | null {
+    if (sqlQueryExprShape(operand) !== null) return { typeName: "SqlError", variants: SQL_ERROR_EXHAUSTIVE_VARIANTS };
+    if (operand.kind === "call" && operand.callee.kind === "ident") {
+      const typeName = fnErrorTypes.get(operand.callee.name);
+      if (!typeName) return null;
+      const t = typeRegistry.get(typeName);
+      if (!t || t.kind !== "enum") return null;
+      return { typeName, variants: ((t as EnumType).variants ?? []).map((v: VariantDef) => v.name) };
+    }
+    return null;
+  }
+
+  function _checkExpressionPositionHandlers(roots: unknown[]): void {
+    const seen = new WeakSet<object>();
+    const walk = (v: unknown, span: Span | null): void => {
+      if (!v || typeof v !== "object") return;
+      if (seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) walk(x, span); return; }
+      const o = v as Record<string, unknown>;
+      const own = o.span as Span | undefined;
+      const here = own && typeof own.line === "number" && own.line > 1 ? own : (span ?? own ?? null);
+      // An expression-position `!{}` (expression-parser extractHandledOperands).
+      const raw = typeof o.kind === "string" ? guardCallArmsRaw(o as unknown as ExprNode) : null;
+      if (raw !== null) {
+        const operand = ((o.callee as Record<string, unknown>).object) as ExprNode;
+        const known = _operandErrorVariants(operand);
+        const arms = known ? parseGuardArmsFromRaw(raw, filePath) : null;
+        if (known && arms) {
+          _checkHandlerExhaustive(known.typeName, known.variants, arms.map((a) => String(a.pattern ?? "")), (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span);
+        }
+      }
+      // A `match` on a `?{}` query (§19.8.3 form 2): `::Ok` plus every SqlError
+      // variant, or a catch-all (E-TYPE-020, §19.7.3).
+      if (o.kind === "match-expr" || o.kind === "match-stmt") {
+        const header = (o.headerExpr ?? o.subject) as ExprNode | undefined;
+        if (sqlQueryExprShape(header) !== null) {
+          const heads: string[] = [];
+          const body = Array.isArray(o.body) ? o.body as Array<Record<string, unknown>> : [];
+          for (const arm of body) {
+            if (!arm) continue;
+            if (arm.kind === "match-arm-inline") heads.push(_armVariant(String(arm.test ?? "")));
+            else if (arm.kind === "match-arm-block") heads.push(arm.isWildcard ? "_" : String(arm.variant ?? ""));
+            else if (typeof arm.expr === "string") heads.push(_armVariant(String(arm.expr).split(/:>|=>|->/)[0] ?? ""));
+          }
+          for (const r of (Array.isArray(o.rawArms) ? o.rawArms as string[] : [])) heads.push(_armVariant(String(r).split(/:>|=>|->/)[0] ?? ""));
+          if (heads.length > 0 && !heads.includes("_")) {
+            const missing = ["Ok", ...SQL_ERROR_EXHAUSTIVE_VARIANTS].filter((x) => !heads.includes(x));
+            if (missing.length > 0) {
+              errors.push(new TSError(
+                "E-TYPE-020",
+                `E-TYPE-020: Non-exhaustive match over the result of a \`?{}\` query. Missing variant(s): ` +
+                `${missing.join(", ")}. A match on a query's result must cover \`::Ok\` and every \`SqlError\` ` +
+                `variant, or end with a \`_ :>\` arm (§19.7.3, §19.8.3).`,
+                (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span,
+              ));
+            }
+          }
+        }
+      }
+      for (const k of Object.keys(o)) {
+        if (k === "span" || k === "parent") continue;
+        walk(o[k], here);
+      }
+    };
+    walk(roots, null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -15501,8 +16320,30 @@ function inferBareVariantsInExpr(
   contextType: ResolvedType | null,
   span: Span,
   errors: TSError[],
+  /**
+   * S446 r4 — consider ONLY value-spine idents (neither stamp nor diagnose the
+   * rest). Set by the call-argument pass for an IMPORTED signature: before
+   * imported signatures existed that pass never ran on such an argument, so a
+   * comparison operand / ternary test inside it (`yOf(k == .Q ? … : …)`, `k: L`)
+   * must not now be checked against the PARAMETER's enum (a false E-TYPE-063).
+   */
+  spineOnly?: boolean,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
+  // S446 — `contextType` is the type of the WHOLE expression. An ident inside a
+  // call's ARGUMENT list sits at the callee's parameter position, whose type is
+  // not `contextType` (`return conv(.Neg(6))` under `-> Expr` passes `.Neg` to
+  // `conv(o: Other)`). Those idents are never stamped from this context: a call
+  // whose parameter types TS knows runs this walker on each argument with the
+  // PARAMETER type as the root context (the call-site passes), and a call TS
+  // cannot type leaves the argument unstamped — the pre-F11 loud lowering.
+  const callArgIdents = collectCallArgumentIdents(exprNode);
+  // S446 r4 — and only an ident whose value IS the expression's value (the
+  // VALUE SPINE: the root, a ternary's branches, `??` / `||` operands, a
+  // constructor callee there) sits at `contextType`'s position. A comparison
+  // operand (`k == .Neg(1)`) or a ternary TEST is at another position (the
+  // other operand's type), so it is never stamped from this context.
+  const valueSpineIdents = collectValueSpineIdents(exprNode);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -15511,6 +16352,7 @@ function inferBareVariantsInExpr(
     if (raw.length < 2 || raw[0] !== ".") return;
     const variantName = raw.slice(1);
     if (!/^[A-Z][A-Za-z0-9_]*$/.test(variantName)) return;
+    if (spineOnly === true && !valueSpineIdents.has(ident)) return;
 
     // §14.10 binary-expr comparison position (S84 v0.2.4 #5): if a prior
     // pre-pass at `inferBareVariantsAtComparisonSites` has already resolved
@@ -15521,6 +16363,36 @@ function inferBareVariantsInExpr(
     // BOTH operands meet the binary-comparison shape AND the cell's
     // resolvedType is enum/union; non-matching shapes leave the flag unset
     // and the normal `contextType`-driven path runs unchanged.
+    // §14.10 — "a bare variant SHALL be resolved … from a type annotation on
+    // the LHS" (or the parameter / return / field type fixing the position).
+    // Stamp the RESOLVED enum's payload field list on the ident so codegen
+    // lowers a bare-dot CONSTRUCTOR `.V(args)` against that enum, not a
+    // by-variant-NAME lookup that a same-named variant of another enum (a local
+    // `Neg(y, z)` beside the annotated imported `Neg(x)`) can shadow (S438
+    // review F2). First resolution wins (a later pass may have no context).
+    if (contextType && !callArgIdents.has(ident) && valueSpineIdents.has(ident)
+        && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
+      const resolvedEnum: EnumType | null =
+        contextType.kind === "enum" ? contextType as EnumType
+        : (contextType.kind === "predicated" && (contextType as PredicatedType).baseType === "enum")
+          ? ((contextType as PredicatedType).enumBase as EnumType | undefined) ?? null
+        : contextType.kind === "union"
+          ? (() => {
+              const ds = ((contextType as UnionType).members.filter((m: ResolvedType) => m.kind === "enum") as EnumType[])
+                .filter((em) => (em.variants ?? []).some((v) => v.name === variantName));
+              return ds.length === 1 ? ds[0] : null;
+            })()
+        : null;
+      const v = resolvedEnum ? (resolvedEnum.variants ?? []).find((x) => x.name === variantName) : undefined;
+      if (v) {
+        // ENUMERABLE plain data on purpose: codegen deep-clones logic AST
+        // (emit-each row clones via JSON round-trip / structuredClone), and a
+        // non-enumerable stamp was lost there (S438 review N1).
+        (ident as unknown as Record<string, unknown>).__variantFields =
+          v.payload instanceof Map ? Array.from(v.payload.keys()) : null;
+      }
+    }
+
     if ((ident as Record<string, unknown>)._bareVariantInferredAtBinaryExpr === true) return;
 
     // Determine the enum that should contain this variant from contextType.
@@ -15685,6 +16557,84 @@ function inferBareVariantsInExpr(
       span,
     ));
   });
+}
+
+/**
+ * S446 — every IdentExpr reachable (by `forEachIdentInExprNode`) from an
+ * ARGUMENT of a `call` / `new` anywhere in `root`. The callee itself is not an
+ * argument: `.Neg(6)` at the root keeps its own ident; `conv(.Neg(6))` puts
+ * `.Neg` in the set. Used only to keep `inferBareVariantsInExpr` from stamping
+ * the whole-expression context onto a parameter position.
+ */
+/**
+ * S446 r6 — every function name declared (`function-decl` node, any depth) more
+ * than once in `root`. Generic: descends EVERY own key of every object / array
+ * (a hand-rolled key list misses an if-chain branch, a match-arm block, a
+ * lambda body …), with a visited set for cycles; `span` is skipped (leaf data).
+ */
+function countFnDeclaredTwice(root: unknown): Set<string> {
+  const seenNames = new Set<string>();
+  const twice = new Set<string>();
+  const visited = new Set<unknown>();
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object" || visited.has(node)) continue;
+    visited.add(node);
+    if (Array.isArray(node)) { for (const el of node) stack.push(el); continue; }
+    const n = node as Record<string, unknown>;
+    if (n.kind === "function-decl" && typeof n.name === "string" && n.name.length > 0) {
+      if (seenNames.has(n.name)) twice.add(n.name);
+      else seenNames.add(n.name);
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  return twice;
+}
+
+function collectValueSpineIdents(root: unknown): Set<unknown> {
+  const out = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as Record<string, unknown> & { kind?: unknown; op?: unknown };
+    if (n.kind === "ident") { out.add(node); return; }
+    if (n.kind === "paren") { visit(n.expr); return; }
+    if (n.kind === "ternary") { visit(n.consequent); visit(n.alternate); return; }
+    if (n.kind === "binary" && (n.op === "??" || n.op === "||")) { visit(n.left); visit(n.right); return; }
+    if (n.kind === "call") {
+      // Only a bare-dot constructor callee: its value is the call's value.
+      const callee = n.callee as { kind?: unknown; name?: unknown } | undefined;
+      if (callee && callee.kind === "ident" && typeof callee.name === "string" && callee.name.startsWith(".")) out.add(callee);
+    }
+  };
+  visit(root);
+  return out;
+}
+
+function collectCallArgumentIdents(root: unknown): Set<unknown> {
+  const out = new Set<unknown>();
+  const seen = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const el of node) visit(el); return; }
+    const n = node as { kind?: unknown; args?: unknown };
+    if ((n.kind === "call" || n.kind === "new") && Array.isArray(n.args)) {
+      for (const arg of n.args) {
+        if (arg && typeof arg === "object") forEachIdentInExprNode(arg as any, (id) => { out.add(id); });
+      }
+    }
+    for (const key of Object.keys(node as object)) {
+      if (key === "span") continue;
+      visit((node as Record<string, unknown>)[key]);
+    }
+  };
+  visit(root);
+  return out;
 }
 
 /**
@@ -16111,6 +17061,18 @@ function inferReactiveSiteBareVariants(
     ) {
       const ctx = resolveReactiveCellType(target.name);
       if (ctx) inferBareVariantsInExpr(value, ctx, span, errors);
+    } else if (target && target.kind === "ident" && typeof target.name === "string") {
+      // §14.10 — "a previously-declared cell or LOCAL with a known type": a
+      // reassignment of a local whose type was WRITTEN (`let e: Expr = …;
+      // e = .Neg(k)`) resolves its bare variants against that declared type. A
+      // local whose type was only inferred from its initializer is not a
+      // declared position and is left alone.
+      const entry = scopeChain.lookup(target.name) as ScopeEntry | undefined;
+      const rt = entry && entry.kind === "variable" && entry.annotated === true ? entry.resolvedType : null;
+      if (rt && (rt.kind === "enum" || rt.kind === "union"
+          || (rt.kind === "predicated" && (rt as PredicatedType).baseType === "enum"))) {
+        inferBareVariantsInExpr(value, rt, span, errors);
+      }
     }
     return;
   }
@@ -16868,8 +17830,29 @@ function inferBareVariantsAtCallArgs(
   }>,
   span: Span,
   errors: TSError[],
+  /**
+   * S446 r4 — the scope the call sits in. A signature is the callee's only when
+   * the name RESOLVES to that declaration: a nearer binding of the same name (a
+   * parameter, a `const f = …`, a loop / destructured variable) shadows it and
+   * the call's arguments stay unstamped. An IMPORTED signature additionally
+   * requires the name to resolve to the import binding itself.
+   */
+  scopeChain?: ScopeChain,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
+
+  const sigFor = (name: string): { params: Array<{ name: string; type: ResolvedType }> } | undefined => {
+    const sig = fnSignatures.get(name) as (FnSignature & { imported?: boolean }) | undefined;
+    if (!sig || !scopeChain) return sig;
+    const entry = scopeChain.lookup(name);
+    if (sig.imported === true) return entry && entry.kind === "import" ? sig : undefined;
+    // A local function: an unresolved name (forward reference — a function is
+    // bound after its body) keeps its signature; a non-function binding shadows.
+    // A LOCAL signature never applies to a name that resolves to an import
+    // binding (r5), nor to any non-function binding.
+    if (entry && entry.kind !== "function") return undefined;
+    return sig;
+  };
 
   const walk = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
@@ -16884,7 +17867,7 @@ function inferBareVariantsAtCallArgs(
       // `inferReactiveSiteBareVariants` path when the bare-expr root is
       // the call itself; otherwise they're not in §14.10 scope today.
       if (callee && callee.kind === "ident" && typeof callee.name === "string") {
-        const sig = fnSignatures.get(callee.name);
+        const sig = sigFor(callee.name);
         if (sig) {
           for (let i = 0; i < args.length; i++) {
             const arg = args[i];
@@ -16898,7 +17881,7 @@ function inferBareVariantsAtCallArgs(
             // expected type. Idents stamped here get the standard flag, so
             // the call-arg's bare-variant gets diagnosed against the right
             // enum context AND any downstream walker skips it.
-            inferBareVariantsInExpr(arg, paramType, span, errors);
+            inferBareVariantsInExpr(arg, paramType, span, errors, (sig as { imported?: boolean }).imported === true);
             // Also stamp the call-arg ident directly if it's a top-level
             // bare-variant ident. `inferBareVariantsInExpr` doesn't stamp;
             // it only emits diagnostics. Stamping here lets the comparison-
@@ -18289,6 +19272,92 @@ function matchArrowLegacyMessage(location: string, glyph: string): string {
 }
 
 /**
+ * §19.4.5 / §34 — W-ARM-PIPE-LEGACY (S452) for `!{}` handler arms. A `!{}` arm
+ * led by `|` is soft-deprecated (§63.1 Stage 1); one info-level lint per arm.
+ *
+ * The arm record carries `legacyPipe` ONLY when the `!{}` arm parser
+ * (ast-builder.js parseErrorTokens) read it through its `|` path, so a
+ * pipe-less arm, a match arm, `||` and a `|` in a string never reach here. The
+ * walk visits EVERY object of the file's tree, so it finds the arms of a
+ * guarded-expr, of a standalone error-effect block, and of a handler nested in
+ * another arm's body (`arm.nestedHandlers`, ast-builder.js
+ * `_nestedHandlersIn`). One lint per arm SITE: an arm reached twice (a shared
+ * array, or a component body instantiated more than once) is linted once.
+ *
+ * Special cases (S452 review r1):
+ *  - an arm the parser found no arm arrow for (`| .A | .B :> …` — impl#1 has
+ *    no `!{}` alternation; it reads `| .A` as an arm of its own) gets no
+ *    rewrite suggestion;
+ *  - an arm inside a COMPONENT BODY (its span's file is the synthetic
+ *    `<file>#<Component>` the component expander re-parses under) is not told
+ *    to drop the `|`: impl#1 does not yet compile the pipe-less form there
+ *    (g-impl1-component-body-pipeless-handler-s452).
+ */
+function checkArmPipeLegacy(nodes: ASTNodeLike[], errors: TSError[], fileSpan: Span): void {
+  const seenObj = new WeakSet<object>();
+  const seenSite = new Set<string>();
+  const found: TSError[] = [];
+  const stack: unknown[] = [nodes];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n || typeof n !== "object" || seenObj.has(n as object)) continue;
+    seenObj.add(n as object);
+    const o = n as Record<string, unknown>;
+    const lp = o.legacyPipe as { pattern?: string; canonical?: string; arrowFound?: boolean } | undefined;
+    if (lp && typeof o.pattern === "string" && typeof o.armArrow === "string") {
+      const span = (o.span as Span | undefined) ?? fileSpan;
+      const key = `${span.file ?? ""}:${span.start}:${lp.pattern ?? ""}`;
+      if (!seenSite.has(key)) {
+        seenSite.add(key);
+        const inComponent = typeof span.file === "string" && span.file.includes("#");
+        let message: string;
+        if (lp.arrowFound === false) {
+          message =
+            `W-ARM-PIPE-LEGACY: Arm '| ${lp.pattern ?? ""}' in a \`!{}\` handler uses the deprecated leading '|' ` +
+            `and has no arm separator of its own: a \`!{}\` handler has no alternation on impl#1, so this ` +
+            `pattern is read as a separate arm. Write each pattern as its own §18.2 match arm ` +
+            `('<pattern> :> <body>'); 'scrml fix' leaves this arm for a human (§19.4.5).`;
+        } else if (inComponent) {
+          message =
+            `W-ARM-PIPE-LEGACY: Arm '| ${lp.pattern ?? ""} ${o.armArrow}' in a \`!{}\` handler in a component body ` +
+            `uses the deprecated leading '|'. The canonical arm is '${lp.canonical ?? ""} ${o.armArrow}' (§18.2), ` +
+            `but impl#1 does not yet compile the pipe-less form inside a component body — keep the '|' there ` +
+            `for now (§19.4.5).`;
+        } else {
+          message = armPipeLegacyMessage(String(lp.pattern ?? ""), String(lp.canonical ?? ""), String(o.armArrow), "in a `!{}` handler");
+        }
+        found.push(new TSError("W-ARM-PIPE-LEGACY", message, span, "info"));
+      }
+    }
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  // Source order (the walk is a stack).
+  const pos = (e: TSError) => { const sp = (e as unknown as { span?: Span }).span; return [String(sp?.file ?? ""), Number(sp?.start ?? 0)] as const; };
+  found.sort((a, b) => { const [fa, sa] = pos(a); const [fb, sb] = pos(b); return fa < fb ? -1 : fa > fb ? 1 : sa - sb; });
+  errors.push(...found);
+}
+
+/**
+ * Build the W-ARM-PIPE-LEGACY (§19.4.5 / §34) diagnostic message for a `|`-led
+ * pattern arm — a `!{}` handler arm (here, `guarded-expr`) or an engine
+ * message arm (symbol-table.ts). `pattern` is the arm's pattern as written
+ * after the `|`; `canonical` is the pipe-less spelling (a parenthesis-free
+ * binder written `.V(m)`); `glyph` is the arm's separator as written (the
+ * separator has its own lint, W-MATCH-ARROW-LEGACY, and `scrml fix` leaves it).
+ * The wording is §19.4.5's; `where` (optional) names the arm's context.
+ */
+export function armPipeLegacyMessage(pattern: string, canonical: string, glyph: string, where = ""): string {
+  return (
+    `W-ARM-PIPE-LEGACY: Arm '| ${pattern} ${glyph}'${where ? " " + where : ""} uses the deprecated leading '|'. ` +
+    `A pattern arm is a match arm (§18.2): write '${canonical} ${glyph}'. ` +
+    `Run 'scrml fix' to rewrite every site (§19.4.5).`
+  );
+}
+
+/**
  * Build the W-GIVEN-ARROW-LEGACY (§42.2.3 / §34) diagnostic message — the
  * STANDALONE-`given`-guard sibling of `matchArrowLegacyMessage`. `vars` names
  * the guarded identifier-list (e.g. "x" or "x, y"). The standalone presence
@@ -18656,6 +19725,24 @@ function checkMatchDiagnostics(
 
   const isPartial = (node as { partial?: boolean }).partial === true;
 
+  // §18.7 — positional payload binding assigns fields "left-to-right in the order
+  // the fields were declared in the enum definition": the SUBJECT's enum, which
+  // only this stage knows. Stamp it on the match node so codegen binds (and
+  // decides tag-vs-`.variant` comparison) against that enum's own schema rather
+  // than a by-variant-NAME lookup, which cannot tell two enums apart when they
+  // share a variant name (a local `Neg(y, z)` beside an imported `Neg(x)`, or
+  // two imported `Expr`s). g-impl1-match-miscompiles-hit-by-the-bootstrap
+  // F11/F16. A TS-only annotation (post-parse): not part of the parser AST. It
+  // is plain data (names + field-name lists), never a ResolvedType reference —
+  // a recursive enum's type graph is cyclic and generic AST walkers descend
+  // every key.
+  {
+    const subjectVariants = matchSubjectVariantsOf(subjectType);
+    if (subjectVariants) {
+      (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = subjectVariants;
+    }
+  }
+
   if (!subjectType) {
     // §19.7.1/.3 — a `match` over a failable-call result. The scrutinee is a
     // bare CALL (never a bound ident), so `resolveMatchSubjectType` yields null;
@@ -18672,6 +19759,17 @@ function checkMatchDiagnostics(
       typeRegistry,
     );
     if (failableResult) {
+      // §19.7.1 — the failable-call subject IS resolved: to its synthetic
+      // `::Ok | <declared error variants>` union. Stamp it (and that it is a
+      // failable result) so codegen binds the error arms against the DECLARED
+      // error enum instead of a by-name lookup an imported same-named variant
+      // can shadow (S438 review F1: `::Malformed(r)` over ParseError read an
+      // imported `Wire.Malformed(code, detail)`'s `code`).
+      const failableVariants = matchSubjectVariantsOf(failableResult);
+      if (failableVariants) {
+        (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = failableVariants;
+        (node as { __matchSubjectFailable?: boolean }).__matchSubjectFailable = true;
+      }
       checkExhaustiveness(
         { arms: extracted.armPatterns } as unknown as ASTNodeLike,
         failableResult,
@@ -18893,6 +19991,18 @@ function checkMultiScrutineeMatch(
     }
   }
 
+  // §18.7 — per-position subject enum schema for codegen's positional binding
+  // (the multi-scrutinee sibling of `__matchSubjectVariants`; F11/F16). Stamped
+  // BEFORE the coverage early-returns: binding needs it even when `partial` /
+  // a whole-product wildcard makes exhaustiveness moot.
+  {
+    const perPosition = scrutinees.map((scrutinee, i) =>
+      matchSubjectVariantsOf(resolveMatchSubjectType(scrutinee, scrutineeExprs[i], scopeChain)));
+    if (perPosition.some((p) => p !== null)) {
+      (node as { __matchScrutineeVariants?: Array<MatchSubjectVariant[] | null> }).__matchScrutineeVariants = perPosition;
+    }
+  }
+
   // (3) Product exhaustiveness — cross-product of per-position variant sets.
   if (isPartial || hasWholeWildcard) return; // `partial` opts out; `_`/`else` covers all.
 
@@ -18969,6 +20079,68 @@ function checkMultiScrutineeMatch(
       span,
     ));
   }
+}
+
+/**
+ * §18.7 — the codegen-facing schema of a match subject's enum (see
+ * MatchSubjectVariant): each variant's name + payload field names in
+ * declaration order. `null` unless the subject resolved to an enum (or an
+ * enum-subset refinement, whose base enum carries the payload shapes).
+ */
+function matchSubjectVariantsOf(subjectType: ResolvedType | null | undefined): MatchSubjectVariant[] | null {
+  if (!subjectType) return null;
+  const subjectEnum = subjectType.kind === "enum"
+    ? subjectType as EnumType
+    : (subjectType.kind === "predicated" &&
+        (subjectType as PredicatedType).baseType === "enum" &&
+        (subjectType as PredicatedType).enumBase)
+      ? (subjectType as PredicatedType).enumBase as EnumType
+      : null;
+  if (!subjectEnum || !Array.isArray(subjectEnum.variants)) return null;
+  return subjectEnum.variants.map((v) => ({
+    name: v.name,
+    fields: v.payload instanceof Map ? Array.from(v.payload.keys()) : null,
+  }));
+}
+
+/**
+ * §14.10 — a `match` whose VALUE flows into a declared enum position (the
+ * return of a `-> T` function, a `: T`-annotated let/const initializer): each
+ * arm's RESULT sits at that position, so a bare-dot constructor that IS an arm's
+ * whole result resolves against `T`. Arm results are lowered from their source
+ * TEXT (no TS-visited ExprNode exists for literal-test arms), so the position
+ * type is stamped on the MATCH node as plain data (the `__matchSubjectVariants`
+ * shape) and codegen applies it to a whole-result constructor only — a
+ * constructor nested inside an arm result (a call argument, a payload argument)
+ * is at a different position and is never typed from this stamp.
+ * `T` not an enum (or enum-subset) → no stamp.
+ */
+function stampArmResultVariants(matchNode: ASTNodeLike, positionType: ResolvedType | null | undefined): void {
+  if (!matchNode || typeof matchNode !== "object" || matchNode.kind !== "match-expr") return;
+  const schema = matchSubjectVariantsOf(positionType ?? null);
+  if (schema) (matchNode as { __armResultVariants?: MatchSubjectVariant[] }).__armResultVariants = schema;
+}
+
+/**
+ * F17 — when a block-form match arm's body is an OBJECT LITERAL (`{ k: v, … }`,
+ * parsed by the AST builder as ONE `bare-expr` whose raw `expr` is the brace
+ * interior), return a synthetic `bare-expr` carrying the whole object as its
+ * exprNode, so scope/type checks see the object's VALUES and never its keys.
+ * Mirrors codegen's `_objectLiteralArmFromStructuredBody` + the
+ * `_matchArmResultIsBlockBody` classifier (emit-logic.ts): reconstruct
+ * `{ <expr> }` and treat it as a value iff it parses to an `object` node.
+ * `null` for every genuine statement block.
+ */
+function objectLiteralArmBodyNode(armBody: ASTNodeLike[], filePath: string): ASTNodeLike | null {
+  if (armBody.length !== 1) return null;
+  const only = armBody[0] as { kind?: string; expr?: unknown; span?: Span } | undefined;
+  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
+  const candidate = `{ ${only.expr} }`;
+  let parsed: { kind?: string } | null = null;
+  try { parsed = parseExprToNode(candidate, filePath, only.span?.start ?? 0) as { kind?: string } | null; }
+  catch { parsed = null; }
+  if (!parsed || parsed.kind !== "object") return null;
+  return { ...(only as object), expr: candidate, exprNode: parsed } as unknown as ASTNodeLike;
 }
 
 /**
@@ -23746,12 +24918,8 @@ function walkAndExpandTableForNodes(
  * value-returning server-fn-body form; this pass governs the admitted form).
  */
 function resolveProgramLang(fileAST: FileAST): string | null {
-  const nodes = (fileAST.nodes as ASTNodeLike[] | undefined)
-    ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
-    ?? [];
-  const programNode = nodes.find(
-    (node: ASTNodeLike) => node.kind === "markup" && (node as ASTNodeLike).tag === "program",
-  );
+  // The file's top-level <program> by the one role definition (program-role.ts, §4.12, S445).
+  const programNode = findTopLevelProgramNode(fileAST);
   if (!programNode) return null;
   const attrs = (programNode as ASTNodeLike).attrs as Array<{ name: string; value: unknown }> | undefined;
   if (!attrs) return null;
@@ -25201,6 +26369,8 @@ function processFile(
    * the very over-fire this parameter exists to end.
    */
   appHasServerContext?: boolean,
+  /** §14.10 — imported functions' declared parameter types (resolveImportedFnSignatures). */
+  importedFnSignatures?: Map<string, FnSignature>,
 ): { typedAst: TypedFileAST; errors: TSError[]; stateTypeRegistry: Map<string, ResolvedType> } {
   const errors: TSError[] = [];
   const hasServerContext = appHasServerContext ?? fileEstablishesServerContext(fileAST);
@@ -25239,6 +26409,10 @@ function processFile(
     // §20.7.5 / W-PRINT-SHADOWED — a user-declared `function print` / `println`
     // shadows the clean-stdout builtin; info-level nudge (mirrors W-LOG-SHADOWED).
     checkPrintShadowing(fnFieldTopNodes, errors, fileSpan);
+    // §19.4.5 / W-ARM-PIPE-LEGACY — every `|`-led `!{}` handler arm impl#1
+    // parsed, wherever it hangs (guarded-expr, standalone error-effect, a
+    // handler nested in an arm body). Engine message arms: symbol-table.ts.
+    checkArmPipeLegacy(fnFieldTopNodes, errors, fileSpan);
     // §20.7.2 / E-PRINT-NON-PRIMITIVE — a print()/println() arg must be a
     // string / number / boolean; a struct/enum/array/map/markup/`not` is rejected.
     checkPrintArgs(fnFieldTopNodes, errors, fileSpan);
@@ -25384,6 +26558,7 @@ function processFile(
     stateTypeRegistry,
     machineRegistry,
     hasServerContext,
+    importedFnSignatures,
   );
 
   // §14.12.4 — Engine-cell carve-out for lifecycle annotation
@@ -25955,6 +27130,86 @@ function annotateWatchesRowChange(nodes: ASTNodeLike[] | undefined): void {
   }
 }
 
+/**
+ * One imported function's DECLARATION, as api.js reads it off the import graph:
+ * the exporting file's `function-decl` node, that file's path, and its type
+ * declarations (the scope its parameter annotations are written in).
+ */
+export interface ImportedFnDecl {
+  fnNode: ASTNodeLike;
+  depFilePath: string;
+  depTypeDecls: ASTNodeLike[];
+}
+
+type FnSignature = {
+  params: Array<{ name: string; type: ResolvedType }>;
+  returnType: ResolvedType;
+  /** Read off an IMPORTED declaration (resolveImportedFnSignatures). */
+  imported?: boolean;
+};
+
+/**
+ * §14.10 — "a function parameter type (`fn(.V)` where the parameter is typed
+ * `T`)". The position type of a bare variant passed to an IMPORTED function is
+ * that function's DECLARED parameter type. Resolve each imported function's
+ * parameter ANNOTATIONS in the scope they were written in — the exporting
+ * file's own type declarations plus the types IT imports (the same
+ * `importedTypesByFile` map, same local-wins seeding rule as processFile) — so
+ * `yOf(.Neg(n))` with `yOf(o: Other)` in another file stamps `.Neg` with
+ * `Other`'s fields even when the importer never imports `Other`.
+ *
+ * Read-only over declarations: no body is inspected, nothing is inferred. A
+ * parameter with no annotation, or whose annotation does not resolve to an
+ * enum / union / enum-subset, is `asIs` — the call-arg walker skips it and a
+ * bare variant there is unstamped (codegen then never guesses its enum). The
+ * return type is always `asIs`: these signatures feed ONLY the call-argument
+ * bare-variant walker, never return-type propagation or other checks.
+ */
+function resolveImportedFnSignatures(
+  decls: Map<string, ImportedFnDecl> | undefined,
+  importedTypesByFile: Map<string, Map<string, ResolvedType>> | undefined,
+  registryCache: Map<string, Map<string, ResolvedType>>,
+): Map<string, FnSignature> | undefined {
+  if (!decls || decls.size === 0) return undefined;
+  const out = new Map<string, FnSignature>();
+  for (const [localName, d] of decls) {
+    try {
+      let reg = registryCache.get(d.depFilePath);
+      if (!reg) {
+        reg = buildTypeRegistry(d.depTypeDecls ?? [], [], { file: d.depFilePath, start: 0, end: 0, line: 1, col: 1 });
+        const depImports = importedTypesByFile?.get(d.depFilePath);
+        if (depImports) {
+          for (const [name, type] of depImports) {
+            const existing = reg.get(name);
+            if (!existing || existing.kind === "unknown" || existing === BUILTIN_TYPES.get(name)) reg.set(name, type);
+          }
+        }
+        registryCache.set(d.depFilePath, reg);
+      }
+      const params: Array<{ name: string; type: ResolvedType }> = [];
+      for (const param of (Array.isArray(d.fnNode.params) ? d.fnNode.params as unknown[] : [])) {
+        const paramName = typeof param === "string" ? param : (param as ASTNodeLike)?.name as string | undefined;
+        if (!paramName) continue;
+        const annot = (typeof param === "object" && param !== null)
+          ? (param as ASTNodeLike).typeAnnotation as string | undefined
+          : undefined;
+        let type: ResolvedType = tAsIs();
+        if (typeof annot === "string" && annot.trim().length > 0) {
+          const t = resolveTypeExpr(annot, reg);
+          if (t.kind === "enum" || t.kind === "union"
+              || (t.kind === "predicated" && (t as PredicatedType).baseType === "enum")) type = t;
+        }
+        params.push({ name: paramName, type });
+      }
+      out.set(localName, { params, returnType: tAsIs(), imported: true });
+    } catch {
+      // A signature that cannot be read is simply absent: its call arguments stay
+      // unstamped (the codegen side then refuses to guess) — never a crash.
+    }
+  }
+  return out.size > 0 ? out : undefined;
+}
+
 export function runTS(input: {
   files: FileAST[];
   protectAnalysis: ProtectAnalysis;
@@ -25963,13 +27218,18 @@ export function runTS(input: {
    * Built in api.js from already-processed dependency files in topo order.
    * Keys are absolute file paths. Values are the exported type entries from that file. */
   importedTypesByFile?: Map<string, Map<string, ResolvedType>>;
+  /** Imported function declarations per importing file (local name → decl),
+   * built in api.js from the import graph. See resolveImportedFnSignatures. */
+  importedFnDeclsByFile?: { get(filePath: string): Map<string, ImportedFnDecl> | undefined };
 }): { files: TypedFileAST[]; errors: TSError[]; stateTypeRegistry?: Map<string, ResolvedType> } {
   const {
     files = [],
     protectAnalysis = { views: new Map() },
     routeMap = { functions: new Map() },
     importedTypesByFile,
+    importedFnDeclsByFile,
   } = input;
+  const importedFnRegistryCache = new Map<string, Map<string, ResolvedType>>();
 
   const typedFiles: TypedFileAST[] = [];
   const allErrors: TSError[] = [];
@@ -25997,7 +27257,12 @@ export function runTS(input: {
     // when an importing file is processed. If not provided, cross-file types are absent
     // (pre-import-system behavior — single-file compilation still works correctly).
     const importedTypes = importedTypesByFile?.get(fileAST.filePath as string);
-    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext);
+    const importedFnSignatures = resolveImportedFnSignatures(
+      importedFnDeclsByFile?.get(fileAST.filePath as string),
+      importedTypesByFile,
+      importedFnRegistryCache,
+    );
+    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext, importedFnSignatures);
     typedFiles.push(typedAst);
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;
@@ -26162,6 +27427,9 @@ function checkFnBodyProhibitions(
     for (const stmt of nodes) {
       if (!stmt || typeof stmt !== "object") continue;
       if (stmt.kind === "function-decl") continue; // nested fn has own scope
+      // S455 — `const x = ?{…} !{…}` declares `x` exactly as the unhandled form.
+      const _handledInner = handledSqlGuardInner(stmt);
+      if (_handledInner) { collectLocalDecls([_handledInner as ASTNodeLike]); continue; }
       const declName = (stmt.name as string | undefined) ?? undefined;
       if (
         declName &&
@@ -26399,6 +27667,16 @@ function checkFnBodyProhibitions(
   function walkBody(nodes: ASTNodeLike[]): void {
     for (const stmt of nodes) {
       if (!stmt || typeof stmt !== "object") continue;
+
+      // S455 (§19.8.3, §48.3.1) — a `!{}` on a `?{}` wraps the WHOLE statement
+      // (`guarded-expr { guardedNode }`). The handler adds a failure path; the
+      // statement is still a SQL access, so it is checked exactly as the
+      // unhandled one (E-FN-001 — it used to be invisible here).
+      const _handledInner = handledSqlGuardInner(stmt);
+      if (_handledInner) {
+        walkBody([_handledInner as ASTNodeLike]);
+        continue;
+      }
 
       const stmtSpan = (stmt.span ?? fnSpan) as Span;
 

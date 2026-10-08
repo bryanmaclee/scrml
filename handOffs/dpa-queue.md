@@ -84,6 +84,11 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-056 | **FULLY RULED S440** R1-R7 (no shared mutable memory in the core; share grant-less tapes; `send(lin x)` = transfer; `<program isolation=>`; `pool=N`; R6 diagnostic now + client foreign placement BANKED; SPEC hygiene). D1/D2 worker fixes queued. (Row rewritten S441.) | user-voice S440 dpa-056 R1-R7 |
 | dpa-058 | **RULED S442 — "your recs"** (ruling: `scrml-support/user-voice-scrml.md` S442 "dpa-058 (O25) = all PA recs…"). (a) bind always written; (b) the HTML-native validator subset follows the bind; compiler adds `novalidate` (R1 (i)); O54 = (a) this instance; dead validators are errors; D1 fixed in impl#1 (#1160); D2-D9 filed in known-gaps §S442. Bootstrap build owed (needs `bind:` in Core). Artifact `scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md`. | **bryan** — ruled S442 |
 | dpa-057 | **COMPLETE (ADVISORY) dPA 2026-09-29 — awaiting bryan (B floor, Q1–Q3) + PA (D conformance fix, 4 HIGH defects).** Witnessed leak reproduced BY EXECUTION (outside curl → 200 `{"apiKey":"sk_live_TOPSECRET"}`); OAuth + kv shapes executed too. ★ **Pole D is ALREADY SPEC §13.4 — app mode is non-conformant** (library-mode-only gate) → fix, no ruling. B floor = egress value registry (bryan: what counts as a secret env, how to declassify). A = relay pull-up (tiny). C rejected. ⚑ Dead fns still ship live routes (`examples/07` `deleteUser`); `examples/23` logout never revokes; `examples/19` body-split broken end-to-end. Artifact: `scrml-support/docs/deep-dives/server-helper-return-leak-placement-dpa-057-2026-09-29.md` | dPA — advisory |
+| dpa-062 | **RULED S444 (c) split surface** (user-voice S444; SPEC §6.14.4). dPA rec = split the surface: cell-level `prepaint` = REFLECT only (root attribute before paint); HOLD = a separate author-placed region marker `hold=@cell` with a no-JS CSS failsafe release. 4 route-to-PA notes (§52.8/§6.14.2 pre-hydration wording vs emit; inline `_SCRML_CHUNKS` under strict CSP — fixed #1200). | `scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md` |
+| dpa-063 | **RULED S446 — FULLY** (user-voice S446): Call 1 (b) a newline ends a statement, continuation explicit (line-final operator / open bracket); 4a (i) leading `.`/`?.` is an error; 4b line-final `;` legal; 5 (i) `E-STMT-NO-EFFECT` language-wide + leading `+`/`-`; 6 (i) immediate error pre-1.0 + `scrml migrate --fix` codemod; 7 confirm (S440 #6 subsumed). SPEC text: branch `wip/s448-spec-dpa063` (§7.2.2), PR owed after bryan vetoes the agent's 10 PA readings. | scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md |
+| dpa-064 | **COMPLETE (ADVISORY) dPA 2026-09-30 — awaiting bryan;** rec = relax `E-PROGRAM-NESTED-AUTH` only for `auth="required"`, tighten-only (stricter-wins, one governing-scope resolver), gates endpoints not markup; only the transparent nested program qualifies at 29eb80c31; worker/WASM stay errors permanently, db-scope/sidecar/`route=` until built. 5 fail-open prerequisites + 7 gaps to file; 4 route-to-PA. | `scrml-support/docs/deep-dives/nested-program-auth-scope-dpa-064-2026-09-30.md` |
+| dpa-066 | **RATIFIED S452** ("all your recs" item 3) — Approach B: one effect/footprint summary per callable in the bootstrap's Core, per-dimension unknowability, rules as queries; effect variables deferred. M0–M3 BUILT (#1290; G7 closed); M4–M6 owed (M4 retires the typer's name-keyed write set). | `scrml-support/docs/deep-dives/bootstrap-effect-summary-dpa-066-2026-10-04.md` |
+| dpa-067 | **RATIFIED S452** — tenant F2 = filter at the SOURCE ("a"; SPEC #1278, impl#1 #1287/#1293 partial); F1 protect as a dataflow pass keyed on origin (SPEC #1281); F3 shared call graph, separate pass; F4 U1c keeps the floors refused + SQL facts record source columns (owed); F5 E-PROTECT-UNRESOLVED-COLUMNS; F6 I-PROTECT-REVEAL; F7 one origin lattice. | `scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md` |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -3750,3 +3755,202 @@ bind explicitly and do not rely on (b). Context the PA verified: the S435 DD §7
 single input (today's behaviour, carried) · explicit bind always + validators flow only to an explicitly marked input ·
 explicit bind + validators live ONLY in the validity surface (no HTML attributes). Deliver worked programs for each pole.
 
+
+## [dpa-059] deep-dive — a superseded `<request>`: discard the result, or also cancel the fetch?
+`status:    ruled S444`  # dPA-equivalent run S444 → scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md · RULED C (abort reads, discard writes; compiler-classified, unclassifiable = write); calls 2-5 entailed (user-voice S444)
+banked:     S444 2026-09-30 (bryan, on the coderlegion "billion records" port: "those first 3 are things we should look at")
+
+The question: SPEC §6.7.7 EC-2 says a superseded `<request>` fetch is *"superseded — only the most recently initiated
+fetch's result is applied"* and the compiler emits a per-instance sequence number (verified by emission S444:
+`_scrml_request_<id>_seq`, result dropped when `seq !== current`). The network call still runs to completion. §20.8
+already says the OPPOSITE for navigation: *"In-flight cancellation — last-navigation-wins; a superseded in-flight fetch
+SHALL be aborted"* and a navigated-away region's *"in-flight `<request>`s … are aborted"* (SPEC ~L17517/L17554). So the
+same `<request>` is aborted when its region is torn down by navigation but only discarded when superseded by its own
+re-fetch. Evidence of demand: the S444 port of the coderlegion article "Searching a billion records" (hand-rolled
+debounce + AbortController + stale-guard + cache) — scrml covered debounce/stale-guard in 37 compiled lines
+(`scratchpad/ninja/search.scrml`, route verified by execution), but the abort technique is only half-covered.
+Questions: (1) should EC-2 abort the superseded transport (AbortController on the generated fetch)? (2) what does abort
+MEAN for a server function with writes — the server may still commit; is cancellation transport-only, and must the SPEC
+say so to avoid implying rollback? (3) does abort surface anywhere (`<#id>.error` must NOT become an AbortError —
+superseded is not failure)? (4) interaction with body-split CPS server calls and §19.10.5 per-handler tx, and with
+`<poll>`. Rule 4 note: §20.8 is a governing precedent inside SPEC; the PA lean is that (1) is a conformance
+alignment of §6.7.7 to §20.8 with transport-only semantics stated explicitly — the dPA should confirm or break that.
+
+## [dpa-060] deep-dive — caching `<request>` results: language surface or stdlib?
+`status:    ruled S444`  # → scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md · RULED B2 bare compiler-derived `cache`; no author TTL anywhere (cache illegal without a read-set, url=/api=); hit = stale-while-revalidate (user-voice S444)
+banked:     S444 2026-09-30 (bryan: "those first 3 are things we should look at")
+
+The question: SPEC §6.7.7 says *"`stale` does not imply cache TTL … No cache expiration, no max-age, no background
+revalidation. Cache semantics are a stdlib concern."* — a recorded decision (find its provenance; Rule 4b: cite why it
+exists before overturning it). The coderlegion port shows the cost: the article's 30 s "pocket scroll" cache is ~15 lines
+of hand-written JS, and in scrml it is ALSO hand-written (a map-keyed cell + timestamps), so the one place scrml does
+not beat the article is the one the SPEC deferred. Poles: (A) keep it stdlib (what would the stdlib API be, and can it
+compose with `<request>`'s sequence/stale semantics without re-implementing them?); (B) a `<request>` attribute
+(`cache=30s` keyed by the fetch's reactive deps — the compiler already knows the key set); (C) a server-side answer
+(memoized server function / HTTP cache headers the compiler emits) — the article's own thesis is that the server does the
+work; (D) a state-primacy answer (Rule 6): the cache as a declared cell/authority with an expiry lifecycle rather than a
+fetch option. Deliver worked programs per pole on the S444 search example; cover invalidation after a write (the hard
+half), cache key = deps, memory bound, and interaction with `stale`/`refetch()`.
+
+## [dpa-061] deep-dive — browser-persisted state (localStorage / sessionStorage / IndexedDB) as a declared authority
+`status:    ruled S444`  # → scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md · RULED: `persist="local|session"` lifetime attribute (A2, not an authority value); key= required; decode-first against the full contract; write-failure = synthesized status property; reveal/lin → error; IndexedDB = PLANNED stdlib addition; first paint = default-then-restore + auto pre-paint for a `<theme for=>` mode cell (→ dpa-062 for the general opt-in); recipe fixes land now (user-voice S444)
+banked:     S444 2026-09-30 (bryan: "those first 3 are things we should look at")
+
+The question: scrml owns server persistence (`?{}`, §52 `authority="server"`), but browser persistence is hand-written
+host JS: the SPEC's own canonical recipe is `when @var changes { localStorage.setItem(key, @var) }` (§6.7, ~L4516) plus
+a hand-written read at init. §52 already has `authority="local"` (client-local, NO sync infrastructure, ~L33743) — the
+authority axis exists but has no persisted-client tier. Rule 6 (state-primacy at intake): this is a STATE ask — "where
+does this cell's value live and survive?" — so the first question is whether it is an authority/lifecycle of the cell,
+not a stdlib call. Poles: (A) a new authority tier (`authority="browser"` / `persist="local|session"`) — the compiler
+emits load-at-init + write-on-change + serialization via the §57 wire codec (lossless `not`, maps §59.10); (B) stdlib
+`scrml:store`-style client API (today `scrml:store` is server/SQLite); (C) keep the `when … changes` recipe, just fix
+its gaps. Must address: key naming/collision across pages and apps (§47 encoding?), schema evolution of a stored value
+(type changed since last visit — `parseVariant`-style boundary decode, fail-closed to the default), SSR (no storage on
+the server: first paint uses the default?), multi-tab consistency (`storage` event), quota/unavailable storage (the
+existing localStorage availability guard), privacy (never persist `protect=` values — §14.8.9 egress), and `lin` /
+`(not to T)` lifecycle interaction. Evidence: the coderlegion port's "recent searches" (a 5-item MRU list in
+localStorage) had no scrml form at all. Axiom-adjacent (§52 authority model) — R2 minimum, one at a time.
+
+## [dpa-062] deep-dive — an explicit `prepaint` opt-in so a persisted cell never flashes on first paint
+`status:    ruled S444`  # → scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md · RULED (c) split surface: cell-level `prepaint` = REFLECT only (bool / payload-free enum / `| not`; `key=`-derived root attr; CSS-keyed for show=/style:/theme, STAMP for class:/attrs; uncoverable reads → Info per site) + region `hold=@cell` (visibility:hidden, aria-busy, 3000 ms pure-CSS failsafe); inline script + per-build sha256 under headers="strict"; without persist= → error; calls 2–8 = PA recs → SPEC §6.14.4 (user-voice S444)
+banked:     S444 2026-09-30 (bryan: "yes, bank it as dpa-062"; origin: dpa-061 call 6 — "I really like the second option, but it gets complicated. We could have the dev explicate when a cell needs that behaviour, but I don't know what that would look like.")
+
+The question: dpa-061 call 6 RULED default-then-restore for `persist=` cells, with an automatic pre-paint restore only for a
+`<theme for=@cell>` mode cell (§65.6 already reduces theming to one `:root`/`<html>` attribute). bryan wants the pre-paint
+behaviour available generally, by explicit author opt-in. PA sketch (S444, to be tested, not ratified): a bare `prepaint`
+attribute on a `persist=` cell (`<sidebar persist="local" key="ui.sidebar" prepaint>: SidebarMode = .Open`); the compiler
+chooses the mechanism from the cell's type and read sites, using the dependency graph it already builds:
+(1) REFLECT — a scalar cell (enum/bool/short string) is written by a blocking pre-paint script onto `<html>` as
+`data-scrml-<cell>="…"`, and styling that reads the cell (`class:x=@sidebar == .Collapsed`, `style:` bindings) is emitted
+as CSS keyed on that root attribute, so first paint is already correct; (2) HOLD — anything else (lists, structs, text
+content) — the regions that read the cell are marked and hidden (visibility) by the pre-paint script until the client has
+restored and rendered them (a brief blank instead of wrong→right). `prepaint="hold"` override; `prepaint` without
+`persist=` is an error. Must address: which read shapes REFLECT can honestly cover (text content cannot) and the exact
+fallback rule; layout shift under HOLD (visibility vs display; reserved space); the blocking-script cost + the S441 CSP
+nonce/hash; interaction with SSR-seeded server cells on the same page and with §52.8 compose-route first paint; storage
+unavailable / decode failure at pre-paint (must fall back to the default and UNHIDE — a hold must never stick);
+`persist="session"`; multiple prepaint cells (one script); a11y (hidden regions and screen readers); prior art
+(next-themes / theme-flash scripts, Remix/Next cookie-based color-mode, `color-scheme` meta, CSS `@media` + `:root` attr
+patterns, content-visibility). Deliver worked programs per mechanism and a rec on the surface (bare `prepaint` vs explicit
+modes vs per-region markers).
+
+## [dpa-063] deep-dive — statement termination: does a newline end a statement, or does `;`? (no silent carve-outs)
+`status:    ruled S446`  # FULLY RULED S446 (user-voice S446, Calls 1 b · 4 (i)/(i) · 5 (i) · 6 (i) · 7 confirm) — was: COMPLETE dPA 2026-09-30 → scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md · verdict: D rejected, C disfavoured; A (`;`, ~30k edits) vs B (newline, ~205 lines) is bryan's call, 7 calls
+banked:     S445 2026-09-30 (bryan: "your solution seems reasonable. but a ; really clarifies things. That is huge though. And I am not a fan of specific silent carve-outs like this. lets dpa it")
+
+The question: at a `<program>`/`<page>`/`<channel>` body top (default-logic mode, §40.8 — where loose prose is now an
+error and a statement that does nothing is an error, rulings S441 + S443 #4), both parsers still apply JavaScript's
+automatic-semicolon-insertion continuation rules: a line starting with `-`, `+`, `[`, `(`, `/` or a template literal
+CONTINUES the previous line's expression. Executed S445 (prose r5 fuzz, both parsers): `console.log("m")⏎-3102` compiles
+as `console.log("m") - 3102`. Nothing is dropped — it is compiled — but the author almost certainly meant two lines.
+PA rec presented (S445): a newline ends a statement at the body top. bryan: reasonable, BUT "a `;` really clarifies
+things" and he is "not a fan of specific silent carve-outs like this" — i.e. a body-top-only newline rule is itself a
+carve-out (different termination rules in different body modes).
+The poles to develop (language-wide, NOT body-top-only — the carve-out objection is the load-bearing constraint):
+(A) `;` is the statement terminator everywhere in scrml logic (required; a newline never terminates) — maximal clarity,
+    largest migration (measure it: corpus statement count vs `;`-terminated count, both parsers);
+(B) newline terminates everywhere, with explicit continuation (a trailing operator / open bracket continues; a LEADING
+    operator on a new line is an error, not a continuation) — Go/Swift/Kotlin-style, no ASI hazard, no carve-out;
+(C) JS ASI everywhere (today) + a loud diagnostic on every ASI-hazard continuation (a line starting `-`/`+`/`[`/`(`/`/`/`` ` ``
+    that continued the previous expression) — keeps JS muscle memory, makes the hazard loud not silent;
+(D) `;` OPTIONAL but where present authoritative, newline terminates only when unambiguous — likely the carve-out shape
+    bryan rejects; include to reject it on the record or not.
+Must address: consistency across ALL logic loci (`${}` blocks, function bodies, handler inline blocks `onclick={ … }`,
+engine/match code-default bodies §4.18, `:`-shorthand single-expression bodies, `^{}` meta, `?{}` SQL is exempt?);
+interaction with `;` currently being "formatting" at the native body top (prose r5, B); multi-line expressions authors
+actually write (method chains `.map(...)` on the next line, ternaries, binary operators, long argument lists — the
+leading-`.` chain is the biggest ergonomic stake for (B)); the self-host bootstrap parser (implement the ruled grammar by
+construction); `scrml fix` migration feasibility; prior art (Go's lexer semicolon rule, Swift, Kotlin, Scala 3, Python,
+JS ASI hazards + StandardJS vs semicolons, Rust `;` as expression-vs-statement marker — note Rust's `;` carries MEANING,
+a possible scrml angle given `~` / last-expression-value §32.2). Deliver worked programs per pole, the measured migration,
+and a rec. Axiom-adjacent (touches every scrml program's surface) — R2 minimum, one call at a time.
+
+## [dpa-064] deep-dive — a nested `<program>` as an auth scope (gate a sidecar's endpoints)
+`status:    complete`  # COMPLETE dPA 2026-09-30 (ADVISORY, NOT ratified) → scrml-support/docs/deep-dives/nested-program-auth-scope-dpa-064-2026-09-30.md · verdict: relax E-PROGRAM-NESTED-AUTH for auth="required" only, tighten-only, endpoint-gating; worker/WASM stay errors
+banked:     S445 2026-09-30 (bryan confirmed the PA's reading as what he meant: "you picked up on something i meant but did not explicate 'auth inside <div> to gate sidecars endpoints'"; ruling context user-voice S445 "top-level `<program>` = no `<program>`/`<page>` ANCESTOR")
+
+The question: `<program>` may sit anywhere (bryan's locality-of-behaviour rule — "what if a <div> wants to call a
+sidecar"). Today `auth=` on a nested `<program>` (any `<program>`/`<page>` ancestor) is `E-PROGRAM-NESTED-AUTH` — a
+fail-closed PLACEHOLDER (S443 pa-ruled; before it, the attribute was silently dropped and the nested program's server fns
+ran anonymously). bryan's stated intent: a nested `<program auth=…>` should SCOPE auth to that nested context — e.g. gate
+a sidecar's endpoints. When designed, the error is RELAXED (newly-accepting — this deliberation is what licenses it).
+Must address: what a nested program's "endpoints" are per execution-context type (§4.12.3 — inline worker, foreign
+sidecar, db-scoped context, `route=` server endpoint, WASM) — which of them even have a request/caller to authenticate;
+composition with the application program's `auth=` and `<page auth=>` (stricter-wins? nearest-wins? §52.13 member-page
+inheritance); role-gated auth (`<auth role>`, §40.1) at nested scope; sessions (§20.5.1 — one application-scope cookie;
+does a nested scope reuse it?); CSRF (`csrf="auto"` default under auth, §40.2); the loginRedirect of a nested scope; how
+the compiler proves every nested endpoint is gated (fail-closed by construction, not a per-endpoint check); the S441/S443
+history of silent auth drops (wrapped program, nested program, page auth) as the adversarial checklist. Worked programs:
+a sidecar under a `<div>` in an auth=optional page with `<program lang=… auth="required">`; a db-scoped nested program
+with a stricter role; a worker (likely: auth meaningless → error stays?). Rec on the surface + which cases stay errors.
+| dpa-065 | **BANKED S449 (bryan "your recs." — dialect ruling 3).** O35 (SPEC §66.22): must a NON-LITERAL own value carry a type annotation (`let <total=(sum(@items))/>` vs `let <total:int=(…)/>`)? Decides how many of the 201 type-only legacy conformance cases twin mechanically. Scope: §66.3 inference rule (integer literal infers `int`), §14 inference reach, what the error/diagnostic is, ergonomics vs the S322 "by construction" test; capability-map + worked adopter code. R2 deep-dive; bryan rules. | `scrml-support/docs/deep-dives/corpus-dialect-codemod-scope-2026-10-03.md` (context) |
+
+## [dpa-066] deep-dive — one effect/footprint summary per function in the bootstrap's Core
+`status:    complete`  # PA-run S452 → docs/deep-dives/bootstrap-effect-summary-dpa-066-2026-10-04.md · RATIFIED S452 (see status table)
+banked:     S452 2026-10-04 (bryan: "looks good, go on DDs and 3"; PA ask: "Nominal features that make sense now rather than retrofit later")
+
+The question: the bootstrap (compiler/self-host-v2/) is a from-scratch compiler. Many ruled/Nominal rules each ask "what does
+this function TRANSITIVELY do?" — §6.15 value positions may not write · E-EFFECT-WRITES-STATE (§6.7.4) · R1
+E-VALUE-SERVER-CALL (§13.7, "would this position have to wait") · R4 parallelize only provably-read calls (§13.2) ·
+§6.7.7.1 `<request>` READ/WRITE · E-SQL-011 cross-database writes in an envelope (§8.9.2) · E-ERROR-012 callee yields a
+value (§19.4.3) · §19.9.10 client calls to server functions failable · §23.5 capability enforcement (Nominal, deferred).
+impl#1 answers each with its own walker (the S322 retrofit signature); the bootstrap has started repeating it
+(`analyze.scrml`: exprEffects/stmtEffects/callEffect, mayRunOnServer, isWriteExpr, fnYieldsValue, capability checks —
+S452 review rounds kept finding gaps BETWEEN walkers). Should Core carry ONE per-function effect summary (a lattice:
+reads cells, writes cells, server reach, db read/write per database, capabilities, may-fail + its error type, may-wait),
+computed once to a fixpoint over the call graph (recursion, mutual recursion, imports, lambdas/closures, `^{}`/`_{}`
+opacity = fail-closed TOP), with every rule a QUERY on it?
+Must address: the lattice and its soundness (what is TOP; unknown/opaque = worst case, fail-closed); per-call-site vs
+per-function (a function that writes only on one branch); higher-order functions and callbacks (a function passed to
+`map`, a handler stored in a cell); stdlib/host calls (a declared effect table, not inference); how each listed rule
+becomes a query and which existing bootstrap walkers it replaces (inventory them, with file:function); interaction with
+the S451 binding requirements (a read that is parallelized or cached runs in a read-only transaction; outside `!` the
+runtime detects an open transaction) — static summary decides MAY, runtime enforces; incremental build/caching
+implications; prior art (Koka/Eff effect rows, Rust's Send/Sync-style auto traits, Haskell IO, Flow/TS purity
+analyses, React Compiler's effect inference, Koka's `div`/`exn`, Swift async/throws colouring vs scrml's uncoloured
+source). Deliver: the Core shape, the inventory → query map, a migration path for the existing walkers, the cost, and a
+rec. Sequencing: rule BEFORE U1b's design pass (U1b's failure type for client server calls is an effect question).
+Architecture of the new compiler — R2 minimum.
+
+## [dpa-067] deep-dive — provenance tracking for the security floors (protect egress, tenant-row isolation) by construction in the bootstrap
+`status:    complete`  # PA-run S452 → docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · RATIFIED S452 (see status table)
+banked:     S452 2026-10-04 (bryan: "looks good, go on DDs and 3")
+
+The question: §14.8.9 (`protect=` server→client column egress floor) and §14.8.10 (tenant-row isolation floor, Nominal)
+are delivered in impl#1 by RETROFIT — the protect egress floor took ten adversarial review rounds and still carries
+residuals (`g-protect-egress-round-10-residuals`; S449 DURABLE: "a precision shortcut inside a soundness analysis is
+where the leaks come back"). The bootstrap barely touches protect yet (a clean slate). Should a value's PROVENANCE
+("came from a protected column", "came from a row scoped to tenant T") be a property carried through Core — by type,
+by taint label, or by a separate dataflow fact — so that egress to the client and cross-tenant flow are checked BY
+CONSTRUCTION at the boundary (the U1c server artifact), not by scanning emitted code?
+Must address: read the SPEC sections IN FULL (§14.8.9, §14.8.10, §52, §40, the `reveal` provenance §6.14 mentions,
+`protect=` coverage §8.1.1 note) and impl#1's history (known-gaps protect/tenant entries; the S445/S447/S449 protect
+rounds) as the adversarial checklist; label vs type vs dataflow approaches and their soundness under aliasing,
+struct/spread copies, closures, string interpolation, serialization (§57), channels (§38), SSE (§37), logs/diagnostics,
+`^{}`/`_{}` opacity (fail-closed); declassification (`reveal`, explicit and auditable); how it composes with dpa-066's
+effect summary (same fixpoint? separate?); what is checked statically vs enforced at runtime (row-level: Postgres RLS
+/ the tenant floor's runtime half); prior art (Jif/FlowCaml information-flow types, Rust's taint crates, LIO,
+Laminar/Hails, Ur/Web's policy checking, Rails strong-params, Prisma field omission). Deliver: the design, what it
+replaces in impl#1's approach, cost, sequencing against U1c, and a rec. Security-architecture — R2 minimum.
+
+## [dpa-068] deep-dive — widen the arm-body grammar: bare control-flow statements (`return`, `fail`, …) as an arm body
+`status:    banked`
+banked:     S454 2026-10-05 (bryan: "Your rec, but we will likely widen this later. significantly more ergonomic")
+
+The question: §18.2's `arm-body ::= expression | block-body` makes `!{ .Transport(t) :> return }` / `match x { _ :> fail .E }`
+ill-formed (the bootstrap rejects a bare `return` with E-SCOPE-001; impl#1 accepts it), so S454 corrected the SPEC examples to
+`:> { return }`. bryan's stated intent: the grammar will likely be WIDENED later because the bare form is "significantly more
+ergonomic". Design the widening: which statements may stand bare as an arm body (`return [expr]`, `fail .V(…)`, `break`,
+`continue`, `?`-propagation? a bare assignment?); how the bare form composes with value-position handling (S451 1a — an arm in a
+value position must yield or leave: a bare `return`/`fail` LEAVES, so it is legal there by construction); the parse
+disambiguation against `expression` (is `return x` vs an identifier `return` ambiguous? the `:>` separator and the next-arm
+boundary — newline vs `|` legacy); one grammar for `!{}` arms, `match` arms, engine message arms (S452 "one pattern-arm spelling
+language-wide"); the `scrml fix` impact (the `{ return }` the F8 rule writes would simplify — or stay valid); widen-vs-limit is
+fork-rule row 1, so show worked adopter code for both and the reversibility (newly-accepting = one-way door). Must read §18.2,
+§18.3, §19.4.3 (value vs statement position), §19.4.5, §19.9.10, §51.0.S message arms IN FULL. R2; bryan rules.
+
+## [dpa-069] deep-dive — O18: what an attribute on a plain use of a component / declaration IS (markup attribute vs construction data)
+`status:    banked`
+banked:     S458 2026-10-08 (PA, from the D1 build — bryan ruled D1 "declared props never reach the root"; this is the UNDECLARED half D1 left)
+
+The question: §66.6.7 leaves OPEN (O18) whether `class=` / `style=` / `key=` on a plain use are markup attributes or construction data, and O18 does not even name `id=`. Today impl#1 falls UNDECLARED call-site attributes through to the expanded root (the S457 sinks pins depend on it), §15.5 and §15.10 contradict each other on `id=`, the bootstrap refuses `class=` on a use (`E-DECL-USE-ATTR`, no §34 row) while §66.15.1 says "class merging carries over". Decide one rule for undeclared use-site attributes: fall through (which ones? merge semantics for class/style?), refuse (E-DECL-USE-ATTR, newly-rejecting — measure), or construction data. Show worked adopter code (a Card used with `class="wide"`, `id="main"`, `style=…`, `aria-*`, `data-*`, an `on…` handler) under each pole; fork-rule rows 1–4 (limit vs widen; fail-closed; reversibility; root vs position); the sink interaction (S456/S457 executable-sink checks on fallthrough attributes); the impl#1 vs bootstrap divergence. Must read §15.5, §15.10, §66.6, §66.14, §66.15, §66.22 O18, the D1 progress (`docs/changes/s458-declared-props-d1/progress.md` on the D1 branch), the sinks conformance cases `conformance/cases/attr-executable-sink/undeclared-attr-*`.

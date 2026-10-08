@@ -1,0 +1,30 @@
+${
+    <trace> = ""
+    function note(x) { @trace = @trace + x + ";" }
+
+    function a() {
+        let defer = [1, 2]
+        defer [0] = 9
+        return defer[0]
+    }
+
+    function b() {
+        let defer = [{ m: 1 }, 2]
+        defer [0].m = 5
+        return defer[0].m
+    }
+
+    function c() {
+        let defer = [[7], 2]
+        defer [0].forEach(note)
+    }
+
+    function go() {
+        @trace = @trace + a() + b() + ";"
+        c()
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

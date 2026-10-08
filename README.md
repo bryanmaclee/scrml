@@ -432,7 +432,7 @@ scrml uses sigil-delimited contexts to separate concerns within a single file:
 | Logic   | `${}` | Expressions, statements and functions |
 | SQL     | `?{}` | Database queries (SQLite), with bound parameters |
 | CSS     | `#{}` | Scoped styles |
-| Error   | `!{}` | Typed error handling (`!{ \| ::V :> ... }` arms) |
+| Error   | `!{}` | Typed error handling (`!{ .V :> ... }` arms) |
 | Meta    | `^{}` | Compile-time (or runtime) code generation |
 | Test    | `~{}` | Inline tests (compiled out of the output) |
 | Foreign | `_{}` | Inline foreign code: the value-returning `_={…}=` form |

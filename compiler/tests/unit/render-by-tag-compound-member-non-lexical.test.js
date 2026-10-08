@@ -70,6 +70,14 @@ function compileSource(name, src) {
     }
   }
   findFiles(outDir);
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file — the
+  // refused cases (E-CELL-AMBIGUOUS-MEMBER-RENDER) are read from the in-memory output.
+  if ((result?.errors ?? []).length > 0) {
+    expect(existsSync(outDir)).toBe(false);
+    const output = result.outputs.get(inputPath) ?? {};
+    clientJs = output.clientJs ?? "";
+    html = output.html ?? "";
+  }
   return {
     clientJs,
     clientJsPath,

@@ -15,8 +15,9 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-per-item-live-keyed-unit");
+const tmpRoot = resolve(tmpdir(), "scrml-per-item-live-keyed-unit");
 
 function compileClient(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -82,7 +83,7 @@ describe("R28-1c — Tier-1 <each> per-item bindings are live-keyed (closes sibl
     // Per-item key local mirroring the keyFn.
     expect(clientJs).toMatch(/const _scrml_each_key_\d+ = \(_scrml_each_item\?\.id != null \? _scrml_each_item\.id : _scrml_each_idx\);/);
     // Both bindings re-resolve the item by key from the mount + guard === null.
-    expect(clientJs).toMatch(/_scrml_resolve_item\(_mount, _scrml_each_key_\d+\)/);
+    expect(clientJs).toMatch(/_scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\)/);
     expect(clientJs).toContain("if (_scrml_each_item === null) return;");
     // class: is NO LONGER a bare classList.toggle — it lives inside an effect
     // (sibling-gap #1 closed: it was a bare toggle with no reactivity pre-fix).

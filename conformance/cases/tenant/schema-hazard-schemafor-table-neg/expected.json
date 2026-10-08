@@ -1,0 +1,12 @@
+{
+  "id": "tenant-schema-hazard-schemafor-table-neg",
+  "description": "§14.8.10 (S455 review round 2b) — the tenant-scoped table is declared by `${ schemaFor(Assets) }` (a struct carrying `tenant_id`, expanded at compile time), and the same `<schema>` declares a trigger that writes it and a view that reads it. Before the fix this compiled clean and tenant A's go() rewrote tenant B's row (executed on c85602108): the rule read the schema before schemaFor expanded. The rule is evaluated over the schema as it will exist; both declarations are refused.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-schema-hazards.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (S455): a `<schema>` trigger whose body names a tenant-scoped table, and a view reading one, SHALL each be a compile error at the declaration (E-TENANT-SCHEMA-HAZARD); the rule reads the schema after every compile-time expansion, so a table declared through `schemaFor` is tenant-scoped like any other. Provenance: ruling:user-voice-scrml.md S455 \"go, comp-time schema\".",
+  "expect": {
+    "codes": ["E-TENANT-SCHEMA-HAZARD"],
+    "codeCounts": { "E-TENANT-SCHEMA-HAZARD": 2 }
+  }
+}

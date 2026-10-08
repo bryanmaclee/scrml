@@ -1,4 +1,4 @@
-// native-vardecl-type-annotation-thread.test.js — native-parser-swap parity-closer.
+// native-vardecl-type-annotation-thread.test.js — native translate-bridge fix.
 //
 // change-id: native-translate-bridge-gaps-2026-06-06 (FIX C)
 //
@@ -14,34 +14,30 @@
 // THE FIX (one line in makeVarDeclNode): copy `declarator.typeAnnotation` onto
 // the node when non-empty, mirroring makeStateDeclNode.
 //
-// VERIFIED HERE: native fires E-CONTRACT-001 (not E-VARIANT-AMBIGUOUS) for an
-// out-of-subset variant in a typed const; clean for in-subset; scalar/enum
-// typed const+let decls emit byte-identical to the default (LIVE) — no
-// regression.
+// S449 RE-POINT: this file used to compile under the retired full-pipeline
+// `--parser=scrml-native` flag. The bridge runs in production inside
+// `nativeParseFile` (component / `^{}` / `<match>` re-parse), so the fix is now
+// asserted on the native tree: the const/let nodes carry the annotation, equal
+// to the default parser's. The type-system consequence (E-CONTRACT-001, not
+// E-VARIANT-AMBIGUOUS) is kept as a default-pipeline compile.
 
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
-import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
+import { nativeAst, liveAst, findNodes, errorsOf } from "../helpers/native-ast.js";
 
-function compileWith(source, parser, suffix) {
+function compileDefault(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-vta-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-vta-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
-  const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
-    const opts = { inputFiles: [tmpInput], write: true, outputDir: outDir };
-    if (parser) opts.parser = parser;
-    const result = compileScrml(opts);
-    const clientPath = resolve(outDir, `${name}.client.js`);
-    return {
-      errors: result.errors ?? [],
-      warnings: result.warnings ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
-    };
+    const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") });
+    return { errors: result.errors ?? [] };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -53,8 +49,38 @@ const ROLE = "type Role:enum = { Admin, Editor, Viewer }";
 const POST_SUBSET =
   "type Post:struct = { title: string req, role: Role oneOf([.Admin, .Editor]) }";
 
+const varDecls = (result) =>
+  findNodes(result.ast, (n) => n.kind === "const-decl" || n.kind === "let-decl")
+    .map((n) => [n.kind, n.name, n.typeAnnotation ?? null]);
+
 describe("native const/let typeAnnotation threading (FIX C)", () => {
-  test("out-of-subset variant in typed const -> E-CONTRACT-001 (not E-VARIANT-AMBIGUOUS)", () => {
+  test("scalar / enum / struct annotations reach the native const-decl / let-decl nodes", () => {
+    const src = [
+      ROLE,
+      POST_SUBSET,
+      "${",
+      "  const n: number = 5",
+      '  let s: string = "hi"',
+      "  const r: Role = .Admin",
+      '  const bad: Post = { title: "x", role: .Viewer }',
+      "  const u = 3",
+      "}",
+      "<program><p>${n} ${s}</></>",
+    ].join("\n") + "\n";
+    const nat = nativeAst(src);
+    expect(errorsOf(nat)).toEqual([]);
+    expect(varDecls(nat)).toEqual([
+      ["const-decl", "n", "number"],
+      ["let-decl", "s", "string"],
+      ["const-decl", "r", "Role"],
+      ["const-decl", "bad", "Post"],
+      ["const-decl", "u", null],
+    ]);
+    // Fixed-input oracle: the default parser threads the same annotations.
+    expect(varDecls(nat)).toEqual(varDecls(liveAst(src)));
+  });
+
+  test("out-of-subset variant in typed const -> E-CONTRACT-001, not E-VARIANT-AMBIGUOUS (default pipeline)", () => {
     const src = [
       ROLE,
       POST_SUBSET,
@@ -63,18 +89,12 @@ describe("native const/let typeAnnotation threading (FIX C)", () => {
       "}",
       "<program><p>${bad.title}</></>",
     ].join("\n") + "\n";
-
-    const native = compileWith(src, "scrml-native", "bad");
-    const nativeCodes = codes(native);
-    expect(nativeCodes).toContain("E-CONTRACT-001");
-    expect(nativeCodes).not.toContain("E-VARIANT-AMBIGUOUS");
-
-    // Parity: LIVE fires the same diagnostic class.
-    const live = compileWith(src, null, "badlive");
+    const live = compileDefault(src, "badlive");
     expect(codes(live)).toContain("E-CONTRACT-001");
+    expect(codes(live)).not.toContain("E-VARIANT-AMBIGUOUS");
   });
 
-  test("in-subset variant in typed const -> clean (parity with LIVE)", () => {
+  test("in-subset variant in typed const -> clean (default pipeline)", () => {
     const src = [
       ROLE,
       POST_SUBSET,
@@ -83,37 +103,6 @@ describe("native const/let typeAnnotation threading (FIX C)", () => {
       "}",
       "<program><p>${ok.title}</></>",
     ].join("\n") + "\n";
-
-    const native = compileWith(src, "scrml-native", "ok");
-    expect(codes(native)).not.toContain("E-CONTRACT-001");
-    expect(codes(native)).not.toContain("E-VARIANT-AMBIGUOUS");
-
-    const live = compileWith(src, null, "oklive");
-    expect(live.errors).toHaveLength(0);
-    expect(native.errors).toHaveLength(0);
-  });
-
-  test("scalar + enum typed const/let decls emit byte-identical to default", () => {
-    const src = [
-      ROLE,
-      "${",
-      "  const n: number = 5",
-      '  let s: string = "hi"',
-      "  const r: Role = .Admin",
-      "}",
-      "<program><p>${n} ${s}</></>",
-    ].join("\n") + "\n";
-
-    const live = compileWith(src, null, "tyl");
-    const native = compileWith(src, "scrml-native", "tyn");
-    expect(live.errors).toHaveLength(0);
-    expect(native.errors).toHaveLength(0);
-
-    // The three decl lines compose identically (the typed annotation does not
-    // change emitted JS — the bare variant `.Admin` resolves to "Admin").
-    for (const frag of ["const n = 5;", 'let s = "hi";', 'const r = "Admin";']) {
-      expect(live.clientJs).toContain(frag);
-      expect(native.clientJs).toContain(frag);
-    }
+    expect(compileDefault(src, "oklive").errors).toHaveLength(0);
   });
 });

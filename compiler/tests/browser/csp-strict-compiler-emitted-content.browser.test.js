@@ -42,7 +42,7 @@
  *     with the keyframes reachable through the emitted stylesheet instead.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -115,7 +115,8 @@ function compile(source, filePath = "/test/app.scrml") {
 async function composeFirstPaint(serverJs, html, dbRows) {
   const runnable = serverJs
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
-    .replace(/^\s*const _scrml_sql = new SQL\([^)]*\);\s*$/m, "")
+    .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
+    .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
     .replace(/^export\s+/gm, "")
     .replace(/import\.meta\.url/g, JSON.stringify("file:///app.scrml"));
   const _scrml_sql = () => Promise.resolve(dbRows.map((r) => ({ ...r })));
@@ -368,4 +369,11 @@ describe("headers=strict — §38 transitions ship in the stylesheet, not an inl
       expect(css).toContain("@keyframes scrml-" + kind + "-");
     }
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

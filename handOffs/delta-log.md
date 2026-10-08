@@ -4094,3 +4094,236 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3593] find · spotlight audit → security: static server served the DB + session store + server source (on main, fixed #1162); CSRF absent under auth (#1161); WS hijack (#1161); example-23 tokens replayable (#1155); `<page auth="required">` and nested `<program auth>` gate nothing (OPEN, HIGH); protect= bypassed by SQL case + SQL expressions (OPEN, HIGH)
 
 [3594] friction · text-scan fixes lost to adversarial review three rounds running (F4/F5, declared prose); structural rules (scope resolution, binding poisoning, coverage invariant) ended it. A red test passed the full hook because runtime tests skip under happy-dom in the one-process hook (gap filed). Sub-agent pushes classifier-denied repeatedly (ruled covered)
+
+[3595] state · S442 (bryan/XPS) successor to S441 (ASUS); took S441's FREE lanes: bootstrap typer + §66.19 programs + maps; Bun 1.3.6→1.4.2 on XPS
+
+[3596] rule · S442 bryan: tape grow/shrink split (append/pop, prepend/shift, insert/remove — tokens ruled) + anywhere covers end/front; O55 = error; six typer recs (bool|not bare condition error, handle presence narrows, int everywhere, 4 codes); T|not into T error for all types; sequence spreads one snapshot → user-voice S442
+
+[3597] rule · S442 bryan: dpa-058 all recs (bind always written; validators follow the bind; novalidate; O54=(a); dead validators error; D1 fixed) + dpa-045 AXIOM ruled (a′: two text-mode productions; closed exit set = context sigils + // + <[a-zA-Z!/?*_.]; cooked; no display-text escapes; whitespace kept)
+
+[3598] land · S442: #1144 maps · #1148 bank dpa-058 · #1151 #1157 #1159 bootstrap typer · #1154 #1168 dpa drain/ruled · #1156 SPEC §66.12/O55 · #1160 impl#1 self-close · #1164 §66.19 programs; queued #1167 #1169 #1170
+
+[3599] find · dpa-045's ratified closed exit set omitted //, #{, ^{, !{ and the <* <_ <. tag forms (~580 corpus uses) — found independently by both build agents; bryan ruled the full list
+
+[3600] friction · S442 PA dropped 10 S441 gap entries (4 HIGH) resolving known-gaps.md with a keep-one-side regex; caught by id diff pre-push; + toggled auto-merge on S441's #1153 by a guessed PR number (reverted)
+
+[3601] state · S442 HELD for Oct 2 (agent weekly limit): feat/s442-dpa045-bootstrap @1fe0b22a UNREVIEWED; typer r8 on feat/s442-typer-r8-wip; dpa-058 bootstrap build; SPEC follow-up (4 PA readings); impl#1 gaps to file (liftedali content loss; _{ as text)
+
+[3602] land · S443: #1171 (protect §14.8.9 r1-r5) #1172 (builtin-name enum shadow — #1147 regression) #1173 (page auth / E-PROGRAM-NESTED-AUTH / member-page inheritance) #1174 (workers D1/D2, ex13 works) #1175 (ledger) #1177 (E-PROGRAM-002 same-file) #1180 (ex23 end-to-end) #1183 (ex23 no helper routes); README #1176 HELD for bryan
+
+[3603] find · S441's "reviews lost in compaction" was false for #1145 #1152 #1155 (never reviewed; #1155 told to bryan as reviewed) — post-merge reviews run; #1147's un-re-reviewed fix round carried a false E-ERROR-009 regression
+
+[3604] rule · S443 (user-voice S443): "your recs" ×7 — page optional/none relaxes a required app; stricter auth= wins per file; E-PROGRAM-002 same-file; body-top no-op code is an error; README held; derived SQL over protected cols stays stripped; bare digest stays protected · bun upgrade ASUS · "no waiting, go now" (ex23 PA-direct)
+
+[3605] find · post-merge agent reviews: #1173 abs-path /pages/ disables member-page inheritance (HIGH, fail-open); #1177 <div>-wrapped <program auth> runs anonymously (HIGH, pre-existing); #1180 getCurrentUser(userId) helper = public user-enumeration route (MED, introduced → fixed #1183) + ex23 authz/routing residuals
+
+[3606] find · ex23/ex13 dog-food → compiler defects: markup `${fn(@x.f)}` also emitted as a load-time statement (HIGH); engine write in !{} arm bypasses the setter (HIGH); class-attr template doesn't lower scrml exprs; prod static no directory index; WS handlers merged ×12; bare `{` in markup text swallows child tags (flint, HIGH)
+
+[3607] friction · sub-agent weekly quota exhausted mid-session (3 agents died); continued PA-direct with self-reviewed landings labelled; agent reviews re-run post-merge on quota return found real defects in all three
+
+[3608] state · S443 held for next session: prose r5 + protect r6 briefs (scrml-support/handOffs/s443-briefs/), ex23 residuals, err-arm branch, README #1176; S444-bryan-xps LIVE (successor)
+
+[3609] land · S444: #1181 #1182 #1184 #1185 #1186 #1188 #1189 #1190 #1191 #1193 #1195 #1197 #1199 #1200 #1202 — bootstrap dpa-045 parser + typer r8 + Core additions/dpa-058; impl#1 <request> fixes (S435 exception); per-route chunks CSP fix; SPEC §6.7.7.1/.2, §6.14, §6.14.4 → docs/changelog.md S444
+
+[3610] rule · S444 (user-voice §S444): dpa-059 C (abort reads/discard writes) · dpa-060 B2 + no author TTL + revalidate · dpa-061 persist= (lifetime attr, key= required, decode-first, write-failure status, reveal/lin errors, theme pre-paint, IndexedDB planned stdlib) · dpa-062 c + recs (prepaint REFLECT / hold=@cell, CSP sha256) · free-text // only after whitespace, opaque to EOL · display escapes restored (supersedes S442 B(2)/B(3)) · display literal = standalone statement · #1191 S435 exception
+
+[3611] find · the bootstrap has NO server boundary and NO async → dpa-059/060 sit behind U0 async + U1 server (L each) → scrml-support/docs/deep-dives/bootstrap-server-boundary-arc-plan-2026-09-30.md; impl#1 <request> self-subscription re-fetch loop (fixed #1191); strict CSP refused per-route inline chunk scripts (fixed #1200)
+
+[3612] friction · three confident PA diagnoses reversed by execution (browser failures "unflagged" — baselined; post-merge protect failures "real interaction" — pre-existing test-order pollution; §20.8 "already aborts <request>" — router fetch only) + #1191 dispatched against S435 policy; two parallel sessions → every PR conflicts on generated files (resolve/train scripts)
+
+[3613] state · S444 WRAPPED. Open for bryan: dpa-058 B3 (bound top-level scalar lowers attrs? one switch), SPEC "unawaited Promise" softening, dpa-063/064 (S445 lane). S445 LIVE successor (ASUS). Next bootstrap arc: U0 async core.
+
+[3614] rule · S445 (user-voice S445): top-level <program> = no <program>/<page> ancestor (b); route-file programs nested (item 1); no-effect statement is an error (item 2); nested session attrs error (3); constant-key HMAC protected (4); nested app attrs error (5); db= relative to declaring file + ownership-gated create (6); SCRML_DATA_DIR + per-file ownership · → scrml-support/user-voice-scrml.md §S445 · @adv:g-wrapped-program-auth-silently-dropped,g-dev-creates-empty-db-stubs-that-break-later-compiles
+
+[3615] land · S445: #1194 app root build-relative · #1196 declared prose + E-STMT-NO-EFFECT · #1198 protect egress r6 · #1201 program role by ancestor · #1192 bank dpa-063/064 · → docs/changelog.md S445 · @adv:g-app-root-route-prefix-matched-on-absolute-path,g-body-top-invariant-bypassed-by-raw-text-nodes,g-protect-egress-round-6-residuals,g-wrapped-program-auth-silently-dropped
+
+[3616] find · S445 reviews: protect 6c/6d regressions of their own round (toJSON this-leak); writes through `this` leak on base (HIGH, round 7); `scrml serve` binds *:3100 unauthenticated with arbitrary file r/w (HIGH); server fn in `${ lift }` ships to client; named top-level program = public worker · → docs/known-gaps.md §S445 · @adv:g-protect-egress-round-7-residuals,g-serve-listens-all-interfaces-unauthenticated
+
+[3617] friction · two flaky 300-s pre-commit hangs = 81 orphaned bun servers (commands dev tests leak --__dev-child; old review servers), ~3 GB; killed by cwd (deleted) · → hand-off S445 DURABLE
+
+[3618] state · S445 held: dev-db r4 reviewed LAND-WITH-NITS — round 5 owes R4-1 (outside-root owning db ignores SCRML_DATA_DIR) then land + flogence path heads-up; protect round 7; dpa-063/064 COMPLETE ADVISORY, surface to bryan first · → hand-off.md S445 · @adv:g-dev-creates-empty-db-stubs-that-break-later-compiles,dpa-063,dpa-064
+
+[3619] land · S446-peter: #1212 handler stmt lists (lift rows, arm reads, postfix++⏎) · #1209 schema holes fail-closed (E-SCHEMA-014; union removed, """ change reverted) · #1207 loopback default + host shorthand/whitespace refusal · #1217 handler server-write awaited (SSE kept) · #1219 58-file happy-dom hygiene · #1220 §K POSIX-only test (main windows red since c12b52c2)
+
+[3620] escalate · S446-peter → bryan: note 2026-10-01-from-S446-peter-to-bryan-four-holds-one-word-each.md — #1208 Part A stamp, #1211 E-IMPORT-011-outside-root + type=module stamps, #1210 newly-loud class (38 rows); 5 language Qs (commented schema shadow, LIKE tmpl, nested-sequence stale read, headless server bind, E-ATTR-MULTI-STATEMENT)
+
+[3621] find · S446-peter: 58 test files leaked happy-dom fetch/Response into later files — tracking's 5 dev-watcher 'baseline' failures were this, not real; a stable failure set is not evidence
+
+[3622] find · S446-peter: hand-rolled AST walks again — #1210 r5 counted fn decls via body/children only, missed if/else/match-arm blocks (if-chain class); r6 generic walk
+
+[3623] state · S446-peter wrap: #1210 r6 final check in flight at wrap (enum2-rv4); holds deleted q5/s429-match/s432-expr-handler/s432-dev-server/s446-enum-removal (SHAs in hand-off); flogenceP f3b1b28 db paths; ~30 gaps filed §S446-peter
+
+[3624] state · S448-bryan-xps booted as successor to S446-bryan-xps (killed by the 11:21 reboot, unwrapped); took its lane (bryan: "take its lane") · @adv:s446-bootstrap-u0-when-effects
+
+[3625] land · S448: #1213 bootstrap §57 wire codec (update-branch + fresh gate) · #1221 codec r2 N1-N3 (re-review LAND-WITH-NITS) · @adv:s446-bootstrap-uc-codec
+
+[3626] find · XPS 1h45m boot = systemd-tmpfiles deleting ~1M /tmp files; dominant source = the test suite (~4-7k files/hook run, 529 tmpdir test files), second = full worktrees in the /tmp-resident scratchpad (~20.5k files each) → layer 1 preload (wip/s448-test-tmp-root), layer 2 overlay v2.5 rules, layer 3 sudo tmpfiles change owed by bryan · @adv:s448-test-tmp-root
+
+[3627] find · U0 re-review r2: the run-COUNT cap dropped non-looping runs (R2-1, regression) + an <each>-row when growing its own collection overflows the stack from source (R2-2) → round 3 = cycle detection by causal ancestry + per-event backstop; stopped mid-round at wrap (wip/s448-bootstrap-u0-r3 + patch) · @adv:s446-bootstrap-u0-when-effects
+
+[3628] friction · gh pr merge "blocked" for sessions = compound commands escaping the allow rule into the auto-mode classifier; run it standalone. In-repo TMPDIR breaks walk-up tests (import-host). zsh no-word-split made wrong-commit review trees.
+
+[3629] state · S448 WRAPPED (moving to ASUS): in-flight pushed as wip/s448-{bootstrap-u0-r3,test-tmp-root,spec-dpa063,dpa-062-064-results} + patches in scrml-support/handOffs/s448-wip-patches/; dpa-063 SPEC text awaits bryan's veto of 10 PA readings
+
+[3630] rule · S447 bryan: when → <effect deps=[…]> outside-world only (no reactive writes; cascades impossible by construction) + reset-on= (engines checked vs rule=) + write requests skip mount / server-origin baseline (3c); §55 Edge A reversed + compiler submit gate; opener keywords outside (let <x/>); §7.3.4 arg checks; dpa-063 readings confirmed; UFCS parked; TS tooling carve-out + no impl#1 semantics work; inbox branch in every repo → user-voice §S447 · @adv:dpa-058,dpa-063
+[3631] land · S447: #1215 #1216 #1218 #1222 #1225 #1226 #1227 #1228 #1229 #1230 (dev-db data root; validity SPEC; protect r7+r8; call checks; test temp root + dev orphans; dpa-063; <effect>; self-host v1 retired −22.4k) → docs/changelog.md S447
+[3632] friction · protect r8 introduced 4 HIGH leaks through precision narrowings, all caught at review; a possibly-accidental "your recs on all of them" accept bundled 5 items → re-surfaced individually; post-commit hook made commits 10-15 min → backgrounded → hand-off.md S447 DURABLE
+[3633] state · S447 WRAPPED. Carried: bootstrap U0 re-scope to <effect> (branch wip/s447-bootstrap-u0-r3 @9835b80a4); #1214 held for the bootstrap parser; on mount DD in flight; native-parser fate (bryan call); doorbell rollout (flogence); post-commit bg + coercion carve-out UNCONFIRMED → hand-off.md S447
+[3634] rule · S447 bryan "stamp all" acted on (S450-peter): #1208 Part A · #1211 (a)+(b) · #1210 newly-loud class · rulings (i)-(v) built → hand-off S450 · @adv:g-schema-commented-out-declaration-shadows-live-table,g-schema-create-table-like-template-columns-not-declared,g-handler-nested-sequence-server-write-stale-read,g-generated-headless-and-prod-servers-bind-all-interfaces
+[3635] land · S450: #1208 #1210 #1211 #1241 #1242 #1243 #1244 (defer Part A; imported-enum; client-JS copy; headless loopback; nested await; E-SCHEMA-015 + LIKE; E-ATTR-MULTI-STATEMENT) — all S239-reviewed, merge-on-green → docs/changelog.md S450
+[3636] find · S450 reviews found two HIGH holes LIVE ON MAIN beside the reviewed changes: comment-in-head hid a tenant table from the floor (closed by #1243); one shared _scrml_sql connection lets a concurrent request lose an acknowledged write → g-shared-sql-connection-concurrent-handlers-share-transaction (routed bryan)
+[3637] find · S450 verify batch (main 865065d8): quoted else-if/show ignored · title=f() wired as listener · `helper(x)?` helper not emitted server-side · handler match misses payload variants · ${children} duplicated · ${...} spread E-COMPONENT-021 · implicit §8.9.2 tx commits on fail (ruling) → known-gaps §S450-peter; tilde + WAL gaps closed
+[3638] escalate · S450 → bryan (scrml inbox branch): 2 S435 exception asks on hold refs (hold/s450-transaction-in-function-body, hold/s450-each-row-interp-whitespace) + 6 readings + shared-connection HIGH + implicit-tx ruling
+[3639] state · S450 aM: pin app-pinned bumped to scrml main; aM main 156952a carries the Pi-deploy guard (scrml.toml + deploy-pi refusal until SCRML_DATA_DIR + / & sw.js static fixed)
+[3640] friction · S450 dispatched two aM impl#1 fixes before the S435 policy check → parked; autoMode refused a relayed-authorization branch update (Peter ran it); generated churn (known-gaps theirs / master-list) nearly leaked into 3 PRs
+[3641] state · S450-peter WRAPPED.
+[3642] state · S449-bryan booted solo (ASUS); autonomous most of the session · → board S449-bryan.md
+[3643] ruling · S449 eight-question queue "your recs." (@session server ctx error; <onMount>; §6.15 value positions don't write; auth= invalid error; S447 accepts confirmed; native parser frozen+pruned; effect OPENs) · → user-voice §S449 · @adv:g-session-ambient-unlowered-trust-boundary-inversion,g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth
+[3644] land · #1233 data-root symlink containment · @adv:g-dev-db-data-root-residuals
+[3645] land · #1234 session store WAL+busy_timeout, CSRF-gated honest logout · @adv:g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal,g-session-destroy-route-has-no-csrf-check
+[3646] land · #1235 bootstrap <effect> + compile-time no-write + reset-on= (U0 backstop deleted) · @adv:g-bootstrap-effect-reset-on-owed
+[3647] land · #1236 protect egress round 9 (session store by summary under an allow-list precondition) · @adv:g-protect-egress-round-9-residuals
+[3648] land · #1237 SPEC <onMount>, §6.15, effect OPENs closed · @adv:dpa-063
+[3649] land · #1238 bootstrap §6.15 E-VALUE-WRITES-STATE · @adv:g-bootstrap-render-writer-call-hangs
+[3650] land · #1239 E-SESSION-AMBIENT-SERVER + E-AUTH-ATTR-INVALID · @adv:g-session-ambient-unlowered-trust-boundary-inversion,g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth
+[3651] land · #1240 native-parser freeze + prune (−34k) · @adv:g-parity-canary-outside-every-blocking-gate
+[3652] ruling · S450-peter asks: B1 exception (return/break/continue roll back), C shared-connection lock (+PG opt-in), D fail rolls back implicit envelope · → user-voice §S449 · @adv:g-shared-sql-connection-concurrent-handlers-share-transaction,g-implicit-handler-tx-commits-on-fail
+[3653] land · #1247 bootstrap conformance counter (19 real / 1278) · → docs/bootstrap-conformance.md
+[3654] ruling · on-field (a), opener prose (b), dialect (c); dialect rulings 1-6; PA-reading vetoes none · → user-voice §S449
+[3655] land · #1248 dpa-065 O35 banked · @adv:dpa-065
+[3656] land · #1249 §66 opener keywords + bootstrap parser migration (supersedes #1214) · @adv:g-bootstrap-parser-opener-let-and-unchecked-opener-shapes
+[3657] land · #1250 bootstrap §55 validity surface + submit gate · @adv:g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate
+[3658] land · #1251 transaction guard (§19.10.6) + fail rollback (§8.9.2) · @adv:g-shared-sql-connection-concurrent-handlers-share-transaction,g-implicit-handler-tx-commits-on-fail
+[3659] state · S449 in flight at wrap: wip/s449-scrml-fix-s66-twins @df9f80aab under re-review; open Qs R1-R11 + 3 scrml-fix forks + hidden-field + lock timeout · → hand-off.md §S449
+[3660] state · S451-bryan booted solo (ASUS), Profile A · @adv:none
+[3661] rule · U1 rulings R1/R4/R7 (a), R11 (b — ?{} failable everywhere), R2-R10 yes · → user-voice §S451 · @adv:bootstrap-u1
+[3662] land · #1253 SPEC U1 rulings R1–R11 + scrml fix forks a/c · @adv:bootstrap-u1
+[3663] rule · S451 open items: errorBoundary vs R1 (R1 wins), §52 hydration exempt + @x.error, value positions that would wait, §57.5 R10 wins, §2.2.1 no artifact on error, O-061-5 default · → user-voice §S451
+[3664] land · #1254 bootstrap else-if/else chains · @adv:g-bootstrap-else-if-else-attrs-ignored
+[3665] land · #1255 bootstrap no-artifact gate + defer · @adv:g-bootstrap-defer-scope-001-and-runs-anyway
+[3666] land · #1259 SPEC open items ruled
+[3667] land · #1256 scrml fix (6 S239 rounds; impl#1-AST-derived, reset="none" wrap) · @adv:s449-scrml-fix-s66-twins
+[3668] land · #1258 impl#1 route inference ignores string/template/comment text (§12.4) · @adv:g-route-inference-session-trigger-string-blind
+[3669] land · #1260 bootstrap persist= + repeated opener words refused · @adv:g-impl1-persist-codes-unimplemented-s451
+[3670] land · #1257 bootstrap <program> attributes checked/refused; reset= implemented · @adv:g-bootstrap-program-attrs-ignored-fail-open,g-bootstrap-entry-content-outside-program-dropped-silently
+[3671] land · #1261 bootstrap show= + repeated/case-variant attrs refused
+[3672] rule · show= does not narrow; §8.1.1 nearest database scope wins · → user-voice §S451
+[3673] land · #1262 SPEC show= / nearest db scope
+[3674] land · #1263 bootstrap U1a SQL + placement (3 S239 rounds on the kind scan) · @adv:bootstrap-u1
+[3675] rule · impl#1 wrong-database resolution = security fix · → user-voice §S451
+[3676] land · #1264 impl#1 nearest-db-scope + tenant floor on every handle · @adv:g-impl1-db-resolution-not-nearest-s451
+[3677] land · #1265 bootstrap Ue error model (+ function values no longer lower to null) · @adv:bootstrap-u1
+[3678] rule · Ue forks 1a/2/3, 4a cross-db envelope error, 5 enforce, 11a <db src> supplies program, client server calls failable, 3 forms, | _ err :> binder · → user-voice §S451
+[3679] land · #1266 SPEC E-ERROR-012/013, E-SQL-011 · #1267 SPEC 11a · #1268 SPEC client calls failable §19.9.10
+[3680] friction · PA relayed a wrong premise (all 11 E-SQL-004 cases legacy) into a ruling; agent caught channel-broadcast-strip → re-ruled 11a
+[3681] state · S451 WRAPPED; #1269 (| _ err :>) + #1270 (bootstrap §34 severity, counter 95→119) on auto-merge at wrap; next = bootstrap error-model rulings round + U1b design pass
+[3682] land · #1283 A3 async event listener rejections route to _scrml_error_boundary_log (shared colouring seam, 5 registration paths) · @adv:g-handler-level-rejection-bypasses-scrml-logging
+[3683] land · #1286 B1a/B1b transaction exits roll back; top-level transaction refused (E-ERROR-001); exits still refused in a match arm · @adv:g-transaction-block-not-recognized-inside-a-function-body
+[3684] rule · B2 ruled bootstrap-owed — g-each-row-whitespace-only-text-dropped filed open on main, hold/s450-each-row-interp-whitespace retired unlanded · → user-voice-scrml.md §S449
+[3685] gap · g-handler-callref-auto-wrap-drops-async-callee-rejection filed (the §5.2.2 call-ref limb A3 does NOT close; 1251 sites/640 files, 464/180 at risk; ruling-gated) · g-errorboundary-async-render-rejection-unobserved-s453 filed (LOW)
+[3686] finding · B1a needed NO codegen change — the parked try/finally already rolled back on return/break/continue; S450 refused a shape its own lowering handled · @adv:g-transaction-block-not-recognized-inside-a-function-body
+[3687] friction · a write:false probe is blind to the whole codegen stage (no E-CODEGEN-* can appear); it falsified two true PA corrections and invalidated an agent own 993-file differential until re-closed with write:true
+[3688] verify · aM re-verified green vs #1258/#1264 — 26/26 emitted artifacts byte-identical, pre-#1258 vs HEAD; all of S451+S452 inert on aM
+[3689] ruling · S452 one pattern-arm grammar ("c looks right" + "a. one spelling"): `!{}` and engine message arms take §18.2's match-arm; `|` soft-deprecated (W-ARM-PIPE-LEGACY); impl#1 exceptions for both pipe-less forms · → user-voice S452 · #1273 #1275 #1276 #1285 · @adv:g-impl1-handler-arm-pipeless-dropped-s452,g-impl1-engine-message-arm-pipeless-as-text-s452
+[3690] ruling · S452 tenant floor filters at the SOURCE ("a"); RAW-EGRESS narrowed; INSERT with no tenant = named refusal · → user-voice S452 · #1278 #1281 · @adv:dpa-067
+[3691] security · live impl#1 cross-tenant leak (extracted values) closed; floor SQL handling r1→r4 (classifier → allow-listed token subset + OR ABORT); landed PARTIAL ×2 on bryan's word; schema write hazards / VIEW / `_scrml_` / oracles OPEN · → #1287 #1293 · @adv:g-tenant-floor-extracted-values-escape-the-egress-strip-s452,g-tenant-floor-sql-lexical-bypasses-s452-r3,g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4
+[3692] ruling · dpa-066 RATIFIED (Approach B, one effect summary per callable) + dpa-067 forks RATIFIED · → user-voice S452 "all your recs" · @adv:dpa-066,dpa-067
+[3693] land · bootstrap: S451 error-model rulings (#1274), §34 severity fail-closed (#1270), W-ARM-PIPE-LEGACY + counter grading (#1279), determinism §58 (#1280), effect summary M0–M3 + G7 (#1290); counter PASS 120 · → docs/changes/s452-* · @adv:g-bootstrap-void-through-wrapper-passes-e-error-012-s452
+[3694] friction · PA ran two cwd-dependent bash calls in parallel; a `cd scrml-support` landed between them → the dpa-queue commit + PR #1 went into scrml-support; reverted · → hand-off S452 MISSES
+[3695] finding · impl#1 `<#id>` rewrite reaches inside string literals (silent) + a ref-sigil string initializer mis-splits (wrong diagnostic) — PA-executed · → known-gaps · @adv:g-impl1-ref-sigil-rewrites-inside-string-literal-s452
+[3696] ops · 483 merged/landed remote branches trimmed after a verified bundle backup (bryan's `!` push; classifier blocked the PA) · → scrml-support/archive/branch-trims/
+[3697] land · #1292 maps(s453) 13 maps to fd2f757d0; router gap closed 3 ways; our own gate-steps figure corrected 14→17
+[3698] land · #1297 scripts/merge-on-green.sh committed (RE-AUTHORED from the S438 contract, which was never committed) + scripts/*.sh pinned eol=lf; bite-proven, and the bite found a real UNKNOWN-mergeStateStatus defect
+[3699] state · jq 1.8.2 installed on AdiPDesk (winget, user PATH) — both "this box" hazards recorded at the S453 wrap are now false; hand-off + board corrected in place
+[3700] verify · S454 closed the S453-routed handler-rejection FAMILY: callref limb + parent + errorBoundary sibling all status=resolved on 55c5d348c — pickup item 0 of the S453 wrap is DISCHARGED · @adv:g-handler-level-rejection-bypasses-scrml-logging
+[3701] disp · post-wrap work does NOT get a second /wrap — the wrap is the anchor, the delta-log is the stream between anchors; it lands as its own PR and MUST correct any wrapped statement it falsifies (precedent #1292, #1297). Generalized rule routed to bryan for the flobase continuity module
+[3702] friction · nearly pushed 5 delta-log entries at [3689]-[3693], already used by the live S454 session — caught by a per-number duplicate check before the push; the CI sequence gate exists for exactly this, do not trust the tail you read minutes ago
+[3703] ruling · S454 B-1 "a yes, b yes, root fix" — every event-handler rejection reaches the logging surface; §5.2.2 states meaning not emitted JS · → user-voice S454 · @adv:g-handler-callref-auto-wrap-drops-async-callee-rejection
+[3704] land · #1296 call-ref handlers coloured by AUTHOR name (root); 16th listener site (emit-variant-guard) found; §19.6.8 B7 · → PR #1296 · @adv:g-handler-callref-auto-wrap-drops-async-callee-rejection,g-engine-arm-rewired-handler-skips-async-coloring
+[3705] ruling · S454 U1b "all your recs, F3 with the deadline" + "your recs on both" — ServerCallError + one Transport wrapper; deadline 30 s fixed; double-click = both continue · → user-voice S454 · @adv:dpa-066
+[3706] land · #1295 bootstrap codec §57.8 payload enums · #1298 SPEC §19.9.10 closed · #1303 bootstrap U1b client→server call · → PRs · @adv:dpa-066
+[3707] security · #1299 protect= floor FAIL-OPEN on any statement it could not read (13 executed leak shapes incl. leading `;`, lone CR in a `--` comment, quoted target read as `q`) → inverted to positive-proof-only · → PR #1299 · @adv:g-protect-floor-unknown-leader-fails-open-s454
+[3708] security · #1301 E-NAME-COLLIDES-RESERVED-PREFIX emitted — the S439/S440 ruling existed; the gap entry's "needs a ruling" was false; `_scrml_sql.unsafe` reach closed · → PR #1301 · @adv:g-tenant-floor-raw-driver-handle-callable-s452
+[3709] finding · the Types gate was red on main ≥32 merges behind continue-on-error in the non-required tracking job (found via the #1297 post-merge review) · → PR #1302 (now BLOCKING; bryan "yes, fix the 30 then promote it") · @adv:types-gate
+[3710] ruling · S454 "grant the exception" — impl#1 handled `?{}` in expression positions; bare-`return` arm body: grammar now, widen later (dpa-068 banked) · → user-voice S454 · @adv:g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454,dpa-068
+[3711] land · #1305 handled `?{}` lowers in every expression position; E-TYPE-080 on every handler; no-match throws (r1 found a fail-open "ADMIN-GRANTED") · → PR #1305 · @adv:g-sql-handler-arm-on-all-in-fn-statement-emits-empty-assign-s454
+[3712] state · F8 `scrml fix client-server-call` built + corpus rewritten (229 sites) but S239 r1 found HIGH (loop-captured const→var), MED (parallel-call partial write), MED (entry regex), LOW-MED (match arms) — fix round IN FLIGHT at wrap on feat/s454-scrml-fix-f8-r11 · → hand-off S454 §1 · @adv:f8
+[3713] friction · masked exit code: `git commit … | tail; echo $?` reported a commit that never happened; `bun test <path>` without `./` matched nothing — both caught by re-reading state · → hand-off S454 DURABLE
+[3714] land · POST-WRAP: #1308 F8 `scrml fix client-server-call` merged (217 sites / 160 files; unpreservable shapes LISTED) — supersedes the S454 wrap's "F8 in flight" (hand-off §1); R11 `sql-failable` still owed · → PR #1308 · @adv:f8
+[3715] ruling · S455 "go, comp-time schema" — §14.8.10 tenant-floor schema write hazards (trigger on/writing a tenant table, INSTEAD OF, PG rule, cascading FK either end, VIEW over a tenant table) become a COMPILE ERROR at the `<schema>` declaration; newly-rejecting, fail-closed · → user-voice §S455 · @adv:g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4,g-tenant-floor-schema-view-over-tenant-table-s452
+[3716] disp · S455 parallel: R11 `sql-failable` scrml fix rule (`feat/s455-scrml-fix-r11-sql-failable`, Phase 0 re-measured post-#1305) + tenant schema-hazard rule (`fix/s455-tenant-schema-hazard`) · → docs/changes/s455-*/BRIEF.md
+[3717] state · boot housekeeping: S453-peter's two notes → read/ (both discharged by S454: B-1/U1b ruled; the two SPEC falsehoods fixed — §34 W-ARM-PIPE-LEGACY "Emitted by impl#1", fix-arm-pipe.js exists); #1309 carve-out marker · → this PR
+[3718] land · #1311 state.ts recent-sessions pinned to --abbrev=9 (S454 B-4a) — state.ts --check was FAIL on main · → #1311
+[3719] land · #1312 foreign slice sealed scope (§23.2.4a "no free lexical capture"): `_scrml_foreign_seal` builds each slice once in global scope; E-FOREIGN-007; flogence 738 slices identical · → #1312 · @adv:g-foreign-iife-captures-module-scope-s454
+[3720] land · #1313 E-TENANT-SCHEMA-HAZARD — tenant-floor schema hazards refused at the `<schema>` declaration, one compilation-wide TENANT-SCHEMA stage; S239 five rounds, every HIGH a class fix · → #1313 · @adv:g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4,g-tenant-floor-schema-view-over-tenant-table-s452
+[3721] finding · R11 Phase 0: impl#1 never ran the pre-R11 silent mode — an unhandled failing `?{}` THROWS (500); S451 5(a)'s "meaning-preserving" premise was false; the S239 review then EXECUTED a fail-open on writes (admin-panel doRevokeKey logs "revoked" after a silently failed UPDATE) · → docs/changes/s455-scrml-fix-r11-sql-failable/
+[3722] ruling · S455 "b your rec on R11" — the R11 `sql-failable` rule rewrites READS only; every WRITE is listed (86 of 238 sites) · → user-voice §S455 · @adv:g-impl1-handled-sql-lowering-defects-s455
+[3723] friction · my R11 brief demanded runtime identity with impl#1 while its semantic premise was the pre-R11 SPEC — the two disagreed and I had not checked impl#1; the agent STOPPED correctly at Phase 0 · → docs/changes/s455-scrml-fix-r11-sql-failable/progress.md
+[3724] disp · tenant floor project-level set (floor uses the #1313 compilation-wide set) + ALTER ADD COLUMN tenant_id + RLS-removal (governing-sentence gated) → `fix/s455-tenant-floor-project-set` · @adv:g-tenant-floor-per-file-tenant-set-s455
+[3725] land · #1315 R11 `scrml fix sql-failable` — provable READS rewritten (150 sites / 117 files), every WRITE listed · → #1315 · @adv:g-impl1-handled-sql-lowering-defects-s455
+[3726] land · #1316 tenant floor reads ONE tenant set per compilation; ALTER ADD COLUMN tenant_id scopes · → #1316 · @adv:g-tenant-floor-per-file-tenant-set-s455,g-tenant-floor-alter-add-tenant-column-not-scoped-s455
+[3727] ruling · S455 "yes both" (isolation removal charged + exemption list) → "your rec on the allow-list" (a tenant `<schema>` admits a closed set of statement kinds) → "yes, both" (land PARTIAL + bodies into the S452 subset) · → user-voice §S455
+[3728] land · #1317 tenant `<schema>` statement-kind allow-list + token-level call rule; seven S239 rounds; PARTIAL (rel.f residual) · → #1317 · @adv:g-tenant-schema-rls-removal-not-charged-s455
+[3729] disp · tenant schema BODIES inside the S452 SQL subset (`fix/s455-tenant-schema-body-subset`) · @adv:g-tenant-schema-rel-dot-fn-call-s455
+[3730] friction · a text classifier for a foreign SQL dialect needed ~12 review rounds across #1313/#1317 before the boundary moved to an allow-list + a shared subset; the S452 durable ("after three rounds, change the boundary") applied late — at round 7 of #1317, not round 3 · → docs/changes/s455-tenant-floor-project-set/progress.md
+[3731] land · #1319 tenant `<schema>` bodies in the S452 SQL subset; rel.f closed for bodies AND queries; dialect-aware allow-list; `::<built-in>` casts · → #1319 · @adv:g-tenant-schema-rel-dot-fn-call-s455
+[3732] ruling · S455 "a" (×2): the shared subset admits `::<built-in>`; the PG overload hijack is a DEPLOY requirement (REVOKE CREATE ON SCHEMA public) stated in §14.8.11 · → user-voice §S455 · @adv:g-tenant-pg-overload-hijack-s455
+[3733] land · #1320 §14.8.11 overload hijack = deploy requirement · #1321 `scrml build` prints it · → #1320 #1321 · @adv:g-tenant-pg-overload-hijack-s455
+[3734] land · #1322 handled `?{}` seen by every consumer as the unhandled one (lift, cell write, for-of, fn purity, protect, CPS, batching, hoisted reads); root = `!{}` wraps the STATEMENT · → #1322 · @adv:g-impl1-handled-sql-lowering-defects-s455
+[3735] ruling · S455 "go" — dispatch the §8.10 hoisted-keyed-read-inside-if fix; PA reading: grants the S435 exception for it · → user-voice §S455 · @adv:g-impl1-hoist-keyed-read-inside-if-null-s455
+[3736] land · #1324 executed tenant-floor tests get a 30 s timeout (Windows runner) · #1325 §8.10 hoist: any depth or no hoist (never null); allow-listed shapes only; protected tables never hoisted · → #1325 · @adv:g-impl1-hoist-keyed-read-inside-if-null-s455
+[3737] friction · #1325's fix made two pre-existing HIGHs reachable (the old `null` hid a protect leak + IN-rewrite wrong answers) — a fix that turns "always wrong" into "runs" owes a review of what now runs · → hand-off §S455 DURABLE
+[3738] state · S455 WRAP — 14 PRs (#1310–#1325, #1312/#1313/#1315/#1316/#1317/#1319/#1322/#1325 compiler; rest docs/test/script); 8 rulings; pa-ruled 5 · → hand-off §S455
+[3739] state · S456 BOOT (Profile A, solo) — main 2dd6d35d9 gate green; issues 0; review debt 3 (docs carve-outs); 3 flogence FYIs resolved on inbox (msg resolve now inbox-branch); pa-ruled markers in known-gaps = 3 (hand-off said 5 — unreconciled) · → board S456-bryan.md
+[3740] ruling · S456 "go" on the PA rec: dispatch §8.10 hoist divergences + tenant identity-substrate warning in parallel. PA READING (veto window): extends the S455 S435-freeze exception (#1325) to the same-surface §8.10 silent-wrong fixes · → user-voice §S456
+[3741] disp · s456-hoist-divergences (key coercion · writes between iterations · pre-fetch failure timing · §8.10.6 chunking) → fix/s456-hoist-divergences · @adv:g-impl1-hoist-batching-divergences-s455
+[3742] disp · s456-tenant-identity-substrate (W- on a non-acrossTenants tenant read in a tenantId-pinning fn; residuals b+c) → fix/s456-tenant-identity-substrate · @adv:g-tenant-identity-substrate-scoped-breaks-login-s455,g-tenant-small-residuals-s455
+[3743] finding · g-tenant-floor-off-for-live-db-and-body-create-tables-s455 + residual (a) TEMP tables are RULINGS not fixes — SPEC §14.8.10 states the floor is OFF for live-db / body CREATE TABLE tables; scoping them is semantics-changed, refusing them is newly-rejecting · → surfaced to bryan S456
+[3744] land · #1329 review carve-outs #1326–#1328 · → #1329
+[3745] ruling · S456 "closures fine" — #939 #865 #579 closed with evidence (obsolete/superseded/obsolete) · → user-voice §S456
+[3746] land · #1330 handle() return is a protect sink; Response by value — globalThis.Response leak closed · → #1330 · @adv:g-handle-globalthis-response-ships-protected-columns
+[3747] ruling · S456 "b, startup check lands with it" — undeclared tenant_id tables refused, startup check · → user-voice §S456
+[3748] land · #1331 W-TENANT-SUBSTRATE-SCOPED; `--` ends at CR|LF · → #1331 · @adv:g-tenant-identity-substrate-scoped-breaks-login-s455,g-tenant-small-residuals-s455
+[3749] land · #1332 §8.10 hoist ≡ per-row (key compare, write-free, failure timing, chunking) · → #1332 · @adv:g-impl1-hoist-batching-divergences-s455
+[3750] ruling · S456 "a, fix F7/F9 too" + "your recs, go" — program-body SQL closed statement allow-list; txn/INDEX/7 PRAGMAs admitted · → user-voice §S456
+[3751] land · #1334 undeclared tenant_id refused; closed statement + lexical allow-list; startup 503; table_xinfo · → #1334 · @adv:g-tenant-floor-off-for-live-db-and-body-create-tables-s455
+[3752] finding · set_config('scrml.tenant',…) multi-statement re-pin CONFIRMED live on PG16 under the §14.8.11 tier · → g-tenant-set-config-in-program-body-s456
+[3753] ruling · S456 "one statement per seams reasonable. push" · → user-voice §S456
+[3754] land · #1335 one statement per ?{} + one JS slot reader (8 consumers) + emitted-call guard; closes set_config re-pin + SQLite slot bypass of #1334; CRLF fix · → #1335 · @adv:g-tenant-set-config-in-program-body-s456,g-sql-slot-extent-brace-count-bypass-s456
+[3755] land · #1336 foreign slice silent null (flogence S56): refusal sink, acorn-parse slice tokens, each quoted handler refused · → #1336 · @adv:g-foreign-slice-regex-quote-and-in-block-refusal-lost
+[3756] ruling · S456 "your recs on 1 and 2" — no ${} into event attrs / scheme-led URL attrs / srcdoc · → user-voice §S456
+[3757] land · #1337 E-ATTR-INTERP-EXECUTABLE, judged as emitted · → #1337 · @adv:g-quoted-event-attribute-interpolates-row-data-injection-s456,g-quoted-url-attribute-javascript-scheme-row-data-s456
+[3758] friction · PA brief narrowed a fail-closed rule (every on…) to a WHATWG name list → 19 Chromium handler names re-opened (SVG onbegin ran on load); reverted to fail-closed + exact non-event exemptions · → hand-off §S456 DURABLE
+[3759] friction · split-review briefs dropped the no-pattern-pkill rule and shared one .tmp; a reviewer leaked a curl cookie jar into the main checkout · → hand-off §S456 MISSES
+[3760] state · S456 WRAP — 8 PRs (#1329–#1337), 7 rulings + 2 PA readings, 3 stale PRs closed; pa-ruled 3 · → hand-off §S456
+[3761] ruling · S457 "a now with c discussed for later" — runtime scheme guard on data-supplied URL schemes; PA reading: same safe-scheme set as §5.2 · → user-voice §S457 · @adv:g-quoted-url-attribute-data-supplied-scheme-s456
+[3762] disp · s457-url-scheme-runtime-guard · s457-sql-one-reader · s457-maps-noncompliance · s457-is-some-function-expression (#1333) · s457-reexport-and-dev-tenant-check · DD url-refinement-type · → brief/s457
+[3763] ruling · S457 "ok we can drop c" — no url/link refinement type for attributes; DD marked historical · → user-voice §S457
+[3764] land · s457-maps-noncompliance — FACTS verbs 12, fix --help, bootstrap-conformance regen + blocking PR step; filed walker gap + match-arm phantom (PA-reproduced) + string(url) gap · @adv:g-walkfileast-skips-engine-and-match-bodies
+[3768] land · s457-sql-one-reader — slot extent by parsing (linear), rewriteSqlRefs = the checker's sites, .unsafe params wrapped; two S239 differential rounds · @adv:g-sql-slot-reader-regex-division-misreads-s456,g-rewrite-sql-refs-lowers-inside-js-literals-s456
+[3769] finding · checker reads raw text, emitter lowers rewritten/parsed text → executed DROP TABLE past the §8.1.2 allow-list (keyword-named cell, object literal, <#name> in template) — pre-existing, HIGH · → g-sql-checker-and-lowering-read-different-text-s457
+[3765] land · #1340 s457 maps non-compliance (FACTS verbs, fix --help, bootstrap-conformance blocking step) · → #1340
+[3766] land · s457-url-scheme-runtime-guard — SPEC §5.2 rule 3; `_scrml_safe_url` at 17 emitters incl. SSR first paint; element-scoped; Chromium differential LAND-WITH-NITS (0 bypass in scope, 66,240-value fuzz) · @adv:g-quoted-url-attribute-data-supplied-scheme-s456
+[3767] finding · S457 reviews: svg <set to=> href sink CONFIRMED executable (LOW→HIGH); unquoted srcdoc=${@u} not refused (HIGH); user fn `id` kills click dispatch (HIGH, PA-reproduced); string `?{` clobbered by placeholder (HIGH, PA-reproduced); unquoted onclick call-chain drops callback (HIGH, PA-reproduced) · → known-gaps S457
+[3770] land · #1341 S457 runtime URL scheme guard (+ types decls, FACTS, bootstrap report regen) · @adv:g-quoted-url-attribute-data-supplied-scheme-s456
+[3771] land · #1342 s457-sql-one-reader · @adv:g-sql-slot-reader-regex-division-misreads-s456,g-rewrite-sql-refs-lowers-inside-js-literals-s456
+[3772] disp · s457-sql-check-at-lowering · s457-executable-sinks-srcdoc-svg · s457-runtime-local-rename-and-handler-truncation · → brief/s457b
+[3773] land · s457-is-some-core (#1333) — the placeholder gate split out pending the `__scrml_` prefix ruling (gate kept @ 934ac062c) · @adv:g-is-some-in-a-function-expression-body-emits-an-undefined-helper
+[3774] land · s457-sql-check-at-lowering — §8.1.2 + §14.8.10 item (1) judged at every author-?{} lowering on the SQL each driver call sends; F2/F3/F4 + 13 keyword cells + .unsafe ATTACH refused; differential: 0 bypass, 390/390 legal identical · @adv:g-sql-checker-and-lowering-read-different-text-s457
+[3775] land · s457-runtime-local-rename-and-handler-truncation — scope-aware user-fn rename (fn-name-rename.ts) + compiler locals into _scrml_; unquoted handler call chains read whole (§5.2.3); differential: 0 HEAD-worse of 2,538 substitution compiles, 324 BASE-broken fixed · @adv:g-user-function-named-id-breaks-click-dispatch-s457,g-onclick-unquoted-call-chain-drops-callback-s457
+[3776] land · s457-scrml-prefix-gate — __scrml_ reserved (S457 "a for __scrml_"); compiler placeholders carry a per-compilation unguessable token (AsyncLocalStorage), scrubbed from every output; emit gate refuses any __scrml_<name>__; 6 review rounds (exemption list → source reader → per-process token → per-compile token) · @adv:g-map-literal-in-function-expression-emits-undefined-helper-s457
+[3777] ruling · S457 "1a 2a 3a 4a 5 dd it 6a" + "^{} … I would prefer scrml" (§22.12 already ratifies; impl#1 deny-list → allow-list dispatched) · → user-voice §S457
+[3778] land · s457-string-url-executable-schemes (6a) — string(url) = absolute URL + §5.2 safe scheme, one judge; worker bundle inlines it; review LAND-WITH-NITS · @adv:g-string-url-refinement-admits-executable-schemes
+[3779] land · s457-no-artifacts-on-error (1a) — any Error → no artifact, every entry point; differential review LAND-WITH-NITS (no writing path found; successes byte-identical); PA fixed 2 nits · @adv:g-impl1-artifacts-written-on-error-s451
+[3780] land · #1348 s457-no-artifacts-on-error (1a) · @adv:g-impl1-artifacts-written-on-error-s451
+[3781] state · S457 WRAP — 8 PRs (#1340–#1344, #1346–#1348) + #1333 closed; in flight: #1345 (CI pins), sinks branch, re-export/dev-tenant branch, meta allow-list (held on bryan (a)/(b)); briefs 2a / 3a+4a queued; 11 rulings + 2 PA readings · → hand-off §S457
+[3930] ruling · S458 "1a, D1, refinement next. go" — ^{} allow-list migrates meta-cleanup-001 to meta.interval; D1 declared props never reach the root; refinement checks next · @adv:g-meta-code-runs-unsandboxed-in-the-compiler-process-s457,g-declared-prop-reaches-expanded-root-s457,g-refinement-checks-absent-in-n-positions-s457
+[3931] land · #1345 scope-aware user-fn rename + _scrml_ compiler locals + unquoted handler call chains read whole (S457) · @adv:g-user-fn-id-kills-click-dispatch-s457
+[3932] land · #1350 maps refresh (S457)
+[3933] land · #1351 srcdoc / SVG animation / event-text executable sinks (S457, 3 review rounds) · @adv:g-srcdoc-unquoted-expression-not-refused-s457,g-svg-animation-and-meta-refresh-url-sinks-s456
+[3934] ruling · S458 "your recs on R1-R5, go" — refinement R1 base column + boundary + CHECK + whole-load failure; R2 500 no echo; R3 throw + keep prior; R4 space-separated + in-paren shared-core are refinements, dot-chain refused, no cross-field; R5 renumber · @adv:g-refinement-checks-absent-in-n-positions-s457
+[3935] land · #1352 .scrml re-exports reach server/client/page; scrml dev tenant gate; re-export cycles/missing names/files refused · @adv:g-server-reexport-of-scrml-module-fails-to-link-s456,g-tenant-startup-check-built-server-only-s456
+[3936] land · #1353 Windows EBUSY in dev tenant-gate test cleanup (main windows red after #1352 auto-merged at its previous head)
+[3937] land · #1354 §53 refinement slice 1 — one reader, base-type-first judge fails closed, annotations read whole · @adv:g-refinement-checks-absent-in-n-positions-s457
+[3938] state · S458 WRAP — 6 PRs (#1345 #1350–#1354); weekly API limit stopped every agent (resets 2026-10-11 23:00 MT); parked branches + salvage patches in hand-off §S458
+[3939] state · S458 ADDENDUM — rulings meta.emit gate (a), D1 codes, ratify §21.4; #1355–#1357 merged; uq branch ready @417fa38a3; 5 branches in flight (hand-off top)

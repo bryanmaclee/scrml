@@ -1,0 +1,8 @@
+${
+    <raw>: string = "123-45-6789"
+    function keep(v) {
+        let s: string(ssn) = v
+        return s
+    }
+}
+<program><p>${keep(@raw)}</p></program>

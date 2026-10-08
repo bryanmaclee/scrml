@@ -1,0 +1,4 @@
+${
+    <count>: integer(>0) = 1.5
+}
+<program><p>${@count}</p></program>

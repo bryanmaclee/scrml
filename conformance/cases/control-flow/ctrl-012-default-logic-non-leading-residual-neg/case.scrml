@@ -1,5 +1,5 @@
 <program>
-Welcome to the dashboard.
+<p>Welcome to the dashboard.</p>
 if (1) { }
 <page>
   <h1>Hi</h1>

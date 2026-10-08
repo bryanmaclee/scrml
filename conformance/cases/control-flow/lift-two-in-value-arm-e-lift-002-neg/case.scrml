@@ -1,0 +1,12 @@
+<program>
+    <cond> = true
+    ${
+        const x = if (@cond) {
+            lift 1;
+            lift 2;
+        } else {
+            lift 3;
+        }
+    }
+    <p>${x}</p>
+</program>

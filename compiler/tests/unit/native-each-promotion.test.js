@@ -15,8 +15,10 @@
 //       `each-block` node shape (kind / iterShape / inExprRaw / ofExprRaw /
 //       asName / keyExprRaw / templateChildren / emptyChild / colon-shorthand
 //       fields). This is the promotion mechanism under test.
-//   (2) PARITY — compile real each-shaped source under BOTH parsers
-//       (`parser:"scrml-native"` vs default) and assert the native client.js
+//   (2) END TO END — (S449: was a compile under BOTH parsers through the
+//       retired full-pipeline flag; now the default pipeline, with the
+//       native-shaped nodes reached through `<match>` arm re-parse.) Formerly:
+//       compile real each-shaped source under BOTH parsers and assert the native client.js
 //       carries the structural each semantics (`_scrml_reconcile_list` + render
 //       fn + per-item factory) just like default, and that the unpromoted
 //       symptoms (W-ATTR-001 / E-SCOPE-001 / bare textContent) are GONE.
@@ -26,8 +28,8 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
-import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,20 +82,18 @@ function nativeAst(source) {
   return r.ast;
 }
 
-// compileWith — compile `source` to client.js under `parser` (null = default
-// live BS+TAB; "scrml-native" = native pipeline). Returns errors + warnings +
-// client.js text.
-function compileWith(source, parser, suffix) {
+// compileDefault — compile `source` to client.js through the default pipeline.
+// Returns errors + warnings + client.js text.
+function compileDefault(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-naceach-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-naceach-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
     const opts = { inputFiles: [tmpInput], write: true, outputDir: outDir };
-    if (parser) opts.parser = parser;
     const result = compileScrml(opts);
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
@@ -313,34 +313,35 @@ describe("native-each §8 — each inside a <match> arm (STOP-FLAG coupling)", (
     </match>
 </div>`;
 
-  test("inner each is promoted under native (reconcile_list present), matching default", () => {
-    const def = compileWith(EACH_IN_MATCH_ARM, null, "mm-def");
-    const nat = compileWith(EACH_IN_MATCH_ARM, "scrml-native", "mm-nat");
+  // S449: the former second arm (the retired full-pipeline
+  // `--parser=scrml-native` flag) was dropped. Note: impl#1 never routes an
+  // each-bearing body through the native parser — emit-match.ts and
+  // component-expander.ts both fall back to splitBlocks+buildAST when the body
+  // contains `<each` (verified S449 by breaking emit-each's exprNode branch:
+  // these tests stayed green). So this is default-pipeline coverage; the native
+  // each promotion is covered only by the direct tree tests in §1–§7.
+  test("inner each is promoted in the match arm (reconcile_list present)", () => {
+    const def = compileDefault(EACH_IN_MATCH_ARM, "mm-def");
     expect(def.errors.length).toBe(0);
-    expect(nat.errors.length).toBe(0);
-    // Default establishes the structural-each baseline inside the match arm.
     expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_reconcile_list");
     expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_each_renderers");
-    // Native must match — the inner each is promoted, not masked.
-    expect(foldChunkNamespacing(nat.clientJs)).toContain("_scrml_reconcile_list");
-    expect(foldChunkNamespacing(nat.clientJs)).toContain("_scrml_each_renderers");
   });
 
-  test("native each-in-match-arm does not regress to bare textContent", () => {
-    const nat = compileWith(EACH_IN_MATCH_ARM, "scrml-native", "mm-bare");
-    expect(foldChunkNamespacing(nat.clientJs)).not.toMatch(/textContent\s*=\s*item\b/);
+  test("each-in-match-arm does not regress to bare textContent", () => {
+    const def = compileDefault(EACH_IN_MATCH_ARM, "mm-bare");
+    expect(foldChunkNamespacing(def.clientJs)).not.toMatch(/textContent\s*=\s*item\b/);
   });
 });
 
 // ===========================================================================
-// §9 — PARITY: native vs default client.js semantic equivalence.
-//
-// The structural each semantics (`_scrml_reconcile_list` + per-each render fn
-// + per-item factory) must appear in the native client.js, matching default —
-// and the unpromoted symptoms (W-ATTR-001 / E-SCOPE-001) must be GONE.
+// §9 — the structural each semantics (`_scrml_reconcile_list` + per-each
+// render fn + per-item factory) in the emitted client.js, and the unpromoted
+// symptoms (W-ATTR-001 / E-SCOPE-001) absent. (S449: was native-vs-default
+// parity through the retired full-pipeline flag; the node-level promotion is
+// asserted directly in §1–§7.)
 // ===========================================================================
 
-describe("native-each §9 — native-vs-default client.js parity", () => {
+describe("native-each §9 — structural each in the emitted client.js", () => {
   const EACH_IN_AS = `<program>
 <items> = []
 
@@ -349,23 +350,20 @@ describe("native-each §9 — native-vs-default client.js parity", () => {
 </each>
 </program>`;
 
-  test("native emits _scrml_reconcile_list (structural each) like default", () => {
-    const def = compileWith(EACH_IN_AS, null, "par-def");
-    const nat = compileWith(EACH_IN_AS, "scrml-native", "par-nat");
+  test("emits _scrml_reconcile_list (structural each)", () => {
+    const def = compileDefault(EACH_IN_AS, "par-def");
     expect(def.errors.length).toBe(0);
-    expect(nat.errors.length).toBe(0);
     expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_reconcile_list");
-    expect(foldChunkNamespacing(nat.clientJs)).toContain("_scrml_reconcile_list");
   });
 
-  test("native does NOT fire W-ATTR-001 (as item stray attr) or E-SCOPE-001", () => {
-    const nat = compileWith(EACH_IN_AS, "scrml-native", "par-symptom");
-    expect(codeIn(nat, "W-ATTR-001")).toBe(false);
-    expect(codeIn(nat, "E-SCOPE-001")).toBe(false);
+  test("does NOT fire W-ATTR-001 (as item stray attr) or E-SCOPE-001", () => {
+    const def = compileDefault(EACH_IN_AS, "par-symptom");
+    expect(codeIn(def, "W-ATTR-001")).toBe(false);
+    expect(codeIn(def, "E-SCOPE-001")).toBe(false);
   });
 
-  test("native client.js has no bare textContent = item miscompile", () => {
-    const nat = compileWith(EACH_IN_AS, "scrml-native", "par-bare");
+  test("client.js has no bare textContent = item miscompile", () => {
+    const nat = compileDefault(EACH_IN_AS, "par-bare");
     // The unpromoted path emitted `el.textContent = item`. The promoted path
     // builds the item via the per-item factory + reconcile — no bare
     // assignment of the loose `item` identifier to textContent.
@@ -384,20 +382,16 @@ describe("native-each §9 — native-vs-default client.js parity", () => {
 // shorthandBodyRaw) — matching LIVE.
 // ===========================================================================
 
-describe("native-each §10 — standalone shorthand renders, matching default", () => {
+describe("native-each §10 — standalone shorthand body-child synthesis", () => {
   const STANDALONE = `<program>
 <label> = "hello"
 <span : @label>
 </program>`;
 
-  test("standalone <span : @label> renders body wiring, byte-identical to default", () => {
-    const def = compileWith(STANDALONE, null, "s10-def");
-    const nat = compileWith(STANDALONE, "scrml-native", "s10-nat");
+  test("standalone <span : @label> renders body wiring (default pipeline)", () => {
+    const def = compileDefault(STANDALONE, "s10-def");
     expect(def.errors.length).toBe(0);
-    expect(nat.errors.length).toBe(0);
-    // Default wires the reactive display; native must too (was empty pre-fix).
     expect(foldChunkNamespacing(def.clientJs)).toContain('_scrml_reactive_get("label")');
-    expect(foldChunkNamespacing(nat.clientJs)).toContain('_scrml_reactive_get("label")');
   });
 
   test("native AST synthesizes a logic body child carrying the expr (exprNode)", () => {
@@ -492,55 +486,54 @@ describe("native-each §11 — :let= directive attr is not a shorthand body", ()
 // bare-body `${...}` text node was SILENTLY DROPPED under native — it hit the
 // "each: empty logic interpolation skipped" path. The fix makes emit-each.ts
 // honor the same exprNode-preference contract emit-html.ts uses
-// (`exprNode ? emitStringFromTree(exprNode) : expr`). These tests assert the
-// per-item text is now PRESENT under native and matches the default pipeline.
+// (`exprNode ? emitStringFromTree(exprNode) : expr`).
+//
+// S449: these tests compiled under the retired full-pipeline
+// `--parser=scrml-native` flag — the only way a native-shaped per-item node
+// (`expr: ""` + exprNode) ever reached emit-each. impl#1's production native
+// re-parse sites (emit-match.ts, component-expander.ts) both fall back to
+// splitBlocks+buildAST for an each-bearing body, so with the flag gone the
+// emit-each exprNode branch is unreachable in impl#1 (verified by breaking it:
+// nothing fails). What remains is default-pipeline coverage of a per-item
+// interpolation inside a match arm (the each-in-arm legacy route).
 // ===========================================================================
 
 describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)", () => {
-  test("named-alias `${item.name}` per-item text is emitted (was dropped)", () => {
-    const src = `<program>
-<users> = [{ id: 1, name: "Ann" }, { id: 2, name: "Bob" }]
-<ul>
-<each in=@users as item>
-<li>${"$"}{item.name}</li>
-</each>
-</ul>
-</program>`;
-    const native = compileWith(src, "scrml-native", "interp-named");
-    expect(native.errors).toHaveLength(0);
-    // The per-item text node is now present — NOT the skip comment.
-    expect(foldChunkNamespacing(native.clientJs)).not.toContain("each: empty logic interpolation skipped");
-    expect(foldChunkNamespacing(native.clientJs)).toContain("String(item.name)");
-    // A live text node + reconcile resolve, just like the default pipeline.
-    expect(foldChunkNamespacing(native.clientJs)).toContain("createTextNode");
-    expect(foldChunkNamespacing(native.clientJs)).toContain("_scrml_resolve_item");
+  const IN_MATCH_ARM = (eachOpen, body) => `<div>
+    ${"$"}{
+        type Phase:enum = { Idle, Ready }
+        <phase>: Phase = .Ready
+        <users> = [{ id: 1, name: "Ann" }, { id: 2, name: "Bob" }]
+    }
+    <match for=Phase on=@phase>
+        <Ready>
+            ${eachOpen}
+                ${body}
+            </each>
+        </>
+        <_>
+            <p>waiting</p>
+        </>
+    </match>
+</div>`;
+
+  test("named-alias `${item.name}` per-item text inside a match arm is emitted (was dropped)", () => {
+    const src = IN_MATCH_ARM("<each in=@users as item>", `<li>${"$"}{item.name}</li>`);
+    const def = compileDefault(src, "interp-named");
+    expect(def.errors).toHaveLength(0);
+    // The per-item text node is present — NOT the skip comment.
+    expect(foldChunkNamespacing(def.clientJs)).not.toContain("each: empty logic interpolation skipped");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("String(item.name)");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("createTextNode");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_resolve_item");
   });
 
-  test("native named-alias interpolation matches the default pipeline byte-for-byte (mod id offsets)", () => {
-    const src = `<program>
-<rows> = [{ id: 7, x: "a" }, { id: 9, x: "b" }]
-<ul>
-<each in=@rows as item key=@.id>
-<li>${"$"}{item.x}</li>
-</each>
-</ul>
-</program>`;
-    const native = compileWith(src, "scrml-native", "interp-key-native");
-    const def = compileWith(src, null, "interp-key-default");
-    expect(native.errors).toHaveLength(0);
+  test("keyed each inside a match arm emits its per-item interpolation", () => {
+    const src = IN_MATCH_ARM("<each in=@users as item key=@.id>", `<li>${"$"}{item.name}</li>`);
+    const def = compileDefault(src, "interp-key");
     expect(def.errors).toHaveLength(0);
-    // Both carry the per-item interpolation text node now.
-    expect(foldChunkNamespacing(native.clientJs)).toContain("String(item.x)");
-    expect(foldChunkNamespacing(def.clientJs)).toContain("String(item.x)");
-    // Normalize the numeric local-id suffixes (`_4`, `_tn_6`, …) so the only
-    // remaining difference is id ordering, then assert structural identity.
-    // The chunk-namespace token folds in FIRST: the two fixtures are written to
-    // different temp paths on purpose, so their 8-char path-hash tokens differ
-    // by construction and are not part of what this test compares.
-    // Strip the chunk-namespace token (anchored: `0` + 7 base36 + `_`) before
-    // the id fold. Unanchored, it ate the trailing 8 chars of real identifiers.
-    const norm = (s) => s.replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "").replace(/_\d+\b/g, "_N");
-    expect(norm(normalizeChunkToken(foldChunkNamespacing(native.clientJs)))).toBe(norm(normalizeChunkToken(foldChunkNamespacing(def.clientJs))));
+    expect(foldChunkNamespacing(def.clientJs)).not.toContain("each: empty logic interpolation skipped");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("String(item.name)");
   });
 
   test("legacy (default-parser) per-item interpolation is unchanged — `${item.name}` still emitted", () => {
@@ -556,7 +549,7 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
 </each>
 </ul>
 </program>`;
-    const def = compileWith(src, null, "interp-legacy");
+    const def = compileDefault(src, "interp-legacy");
     expect(def.errors).toHaveLength(0);
     expect(foldChunkNamespacing(def.clientJs)).not.toContain("each: empty logic interpolation skipped");
     expect(foldChunkNamespacing(def.clientJs)).toContain("String(item.name)");

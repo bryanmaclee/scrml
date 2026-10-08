@@ -5,13 +5,13 @@ ${
         ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
     }
     function countTasks() {
-        return ?{`SELECT COUNT(*) AS n FROM tasks`}.get()
+        return ?{`SELECT COUNT(*) AS n FROM tasks`}.get() !{ _ :> not }
     }
     function onDelete() {
-        removeTask(2)
+        removeTask(2) !{ .Transport(_) :> { return } }
     }
     function onCount() {
-        @remaining = countTasks()
+        @remaining = countTasks() !{ .Transport(_) :> { return } }
     }
 }
 <button id="del" onclick=onDelete()>Delete task 2</>

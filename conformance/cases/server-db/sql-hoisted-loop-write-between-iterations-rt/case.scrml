@@ -1,0 +1,60 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <viaCall> = "init"
+    <viaNested> = "init"
+    <viaCallback> = "init"
+    // §8.10 Tier 2: the pre-fetch is taken before iteration 1, so a loop whose body can
+    // WRITE the database between iterations is not hoisted — a later iteration reads
+    // the row as the earlier iteration left it, as the per-iteration query does.
+    function bump(id) {
+        ?{`UPDATE notes SET body = body || '!' WHERE id = ${id}`}.run()
+    }
+    function bumpTwice(id) {
+        bump(id)
+        bump(id)
+    }
+    function viaCall() {
+        let out = []
+        for (const it of [{ id: 7 }, { id: 7 }]) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+            bump(it.id)
+        }
+        return out.join(",")
+    }
+    // the write is two calls deep
+    function viaNested() {
+        let out = []
+        for (const it of [{ id: 9 }, { id: 9 }]) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+            bumpTwice(it.id)
+        }
+        return out.join(",")
+    }
+    // the writer is passed as a value and called by a built-in method
+    function viaCallback() {
+        let out = []
+        for (const it of [{ id: 11 }, { id: 11 }]) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+            const ids = [it.id]
+            ids.forEach(bump)
+        }
+        return out.join(",")
+    }
+    function go() {
+        @viaCall = viaCall() !{ _ :> "err" }
+        @viaNested = viaNested() !{ _ :> "err" }
+        @viaCallback = viaCallback() !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="viaCall">${@viaCall}</p>
+    <p id="viaNested">${@viaNested}</p>
+    <p id="viaCallback">${@viaCallback}</p>
+</program>

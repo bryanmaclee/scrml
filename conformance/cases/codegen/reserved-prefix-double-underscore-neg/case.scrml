@@ -1,0 +1,15 @@
+${
+    // A comment that mentions __scrml_is_some__ is not a name.
+    <msg> = ""
+    const note = "__scrml_text__ in a string is a value, not a name"
+    function go() {
+        // `is some` inside a callback: the compiler's own placeholder for it
+        // never reaches the program as an author name, nor the artifact.
+        Promise.resolve(5).then(function (v) {
+            if (v is some) { @msg = "some" }
+        })
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@msg}</p>
+<p id="prose">markup text __scrml_prose__ is not a name</p>

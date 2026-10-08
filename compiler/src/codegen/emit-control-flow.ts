@@ -1,14 +1,20 @@
 import { genVar } from "./var-counter.ts";
+import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
+import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
+import { tenantFloorTouchesSql } from "./rewrite.js";
+import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
+import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
+import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -65,6 +71,44 @@ function getBatchInListCap(): number {
 
 let _variantFields: Map<string, string[]> | null = null;
 let _variantFieldCollisions: Set<string> | null = null;
+/** Names in `_variantFields` that came from an IMPORTED enum (not a local decl). */
+let _importedVariantNames: Set<string> | null = null;
+/** Local variants + ambient ParseError only — the error-envelope registry (see getErrorVariantFieldSchema). */
+let _localVariantFields: Map<string, string[]> | null = null;
+/**
+ * S438 review (N1/N3) — variant names declared BOTH by a file-local enum and by
+ * an imported enum with a DIFFERENT field list. A bare-dot CONSTRUCTOR of such
+ * a name is lowered only where TS typed its position (the `__variantFields`
+ * stamp); anywhere else (a reassignment, a match-arm result, a handler string)
+ * it is E-VARIANT-AMBIGUOUS / left unlowered — never the pre-F11 silent pick
+ * of the local enum, which the matching side (bound against the subject's own
+ * enum) would then contradict. Set on BOTH the client and server passes.
+ */
+let _shadowedVariantNames: Set<string> | null = null;
+/**
+ * S446 — variant names the by-name registries hold ONLY because an IMPORTED
+ * enum declares them (no local enum does). Read by the bare-dot constructor
+ * lowering (emit-expr.ts emitCall): an UNSTAMPED constructor of such a name —
+ * a position TS did not type, whose destination enum codegen cannot see — is
+ * never built by name (`conv(.Neg(6))` with `conv(o: Other)` in another file
+ * and an imported `Expr.Neg(x)` here); it stays unlowered, the pre-F11 loud
+ * failure. The string-rewrite path refuses the same names (they ride its
+ * collision set). Set on BOTH the client and server passes, with the shadowed set.
+ */
+let _importedOnlyVariantNames: Set<string> | null = null;
+
+export function setShadowedVariantNames(names: Set<string> | null, importedOnly?: Set<string> | null): void {
+  _shadowedVariantNames = names && names.size > 0 ? names : null;
+  _importedOnlyVariantNames = importedOnly && importedOnly.size > 0 ? importedOnly : null;
+}
+
+export function isShadowedVariantName(variantName: string): boolean {
+  return _shadowedVariantNames?.has(variantName) ?? false;
+}
+
+export function isImportedOnlyVariantName(variantName: string): boolean {
+  return _importedOnlyVariantNames?.has(variantName) ?? false;
+}
 
 /**
  * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
@@ -84,9 +128,27 @@ const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
+  importedNames?: Set<string> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
+  _importedVariantNames = importedNames ?? null;
+  // The ERROR-ENVELOPE registry: file-local variants + the compiler-ambient
+  // ParseError schema, WITHOUT imported names (built before the seed below so
+  // an imported same-named variant can never shadow ParseError here).
+  _localVariantFields = null;
+  if (variantFields) {
+    _localVariantFields = new Map();
+    for (const [name, fields] of variantFields) {
+      if (importedNames && importedNames.has(name)) continue;
+      _localVariantFields.set(name, fields);
+    }
+    for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) {
+      if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
+    }
+  }
+  // The SqlError schema scope never outlives a file (see enterSqlErrorSchema).
+  if (variantFields === null) _sqlErrorSchemaDepth = 0;
   // Seed the ParseError schema for parseVariant binding resolution. Only fill
   // in variants the file does NOT already declare — a file-local enum of the
   // same name always wins (and a genuine cross-enum collision keeps the entry,
@@ -97,6 +159,44 @@ export function setVariantFieldsForFile(
     }
   }
 }
+
+/**
+ * §19.8.1 / §19.8.3 (S454) — the SqlError payload schema, in force while the
+ * arms of a handler whose subject is a `?{}` query are emitted. Those arms'
+ * error type IS SqlError, so `.QueryFailed(m)` binds the `message` field and
+ * `.ConstraintViolation(f)` the `field` (matching the envelope `_scrml_sql_error`
+ * builds, sql-attempt.ts). Scoped — not seeded into the per-file registries —
+ * because a SQL handler is the only place the error type is KNOWN to be
+ * SqlError; a file-local enum's same-named variant elsewhere is untouched, and
+ * the server pass (which publishes no per-file registry) still resolves it.
+ */
+let _sqlErrorSchemaDepth = 0;
+const _sqlErrorSchema: ReadonlyMap<string, string[]> = new Map(SQL_ERROR_VARIANT_FIELDS.map(([n, f]) => [n, [...f]]));
+export function enterSqlErrorSchema(): void { _sqlErrorSchemaDepth++; }
+export function exitSqlErrorSchema(): void { if (_sqlErrorSchemaDepth > 0) _sqlErrorSchemaDepth--; }
+
+/**
+ * Error-envelope field schema for a variant NAME, for the consumers whose
+ * subject is a failable result / `!{}` handler / `fail` payload and whose error
+ * enum TS did not resolve: file-local enums + the compiler-ambient ParseError
+ * schema (§41.13), never an imported enum's same-named variant. The error type
+ * of a failable call is its DECLARED error enum (or an ambient one — ParseError,
+ * the CPS `NetworkError`/`ServerError`, which have no field schema and bind the
+ * whole `.data`), so a by-name hit on an unrelated imported enum is always
+ * wrong here (S438 review F1). This is exactly the pre-F11 lookup.
+ */
+export function getErrorVariantFieldSchema(variantName: string): string[] | null {
+  if (_sqlErrorSchemaDepth > 0) {
+    const sqlFields = _sqlErrorSchema.get(variantName);
+    if (sqlFields) return [...sqlFields];
+  }
+  if (!_localVariantFields) return null;
+  if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)
+      && !(_importedVariantNames?.has(variantName) ?? false)) return null;
+  return _localVariantFields.get(variantName) ?? null;
+}
+
+
 
 /**
  * Bug 2 (S95) — Lookup helper for the variant payload-field schema. Used by
@@ -437,7 +537,9 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     // g-reactive-map-set-control-flow — REACTIVE `@`-cell map/set names so a
     // condition `if (@s.has(k))` / `if (@m.size > 0)` lowers to `_scrml_map_*`
     // (the reactive twin of the local sets above; closes the ss52-filed gap).
-    mapVarNames: opts.mapVarNames ?? null, setVarNames: opts.setVarNames ?? null, orderedMapVarNames: opts.orderedMapVarNames ?? null };
+    mapVarNames: opts.mapVarNames ?? null, setVarNames: opts.setVarNames ?? null, orderedMapVarNames: opts.orderedMapVarNames ?? null,
+    // S454 — an expression-position `?{}` / `!{}` in the condition lowers with these options.
+    logicOpts: opts };
   const _ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _ifExprCtx);
   lines.push(`if (${_ifCond}) {`);
 
@@ -616,8 +718,14 @@ function _emitForStmtInner(
   // for this for-stmt, delegate to the rewriter before falling through
   // to the standard emission path.
   const _hoist = (_hoistMap && node.id != null) ? _hoistMap.get(node.id) : null;
-  if (_hoist) {
-    return emitHoistedForStmt(node, _hoist, opts?.dbVar ?? "_scrml_sql", opts ?? undefined);
+  // §14.8.10 (S452 r2) — the hoisted IN-query is issued raw (`.unsafe(...)`), so it
+  // would bypass the tenant source filter: a loop over tenant A's rows fetched
+  // tenant B's. A query that touches a tenant-scoped table is NOT hoisted; the
+  // loop keeps its per-iteration query, which the scoped lowering filters.
+  if (_hoist && !tenantFloorTouchesSql(String(_hoist.sqlTemplate ?? "")) && !tenantFloorTouchesSql(String(_hoist.inSqlTemplate ?? ""))) {
+    const _hoisted = emitHoistedForStmt(node, _hoist, opts?.dbVar ?? fallbackSqlHandle(), opts ?? undefined);
+    // null — the site could not be rewritten; the loop keeps its per-iteration query.
+    if (_hoisted !== null) return _hoisted;
   }
 
   if (typeof iterable === "string") {
@@ -625,7 +733,7 @@ function _emitForStmtInner(
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
-      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
       const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitExprField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
@@ -763,7 +871,9 @@ function _emitForStmtInner(
         } else {
           // Pass continueBehavior:"return" so continue-stmts nested at any depth
           // (e.g. inside an if-body) emit `return;` rather than illegal `continue;`.
-          const code = emitLogicNode(child, { continueBehavior: "return", declaredNames: bodyNames });
+          // boundary: this is the DocumentFragment item-factory — client code by
+          // construction (emitLogicNode defaulted a missing boundary to "client").
+          const code = emitLogicNode(child, { boundary: "client", continueBehavior: "return", declaredNames: bodyNames });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -811,7 +921,7 @@ function _emitForStmtInner(
   }
 
   // Non-reactive path — plain for loop
-  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   iterable = emitExprField(node.iterExpr, iterable, _plainForCtx);
   // s427 round 3 (F1) — a RENDERING loop whose body writes its own binder: the
   // binder is the body's own binding (so the write assigns it, not an outer
@@ -852,97 +962,222 @@ function _emitForStmtInner(
 // ---------------------------------------------------------------------------
 
 /**
- * Deep-clone a for-stmt body and substitute the single hoisted `?{...}`
- * site with a Map.get(...) lookup expression. Walks every string field
- * that might carry the original SQL (`init`, `expr`, `value`, etc.) and
- * performs a targeted replace. The first match per statement is enough
- * because §8.10.1 requires exactly one SQL site in the body.
+ * The loop-body rewrite of a §8.10 Tier 2 hoist: substitute the body's single
+ * keyed `?{…}` read with its Map lookup, AT ANY DEPTH.
  *
- * The structured ExprNode siblings (`initExpr`, `exprNode`, …) are
- * dropped on the cloned node so emit-logic falls back to the string form
- * we just rewrote. Other AST fields pass through by reference — safe
- * because emit-logic treats them as read-only.
+ * The Batch Planner (batch-planner.ts `collectLoopSqlSites`) finds the site by
+ * walking EVERY object / array child of the body (skipping `span` / `id` and the
+ * structured `exprNode` / `*Expr` mirrors) — so a read inside an `if` / `else`,
+ * a nested `if` or an inner loop is a Tier 2 site exactly like one directly in
+ * the body (§8.10.1: "Loop body contains exactly one `?{}`
+ * block"). This walk is that same traversal. It used to recurse only through a
+ * node's `body` array, so a read in an `if` (`consequent` / `alternate`) was
+ * never rewritten: the pre-fetch ran, and the read itself was emitted with no
+ * server boundary (a `null` read, "client cannot evaluate") — so every row read
+ * `not` on SUCCESS.
+ *
+ * Copy-on-write: a node is cloned only on the path to the rewritten site, and
+ * only the node that holds the site drops its structured `*Expr` mirrors (so
+ * emit-logic reads the rewritten string). Every other statement keeps its
+ * structured form and lowers exactly as it does in the un-hoisted loop.
+ *
+ * Returns the rewritten body and the number of sites rewritten. The caller
+ * hoists ONLY when that is exactly one and no `?{` site is left in the result
+ * (`loopBodyHasSqlSite`); otherwise the loop is emitted un-hoisted, with its
+ * per-iteration query — never a `null` read.
  */
-function substituteHoistedSqlInBody(
-  body: any[],
-  sqlSourcePattern: RegExp,
-  replacement: string,
-): any[] {
-  const out: any[] = [];
-  for (const stmt of body) {
-    if (!stmt || typeof stmt !== "object") {
-      out.push(stmt);
-      continue;
-    }
-    const clone: any = { ...stmt };
-    let replaced = false;
-    // v0.2.4 bug-1-anomaly-2: when a let-decl/const-decl carries a structured
-    // sqlNode (from the ast-builder tryConsumeSqlInit hook), the body's SQL
-    // site no longer lives in any string field — so the per-key string regex
-    // below would never match. Detect the structured form first: if the
-    // clone has a `sqlNode` whose reconstructed `?{` form matches the hoist
-    // source pattern, strip the sqlNode and inject the replacement as a
-    // plain `init` string. emit-logic case "let-decl"/"const-decl" then
-    // falls through to the Phase-4 fallback path (init string → emitExprField).
-    if (clone.sqlNode && clone.sqlNode.kind === "sql") {
-      const sqlBody = typeof clone.sqlNode.query === "string"
-        ? clone.sqlNode.query
-        : (typeof clone.sqlNode.body === "string" ? clone.sqlNode.body : "");
-      const chainCalls = Array.isArray(clone.sqlNode.chainedCalls) ? clone.sqlNode.chainedCalls : [];
-      const argsStr = (chainCalls[0]?.args ?? "").toString();
-      const termName = (chainCalls[0]?.method ?? "").toString();
-      const reconstructed = `?{\`${sqlBody}\`}.${termName}(${argsStr})`;
-      if (sqlSourcePattern.test(reconstructed)) {
-        delete clone.sqlNode;
-        clone.init = replacement;
-        replaced = true;
+interface HoistSubst {
+  /** Global pattern for `String.replace`. */
+  re: RegExp;
+  /** Non-global twin for `test` (a `/g` regex's `test` is stateful via `lastIndex`). */
+  probe: RegExp;
+  /** The Map lookup expression. */
+  replacement: string;
+  /** The lookup for a HANDLED site (§19.8.3) — it yields the pre-fetch's SqlError envelope when the pre-fetch failed. */
+  handledReplacement: string;
+  /** Sites rewritten (unhandled + handled). */
+  hits: number;
+  /** Handled sites rewritten — decides whether the pre-fetch runs through the attempt. */
+  handledHits: number;
+}
+
+/** The declaration kinds whose structured `sqlNode` is the whole `init` (ast-builder). */
+const HOIST_SQL_INIT_KINDS = new Set(["let-decl", "const-decl", "tilde-decl"]);
+
+/** A node's structured-mirror keys — skipped by the detector, dropped on a rewritten node. */
+function isExprMirrorKey(k: string): boolean {
+  return k === "exprNode" || k.endsWith("Expr");
+}
+
+function substituteHoistedSqlInBody(body: any[], subst: HoistSubst): any[] {
+  return substituteHoistedSqlIn(body, subst, subst.replacement) as any[];
+}
+
+function substituteHoistedSqlIn(value: any, subst: HoistSubst, replacement: string): any {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    let out: any[] | null = null;
+    for (let i = 0; i < value.length; i++) {
+      const sub = substituteHoistedSqlIn(value[i], subst, replacement);
+      if (sub !== value[i]) {
+        if (!out) out = value.slice();
+        out[i] = sub;
       }
     }
-    for (const k of Object.keys(clone)) {
-      if (k === "span" || k === "id" || k === "kind") continue;
-      if (k === "exprNode" || k.endsWith("Expr")) {
-        // Drop stale ExprNode siblings so emit-logic reads the updated string.
-        delete clone[k];
-        continue;
-      }
-      const v = clone[k];
-      if (typeof v === "string" && sqlSourcePattern.test(v)) {
-        clone[k] = v.replace(sqlSourcePattern, replacement);
-        replaced = true;
-      }
-    }
-    // Recurse into nested body arrays (e.g., if-stmt.consequent, etc.) so
-    // the SQL site in a nested block is also rewritten.
-    if (!replaced && Array.isArray(clone.body)) {
-      clone.body = substituteHoistedSqlInBody(clone.body, sqlSourcePattern, replacement);
-    }
-    out.push(clone);
+    return out ?? value;
   }
-  return out;
+  const node = value;
+  // §19.8.3 (S455) — a HANDLED site (`const row = ?{…}.get() !{…}`): the guard
+  // wraps the statement, so the query sits one level down. Rewrite the guarded
+  // statement with the handled replacement — the pre-fetch's SqlError envelope
+  // when it failed, so the arms run for each iteration exactly as each per-row
+  // query would have failed — and keep the guard.
+  const handledInner = handledSqlGuardInner(node);
+  if (handledInner) {
+    const before = subst.hits;
+    const sub = substituteHoistedSqlIn(handledInner, subst, subst.handledReplacement);
+    if (sub !== handledInner) {
+      subst.handledHits += subst.hits - before;
+      return { ...node, guardedNode: sub, _hoistedHandledSql: true };
+    }
+  }
+  // The structured form: a declaration whose whole `init` is the query
+  // (`let row = ?{…}.get()`, and a keywordless `row = ?{…}.get()` — a
+  // `_bareAssign` const-decl). Strip the sqlNode and carry the lookup as the
+  // plain `init` string. Only the declaration kinds read `init`; a `sqlNode` on
+  // any other kind (`return`, `@cell =`, …) is left in place, which leaves a
+  // `?{` site in the body, so the loop is not hoisted.
+  if (
+    HOIST_SQL_INIT_KINDS.has(node.kind) &&
+    node.sqlNode && typeof node.sqlNode === "object" && node.sqlNode.kind === "sql"
+  ) {
+    const s = node.sqlNode;
+    const sqlBody = typeof s.query === "string" ? s.query : (typeof s.body === "string" ? s.body : "");
+    const chainCalls = Array.isArray(s.chainedCalls) ? s.chainedCalls : [];
+    const argsStr = (chainCalls[0]?.args ?? "").toString();
+    const termName = (chainCalls[0]?.method ?? "").toString();
+    const reconstructed = `?{\`${sqlBody}\`}.${termName}(${argsStr})`;
+    if (subst.probe.test(reconstructed)) {
+      const clone: any = {};
+      for (const k of Object.keys(node)) {
+        if (k === "sqlNode" || isExprMirrorKey(k)) continue;
+        clone[k] = node[k];
+      }
+      clone.init = replacement;
+      subst.hits++;
+      return clone;
+    }
+  }
+  // A string field carrying the query (an expression-position read:
+  // `const row = it.on ? (?{…}.get()) : not`).
+  let stringHit = false;
+  for (const k of Object.keys(node)) {
+    if (k === "span" || k === "id" || k === "kind" || isExprMirrorKey(k)) continue;
+    const v = node[k];
+    if (typeof v === "string" && subst.probe.test(v)) { stringHit = true; break; }
+  }
+  if (stringHit) {
+    const clone: any = {};
+    for (const k of Object.keys(node)) {
+      if (isExprMirrorKey(k)) continue; // the rewritten node lowers from its string form
+      const v = node[k];
+      if (k !== "span" && k !== "id" && k !== "kind" && typeof v === "string" && subst.probe.test(v)) {
+        clone[k] = v.replace(subst.re, () => { subst.hits++; return replacement; });
+      } else {
+        clone[k] = v;
+      }
+    }
+    return clone;
+  }
+  // Recurse into every child the detector walks (`consequent`, `alternate`,
+  // `body`, an inner loop, …).
+  let out: any = null;
+  for (const k of Object.keys(node)) {
+    if (k === "span" || k === "id" || isExprMirrorKey(k)) continue;
+    const v = node[k];
+    if (!v || typeof v !== "object") continue;
+    const sub = substituteHoistedSqlIn(v, subst, replacement);
+    if (sub !== v) {
+      if (!out) out = { ...node };
+      out[k] = sub;
+    }
+  }
+  return out ?? node;
 }
 
 /**
- * Emit the §8.10 rewritten form of a for-stmt. Produces:
- *   const _keys = <iterable>.map(<loopVar> => <loopVar>.<keyField>);
- *   const _placeholders = _keys.map((_, i) => `?${i+1}`).join(", ");
- *   const _rows = _db.query(<in-sql with placeholders>).all(..._keys);
- *   const _byKey = new Map();
- *   for (const _r of _rows) _byKey.set(_r.<keyColumn>, _r);   // or push for .all()
- *   for (const <loopVar> of <iterable>) {
- *     <body with original ?{...}.get()/.all() replaced by Map lookup>
+ * True when a `?{` site is left anywhere in a (rewritten) loop body, by the
+ * Batch Planner's own reading of a site (a structured `sql` node, or a `?{`
+ * in a string field; `exprNode` / `*Expr` mirrors skipped).
+ */
+function loopBodyHasSqlSite(value: any): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(loopBodyHasSqlSite);
+  if (value.kind === "sql") return true;
+  for (const k of Object.keys(value)) {
+    if (k === "span" || k === "id" || isExprMirrorKey(k)) continue;
+    const v = value[k];
+    if (typeof v === "string") {
+      if (k !== "kind" && /\?\{`/.test(v)) return true;
+    } else if (v && typeof v === "object" && loopBodyHasSqlSite(v)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Emit the §8.10 rewritten form of a for-stmt (S456 shape):
+ *
+ *   let <items> = (<iterable>);                       // evaluated ONCE
+ *   const <slots> = new Map();                         // one slot per distinct key value
+ *   for (const _k of <items>.map((<loopVar>) => <loopVar>.<keyField>)) { … <slots>.set(_k, <slots>.size) … }
+ *   const <bySlot> = new Map();                        // slot → row (.get()) / rows (.all())
+ *   const <loaded> = new Set();                        // keys whose rows <bySlot> holds
+ *   const <fetch> = async (_keys) => { … }             // chunks of at most <cap> keys (§8.10.6)
+ *   try { await <fetch>([...<slots>.keys()]); } catch { … }   // the pre-fetch; a failure is not raised here
+ *   const <read> = async (_k) => { … };                // the per-iteration read: a key not loaded is read ALONE
+ *   for (const <loopVar> of <items>) {
+ *     <body with the ?{…}.get()/.all() replaced by `(await <read>(<loopVar>.<keyField>))`>
  *   }
  *
- * The IN placeholder list is built at runtime from the key array (no
- * string interpolation of user data — preserves §8.2 parameter invariant
- * via spread binding).
+ * Each of the four parts restores one per-iteration property (§8.10.3: "The
+ * rewritten loop is observationally equivalent to the un-rewritten loop"):
+ *
+ *   - MATCHING (§8.10.2): rows are found by SLOT, and SQL decides which slot a row
+ *     belongs to, with the per-iteration query's own `=` (hoist-sql-shape.ts
+ *     HOIST_KEY_TABLE). A JS `Map` keyed on the key VALUE missed a text key "7" that
+ *     SQL matched to the INTEGER 7.
+ *   - CHUNKING (§8.10.6): "the Tier 2 rewrite SHALL chunk the IN-list into segments of
+ *     at most `SQLITE_MAX_VARIABLE_NUMBER` keys" — the `batch-in-list-cap=` value. It
+ *     threw E-BATCH-002 above the cap instead. Each distinct key is in exactly one
+ *     chunk, so `.get()` keeps the first row per key and `.all()` the per-key group.
+ *   - FAILURE (§8.10.3): the pre-fetch's failure is never raised by the pre-fetch.
+ *     A chunk that fails loads none of its keys, and a read whose key is not loaded
+ *     runs the same query for that ONE key when the read runs — the per-iteration
+ *     query, at the per-iteration moment. So a loop whose read is never reached does
+ *     not fail; a key that cannot be bound (an object, an array) fails only its own
+ *     read (it used to fail the whole pre-fetch, and every read with it — S456 fix
+ *     round F1); and a handled read (§19.8.3) gets its own SqlError envelope.
+ *   - A KEY THE BODY CHANGED after the pre-fetch (`it.id = it.id + 1`) is not loaded,
+ *     so it is read the same way.
+ *
+ * Writes between iterations are the planner's: a body that may write is not hoisted
+ * (batch-planner.ts / hoist-write-scan.ts).
+ *
+ * The keys are bound parameters (`?1 …`); only compiler-generated slot integers are
+ * spliced into the SQL text (§8.2).
+ *
+ * Returns `null` when the body's site cannot be rewritten (see
+ * `substituteHoistedSqlInBody`), or the plan is not the key-table shape: the caller
+ * then emits the loop un-hoisted, with its per-iteration query. A hoist that left the
+ * read in place would emit it with no server boundary — a `null` read on success.
+ *
+ * `opts` is the plain loop's: the hoisted loop lowers exactly as the un-hoisted one
+ * (boundary, the enclosing scope's declared names, server-fn names, and the
+ * ss52 / g-reactive-map-set-control-flow map/set names) — only the read differs.
  */
-function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
-  // ss52 local + g-reactive-map-set-control-flow reactive — map/set/ordered names
-  // so a (local or `@`-cell) value-native map/set method inside a §8.10 batch-
-  // hoisted for-loop body / iterable lowers to `_scrml_map_*` instead of raw.
-  localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null;
-  mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null;
-}): string {
+function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): string | null {
   // A5 — destructuring LHS support in the batch-hoisted for-stmt path.
   let loopVar: string;
   if (isDestructurePattern(node.variable)) {
@@ -955,80 +1190,134 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
     const forOfMatch = iterable.match(/^\(\s*(?:(?:let|const|var)\s+)?(\w+)\s+of\s+(.*)\s*\)$/s);
     if (forOfMatch) iterable = forOfMatch[2].trim();
   }
-  const _ctx: EmitExprContext = { mode: "client",
-    localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null,
-    mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
-  iterable = emitExprField(node.iterExpr, iterable, _ctx);
-
-  const keysVar = genVar("batch_keys");
-  const placeholdersVar = genVar("batch_placeholders");
-  const rowsVar = genVar("batch_rows");
-  const mapVar = genVar("batch_byKey");
-
   const keyField: string = hoist.keyField;
   const keyColumn: string = hoist.keyColumn;
   const terminator: "get" | "all" = hoist.terminator;
   const inSqlTemplate: string = hoist.inSqlTemplate;
-
-  const lines: string[] = [];
-  lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn})`);
-  lines.push(`const ${keysVar} = (${iterable}).map(${loopVar} => ${loopVar}.${keyField});`);
-  // §8.10.6: reject key counts above the configured cap at runtime.
-  // Default 32766 matches SQLite 3.32+ SQLITE_MAX_VARIABLE_NUMBER (the
-  // bun:sqlite bundled version). S79 audit fix C.2 — adopter override via
-  // <program batch-in-list-cap="65535"> for Postgres or
-  // <program batch-in-list-cap="999"> for older SQLite.
-  // Users can .nobatch() the site to opt out if they hit this ceiling.
-  const batchCap = getBatchInListCap();
-  lines.push(
-    `if (${keysVar}.length > ${batchCap}) { const _e = new Error("E-BATCH-002: batched IN-list exceeds SQLITE_MAX_VARIABLE_NUMBER (${batchCap}) for hoisted loop"); _e.code = "E-BATCH-002"; throw _e; }`,
-  );
-  // Build placeholder list `?1, ?2, ...` so Bun.SQL gets positional bound
-  // params. Bun.SQL's SQLite branch does NOT support array binding in tagged
-  // templates (`${arr}` throws), so we emit a runtime-built SQL string and
-  // bind the array via `sql.unsafe(rawSql, paramArray)` (§44.5).
-  lines.push(
-    `const ${placeholdersVar} = ${keysVar}.map((_, _i) => "?" + (_i + 1)).join(", ");`,
-  );
-  // Substitute `__SCRML_BATCH_IN__` placeholder in the template with the
-  // generated positional placeholder list. The rest of the SQL template
-  // (column list, table, other predicates) is preserved verbatim.
-  lines.push(
-    `const ${rowsVar} = ${keysVar}.length === 0 ? [] : (await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace("__SCRML_BATCH_IN__", ${placeholdersVar}), ${keysVar}));`,
-  );
-  lines.push(`const ${mapVar} = new Map();`);
-  if (terminator === "get") {
-    lines.push(
-      `for (const _r of ${rowsVar}) ${mapVar}.set(_r[${JSON.stringify(keyColumn)}], _r);`,
-    );
-  } else {
-    lines.push(
-      `for (const _r of ${rowsVar}) { const _k = _r[${JSON.stringify(keyColumn)}]; const _a = ${mapVar}.get(_k) ?? []; _a.push(_r); ${mapVar}.set(_k, _a); }`,
-    );
+  // The pre-fetch projects each row's key SLOT under `keyAlias` and, for a
+  // `SELECT *`, carries the key table's bound key under `valAlias`; both are
+  // stripped so each row is exactly the row the per-iteration query returns.
+  const keyAlias: string | null = typeof hoist.keyAlias === "string" && hoist.keyAlias ? hoist.keyAlias : null;
+  const valAlias: string | null = typeof hoist.valAlias === "string" && hoist.valAlias ? hoist.valAlias : null;
+  if (keyAlias === null || valAlias === null || typeof inSqlTemplate !== "string" || !inSqlTemplate.includes(HOIST_VALUES_PLACEHOLDER)) {
+    return null;
+  }
+  // §14.8.10 item (1) (S457) — the pre-fetch sends SQL derived from the author's `?{}` body. A
+  // body the program-body allow-list refuses is not hoisted: the loop is emitted un-hoisted, and
+  // the per-iteration `?{}` lowering (emit-logic `case "sql"`) refuses it — the one place that
+  // reports and throws (g-sql-checker-and-lowering-read-different-text-s457).
+  // (Likewise a body holding more than one statement, §8.1.2 — the per-site lowering reports it.)
+  if (
+    typeof hoist.sqlTemplate !== "string" ||
+    !sqlHoldsOneStatement(hoist.sqlTemplate) ||
+    programStatementRefusal(hoist.sqlTemplate) !== null
+  ) {
+    return null;
   }
 
   // Body rewrite — replace the original `?{`<template>`}.get()/.all()`
-  // call with the Map lookup. We match the raw template (with
+  // call with the per-iteration read. We match the raw template (with
   // backticks) rather than post-emit strings so the rewrite happens at
   // AST level, before emit-logic / rewrite.ts transform the string.
+  // Computed BEFORE the pre-fetch lines: whether the site is HANDLED (a `!{}`
+  // on it, §19.8.3, S455) decides how the pre-fetch failure reaches the read.
   const bodyTemplate = hoist.sqlTemplate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const sourceRe = new RegExp(
-    `\\?\\{\`${bodyTemplate}\`\\}\\s*\\.\\s*${terminator}\\s*\\(\\s*\\)`,
-    "g",
-  );
-  const replacement = terminator === "get"
-    ? `(${mapVar}.get(${loopVar}.${keyField}) ?? null)`
-    : `(${mapVar}.get(${loopVar}.${keyField}) ?? [])`;
-  const rewrittenBody = substituteHoistedSqlInBody(node.body ?? [], sourceRe, replacement);
+  const sourceSrc = `\\?\\{\`${bodyTemplate}\`\\}\\s*\\.\\s*${terminator}\\s*\\(\\s*\\)`;
+  const itemsVar = genVar("batch_items");
+  const slotsVar = genVar("batch_slots");
+  const bySlotVar = genVar("batch_bySlot");
+  const fetchVar = genVar("batch_fetch");
+  const loadedVar = genVar("batch_loaded");
+  const readVar = genVar("batch_read");
+  const _key = `${loopVar}.${keyField}`;
+  // The same read for an unhandled and a handled site: it is `<read>` that knows
+  // which (its own failure throws / is returned as the SqlError envelope).
+  const replacement = `(await ${readVar}(${_key}))`;
+  const subst: HoistSubst = {
+    re: new RegExp(sourceSrc, "g"),
+    probe: new RegExp(sourceSrc),
+    replacement,
+    handledReplacement: replacement,
+    hits: 0,
+    handledHits: 0,
+  };
+  const rewrittenBody = substituteHoistedSqlInBody(node.body ?? [], subst);
+  // §8.10.1 — exactly one site, and none left: anything else is not this rewrite.
+  if (subst.hits !== 1 || loopBodyHasSqlSite(rewrittenBody)) return null;
+  const handled = subst.handledHits === 1;
+
+  const _ctx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
+  iterable = emitExprField(node.iterExpr, iterable, _ctx);
+
+  // §8.10.6 — chunk size. Default 32766 matches SQLite 3.32+
+  // SQLITE_MAX_VARIABLE_NUMBER (the bun:sqlite bundled version); S79 audit fix C.2 —
+  // adopter override via <program batch-in-list-cap="999"> for older SQLite.
+  const batchCap = getBatchInListCap();
+  const aliasKey = JSON.stringify(keyAlias);
+  const aliasVal = JSON.stringify(valAlias);
+  const store = terminator === "get"
+    // `.get()` is the FIRST row the per-key query returns (in its own ORDER BY).
+    ? `if (!${bySlotVar}.has(_s)) ${bySlotVar}.set(_s, _r);`
+    : `const _group = ${bySlotVar}.get(_s); if (_group) _group.push(_r); else ${bySlotVar}.set(_s, [_r]);`;
+  // Each read yields its OWN row object(s), as each per-iteration query does: two
+  // iterations with the same key used to share one row, so a write through one
+  // (`row.body = row.body + "!"`) showed up in the other.
+  const pick = terminator === "get"
+    // (a row is an object, so a slot with no row is the only falsy `_hit`)
+    ? `return _hit ? { ..._hit } : null;`
+    : `return (_hit ?? []).map((_r) => ({ ..._r }));`;
+
+  const lines: string[] = [];
+  lines.push(`// §8.10 Tier 2 loop hoist (key: ${keyColumn}) — one pre-fetch, then a per-iteration read`);
+  // The iterable is evaluated ONCE — the key list and the loop read the same
+  // items (it was evaluated twice: `items.splice(0, 1)` looped over nothing). A
+  // non-array iterable (a Set, a generator) is materialized so both can read it.
+  lines.push(`let ${itemsVar} = (${iterable});`);
+  lines.push(`if (!Array.isArray(${itemsVar})) ${itemsVar} = Array.from(${itemsVar});`);
+  lines.push(`// One slot per distinct key; SQL matches each slot's key to rows with the query's own \`=\` (§8.10.2).`);
+  lines.push(`const ${slotsVar} = new Map();`);
+  lines.push(`for (const _k of ${itemsVar}.map((${loopVar}) => ${_key})) { if (!${slotsVar}.has(_k)) ${slotsVar}.set(_k, ${slotsVar}.size); }`);
+  lines.push(`const ${bySlotVar} = new Map();`);
+  lines.push(`const ${loadedVar} = new Set();`);
+  lines.push(`// Fetch the rows of _keys in chunks of at most ${batchCap} bound keys (§8.10.6); a chunk's keys are loaded when its query succeeds.`);
+  lines.push(`const ${fetchVar} = async (_keys) => {`);
+  lines.push(`  for (let _at = 0; _at < _keys.length; _at += ${batchCap}) {`);
+  lines.push(`    const _chunk = _keys.slice(_at, _at + ${batchCap});`);
+  lines.push(`    const _values = _chunk.map((_k, _i) => "(" + ${slotsVar}.get(_k) + ", ?" + (_i + 1) + ")").join(", ");`);
+  lines.push(`    const _rows = await ${dbVar}.unsafe(${JSON.stringify(inSqlTemplate)}.replace(${JSON.stringify(HOIST_VALUES_PLACEHOLDER)}, _values), _chunk);`);
+  lines.push(`    for (const _r of _rows) { const _s = _r[${aliasKey}]; delete _r[${aliasKey}]; delete _r[${aliasVal}]; ${store} }`);
+  lines.push(`    for (const _k of _chunk) ${loadedVar}.add(_k);`);
+  lines.push(`  }`);
+  lines.push(`};`);
+  // §8.10.3 — the pre-fetch never raises: a key it did not load is read alone by
+  // its own read, when that read runs (S456 fix round F1).
+  lines.push(`// A key the pre-fetch did not load (its chunk failed, or the loop body changed the key) is read alone when its read runs (§8.10.3).`);
+  lines.push(`try { await ${fetchVar}([...${slotsVar}.keys()]); } catch { /* each read whose key is not loaded runs its own query */ }`);
+  lines.push(`const ${readVar} = async (_k) => {`);
+  lines.push(`  if (!${loadedVar}.has(_k)) {`);
+  lines.push(`    if (!${slotsVar}.has(_k)) ${slotsVar}.set(_k, ${slotsVar}.size);`);
+  if (handled) {
+    // §19.8.3 (S455) — a HANDLED site: this key's own failure is the SqlError
+    // envelope the site's arms match on.
+    lines.push(`    const _failed = await ${SQL_ATTEMPT_FN}((_keys) => ${fetchVar}(_keys), [_k], () => null);`);
+    lines.push(`    if (_failed) return _failed;`);
+  } else {
+    lines.push(`    await ${fetchVar}([_k]);`);
+  }
+  lines.push(`  }`);
+  lines.push(`  const _hit = ${bySlotVar}.get(${slotsVar}.get(_k));`);
+  lines.push(`  ${pick}`);
+  lines.push(`};`);
 
   // s430 — a `let` binder the body writes: `let` head + the binder in the body's
   // declared names, so the write is an assignment (not a TDZ `const x = x …`).
-  // Every other hoisted loop is byte-identical to before (no declaredNames — which
-  // is itself a pre-existing drop of the enclosing scope's names; out of scope).
+  // The body lowers with the plain loop's options (see the doc comment): the
+  // enclosing scope's declared names make a keywordless `row = ?{…}` on an outer
+  // `let row` an assignment (it used to re-declare `row` — E-CODEGEN-INVALID-LOGIC).
   const _hoistHeadKw = forHeadKeyword(node);
-  const _hoistNames = _hoistHeadKw === "let" ? loopBodyDeclaredNames((opts as any)?.declaredNames, node, false) : undefined;
-  lines.push(`for (${_hoistHeadKw} ${loopVar} of ${iterable}) {`);
-  for (const code of emitLogicBody(rewrittenBody, { ...(_hoistNames ? { declaredNames: _hoistNames } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  const _hoistNames = loopBodyDeclaredNames(opts?.declaredNames, node, false);
+  lines.push(`for (${_hoistHeadKw} ${loopVar} of ${itemsVar}) {`);
+  for (const code of emitLogicBody(rewrittenBody, { /* S415 */ declaredNames: blockScopedDeclaredNames(_hoistNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -1043,7 +1332,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null; mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to the body emission so
   // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
   // `while` body parse-time-attached sqlNode are emitted via the server
@@ -1054,7 +1343,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   // which emitted `yield null; // SQL — client cannot evaluate _scrml_sql`
   // inside SSE generator bodies.
   const lines: string[] = [];
-  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
@@ -1072,11 +1361,11 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null; mapVarNames?: Set<string> | null; setVarNames?: Set<string> | null; orderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
-  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
+  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
@@ -1321,6 +1610,25 @@ export interface PayloadBinding {
  * Returns [] for an empty/whitespace-only string.
  * Each element is one comma-separated item. Leading/trailing whitespace is trimmed.
  */
+/**
+ * The payload binding text of a block-bodied arm (`match-arm-block`, ast-builder
+ * Form 1b: `.V(bindings) :> { … }`), in the `parseBindingList` shape.
+ *
+ * The node's raw `binding` (the paren interior, e.g. `e : q`) is authoritative:
+ * it keeps the NAMED form. `payloadBindings` holds only the LOCAL names (`["q"]`
+ * — what the type system scopes into the body), so rebuilding the binding from
+ * it turned every named binding into a POSITIONAL one: dropped when the variant's
+ * field order was unknown, or bound to the WRONG field when the named field was
+ * not the one at that position (g-impl1-match-miscompiles-hit-by-the-bootstrap
+ * F17 — the object-literal arm body is what routes an arm through Form 1b).
+ * `payloadBindings` remains the fallback for a node built without `binding`.
+ */
+export function matchArmBlockBinding(child: any): string | null {
+  if (typeof child?.binding === "string" && child.binding.trim().length > 0) return child.binding;
+  const payloadBindings = Array.isArray(child?.payloadBindings) ? child.payloadBindings : [];
+  return payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
+}
+
 export function parseBindingList(raw: string): PayloadBinding[] {
   if (!raw) return [];
   const result: PayloadBinding[] = [];
@@ -2248,6 +2556,11 @@ function emitMultiScrutineeMatch(
     tagVars.push(tagVar);
   }
 
+  // §18.7 / F11 — per-position TS-resolved subject enums (null = unresolved).
+  const perPositionSubject: Array<SubjectVariantFields | null> = Array.isArray(node.__matchScrutineeVariants)
+    ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
+    : [];
+
   const body: any[] = node.body ?? [];
   let conditionIndex = 0;
   for (const child of body) {
@@ -2270,7 +2583,7 @@ function emitMultiScrutineeMatch(
         if (!posArm || posArm.kind === "wildcard") continue; // `_` position: no test.
         conds.push(armCondition(posArm, valVars[i], tagVars[i]));
         if (posArm.kind === "variant") {
-          const prelude = emitVariantBindingPrelude(posArm, valVars[i]);
+          const prelude = emitVariantBindingPrelude(posArm, valVars[i], false, perPositionSubject[i] ?? null);
           if (prelude) preludes.push(prelude);
         }
       }
@@ -2464,6 +2777,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
   const _matchCtx: EmitExprContext = {
     mode: _matchMode,
     ...(engineCtx?.exprCtxExtras ?? {}),
+    // S454 — a `?{}` scrutinee / `!{}` in an arm lowers with the statement options.
+    ...(opts ? { logicOpts: opts } : {}),
   };
 
   // §18.19 — multi-scrutinee match: desugar to nested single-scrutinee dispatch
@@ -2477,7 +2792,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     return emitMultiScrutineeMatch(node, _scrutineeExprs, _matchCtx, _matchMode, opts);
   }
 
-  const header = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
   const body: any[] = node.body ?? [];
 
   const tmpVar = genVar("match");
@@ -2496,18 +2811,10 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // the body emit as unbound JS identifiers → ReferenceError at runtime.
     // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
     if (child.kind === "match-arm-block") {
-      const payloadBindings = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
-      // Prefer the raw paren text (`binding`, ast-builder Form 1b) — it keeps the
-      // `field: local` pairing, so a NAMED binding reads its own field. The local
-      // names alone (`payloadBindings`) are positional: `.W(e: x) :> { x }` bound
-      // `x` to the FIRST field instead of `e` (silent wrong value).
-      const binding = typeof child.binding === "string" && child.binding.trim()
-        ? child.binding
-        : (payloadBindings.length > 0 ? payloadBindings.join(", ") : null);
       const arm: MatchArm = {
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding,
+        binding: matchArmBlockBinding(child),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       };
@@ -2560,11 +2867,13 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // still parses (the A backstop must not double-report a known-unlowerable
     // site as a generic invalid-JS defect). When no error channel is threaded
     // (the emit-expr.ts expression-position bridge passes no `opts`), the hard
-    // error cannot be recorded here — the A parse gate is then the backstop.
+    // error used to be dropped: the placeholder PARSES, so the A parse gate was
+    // never a backstop for it. With no channel the refusal goes to the run-wide
+    // refused-lowering sink (refused-lowering-errors.ts, drained by runCG) — s456.
     const matchSrc = (node?.header ?? "").trim() || "<match>";
     const errChannel: CGError[] | null | undefined = opts?.errors;
-    if (errChannel) {
-      errChannel.push(new CGError(
+    {
+      const refusal = new CGError(
         "E-CG-003",
         `E-CG-003: match expression \`match ${matchSrc} { ... }\` has no arm the ` +
         `code generator can lower — every arm failed to parse (unsupported arm ` +
@@ -2572,7 +2881,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
         `\`.Variant(binding) => result\`, \`"string" => result\`, \`else => result\`; ` +
         `the \`->\` / \`:>\` separators are accepted aliases per SPEC §18.2).`,
         (node?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2],
-      ));
+      );
+      if (errChannel) errChannel.push(refusal);
+      else recordRefusedLowering(refusal, node);
     }
     // Valid-JS placeholder (parses in statement AND expression position).
     return `(undefined) /* E-CG-003: match expression had no lowerable arms */`;
@@ -2582,9 +2893,17 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare, so the `::Ok` arm can only be recognized via the
   // `__scrml_error`-sentinel tag).
-  const failableMatch = isFailableOkMatch(arms);
-  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
+  const subjectVariants = getMatchSubjectVariantFields(node);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(node))
+    || isSqlFailableMatch(node.headerExpr, arms);
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
+  // §19.8.3 — a `match` on a `?{}` query's result IS its handler: a query that
+  // fails to run must reach the arms as a SqlError variant, not throw past them.
+  const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  // The arms' error type is SqlError (released before this function returns).
+  if (_handlesSql) enterSqlErrorSchema();
 
   const iifeLines: string[] = [];
   // inline-sql-in-branch-cps (2026-06-01): a server-batch match-stmt may emit
@@ -2606,7 +2925,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // §19.7.3 — the failable-match `::Ok(v)` arm binds `v` to the whole bare
     // success value (not `tmpVar.data.field`).
     const bindingPrelude = arm.kind === "variant"
-      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok")
+      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch)
       : "";
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
@@ -2723,8 +3042,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude
-            ? `{ ${bindingPrelude}return ${emitExprField(null, arm.result, _matchCtx)}; }`
-            : `return ${emitExprField(null, arm.result, _matchCtx)};`);
+            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`
+            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
@@ -2734,7 +3053,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
           // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${emitExprField(null, arm.result, _matchCtx)}; }`);
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`);
         }
       } else {
         iifeLines.push(`  else ${emitResult}`);
@@ -2745,6 +3064,11 @@ export function emitMatchExpr(node: any, opts?: any): string {
       iifeLines.push(`  ${prefix} (${condition}) ${emitResult}`);
       conditionIndex++;
     }
+  }
+  // S454 fix round (F1) — FAIL CLOSED: a match on a `?{}` with no catch-all re-raises
+  // a failure none of its arms names, rather than evaluating to `undefined`.
+  if (_handlesSql && conditionIndex > 0 && !arms.some((a) => a.kind === "wildcard")) {
+    iifeLines.push(`  else if (${tagVar} !== "Ok") { ${unhandledFailureThrow(tmpVar)} }`);
   }
 
   iifeLines.push(`})()`);
@@ -2782,6 +3106,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
   iifeLines[0] = (_matchMode === "server" || _bodyHasAwait)
     ? `await (async function() {`
     : `(function() {`;
+  if (_handlesSql) exitSqlErrorSchema();
   return iifeLines.join("\n");
 }
 
@@ -2951,7 +3276,16 @@ export function armCondition(arm: MatchArm, tmpVar: string, tagVar: string): str
  * list OR the arm has a binding). When true, callers emit the __tag
  * normalization. When false, unit-only / scalar arms can keep plain equality.
  */
-export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
+export function hasPayloadBindingOrTaggedVariant(
+  arms: MatchArm[],
+  subject?: SubjectVariantFields | null,
+): boolean {
+  // A variant is payload-bearing if the match SUBJECT's enum (TS-resolved,
+  // F16) or the file's variant registry says so. Either source suffices: the
+  // `.variant` normalization is correct for unit values too, so over-including
+  // is safe and under-including is the F16 never-matches miscompile.
+  const isPayload = (t: string): boolean =>
+    (_variantFields?.has(t) ?? false) || (subject?.get(t) != null);
   return arms.some(a => {
     if (a.kind !== "variant") return false;
     if (a.binding) return true;
@@ -2968,10 +3302,78 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
     // extracts only when some alternate is a registered PAYLOAD variant (the
     // registry records payload variants only), as for a singleton arm.
     if (a.tests && a.tests.length > 1) {
-      return _variantFields ? a.tests.some(t => _variantFields!.has(t)) : true;
+      return _variantFields ? a.tests.some(t => isPayload(t)) : true;
     }
-    return _variantFields?.has(a.test ?? "") ?? false;
+    return isPayload(a.test ?? "");
   });
+}
+
+/**
+ * §18.7 — the match SUBJECT's enum schema, as stamped on the match node by TS
+ * (`__matchSubjectVariants`, type-system.ts checkMatchDiagnostics): variant name
+ * → declared payload field names in declaration order (`null` for a unit
+ * variant). `null` when TS did not resolve the subject to an enum (a literal /
+ * union / failable match, or a node TS never visited) — callers then fall back
+ * to the by-name file registry.
+ *
+ * This is the authority for positional binding: "Bindings are assigned
+ * left-to-right in the order the fields were declared in the enum definition"
+ * (§18.7) — the subject's enum, local or imported, never whichever same-named
+ * variant the file registry happened to hold
+ * (g-impl1-match-miscompiles-hit-by-the-bootstrap F11/F16).
+ */
+export type SubjectVariantFields = Map<string, string[] | null>;
+
+/** §19.7.1 — TS stamped this match's subject as a failable-call result union. */
+export function isMatchSubjectFailable(node: any): boolean {
+  return node?.__matchSubjectFailable === true;
+}
+/**
+ * §14.10 — lower a match-arm RESULT that is, as a whole, a bare-dot payload
+ * constructor (`.Neg(k)`), against the enum TS stamped as the match VALUE's
+ * declared position type (`__armResultVariants`: the return of a `-> T`
+ * function, a `: T`-annotated let/const initializer). The constructor's ident is
+ * stamped with `T`'s field list and emitted through the ordinary AST path —
+ * the same `__variantFields` lowering every TS-typed position uses — so the
+ * variant is never looked up by name.
+ *
+ * Returns null (caller keeps its existing string lowering) unless: the match
+ * carries the stamp, the result parses to ONE call whose callee is a bare-dot
+ * variant, and `T` declares that variant with a payload. A constructor nested
+ * inside a result (a call argument, a payload argument) is at another position
+ * and is never typed from this stamp.
+ */
+export function emitTypedArmResultCtor(result: string, matchNode: any, ctx: EmitExprContext): string | null {
+  const schema = matchNode?.__armResultVariants;
+  if (!Array.isArray(schema) || schema.length === 0 || typeof result !== "string") return null;
+  const trimmed = result.trim();
+  if (!/^\.\s*[A-Z][A-Za-z0-9_]*\s*\(/.test(trimmed) || !trimmed.endsWith(")")) return null;
+  let node: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseExprToNode } = require("../expression-parser.ts") as {
+      parseExprToNode: (r: string, f: string, o: number) => any;
+    };
+    node = parseExprToNode(trimmed, "", 0);
+  } catch { node = null; }
+  if (!node || node.kind !== "call" || !node.callee || node.callee.kind !== "ident") return null;
+  const calleeName: unknown = node.callee.name;
+  if (typeof calleeName !== "string" || !/^\.[A-Z]/.test(calleeName)) return null;
+  const variantName = calleeName.slice(1);
+  const v = schema.find((x: any) => x && x.name === variantName);
+  if (!v || !Array.isArray(v.fields)) return null;
+  node.callee.__variantFields = [...v.fields];
+  return emitExpr(node, ctx);
+}
+
+export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
+  const list = node?.__matchSubjectVariants;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const out: SubjectVariantFields = new Map();
+  for (const v of list) {
+    if (v && typeof v.name === "string") out.set(v.name, Array.isArray(v.fields) ? v.fields : null);
+  }
+  return out;
 }
 
 /**
@@ -2988,8 +3390,52 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
  * (it lands in `_variantFields`), so this predicate defers to the regular
  * tagged-object path in that (pathological) collision.
  */
-export function isFailableOkMatch(arms: MatchArm[]): boolean {
-  if (_variantFields?.has("Ok")) return false;
+/** The SqlError variant names (§19.8.1) a `match` on a `?{}` result may test. */
+const SQL_ERROR_VARIANT_NAMES: ReadonlySet<string> = new Set(SQL_ERROR_VARIANT_FIELDS.map(([n]) => n));
+
+/**
+ * §19.8.3 — a `match` whose scrutinee is exactly a `?{}` query and whose arms
+ * test `::Ok` or a `SqlError` variant is a match over a FAILABLE result: the
+ * query's value arrives as `::Ok`, a query that fails to run as its SqlError
+ * variant. (`isFailableOkMatch` already covers the `::Ok` case; this adds a match
+ * that names only error variants and `_`.)
+ */
+export function isSqlFailableMatch(headerExpr: any, arms: MatchArm[]): boolean {
+  if (sqlQueryExprShape(headerExpr) === null) return false;
+  return arms.some(a => {
+    if (a.kind !== "variant") return false;
+    const tests = Array.isArray(a.tests) ? a.tests : [a.test];
+    return tests.some(t => t === "Ok" || (typeof t === "string" && SQL_ERROR_VARIANT_NAMES.has(t)));
+  });
+}
+
+/**
+ * §19.8.3 — does this `match` HANDLE a `?{}` query, so its scrutinee must be
+ * evaluated through `_scrml_sql_attempt` (a failure becomes the SqlError variant
+ * the arms match on)? Server boundary only: a query is never emitted client-side.
+ */
+export function matchScrutineeHandlesSql(headerExpr: any, failableMatch: boolean, mode: "client" | "server"): boolean {
+  return mode === "server" && failableMatch && sqlQueryExprShape(headerExpr) !== null;
+}
+
+export function isFailableOkMatch(
+  arms: MatchArm[],
+  subject?: SubjectVariantFields | null,
+  subjectIsFailable?: boolean,
+): boolean {
+  // TS resolved the subject as a failable-call result (§19.7.1 synthetic
+  // `::Ok | <error variants>` union) — failable by construction.
+  if (subjectIsFailable) return true;
+  // A subject TS resolved to an enum that DECLARES `Ok` binds that enum's `Ok`
+  // (a payload `Res.Ok(v)`, or a unit `Status.Ok` — which the failable path
+  // matched for EVERY value, S438 review). A resolved enum WITHOUT `Ok` keeps
+  // the pre-F11 behaviour below (an ill-typed `::Ok` arm over it is not ours
+  // to reinterpret here — S438 review F3).
+  if (subject && subject.has("Ok")) return false;
+  // Only a FILE-LOCAL payload `Ok` claims the name. An imported enum's `Ok`
+  // (now in `_variantFields` too — F11) must not flip every unresolved
+  // `::Ok` match in the importing file off the failable path.
+  if (_variantFields?.has("Ok") && !(_importedVariantNames?.has("Ok") ?? false)) return false;
   return arms.some(a =>
     a.kind === "variant" &&
     (a.test === "Ok" || (Array.isArray(a.tests) && a.tests.includes("Ok"))),
@@ -3015,7 +3461,13 @@ export function emitMatchTagDiscriminator(tmpVar: string, tagVar: string, failab
   return `const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`;
 }
 
-export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failableOk?: boolean): string {
+export function emitVariantBindingPrelude(
+  arm: MatchArm,
+  tmpVar: string,
+  failableOk?: boolean,
+  subject?: SubjectVariantFields | null,
+  errorContext?: boolean,
+): string {
   if (!arm.binding) return "";
   const bindings = parseBindingList(arm.binding);
   if (bindings.length === 0) return "";
@@ -3035,8 +3487,21 @@ export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failabl
   }
 
   const variantName = arm.test ?? "";
-  const fieldSchema = _variantFields?.get(variantName) ?? null;
-  const ambiguous = _variantFieldCollisions?.has(variantName) ?? false;
+  // The subject's own enum is exact (F11 — covers imported enums and a variant
+  // name two enums share); the by-name registry is the fallback, where a name
+  // declared by two differently-shaped enums stays ambiguous.
+  // In an error context (a failable-result match, TS did not resolve the error
+  // enum) the fallback is the ERROR registry — local + ambient ParseError, never
+  // an unrelated imported enum's same-named variant (S438 review F1).
+  // Error contexts never read the subject: they keep the pre-F11 by-name error
+  // lookup, the same one the `fail` producer uses (S438 review N2).
+  const fromSubject = subject != null && subject.has(variantName) && !errorContext;
+  const fieldSchema = fromSubject
+    ? (subject!.get(variantName) ?? null)
+    : errorContext
+      ? getErrorVariantFieldSchema(variantName)
+      : (_variantFields?.get(variantName) ?? null);
+  const ambiguous = fromSubject || errorContext ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
   const statements: string[] = [];
   for (let i = 0; i < bindings.length; i++) {

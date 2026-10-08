@@ -53,7 +53,7 @@
         FROM messages
         ORDER BY sent_at ASC
         LIMIT 200
-      `}.all()
+      `}.all() !{ _ :> [] }
     }
 
     // Server function only persists — no @state assignments (E-RI-002).
@@ -79,7 +79,7 @@
       reset(@draft)
 
       // Persist to DB — server owns the write, client owns the state.
-      persistMessage(msg.id, msg.author_id, msg.body, msg.sent_at)
+      persistMessage(msg.id, msg.author_id, msg.body, msg.sent_at) !{ .Transport(_) :> { return } }
     }
 
     function handleKey(e) {

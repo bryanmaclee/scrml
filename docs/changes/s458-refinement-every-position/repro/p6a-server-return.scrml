@@ -1,0 +1,13 @@
+<program>
+${
+  server function make(v) -> string(url) {
+    return v
+  }
+  <out> = ""
+  function go() {
+    @out = make("javascript:alert(1)")
+  }
+}
+<button onclick=go()>go</button>
+<p>${@out}</p>
+</program>

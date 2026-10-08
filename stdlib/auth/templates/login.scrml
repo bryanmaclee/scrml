@@ -38,7 +38,7 @@
       // hit F-AUTH-002 (E-SQL-004). The `server` modifier is not needed —
       // the ?{} block escalates the fn structurally.
       function loginServer(emailArg, passwordArg) {
-        const row = ?{`SELECT id, email, password_hash FROM users WHERE email = ${emailArg}`}.get()
+        const row = ?{`SELECT id, email, password_hash FROM users WHERE email = ${emailArg}`}.get() !{ _ :> not }
         if (row is not) {
           return { error: "Invalid email or password" }
         }
@@ -49,6 +49,12 @@
         }
 
         ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
+
+        // Establish the session (SPEC §20.5.1). This is what a
+        // <program auth="required"> gate checks: without it the user is
+        // "logged in" nowhere and every gated page redirects back here.
+        // session.set does NO credential check — call it only after verifying.
+        session.set("userId", row.id)
 
         return {
           user: { id: row.id, email: row.email },
@@ -63,18 +69,17 @@
         @errorMessage = ""
         @submitting = true
 
-        const result = loginServer(@email, @password)
+        const result = loginServer(@email, @password) !{ .Transport(_) :> { return } }
         if (result.error is some) {
           @errorMessage = result.error
           @submitting = false
           return
         }
 
-        // Successful login — navigate. Production deployments will typically
-        // set an HttpOnly Set-Cookie on the server response and rely on the
-        // browser to carry it forward. The generator template uses a simple
-        // navigation as the minimum-viable path; replace with your session
-        // strategy.
+        // Successful login — navigate. loginServer's session.set already put
+        // the compiler-managed HttpOnly session cookie on the response, so the
+        // browser carries it to the gated page. (Logout: call a server fn that
+        // does session.destroy().)
         window.location.href = result.redirectTo
       }
     }

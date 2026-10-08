@@ -42,11 +42,13 @@
  * Parallelism: per-file — fully parallel across Bun workers.
  */
 
+import { placeholderParam } from "./placeholder-nonce.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
+import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 import type {
   Span,
@@ -113,6 +115,7 @@ import type {
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
 import { classifyFileShape } from "./library-shape.js";
+import { programRoleOptionsOf } from "./program-role.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -1214,7 +1217,7 @@ function reparseSynthesizedFile(
   return { ast: result.ast, errors };
 }
 
-function parseComponentBody(
+export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string
@@ -1308,6 +1311,28 @@ function parseComponentDef(
   }
 
   if (!nodes.length) return null;
+
+  // §5.2 executable-sink rule (S456) — a quoted attribute in the component body whose `${…}` lands in
+  // executable text (`onclick="go('${label}')"`, `href="javascript:…${x}"`, `srcdoc`). The
+  // body is raw text until this re-parse, and expansion substitutes a prop into a quoted
+  // attribute textually, so this is the only stage that sees what the author wrote. Runs
+  // for USED and UNUSED defs alike; anchored at the definition (the re-parsed offsets are
+  // relative to the body text). The refused attribute is stamped (`markReported`), and the
+  // stamp travels with its expanded copies, so VP-3 does not report it again per instance.
+  // An attribute whose DEFINITION text is not a sink (`href="${u}"`) is judged again by VP-3
+  // on every expanded instance, AFTER the caller's prop text is substituted in.
+  for (const e of collectExecutableSinkErrors(nodes, filePath, {
+    where: `in component \`${name}\``,
+    spanOverride: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    markReported: true,
+  })) {
+    const ceErr = makeCEError(e.code, e.message, e.span);
+    // S457 — keep the attribute's identity so api.js drops a codegen backstop report of the same
+    // attribute (the expanded copy's spans are the body's, not the definition's).
+    (ceErr as { attrSinkKey?: string; attrSinkName?: string }).attrSinkKey = (e as { attrSinkKey?: string }).attrSinkKey;
+    (ceErr as { attrSinkKey?: string; attrSinkName?: string }).attrSinkName = (e as { attrSinkName?: string }).attrSinkName;
+    ceErrors.push(ceErr);
+  }
 
   // Extract propsDecl from the primary (first) root element's `props` attribute
   const primaryNode = nodes[0];
@@ -3297,6 +3322,9 @@ function expandComponentNode(
     // Mark as expanded — no longer a component reference
     isComponent: false,
     _expandedFrom: componentName,
+    // §5.2 executable-sink rule (S456) — the call site, so VP-3 can anchor a refusal of an
+    // attribute whose EXPANDED value (the caller's prop text substituted in) is a sink.
+    _expansionSiteSpan: node.span,
     // i81 (S239 finding 7) — the DECLARED prop names of the component this root
     // came from. After expansion the root's `attrs` are a MERGE of the
     // definition's own attributes and the call site's props, and downstream
@@ -3323,6 +3351,7 @@ function expandComponentNode(
     id: ++counter.next,
     isComponent: false,
     _expandedFrom: componentName,
+    _expansionSiteSpan: node.span,
   }));
 
   return [expandedNode, ...secondaryNodes];
@@ -3372,13 +3401,17 @@ function parseSnippetBodyNodes(
   // (S375 review #1). Rendering it as literal text is the safe default — a body
   // that genuinely means a variable read is written `${var}` or returns markup.
   // (Span note: buildAST numbers the reparsed nodes against the synthetic
-  // `<program>` wrapper; any diagnostic on malformed snippet content folds into
+  // wrapper; any diagnostic on malformed snippet content folds into
   // ceErrors with the render-site `child.span` — an accurate author position.)
   const asExpr = parseExprToNode(trimmed, filePath, span?.start ?? 0);
   const interpolate = asExpr && asExpr.kind !== "escape-hatch" && asExpr.kind !== "ident";
+  // The body is RENDERED content, so it is reparsed inside a plain-markup
+  // wrapper whose body is free text (§4.18.1). ⛑ S441: this used to be a
+  // synthetic `<program>` wrapper, which is now a code-default body (§40.8
+  // S441 bullet) — a bare-word body there would be read as code.
   const wrapped = interpolate
-    ? `<program>\n\${${trimmed}}\n</program>\n`
-    : `<program>\n${trimmed}\n</program>\n`;
+    ? `<div>\n\${${trimmed}}\n</div>\n`
+    : `<div>\n${trimmed}\n</div>\n`;
   const bsOut = splitBlocks(filePath, wrapped);
   const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
   if (ceErrors) {
@@ -3389,7 +3422,7 @@ function parseSnippetBodyNodes(
     }
   }
   const prog = (tabOut.ast?.nodes ?? []).find(
-    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "program",
+    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "div",
   ) as MarkupNode | undefined;
   const kids = prog?.children ?? [];
   return _deepCloneAst(kids, counter) as ASTNode[];
@@ -3481,7 +3514,10 @@ function _injectChildrenWalk(
           const callee = (en as any).callee;
           if (!callee || callee.kind !== "ident") continue;
           const calleeName = callee.name as string;
-          const nameM = calleeName.match(/^__scrml_render_([A-Za-z_$][A-Za-z0-9_$]*)__$/);
+          // Only the parser's unforgeable placeholder (placeholder-nonce.ts) —
+          // an author-typed `__scrml_render_x__` is an ordinary identifier.
+          const renderName = placeholderParam(calleeName, "render");
+          const nameM = renderName !== null && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(renderName) ? [calleeName, renderName] : null;
           if (!nameM) continue;
           const args = ((en as any).args ?? []) as ExprNode[];
           if (args.length === 0) {
@@ -4812,7 +4848,7 @@ export function runCEFile(
     // this field runs after CE and wants the post-CE answer. The one pre-CE
     // reader, `api.js`'s W5a library auto-detect, reads at the PRECG seam and
     // never sees this object.
-    fileShape: classifyFileShape(phase2Nodes, ast.hasProgramRoot === true),
+    fileShape: classifyFileShape(phase2Nodes, ast.hasProgramRoot === true, programRoleOptionsOf(ast)),
   };
 
   // S139 Bug 51 fix — carry non-enumerable annotations forward to the new

@@ -1,0 +1,15 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUsers() {
+        let rows = ?{`SELECT * FROM users`}.run()
+        return rows
+      }
+    }
+  </db>
+  <users> = []
+  <button id="load" onclick={ @users = getUsers() !{ .Transport(_) :> { return } } }>load</button>
+</program>

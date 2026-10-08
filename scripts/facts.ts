@@ -77,11 +77,19 @@ function stdlibModules(): string[] {
  *   - `diagnostic-format`    — `stripRedundantCode`, imported by build/compile/dev.
  *   - `select-request-onion` — §40.3/§40.8 onion selection, imported by build/dev.
  *   - `refusal-gate`         — the pre-write application-scope refusal, imported by build/compile.
+ *   - `listen`               — the one CLI `Bun.serve` wrapper (bind host), imported by dev/serve.
+ *   - `fix-s66`              — the §66.21 rule set behind `scrml fix`, imported by fix.js and the
+ *                              bootstrap conformance counter.
+ *   - `fix-arm-pipe`         — the §19.4.5 `arm-pipe` rule behind `scrml fix`, imported by
+ *                              fix-s66.js (S452).
+ *   - `fix-client-server-call` — the client-server-call rule behind `scrml fix`, imported by
+ *                              fix-s66.js (S455).
+ *   - `fix-sql-failable`     — the sql-failable rule behind `scrml fix`, imported by fix-s66.js (S455).
  */
 function cliVerbs(): string[] {
   const d = join(ROOT, "compiler/src/commands");
   if (!existsSync(d)) return [];
-  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "refusal-gate"]);
+  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "refusal-gate", "listen", "fix-s66", "fix-arm-pipe", "fix-client-server-call", "fix-sql-failable"]);
   return readdirSync(d)
     .filter((e) => extname(e) === ".js")
     .map((e) => e.replace(/\.js$/, ""))
@@ -140,8 +148,10 @@ function countFiles(root: string, exts: string[], suffix?: string): { files: num
 
 /**
  * The LIVE compiler — `compiler/src`, the DEFAULT pipeline. Deliberately excludes
- * `compiler/native-parser` (~47k lines, gated behind the opt-in
- * `--parser=scrml-native` flag, so not the default path) and
+ * `compiler/native-parser` (~30k lines of JS; a frozen component of impl#1 that
+ * `compiler/src` calls at fixed sites — component / `^{}` / `<match>` re-parse,
+ * the defer lint, the E-CLASS / E-DYNAMIC-IMPORT pass — not counted here;
+ * its full-pipeline `--parser=scrml-native` flag was retired S449) and
  * `compiler/self-host-v2` (impl #2). Verified hand-written: no file in the tree
  * averages >200 chars/line, and there is no bundled, vendored or generated
  * directory under `src`.

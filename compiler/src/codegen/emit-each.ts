@@ -37,13 +37,21 @@
  */
 
 import type { CompileContext } from "./context.ts";
-import { colorActiveHandler } from "./js-async-analysis.ts";
+import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import {
+  classifyInterpolatedAttrSink,
+  interpolatedAttrSinkMessage,
+  ATTR_INTERP_EXECUTABLE_CODE,
+  attrSinkKey,
+} from "../attr-injection-sink.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2169,13 +2177,19 @@ function eventNameForAttr(aName: string): string | null {
     const ev = aName.slice(3);
     return ev.length > 0 ? ev : null;
   }
-  if (aName.startsWith("on") && aName.length > 2) {
+  if (aName.length > 2 && aName.slice(0, 2).toLowerCase() === "on") {
     // Exclude bind:/class: false hits (they never start with "on") and the
     // bare `on` directive. `onclick` → "click".
-    return aName.slice(2);
+    // s456 review round 3 — HTML attribute names are case-insensitive: `ONCLICK=` / `onClick=`
+    // ARE the click handler. Matched case-insensitively and mapped to the lowercase DOM event
+    // name; before, `ONCLICK=hit(it.name)` was not an event attribute here, so the CALL's result
+    // was written as handler text (`setAttribute("ONCLICK", String(hit(…)))`), and `onClick=`
+    // registered a "Click" listener that never fires.
+    return aName.slice(2).toLowerCase();
   }
   return null;
 }
+
 
 /**
  * g-expr-event-handler-dead-in-each (Family-A Half-2, 2026-06-25) — lower a
@@ -2431,8 +2445,14 @@ function renderTemplateAttrToJs(
   }
 
   // ---- (2) event handlers — inline addEventListener -----------------------
+  // A QUOTED (`onclick="hit(it)"`) or bareword event attribute is NOT a handler: SPEC §5.2
+  // rule 1 — "`attr=\"value\"` SHALL produce a static attribute with the literal string
+  // `value`. The compiler SHALL NOT interpret the string contents as an expression." It falls
+  // through to the static-attribute path (4) below, exactly as the same attribute outside an
+  // `<each>` is emitted into the HTML. Until s456 it entered this branch and its listener body
+  // became `/* each: unsupported event handler shape */` — the attribute silently DROPPED.
   const ev = eventNameForAttr(aName);
-  if (ev !== null) {
+  if (ev !== null && valKind !== "string-literal" && valKind !== "absent" && val != null) {
     let handlerBody: string;
     if (valKind === "call-ref") {
       const fnName = String(val.name ?? "");
@@ -2503,7 +2523,17 @@ function renderTemplateAttrToJs(
       const ref = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
       handlerBody = `${ref}(event);`;
     } else {
-      handlerBody = "/* each: unsupported event handler shape */";
+      // §2.2.1 — a handler value kind this emitter cannot lower is REFUSED, never a silent
+      // no-op listener (run-wide sink, refused-lowering-errors.ts; s456 review).
+      recordRefusedLowering(new CGError(
+        "E-CG-003",
+        `E-CG-003: the \`${aName}=\` event handler inside an \`<each>\` row has a value shape ` +
+        `(\`${valKind || "unknown"}\`) the code generator cannot lower. Write it in a §5.2.3 form: ` +
+        `a call (\`${aName}=fn(@.id)\`), a handler reference (\`${aName}=@handler\`), or an inline ` +
+        `block (\`${aName}={ … }\` / \`${aName}=\${…}\`).`,
+        (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+      ), attr);
+      handlerBody = "/* E-CG-003: unsupported event handler shape */";
     }
     // Bug 73 — per-item handler live-keying. If a reconcile ctx is active and
     // the handler reads the iter var, prepend a fire-time re-resolution prelude
@@ -2528,9 +2558,18 @@ function renderTemplateAttrToJs(
     // await its async calls (the handler becomes `async`), lift clean-family
     // callbacks, fail closed on what cannot be awaited and on an async fn used as
     // a value (S440 F4).
+    // S446 (S439 #4) — a statement-list handler awaits a server-call cell write in
+    // place, so the next statement sees the resolved value (ColorOpts doc).
+    // `{}` (unchanged) below two statements; SSE generator writes keep the skip.
+    // S453 (bryan S449 A3) — `boundaryId` so a logged rejection names the row
+    // listener (see js-async-analysis `wrapHandlerRejectionLog`).
     const handlerFn = colorActiveHandler(
       `function(event) { ${preventLine}${wrappedHandlerBody} }`,
       (attr as { span?: unknown }).span ?? (elNode as { span?: unknown } | null)?.span,
+      {
+        ...(valKind === "expr" ? activeHandlerStatementListColor(val.handlerBlock?.stmts) : {}),
+        boundaryId: `on${ev} <each> row`,
+      },
     );
     lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, ${handlerFn});`);
     return;
@@ -2659,17 +2698,36 @@ function renderTemplateAttrToJs(
   // ---- (3) ${...} interpolation / @.field value → setAttribute value ------
   // Bug 64 / R28-1c (S159) — per-item attr interpolation is live-keyed too so
   // an attr value bound to item data refreshes on reconcile (matches Tier-0).
+  // §5.2 rule 3 (S457) — a URL attribute on this element takes its scheme from the
+  // row data, so its write goes through the runtime guard `_scrml_safe_url`.
+  // S457 — an SVG animation value (`<set attributeName="href" to=it.url>`) writes the
+  // animated URL attribute: guarded with that attribute as the target.
+  const _urlValue = (valueJs: string): string =>
+    dynamicUrlAttrNeedsGuard(_elTag, aName, _elAttrs as unknown[])
+      ? wrapUrlGuard(elVar, aName, valueJs, urlGuardTarget(_elTag, aName, _elAttrs as unknown[]))
+      : valueJs;
+  // §5.2 (S457) — a `srcdoc` (an HTML document) or an event-handler attribute is never
+  // written from row data: refused here (VP-3 refuses the srcdoc forms first; event names
+  // are wired as listeners above, so this is the backstop).
+  if (valKind === "expr" || valKind === "variable-ref" || valKind === "call-ref") {
+    // (Wherever the write is emitted — a declared component prop written onto an expanded root too.)
+    const _refused = refuseExecutableDataWrite(aName, _elTag, (attr && attr.span) || (val && val.span), attr, "inside an `<each>` row");
+    if (_refused !== null) {
+      lines.push(`${indent}${_refused}`);
+      return;
+    }
+  }
   if (valKind === "expr") {
     const expr = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
   if (valKind === "variable-ref") {
     const expr = lowerEachExpr(String(val.name ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -2681,7 +2739,7 @@ function renderTemplateAttrToJs(
     // class — the generic value-attribute sibling of the class: arm.)
     const expr = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -2695,9 +2753,33 @@ function renderTemplateAttrToJs(
     // the attr re-evaluates on reconcile, matching the interpolation/text paths.
     const sv = String(val.value ?? "");
     const tpl = buildEachAttrTemplate(sv, iterVarName);
+    // §5.2 executable-sink rule (S456) — a QUOTED attribute whose `${…}` lands in text the browser EXECUTES
+    // (an `on…` handler, `srcdoc`, a URL with a non-safe literal scheme such as
+    // `javascript:`) is refused. VP-3 refuses it for every markup position before codegen;
+    // this is the backstop for a row template that reaches here without VP-3 having seen it,
+    // and it asks the SAME reader (`classifyInterpolatedAttrSink`) — never a second test.
+    const sink = tpl !== null ? classifyInterpolatedAttrSink(aName, sv, { tag: _elTag, attrs: _elAttrs as unknown[] }) : null;
+    if (sink !== null) {
+      const refusal = new CGError(
+        ATTR_INTERP_EXECUTABLE_CODE,
+        interpolatedAttrSinkMessage(sink, aName, "", "inside an `<each>` row"),
+        (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+      );
+      // Same attribute identity VP-3 stamps, so api.js reports the attribute once.
+      (refusal as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(attr && attr.span, aName);
+      recordRefusedLowering(refusal, attr);
+      lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${aName}" attribute refused (executable sink) */`);
+      return;
+    }
     if (tpl !== null) {
+      // §5.2 rule 3 (S457) — `href="${it.url}"`: a literal prefix that commits to no scheme
+      // lets the row data supply it; guard the write. A literal relative path / safe scheme
+      // (`href="/u/${it.id}"`) is proven and stays byte-identical.
+      const _tplValue = quotedUrlAttrNeedsGuard(_elTag, aName, sv, _elAttrs as unknown[])
+        ? wrapUrlGuard(elVar, aName, tpl, urlGuardTarget(_elTag, aName, _elAttrs as unknown[]))
+        : tpl;
       for (const _l of maybeWrapEachPerItemEffect(
-        [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${tpl});`], iterVarName, indent,
+        [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_tplValue});`], iterVarName, indent,
       )) lines.push(_l);
       return;
     }
@@ -2710,8 +2792,15 @@ function renderTemplateAttrToJs(
     return;
   }
 
-  // Unknown value kind — defensive literal copy with a hint.
-  lines.push(`${indent}// each: per-item attr "${aName}" unhandled value kind="${valKind}"`);
+  // Unknown value kind — REFUSED (§2.2.1; s456 review): the attribute would otherwise be
+  // dropped with only a comment in the artifact.
+  recordRefusedLowering(new CGError(
+    "E-CG-003",
+    `E-CG-003: the \`${aName}=\` attribute inside an \`<each>\` row has a value shape ` +
+    `(\`${valKind || "unknown"}\`) the code generator cannot lower.`,
+    (attr && attr.span) || (val && val.span) || { start: 0, end: 0 },
+  ), attr);
+  lines.push(`${indent}/* E-CG-003: per-item attr "${aName}" unhandled value kind="${valKind}" */`);
 }
 
 /**
@@ -3600,7 +3689,7 @@ function emitEachReconcileLines(
   lines.push(`${indent}  ${itemsVar},`);
   lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => ${keyFnBody},`);
   lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => {`);
-  lines.push(`${indent}    const _itemFrag = document.createDocumentFragment();`);
+  lines.push(`${indent}    const _scrml_item_frag = document.createDocumentFragment();`);
   // Bug 64 / R28-1c (S159) — capture this node's create-time key (the SAME
   // expression the keyFn above uses) so per-item text/class bindings can
   // re-resolve the LIVE item by key on every reconcile. Push a reconcile ctx so
@@ -3648,7 +3737,7 @@ function emitEachReconcileLines(
     // `isItemRoot=true` mount below is a STRUCTURAL requirement of the reconcile
     // list (exactly one tracked node per item; a bare text node cannot hold a DOM
     // child) and is deliberately NOT gated by the RCDATA refusal.
-    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, false, true, _isSoleItemRoot);
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_scrml_item_frag", templateLines, `${indent}    `, engineCtx, false, false, true, _isSoleItemRoot);
   }
   for (const l of templateLines) lines.push(l);
   popEachReconcileCtx();
@@ -3688,12 +3777,12 @@ function emitEachReconcileLines(
   const _childIndent = `${indent}    `;
   const _rootCount = templateLines.reduce((n, l) => {
     if (!l.startsWith(_childIndent) || l[_childIndent.length] === " ") return n;
-    return n + (l.split("_itemFrag.appendChild(").length - 1);
+    return n + (l.split("_scrml_item_frag.appendChild(").length - 1);
   }, 0);
   lines.push(
     _rootCount > 1
-      ? `${indent}    return _itemFrag;`
-      : `${indent}    return _itemFrag.firstChild;`,
+      ? `${indent}    return _scrml_item_frag;`
+      : `${indent}    return _scrml_item_frag.firstChild;`,
   );
   lines.push(`${indent}  }`);
   lines.push(`${indent});`);
@@ -4127,7 +4216,7 @@ function emitArmScopedEachRenderFn(
   const iterVarName = node.asName ? node.asName : "_scrml_each_item";
   resetLocalIdCounter();
   const fnLines: string[] = [];
-  fnLines.push(`function ${fnName}(${["_root", ...params].join(", ")}) {`);
+  fnLines.push(`function ${fnName}(${["_scrml_each_root", ...params].join(", ")}) {`);
   let itemsExpr: string;
   if (node.iterShape === "in") {
     itemsExpr = rewriteMapAwareIterable(node.inExprRaw ?? "[]", eachMapVarNames, eachSetVarNames);
@@ -4138,15 +4227,15 @@ function emitArmScopedEachRenderFn(
     fnLines.push(`}`);
     return fnLines.join("\n");
   }
-  fnLines.push(`  const _items = ${itemsExpr};`);
-  fnLines.push(`  let _mount = null;`);
-  fnLines.push(`  if (_root && typeof document !== "undefined") {`);
-  fnLines.push(`    const _w = document.createTreeWalker(_root, NodeFilter.SHOW_COMMENT);`);
+  fnLines.push(`  const _scrml_items = ${itemsExpr};`);
+  fnLines.push(`  let _scrml_mount = null;`);
+  fnLines.push(`  if (_scrml_each_root && typeof document !== "undefined") {`);
+  fnLines.push(`    const _w = document.createTreeWalker(_scrml_each_root, NodeFilter.SHOW_COMMENT);`);
   fnLines.push(`    let _n;`);
-  fnLines.push(`    while ((_n = _w.nextNode())) { if (String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _mount = _n; break; } }`);
+  fnLines.push(`    while ((_n = _w.nextNode())) { if (String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _scrml_mount = _n; break; } }`);
   fnLines.push(`  }`);
-  fnLines.push(`  if (!_mount) return;`);
-  for (const l of emitEachReconcileLines(node, iterVarName, "_scrml_each_idx", "_mount", "_items", "  ", engineCtx)) {
+  fnLines.push(`  if (!_scrml_mount) return;`);
+  for (const l of emitEachReconcileLines(node, iterVarName, "_scrml_each_idx", "_scrml_mount", "_scrml_items", "  ", engineCtx)) {
     fnLines.push(l);
   }
   fnLines.push(`}`);
@@ -4321,7 +4410,7 @@ export function emitEachBodyRenderForFile(
     }
 
     // Dep-establishing read FIRST (see comment above).
-    fnLines.push(`  const _items = ${itemsExpr};`);
+    fnLines.push(`  const _scrml_items = ${itemsExpr};`);
     // Now locate the mount; if it is not in the DOM yet (non-initial engine arm
     // pre-entry), bail — the dep above is already tracked, so a later arm-entry
     // remount (via `_scrml_remount_each`) will re-run this fn with the mount present.
@@ -4332,11 +4421,11 @@ export function emitEachBodyRenderForFile(
     // The id is chunk-namespaced, so it is a STRING (`"a1b2c3d4_9"`) rather than
     // a bare numeric literal. `_scrml_find_each_anchor` concatenates it into
     // `"scrml-each:" + id`, so a string arg needs no runtime change.
-    fnLines.push(`  const _mount = _scrml_find_each_anchor(document, ${JSON.stringify(nsId(node.id))});`);
-    fnLines.push(`  if (!_mount) return;`);
+    fnLines.push(`  const _scrml_mount = _scrml_find_each_anchor(document, ${JSON.stringify(nsId(node.id))});`);
+    fnLines.push(`  if (!_scrml_mount) return;`);
 
     // Empty-guard + per-item reconcile (shared with the nested-each inline path).
-    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_mount", "_items", "  ", engineCtx)) {
+    for (const l of emitEachReconcileLines(node, iterVarName, iterIdxName, "_scrml_mount", "_scrml_items", "  ", engineCtx)) {
       fnLines.push(l);
     }
     fnLines.push(`}`);

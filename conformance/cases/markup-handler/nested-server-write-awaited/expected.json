@@ -1,0 +1,15 @@
+{
+  "id": "markup-handler-nested-server-write-awaited",
+  "description": "S450 (S447 ruling iii) — a server-call cell write NESTED in a 1-statement handler (an `if` body, the `else if` limb of an if / else-if / else chain, a `match` arm) is awaited before the next statement, so the read of the written cell sees the resolved value: y = 10 + 1, z = 10 + 2, w = 10 + 3. Before the fix the write was a detached fire-and-forget IIFE and each read saw the pre-fetch 0 (y = 1, z = 2, w = 3).",
+  "language-version": "1.0",
+  "spec": "§13.2",
+  "provenance": "ruling:user-voice-scrml.md-S447-stamp-all",
+  "rationale": "§13.2: \"The compiler SHALL insert `await` at every call site where a server-generated fetch call is made\" and (S450) a server-call cell write in a handler SHALL be awaited in place unless it is the handler's SOLE root statement — here every write is nested, so the statement after it observes the resolved value.",
+  "expect": {
+    "codes": [],
+    "serverStub": { "save": 10 },
+    "input": [{ "click": "#nif" }, { "wait": "settle" }, { "click": "#nchain" }, { "wait": "settle" }, { "click": "#nmatch" }, { "wait": "settle" }],
+    "state": { "x": 10, "y": 11, "z": 12, "w": 13 },
+    "domAnchored": [{ "selector": "#out", "text": "11 12 13" }]
+  }
+}

@@ -20,10 +20,10 @@
  * Emit-shape pins: compiler/tests/unit/lift-body-lowering-s427.test.js.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
-import { writeFileSync, readFileSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
@@ -43,10 +43,22 @@ function compileAndMount(source, baseName, { expectBootError = false, expectCode
   const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
   if (expectCodes) expect(errors.map((e) => e.code)).toEqual(expectCodes);
   else expect(errors).toEqual([]);
-  const html = readFileSync(resolve(outDir, `${baseName}.html`), "utf8");
-  const clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
-  const runtimeName = /scrml-runtime\.[A-Za-z0-9]+\.js/.exec(html)?.[0] ?? result.runtimeFilename ?? "scrml-runtime.js";
-  const runtimeJs = readFileSync(resolve(outDir, runtimeName), "utf8");
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file. The
+  // expectCodes cases pin the lowering UNDER a compile error (defense in depth), so
+  // they mount the in-memory outputs + runtime.
+  let html, clientJs, runtimeJs;
+  if (errors.length > 0) {
+    expect(existsSync(outDir)).toBe(false);
+    const output = result.outputs.get(input) ?? {};
+    html = output.html;
+    clientJs = output.clientJs;
+    runtimeJs = result.runtimeSource();
+  } else {
+    html = readFileSync(resolve(outDir, `${baseName}.html`), "utf8");
+    clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
+    const runtimeName = /scrml-runtime\.[A-Za-z0-9]+\.js/.exec(html)?.[0] ?? result.runtimeFilename ?? "scrml-runtime.js";
+    runtimeJs = readFileSync(resolve(outDir, runtimeName), "utf8");
+  }
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   document.body.innerHTML = (bodyMatch ? bodyMatch[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
   const consoleErrors = [];
@@ -572,4 +584,11 @@ describe("round 5 — native-parsed loop binders: `let` writes take effect, `con
       }
     });
   }
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

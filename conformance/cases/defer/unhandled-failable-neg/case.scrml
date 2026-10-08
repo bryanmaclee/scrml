@@ -16,7 +16,7 @@ ${
 
     function go() {
         work() !{
-            | ::Busy :> @n = 2
+            ::Busy :> @n = 2
         }
     }
 }

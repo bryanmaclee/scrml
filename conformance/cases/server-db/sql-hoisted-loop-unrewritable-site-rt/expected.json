@@ -1,0 +1,27 @@
+{
+  "id": "server-db-sql-hoisted-loop-unrewritable-site-rt",
+  "description": "§8.10 Tier 2 loop hoisting (RUNTIME, sqlEngine:\"real\"): the planner accepts a loop whose single keyed read is `return ?{…}.get()` inside an `if` — a site the body rewrite has no Map-lookup form for. The loop is emitted UN-hoisted, with its per-iteration query, so the read returns the row. Pre-S455 the loop was hoisted anyway, the read was left in place and emitted with no server boundary — `return null; // SQL — client cannot evaluate` — so the function returned `not` on success (\"none\").",
+  "language-version": "1.0",
+  "spec": "§8.10",
+  "rationale": "§8.10.3: \"The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings.\" A rewrite that cannot preserve the read is not the §8.10.2 rewrite; the un-rewritten loop is the correct emission.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ]
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "found": "hello"
+    },
+    "domAnchored": [
+      { "selector": "#found", "text": "hello" }
+    ]
+  }
+}

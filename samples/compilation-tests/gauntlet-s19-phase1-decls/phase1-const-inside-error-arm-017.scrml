@@ -12,11 +12,11 @@ ${
 
     function safePay(a) {
         let result = pay(a) !{
-            | .InvalidAmount(reason) => {
+            .InvalidAmount(reason) => {
                 const fallback = 0
                 return fallback
             }
-            | .Declined(code) => {
+            .Declined(code) => {
                 const errCode = code
                 return errCode
             }

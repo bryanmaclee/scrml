@@ -157,7 +157,7 @@ import {
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
 // s430 — destructured-pattern name walk for E-NAME-COLLIDES-STATE. The two
 // helpers are self-contained (route-inference.ts imports them the same way).
-import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
+import { isDestructurePattern, iterDestructuredNames, armPipeLegacyMessage } from "./type-system.ts";
 import { isAuthorMainTag } from "./landmark-tag.ts";
 // §17.1.1 if-chain child SHAPE. `collapseIfChains` (ast-builder.js) rewrites an
 // `if=`/`else-if=`/`else` chain WITH an else arm into `{kind:"if-chain",
@@ -198,35 +198,11 @@ import {
   ROWCHANGE_VARIANT_NAMES,
 } from "./channel-watches.ts";
 
-// Unit CC (S123 — companion to V-kill): per-file exemption list for the
-// E-WRITE-NOT-IN-LOGIC-CONTEXT diagnostic. The 110-ish-file pre-S123 corpus
-// uses bare `@x = expr` at `<program>` / `<page>` body-top — a pattern that
-// V-kill carved out from its own fire and Unit CC now enforces per Option 2.
-// Adopter migration is deferred; each file sunsets by removing its entry
-// from the JSON. List shape: repo-relative path strings (e.g.,
-// "samples/contact-directory.scrml").
-//
-// Loaded once at module init via synchronous readFileSync. JSON file lives
-// in compiler/src/ so it ships with the compiler. Matching is strict membership
-// first, then a `/`-boundary suffix match, which covers the fact that spans
-// carry ABSOLUTE paths while the list is repo-relative and the checkout location
-// varies (a worktree harness inserts a `.claude/worktrees/agent-XXX/` segment).
-// ⚑ S379: that description used to name `isUnitCCExempt()` as the place the
-// normalization happens. It was inlined here and is not any more — the logic
-// moved to `default-logic-exemption.ts` and `isUnitCCExempt` is now only a local
-// alias for the import below. Describing a function's internals from the outside
-// is how that reference went stale; point at the module instead.
-// S368 — the loader + predicate moved to a leaf module (`default-logic-exemption.ts`)
-// so a TAB-stage gate at this SAME §40.8 body-top locus can consult the SAME
-// list. TAB runs BEFORE SYM, so `ast-builder.js` cannot import from this file;
-// the leaf module is what both sides are allowed to depend on. ⚑ S379: the TAB
-// consumer that motivated the extraction (`E-CALL-NOT-IN-LOGIC-CONTEXT`) is HELD
-// and is NOT in the compiler — this is currently the list's only live consumer.
-// Read the leaf module's header before folding it back in here.
-import { isDefaultLogicBodyTopExempt } from "./default-logic-exemption.ts";
-
-/** Back-compat alias for the Unit CC call sites below. */
-const isUnitCCExempt = isDefaultLogicBodyTopExempt;
+// ⛑ S441 — E-WRITE-NOT-IN-LOGIC-CONTEXT (S123 "Unit CC") is RETIRED: a
+// `<program>` / `<page>` / `<channel>` body is code (SPEC §40.8 S441 bullet), so
+// a bare write at its body-top is ordinary logic. The per-file exemption list
+// (`unit-cc-exemption-list.json`) and its loader (`default-logic-exemption.ts`)
+// had no other consumer and were removed with it.
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
@@ -593,6 +569,11 @@ export interface MessageArmEntry {
   /** Local byte offset just past the arm body within the state-child
    *  `bodyRaw`. */
   spanEnd: number;
+  /** §19.4.5 / §51.0.S.2.3 (S452) — present iff the arm is written with the
+   *  soft-deprecated leading `|`: `pattern` is the arm pattern as written
+   *  (between the `|` and the arm arrow), `patternStart` its `bodyRaw` offset.
+   *  Drives the W-ARM-PIPE-LEGACY lint and `scrml fix`'s arm-pipe rule. */
+  legacyPipe?: { pattern: string; patternStart: number };
 }
 
 /**
@@ -845,6 +826,9 @@ export interface EngineStateChildEntry {
    *  dispatch. NOT consumed by the codegen `EngineStateChildEntry` mirror in
    *  `codegen/emit-engine.ts` until batch 3 wires it. */
   messageArms: MessageArmEntry[];
+  /** §19.4.5 (S452) — `rulesRaw` offset where `bodyRaw` begins (message-arm
+   *  offsets are `bodyRaw`-relative). Read by `scrml fix` (arm-pipe rule). */
+  bodyRawOffset?: number;
 }
 
 /**
@@ -1566,7 +1550,7 @@ function reportLocalNameCollidesState(
   name: string,
   declDisplay: string,
   isLet: boolean,
-  span: Span | undefined,
+  span: Span,
   currentScope: Scope,
   errors: SYMDiagnostic[],
 ): void {
@@ -2536,69 +2520,6 @@ function walkResolveAtNames(
             });
           }
         }
-      }
-      // Unit CC (S123 — companion to V-kill): for `_isUnitCCWrite`-tagged
-      // state-decls (bare `@name = expr` writes at default-logic body-top —
-      // the §40.8 auto-lifted `<program>` / `<page>` / `<channel>` body),
-      // fire E-WRITE-NOT-IN-LOGIC-CONTEXT regardless of whether the target
-      // cell is declared. Per the S122 user-voice Option-2 ratification,
-      // §40.8 auto-lift covers DECLARATIONS only (`<x> = 0`, `function f()
-      // { }`) — NOT writes. Writes are LOGIC; logic goes in `${...}`.
-      //
-      // The diagnostic is a SHAPE error, not a name-resolution error: the
-      // cell may or may not exist; the wrong is the bare write at body-top.
-      // PASS 1 deliberately STILL registers the auto-synthesised cell for
-      // _isUnitCCWrite nodes (unlike V-kill which skips registration), so
-      // downstream stages remain unchanged — only the loud diagnostic is
-      // new. The user fixes by either:
-      //   (a) wrapping the write in `${...}`: `${ @name = expr }`, OR
-      //   (b) converting to a structural decl: `<name> = expr`.
-      //
-      // EXEMPTION: per-file path-based suppression for the 110-file corpus
-      // that pre-dates Unit CC's enforcement. Each exempted file sunsets
-      // per-file as adopters migrate (remove the file's path from
-      // `unit-cc-exemption-list.json`). Sunset is intentionally manual
-      // (vs V-kill's auto-sunset on file deletion) because these files are
-      // not scheduled for deletion — they are adopter source that needs
-      // migration. The list, the loader and the matching rule all live in
-      // `default-logic-exemption.ts`; `isUnitCCExempt` here is a local alias
-      // for its `isDefaultLogicBodyTopExempt` export. Read that module for
-      // the behaviour — including what happens when the JSON is malformed.
-      //
-      // ⛑ S383: this comment used to describe the loader's internals from out
-      // here — it named the module-init Set binding directly — and that binding
-      // no longer exists in this file, because the S379 extraction moved it.
-      // That is exactly the failure the banner above this file's import names:
-      // describing a function's internals from the outside is how a reference
-      // goes stale. Point at the module. (The dead symbol is deliberately not
-      // repeated here, so a grep for it stays a reliable staleness check.)
-      if ((anyN as any)._isUnitCCWrite === true && typeof anyN.name === "string") {
-        const filePath = (anyN.span && typeof anyN.span.file === "string") ? anyN.span.file : "";
-        if (isUnitCCExempt(filePath)) {
-          // Exempt — skip the fire. Sunset is per-file (remove entry from JSON).
-          continue;
-        }
-        const targetName: string = anyN.name;
-        const declSpan = anyN.span ?? {
-          file: currentScope.qualifiedPath || "",
-          start: 0,
-          end: 0,
-          line: 1,
-          col: 1,
-        };
-        errors.push({
-          code: "E-WRITE-NOT-IN-LOGIC-CONTEXT",
-          message:
-            `E-WRITE-NOT-IN-LOGIC-CONTEXT: bare \`@${targetName} = ...\` write at `
-            + `default-logic body-top. Default-logic mode (SPEC §40.8) auto-lifts `
-            + `DECLARATIONS only (\`<${targetName}> = ...\`, \`function f() {}\`) — `
-            + `NOT writes. Writes are logic; wrap in \`\${...}\`: `
-            + `\`\${ @${targetName} = ... }\`. `
-            + `Alternative: if this was meant to be a declaration, use the `
-            + `structural form \`<${targetName}> = ...\`.`,
-          span: declSpan as Span,
-          severity: "error",
-        });
       }
       // Use the compound sub-scope for nested @-refs inside compound bodies.
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
@@ -7702,6 +7623,44 @@ export function validateEngineStateChildrenAndRules(
       }
     }
 
+    // -- W-ARM-PIPE-LEGACY (info) -- §19.4.5 / §51.0.S.2.3 (S452): a message
+    // arm led by `|` is soft-deprecated; it parses to the same entry as the
+    // pipe-less §18.2 arm. One per `|`-led arm. `legacyPipe` is set only by
+    // parseMessageArms' `|` path (engine-statechild-parser.ts).
+    for (const arm of arms) {
+      if (!arm.legacyPipe) continue;
+      // The arm's own span (S452 review r1): `rulesRawPos` (ast-builder.js)
+      // places `rulesRaw` in the file; the arm sits `bodyRawOffset +
+      // spanStart` into it. Falls back to the engine's span when unplaced.
+      const rp = (engineDecl as { rulesRawPos?: { start: number; line: number; col: number } } | undefined)?.rulesRawPos;
+      const rulesRawText = typeof (engineDecl as { rulesRaw?: unknown } | undefined)?.rulesRaw === "string"
+        ? (engineDecl as { rulesRaw: string }).rulesRaw : null;
+      let span: SYMDiagnostic["span"] = engineDecl?.span ?? {
+        file: filePath, start: 0, end: 0, line: 1, col: 1,
+      };
+      if (rp && rulesRawText !== null && typeof sc.bodyRawOffset === "number") {
+        const rel = sc.bodyRawOffset + arm.spanStart;
+        const before = rulesRawText.slice(0, rel);
+        const nl = before.lastIndexOf("\n");
+        span = {
+          file: filePath,
+          start: rp.start + rel,
+          end: rp.start + rel + 1,
+          line: rp.line + (before.match(/\n/g) ?? []).length,
+          col: nl < 0 ? rp.col + before.length : before.length - nl,
+        };
+      }
+      errors.push({
+        code: "W-ARM-PIPE-LEGACY",
+        message: armPipeLegacyMessage(
+          arm.legacyPipe.pattern, arm.legacyPipe.pattern, arm.armArrow,
+          `(a message arm in state-child \`<${sc.tag}>\`)`,
+        ),
+        span,
+        severity: "info",
+      });
+    }
+
     // -- E-ENGINE-MSG-WITHOUT-ACCEPTS -- arms present but no `accepts=`.
     if (acceptsType === null) {
       fireB15Diagnostic(
@@ -7742,8 +7701,8 @@ export function validateEngineStateChildrenAndRules(
         `\`<engine for=${forType} accepts=${acceptsType}>\` declares message-arm(s) but does ` +
         `not cover every \`${acceptsType}\` variant. Missing arm(s) for: ` +
         `${missing.map((v) => `.${v}`).join(", ")}. Per SPEC §51.0.S.2.4, once a state declares ` +
-        `any message-arm it must cover the full message set OR carry a \`| _ :>\` wildcard. ` +
-        `Add the missing arm(s), or add \`| _ :> @${meta.varName}\` to explicitly ignore the rest ` +
+        `any message-arm it must cover the full message set OR carry a \`_ :>\` wildcard. ` +
+        `Add the missing arm(s), or add \`_ :> @${meta.varName}\` to explicitly ignore the rest ` +
         `(stay in the current state).`,
         engineDecl,
         filePath,

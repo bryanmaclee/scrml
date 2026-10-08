@@ -4,10 +4,10 @@
 < db src="./test.db" protect="password_hash" tables="users">
 ${
   server function getUser(id) {
-    return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get()
+    return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get() !{ _ :> not }
   }
 }
 <div>
-  <button onclick=getUser(1)>Load User</>
+  <button onclick={ getUser(1) !{ .Transport(_) :> { return } } }>Load User</>
 </div>
 </>

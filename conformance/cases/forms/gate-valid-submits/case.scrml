@@ -1,0 +1,15 @@
+// §55.17.3 step 4 — the same gated form with a VALID value: the submit runs the handler.
+<program>
+    let <email:string="" req length(>=5)/>
+    let <calls:int=0/>
+
+    function register() { @calls = @calls + 1 }
+
+    <main>
+        <form id="f" onsubmit=register()>
+            <input id="email" type="email" bind:value=@email/>
+            <button id="go" type="submit">Create account</button>
+        </form>
+        <p id="calls">${@calls}</p>
+    </main>
+</program>

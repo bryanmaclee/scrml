@@ -1,7 +1,7 @@
 # CI — the authoritative async gate (clean env). Never blocks a local push.
 #
 # Gate-layering (flogence gate-layering-methodology-2026-07-06 + scrml S242/S243; TUNED S253 cloud-PA arc):
-#   types (`bun run types:check`; NON-BLOCKING in `tracking` below — NOT always-on local, nothing local
+#   types (`bun run types:check`; BLOCKING in `gate` below since S454 — NOT always-on local, nothing local
 #   invokes it) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #   (S365 fix round: this line previously advertised a layer that did not exist — `scripts/types-gate.ts`
@@ -9,12 +9,15 @@
 #
 # THREE jobs:
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
-#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet.
-#                This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
-#                green in `tracking` (integration needs self-host-smoke relocated/dist-guarded first).
+#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet
+#                + the types gate (S454) + the bootstrap-conformance report's currency on PRs touching
+#                conformance/cases or compiler/self-host-v2 (S457). This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
+#                green in `tracking` (the v1 self-host dist tests were removed S447 — see KEY FINDING).
 #   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
 #                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
-#                interp) + the M6.x within-node parser-parity backlog + canary. Visible, never blocks.
+#                interp) + the bootstrap conformance/severity reports. Visible, never blocks. (The types
+#                gate ran here S365-S454; it is in `gate` now.) (The M6.x within-node parser-parity
+#                step was retired S449 item 6 — native-parser frozen as part of impl#1.)
 #   • windows  — NON-BLOCKING (continue-on-error). unit + conformance on windows-latest — surfaces the
 #                OS-path-separator regressions the Linux gate can't see (#25/#26 `\` vs `/`). Promote into
 #                `gate` (windows-latest matrix) once green. The owed Windows-CI runner (4th+ OS-path report).
@@ -25,6 +28,10 @@
 # sources don't compile against the current compiler: `null`/`!==`/`try` — the post-v1.0 self-host
 # migration, master-list B4). A trustworthy cloud gate can only include what's reproducibly green from
 # source; self-host + the M6.x within-node backlog + browser env-fails are tracked, not gated.
+# S447 UPDATE: the v1 tree is gone (s447-retire-self-host-v1). compiler/tests/self-host was retired at
+# S430; the v1-dist sections of self-host-smoke (§B bs.js, §C tab.js) and self-compilation (the
+# "compiler compiles compiler" bootstrap) were deleted with compiler/self-host/. What remains of those
+# two files exercises stdlib/compiler/ and skips when its gitignored dist is absent.
 #
 # WHY (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the M6.x within-node
 # backlog + the un-rebuildable self-host dist. A gate red on known backlog can't be trusted to retire
@@ -111,6 +118,25 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
+      # S365 / S454 — the compiler's own TypeScript diagnostics do not change silently. BLOCKING.
+      #
+      # `scripts/types-gate.ts --check` diffs `tsc --noEmit --strict` over compiler/src against the
+      # NAME->COUNT baseline in compiler/tests/TYPES-BASELINE.json and exits 1 on ANY difference, in
+      # EITHER direction: a NEW name or a GROWN count is a regression; a GONE name or a SHRUNK count
+      # means the baseline is stale — record a fix in the same commit with
+      # `bun scripts/types-gate.ts --write`. It is a ratchet, not a "tsc-clean" demand: the recorded
+      # population drains through ordinary work.
+      #
+      # It ran from S365 as a continue-on-error step in `tracking`, and sat red there unseen for
+      # ~32 merges (30 NEW + 1 GROWN when promoted). Those were fixed, the baseline re-recorded,
+      # and the step moved here without continue-on-error.
+      # > Provenance: ruling:user-voice-scrml.md S454 "yes, fix the 30 then promote it"
+      #
+      # PLACED FIRST (right after Install deps): it needs neither `pretest` nor a populated dist, so
+      # no earlier step's failure can skip it. `typescript` is a devDependency (installed above);
+      # the script refuses to fall back to a PATH tsc and exits 2 if it is missing.
+      - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
+        run: bun scripts/types-gate.ts --check
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
       - name: Gate suite (unit + conformance — reproducibly green from source)
@@ -146,13 +172,17 @@ jobs:
       # M2 (s437-bootstrap-slice-m2): the front end (parse → analyze → lower) — its proof that the
       # lowered Core equals M1's hand-built oracle, its §66.19 negative lines, and the M1 suite run a
       # second time on the LOWERED programs (SLICE_CORE=lowered).
-      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + v2 lexer oracle
+      # S444 — slice-m4 (#1164: the §66.19 programs compiled from source and run) ran in NO job until now.
+      # S446 — slice-codec (arc unit Uc: the §57 wire codec, descriptor + runtime half + cross-impl vs impl#1).
+      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + M4 §66.19 programs + §57 codec + v2 lexer oracle
         run: |
           bun scripts/lint-no-default-arm.js
           bun test ./compiler/self-host-v2/slice-m1/
           bun test ./compiler/self-host-v2/slice-m2/
           SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/
           bun test ./compiler/self-host-v2/slice-m3/
+          bun test ./compiler/self-host-v2/slice-m4/
+          bun test ./compiler/self-host-v2/slice-codec/
           bun test compiler/tests/integration/self-host-v2-lexer
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
@@ -186,6 +216,29 @@ jobs:
         run: bun scripts/corpus-compile-floor.ts --check
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
+      # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
+      # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3): nothing that grows
+      # the corpus was ever made to regenerate it. BLOCKING here, but PATH-SCOPED: only a pull request
+      # whose diff touches `conformance/cases/**` or `compiler/self-host-v2/**` must leave the report
+      # current. What blocks is STALENESS only — the FAIL count never sets the exit status (that stays
+      # a tracked backlog, not a gate). Remedy: `bun scripts/bootstrap-conformance.ts --write` (~60 s).
+      #
+      # PR-ONLY: on a push to `main` there is no PR base, and two individually-current corpus PRs can
+      # merge into a stale combination; failing the trunk check for that would be cry-wolf. The next
+      # corpus PR is made to heal it, and `tracking` still reports staleness on every run.
+      #
+      # HONEST LIMIT: the report also reads impl#1's front end (the §66 twins come from
+      # `compiler/src/commands/fix-s66.js`) and `conformance/*.ts`, so a PR touching only those can
+      # stale it without tripping this step; the next corpus PR then inherits a mechanical
+      # regenerate. `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
+      - name: Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+            echo "no conformance/cases or compiler/self-host-v2 change in this PR — report currency not required here"
+          else
+            bun scripts/bootstrap-conformance.ts --check
+          fi
       # S409 — an unresolved merge conflict reached `main` at e74f5423 (#900) and this job was GREEN.
       # `compiler/SPEC-INDEX.md` carried three raw markers around 117 duplicated rows; it is a
       # mandatory full-read at every Profile-A PA boot, so the next session read a doubled navigation
@@ -224,25 +277,34 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
-      # S365 — the compiler's own TypeScript diagnostics do not grow silently.
+      # (The Types gate step that ran here S365-S454 is now BLOCKING, in `gate` — S454.)
       #
-      # NON-BLOCKING BY TWO MECHANISMS, ON PURPOSE. The job is `continue-on-error`, and so is
-      # this STEP. The step-level flag is not redundant: a failed step HALTS the job even in a
-      # continue-on-error job (verified on run 30742472551, where the within-node parity step
-      # reported `skipped` and had never run at all). Without it, a types regression would
-      # silently suppress every tracking signal below it — the exact failure this job exists
-      # to avoid.
+      # STEP-LEVEL continue-on-error ON EVERY TRACKING STEP, ON PURPOSE: a failed step HALTS the
+      # job even in a continue-on-error job (verified on run 30742472551, where the within-node
+      # parity step reported `skipped` and had never run at all), so one red signal would
+      # silently suppress every tracking signal below it.
       #
-      # PLACED FIRST because it needs neither `pretest` nor a populated dist, so it cannot be
-      # skipped by an earlier step's failure. Promotion into the BLOCKING `gate` job remains an
-      # operator call and is NOT taken here; it wants a decision on the nine live `never`
-      # failures first (fix, or record and drain).
-      - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
+      # S449 (s449-bootstrap-conformance-counter) — how many conformance cases the PURE bootstrap
+      # (compiler/self-host-v2/) passes, by bucket and area; ~7 s. TRACKING ONLY, never in `gate`:
+      # the number is a backlog, and a red gate over a backlog is the cry-wolf shape. `--check`
+      # exits 1 only when docs/bootstrap-conformance.md is stale (regenerate with `--write`); the
+      # FAIL count never sets the exit status here. (S457: on a PR touching conformance/cases or
+      # compiler/self-host-v2 the same staleness check is ALSO a blocking `gate` step.) Step-level continue-on-error for the reason
+      # stated above (a failed step halts the job). Needs no pretest.
+      - name: Bootstrap conformance count (tracking; report staleness)
         continue-on-error: true
-        run: bun scripts/types-gate.ts --check
+        run: bun scripts/bootstrap-conformance.ts --check
+      # s451-boot-diag-severity — compiler/self-host-v2/severity.scrml is GENERATED from SPEC §34.
+      # Staleness is TRACKED here, not gated: a docs-only SPEC PR adding a §34 row for a code the
+      # bootstrap names (same severity) makes the file stale without changing any answer. The
+      # SEMANTIC check (compiled severityOf == §34) is in slice-m4/severity.test.js. Regenerate
+      # with `bun scripts/gen-bootstrap-severity.ts`.
+      - name: Bootstrap severity table (tracking; report staleness)
+        continue-on-error: true
+        run: bun scripts/gen-bootstrap-severity.ts --check
       - name: Populate browser-test fixtures
         run: bun run pretest
-      - name: integration + lsp + commands (promotion candidates — integration needs self-host-smoke dist-guarded)
+      - name: integration + lsp + commands (promotion candidates)
         run: bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
       # S313 (bryan's Q6) — assert the browser tier's failure NAME SET, not its exit code.
       #
@@ -257,13 +319,11 @@ jobs:
       # leaves it, so this step now carries information and the steps after it execute.
       - name: Browser tier — failure NAME-SET assertion (not exit code)
         run: bun scripts/browser-baseline.ts --check
-      # NOTE (label accuracy — g-ci-does-not-run-root-level-test-files): this step runs ONLY the
-      # within-node parity file. The canary (parser-conformance-canary.test.js) is NOT run here — it
-      # is gated in the BLOCKING `gate` job by the `*.test.js` root glob above ("Root-level
-      # parser/native conformance (S302)"). The step name is kept truthful to its command so an
-      # auditor reading "is the canary covered?" is not misled into thinking THIS step covers it.
-      - name: Within-node parser-parity (M6.x native-parser migration backlog — tracking; canary gated in the blocking `gate` job)
-        run: bun test compiler/tests/parser-conformance-within-node.test.js
+      # S449 (item 6 = (b)): the "Within-node parser-parity" step that stood here is RETIRED with
+      # the parity test, its allowlist and the dual-pipeline canary. compiler/native-parser is a
+      # frozen component of impl#1 (divergences filed, not fixed), so a native-vs-default drift
+      # record has no consumer. The native functions impl#1 calls in production keep their own
+      # tests, run by the blocking `gate` job's root glob and the unit suite.
 
   windows:
     # NON-BLOCKING (continue-on-error) — surfaces OS-path-separator regressions on every PR without gating

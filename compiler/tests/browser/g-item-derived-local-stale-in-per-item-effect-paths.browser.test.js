@@ -30,10 +30,11 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
-const tmpRoot = resolve("/tmp", "scrml-gap-item-derived-local-stale");
+const tmpRoot = resolve(tmpdir(), "scrml-gap-item-derived-local-stale");
 function compileOut(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);
@@ -42,9 +43,12 @@ function compileOut(source, baseName) {
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
-  const html = readFileSync(resolve(outDir, `${baseName}.html`), "utf8");
-  const clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
-  const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf8");
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file, and these
+  // fixtures report one (E-FN-003) — mount the in-memory outputs + runtime.
+  const output = result.outputs.get(tmpInput) ?? {};
+  const html = output.html;
+  const clientJs = output.clientJs;
+  const runtimeJs = result.runtimeSource();
   rmSync(tmpDir, { recursive: true, force: true });
   return { errors: result.errors ?? [], html, clientJs, runtimeJs };
 }

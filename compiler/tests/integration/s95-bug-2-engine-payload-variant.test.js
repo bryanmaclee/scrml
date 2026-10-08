@@ -25,11 +25,12 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 function compileToClientJs(source, suffix = "bug2") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -40,8 +41,9 @@ function compileToClientJs(source, suffix = "bug2") {
       write: true,
       outputDir: outDir,
     });
-    const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+    // in-memory client output (a clean compile writes the same codegen).
+    const clientJs = result.outputs.get(tmpInput)?.clientJs ?? "";
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -270,9 +272,9 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
     const { errors, clientJs } = compileToClientJs(src, "dispatcher-data");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Tag extraction reads `.variant` (the canonical SPEC §51.3.2 shape).
-    expect(clientJs).toMatch(/typeof _v\.variant === "string"/);
+    expect(clientJs).toMatch(/typeof _scrml_arm_v\.variant === "string"/);
     // Data extraction reads `.data` (named fields, not Array.isArray on .payload).
-    expect(clientJs).toMatch(/_v\.data && typeof _v\.data === "object"/);
+    expect(clientJs).toMatch(/_scrml_arm_v\.data && typeof _scrml_arm_v\.data === "object"/);
     // The dead `.payload` Array placeholder is never referenced; `.variant` is
     // the PRIMARY discriminant. §55.10-L4 (msgchain-render-wiring-2026-07-03)
     // added a SECONDARY `.tag` fallback (checked AFTER `.variant`) so the
@@ -306,7 +308,7 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
 </>`;
     const { errors, clientJs } = compileToClientJs(src, "dispatcher-named-data");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
-    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_data && _data\["msg"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_scrml_arm_data && _scrml_arm_data\["msg"\]\)/);
   });
 });
 

@@ -1,0 +1,12 @@
+{
+  "id": "program-two-top-level-same-file-pos",
+  "description": "§40.8 (S443, ruled) — two top-level `<program>` elements in ONE file fire E-PROGRAM-002. Before S443 the second program's `auth=` was silently ignored (compute-program-config reads only the first), so its routes served anonymous callers (g-two-top-level-programs-one-file-second-auth-dropped).",
+  "language-version": "1.0",
+  "spec": "§40.8, §20.5.1",
+  "rationale": "§40.8 'declare its top-level `<program>` element exactly ONCE'; bryan S443 (user-voice item 3): E-PROGRAM-002 covers the same-file case.",
+  "expect": {
+    "codes": ["E-PROGRAM-002"],
+    "severity": { "E-PROGRAM-002": "error" },
+    "codeCounts": { "E-PROGRAM-002": 1 }
+  }
+}

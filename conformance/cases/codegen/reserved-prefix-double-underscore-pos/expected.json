@@ -1,0 +1,13 @@
+{
+  "id": "codegen-reserved-prefix-double-underscore-pos",
+  "description": "§47.1.1 (S457 \"a for __scrml_\") — the `__scrml_` identifier namespace is reserved like `_scrml_`. The program declares `__scrml_cfg__` and references it; each is E-NAME-COLLIDES-RESERVED-PREFIX, reported once per line. (-pos: the code fires.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/is-predicate-in-function-expression-1333.test.js",
+  "spec": "§47.1.1",
+  "rationale": "§47.1.1 S457 ruling: a user-authored scrml program SHALL NOT declare or reference a name that begins with `__scrml_` — the namespace of the compiler's internal placeholders and locals — under E-NAME-COLLIDES-RESERVED-PREFIX. This is what lets the §2.2.1 emitted-artifact gate refuse any `__scrml_<name>__` identifier by shape alone.",
+  "expect": {
+    "codes": ["E-NAME-COLLIDES-RESERVED-PREFIX"],
+    "codeCounts": { "E-NAME-COLLIDES-RESERVED-PREFIX": 2 },
+    "severity": { "E-NAME-COLLIDES-RESERVED-PREFIX": "error" }
+  }
+}

@@ -85,7 +85,8 @@ describe("§A serve-harness: Bun.serve mounting <endpoint> + SSE routes (no html
 
     // The serve-harness — a compiler-owned Bun.serve on the declared port.
     expect(toolJs).toContain("const _scrml_serve_port = 7878;");
-    expect(toolJs).toContain("const _scrml_server = Bun.serve({");
+    // S447 ruling (iv): the harness binds through _scrml_bind.listen (loopback by default).
+    expect(toolJs).toContain("const _scrml_server = _scrml_bind.listen({");
     expect(toolJs).toContain("port: _scrml_serve_port,");
     // It iterates the mounted routes with (request, server) — WS routes get server.
     expect(toolJs).toContain("for (const _scrml_route of routes) {");
@@ -125,7 +126,7 @@ describe("§B main-optional (§64.2 relaxed for serve=)", () => {
     expect(codes).not.toContain("E-TOOL-001");
     // The serve-harness IS the entry — no `await main` for a no-main tool.
     expect(toolJs).not.toContain("await main(");
-    expect(toolJs).toContain("Bun.serve({");
+    expect(toolJs).toContain("_scrml_bind.listen({");
   });
 
   test("a NON-serve tool with no main STILL fires E-TOOL-001 (regression-guard both directions)", () => {
@@ -139,8 +140,8 @@ describe("§B main-optional (§64.2 relaxed for serve=)", () => {
     expect(codes).toEqual([]);
     expect(toolJs).toContain("function main(args) {");
     expect(toolJs).toContain("await main(process.argv.slice(2));");
-    // The await precedes the Bun.serve harness.
-    expect(toolJs.indexOf("await main(")).toBeLessThan(toolJs.indexOf("Bun.serve({"));
+    // The await precedes the serve-harness listener.
+    expect(toolJs.indexOf("await main(")).toBeLessThan(toolJs.indexOf("_scrml_bind.listen({"));
     expect(() => parsesAsModule(toolJs)).not.toThrow();
   });
 
@@ -227,7 +228,8 @@ describe("§G NON-serve tool is UNCHANGED (no serve-harness path)", () => {
       "</program>\n";
     const { codes, toolJs } = compileTool(src);
     expect(codes).toEqual([]);
-    expect(toolJs).not.toContain("Bun.serve({");
+    expect(toolJs).not.toContain("Bun.serve(");
+    expect(toolJs).not.toContain("_scrml_bind");
     expect(toolJs).toContain("main() harness");
     expect(toolJs).toContain("process.exit(");
   });

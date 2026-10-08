@@ -9,8 +9,12 @@ import { loadBundle, MODULES, SELF_HOST_V2 } from "../slice-m1/harness.js";
 export const M2_MODULES = [
   ...MODULES,
   "lex.scrml",
+  "severity.scrml",
   "ast.scrml",
+  "sql.scrml",
   "parse.scrml",
+  "link.scrml",
+  "effects.scrml",
   "analyze.scrml",
   "lower.scrml",
 ];

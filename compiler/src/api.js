@@ -7,30 +7,29 @@
  * servers can all drive compilation without spawning a subprocess.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, existsSync, copyFileSync } from "fs";
-import { resolve, extname, dirname, basename, join, relative, posix as pathPosix } from "path";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, existsSync, copyFileSync, realpathSync } from "fs";
+import { resolve, extname, dirname, basename, join, relative, isAbsolute, posix as pathPosix } from "path";
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
-import { nativeParseFile } from "../native-parser/parse-file.js";
-import { populateNativeAttrValueExprNodes } from "./native-walker/attrvalue-exprnode-walker.ts";
-import { backfillNativeExprText } from "./native-walker/exprtext-backfill-walker.ts";
 import { runPRECG } from "./precg.ts";
 import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
-import { runAttributeInterpolation } from "./validators/attribute-interpolation.ts";
+import { runAttributeInterpolation, runExecutableSinkCheck } from "./validators/attribute-interpolation.ts";
+import { ATTR_INTERP_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { SecretRedactor } from "./diagnostic-secrets.ts";
-import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, programRoleBuildFacts } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
+import { findTopLevelProgram, programRoleOptionsOf, stampImpliedProgramAncestors } from "./program-role.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -43,12 +42,22 @@ import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
+import { withCompilationPlaceholderToken, scrubPlaceholderToken, currentPlaceholderToken } from "./placeholder-nonce.ts";
+// §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
+// and the compilation's ONE tenant set it shares with the floor in CG.
+import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
+import { programBodyUndeclaredTenantTables, liveUndeclaredTenantTables, compilationHasDatabase } from "./tenant-undeclared.ts";
+import { programBodyMultipleStatements } from "./sql-one-statement.ts";
+import { compilationTenantSet, buildTenantContext } from "./codegen/tenant-egress.ts";
+import { fileTenantSubstrateReads } from "./tenant-substrate-read.ts";
+import { appDeclaresDbAuthoritative } from "./codegen/db-authoritative.ts";
+import { buildProtectContext } from "./codegen/protect-egress.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
 import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
-import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST } from "./static-serve-policy.js";
+import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
@@ -56,7 +65,7 @@ import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
 import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides, getBPPOverrides } from "./codegen/compat/parser-workarounds.js";
-import { clearProjectRootCache } from "./codegen/chunk-namespace.ts";
+import { clearProjectRootCache, resolveProjectRoot } from "./codegen/chunk-namespace.ts";
 import { resetMarkupValueExprIdCounter } from "../native-parser/translate-expr.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { runIMatchPromotable } from "./lint-i-match-promotable.js";
@@ -75,9 +84,11 @@ import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
+import { runTransactionChecks } from "./validators/lint-transaction.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
+import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
-import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
+import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -358,6 +369,51 @@ export function collectStdlibSpecifiers(tabResults) {
   return names;
 }
 
+// `scrml:compiler` family — KNOWN-DEFERRED per S121 Wave 7 Unit E survey
+// (docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md
+// Option (d)). The umbrella shim + its 13 per-stage siblings ship a deferred
+// thunk that throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
+// ANY `scrml:compiler` or `scrml:compiler/*` import fires this warning at
+// compile time, regardless of whether the thunk shim is on disk, so adopters
+// see the deferral BEFORE deploy instead of at runtime via a thrown Error.
+function isCompilerFamily(name) {
+  return name === "compiler" || name.startsWith("compiler/");
+}
+
+function stdlibCompilerDeferredWarning(name) {
+  return {
+    code: "W-STDLIB-COMPILER-DEFERRED",
+    message:
+      `W-STDLIB-COMPILER-DEFERRED: scrml:${name} is currently deferred — `
+      + `the bundled shim is a thunk that throws at call time with attribution. `
+      + `The scrml:compiler family requires either an installable compiler package `
+      + `or a compile-time path-rewriter for the bundled shim; neither is in scope yet. `
+      + `For now, invoke the compiler via the CLI (\`scrml compile\`) or import directly `
+      + `from compiler/src/api.js. See `
+      + `docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md `
+      + `+ SPEC §34 (W-STDLIB-COMPILER-DEFERRED) + §41.17.`,
+    severity: "warning",
+    stage: "STDLIB-BUNDLE",
+    filePath: "",
+    line: 1,
+    column: 1,
+  };
+}
+
+function stdlibShimMissingWarning(name) {
+  return {
+    code: "W-STDLIB-SHIM-MISSING",
+    message:
+      `W-STDLIB-SHIM-MISSING: scrml:${name} has no runtime shim — imports will fail at runtime. `
+      + `Add compiler/runtime/stdlib/${name}.js.`,
+    severity: "warning",
+    stage: "STDLIB-BUNDLE",
+    filePath: "",
+    line: 1,
+    column: 1,
+  };
+}
+
 /**
  * Copy the runtime shim for each referenced `scrml:NAME` specifier into
  * `<outputDir>/_scrml/<name>.js` so emitted JS can `import` it via a relative
@@ -452,35 +508,9 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
     }
   }
 
-  // `scrml:compiler` family — KNOWN-DEFERRED per S121 Wave 7 Unit E survey
-  // (docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md
-  // Option (d)). The umbrella shim + its 13 per-stage siblings ship a deferred
-  // thunk that throws at call time with W-STDLIB-COMPILER-DEFERRED attribution.
-  // ANY `scrml:compiler` or `scrml:compiler/*` import fires this warning at
-  // compile time, regardless of whether the thunk shim is on disk, so adopters
-  // see the deferral BEFORE deploy instead of at runtime via a thrown Error.
-  function isCompilerFamily(name) {
-    return name === "compiler" || name.startsWith("compiler/");
-  }
+  // `scrml:compiler` family — see `isCompilerFamily` above.
   function emitCompilerDeferred(name) {
-    if (!Array.isArray(diagnostics)) return;
-    diagnostics.push({
-      code: "W-STDLIB-COMPILER-DEFERRED",
-      message:
-        `W-STDLIB-COMPILER-DEFERRED: scrml:${name} is currently deferred — `
-        + `the bundled shim is a thunk that throws at call time with attribution. `
-        + `The scrml:compiler family requires either an installable compiler package `
-        + `or a compile-time path-rewriter for the bundled shim; neither is in scope yet. `
-        + `For now, invoke the compiler via the CLI (\`scrml compile\`) or import directly `
-        + `from compiler/src/api.js. See `
-        + `docs/changes/bug-8-followup/scrml-compiler-shim-survey-s121-2026-05-22.md `
-        + `+ SPEC §34 (W-STDLIB-COMPILER-DEFERRED) + §41.17.`,
-      severity: "warning",
-      stage: "STDLIB-BUNDLE",
-      filePath: "",
-      line: 1,
-      column: 1,
-    });
+    if (Array.isArray(diagnostics)) diagnostics.push(stdlibCompilerDeferredWarning(name));
   }
 
   for (const name of names) {
@@ -497,17 +527,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
       if (isCompiler) {
         emitCompilerDeferred(name);
       } else if (Array.isArray(diagnostics)) {
-        diagnostics.push({
-          code: "W-STDLIB-SHIM-MISSING",
-          message:
-            `W-STDLIB-SHIM-MISSING: scrml:${name} has no runtime shim — imports will fail at runtime. `
-            + `Add compiler/runtime/stdlib/${name}.js.`,
-          severity: "warning",
-          stage: "STDLIB-BUNDLE",
-          filePath: "",
-          line: 1,
-          column: 1,
-        });
+        diagnostics.push(stdlibShimMissingWarning(name));
       }
       continue;
     }
@@ -557,6 +577,48 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
   return bundled;
 }
 
+/**
+ * The names `bundleStdlibForRun` WOULD bundle — every referenced name whose
+ * shim file exists — computed without touching the filesystem beyond an
+ * existence check. compileScrml decides the stdlib-import rewrites (and runs the
+ * emitted-JS parse gate over them) from this set BEFORE anything is written, so
+ * a compile that fails the gate leaves no `_scrml/` shims behind (SPEC §2.2.1).
+ * `bundleStdlibForRun` returns the same set once it has copied the shims.
+ * When `diagnostics` is supplied, pushes the same W-STDLIB-SHIM-MISSING /
+ * W-STDLIB-COMPILER-DEFERRED warnings `bundleStdlibForRun` would.
+ *
+ * @param {Set<string>} names
+ * @param {object[]} [diagnostics]
+ * @returns {Set<string>}
+ */
+export function planStdlibBundle(names, diagnostics) {
+  const planned = new Set();
+  if (!names) return planned;
+  for (const name of names) {
+    const shimExists = existsSync(join(STDLIB_RUNTIME_DIR, `${name}.js`));
+    if (shimExists) planned.add(name);
+    if (!Array.isArray(diagnostics)) continue;
+    // The same warnings, in the same order, `bundleStdlibForRun` pushes.
+    if (isCompilerFamily(name)) diagnostics.push(stdlibCompilerDeferredWarning(name));
+    else if (!shimExists) diagnostics.push(stdlibShimMissingWarning(name));
+  }
+  return planned;
+}
+
+/**
+ * The diagnostic-stream partition (S93): W-/I- prefixes and warning/info
+ * severities are non-fatal (`result.warnings`); everything else is an Error
+ * (`result.errors`) and fails the compile. ONE predicate, read by the final
+ * result split AND the §2.2.1 pre-write commit decision, so "this compile
+ * reported an error" and "this compile wrote nothing" cannot disagree.
+ */
+function isNonFatalDiagnostic(e) {
+  return e.code?.startsWith("W-") ||
+    e.code?.startsWith("I-") ||
+    e.severity === "warning" ||
+    e.severity === "info";
+}
+
 // ---------------------------------------------------------------------------
 // Import path rewriting (GITI-009 + OQ-2)
 // ---------------------------------------------------------------------------
@@ -591,9 +653,15 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  *   header imports `./scrml-runtime.<hash>.js`, a `.js` relative specifier the
  *   emitter computed in DIST space, which re-basing as if it were source-relative
  *   would break.
+ * @param {((absImportPath: string, importerFile: string) => string|null)|null} [relocate]
+ *   — CLIENT JS only (S440 item 16): maps a source-space helper target to the
+ *   absolute path of its COPY inside dist (`createClientHelperRelocator`), so the
+ *   specifier is re-based to a file the browser can fetch. Called with the target
+ *   THIS function resolved — there is one resolver, not two. Null (or a null
+ *   return) keeps the on-disk re-base to the source file.
  * @returns {string} — JS code with rewritten import paths
  */
-export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null, distSpaceTargets = null) {
+export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null, distSpaceTargets = null, relocate = null) {
   if (!jsCode || !sourceFilePath || !outputDir) return jsCode;
   const sourceDir = dirname(resolve(sourceFilePath));
   const outDir = resolve(outputDir);
@@ -668,7 +736,9 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
     // from `<out>/`, one level short, and failed at runtime. This becomes an
     // emitted import specifier, so posix-normalize it (GitHub #18) — a raw
     // Windows `relative()` result would embed `\` and break the import.
-    let newRelPath = toPosixSpecifier(relative(outDir, absImportPath));
+    // Client JS: point at the dist COPY when the relocator takes the target.
+    const relocated = relocate ? relocate(absImportPath, sourceFilePath) : null;
+    let newRelPath = toPosixSpecifier(relative(outDir, relocated ?? absImportPath));
     // Ensure it starts with ./ or ../
     if (!newRelPath.startsWith('.')) newRelPath = './' + newRelPath;
     return newRelPath;
@@ -732,6 +802,154 @@ function staticImportSources(jsCode) {
 }
 
 /**
+ * The dist subdirectory that holds copies of the author's plain-JS helper
+ * modules that client JS imports (SPEC §21.3). Separate from `_scrml/` (the
+ * stdlib shims), so a project-root-level `math.js` can never land on a shim.
+ */
+export const CLIENT_HELPER_DIR = "_scrml_local";
+
+/** Helper extensions a browser can load as an ES module, so are copied. */
+const CLIENT_HELPER_EXT_RE = /\.(?:js|mjs)$/;
+
+/**
+ * Relative-module specifiers of a helper module (static import, `export … from`,
+ * and literal dynamic `import()`), or null when it does not parse as a module.
+ * @param {string} code
+ */
+function helperModuleSpecifiers(code) {
+  let program;
+  try {
+    program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true });
+  } catch {
+    return null;
+  }
+  const out = [];
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if ((node.type === "ImportDeclaration" || node.type === "ExportNamedDeclaration" || node.type === "ExportAllDeclaration")
+      && node.source && typeof node.source.value === "string") {
+      out.push(node.source.value);
+    } else if (node.type === "ImportExpression" && node.source && node.source.type === "Literal"
+      && typeof node.source.value === "string") {
+      out.push(node.source.value);
+    }
+    for (const key of Object.keys(node)) {
+      const v = node[key];
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === "string") visit(c); }
+      else if (v && typeof v.type === "string") visit(v);
+    }
+  };
+  visit(program);
+  return out;
+}
+
+/**
+ * S440 item 16 (bryan) — the browser half of the client-JS relative-import
+ * re-base: a plain `.js` helper that a page imports client-side is LEGAL
+ * (SPEC §21.3), so the build copies it into dist and re-bases the specifier to
+ * the copy. Re-basing alone (#1113) pointed the specifier back into the SOURCE
+ * tree, which a browser served from the output dir cannot reach.
+ *
+ * Layout: `<outputDir>/_scrml_local/<path relative to the project root>`. The
+ * mirror keeps every helper-to-helper relative specifier valid, so copies are
+ * byte-for-byte; a helper imported by N pages is one file.
+ *
+ * Fail-closed: a target outside the project root (symlinks resolved), a target
+ * whose dist path falls in a §47.13 denied class (it could never be served, and
+ * may be confidential — `*.server.*`, a database, a dot-path), and a missing
+ * target are compile errors; nothing is copied for them. Only `.js` / `.mjs`
+ * are copied — a `.ts` `import:host` target keeps the on-disk re-base.
+ *
+ * The relocator is called by `rewriteRelativeImportPaths` with the target THAT
+ * function resolved, so there is one resolution algorithm, and is memoized, so
+ * the gate phase and the write phase see identical answers.
+ *
+ * @param {string} outputDir — absolute dist root
+ * @param {string} projectRoot — absolute project root (the copy boundary)
+ */
+export function createClientHelperRelocator(outputDir, projectRoot) {
+  const copies = new Map(); // abs dest -> real abs source
+  const errors = [];
+  const memo = new Map(); // abs target -> abs dest | null
+  let realRoot;
+  // `.native` on BOTH sides: Bun's JS `realpathSync` does not expand Windows 8.3
+  // short names, so `secret~1.js` (short name of `secret.server.js`) would be
+  // judged — and copied — under its short name, slipping the §47.13 denied class.
+  try { realRoot = realpathSync.native(projectRoot); } catch { realRoot = resolve(projectRoot); }
+  const fail = (code, file, message) => {
+    errors.push({ stage: "CG", code, message, file, severity: "error" });
+  };
+
+  /** Validate + plan one target; returns the abs dest or null (error recorded). */
+  const plan = (absTarget, importerFile, viaHelper) => {
+    if (memo.has(absTarget)) return memo.get(absTarget);
+    memo.set(absTarget, null);
+    const shown = toPosixSpecifier(absTarget);
+    const via = viaHelper ? ` (imported by the client helper \`${toPosixSpecifier(viaHelper)}\`)` : "";
+    let real;
+    try {
+      real = realpathSync.native(absTarget);
+      if (!statSync(real).isFile()) throw new Error("not a file");
+    } catch {
+      fail("E-IMPORT-006", importerFile,
+        `E-IMPORT-006: \`${shown}\`${via} is imported by client code but does not exist on disk, ` +
+        `so it cannot be copied into the build output for the browser to load.`);
+      return null;
+    }
+    const rel = relative(realRoot, real);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+      fail("E-IMPORT-011", importerFile,
+        `E-IMPORT-011: \`${shown}\`${via} is imported by client code but resolves outside the project root ` +
+        `\`${toPosixSpecifier(realRoot)}\`. The compiler copies client-reachable helper modules into the build ` +
+        `output so the browser can load them, and will not copy files from outside the project. ` +
+        `Move the helper inside the project (or add a scrml.toml at the directory that should be the project root).`);
+      return null;
+    }
+    const distRel = `${CLIENT_HELPER_DIR}/${toPosixSpecifier(rel)}`;
+    if (_scrml_static_denied(distRel)) {
+      fail("E-IMPORT-011", importerFile,
+        `E-IMPORT-011: \`${shown}\`${via} is imported by client code, but its path is in a class the server never ` +
+        `serves (SPEC §47.13: \`*.server.*\`, databases, dot-paths, \`.scrml\`, \`.map\`). It is not copied into the ` +
+        `build output: a browser could never load it, and such files may be server-only. Rename or move the helper.`);
+      return null;
+    }
+    const dest = join(resolve(outputDir), CLIENT_HELPER_DIR, rel);
+    memo.set(absTarget, dest);
+    copies.set(dest, real);
+    // Transitive: the copy's own relative imports must exist beside it too.
+    let code = null;
+    try { code = readFileSync(real, "utf8"); } catch { /* unreadable — the stat above passed; leave */ }
+    const specs = code === null ? null : helperModuleSpecifiers(code);
+    if (specs) {
+      for (const spec of specs) {
+        if (!(spec.startsWith("./") || spec.startsWith("../"))) continue;
+        if (!CLIENT_HELPER_EXT_RE.test(spec)) continue;
+        plan(resolve(dirname(real), spec), importerFile, real);
+      }
+    }
+    return dest;
+  };
+
+  return {
+    copies,
+    errors,
+    /** The `relocate` hook for `rewriteRelativeImportPaths`. */
+    relocate(absImportPath, importerFile) {
+      if (!CLIENT_HELPER_EXT_RE.test(absImportPath)) return null;
+      return plan(absImportPath, importerFile, null);
+    },
+    /** Copy every planned helper into dist. Returns the number copied. */
+    writeCopies() {
+      for (const [dest, src] of copies) {
+        mkdirSync(dirname(dest), { recursive: true });
+        copyFileSync(src, dest);
+      }
+      return copies.size;
+    },
+  };
+}
+
+/**
  * Rewrite `import { ... } from "scrml:NAME"` to a relative path under
  * `<outputDir>/_scrml/NAME.js` for every NAME in the bundled-stdlib set.
  *
@@ -782,6 +1000,9 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * @param {object} options
  * @param {string[]} options.inputFiles        — resolved .scrml file paths to compile
  * @param {string}  [options.outputDir]        — directory to write output files; defaults to dist/ next to first input
+ * @param {string}  [options.buildRoot]        — S445: the build root (§40.8). Route files are the files under ITS
+ *   `pages/` / `routes/` (§40.2); directories above it are never consulted. Default: inferred from the
+ *   application's entry file (route-inference.ts `resolveBuildRoot`; SPEC §40.8 "The build root").
  * @param {boolean} [options.verbose]          — emit per-stage timing and counts to options.log
  * @param {boolean} [options.convertLegacyCss] — pre-process <style> blocks to #{…}
  * @param {boolean} [options.embedRuntime]     — embed runtime inline instead of writing separate file (browser mode only)
@@ -830,6 +1051,42 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * }}
  */
 export function compileScrml(options = {}) {
+  // S457 — every compilation gets its OWN unforgeable placeholder token, held in
+  // an AsyncLocalStorage context for exactly this call (placeholder-nonce.ts):
+  // a token seen in an earlier compile's output is just a name to this one, and
+  // two compilations interleaved in one process never read each other's token.
+  return withCompilationPlaceholderToken(() => _compileScrmlChokepoint(options));
+}
+
+/**
+ * Deep-scrub the current compilation's placeholder token from every string in
+ * `value` (in place; Maps, arrays and plain objects). The token never leaves
+ * the compiler — not in an artifact, a diagnostic, the in-memory `outputs` a
+ * failed compile still returns (it writes none — SPEC §2.2.1), or a serve/LSP reply.
+ */
+function scrubPlaceholderTokenDeep(value, seen = new WeakSet()) {
+  const token = currentPlaceholderToken();
+  const visit = (v) => {
+    if (typeof v === "string") return v.indexOf(token) === -1 ? v : scrubPlaceholderToken(v, token);
+    if (!v || typeof v !== "object" || seen.has(v) || Object.isFrozen(v)) return v;
+    seen.add(v);
+    if (v instanceof Map) {
+      for (const [k, x] of v) { const y = visit(x); if (y !== x) v.set(k, y); }
+    } else if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) { const y = visit(v[i]); if (y !== v[i]) v[i] = y; }
+    } else {
+      for (const k of Object.keys(v)) {
+        const x = v[k];
+        const y = visit(x);
+        if (y !== x) { try { v[k] = y; } catch { /* read-only — leave */ } }
+      }
+    }
+    return v;
+  };
+  return visit(value);
+}
+
+function _compileScrmlChokepoint(options = {}) {
   // s430-dev-db-stub F4 — THE OUTPUT CHOKEPOINT for a compile.
   //
   // The compile unit's connection values (`<program db>`, `<page db>`,
@@ -854,7 +1111,7 @@ export function compileScrml(options = {}) {
     try { redactor.addSource(readFileSync(resolve(f), "utf8")); } catch { /* a directory / unreadable — BS reports it */ }
   }
   const userLog = typeof options.log === "function" ? options.log : console.log;
-  const log = (...args) => userLog(...args.map((a) => (typeof a === "string" ? redactor.redact(a) : a)));
+  const log = (...args) => userLog(...args.map((a) => (typeof a === "string" ? scrubPlaceholderToken(redactor.redact(a)) : a)));
   const restoreOutput = interceptCompileOutput(redactor);
   let result;
   try {
@@ -867,6 +1124,11 @@ export function compileScrml(options = {}) {
   for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
     if (Array.isArray(list)) for (const d of list) redactor.redactDiagnostic(d);
   }
+  // S457 — no placeholder token in anything returned (diagnostics, outputs).
+  for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
+    if (Array.isArray(list)) scrubPlaceholderTokenDeep(list);
+  }
+  if (result.outputs) scrubPlaceholderTokenDeep(result.outputs);
   result.redact = (text) => redactor.redact(text);
   result.redactSource = (text) => redactor.redactSource(text);
   return result;
@@ -878,7 +1140,7 @@ export function compileScrml(options = {}) {
  * synchronous, so nothing else writes while the patch is in place.
  */
 function interceptCompileOutput(redactor) {
-  const red = (a) => (typeof a === "string" ? redactor.redact(a) : a);
+  const red = (a) => (typeof a === "string" ? scrubPlaceholderToken(redactor.redact(a)) : a);
   const saved = {
     log: console.log, error: console.error, warn: console.warn, info: console.info,
     out: process.stdout.write, err: process.stderr.write,
@@ -1012,17 +1274,15 @@ function _compileScrmlImpl(options = {}) {
      */
     compilerSettings = {},
     /**
-     * M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING flag. When set to
-     * the literal "scrml-native", the per-file parse is ROUTED through the
-     * native parser's `nativeParseFile` (compiler/native-parser/parse-file.js)
-     * instead of the live BS+TAB (`splitBlocks` + `buildAST`) path; since
-     * `nativeParseFile` returns the same `{ filePath, ast, errors }` shape,
-     * every downstream stage runs unchanged and pipeline-agnostic. An
-     * I-PARSER-NATIVE-SHADOW routing-confirmation info diagnostic is appended
-     * to result.warnings. The flag is STRICTLY OPT-IN — a no-op when null /
-     * undefined / any other value, in which case the live BS+TAB pipeline is
-     * the unchanged default. Pre-C2 (M5.1) the flag was observability-only;
-     * C2 swapped the no-op for real routing behind the same flag value.
+     * RETIRED (S449, user-voice item 6). This was the `--parser=scrml-native`
+     * routing flag: it sent the whole per-file parse through the native
+     * parser's `nativeParseFile` instead of `splitBlocks` + `buildAST`. The M6
+     * migration it served was stopped (S249) and the native parser is now a
+     * frozen component of impl#1, called only at its fixed internal sites
+     * (component / `^{}` / `<match>` re-parse, the defer lint, the
+     * E-CLASS / E-DYNAMIC-IMPORT pass). Any non-null value throws, so a caller
+     * that still passes it learns the routing is gone instead of silently
+     * compiling with a different parser than it asked for.
      */
     parser = null,
     /**
@@ -1084,6 +1344,14 @@ function _compileScrmlImpl(options = {}) {
      */
     beforeWrite = null,
   } = options;
+
+  // S449 — the full-pipeline `parser` routing option is retired (see its doc above).
+  if (parser !== null && parser !== undefined) {
+    throw new Error(
+      `compileScrml: the \`parser\` option is retired (S449) — got ${JSON.stringify(parser)}. ` +
+      "The native parser is a frozen part of impl#1 and no longer selectable for the whole pipeline; " +
+      "remove the option to compile with the default front end.");
+  }
 
   let { outputDir } = options;
 
@@ -1243,6 +1511,9 @@ function _compileScrmlImpl(options = {}) {
     return result;
   }
 
+  const _attrInterpExecutableSeen = new Set();
+  /** S457 — `sqlBodyKey`s of program-body `?{}` refusals already reported (see collectErrors). */
+  const _sqlProgramStatementSeen = new Set();
   function collectErrors(stageName, errors, filePath = null) {
     if (errors && errors.length > 0) {
       for (const e of errors) {
@@ -1282,6 +1553,37 @@ function _compileScrmlImpl(options = {}) {
           if (enriched.span && typeof enriched.span === "object" && !enriched.span.file) {
             enriched.span = { ...enriched.span, file: filePath };
           }
+        }
+        // §5.2 executable-sink rule (S456) — one E-ATTR-INTERP-EXECUTABLE per emitted attribute.
+        // VP-3 / the post-ME check refuse it before codegen, keyed by the attribute's identity
+        // (`attrSinkKey`) + where it is reported (two instances of one component are two
+        // reports). The `<each>` row lowering asks the same question as a backstop (CG stage);
+        // its report is dropped when that attribute was already refused anywhere.
+        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE) {
+          const sp = enriched.span && typeof enriched.span === "object" ? enriched.span : {};
+          const attrKey = e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
+          const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
+          if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
+          // S457 — a codegen backstop that re-lowers markup from a COPY (a `<match>` arm body is
+          // re-parsed in codegen, with its own span file) cannot share the attribute's identity.
+          // Its refusal is dropped when an EARLIER stage (VP-3 / CE) already refused the same-named
+          // attribute in the same file: the compile fails either way. Only those stages record the
+          // name — codegen refusals never shadow each other, so two distinct `<button ONCLICK=${…}>`
+          // the backstop alone refuses are two reports (identity = their own spans, `attrKey`).
+          const nameKey = e.attrSinkName ? `${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
+          if (stageName === "CG" && nameKey !== null && _attrInterpExecutableSeen.has(nameKey)) continue;
+          if (stageName !== "CG" && nameKey !== null) _attrInterpExecutableSeen.add(nameKey);
+          _attrInterpExecutableSeen.add(attrKey);
+          _attrInterpExecutableSeen.add(fullKey);
+        }
+        // §14.8.10 item (1) (S457) — a program-body `?{}` refused at the TENANT-SCHEMA stage is
+        // refused AGAIN at its codegen lowering (the authority — sql-one-statement-guard.ts): one
+        // report per body, the stage's (it carries the exact `?{` span). A body only the lowering
+        // reads (the stage's raw-text reader missed it) is reported by the lowering.
+        if (typeof e.sqlBodyKey === "string") {
+          if (stageName === "CG" && _sqlProgramStatementSeen.has(e.sqlBodyKey)) continue;
+          _sqlProgramStatementSeen.add(e.sqlBodyKey);
+          delete enriched.sqlBodyKey;
         }
         allErrors.push(enriched);
         // s432 F3 — positioned redaction (a fragment attribute's echoed name).
@@ -1383,7 +1685,7 @@ function _compileScrmlImpl(options = {}) {
   if (bsResults.length === 0) {
     const errors = allErrors;
     const warnings = [];
-    return { errors, warnings, lintDiagnostics: allLintDiagnostics, fileCount: 0, outputDir: outputDir || "", durationMs: 0, outputs: new Map() };
+    return { errors, warnings, lintDiagnostics: allLintDiagnostics, fileCount: 0, artifactsWritten: false, outputDir: outputDir || "", durationMs: 0, outputs: new Map() };
   }
 
   // Stage 2.5: W-INTERP-IN-RAW-CONTENT info-level lint (SPEC §4.17).
@@ -1492,67 +1794,13 @@ function _compileScrmlImpl(options = {}) {
   // When selfHostModules.buildAST is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
   // The self-hosted buildAST bundles its own tokenizer, so no tokenizer override is needed.
   //
-  // M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING. When the opt-in flag
-  // is set, the per-file parse is driven by the native parser's
-  // `nativeParseFile` (compiler/native-parser/parse-file.js) INSTEAD of the
-  // live BS+TAB (`splitBlocks` + `buildAST`) path. `nativeParseFile` returns
-  // the SAME `{ filePath, ast: FileAST, errors }` shape `buildAST` returns, so
-  // it drops into `tabResults` and every downstream stage (PRECG / GCP1 /
-  // GCP3 / NR / RI / AG / CG) runs unchanged and pipeline-agnostic.
-  //   - BS still runs above (its `bsResults` feed the GCP1 raw-block-tree
-  //     check pass via `bsByTab`); the native path simply does not CONSUME
-  //     the BS block-stream — it re-parses from the file source directly.
-  //   - The flag is STRICTLY OPT-IN. `parser` defaults to `null`; for every
-  //     caller that does not pass "scrml-native" the live BS+TAB path is the
-  //     untouched default, which bounds this routing's blast radius.
-  //   - `nativeParseFile` needs `(filePath, source)`; both are recoverable
-  //     from the paired `bsResult` (`bsResult.filePath`) + `sourceByFile`.
-  const useNativeParser = parser === "scrml-native";
-  if (useNativeParser && seams.has("TAB")) {
-    throw new StageSeamError("TAB", null,
-      'cannot substitute TAB under parser: "scrml-native" — that flag routes the parse through nativeParseFile, not buildAST');
-  }
+  // (S449: the `--parser=scrml-native` full-pipeline routing that branched here
+  // is retired — the native parser is a frozen component of impl#1, reached only
+  // at its fixed internal call sites.)
   const _tabEntry = seams.pick("TAB", buildAST);
-  const _buildAST = useNativeParser
-    ? (bsResult) => {
-        // M5-swap — native attr-value `exprNode` population. `nativeParseFile`
-        // builds markup attr values (`onclick=`/`if=`/`bind:`/props) WITHOUT the
-        // `exprNode` field that codegen (emit-html.ts -> emit-event-wiring /
-        // emit-control-flow / emit-bindings / ...) consumes; the LIVE path sets
-        // it inline in ast-builder.js parseAttributes via safeParseExprToNodeGlobal.
-        // Native-parser modules cannot import the live acorn-backed parser (it
-        // would invert the self-host layering), so the population runs HERE on
-        // the assembled native FileAST, reusing the SAME safeParseExprToNodeGlobal
-        // with the SAME `(raw, span.start)` pairing the live path uses -> the
-        // emitted ExprNode is byte-identical to live's. Parse diagnostics
-        // (E-SQL-008 / E-RESET-NO-ARG) land in `result.errors` so `collectErrors`
-        // picks them up exactly as the live path does. Native-path-ONLY; the
-        // default pipeline is untouched.
-        const result = nativeParseFile(
-          bsResult.filePath,
-          sourceByFile.get(bsResult.filePath) ?? "");
-        if (result && result.ast) {
-          if (Array.isArray(result.errors) === false) result.errors = [];
-          populateNativeAttrValueExprNodes(
-            result.ast, result.filePath || bsResult.filePath, result.errors);
-          // M5-swap — native string-`.expr`/`.init`/`.condition` backfill. The
-          // native make*/translate* builders set these legacy string fields empty
-          // (carrying the structured exprNode/initExpr/condExpr sibling instead).
-          // Codegen is migrated to the structured siblings, but the type-system's
-          // lifecycle / bare-variant / enum-subset enforcement is regex-over-TEXT
-          // (checkLifecycleBindingAccess's statementText reads node.expr/init/
-          // condition) and is un-migrated. Backfill the string fields from the
-          // structured siblings (round-tripped via emitStringFromTree) so those
-          // text-passes see the expression. Inert for codegen (never overwrites a
-          // non-empty string; consumers with the sibling keep reading it).
-          // Native-path-ONLY; the default pipeline is untouched.
-          backfillNativeExprText(result.ast);
-        }
-        return result;
-      }
-    : selfHostModules?.buildAST
-      ? (bsResult) => _tabEntry(bsResult)
-      : (bsResult) => _tabEntry(bsResult, selfHostModules?.tokenizer ?? null);
+  const _buildAST = selfHostModules?.buildAST
+    ? (bsResult) => _tabEntry(bsResult)
+    : (bsResult) => _tabEntry(bsResult, selfHostModules?.tokenizer ?? null);
   const tabResults = [];
   // Keep bsResult alongside tabResult for the Gauntlet Phase 1 check pass
   // (some diagnostics need to inspect the raw block tree before TAB drops
@@ -1590,22 +1838,17 @@ function _compileScrmlImpl(options = {}) {
     // emit-server.ts E-SQL-009 site (the concise gate keeps the two disjoint).
     collectErrors("CG", detectSqlInConciseArrowBody(result.ast, result.filePath || bsResult.filePath), result.filePath || bsResult.filePath);
     // §7.2.1 / §21.3.2 (S430 P1 + P4) — E-CLASS-NOT-IN-SCRML /
-    // E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided on the NATIVE parser's tree in
-    // both pipelines (native-walker/forbidden-js-native.ts). The native path
-    // already carries the parse-level codes in result.errors; attribute
-    // expressions are added here. The default path runs the native parser over
-    // the file for THIS family only (every other native code is discarded).
+    // E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided on the NATIVE parser's tree
+    // (native-walker/forbidden-js-native.ts): the native parser runs over the
+    // file for THIS family only (every other native code is discarded), and
+    // attribute expressions are scanned the same way.
     {
       const _fp = result.filePath || bsResult.filePath;
       const _src = sourceByFile.get(_fp) ?? "";
-      if (useNativeParser) {
-        collectErrors("TAB", nativeForbiddenJsAttrDiagnostics(result.ast, _src, _fp), _fp);
-      } else {
-        const _fj = stage("REJECT-CLASS-DYNAMIC-IMPORT", () => forbiddenJsDiagnosticsForDefault(_fp, _src, result.ast));
-        collectErrors("TAB", _fj.diagnostics, _fp);
-        if (verbose && (_fj.fallbackUsed > 0 || _fj.nativeFailed)) {
-          log(`  [TAB] ${_fp}: E-CLASS/E-DYNAMIC-IMPORT native fallback — ${_fj.nativeFailed ? "native parse threw" : `${_fj.fallbackUsed} statement(s)`}`);
-        }
+      const _fj = stage("REJECT-CLASS-DYNAMIC-IMPORT", () => forbiddenJsDiagnosticsForDefault(_fp, _src, result.ast));
+      collectErrors("TAB", _fj.diagnostics, _fp);
+      if (verbose && (_fj.fallbackUsed > 0 || _fj.nativeFailed)) {
+        log(`  [TAB] ${_fp}: E-CLASS/E-DYNAMIC-IMPORT native fallback — ${_fj.nativeFailed ? "native parse threw" : `${_fj.fallbackUsed} statement(s)`}`);
       }
     }
     // Attach source text for library-mode codegen (export-decl span extraction)
@@ -1645,6 +1888,18 @@ function _compileScrmlImpl(options = {}) {
   //
   // The pass body lives in `precg.ts` (`runPRECG`) so the stage has a named, substitutable entry
   // (s430-stage-swap); it was moved there verbatim.
+  // S445 item 1 (§4.12) — the implied application ancestor is a BUILD fact:
+  // when an application program exists, every `<program>` in a route file is
+  // nested. Decided ONCE here, over the whole parsed set, before PRECG reads any
+  // program role (program-role.ts). The route-file classifier is route
+  // inference's own build-root rule (`programRoleBuildFacts`) — swap it there, not here.
+  {
+    const _asts = tabResults.map((r) => r?.ast).filter(Boolean);
+    const _givenRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+      ? resolve(options.buildRoot)
+      : undefined;
+    stampImpliedProgramAncestors(_asts, programRoleBuildFacts(_asts, _givenRoot));
+  }
   const _runPRECG = seams.pick("PRECG", runPRECG);
   for (const tabResult of tabResults) {
     const fileAST = tabResult?.ast;
@@ -1702,7 +1957,7 @@ function _compileScrmlImpl(options = {}) {
       // is exactly the change nobody would think to re-verify here.
       const shape =
         fileAST.fileShape ??
-        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true);
+        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true, programRoleOptionsOf(fileAST));
       return isLibraryShape(shape, fileAST.exports ?? []);
     });
     if (allPureFnModules) {
@@ -1822,6 +2077,14 @@ function _compileScrmlImpl(options = {}) {
     collectErrors("DEFER-CHECKS", deferDiags);
   }
 
+  // §19.10.4 (S450) — `transaction { }` placement + exits: E-ERROR-001 (in a
+  // non-`!` function), E-ERROR-007 (nested), E-TRANSACTION-CONTROL-FLOW (a
+  // `return` / `break` / `continue` / `yield` leaving the block in a function).
+  for (const tabResult of tabResults) {
+    const txnDiags = stage("TRANSACTION-CHECKS", () => runTransactionChecks(tabResult.ast));
+    collectErrors("TRANSACTION-CHECKS", txnDiags);
+  }
+
   // §7.3.3 (S430 round 5) — a block binds each name once: a `let`/`const`/`lin`/
   // `function` redeclaring a same-block binding or a parameter is
   // E-SCOPE-REDECLARE (before this it failed at codegen as an unexplained
@@ -1829,6 +2092,18 @@ function _compileScrmlImpl(options = {}) {
   for (const tabResult of tabResults) {
     const redeclDiags = stage("SCOPE-REDECLARE", () => runRedeclareChecks(tabResult.ast));
     collectErrors("SCOPE-REDECLARE", redeclDiags);
+  }
+
+  // §47.1.1 (S439 #7 + S440 #9, security) — the `_scrml_` identifier prefix is
+  // RESERVED for compiler/runtime names: a user-authored program may neither
+  // declare nor reference one (E-NAME-COLLIDES-RESERVED-PREFIX). Without it an
+  // author's `_scrml_sql.unsafe(...)` reached the raw driver handle around every
+  // `?{}`-lowering floor. Runs HERE, on each file's author tree exactly once,
+  // because the compiler later re-runs buildAST on text it synthesizes (which
+  // legitimately carries `_scrml_` names). stdlib/ source is exempt by path.
+  for (const tabResult of tabResults) {
+    const prefixDiags = stage("RESERVED-PREFIX", () => runReservedPrefixCheck(tabResult.ast));
+    collectErrors("RESERVED-PREFIX", prefixDiags);
   }
 
   // Stage 3.1: Module Resolution
@@ -2165,7 +2440,9 @@ function _compileScrmlImpl(options = {}) {
   // VP-3 — attribute interpolation: `${...}` in non-interpolating attribute
   //        values (e.g. `<channel name=>`) becomes E-CHANNEL-007.
   // VP-1 — attribute allowlist: unknown attributes on scrml-special elements
-  //        (or `auth="role:X"`) emit W-ATTR-001 / W-ATTR-002 (warnings).
+  //        (or an unrecognized value) emit W-ATTR-001 / W-ATTR-002 (warnings); an
+  //        `auth=` on <program>/<page> outside the three literals is the ERROR
+  //        E-AUTH-ATTR-INVALID (§52.13.2, S449).
   // Run all three on the post-CE AST set so downstream stages see consistent
   // diagnostics. Errors fail the run; warnings continue.
   const postCEResult = stage("VP-2", () => seams.pick("VP-2", runPostCEInvariant)({ files: ceResults }));
@@ -2226,7 +2503,11 @@ function _compileScrmlImpl(options = {}) {
 
   // Stage 5: RI (all files)
   const _runRI = seams.pick("RI", runRI);
-  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis }));
+  // S445 — a caller-given build root (§40.8); absent, RI infers it from the entry file.
+  const riBuildRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+    ? resolve(options.buildRoot)
+    : undefined;
+  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot }));
   collectErrors("RI", riResult.errors);
   if (verbose) {
     const routeCount = riResult.routeMap?.functions?.size ?? 0;
@@ -2345,7 +2626,9 @@ function _compileScrmlImpl(options = {}) {
           : null;
       } else {
         // Fallback: parse from raw db= attribute value via the helper.
-        const programNode = (f.nodes ?? f.ast?.nodes ?? []).find(n => n?.kind === "markup" && (n.tag ?? "") === "program");
+        // The file's top-level <program> (program-role.ts; §4.12, S445 — whatever
+        // markup wraps it), the same node its middlewareConfig was read from.
+        const programNode = findTopLevelProgram(f.nodes ?? f.ast?.nodes ?? [], programRoleOptionsOf(f));
         const dbAttr = programNode?.attrs?.find(a => a.name === "db");
         const dbVal = dbAttr?.value?.kind === "string-literal" ? dbAttr.value.value : null;
         dbDriver = extractDbDriverFromValue(dbVal);
@@ -2586,11 +2869,83 @@ function _compileScrmlImpl(options = {}) {
     }
   }
 
+  // §14.10 — imported functions' DECLARATIONS, so TS can type a bare variant
+  // passed to one (`yOf(.Neg(n))` with `yOf(o: Other)` in another file) from
+  // the callee's declared parameter type. Same import-graph walk as the type
+  // seed above (alias-aware pairs, re-export chase); nothing is inferred — TS
+  // resolves each parameter's ANNOTATION in the exporting file's scope
+  // (type-system.ts resolveImportedFnSignatures).
+  const depFnDeclCache = new PathKeyedMap(); // absSource → Map<name, function-decl>
+  function getDepFnDecls(absSource) {
+    if (depFnDeclCache.has(absSource)) return depFnDeclCache.get(absSource);
+    const out = new Map();
+    const depFile = ceFileMap.get(absSource);
+    const top = depFile ? (depFile.nodes ?? depFile.ast?.nodes ?? []) : [];
+    // File-level declarations only: descend through markup / logic containers,
+    // never into a function body (a nested helper is not the exported name).
+    const visit = (nodes) => {
+      for (const n of nodes) {
+        if (!n || typeof n !== 'object') continue;
+        if (n.kind === 'function-decl') {
+          if (typeof n.name === 'string' && !out.has(n.name)) out.set(n.name, n);
+          continue;
+        }
+        if (Array.isArray(n.body)) visit(n.body);
+        if (Array.isArray(n.children)) visit(n.children);
+      }
+    };
+    visit(top);
+    depFnDeclCache.set(absSource, out);
+    return out;
+  }
+  function resolveFnThroughReExport(absSource, fnName, visited) {
+    const key = `${absSource}::${fnName}`;
+    if (visited.has(key)) return null;
+    visited.add(key);
+    const own = getDepFnDecls(absSource).get(fnName);
+    if (own) {
+      const depFile = ceFileMap.get(absSource);
+      return { fnNode: own, depFilePath: absSource, depTypeDecls: depFile?.typeDecls ?? depFile?.ast?.typeDecls ?? [] };
+    }
+    const depGraphEntry = moduleResult.importGraph.get(absSource);
+    if (!depGraphEntry || !depGraphEntry.exports) return null;
+    for (const exp of depGraphEntry.exports) {
+      if (exp.name !== fnName || !exp.reExportSource) continue;
+      // A RENAMED re-export (`export { yOf as g } from …`) is refused, not
+      // chased: chasing the exported name would find an unrelated `g` in the
+      // source file. No signature → the call's arguments stay unstamped.
+      if (typeof exp.localName === 'string' && exp.localName !== fnName) return null;
+      const found = resolveFnThroughReExport(exp.reExportSource, fnName, visited);
+      if (found) return found;
+    }
+    return null;
+  }
+  const importedFnDeclsByFile = new PathKeyedMap();
+  for (const [filePath, graphEntry] of moduleResult.importGraph) {
+    if (!graphEntry.imports || graphEntry.imports.length === 0) continue;
+    const decls = new Map();
+    for (const imp of graphEntry.imports) {
+      const depExports = moduleResult.exportRegistry.get(imp.absSource);
+      if (!depExports) continue;
+      const pairs = Array.isArray(imp.specifiers) && imp.specifiers.length > 0
+        ? imp.specifiers.map(s => ({ imported: s.imported, local: s.local }))
+        : (imp.names ?? []).map(n => ({ imported: n, local: n }));
+      for (const { imported: importedName, local: localName } of pairs) {
+        if (!importedName || !localName || decls.has(localName)) continue;
+        if (!depExports.has(importedName)) continue;
+        const found = resolveFnThroughReExport(imp.absSource, importedName, new Set());
+        if (found) decls.set(localName, found);
+      }
+    }
+    if (decls.size > 0) importedFnDeclsByFile.set(filePath, decls);
+  }
+
   const tsResult = stage("TS", () => _runTS({
     files: ceResults,
     protectAnalysis: paResult.protectAnalysis,
     routeMap: riResult.routeMap,
     importedTypesByFile,
+    importedFnDeclsByFile,
   }));
   // §23.5.5 / §28 — `lint.foreign-undeclared-capability = off` suppression. The
   // W-FOREIGN-UNDECLARED-CAPABILITY presence-nudge always computes in TS; drop it
@@ -2743,6 +3098,75 @@ function _compileScrmlImpl(options = {}) {
   const metaEvalResult = stage("ME", () => seams.pick("META-EVAL", runMetaEval)({ files: metaFiles }));
   collectErrors("ME", metaEvalResult.errors);
 
+  // Stage 6.55: the §5.2 executable-sink rule over the POST-META AST (S456 review F2).
+  // VP-3 (Stage 3.3) runs before ME, so markup a `^{ emit(…) }` splices in — e.g. an
+  // `onclick="go('${@x}')"` or a `href="javascript:…${@x}"` — reached codegen unchecked. Placed
+  // immediately after ME because ME is the LAST stage that adds markup to the AST (DG, the
+  // tenant checks and CG only read it), and before CG so a refusal stops emission like any
+  // other error. Same reader, same walker as VP-3; an attribute VP-3 already refused is not
+  // reported twice (collectErrors dedupe).
+  collectErrors("VP-3", runExecutableSinkCheck({ files: metaFiles }).errors);
+
+  // Stage 6.6: TENANT-SCHEMA — §14.8.10 E-TENANT-SCHEMA-HAZARD (S455, ruling
+  // user-voice-scrml.md S455 "go, comp-time schema"). The ONE evaluation of the
+  // schema-declaration rule, placed after every compile-time expansion of `<schema>`
+  // (TS: `${ schemaFor(T) }`; ME: meta splices) and before CG, over the same AST CG
+  // consumes. Its tenant set IS the floor's — `compilationTenantSet` over the
+  // `<db tables=>` registry and every expanded `<schema>` — the one object CG's
+  // `buildTenantContext` also receives, so a table the floor scopes can never escape
+  // the declaration rule, and the two cannot drift.
+  //
+  // COMPILATION-SCOPED (S455 review rounds 3–4, PA decision): ONE tenant set — the
+  // union of every compiled file's tenant tables, whatever database each names — and
+  // every file's hazards are charged against it. A trigger in one file's `<schema>`
+  // over a tenant table another file declares writes the same database whenever the
+  // two names reach one file, and "these databases are different" cannot be proven
+  // from a `db=` string (symlinks, `?mode=` URIs, SCRML_DATA_DIR roots, hardlinks,
+  // case-insensitive filesystems — each executed by the reviewer). Accepted cost: two
+  // genuinely different databases compiled together share the set.
+  //
+  // THE SAME SET IS THE FLOOR'S (S455, g-tenant-floor-per-file-tenant-set-s455): it is
+  // computed ONCE here and handed to CG (`compilationTenant`), so a file whose reads
+  // touch a table tenant-scoped anywhere in the compilation is filtered at the source
+  // exactly as if it declared the table itself. Before, the floor read only its own
+  // file's `<schema>`: admin.scrml's `SELECT name FROM assets` (assets declared in
+  // app.scrml) was emitted unfiltered and served every tenant's rows (executed).
+  const compilationTenant = compilationTenantSet(metaFiles, buildProtectContext(paResult.protectAnalysis));
+  // S455 "yes, both" — the columns EVERY compiled file's `<schema>` declares: a body's
+  // qualified `rel.col` must name one (Postgres reads `rel.f` as the call `f(rel)` otherwise).
+  // (Computed only when the floor is on — with no tenant table the rule charges nothing.)
+  const compilationColumns = compilationTenant.columns ?? new Map();   // the SAME declared columns the query floor reads
+  // §14.8.10 corollary (S456, g-tenant-identity-substrate-scoped-breaks-login-s455) —
+  // W-TENANT-SUBSTRATE-SCOPED: a function that pins the tenant on the result of a read
+  // of a tenant-scoped table. Same set, same floor classification (`resolveTenantScoping`
+  // over the compilation's context), over the same expanded AST.
+  const substrateCtx = compilationTenant.tables.size > 0
+    ? buildTenantContext(buildProtectContext(paResult.protectAnalysis), [], "", undefined, compilationTenant)
+    : null;
+  // S456 "a, fix F7/F9 too": the program-body allow-list governs a compilation with a database.
+  const compilationHasDb = compilationHasDatabase(metaFiles);
+  for (const fileAST of metaFiles) {
+    const fp = fileAST?.filePath ?? fileAST?.ast?.filePath ?? null;
+    const diags = stage("TENANT-SCHEMA", () => fileTenantSchemaHazards(fileAST, compilationTenant.tables, compilationColumns, compilationTenant.dialect ?? "unknown"));
+    collectErrors("TENANT-SCHEMA", diags, fp);
+    if (substrateCtx) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => fileTenantSubstrateReads(fileAST, substrateCtx)), fp);
+    // §14.8.10 (S456, rulings "b, startup check lands with it" item 1 + "a, fix F7/F9 too" +
+    // "your recs, go") — every program-body `?{}` statement is held to a CLOSED allow-list:
+    // an admitted form giving a relation outside the SAME tenant set a `tenant_id` column is
+    // E-TENANT-UNDECLARED; anything else is E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED
+    // (tenant-undeclared.ts over schema-differ.js `programStatementVerdicts`).
+    if (compilationHasDb) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyUndeclaredTenantTables(fileAST, compilationTenant.tables, compilationTenant.dialect ?? "unknown")), fp);
+    // §8.1.2 (S456, ruling "one statement per seams reasonable. push") — a program-body `?{}`
+    // holds exactly ONE SQL statement (sql-one-statement.ts over the same token walk).
+    if (compilationHasDb) collectErrors("TENANT-SCHEMA", stage("TENANT-SCHEMA", () => programBodyMultipleStatements(fileAST)), fp);
+  }
+  // …item 2 — a live SQLite file a `<db src=>` block opened holds a `tenant_id` relation
+  // outside the set (protect-analyzer.ts collected them; reported at the `<db>` block).
+  for (const d of liveUndeclaredTenantTables(paResult.protectAnalysis?.liveTenantTables, compilationTenant.tables)) {
+    const fp = paResult.protectAnalysis?.liveTenantTables?.find((r) => r.span === d.span)?.filePath ?? null;
+    collectErrors("TENANT-SCHEMA", [d], fp);
+  }
+
   // Stage 7: DG (all files — sees post-meta-expansion AST)
   // When selfHostModules.runDG is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
   const _runDG = seams.pick("DG", runDG);
@@ -2859,6 +3283,11 @@ function _compileScrmlImpl(options = {}) {
     routeMap: riResult.routeMap,
     depGraph: dgResult.depGraph,
     protectAnalysis: paResult.protectAnalysis,
+    // §14.8.10 (S455) — the compilation's ONE tenant set (stage TENANT-SCHEMA above).
+    compilationTenant,
+    // §14.8.10 item (1) (S457) — the SAME database scope the stage above used: codegen holds
+    // every `?{}` it lowers to the program-body statement allow-list.
+    compilationHasDatabase: compilationHasDb,
     batchPlan: bpResult.batchPlan,
     batchPlannerErrors: bpResult.errors,
     embedRuntime,
@@ -2879,6 +3308,10 @@ function _compileScrmlImpl(options = {}) {
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.
     exportRegistry: moduleResult.exportRegistry,
+    // g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the SAME
+    // cross-file type map TS seeded from, so codegen's variant-payload registry
+    // sees imported enums (positional binding, tag compare, constructors).
+    importedTypesByFile,
     // known-gaps-#6 (S152) — pass MOD importGraph + dist outputBaseDir so the
     // cross-file _scrml_modules lowering (Approach B, §21.3) can identify
     // exporter files, derive identical registry keys, and emit topo-ordered
@@ -2903,7 +3336,22 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
-  collectErrors("CG", cgResult.errors);
+  // S457 — every placeholder is lowered by now; any that survived (a refused
+  // construct) loses its compilation token here, before the emit gate reads,
+  // reports or any write lands, and before the in-memory outputs a failed compile
+  // still returns (it writes none — SPEC §2.2.1). The gate's shape test still sees
+  // `__scrml_<name>__`.
+  scrubPlaceholderTokenDeep(cgResult);
+  // §6.6.9 / §20.5 (S449) — the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER
+  // reports a server `@session` lowering the front end MISSED. When route
+  // inference already reported E-SESSION-AMBIENT-SERVER the backstop's hits are
+  // the same reads, refused twice: report the author-facing code only (the
+  // E-INTERNAL-BODY-TOP-DROPPED precedent — an internal floor does not fire when
+  // the run already carries the real error).
+  const _riRefusedSession = (riResult.errors ?? []).some((e) => e && e.code === "E-SESSION-AMBIENT-SERVER");
+  collectErrors("CG", _riRefusedSession
+    ? (cgResult.errors ?? []).filter((e) => !(e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER"))
+    : cgResult.errors);
 
   const durationMs = parseFloat((performance.now() - pipelineStart).toFixed(1));
 
@@ -3023,30 +3471,33 @@ function _compileScrmlImpl(options = {}) {
   // D-4 note above for why that made this very guard blind to the class it
   // exists to catch.
   // ---------------------------------------------------------------------------
+  // Exported names declared in an emitted .server.js (ESM forms; errs toward
+  // "exported" — an unmodeled form just means no false warning). Shared by the
+  // invariant check and (s457) the re-export reconciliation.
+  function serverExportedNamesOf(js) {
+    const names = new Set();
+    let m;
+    const declRe = /\bexport\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)/g;
+    while ((m = declRe.exec(js))) names.add(m[1]);
+    const braceRe = /\bexport\s*\{([^}]*)\}/g;
+    while ((m = braceRe.exec(js))) {
+      for (const part of m[1].split(",")) {
+        const t = part.trim();
+        if (!t) continue;
+        const as = t.split(/\s+as\s+/); // `X as Y` exports Y; bare `X` exports X
+        names.add((as[1] ?? as[0]).trim());
+      }
+    }
+    if (/\bexport\s+default\b/.test(js)) names.add("default");
+    return names;
+  }
+
   function checkServerImportInvariant() {
     if (!cgResult.outputs) return;
     const outputByAbsSource = new Map();
     for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
 
-    // Exported names declared in an emitted .server.js (ESM forms; errs toward
-    // "exported" — an unmodeled form just means no false warning).
-    const exportedNamesOf = (js) => {
-      const names = new Set();
-      let m;
-      const declRe = /\bexport\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)/g;
-      while ((m = declRe.exec(js))) names.add(m[1]);
-      const braceRe = /\bexport\s*\{([^}]*)\}/g;
-      while ((m = braceRe.exec(js))) {
-        for (const part of m[1].split(",")) {
-          const t = part.trim();
-          if (!t) continue;
-          const as = t.split(/\s+as\s+/); // `X as Y` exports Y; bare `X` exports X
-          names.add((as[1] ?? as[0]).trim());
-        }
-      }
-      if (/\bexport\s+default\b/.test(js)) names.add("default");
-      return names;
-    };
+    const exportedNamesOf = serverExportedNamesOf;
 
     // `import D, { a, b as c } from "./X.server.js"` — default + named clause +
     // the relative .server.js path. Namespace `import * as X` is not matched.
@@ -3057,6 +3508,34 @@ function _compileScrmlImpl(options = {}) {
     // kind + missing-name set), so a route-mis-inferred helper imported by many
     // per-route server bundles fires once, not once per bundle.
     const seen = new Set();
+    // S458 (review F4) — an import of a name two `export *` bind differently is already
+    // E-IMPORT-004 ("ambiguous", module-resolver.js). Its importer/target pair emits no
+    // server link for that name; a "has no server content" / "missing export" warning on
+    // the same pair would only misdirect, so that pair stays silent here.
+    // S458 (re-review N2b) — the same for a MISSING name: an import of a name its
+    // target does not export (pair `importer -> target`, name), and a re-export of a
+    // missing name (the re-exporter emits no binding for it, so any importer reading
+    // it through the re-exporter is covered). The E-IMPORT-004 is the report.
+    const ambiguousPairs = new Set();
+    const missingByPair = new Map(); // "importer\ntarget" -> Set<name>
+    const missingReExported = new Map(); // re-exporter abs path -> Set<exported name>
+    for (const e of allErrors) {
+      if (!e || e.code !== "E-IMPORT-004" || !e.importerFile || !e.targetFile) continue;
+      if (e.ambiguousStarName) {
+        ambiguousPairs.add(resolve(e.importerFile) + "\n" + resolve(e.targetFile));
+      } else if (e.missingName) {
+        const k = resolve(e.importerFile) + "\n" + resolve(e.targetFile);
+        if (!missingByPair.has(k)) missingByPair.set(k, new Set());
+        missingByPair.get(k).add(e.missingName);
+      } else if (e.reExportedMissingName) {
+        const k = resolve(e.importerFile);
+        if (!missingReExported.has(k)) missingReExported.set(k, new Set());
+        missingReExported.get(k).add(e.reExportedMissingName);
+      }
+    }
+    const reportedMissing = (importer, target, name) =>
+      (missingByPair.get(resolve(importer) + "\n" + resolve(target))?.has(name) ?? false) ||
+      (missingReExported.get(resolve(target))?.has(name) ?? false);
     for (const [filePath, output] of cgResult.outputs) {
       if (!output.serverJs) continue;
       const importerBase = basename(filePath, ".scrml");
@@ -3069,7 +3548,18 @@ function _compileScrmlImpl(options = {}) {
         const targetAbs = serverImportTargetSource(filePath, relServer);
         const target = outputByAbsSource.get(targetAbs);
         if (!target) continue; // external / cross-unit / vendor — not our invariant
+        if (ambiguousPairs.has(resolve(filePath) + "\n" + resolve(targetAbs))) continue; // S458 F4
         const targetBase = basename(targetAbs, ".scrml");
+        const wanted = [];
+        if (defaultName) wanted.push("default");
+        if (namedClause) {
+          for (const part of namedClause.split(",")) {
+            const t = part.trim();
+            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
+          }
+        }
+        // S458 N2b — every name this import reads is already an E-IMPORT-004.
+        if (wanted.length > 0 && wanted.every((n) => reportedMissing(filePath, targetAbs, n))) continue;
 
         if (!target.serverJs) {
           // (a) MISSING-FILE — target emits no .server.js at all.
@@ -3089,15 +3579,7 @@ function _compileScrmlImpl(options = {}) {
         }
         // (b) MISSING-EXPORT — target emits .server.js but not all imported names.
         const exported = exportedNamesOf(target.serverJs);
-        const wanted = [];
-        if (defaultName) wanted.push("default");
-        if (namedClause) {
-          for (const part of namedClause.split(",")) {
-            const t = part.trim();
-            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
-          }
-        }
-        const missing = wanted.filter((n) => n && !exported.has(n));
+        const missing = wanted.filter((n) => n && !exported.has(n) && !reportedMissing(filePath, targetAbs, n));
         if (missing.length > 0) {
           const dk = "E|" + targetAbs + "|" + missing.slice().sort().join(",");
           if (seen.has(dk)) continue;
@@ -3151,45 +3633,99 @@ function _compileScrmlImpl(options = {}) {
     const outputByAbsSource = new Map();
     for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
     // `import D, { a, b as c } from "./X.server.js"` — same shape the invariant
-    // check matches. We only need the relative `.server.js` path here.
+    // check matches — and (s457, §21.4) a re-export `export { a as b } from
+    // "./X.server.js"`, which links X exactly like an import does. We only need the
+    // relative `.server.js` path here.
     const importRe =
-      /\bimport\s+(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\})?\s*from\s*["'](\.\.?\/[^"']+\.server\.js)["']/g;
+      /\b(?:import\s+(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\})?|export\s*\{[^}]*\})\s*from\s*["'](\.\.?\/[^"']+\.server\.js)["']/g;
     // Dedup so a target imported by many bundles is emitted once.
     const emittedFor = new Set();
-    for (const [filePath, output] of cgResult.outputs) {
-      if (!output.serverJs) continue;
-      importRe.lastIndex = 0;
-      let m;
-      while ((m = importRe.exec(output.serverJs))) {
-        const relServer = m[1];
-        // D-4: same DIST-space reversal the invariant check uses — a source-space
-        // reversal here silently fails to materialize the value-only
-        // `.server.js` for any importer under `pages/`, and the guard then never
-        // sees the dangling target either.
-        const targetAbs = serverImportTargetSource(filePath, relServer);
-        if (emittedFor.has(targetAbs)) continue;
-        const target = outputByAbsSource.get(targetAbs);
-        if (!target) continue; // external / cross-unit / vendor — not ours.
-        if (target.serverJs) continue; // already has server content — fine.
-        const targetAst = astByAbsSource.get(targetAbs);
-        if (!targetAst) continue; // no AST for the target (shouldn't happen).
-        // E-SQL-006 (§44.3, g-esql006) — the value-only emit can surface a compile
-        // diagnostic (a `.prepare()` on a `?{}` in an EXPORTED async fn body that the
-        // module-value-export path emits). Thread a local sink through and fold it
-        // into the compile's error stream via collectErrors (same conversion the main
-        // CG errors take), so the diagnostic is not silently discarded on this pass.
-        const valueOnlyErrors = [];
-        const valueOnly = generateValueOnlyServerJs(targetAst, valueOnlyErrors);
-        if (valueOnlyErrors.length > 0) collectErrors("CG", valueOnlyErrors, targetAbs);
-        emittedFor.add(targetAbs);
-        if (!valueOnly) continue; // no server-importable value export → leave dangling (warning fires).
-        // Attach the minimal value-only .server.js to the target output so the
-        // parse-gate + write phase pick it up and the invariant check resolves.
-        target.serverJs = valueOnly;
+    // s457 — to a FIXPOINT: a value-only `.server.js` materialized below may itself
+    // re-export from a module with no server content (b re-exports c's const), and
+    // that module's file is only needed once b's exists.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const [filePath, output] of cgResult.outputs) {
+        if (!output.serverJs) continue;
+        importRe.lastIndex = 0;
+        let m;
+        while ((m = importRe.exec(output.serverJs))) {
+          const relServer = m[1];
+          // D-4: same DIST-space reversal the invariant check uses — a source-space
+          // reversal here silently fails to materialize the value-only
+          // `.server.js` for any importer under `pages/`, and the guard then never
+          // sees the dangling target either.
+          const targetAbs = serverImportTargetSource(filePath, relServer);
+          if (emittedFor.has(targetAbs)) continue;
+          const target = outputByAbsSource.get(targetAbs);
+          if (!target) continue; // external / cross-unit / vendor — not ours.
+          if (target.serverJs) continue; // already has server content — fine.
+          const targetAst = astByAbsSource.get(targetAbs);
+          if (!targetAst) continue; // no AST for the target (shouldn't happen).
+          // E-SQL-006 (§44.3, g-esql006) — the value-only emit can surface a compile
+          // diagnostic (a `.prepare()` on a `?{}` in an EXPORTED async fn body that the
+          // module-value-export path emits). Thread a local sink through and fold it
+          // into the compile's error stream via collectErrors (same conversion the main
+          // CG errors take), so the diagnostic is not silently discarded on this pass.
+          const valueOnlyErrors = [];
+          const valueOnly = generateValueOnlyServerJs(targetAst, valueOnlyErrors);
+          if (valueOnlyErrors.length > 0) collectErrors("CG", valueOnlyErrors, targetAbs);
+          emittedFor.add(targetAbs);
+          if (!valueOnly) continue; // no server-importable value export → leave dangling (warning fires).
+          // Attach the minimal value-only .server.js to the target output so the
+          // parse-gate + write phase pick it up and the invariant check resolves.
+          target.serverJs = valueOnly;
+          grew = true;
+        }
       }
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // s457 (§21.4) — RE-EXPORTS ARE DECIDED OFF THE EMITTED OUTPUT. emit-server writes
+  // `export { w as helper } from "./c.server.js"` for each local `.scrml` re-export
+  // of a runtime value, but only c's own emission knows whether c.server.js really
+  // exports `w` (an exported server OPERATION that is not async, a component const,
+  // a local `export { a as b }`, or a module with no server file at all, emit none).
+  // ESM does not degrade per name: one missing re-exported name makes the WHOLE
+  // re-exporting module fail to link — every route in it, for every importer. So,
+  // after every `.server.js` exists, each re-export line keeps only the names its
+  // target exports (a line left empty is removed), to a fixpoint so a chain
+  // (b re-exports c re-exports d) settles from the far end. A name dropped here
+  // that a server bundle does import is then reported by
+  // `checkServerImportInvariant` as W-SERVER-IMPORT-UNEMITTED (missing export),
+  // exactly as for a direct import of a name the module does not export.
+  // ---------------------------------------------------------------------------
+  function reconcileServerReExports() {
+    if (!cgResult.outputs) return;
+    const outputByAbsSource = new Map();
+    for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
+    const reExportRe = /^export\s*\{([^}]*)\}\s*from\s*(["'])(\.\.?\/[^"']+\.server\.js)\2;?[ \t]*$/gm;
+    let changed = true;
+    for (let pass = 0; changed && pass < outputByAbsSource.size + 2; pass++) {
+      changed = false;
+      for (const [filePath, output] of cgResult.outputs) {
+        if (!output.serverJs || !output.serverJs.includes("export {")) continue;
+        const next = output.serverJs.replace(reExportRe, (line, clause, _q, relServer) => {
+          const target = outputByAbsSource.get(serverImportTargetSource(filePath, relServer));
+          if (!target) return line; // outside this compile — not ours to judge
+          const exported = target.serverJs ? serverExportedNamesOf(target.serverJs) : new Set();
+          const kept = clause.split(",").map((p) => p.trim()).filter(Boolean)
+            .filter((p) => exported.has(p.split(/\s+as\s+/)[0].trim()));
+          if (kept.length === 0) return "";
+          return `export { ${kept.join(", ")} } from ${JSON.stringify(relServer)};`;
+        });
+        if (next !== output.serverJs) {
+          output.serverJs = next;
+          changed = true;
+        }
+      }
+    }
+  }
+
   emitValueOnlyServerJsForDanglingImports();
+  reconcileServerReExports();
   checkServerImportInvariant();
   runProtectFlow();
 
@@ -3222,10 +3758,62 @@ function _compileScrmlImpl(options = {}) {
     for (const [fp, errs] of byFile) collectErrors("CG", errs, fp);
   }
 
+  // S440 item 16 — plain-JS helpers that client JS imports are copied into
+  // `<outputDir>/_scrml_local/` and the client specifier re-based to the copy
+  // (see createClientHelperRelocator). Planned HERE, before the commit decision
+  // and the emit gate, so its diagnostics reach both and the gate phase and the
+  // write phase consult one memoized answer. The plan walks every client output
+  // from its own dist dir (the `pathFor` computation), exactly as the gate and
+  // write limbs do — an output whose dist dir IS its source dir needs no re-base
+  // and so no copy (the helper already sits beside it in the served tree).
+  // #1045 F1 — the dist artifacts the compiler itself writes that client JS
+  // may name by a relative specifier already in DIST space (the esm-format
+  // runtime import); `rewriteRelativeImportPaths` must leave those alone.
+  // Shared by the plan, the gate phase and the write phase so all rewrite identically.
+  const clientDistSpaceTargets = (outputDir && mode !== "library" && cgResult?.runtimeFilename)
+    ? new Set([resolve(outputDir, cgResult.runtimeFilename)])
+    : null;
+  const clientHelperRelocator = (outputDir && cgOutputBaseDir && cgResult?.outputs)
+    ? createClientHelperRelocator(outputDir, resolveProjectRoot(cgOutputBaseDir) ?? cgOutputBaseDir)
+    : null;
+  const clientRelocate = clientHelperRelocator ? clientHelperRelocator.relocate : null;
+  if (clientHelperRelocator) {
+    const planScrmlSources = new Set(cgResult.outputs.keys());
+    for (const [filePath, output] of cgResult.outputs) {
+      if (!output.clientJs) continue;
+      const relDir = stripPagesPrefix(dirname(relative(cgOutputBaseDir, filePath)));
+      const distDir = (relDir === "." || relDir === "") ? outputDir : join(outputDir, relDir);
+      rewriteRelativeImportPaths(output.clientJs, filePath, distDir, planScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
+    }
+    for (const e of clientHelperRelocator.errors) allErrors.push(e);
+  }
+
   // Pre-write commit decision — see the `beforeWrite` option. The planned
   // `.server.js` set is read off `distServerKeyToSource` (the forward index built
   // through the write phase's `pathFor` transform), never re-derived here.
-  let writeCommitted = write;
+  //
+  // SPEC §2.2.1 (S451 5(b); impl#1 exception granted S457 "1a"): "A compile that
+  // reports one or more diagnostics of Error severity (§34) SHALL NOT produce a
+  // runnable artifact. After such a compile, either no output file of that
+  // compile exists, or the compile wrote no file — an output directory left by an
+  // earlier compile is left exactly as it was, neither overwritten in part nor
+  // deleted." So ANY fatal diagnostic known here refuses the write — not only the
+  // application-scope codes `commands/refusal-gate.js` names. The later fatal
+  // diagnostics are decided before the first byte too: the emitted-JS parse gate
+  // (E-CODEGEN-INVALID-LOGIC) and the dist-path collision check (E-CG-015) both
+  // run below before anything reaches `outputDir`. The callback is still asked
+  // when the compile already failed, so a command can add its own refusal
+  // diagnostics (build's E-MW-007 onion check) to the failure it reports.
+  //
+  // Two decisions, kept apart so a failed compile reports EXACTLY the
+  // diagnostics it reported before S457 (only what lands on disk changes):
+  //   `writeEligible` — the pre-S457 commit (write requested and the callback
+  //     did not refuse). It still gates the pre-write checks that produce
+  //     diagnostics: the stdlib bundle warnings, the emit gate, E-CG-015.
+  //   `writeAborted` (below) — whether a byte is written: eligible, AND no
+  //     fatal diagnostic before the decision, AND every pre-write check passed.
+  const hasFatalBeforeWrite = allErrors.some((e) => !isNonFatalDiagnostic(e));
+  let writeEligible = write;
   if (write && outputDir && typeof beforeWrite === "function") {
     const outputByAbsSource = new Map();
     for (const [fp, output] of cgResult.outputs ?? []) outputByAbsSource.set(resolve(fp), output);
@@ -3234,12 +3822,18 @@ function _compileScrmlImpl(options = {}) {
       const output = outputByAbsSource.get(absSource);
       if (output && output.serverJs) plannedServerUnits.push({ relPath, source: output.serverJs });
     }
-    writeCommitted = beforeWrite({ errors: allErrors, outputDir, plannedServerUnits }) !== false;
+    writeEligible = beforeWrite({ errors: allErrors, outputDir, plannedServerUnits }) !== false;
   }
 
-  const bundledStdlib = (writeCommitted && outputDir)
-    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
+  // The stdlib names this run bundles — decided WITHOUT writing, so the emit
+  // gate below checks the exact bytes the write phase would produce and the
+  // shims are copied only once the gate has passed (a gate failure used to leave
+  // `_scrml/*.js` behind in an otherwise-unwritten output directory).
+  const bundledStdlib = (writeEligible && outputDir)
+    ? planStdlibBundle(stdlibSpecifiers, allErrors)
     : new Set();
+  // Set true once the first byte of this compile reaches `outputDir`.
+  let artifactsWritten = false;
 
   // ---------------------------------------------------------------------------
   // Write output files
@@ -3250,6 +3844,8 @@ function _compileScrmlImpl(options = {}) {
   // dist-relative POSIX paths. Function-scoped so it reaches the return value;
   // populated in the write phase below. Empty for `write:false` / library mode.
   const hashedAssets = new Set();
+  // S445 review F3 — dist-relative POSIX paths of every `.server.js` written this run.
+  const writtenServerModules = new Set();
   // SPEC §47.13 — the client-asset manifest (g-static-server-serves-db-and-server-
   // source). `clientSeeds` records every artifact written FOR THE BROWSER
   // (documents, CSS, client bundles, the shared runtime, per-route chunks);
@@ -3258,13 +3854,18 @@ function _compileScrmlImpl(options = {}) {
   const clientSeeds = new Set();
   let clientAssets = [];
 
-  if (writeCommitted && outputDir) {
-    mkdirSync(outputDir, { recursive: true });
-
-    // `emitGateFailed` short-circuits ALL writes below (runtime chunk, per-file
-    // client/server/library, per-route chunks + manifest) when the emit gate
-    // rejects an artifact. Declared here so every sibling write block in this
-    // `if (write && outputDir)` scope can guard on it.
+  if (writeEligible && outputDir) {
+    // `writeAborted` short-circuits ALL writes below (stdlib shims, runtime chunk,
+    // per-file client/server/library, per-route chunks + manifest) when the
+    // compile has failed: a fatal diagnostic before the commit decision, the
+    // emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC), or the dist-path collision
+    // check (E-CG-015). Nothing — not even `outputDir` itself — is created before
+    // all of them have passed (SPEC §2.2.1: a compile that reports an error
+    // writes no file). Declared here so every sibling write block in this scope
+    // can guard on it.
+    let writeAborted = hasFatalBeforeWrite;
+    // `emitGateFailed` — the gate rejected an artifact; the per-file staging loop
+    // (which raises E-CG-015) does not run over a gate-rejected output set.
     let emitGateFailed = false;
 
     // -------------------------------------------------------------------------
@@ -3305,15 +3906,10 @@ function _compileScrmlImpl(options = {}) {
     // E-CODEGEN-INVALID-LOGIC on top of the real (already-surfaced) error is
     // actively misleading. The build still fails (the prior fatal error fails
     // it) and no artifacts are written. We use the same fatal/non-fatal
-    // partition as the final result split below (`isNonFatal`): only W-/I-
+    // partition as the final result split below (`isNonFatalDiagnostic`): only W-/I-
     // prefixes and warning/info severities are non-fatal.
-    // #1045 F1 — the dist artifacts the compiler itself writes that client JS
-    // may name by a relative specifier already in DIST space (the esm-format
-    // runtime import); `rewriteRelativeImportPaths` must leave those alone.
-    // Shared by the gate phase and the write phase so both rewrite identically.
-    const clientDistSpaceTargets = (outputDir && mode !== "library" && cgResult?.runtimeFilename)
-      ? new Set([resolve(outputDir, cgResult.runtimeFilename)])
-      : null;
+    // (`clientDistSpaceTargets` / `clientRelocate` are computed above the
+    // commit decision — shared by the plan, the gate phase and the write phase.)
     const hasPriorFatalError = allErrors.some((e) =>
       !(e.code?.startsWith("W-")
         || e.code?.startsWith("I-")
@@ -3371,7 +3967,7 @@ function _compileScrmlImpl(options = {}) {
         // so the gated bytes are the written bytes (an `import:host` binding or a
         // plain `.js` helper used client-side lands a source-space specifier here).
         if (output.clientJs) {
-          let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+          let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
           c = rewriteStdlibImports(c, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
           // §4.12.4 — the page's nested-program worker bundles are browser JS too.
@@ -3390,7 +3986,13 @@ function _compileScrmlImpl(options = {}) {
           pushArtifact(chunk.filename, chunk.filename, chunk.payloadJs);
         }
       }
-      const gateErrors = validateEmittedArtifacts(gateArtifacts);
+      if (emitPerRoute && cgResult.chunksBootJs && cgResult.chunksBootFilename) {
+        pushArtifact(cgResult.chunksBootFilename, cgResult.chunksBootFilename, cgResult.chunksBootJs);
+      }
+      // Wording only (never an exemption): did the author's source text mention
+      // a placeholder-shaped name the gate found? See validate-emit.ts.
+      const gateErrors = validateEmittedArtifacts(gateArtifacts,
+        (name) => [...sourceByFile.values()].some((src) => typeof src === "string" && src.includes(name)));
       if (gateErrors.length > 0) {
         for (const ge of gateErrors) {
           allErrors.push({
@@ -3409,6 +4011,7 @@ function _compileScrmlImpl(options = {}) {
           });
         }
         emitGateFailed = true;
+        writeAborted = true;
         if (verbose) {
           log(`  [CG] Emit gate FAILED -- ${gateErrors.length} invalid artifact(s); no files written.`);
         }
@@ -3433,13 +4036,14 @@ function _compileScrmlImpl(options = {}) {
         if (chunk && chunk.filename) hashedAssets.add(chunk.filename);
       }
     }
-
-    // In browser mode, write the shared runtime file (not needed in library mode)
-    if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
-      writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
-      clientSeeds.add(cgResult.runtimeFilename);
-      if (verbose) log(`  [CG] Wrote shared runtime: ${cgResult.runtimeFilename}`);
+    if (emitPerRoute && cgResult.chunksBootFilename) {
+      hashedAssets.add(cgResult.chunksBootFilename);
     }
+
+    // Per-file artifacts are STAGED by `writeOutput` below and flushed only after
+    // every one has a collision-free dist path (E-CG-015), together with the
+    // stdlib shims and the shared runtime — see "Commit the staged writes".
+    const stagedWrites = []; // { targetDir, fullPath, contents }
 
     if (!emitGateFailed && cgResult.outputs) {
       // F-COMPILE-001 Option A: preserve source-tree structure in dist/.
@@ -3500,6 +4104,7 @@ function _compileScrmlImpl(options = {}) {
         if (prior !== undefined && prior !== filePath) {
           // Distinct source files compute to the same dist path.
           // Hard error per §47.9 / §10.10 default. Refuse to overwrite.
+          writeAborted = true;
           allErrors.push({
             stage: "CG",
             code: "E-CG-015",
@@ -3512,8 +4117,8 @@ function _compileScrmlImpl(options = {}) {
           });
           return false;
         }
-        mkdirSync(targetDir, { recursive: true });
-        writeFileSync(fullPath, contents);
+        // Staged, not yet written: flushed after the loop once no E-CG-015 fired.
+        stagedWrites.push({ targetDir, fullPath, contents });
         writtenPaths.set(fullPath, filePath);
         // §47.13 — a browser artifact (document, stylesheet, client bundle, hashed
         // or not, and a §4.12.4 worker bundle) seeds the client-asset manifest.
@@ -3524,6 +4129,9 @@ function _compileScrmlImpl(options = {}) {
           || suffix.endsWith(".worker.js")) {
           clientSeeds.add(relFromRoot(outputDir, fullPath));
         }
+        // S445 review F3 — the server modules THIS compile wrote, so `scrml dev`
+        // loads only those and never a stale `.server.js` an earlier compile left.
+        if (suffix === ".server.js") writtenServerModules.add(relFromRoot(outputDir, fullPath));
         return true;
       }
 
@@ -3580,7 +4188,7 @@ function _compileScrmlImpl(options = {}) {
         for (const [filePath, output] of cgResult.outputs) {
           if (output.clientJs) {
             const { targetDir, fullPath } = pathFor(filePath, ".client.js");
-            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             const hash = fnv1aHash(c);
             finalClientByFile.set(filePath, { contents: c, hash });
@@ -3624,6 +4232,46 @@ function _compileScrmlImpl(options = {}) {
             return `${pre}${posixRelFrom(htmlDir, hashed)}${post}`;
           },
         );
+      };
+
+      // S440 item 16 — classic format: a client bundle that carries a top-level
+      // ES `import` (a plain-JS helper used client-side, now copied into dist)
+      // is a SyntaxError as a classic `<script>`, so the page was dead on
+      // arrival whatever the specifier. Such a page's client-bundle tags load as
+      // `type="module"` instead. ALL of the page's bundle tags flip, not just
+      // the importing one: module scripts run deferred, in document order, so
+      // flipping one would make it run AFTER a classic bundle that reads its
+      // `_scrml_modules[...]` registration. The shared runtime (and the
+      // per-route chunk activation script) stay classic and still run first.
+      // Pages with no importing bundle — every page before this fix that
+      // worked — are byte-identical. esm already tags every script as a module.
+      const importingClientBundles = new Set(); // dist-relative POSIX, unhashed AND hashed
+      if (moduleFormat !== "esm") {
+        for (const [filePath, output] of cgResult.outputs) {
+          if (!output.clientJs) continue;
+          const srcs = staticImportSources(output.clientJs);
+          if (!srcs || srcs.length === 0) continue;
+          const relUn = toPosixRel(pathFor(filePath, ".client.js").fullPath);
+          importingClientBundles.add(relUn);
+          if (assetHashMap.has(relUn)) importingClientBundles.add(assetHashMap.get(relUn));
+        }
+      }
+      const CLIENT_BUNDLE_TAG_RE = /<script src="([^"]+?\.client(?:\.[0-9a-z]+)?\.js)"><\/script>/g;
+      const promoteClassicModuleBundles = (html, htmlFilePath) => {
+        if (importingClientBundles.size === 0 || !html) return html;
+        const { targetDir } = pathFor(htmlFilePath, ".html");
+        const htmlDir = toPosixRel(targetDir);
+        let needsModule = false;
+        for (const m of html.matchAll(CLIENT_BUNDLE_TAG_RE)) {
+          const ref = m[1];
+          if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//") || ref.startsWith("/")) continue;
+          if (importingClientBundles.has(posixNormalize(htmlDir ? `${htmlDir}/${ref}` : ref))) {
+            needsModule = true;
+            break;
+          }
+        }
+        if (!needsModule) return html;
+        return html.replace(CLIENT_BUNDLE_TAG_RE, (m, ref) => `<script type="module" src="${ref}"></script>`);
       };
 
       // ESM chunks arc (Unit 3) — content-hash the in-chunk ES `import` URLs.
@@ -3731,7 +4379,7 @@ function _compileScrmlImpl(options = {}) {
             }
             if (writeOutput(filePath, `.client.${cached.hash}.js`, c)) fileCount++;
           } else {
-            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
           }
@@ -3750,7 +4398,7 @@ function _compileScrmlImpl(options = {}) {
         if (output.html) {
           // #82 — rewrite `.client.js`/`.css` refs to their hashed names
           // (no-op when hashAssets is off).
-          const htmlOut = rewriteHtmlAssetRefs(output.html, filePath);
+          const htmlOut = promoteClassicModuleBundles(rewriteHtmlAssetRefs(output.html, filePath), filePath);
           if (writeOutput(filePath, ".html", htmlOut)) fileCount++;
         }
         if (output.css) {
@@ -3797,6 +4445,46 @@ function _compileScrmlImpl(options = {}) {
     }
 
     // -------------------------------------------------------------------------
+    // Commit the staged writes (SPEC §2.2.1). Reached only when every pre-write
+    // check passed: no fatal diagnostic before the commit decision, the emit
+    // gate, and the E-CG-015 path-collision check over the whole output set. A
+    // collision found mid-loop used to leave the runtime and every artifact
+    // staged before it on disk; now the compile writes nothing at all.
+    // -------------------------------------------------------------------------
+    if (!writeAborted) {
+      mkdirSync(outputDir, { recursive: true });
+      artifactsWritten = true;
+      // No diagnostics sink: `planStdlibBundle` already pushed the bundle warnings.
+      const shimsBundled = bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, null);
+      // The stdlib-import rewrites were computed from `planStdlibBundle`; the
+      // copy must have bundled exactly that set or the rewritten specifiers
+      // point at files that are not there.
+      if (shimsBundled.size !== bundledStdlib.size || [...shimsBundled].some((n) => !bundledStdlib.has(n))) {
+        throw new Error(
+          `compileScrml: stdlib bundle plan diverged from the copy — planned ` +
+          `[${[...bundledStdlib].sort().join(", ")}], bundled [${[...shimsBundled].sort().join(", ")}]. ` +
+          "This is a compiler bug. Please report it.");
+      }
+      // In browser mode, write the shared runtime file (not needed in library mode)
+      if (mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
+        writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
+        clientSeeds.add(cgResult.runtimeFilename);
+        if (verbose) log(`  [CG] Wrote shared runtime: ${cgResult.runtimeFilename}`);
+      }
+      for (const w of stagedWrites) {
+        mkdirSync(w.targetDir, { recursive: true });
+        writeFileSync(w.fullPath, w.contents);
+      }
+    } else {
+      // Nothing was written; nothing this compile planned is reported as written.
+      fileCount = 0;
+      clientSeeds.clear();
+      writtenServerModules.clear();
+      hashedAssets.clear();
+      if (verbose) log(`  [CG] Write refused -- no files written to ${outputDir}.`);
+    }
+
+    // -------------------------------------------------------------------------
     // S91 A-4.1 — Per-route chunk file writes.
     //
     // When `--emit-per-route` is set AND runCG produced chunk descriptors,
@@ -3814,7 +4502,7 @@ function _compileScrmlImpl(options = {}) {
     // references the chunk by hash so adopter tooling can replay the
     // deterministic-from-source contract end-to-end.
     // -------------------------------------------------------------------------
-    if (!emitGateFailed && emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
+    if (!writeAborted && emitPerRoute && cgResult.chunks && cgResult.chunksManifest) {
       // S91 A-4.3 — surface per-tier byte totals in the verbose log so
       // adopters can sanity-check the tier-1 idle-prefetch payload
       // budget at a glance. S91 A-4.4 extends this to tier-2 chunks;
@@ -3862,6 +4550,17 @@ function _compileScrmlImpl(options = {}) {
           log(`  [CG] Wrote chunk: ${chunk.filename} (${byteLen} B)`);
         }
       }
+      // s444-csp-inline-chunks — the build's chunk-activation script
+      // (`_SCRML_CHUNKS` manifest + role bootstrap), referenced by every
+      // augmented page as a same-origin `<script src>` (never inline, so it
+      // runs under `headers="strict"`'s `default-src 'self'`).
+      if (cgResult.chunksBootJs && cgResult.chunksBootFilename) {
+        writeFileSync(join(outputDir, cgResult.chunksBootFilename), cgResult.chunksBootJs);
+        clientSeeds.add(cgResult.chunksBootFilename);
+        fileCount++;
+        if (verbose) log(`  [CG] Wrote chunk activation script: ${cgResult.chunksBootFilename}`);
+      }
+
       const manifestPath = join(outputDir, "chunks.json");
       // A-4.6 — pass `cgResult.chunks` so the on-disk JSON resolves
       // ChunkKey → URL-style content-addressed filename per the
@@ -3927,11 +4626,27 @@ function _compileScrmlImpl(options = {}) {
       }
     }
 
+    // S440 item 16 — copy the client-reachable plain-JS helpers into dist
+    // (`_scrml_local/`). Every copy is SEEDED into the §47.13 manifest: the
+    // relocator's validated copy set is the one source of truth for what client
+    // JS reaches (it was planned from client imports by acorn). The closure's
+    // text scan cannot be trusted to re-find a minified helper's imports
+    // (`import{t}from"./dep.js"`), which used to leave a copied dep unservable.
+    // `collectClientAssets` still applies the denied-class check to every seed.
+    // Fail-closed: a build with any relocation error copies NOTHING.
+    if (!writeAborted && clientHelperRelocator && clientHelperRelocator.errors.length === 0
+      && clientHelperRelocator.copies.size > 0) {
+      for (const dest of clientHelperRelocator.copies.keys()) clientSeeds.add(relFromRoot(outputDir, dest));
+      const n = clientHelperRelocator.writeCopies();
+      fileCount += n;
+      if (verbose) log(`  [CG] Copied ${n} client helper module(s) -> ${CLIENT_HELPER_DIR}/`);
+    }
+
     // SPEC §47.13 — close the browser artifacts over their relative imports and
     // record the result beside the build output. The manifest is a DOTFILE, so the
     // policy that reads it can never serve it. Not counted in `fileCount`: it is
     // compiler bookkeeping, not a compiled artifact.
-    if (!emitGateFailed) {
+    if (!writeAborted) {
       clientAssets = collectClientAssets(outputDir, clientSeeds);
       writeFileSync(
         join(outputDir, CLIENT_ASSET_MANIFEST),
@@ -3950,32 +4665,6 @@ function _compileScrmlImpl(options = {}) {
     }
   }
 
-  // M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING CONFIRMATION. When the
-  // opt-in flag is set, emit ONE I-PARSER-NATIVE-SHADOW info diagnostic per
-  // compile confirming the per-file parse was ROUTED through the native
-  // parser's `nativeParseFile` (the TAB-stage `_buildAST` override above).
-  // Pre-C2 (M5.1) this flag was observability-only — the live BS+TAB pipeline
-  // still produced the FileAST; C2 swapped the no-op for real routing. The
-  // diagnostic's presence in result.warnings is the evidence the native
-  // pipeline produced the downstream FileAST for this compile.
-  if (parser === "scrml-native") {
-    allErrors.push({
-      code: "I-PARSER-NATIVE-SHADOW",
-      message:
-        "I-PARSER-NATIVE-SHADOW: --parser=scrml-native flag recognized. " +
-        "The per-file parse was ROUTED through the native parser " +
-        "(nativeParseFile, compiler/native-parser/parse-file.js) instead " +
-        "of the live BS+TAB path; the native parser produced the FileAST " +
-        "consumed by every downstream stage for this compile. The flag is " +
-        "strictly opt-in — callers that do not pass it use the unchanged " +
-        "live pipeline.",
-      severity: "info",
-      stage: "PARSER-FLAG",
-      filePath: inputFiles[0] || "",
-      line: 1,
-      column: 1,
-    });
-  }
 
   // Diagnostic-stream partition (S93 fix — info-level no longer fatal).
   //
@@ -3996,19 +4685,18 @@ function _compileScrmlImpl(options = {}) {
   // partition rule was {W- prefix OR severity:warning} → warnings; everything
   // else → errors. Info-level fell through to errors. Now: {W-/I- prefix OR
   // severity:warning/info} → warnings.
-  const isNonFatal = (e) =>
-    e.code?.startsWith("W-") ||
-    e.code?.startsWith("I-") ||
-    e.severity === "warning" ||
-    e.severity === "info";
-  const errors = allErrors.filter(e => !isNonFatal(e));
-  const warnings = allErrors.filter(isNonFatal);
+  const errors = allErrors.filter(e => !isNonFatalDiagnostic(e));
+  const warnings = allErrors.filter(isNonFatalDiagnostic);
 
   return {
     errors,
     warnings,
     lintDiagnostics: allLintDiagnostics,
     fileCount,
+    // SPEC §2.2.1 — true when this compile wrote its artifacts to `outputDir`.
+    // Always false when `errors` is non-empty: a compile that reports an Error
+    // writes no file and leaves an earlier build's output directory as it was.
+    artifactsWritten,
     outputDir: outputDir || "",
     durationMs,
     outputs: cgResult.outputs || new Map(),
@@ -4018,11 +4706,38 @@ function _compileScrmlImpl(options = {}) {
     // exercised (e.g. fatal upstream errors); callers fall back to the
     // legacy literal `RUNTIME_FILENAME` when needed.
     runtimeFilename: cgResult.runtimeFilename,
+    // The shared runtime's text, in memory (the bytes written to `runtimeFilename`
+    // on a successful compile). With `outputs`, it lets tooling and tests inspect a
+    // compile that reported an Error — which writes no file (SPEC §2.2.1). The
+    // function form mirrors `batchPlanJson` / `tokenSetJson`.
+    runtimeSource: () => cgResult.runtimeJs ?? "",
+    // s444-csp-inline-chunks — under `emitPerRoute`, the build's same-origin
+    // chunk-activation script (manifest + role bootstrap) and its dist-root
+    // filename. Undefined when no chunks were emitted.
+    chunksBootJs: cgResult.chunksBootJs,
+    chunksBootFilename: cgResult.chunksBootFilename,
     // adopter-#82 FIX 1 — dist-relative POSIX paths of every content-addressed
     // (immutable-safe) artifact written this build (runtime + per-route chunks +,
     // on the build path, page bundles + CSS). The generated `_server.js` serves
     // `immutable` by membership in this set — never by a filename shape guess.
     hashedAssets: [...hashedAssets],
+    // S445 review F3 — dist-relative POSIX paths of every `.server.js` this compile
+    // wrote. `scrml dev` mounts exactly these; any other `.server.js` under the
+    // output dir is a leftover of an earlier compile and is not imported.
+    serverModules: [...writtenServerModules],
+    // s447-dev-db-r5 (§47.14) — every SQLite file handle codegen emitted, as noted by
+    // emit-server / emit-tool (`codegen/sqlite-file-target.ts noteSqliteHandle`):
+    // recorded path, ownership, declaring file, project-root provenance, and kind
+    // ("server" | "tool"). `scrml build` reports them, warns on paths the data root
+    // cannot move, and bakes the referencing ones into the server's startup check.
+    sqliteDatabases: (metaFiles ?? []).flatMap((f) => (f && Array.isArray(f._sqliteFileHandles) ? f._sqliteFileHandles : [])),
+    // §14.8.11 (S455 "a") — true when ANY compiled file declares a `db-authoritative`
+    // `<schema>` table: the SAME recognizer emit-server's principal-wrapper engagement gate
+    // uses (`appDeclaresDbAuthoritative`), so the report and the wrapper cannot disagree.
+    // A build that reaches `scrml build`'s report with this true is on Postgres: codegen's
+    // E-DBAUTH-SQLITE gate hard-fails any other resolved driver. `scrml build` uses it to
+    // state the deploy requirement `REVOKE CREATE ON SCHEMA public FROM PUBLIC`.
+    dbAuthoritative: (metaFiles ?? []).some((f) => f != null && appDeclaresDbAuthoritative(f)),
     // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
     // browser artifacts + their import closure). `generateServerEntry` bakes it
     // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.
@@ -4031,6 +4746,10 @@ function _compileScrmlImpl(options = {}) {
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.
     gatheredFiles: inputFiles,
+    // S440 item 16 — absolute SOURCE paths of the plain-JS helpers this build
+    // planned to copy into `_scrml_local/` (client-reachable only). `scrml dev`
+    // adds them to its watched source set so an edited helper is re-copied.
+    clientHelperSources: clientHelperRelocator ? [...clientHelperRelocator.copies.values()] : [],
     batchPlan: bpResult.batchPlan,
     batchPlanJson: () => serializeBatchPlan(bpResult.batchPlan),
     // Stage 7.6 — A-2.1 scaffold. The record is empty until A-2.2+.

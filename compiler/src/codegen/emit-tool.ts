@@ -27,6 +27,7 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE } from "./sql-handle-name.ts";
 import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
 import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
@@ -37,16 +38,98 @@ import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs,
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
+import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
+// s445 — THE SQLite-file handle emission, shared with emit-server.ts.
+import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./async-combinators.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
+import { buildTenantContext, compilationTenantOf, SERVER_TENANT_HELPER } from "./tenant-egress.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
+import { extractDesiredSchema } from "./db-authoritative.ts";
+import { setTenantContextForRewriter, drainTenantViolationsFromRewriter } from "./rewrite.ts";
+import {
+  isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners, DEFAULT_HOST,
+} from "../commands/listen.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
+
+/**
+ * §64.9 bind address of a headless serve-target (S447 ruling (iv): "generated
+ * headless serve targets default to loopback, prod stays all-interfaces").
+ *
+ * The generated server binds `DEFAULT_HOST` (127.0.0.1 + its ::1 twin) unless
+ * the `SCRML_HOST` environment variable names another address (`0.0.0.0` =
+ * every interface + its `::` twin). The value is validated exactly as
+ * `scrml dev --host` / `scrml serve --host` validate theirs (#1207): whitespace
+ * / control characters and legacy numeric IPv4 shorthand (`0`, `127.1`, …) are
+ * refused, as is an empty value; a refused value or a primary socket that cannot
+ * bind exits 1 with a message on stderr.
+ *
+ * The validation, bind plan, IPv4/IPv6 twin and URL functions are NOT restated:
+ * they are `commands/listen.js`'s own self-contained functions, re-printed by the
+ * runtime's `Function.prototype.toString()` (Bun's printer, not the source text) into
+ * the module (the generated server runs as a plain `bun <file>.js`, with no
+ * compiler beside it to import from).
+ */
+export const SERVE_HOST_ENV = "SCRML_HOST";
+
+const SERVE_BIND_FNS = [
+  isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners,
+];
+
+function serveBindHelperLines(): string[] {
+  const out: string[] = [];
+  out.push(`// --- §64.9 bind address — loopback by default; ${SERVE_HOST_ENV} opts in (S447 ruling iv) ---`);
+  out.push("// The functions inside are compiler/src/commands/listen.js's functions as printed by the");
+  out.push("// runtime's Function.prototype.toString (not its source text), so this server validates");
+  out.push("// and binds its host with the same code `scrml dev` / `scrml serve` run.");
+  out.push("const _scrml_bind = (() => {");
+  for (const fn of SERVE_BIND_FNS) {
+    // Not re-indented: a template literal spanning lines must keep its text exactly.
+    out.push(fn.toString().replace(/\r\n/g, "\n"));
+  }
+  out.push(`  function host(raw) {`);
+  out.push(`    if (raw === undefined) return ${JSON.stringify(DEFAULT_HOST)};`);
+  out.push(`    const refused = raw === ""`);
+  out.push(`      ? { message: "is set but empty. Unset it to bind loopback, or name an address (e.g. 0.0.0.0 for every interface)." }`);
+  out.push(`      : hostRefusal(raw);`);
+  out.push(`    if (refused) {`);
+  out.push(`      console.error(\`scrml serve-target: ${SERVE_HOST_ENV} \${refused.message}\`);`);
+  out.push(`      process.exit(1);`);
+  out.push(`    }`);
+  out.push(`    return raw;`);
+  out.push(`  }`);
+  out.push(`  function listen(config, host) {`);
+  out.push(`    const plan = bindPlan(host);`);
+  out.push(`    const serve = (c) => Bun.serve(c);`);
+  out.push(`    const { server, bound } = bindListeners(serve, config, plan, plan.twin, () => probeIPv6(serve), (m) => console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:")), (err) => {`);
+  out.push(`      const where = config.port === 0 ? "an ephemeral port" : \`port \${config.port}\`;`);
+  out.push(`      console.error(`);
+  out.push(`        \`scrml serve-target: could not listen on host "\${host}" at \${where} — tried \${plan.primary}. \` +`);
+  out.push(`        \`The address is not one of this machine's, the name does not resolve, or the port is already in use. \` +`);
+  out.push(`        \`Set ${SERVE_HOST_ENV} to an address this machine owns (0.0.0.0 = every interface), or change serve=. \` +`);
+  out.push(`        \`Underlying error: \${[err && err.code, err && err.message].filter(Boolean).join(" ")}\`,`);
+  out.push(`      );`);
+  out.push(`      process.exit(1);`);
+  out.push(`    });`);
+  out.push(`    if (isLoopbackHost(host)) {`);
+  out.push(`      console.error(\`scrml serve-target listening on \${displayUrlFor(bound, host, server.port)}\`);`);
+  out.push(`    } else {`);
+  out.push(`      console.error(\`scrml serve-target listening on \${bound.join(" + ")} port \${server.port} — reachable from the network. Anyone who can reach this machine can use it.\`);`);
+  out.push(`    }`);
+  out.push(`    return server;`);
+  out.push(`  }`);
+  out.push(`  return { host, listen };`);
+  out.push(`})();`);
+  return out;
+}
 
 /** Extract the FileAST from a CompileContext-or-fileAST argument. */
 function resolveFileAST(ctxOrFileAST: CompileContext | ASTNode): {
@@ -133,29 +216,63 @@ function toolParamSignature(p: unknown, i: number): string {
  * (§44.2), driven by which `_scrml_sql`/`_scrml_sql_<n>` identifiers the emitted
  * body references. Returns "" when the tool uses no `?{}`.
  */
-function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigure = false): string {
+function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigure = false, errors?: unknown[]): string {
   const usedIdents = new Set<string>();
-  const re = /\b_scrml_sql(?:_\d+)?\b/g;
+  const re = sqlHandleRegExp(); // every handle name (sql-handle-name.ts)
   let m: RegExpExecArray | null;
   while ((m = re.exec(emittedBody)) !== null) usedIdents.add(m[0]);
+  // FAIL CLOSED (S451 review) — a lowering told no handle in a multi-database file.
+  // Never declared (no `:memory:` stand-in); a compile error.
+  if (usedIdents.delete(UNRESOLVED_SQL_HANDLE) && errors) {
+    errors.push(new CGError(
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED",
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED: this file declares more than one database, and a database " +
+      "query in it was lowered without knowing which database it runs on (§8.1.1). The compiler " +
+      "refuses rather than run it on the file's first database. This is a compiler defect.",
+      { file: typeof fileAST.filePath === "string" ? fileAST.filePath : "", start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
+  }
   if (usedIdents.size === 0) return "";
 
   const dbScopes = collectDbScopes(fileAST as never);
   const lines: string[] = [];
   lines.push("// --- §44.2: Bun.SQL handle declarations (compiler-generated) ---");
   lines.push('import { SQL } from "bun";');
-  const sorted = Array.from(usedIdents).sort((a, b) => {
-    if (a === "_scrml_sql") return -1;
-    if (b === "_scrml_sql") return 1;
-    return parseInt(a.replace("_scrml_sql_", ""), 10) - parseInt(b.replace("_scrml_sql_", ""), 10);
-  });
+  const sorted = Array.from(usedIdents).sort(compareSqlHandles);
   // §44 (S433 fix-round, F2-2) — the file-backed sqlite handles this module declares,
   // collected as they are emitted and configured in one block after them.
   const sqliteConfiguredIdents: string[] = [];
+  // s445-dev-db-side-file — the SAME SQLite-file emission as the server half
+  // (codegen/sqlite-file-target.ts): the file the compile-time schema read resolved,
+  // recorded relative to the project root and resolved at runtime against
+  // SCRML_DATA_DIR ?? that root (§47.14); an owning handle (this file declares the
+  // schema) opens at load and may create, a referencing one opens lazily and never
+  // creates (§8.1.1). A tool is run from wherever the user's shell is (`bun
+  // src/ports/dist/tick-tool.js` from the repo root), so a CWD-relative literal opened
+  // — and created — a different file than the compiler read.
+  const sourceFile = typeof fileAST.filePath === "string" ? fileAST.filePath : "";
+  const sqliteFileHelperAt = lines.length;
+  let sqliteFileProjectRoot: string | null = null;
   for (const ident of sorted) {
     const scope = dbScopes.get(ident);
     if (!scope) {
       lines.push(`const ${ident} = new SQL(":memory:"); // no <program db=> found (likely upstream E-SQL-004)`);
+      continue;
+    }
+    const sqliteFile = scope.driver === "sqlite" && sourceFile
+      ? sqliteFileHandle(
+          scope.connectionString,
+          sourceFile,
+          (fileAST as any)._outputBaseDir,
+          ownedDbFilesFor(getNodes(fileAST as never), sourceFile),
+        )
+      : null;
+    if (sqliteFile !== null) {
+      sqliteFileProjectRoot = sqliteFile.projectRoot;
+      noteSqliteHandle(fileAST, sqliteFile.record, "tool");
+      lines.push(`const ${ident} = ${sqliteFile.expr};`);
+      if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
       continue;
     }
     let connStr = scope.connectionString;
@@ -199,7 +316,11 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
   // subprocess; only `.server.js` goes through `evalServerModule`). The LIBRARY caller
   // keeps the floating form — it is long-lived enough not to need the barrier and it is
   // imported by other modules, so it gets no top-level await it did not already have.
-  if (sqliteConfiguredIdents.length > 0) {
+  if (sqliteFileProjectRoot !== null) {
+    lines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...sqliteFileHelperLines(sqliteFileProjectRoot), "");
+  }
+  // A referencing sqlite-file handle calls `_scrml_sqlite_configure` itself when it opens.
+  if (sqliteConfiguredIdents.length > 0 || sqliteFileProjectRoot !== null) {
     lines.push("");
     lines.push(...SQLITE_CONFIGURE_HELPER_LINES);
     for (const ident of sqliteConfiguredIdents) {
@@ -214,6 +335,41 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
 // emit these). A tool bypasses the client runtime, so the helper DEFINITIONS
 // must be inlined into the module — the same on-demand pattern the server emit
 // uses. Table = call-signature → self-contained source.
+// ---------------------------------------------------------------------------
+// §14.8.10 tenant floor in a `kind="tool"` module. A tool runs OUTSIDE any
+// request, so (S452 readings) a read of a tenant-scoped table without
+// `.acrossTenants()` sees ZERO rows and a tenant-injected INSERT is refused by
+// name at runtime; the compile-time refusals (E-TENANT-AGG / E-TENANT-WRITE)
+// apply as in a web app. Armed from the file's own `<schema>` declarations and
+// the compilation's one tenant set (S455) around the tool's SQL lowering, then
+// released.
+// ---------------------------------------------------------------------------
+function beginToolTenantFloor(fileAST: ASTNode): boolean {
+  const desired = extractDesiredSchema(fileAST as never);
+  const dbScopes = collectDbScopes(fileAST as never);
+  const ctx = buildTenantContext(
+    { protectedByTable: new Map(), schemaByTable: new Map() } as never,
+    desired.tenantTables,
+    desired.schemaText,
+    (ident: string) => dbScopes.get(ident)?.driver,
+    // S455 — the compilation's one tenant set (runCG attaches it to the file AST).
+    compilationTenantOf(fileAST),
+  );
+  if (ctx.tenantScopedTables.size === 0) return false;
+  setTenantContextForRewriter(ctx);
+  return true;
+}
+function endToolTenantFloor(armed: boolean, filePath: string, errors?: unknown[]): void {
+  if (!armed) return;
+  for (const v of drainTenantViolationsFromRewriter()) {
+    errors?.push(new CGError(v.code, v.message, { file: filePath, start: 0, end: 0, line: 1, col: 1 }, "error"));
+  }
+  setTenantContextForRewriter(null);
+}
+/** The tenant-floor runtime names a tool body may call (all defined by SERVER_TENANT_HELPER). */
+const TENANT_HELPER_CALL_RE = /\b_scrml_tenant_(?:scope|scope_none|write_key)\(/;
+const TENANT_HELPER_NAMES = ["_scrml_tenant_scope", "_scrml_tenant_scope_none", "_scrml_tenant_write_key"];
+
 const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   { sig: "_scrml_structural_eq(", src: SERVER_STRUCTURAL_EQ_HELPER },
   { sig: "_scrml_log(", src: SERVER_LOG_HELPER },
@@ -221,6 +377,17 @@ const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   // means a `_scrml_print(` reference is INLINED (not an E-TOOL-005 gap): a
   // `kind="tool"` program is the primary print consumer (its stdout is parsed).
   { sig: "_scrml_print(", src: SERVER_PRINT_HELPER },
+  // §19.8.3 (S451 R11) — a `?{}` handled by `!{}` / `match` lowers through
+  // `_scrml_sql_attempt(`. Listed explicitly: the `_scrml_sql*` db-handle
+  // exemption in the fail-closed scan below would otherwise wave it through
+  // un-inlined.
+  { sig: `${SQL_ATTEMPT_FN}(`, src: SERVER_SQL_ATTEMPT_HELPER },
+  // §23.2.4a — a `_{}` slice (main's host I/O, or an inline value-returning
+  // block) is built in its sealed scope by this helper (foreign-seal.ts).
+  { sig: `${FOREIGN_SEAL_FN}(`, src: SERVER_FOREIGN_SEAL_HELPER },
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls the `url` shape judge
+  // (runtime-url-guard.js). A header, so its `const` sets initialize before any top-level check.
+  { sig: `${URL_SHAPE_FN}(`, src: SERVER_URL_SHAPE_HELPER },
 ];
 
 // Runtime-helper identifiers the tool module legitimately DEFINES itself (the
@@ -243,6 +410,11 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
       parts.push(src);
       inlinedNames.add(sig.slice(0, -1)); // strip trailing "("
     }
+  }
+  // §14.8.10 — the tenant floor's source filter / write key (one block, once).
+  if (TENANT_HELPER_CALL_RE.test(body)) {
+    parts.push(SERVER_TENANT_HELPER);
+    for (const n of TENANT_HELPER_NAMES) inlinedNames.add(n);
   }
   // Phase-2 colorless-async — inline any collection-combinator helper the tool
   // body lowered an async callback to (`_scrml_<method>Async(`). Register each used
@@ -506,18 +678,14 @@ export function generateToolJs(
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // s440 — nested helpers resolved against the tool's async set (see local-async-fns.ts).
   annotateToolFns(fns, asyncFnNames, filePath, errors, fileAST);
-  // Foreign crossing-shadow errors (E-FOREIGN-006) surface via this sink.
-  const foreignCrossingErrors: unknown[] = [];
-  // E-SQL-006 (§44.3) — `.prepare()` on a `?{}` result in a tool fn body surfaces
-  // via this dedicated narrow sink (mirror of `foreignCrossingErrors`).
-  const preparedStmtErrors: unknown[] = [];
+  // E-FOREIGN-006/007 and E-SQL-006 refusals go to the run-wide sink
+  // (refused-lowering-errors.ts, drained by runCG) — never an opts-threaded channel,
+  // which an `if` / loop body's freshly built opts used to drop (s456).
 
   const emitOpts = {
     boundary: "server" as const,
     serverFnNames: asyncFnNames,
     syncPeerCalls: [] as Array<{ name: string; span: unknown }>,
-    foreignCrossingErrors,
-    preparedStmtErrors,
     declaredNames: new Set<string>(),
   };
 
@@ -538,6 +706,7 @@ export function generateToolJs(
 
   let mainFn: ASTNode | null = null;
 
+  const _tenantArmed = beginToolTenantFloor(fileAST);
   for (const stmt of stmts) {
     if (isFunctionDecl(stmt)) {
       const name = (stmt.name ?? "anon") as string;
@@ -563,6 +732,7 @@ export function generateToolJs(
       bodyLines.push(code);
     }
   }
+  endToolTenantFloor(_tenantArmed, filePath, errors);
 
   // F2 no-silent-leak — fail closed on any non-awaitable async (stdlib primitive or
   // async-callback combinator) the tool emitted BARE.
@@ -613,16 +783,6 @@ export function generateToolJs(
     // No main — E-TOOL-001 already fired at TS; emit an honest no-op so the
     // artifact still parses (the build fails on the prior fatal error).
     harness.push("// (no `function main` — E-TOOL-001)");
-  }
-
-  // Surface any E-FOREIGN-006 crossing-shadow errors the foreign lowering
-  // collected (the emit-logic `case "foreign"` writes them to this sink).
-  if (errors && foreignCrossingErrors.length > 0) {
-    for (const e of foreignCrossingErrors) errors.push(e);
-  }
-  // Surface any E-SQL-006 `.prepare()` diagnostics the SQL lowering collected.
-  if (errors && preparedStmtErrors.length > 0) {
-    for (const e of preparedStmtErrors) errors.push(e);
   }
 
   // §8.1.1 / §44.7 E-SQL-004 — a `kind="tool"` PROGRAM with a `?{}` SQL block that
@@ -730,15 +890,13 @@ function generateServeHarnessToolJs(
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // s440 — nested helpers resolved against the tool's async set (see local-async-fns.ts).
   annotateToolFns(fns, asyncFnNames, filePath, errors, fileAST);
-  const foreignCrossingErrors: unknown[] = [];
-  // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of foreignCrossingErrors).
-  const preparedStmtErrors: unknown[] = [];
+  // E-FOREIGN-006/007 and E-SQL-006 refusals go to the run-wide sink
+  // (refused-lowering-errors.ts, drained by runCG) — never an opts-threaded channel,
+  // which an `if` / loop body's freshly built opts used to drop (s456).
   const emitOpts = {
     boundary: "server" as const,
     serverFnNames: asyncFnNames,
     syncPeerCalls: [] as Array<{ name: string; span: unknown }>,
-    foreignCrossingErrors,
-    preparedStmtErrors,
     declaredNames: new Set<string>(),
   };
   const routeMap = deps.routeMap as { functions?: Map<string, { boundary?: string }> } | undefined;
@@ -758,6 +916,7 @@ function generateServeHarnessToolJs(
   const headlessDeclaresBinding = (name: string): boolean =>
     new RegExp("(?:export\\s+)?(?:const|let)\\s+" + escapeRegExp(name) + "\\b").test(headlessModule);
 
+  const _tenantArmed = beginToolTenantFloor(fileAST);
   for (const stmt of stmts) {
     if (isFunctionDecl(stmt)) {
       const name = (stmt.name ?? "anon") as string;
@@ -792,6 +951,7 @@ function generateServeHarnessToolJs(
     for (const line of code.split("\n")) extraLines.push(line);
     extraLines.push("");
   }
+  endToolTenantFloor(_tenantArmed, filePath, errors);
 
   // F2 no-silent-leak — fail closed on any non-awaitable async (stdlib primitive or
   // async-callback combinator) emitted BARE in a composing `main`/helper. (Route
@@ -818,17 +978,19 @@ function generateServeHarnessToolJs(
     portJs = "0";
   }
 
-  // 4. Surface any E-FOREIGN-006 crossing-shadow diagnostics from the extra-fn emit.
-  if (errors && foreignCrossingErrors.length > 0) for (const e of foreignCrossingErrors) errors.push(e);
-  // 4b. Surface any E-SQL-006 `.prepare()` diagnostics from the extra-fn emit.
-  if (errors && preparedStmtErrors.length > 0) for (const e of preparedStmtErrors) errors.push(e);
-
   // 5. Assemble: banner + headless module + extra helper header + extra fns +
   //    the serve-harness. The headless module leads with its own ES imports (they
   //    hoist); the extra helper header is a plain function/const block after it.
   const out: string[] = [];
   out.push("// Generated listener-owning tool — scrml compiler output (§64, Fork 1A)");
   out.push(`// Headless serve-target: \`bun <this-file>.js\` starts Bun.serve on the declared port.`);
+  out.push("");
+  // §64.9 bind address — resolved + validated FIRST, before any of this module's
+  // own top-level statements (db handles, user consts, a composing `main`), so a
+  // refused SCRML_HOST exits before any user code in this module runs. (Static
+  // ES imports still evaluate first — the language cannot order code ahead of them.)
+  for (const line of serveBindHelperLines()) out.push(line);
+  out.push(`const _scrml_serve_host = _scrml_bind.host(process.env.${SERVE_HOST_ENV});`);
   out.push("");
   out.push(headlessModule.replace(/\n+$/, ""));
   out.push("");
@@ -847,7 +1009,7 @@ function generateServeHarnessToolJs(
     out.push("await main(process.argv.slice(2));");
   }
   out.push(`const _scrml_serve_port = ${portJs};`);
-  out.push(`const _scrml_server = Bun.serve({`);
+  out.push(`const _scrml_server = _scrml_bind.listen({`);
   out.push("  port: _scrml_serve_port,");
   // Match the web-app entry's idleTimeout (S221 — a legit >10s route must not be
   // truncated by Bun's 10s default).
@@ -864,15 +1026,15 @@ function generateServeHarnessToolJs(
   out.push("    return new Response(\"Not Found\", { status: 404 });");
   out.push("  },");
   if (hasWs) out.push("  websocket: _scrml_ws_handlers,");
-  out.push("});");
+  out.push("}, _scrml_serve_host);");
   // Expose the server handle on globalThis: §38.6 needs it for a channel-scoped
   // `broadcast()` (`_scrml_active_server.publish(topic, msg)`, mirrors build.js),
   // and it is the in-process boot/drive/STOP seam for a harness test (the DD H6
   // conformance shape — `_scrml_active_server.stop(true)`). Unconditional: a
   // headless serve-target has no client, so exposing its own server is harmless.
   out.push("globalThis._scrml_active_server = _scrml_server;");
-  // Operator-visible startup line on STDERR (stdout stays clean for machine output).
-  out.push("console.error(`scrml serve-target listening on http://localhost:${_scrml_serve_port}`);");
+  // The operator-visible startup line (STDERR — stdout stays clean for machine
+  // output) is printed by `_scrml_bind.listen`, naming what actually bound.
   out.push("");
   return out.join("\n");
 }
@@ -897,6 +1059,12 @@ function buildServeExtraHelperHeader(
       parts.push(src);
       inlinedNames.add(sig.slice(0, -1));
     }
+  }
+  // §14.8.10 — the tenant floor's source filter / write key, unless the headless
+  // module already defines it.
+  if (TENANT_HELPER_CALL_RE.test(extraBody) && !headlessModule.includes("function _scrml_tenant_scope(")) {
+    parts.push(SERVER_TENANT_HELPER);
+    for (const n of TENANT_HELPER_NAMES) inlinedNames.add(n);
   }
   const referenced = new Set<string>();
   const re = /\b(_scrml_[A-Za-z0-9_]+)\s*\(/g;
@@ -940,7 +1108,7 @@ function assembleModuleHeaders(
   awaitSqliteConfigure = false,
 ): string {
   const runtimeHeader = buildRuntimeHelperHeader(body, filePath, errors);
-  const dbHeader = buildDbHandleHeader(fileAST, body, awaitSqliteConfigure);
+  const dbHeader = buildDbHandleHeader(fileAST, body, awaitSqliteConfigure, errors);
   const importHeader = buildImportHeader(fileAST);
   return (
     (importHeader ? importHeader + "\n" : "") +
@@ -961,9 +1129,10 @@ function assembleModuleHeaders(
  */
 function dbHandleMissingScope(fileAST: ASTNode, body: string): boolean {
   const used = new Set<string>();
-  const re = /\b_scrml_sql(?:_\d+)?\b/g;
+  const re = sqlHandleRegExp(); // every handle name (sql-handle-name.ts)
   let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) used.add(m[0]);
+  used.delete(UNRESOLVED_SQL_HANDLE); // its own internal error (buildDbHandleHeader), not a missing-scope code
   if (used.size === 0) return false;
   const scopes = collectDbScopes(fileAST as never);
   for (const id of used) if (!scopes.get(id)) return true;
@@ -1010,9 +1179,9 @@ export function generateToolLibraryJs(
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // s440 — nested helpers resolved against the tool's async set (see local-async-fns.ts).
   annotateToolFns(fns, asyncFnNames, filePath, errors, fileAST);
-  const foreignCrossingErrors: unknown[] = [];
-  // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of foreignCrossingErrors).
-  const preparedStmtErrors: unknown[] = [];
+  // E-FOREIGN-006/007 and E-SQL-006 refusals go to the run-wide sink
+  // (refused-lowering-errors.ts, drained by runCG) — never an opts-threaded channel,
+  // which an `if` / loop body's freshly built opts used to drop (s456).
 
   // Exported type names (`export type X:enum`) — used to `export` the emitted
   // enum backing objects so a consumer's `import { X }` resolves.
@@ -1042,6 +1211,7 @@ export function generateToolLibraryJs(
     bodyLines.push("");
   }
 
+  const _tenantArmed = beginToolTenantFloor(fileAST);
   for (const stmt of stmts) {
     if (isFunctionDecl(stmt)) {
       const name = (stmt.name ?? "anon") as string;
@@ -1072,8 +1242,6 @@ export function generateToolLibraryJs(
       bodyLines.push(emitLibraryFnMember(stmt, {
         isExported: stmt.fromExport === true,
         asyncFnNames,
-        foreignCrossingErrors,
-        preparedStmtErrors,
       }));
       bodyLines.push("");
       continue;
@@ -1156,16 +1324,7 @@ export function generateToolLibraryJs(
     if (code && code.trim()) { bodyLines.push(code); bodyLines.push(""); }
   }
 
-  // Drain any E-FOREIGN-006 crossing-shadow diagnostics the foreign lowering
-  // collected (§23.2.4a) into the live error stream.
-  if (errors && foreignCrossingErrors.length > 0) {
-    for (const e of foreignCrossingErrors) errors.push(e);
-  }
-  // Drain any E-SQL-006 `.prepare()` diagnostics the SQL lowering collected.
-  if (errors && preparedStmtErrors.length > 0) {
-    for (const e of preparedStmtErrors) errors.push(e);
-  }
-
+  endToolTenantFloor(_tenantArmed, filePath, errors);
   const body = bodyLines.join("\n");
 
   // A db-context lib routed here whose `?{}` has NO `<db src>` would fall back to

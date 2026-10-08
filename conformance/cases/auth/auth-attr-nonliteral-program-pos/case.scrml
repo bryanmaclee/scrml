@@ -1,0 +1,4 @@
+<program auth=@mode>
+<mode> = "required"
+<p>home</p>
+</program>

@@ -88,8 +88,10 @@ function compile(src) {
   const p = join(d, "app.scrml");
   writeFileSync(p, src);
   const r = compileScrml({ inputFiles: [p], write: true, outputDir: join(d, "out") });
-  const g = (f) => (existsSync(join(d, "out", f)) ? readFileSync(join(d, "out", f), "utf8") : "");
-  return { errors: r.errors ?? [], server: g("app.server.js"), client: g("app.client.js") };
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file, and these
+  // fixtures report one (E-PA-002, no database file) — read the in-memory outputs.
+  const o = r.outputs.get(p) ?? {};
+  return { errors: r.errors ?? [], server: o.serverJs ?? "", client: o.clientJs ?? "" };
 }
 const APP = (retType, sqlMethod, cell) => `<program>
 <db src="notes.db" tables="notes">

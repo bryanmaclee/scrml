@@ -155,9 +155,9 @@ describe("Gap 2 §4: CODEGEN — space-form `<Done count>` emits a bound param",
 
     const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
     // The arm wire fn takes `count` as a payload param (not a free var).
-    expect(clientJs).toMatch(/_scrml_match_\w+_wire_Done\(_root,\s*count\)/);
+    expect(clientJs).toMatch(/_scrml_match_\w+_wire_Done\(_scrml_arm_root,\s*count\)/);
     // Dispatch threads the payload field from the matched value's data.
-    expect(clientJs).toMatch(/_scrml_match_\w+_wire_Done\(_mount,\s*_data && _data\["count"\]\)/);
+    expect(clientJs).toMatch(/_scrml_match_\w+_wire_Done\(_scrml_arm_mount,\s*_scrml_arm_data && _scrml_arm_data\["count"\]\)/);
 
     // node --check — a free `count` var (the pre-fix bug) is syntactically valid
     // but would throw at runtime; the param shape above is the real guarantee.
@@ -189,9 +189,9 @@ describe("Gap 2 §5: CODEGEN multi `<Conflict field detail>` — both params", (
     expect(result.errors).toHaveLength(0);
 
     const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
-    expect(clientJs).toMatch(/_scrml_match_\w+_wire_Conflict\(_root,\s*field,\s*detail\)/);
-    expect(clientJs).toMatch(/_data && _data\["field"\]/);
-    expect(clientJs).toMatch(/_data && _data\["detail"\]/);
+    expect(clientJs).toMatch(/_scrml_match_\w+_wire_Conflict\(_scrml_arm_root,\s*field,\s*detail\)/);
+    expect(clientJs).toMatch(/_scrml_arm_data && _scrml_arm_data\["field"\]/);
+    expect(clientJs).toMatch(/_scrml_arm_data && _scrml_arm_data\["detail"\]/);
 
     const checkPath = join(outDir, "repro.client.js");
     expect(() => execFileSync("node", ["--check", checkPath])).not.toThrow();

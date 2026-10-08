@@ -1,0 +1,14 @@
+{
+  "id": "fixture-server-stub",
+  "description": "KNOWN PASS (codes + runtime, s454 U1b): a handler's client call of a server function, answered by the case's serverStub through the bootstrap's own route manifest (scripts/bootstrap-conformance.ts stubFetch).",
+  "language-version": "1.0",
+  "spec": "§19.9.10",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "serverStub": { "count": 7 },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "n": 7, "seen": "" },
+    "domAnchored": [{ "selector": "#out", "text": "7" }]
+  }
+}

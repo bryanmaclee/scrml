@@ -1,0 +1,14 @@
+{
+  "id": "fixture-codes-only",
+  "description": "KNOWN CODES-ONLY: a clean program whose runtime half is an SSR run (`ssr: true`) — the bootstrap emits no server artifact, so only the codes half is graded. (s454 U1b: a `serverStub` run IS executed now — the stub answers the bootstrap's own client calls — so this fixture names a server half the bootstrap still cannot run.)",
+  "language-version": "1.0",
+  "spec": "§52",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "state": {
+      "count": 0
+    },
+    "ssr": true
+  }
+}

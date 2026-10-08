@@ -26,6 +26,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
 const HEAD = `<program db="./app.db">
 <schema>
@@ -382,8 +383,8 @@ async function serveAndCall(src, argsJson, { realHash = false } = {}) {
   const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
   const serverJsPath = join(outDir, "app.server.js");
   expect(existsSync(serverJsPath)).toBe(true);
-  writeFileSync(serverJsPath, readFileSync(serverJsPath, "utf8").replace(
-    'new SQL("sqlite:./app.db")', `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
+  // s445: the module opens the seeded file itself (declaring-file-relative, CWD-independent) — assert it.
+  assertOpensDb(serverJsPath, dbPath);
   globalThis.__scrml_session_store = new Map([["sid1", { userId: 1, role: "user", csrfToken: "tok1" }]]);
   const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
   const route = mod.routes.find((r) => r.path.startsWith("/_scrml/__ri_route_"));
@@ -494,4 +495,115 @@ describe("S441 round 5 EXECUTED — the row path strips what it used to ship", (
     expect(status).toBe(200);
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", passwordHash: "SECRET-HASH-123" });
   });
+});
+
+// ---------------------------------------------------------------------------
+// S447 round 7 — writes through `this`, and functions the LANGUAGE invokes.
+// Each of these compiled at exit 0 on base and served the hash over HTTP
+// (docs/changes/s447-protect-egress-r7/progress.md). The runtime floor cannot
+// strip them — the author's own call copies the column into a new, unmarked
+// field (or a coercion turns it into a string) before the sink sees the value —
+// so the compile-time rejection is the guarantee.
+// ---------------------------------------------------------------------------
+const R7_LEAKS = {
+  "W1 a method writes this.x = this.passwordHash": fnBody([ONE, "u.stash = function () { this.x = this.passwordHash }", "u.stash()", "return u"]),
+  "W4 the same, on each row": fnBody([ALL, "for (const r of rows) { r.stash = function () { this.x = this.passwordHash }; r.stash() }", "return rows"]),
+  "W5 a user method named set writes the column into its object": fnBody([ONE, 'const o = { h: "" }', "o.set = function (r) { this.h = r.passwordHash }", "o.set(u)", "return o"]),
+  "W7 overwrite a clean column through this": fnBody([ONE, "u.stash = function () { this.name = this.passwordHash }", "u.stash()", "return u"]),
+  "W9 bind": fnBody([ONE, 'const o = { h: "" }', "const st = function (r) { this.h = r.passwordHash }.bind(o)", "st(u)", "return o"]),
+  "W13 new F": fnBody([ONE, "const F = function (r) { this.h = r.passwordHash }", "return new F(u)"]),
+  "W14 forEach thisArg": fnBody([ALL, 'const o = { h: "" }', "rows.forEach(function (r) { this.h = r.passwordHash }, o)", "return o"]),
+  "I1 tagged template": fnBody([ONE, "const tag = (s, v) => v", "return tag`${u.passwordHash}`"]),
+  "I12 tag via a method": fnBody([ONE, "const t = { f: (s, v) => v }", "return t.f`${u.passwordHash}`"]),
+  "I2 toString in a template": fnBody([ONE, "const o = { toString: () => u.passwordHash }", "return `${o}`"]),
+  "I7 Symbol.toPrimitive": fnBody([ONE, "const o = { [Symbol.toPrimitive]: () => u.passwordHash }", "return `${o}`"]),
+  "I4 Symbol.iterator spread": fnBody([ONE, "const o = { [Symbol.iterator]: function* () { yield u.passwordHash } }", "return [...o]"]),
+  "I8 for-of over a custom iterable": fnBody([ONE, "const o = { [Symbol.iterator]: function* () { yield u.passwordHash } }", 'let s = ""', "for (const x of o) { s = x }", "return s"]),
+  "I9 destructuring a custom iterable": fnBody([ONE, "const o = { [Symbol.iterator]: function* () { yield u.passwordHash } }", "const [a] = o", "return a"]),
+  "I14 toString reading this": fnBody([ONE, "u.toString = function () { return this.passwordHash }", "return `${u}`"]),
+  "I18 a key object coerced by toString": fnBody([ONE, "const k = { toString: () => u.passwordHash }", "const o = {}", "o[k] = 1", "return o"]),
+  "I19 Symbol.hasInstance receives the left operand": fnBody([ONE, 'let s = ""', "const C = { [Symbol.hasInstance]: (x) => { s = x.passwordHash; return true } }", "const b = u instanceof C", "return s"]),
+  "X5 a server function returns a thenable": fnBody([ONE, "return { then: (res) => res(u.passwordHash) }"]),
+  "X10 a tag a host call made": fnBody([ONE, "const t = String.raw.bind(String)", "return t`${u.passwordHash}`"]),
+};
+
+describe("S447 round 7 — `this` writes and implicit invocation are E-PROTECT-006", () => {
+  for (const [name, body] of Object.entries(R7_LEAKS)) {
+    test(name, () => {
+      const { codes, diags } = compileMem(prog(body));
+      expect(codes).toContain("E-PROTECT-006");
+      expect(diags.find((d) => d.code === "E-PROTECT-006").message).toMatch(/outside its row/);
+    });
+  }
+});
+
+const R7_CLEAN = {
+  "a method writing a clean column through this": fnBody([ONE, 'u.greet = function () { this.label = "hi " + this.name }', "u.greet()", "return u"]),
+  "a counter object mutated through this": fnBody([ONE, "const c = { n: 0 }", "c.inc = function () { this.n = this.n + 1 }", "c.inc()", "return { id: u.id, n: c.n }"]),
+  "a tag over clean values": fnBody([ONE, "const tag = (s, v) => s[0] + v", "return tag`id ${u.id}`"]),
+  "a toString hook over a clean column": fnBody([ONE, "const o = { toString: () => u.name }", "return `${o}`"]),
+  "an iterator over clean values": fnBody([ONE, "const o = { [Symbol.iterator]: function* () { yield u.name } }", "return [...o]"]),
+};
+
+describe("S447 round 7 — no false positives", () => {
+  for (const [name, body] of Object.entries(R7_CLEAN)) {
+    test(name, () => {
+      const { result } = compileMem(prog(body));
+      expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
+    });
+  }
+
+  test("EXECUTED: a clean write through this serves the row, stripped", async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(R7_CLEAN["a method writing a clean column through this"]), "{}");
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", label: "hi ada" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S449 round 9 — the §14.8.9 flow models the compiler-owned session store by
+// SUMMARY, recognizing its declaration by EXACT text (session-store-emit.ts). If
+// the emitter drifted from that constant the flow would silently fall back to
+// walking the store (sound, but examples/23's analysis goes from ~1 s to ~100 s),
+// so pin the seam: what the emitter writes IS the recognized text.
+// ---------------------------------------------------------------------------
+import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "../../src/codegen/session-store-emit.ts";
+
+describe("S449 round 9 — the session store the emitter writes is the one the flow recognizes", () => {
+  const serverJsOf = (src) => {
+    const { result } = compileMem(src);
+    return [...(result.outputs?.values?.() ?? [])].map((o) => o?.serverJs ?? "").join("\n");
+  };
+  test("a session-writing app emits the SQLite store text verbatim", () => {
+    const js = serverJsOf(prog(fnBody([ONE, 'session.set("seen", 1)', "return { id: u.id }"])));
+    expect(js).toContain(SESSION_STORE_SQLITE_TEXT);
+  });
+  test("a session-reading app emits the in-memory store text verbatim", () => {
+    const js = serverJsOf(prog(fnBody([ONE, "return { id: u.id, me: session.userId }"])));
+    expect(js).toContain(SESSION_STORE_MEMORY_TEXT);
+  });
+  test("a session write of a protected column is E-PROTECT-006 (the store is in the global heap)", () => {
+    const { codes } = compileMem(prog(fnBody([ONE, 'session.set("pw", u.passwordHash)', "return { id: u.id }"])));
+    expect(codes).toContain("E-PROTECT-006");
+  });
+});
+
+// r9 fix round (R3) — round 9 marked every `.prototype` / `.constructor` /
+// `getPrototypeOf` as platform-owned and refused legitimate scrml (no `class`:
+// this IS how adopters build types). Each MUST compile.
+describe("S449 r9 fix round — the program's own prototypes compile", () => {
+  const MUST_COMPILE = {
+    "a method on a function's prototype": fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.norm = function () { return this.x * 2 }", "const p = new Pt(u.id)", "return { v: p.norm() }"]),
+    "data on a function's prototype": fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.kind = \"pt\"", "return { v: new Pt(1).kind, id: u.id }"]),
+    "new o.constructor() of a program object": fnBody([ONE, "const o = { a: 1 }", "const c = new o.constructor()", "return { id: u.id }"]),
+    "a global cache key with a static prefix": fnBody([ONE, "globalThis[\"cache_\" + u.id] = { n: 1 }", "return { id: u.id }"]),
+    "getPrototypeOf of a program instance": fnBody([ONE, "const Pt = function () { }", "const ownObj = new Pt()", "Object.getPrototypeOf(ownObj).extra = 1", "return { id: u.id }"]),
+  };
+  for (const [name, body] of Object.entries(MUST_COMPILE)) {
+    test(name, () => {
+      const { result } = compileMem(prog(body));
+      expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
+    });
+  }
 });

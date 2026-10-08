@@ -1,0 +1,15 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)`}
+        ?{`CREATE VIEW va AS SELECT id, name FROM assets`}
+        ?{`CREATE TRIGGER t_v INSTEAD OF UPDATE ON va BEGIN UPDATE assets SET name = NEW.name WHERE id = NEW.id; END`}
+    </>
+    // A write through the view runs the trigger body, which no query scopes.
+    ${
+        function go() {
+            ?{`UPDATE va SET name = 'pwned-by-A' WHERE id = 2`}.run()
+            return "ok"
+        }
+    }
+    <button onclick=${ go() }>go</button>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "program-nested-auth-pos",
+  "description": "§4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=\"required\"` on a `<program>` nested inside `<program db>` fires E-PROGRAM-NESTED-AUTH. `auth=` is not a nested-valid `<program>` attribute; before S443 it was silently dropped and the inner program's INSERT server function ran for anonymous callers (MEASURED S441: an anonymous POST wrote a row).",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §52.13",
+  "rationale": "§4.12.2's nested-attribute table does not list `auth=`, and (S443) 'An `auth=` attribute on a nested `<program>` … SHALL be a compile error (`E-PROGRAM-NESTED-AUTH`), whatever its value; the compiler SHALL NOT accept it silently.'",
+  "expect": {
+    "codes": ["E-PROGRAM-NESTED-AUTH"],
+    "severity": { "E-PROGRAM-NESTED-AUTH": "error" },
+    "codeCounts": { "E-PROGRAM-NESTED-AUTH": 1 }
+  }
+}

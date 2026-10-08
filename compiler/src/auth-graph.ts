@@ -72,6 +72,7 @@ import {
   type ConstValue,
   partiallyEvaluateExpr,
 } from "./codegen/constant-folder.js";
+import { findTopLevelProgram, programRoleOptionsOf, type ProgramRoleOptions } from "./program-role.ts";
 
 // ---------------------------------------------------------------------------
 // File-shape normalization (CE-shape vs. post-META wrapper)
@@ -217,11 +218,16 @@ export function runAuthGraph(
 // Per-file enumeration
 // ---------------------------------------------------------------------------
 
+/** The `<program auth=>` literals that gate (§52.13): `"required"` and `"optional"`.
+ *  `"none"` applies no gate. An unrecognized literal is E-AUTH-ATTR-INVALID (S449,
+ *  §52.13.2 — the build is refused); it is not treated as a gate here either. */
+const PROGRAM_GATING_AUTH: ReadonlySet<string> = new Set(["required", "optional"]);
+
 /**
  * Walk one `FileAST` and append each gate-bearing site to the gates map.
  * Covers the four AuthSiteKind variants per SCOPING §2.2:
  *
- *   - `program-auth`     — `fileAST.authConfig.auth != null && != "none"`.
+ *   - `program-auth`     — `fileAST.authConfig.auth` is `"required"` or `"optional"`.
  *   - `page-auth`        — any MarkupNode where `tag === "page"` + `auth` attr.
  *   - `auth-role-block`  — any MarkupNode where `tag === "auth"`.
  *   - `channel-auth`     — any ChannelDeclNode where attrs include `auth`.
@@ -242,8 +248,15 @@ function enumerateFile(
   // classify this as closed_form: true / gated_for_role: ALL).
   // -------------------------------------------------------------------
 
-  if (fileAST.authConfig != null && fileAST.authConfig.auth !== "none") {
-    const programNode = findProgramNode(fileAST.nodes);
+  // S449 (g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth): authConfig.auth
+  // is the RAW literal — compute-program-config does not normalize it — so the old
+  // `!== "none"` test made `auth="Required"` / `auth=" required"` a program gate here
+  // while route-inference (exact `=== "required"`) emitted NO auth check for it. The
+  // auth graph then drove W-AUTH-LOGIN-MISSING / I-AUTH-REDIRECT-UNRESOLVED as if the
+  // app were gated. §52.13.2: "On a `<program>`, an unrecognized value applies no auth
+  // gate at all". Only the two gating literals of §52.13's three build a gate.
+  if (fileAST.authConfig != null && PROGRAM_GATING_AUTH.has(fileAST.authConfig.auth as string)) {
+    const programNode = findProgramNode(fileAST.nodes, programRoleOptionsOf(fileAST));
     if (programNode) {
       const gate = buildProgramGate(programNode, fileAST);
       gates.set(programNode.id, gate);
@@ -683,15 +696,12 @@ function walkMarkupNodes(
   }
 }
 
-/** Find the `<program>` markup root, if any. Top-level only — `<program>`
- *  never nests in scrml. */
-function findProgramNode(nodes: ASTNode[]): MarkupNode | null {
-  for (const node of nodes ?? []) {
-    if (node && node.kind === "markup" && node.tag === "program") {
-      return node;
-    }
-  }
-  return null;
+/** Find the file's top-level `<program>`, if any — the first with no `<program>`
+ *  / `<page>` ancestor, whatever markup wraps it (the ONE shared role definition,
+ *  program-role.ts; §4.12, S445). It is the node whose `auth=` became
+ *  `authConfig`, so the program gate is anchored to the program that declared it. */
+function findProgramNode(nodes: ASTNode[], roleOpts: ProgramRoleOptions = {}): MarkupNode | null {
+  return findTopLevelProgram(nodes ?? [], roleOpts) as MarkupNode | null;
 }
 
 /** Lookup an attribute by name on a markup node's attr list. */

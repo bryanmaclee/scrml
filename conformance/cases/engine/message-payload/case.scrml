@@ -4,10 +4,10 @@ ${
 }
 <engine for=Drag initial=.Idle accepts=DragMsg>
     <Idle rule=.Dragging>
-        | .Start(id) :> .Dragging(id)
+        .Start(id) :> .Dragging(id)
     </>
     <Dragging(id) rule=.Idle>
-        | .Drop :> .Idle
+        .Drop :> .Idle
     </>
 </>
 <program>

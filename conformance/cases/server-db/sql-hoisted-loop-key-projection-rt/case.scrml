@@ -1,0 +1,65 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        tags {
+            id: integer primary key
+            note_id: integer
+            label: text
+        }
+    </schema>
+    <aliased> = "init"
+    <qualified> = "init"
+    <firstrow> = "init"
+    <bodyOnly> = "init"
+    // §8.10.4: the pre-fetch groups its rows by the key column whatever the
+    // SELECT list says — the key not selected (`SELECT body`), aliased
+    // (`id AS note_id`), or table-qualified (`n.id`) — and each row is exactly the
+    // row the per-iteration query returns (no extra column). `.get()` is the FIRST
+    // row the per-key query returns, in its own ORDER BY.
+    function bodyOnly(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body + ":" + Object.keys(row).join("|"))
+        }
+        return out.join(",")
+    }
+    function viaAlias(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT id AS note_id, body FROM notes WHERE id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body + ":" + row.note_id)
+        }
+        return out.join(",")
+    }
+    function viaQualified(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT n.body FROM notes n WHERE n.id = ${it.id}`}.get()
+            out.push(row is not ? "none" : row.body)
+        }
+        return out.join(",")
+    }
+    function firstTag(items) {
+        let out = []
+        for (const it of items) {
+            const row = ?{`SELECT label FROM tags WHERE note_id = ${it.id} ORDER BY label`}.get()
+            out.push(row is not ? "none" : row.label)
+        }
+        return out.join(",")
+    }
+    function go() {
+        @aliased = viaAlias([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+        @qualified = viaQualified([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+        @firstrow = firstTag([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+        @bodyOnly = bodyOnly([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="aliased">${@aliased}</p>
+    <p id="qualified">${@qualified}</p>
+    <p id="firstrow">${@firstrow}</p>
+    <p id="bodyOnly">${@bodyOnly}</p>
+</program>

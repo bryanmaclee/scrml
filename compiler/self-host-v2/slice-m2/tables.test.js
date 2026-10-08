@@ -37,9 +37,22 @@ const EVERY_FACT = {
     "    type Line:struct = { id: int, name: string }",
     "    type Pt:struct = { let x: int, let y: int }",
     "    <lines:Line[free, append, prepend]=([{ id: 1, name: \"Tea\" }])/>",
-    "    <let p:Pt=({ x: 0, y: 0 })/>",
-    "    <let n:int=0/>",
-    "    <let show:bool=true/>",
+    "    let <p:Pt=({ x: 0, y: 0 })/>",
+    "    let <n:int=0/>",
+    "    let <show:bool=true/>",
+    // s444: a removal, an element-field write, a filter shape (lambda), a host call, a bind, a Star
+    "    type Row:struct = { let qty: int }",
+    "    <rows:Row[free, append, remove]=([{ qty: 1 }])/>",
+    "    let <t:number=0/>",
+    "    let <who:string=\"\"/>",
+    "    <card title:string=\"T\"/>",
+    "    renders <b>${title}</b>",
+    "    function trim() {",
+    "        @rows.pop()",
+    "        @rows[0].qty = 2",
+    "        @rows = @rows.filter(r => r.qty > 0)",
+    "        @t = Date.now()",
+    "    }",
     "    function bump(k: int) -> int {",
     "        let a = k + 1",
     "        a = a * 2",
@@ -56,6 +69,8 @@ const EVERY_FACT = {
     "        <div if=@show><dropdown as=color label=\"L\" options=([\"a\"])/></div>",
     "        <each in=@lines key=@.id as line><span>${@.name}</span></each>",
     "        <button onclick=bump(1)>go</button>",
+    "        <input bind:value=@who/>",
+    "        <*card/>",
     "    </main>",
     "</program>",
     "",
@@ -101,7 +116,9 @@ function nodeKinds(asts) {
 // Which node kinds each family may describe.
 const FAMILY_KINDS = {
   names: (k) => ["expr:Name", "expr:At", "expr:AtItem", "expr:Member"].includes(k),
-  values: (k) => ["expr:Num", "expr:Str", "expr:Bool", "expr:NotLit", "expr:Variant", "expr:Unary", "expr:Binary", "expr:ObjectLit"].includes(k),
+  // s444: a host call / sequence call is a Call node's VALUE fact (VHost / VSeqCall); a lambda's parameters (VLambda)
+  values: (k) => ["expr:Num", "expr:Str", "expr:Bool", "expr:NotLit", "expr:Variant", "expr:Unary", "expr:Binary", "expr:ObjectLit",
+    "expr:Call", "expr:Lambda"].includes(k),
   effects: (k) => ["expr:Assign", "expr:Call"].includes(k),
   binds: (k) => ["stmt:Local", "stmt:Given", "fn", "param"].includes(k),
   elems: (k) => k === "elem",
@@ -149,11 +166,11 @@ describe("the node facts — one family per node, indexed by NodeId", () => {
   test("the programs above reach every fact variant of every family", () => {
     expect(Object.fromEntries(FAMILIES.map((f) => [f, [...seen[f]].sort()]))).toEqual({
       names: ["NField", "NFn", "NInst", "NLength", "NLocal", "NStruct"],
-      values: ["VLit", "VOp", "VStructOf", "VVariant"],
-      effects: ["EAssignLocal", "EEdits", "EReset", "ESpread", "EWrite"],
+      values: ["VHost", "VLambda", "VLit", "VOp", "VSeqCall", "VStructOf", "VVariant"],
+      effects: ["EAssignLocal", "EEdits", "EElemAt", "ERemove", "EReset", "ESpread", "EWrite"],
       binds: ["BBind", "BGiven", "BParam"],
-      elems: ["MEach", "MHtml", "MInline", "MSlot", "MStateView", "MUse"],
-      attrs: ["AAs", "ABound", "AConstruct", "AEachAs", "AEachIn", "AEachKey", "AIf", "AOn", "AStatic"],
+      elems: ["MEach", "MHtml", "MInline", "MSlot", "MStar", "MStateView", "MUse"],
+      attrs: ["AAs", "ABind", "ABound", "AConstruct", "AEachAs", "AEachIn", "AEachKey", "AIf", "AOn", "AStatic"],
     });
   });
   test("the every-fact program is a legal program (no diagnostic)", () => {

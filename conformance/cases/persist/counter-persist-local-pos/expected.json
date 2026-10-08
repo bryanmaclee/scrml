@@ -1,0 +1,42 @@
+{
+  "id": "persist-counter-persist-local-pos",
+  "description": "§66.19.1 counter with `persist=\"local\" key=` on `@count`: compiles clean; with no stored value the cell starts at its default and counts / resets exactly as the unpersisted counter (+, +, Reset, + → 1).",
+  "language-version": "1.0",
+  "spec": "§6.14.2",
+  "rationale": "§6.14.2 rule 3: \"If the key is absent, storage is unavailable, the decode fails, or the decoded value does not satisfy the contract, the cell SHALL take its default\"; rule 4: \"When the cell's value changes, the compiler-emitted code SHALL encode the new value and write it to storage\"; rule 9: \"`reset(@x)` on a persisted cell … SHALL write the reset value to the cell\". §6.14.1 rule 3: \"`persist=` is legal on client-owned state cells.\"",
+  "expect": {
+    "notCodePrefixes": [
+      "E-PERSIST-",
+      "E-PREPAINT-",
+      "E-HOLD-"
+    ],
+    "input": [
+      { "click": "#inc" },
+      { "click": "#inc" },
+      { "click": "#reset" },
+      { "click": "#inc" }
+    ],
+    "state": {
+      "count": 1
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "Count 1 (doubled 2)"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-persist-codes-unimplemented-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=7"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

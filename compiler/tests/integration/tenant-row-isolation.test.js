@@ -3,10 +3,11 @@
  *
  * Two layers:
  *   1. code-firing — each E-TENANT-* / I-TENANT-* fires on the right shape;
- *   2. runtime — the compiled bundle WIRES the redact at the egress sink, and the
- *      SHIPPED redact helper, EXECUTED, isolates rows (tenant A → only A + tenant_id
- *      stripped; unpinned → zero; untagged / `.acrossTenants()` → passthrough); plus
- *      a non-tenant app is byte-identical.
+ *   2. runtime — the compiled bundle WIRES the source filter + the egress re-check,
+ *      and the SHIPPED helpers, EXECUTED, isolate rows (tenant A → only A + the
+ *      floor-added tenant_id removed; unpinned → zero; `.acrossTenants()` →
+ *      passthrough); plus a non-tenant app is byte-identical. The executed
+ *      end-to-end handler run lives in conformance/conf-TENANT-SOURCE-FILTER.
  *
  * The runtime half EXECUTES the shipped redact (not a grep of a marker — the S265
  * lesson). The end-to-end full-bundle-over-HTTP path is cloud-runner-infra-flaky, so
@@ -66,13 +67,29 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
     const r = compile(`      function loadAssets() { let rows = ?{\`SELECT id, name FROM assets\`}.all(); return rows }`);
     expect(hasCode(r, "I-TENANT-STRIP")).toBe(true);
   });
-  test("UPDATE against a tenant table → E-TENANT-WRITE", () => {
-    const r = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1}\`}.run(); return x }`);
-    expect(hasCode(r, "E-TENANT-WRITE")).toBe(true);
+  // S452 r3 — a subset UPDATE / DELETE is tenant-constrained (`AND tenant_id = <active
+  // tenant>` on its parenthesized WHERE); a write the floor cannot constrain is refused.
+  test("UPDATE against a tenant table → constrained to the active tenant", () => {
+    const r = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1} OR id = 2\`}.run(); return x }`);
+    expect(hasCode(r, "E-TENANT-WRITE")).toBe(false);
+    const out = [...r.outputs.values()][0];
+    expect(out.serverJs).toContain("UPDATE OR ABORT assets SET name = ${\"z\"} WHERE (id = ${1} OR id = 2) AND tenant_id = ${_scrml_tenant_write_key()}");
   });
-  test("DELETE against a tenant table → E-TENANT-WRITE", () => {
-    const r = compile(`      function f() { let x = ?{\`DELETE FROM assets WHERE id = \${1}\`}.run(); return x }`);
-    expect(hasCode(r, "E-TENANT-WRITE")).toBe(true);
+  test("DELETE against a tenant table → constrained to the active tenant (a missing WHERE gets one)", () => {
+    const r = compile(`      function f() { let x = ?{\`DELETE FROM assets\`}.run(); return x }`);
+    expect(hasCode(r, "E-TENANT-WRITE")).toBe(false);
+    const out = [...r.outputs.values()][0];
+    expect(out.serverJs).toContain("DELETE FROM assets WHERE tenant_id = ${_scrml_tenant_write_key()}");
+  });
+  test("UPDATE that sets tenant_id / UPDATE … FROM / DELETE … RETURNING → E-TENANT-WRITE", () => {
+    for (const q of [
+      "UPDATE assets SET tenant_id = ${\"z\"} WHERE id = ${1}",
+      "UPDATE assets SET name = 'x' FROM config WHERE id = 1",
+      "DELETE FROM assets WHERE id = 1 RETURNING name",
+    ]) {
+      const r = compile(`      function f() { let x = ?{\`${q}\`}.run(); return x }`);
+      expect(hasCode(r, "E-TENANT-WRITE")).toBe(true);
+    }
   });
   test("aggregate over a tenant table without a discriminator → E-TENANT-AGG", () => {
     const r = compile(`      function f() { let x = ?{\`SELECT COUNT(*) AS n FROM assets\`}.get(); return x }`);
@@ -99,7 +116,8 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
   test("the INSERT injection binds the ambient tenant into the column-set", () => {
     const r = compile(`      function f() { let x = ?{\`INSERT INTO assets (name) VALUES (\${"z"})\`}.run(); return x }`);
     const out = [...r.outputs.values()][0];
-    expect(out.serverJs).toContain("INSERT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_current_user(_scrml_req).tenantId})");
+    // read from the per-request store; with no active tenant it refuses by name (S452)
+    expect(out.serverJs).toContain("INSERT OR ABORT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_tenant_write_key()})");
   });
 });
 
@@ -113,11 +131,16 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
 // EXECUTING the shipped redact (not a grep of a marker — the S265 lesson): (1) codegen
 // WIRES the redact at the compiled artifact's egress sink; (2) the shipped helper,
 // run, ISOLATES rows. (PA-side R26 exercised the true end-to-end path once, locally.)
-describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped redact isolates rows", () => {
-  // Eval the SHIPPED helper block (the EXACT runtime the emitted server carries).
+describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped helpers isolate rows", () => {
+  // Eval the SHIPPED helper block (the EXACT runtime the emitted server carries),
+  // with a stub session resolver: a request is `{ tenantId }`.
   const H = new Function(
-    SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_tag, _scrml_tenant_redact };",
+    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    SERVER_TENANT_HELPER +
+    "\nreturn { _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
   )();
+  const scopeAs = (tenantId, rowsIn, added = ["tenant_id"]) =>
+    JSON.parse(JSON.stringify(H._scrml_tenant_request_scope(() => H._scrml_tenant_scope(rowsIn, ["tenant_id"], added))({ tenantId })));
   const rows = () => [
     { id: 1, name: "a1", tenant_id: "A" },
     { id: 2, name: "a2", tenant_id: "A" },
@@ -135,32 +158,32 @@ describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped red
     return readFileSync(join(outDir, "app.server.js"), "utf8");
   }
 
-  test("(wiring) the scoped read's client-egress return is wrapped in the tenant redact", () => {
+  test("(wiring) the read is filtered at the source and the return re-checked at the egress", () => {
     const server = compileServer(
       `      function loadAssets() { let rows = ?{\`SELECT id, name FROM assets\`}.all(); return rows }`,
     );
+    expect(server).toContain('_scrml_tenant_scope(await _scrml_sql`SELECT id, name, assets.tenant_id AS __scrml_tenant_0 FROM assets`, ["__scrml_tenant_0"], ["__scrml_tenant_0"])');
     expect(/_scrml_tenant_redact\([^)]*_scrml_active_tenant/.test(server)).toBe(true);
     expect(server.includes("function _scrml_tenant_redact")).toBe(true);
     expect(server.includes("function _scrml_active_tenant")).toBe(true);
   });
 
-  test("(a) tenant A → ONLY tenant-A rows, the floor-added tenant_id stripped", () => {
-    const out = H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), "A");
+  test("(a) tenant A → ONLY tenant-A rows, the floor-added tenant_id removed", () => {
+    const out = scopeAs("A", rows());
     expect(out).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
     expect(out.every((r) => !("tenant_id" in r))).toBe(true);
   });
 
   test("(b) an absent ambient tenant (unpinned request) → ZERO rows (fail-closed)", () => {
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), null)).toEqual([]);
+    expect(scopeAs(null, rows())).toEqual([]);
   });
 
-  test("(c) .acrossTenants() emits UNtagged rows → passthrough (all tenants)", () => {
+  test("(c) .acrossTenants() emits UNscoped rows → the egress re-check passes them (all tenants)", () => {
     expect(H._scrml_tenant_redact(rows(), "A")).toEqual(rows());
   });
 
   test("tenant B → ONLY tenant-B rows", () => {
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), "B"))
-      .toEqual([{ id: 3, name: "b1" }]);
+    expect(scopeAs("B", rows())).toEqual([{ id: 3, name: "b1" }]);
   });
 });
 
@@ -187,9 +210,17 @@ describe("§14.8.10 non-tenant apps carry zero tenant-floor overhead", () => {
     writeFileSync(file, src);
     const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
     const out = [...result.outputs.values()][0];
-    expect(out.serverJs).not.toContain("_scrml_tenant_");
-    expect(out.serverJs).not.toContain("_scrml_active_tenant");
-    expect(out.serverJs).not.toContain("tenant_id");
+    // S456 ("b, startup check lands with it") — every module with a database carries the
+    // startup check for UNDECLARED tenant tables (a non-tenant compilation's database can
+    // hold one: its set is empty, so any `tenant_id` table is undeclared). It is not floor
+    // machinery; everything else below still must be absent.
+    const STARTUP_CHECK = /\n\/\/ §14\.8\.10 \(S456\) — which relations[\s\S]*?\nexport const _scrml_tenant_startup_check = \{[\s\S]*?\n\};\n?/;
+    expect(out.serverJs).toMatch(STARTUP_CHECK);
+    expect(out.serverJs).toContain("const _SCRML_TENANT_DECLARED = new Set([]);");
+    const floorOnly = out.serverJs.replace(STARTUP_CHECK, "\n");
+    expect(floorOnly).not.toContain("_scrml_tenant_");
+    expect(floorOnly).not.toContain("_scrml_active_tenant");
+    expect(floorOnly).not.toContain("tenant_id");
     expect(hasCode(result, "I-TENANT-STRIP")).toBe(false);
   });
 });

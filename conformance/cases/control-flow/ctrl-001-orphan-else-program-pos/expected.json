@@ -1,0 +1,11 @@
+{
+  "id": "ctrl-001-orphan-else-program-pos",
+  "description": "§17.1.1 — an element carrying `else` immediately after a plain `<p>` (no `if=` / `else-if=` sibling before it) fires E-CTRL-001. The `<program>` + `let <x/>` twin of ctrl-001-orphan-else-pos (legacy rhs-decl shape), so the bootstrap grades it. Severity (Error) is pinned by that legacy-shape twin; it is not asserted here because a bootstrap Diag carries no §34 severity yet.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1 Normative Rules: \"An element carrying `else` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. The compiler SHALL reject any `else` attribute that does not satisfy this condition (E-CTRL-001).\"",
+  "expect": {
+    "codes": ["E-CTRL-001"],
+    "notCodes": ["E-CTRL-002", "E-CTRL-005"]
+  }
+}

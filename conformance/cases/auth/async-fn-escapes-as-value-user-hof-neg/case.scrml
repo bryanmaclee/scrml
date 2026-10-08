@@ -9,7 +9,7 @@ server function check(pw, hash) {
   return drive(matches) ? "accepted" : "rejected"
 }
 function go() {
-  @verdict = check("wrong", "not-a-hash")
+  @verdict = check("wrong", "not-a-hash") !{ .Transport(_) :> { return } }
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>

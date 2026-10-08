@@ -8,6 +8,6 @@ ${
   }
 }
 <div>
-  <button onclick=getAllUsers()>Load All</>
+  <button onclick={ getAllUsers() !{ .Transport(_) :> { return } } }>Load All</>
 </div>
 </>

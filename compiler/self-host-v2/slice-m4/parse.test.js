@@ -73,7 +73,7 @@ describe("§4.14 `:`-shorthand bodies", () => {
   });
 
   test("a declaration opener has no `:`-shorthand body (E-PARSE-SHORTHAND)", () => {
-    expect(codes(`<program><let n:int=0 : "hi"></program>`)).toEqual(["E-PARSE-SHORTHAND"]);
+    expect(codes(`<program>let <n:int=0 : "hi"></program>`)).toEqual(["E-PARSE-SHORTHAND"]);
   });
 });
 
@@ -117,11 +117,17 @@ describe("expressions: spread elements, index, arrow functions", () => {
   });
 });
 
-describe("validators in an opener (⚑ O25)", () => {
-  test("`req` and `length(>=5)` are each reported, and the declaration still parses", () => {
-    const r = parse(`<program><let email:string="" req length(>=5)/></program>`);
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
-    for (const d of r.diags) expect(d.message).toContain("O25");
-    expect(find(r.ast, (n) => n.name === "email" && "own" in n)).not.toBeNull();
+describe("validators in an opener (s444 Phase B: parsed — O25 RULED S442 as dpa-058)", () => {
+  test("`req` and `length(>=5)` parse into the declaration's validators, in source order, with no diagnostic", () => {
+    const r = parse(`<program>let <email:string="" req length(>=5) pattern(/^a+$/i) min(-2) eq(@x, 1)/></program>`);
+    expect(r.diags).toEqual([]);
+    const d = find(r.ast, (n) => n.name === "email" && "own" in n);
+    expect(d.mods).toEqual([]);
+    expect(d.validators.map((v) => [v.name, typeof v.arg === "string" ? v.arg : v.arg.variant])).toEqual([
+      ["req", "NoArgs"], ["length", "Cmp"], ["pattern", "Regex"], ["min", "Exprs"], ["eq", "Exprs"],
+    ]);
+    expect(d.validators[1].arg.data.op).toBe(">=");
+    expect(d.validators[2].arg.data).toEqual({ source: "^a+$", flags: "i" });
+    expect(d.validators[4].arg.data.es.length).toBe(2);
   });
 });

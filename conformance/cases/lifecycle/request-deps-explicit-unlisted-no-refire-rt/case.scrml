@@ -1,0 +1,17 @@
+<program db="./app.db">
+${
+    type User:struct = { id: number, name: string }
+    <userId> = 1
+    <ver> = 0
+    <userData> : User | not = not
+    function loadUser(id: number) : User | not {
+        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+    }
+}
+<request id="userReq" deps=[@ver]>
+    ${ @userData = loadUser(@userId) }
+</>
+<button id="setid" onclick=${@userId = 2}>user 2</>
+<button id="bump" onclick=${@ver = @ver + 1}>reload</>
+<p id="who">${@userData?.name}</>
+</program>

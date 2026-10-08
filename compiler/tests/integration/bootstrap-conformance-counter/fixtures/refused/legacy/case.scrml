@@ -1,0 +1,8 @@
+${
+    <count> = 0
+    function bump() {
+        @count = @count + 1
+    }
+}
+<button id="inc" onclick=bump()>+</button>
+<p id="out">${@count}</p>

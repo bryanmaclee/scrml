@@ -21,7 +21,7 @@ const withFn = (fn, type) => {
   return s.replace("function record(action: string) {", fn + "\n    function record(action: string) {");
 };
 const rows = () => [...document.querySelectorAll("main > ul > li")].map((li) => li.textContent);
-const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    <let n:int=5/>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    let <n:int=5/>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
 
 // ---------------------------------------------------------------------------
 describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () => {
@@ -31,8 +31,17 @@ describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () =
   test("the same on a `const` local keeps E-ASSIGN-CONST", () => {
     expect(codes(withFn(`function lp() -> int {\n const s = @audit\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-ASSIGN-CONST");
   });
-  test("`s = s.filter(…)` on a local, and a parameter: refused", () => {
-    expect(codes(withFn(`function lp() -> int {\n let s = @audit\n s = s.filter(e => false)\n return s.length\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("`s = s.filter(…)` on a `let` local is a local REBINDING to a new value (s444: `.filter` is a Core value) — kept, never deleted", async () => {
+    const r = run(withFn(`function lp() -> int {\n let s = @audit\n s = s.filter(e => e.action != "b")\n return s.length\n }`));
+    expect(r.diags).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const { program } = await loadProgram(r.core, "r1-f1-local-filter", ["lp", "record"]);
+    program.record("a");
+    program.record("b");
+    expect(program.lp()).toBe(1);
+    expect(rows().length).toBe(2);                              // the cell is untouched: the local holds the new value
+  });
+  test("a spread on a parameter: refused", () => {
     expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
   test("`s.push(e)` / `s.shift()` / `s[0].f = v` on a local: refused (a diagnostic each), not dropped", () => {
@@ -59,7 +68,7 @@ describe("F3 — a `:`-shorthand body and `>`", () => {
     const r = run(P("", `        <p : @n >= 3>\n        <b>end</b>`));
     expect(r.diags).toEqual([]);
     await loadProgram(r.core, "r1-ge");
-    expect(document.querySelector("main").innerHTML).toBe("<p>true</p><b>end</b>");
+    expect(document.querySelector("main").innerHTML).toBe("\n        <p>true</p>\n        <b>end</b>\n    ");   // dpa-045 fu4: whitespace kept exactly
   });
   test("a bare `>` comparison → E-PARSE-SHORTHAND-GT (parenthesize); the tail is never page text", () => {
     for (const body of ["@n > 3", "@n>3", "@n > 3 ? \"big\" : \"small\""]) {
@@ -78,7 +87,7 @@ describe("F3 — a `:`-shorthand body and `>`", () => {
     const r = run(P("", `        <div : <p : "x">>\n        <b>end</b>`));
     expect(r.diags).toEqual([]);
     await loadProgram(r.core, "r1-mav");
-    expect(document.querySelector("main").innerHTML).toBe("<div><p>x</p></div><b>end</b>");
+    expect(document.querySelector("main").innerHTML).toBe("\n        <div><p>x</p></div>\n        <b>end</b>\n    ");   // dpa-045 fu4: whitespace kept exactly
   });
 });
 
@@ -144,7 +153,7 @@ describe("F5 / F6 — a sequence shape is ONE value: its elements are evaluated 
 // ---------------------------------------------------------------------------
 describe("nits — type error on a non-sequence, `<*field/>` out of scope", () => {
   test("`@phase = [...@phase, .Done]` on an enum cell → E-TYPE-031", () => {
-    const src = P(`    <let ph:Phase=.Idle/>\n    function x() { @ph = [...@ph, .Done] }`, `        <p>x</p>`);
+    const src = P(`    let <ph:Phase=.Idle/>\n    function x() { @ph = [...@ph, .Done] }`, `        <p>x</p>`);
     expect(codes(src)).toEqual(["E-TYPE-031"]);
   });
   test("`<*status/>` at program level names the declaration that owns `status` (E-SCOPE-001), not an HTML element", () => {
@@ -158,11 +167,15 @@ describe("nits — type error on a non-sequence, `<*field/>` out of scope", () =
 // ---------------------------------------------------------------------------
 // G1 — the guards that carry `<*x/>` soundness (resolveStarShared / resolveStarField)
 describe("G1 — `<*x/>` guards", () => {
-  const box = (renders, main, extra = "") => `<program>\n    <item label:string="i"/>\n    renders <i>\${label}</i>\n    <box note:string="n"${extra}>\n        <let v:int=0/>\n    </>\n    renders ${renders}\n    <main>\n${main}\n    </main>\n</program>\n`;
-  test("constructs-nothing: `<*box/>` whose renders USES a declaration is refused (Core has no View.Star)", () => {
-    const d = run(box(`<div><item/></div>`, `        <*box/>`)).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(d[0].message).toContain("constructs instances");
+  const box = (renders, main, extra = "") => `<program>\n    <item label:string="i"/>\n    renders <i>\${label}</i>\n    <box note:string="n"${extra}>\n        let <v:int=0/>\n    </>\n    renders ${renders}\n    <main>\n${main}\n    </main>\n</program>\n`;
+  test("s444 (View.Star): `<*box/>` whose renders USES a declaration renders the existing box — its own child instance included", async () => {
+    const r = run(box(`<div><item/></div>`, `        <*box/>\n        <*box/>`));
+    expect(r.diags).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const { rt } = await loadProgram(r.core, "r1-g1-star-constructs");
+    expect([...document.querySelectorAll("main > div > i")].map((d) => d.textContent)).toEqual(["i", "i"]);
+    expect(instancesOf(rt, "box").length).toBe(1);             // ONE box (the shared instance), shown twice
+    expect(instancesOf(rt, "item").length).toBe(1);            // its unconditional child: created once, with the box
   });
   test("program top level only: `<*item/>` inside another declaration's renders is refused", () => {
     const d = run(box(`<div><*item/></div>`, `        <box/>`)).diags;

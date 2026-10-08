@@ -2,12 +2,12 @@ ${
     <items> = []
     server function loadPair(id) {
         ?{`BEGIN`}
-        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all()
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all() !{ _ :> [] }
         ?{`COMMIT`}
         return { a, b }
     }
 }
 <program db="test.db">
-    <button id="load" onclick=@items = loadPair(1)>Load</>
+    <button id="load" onclick={ @items = loadPair(1) !{ .Transport(_) :> { return } } }>Load</>
 </program>

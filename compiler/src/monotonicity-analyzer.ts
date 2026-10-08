@@ -27,6 +27,7 @@
 
 import type { CPSSplit, FunctionRoute, RouteMap } from "./route-inference.ts";
 import { exprNodeContainsCall } from "./expression-parser.ts";
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 
 // ---------------------------------------------------------------------------
 // Pure-fn lookup surface (D3, S81)
@@ -517,6 +518,22 @@ function classifyStatement(
   functionIndex: FunctionPurityLookup | null,
 ): MonotonicityVerdict {
   if (!stmt || typeof stmt !== "object") return "non-monotone";
+
+  // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the whole statement. It is as
+  // monotone as the statement it guards, provided every arm is a call-free
+  // value (an arm runs only on failure, but a call there could do anything).
+  const _handledInner = handledSqlGuardInner(stmt);
+  if (_handledInner) {
+    for (const arm of ((stmt as { arms?: unknown[] }).arms ?? []) as Array<Record<string, unknown>>) {
+      const h = typeof arm?.handler === "string" ? arm.handler.trim() : "";
+      if (arm?.handlerExpr) {
+        if (exprNodeContainsCall(arm.handlerExpr as never)) return "non-monotone";
+      } else if (h.replace(/^\{|\}$/g, "").trim() !== "") {
+        return "non-monotone";
+      }
+    }
+    stmt = _handledInner as ASTNode;
+  }
 
   // SQL node directly OR wrapped in state-decl init / bare-expr.
   // SQL classification takes precedence — a bare-expr that wraps `pureFn(?{...})`

@@ -1,0 +1,12 @@
+{
+  "id": "fixture-legacy",
+  "description": "KNOWN LEGACY: the legacy right-hand-side declaration `<count> = 0` with no `<program>` root — the bootstrap parses only §66; never a FAIL.",
+  "language-version": "1.0",
+  "spec": "§66.21",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#inc" }],
+    "state": { "count": 1 }
+  }
+}

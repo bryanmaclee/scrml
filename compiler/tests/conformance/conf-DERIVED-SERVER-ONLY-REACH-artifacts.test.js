@@ -173,33 +173,27 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §1 a derived cell in a `for`-loop 
   });
 
   /**
-   * !! THIS IS A GAP PIN, NOT A SAFETY CLAIM — READ BEFORE TRUSTING §1. !!
+   * The emission gate — formerly a GAP PIN, INVERTED (not deleted) as this comment
+   * required when the gate landed.
    *
-   * The refusal is a DIAGNOSTIC, not an EMISSION GATE. Measured at S337: this source
-   * reports `FAILED — 1 error` and the compiler STILL WRITES the leaking bundle. The
-   * output directory ends up holding a `case.html` whose two `<script src=…>` tags
-   * load artifacts that between them contain `Bun.password`, `argon2id` and
-   * `hashPassword`, with ZERO `.server.js` — i.e. exactly the artifact set the code
-   * exists to prevent, sitting on disk next to the error that was supposed to prevent
-   * it. A CI step that compiles and then deploys `dist/` without checking the exit
-   * code ships the leak with a red build.
+   * Measured at S337: this source reported `FAILED — 1 error` and the compiler STILL
+   * WROTE the leaking bundle — a `case.html` whose `<script src=…>` tags loaded
+   * artifacts holding `Bun.password`, `argon2id` and `hashPassword`, with ZERO
+   * `.server.js`. A CI step that compiled and then deployed `dist/` without checking
+   * the exit code shipped the leak with a red build.
    *
-   * That is a SEPARATE defect from the one this file's §1 gates (which is: does the
-   * compiler notice at all), it is out of scope for the S337 fix, and it is recorded
-   * here rather than in prose because prose gates nothing — which is the whole lesson
-   * of this file.
-   *
-   * WHEN THE EMISSION GATE LANDS, THIS EXPECTATION MUST INVERT, not be deleted: the
-   * greps below should flip to `.not.toContain`, and the flip is the evidence the gap
-   * closed.
+   * SPEC §2.2.1 (S451 5(b); impl#1 exception granted S457 "1a"): a compile that
+   * reports any Error writes NO artifact. The refusal is now an emission gate too:
+   * the output directory holds nothing, so nothing the browser could load exists.
    */
-  test("GAP PIN — the failing compile still writes the leaking artifacts to disk", () => {
+  test("EMISSION GATE — the failing compile writes no artifact (the S337 gap pin, inverted)", () => {
     expect(c.errorCodes).toContain(CODE);
+    expect(c.allFiles).toEqual([]);
     expect(c.serverJsFiles.length).toBe(0);
-    expect(c.clientLoaded.length).toBeGreaterThan(0);
-    expect(c.clientLoadedText).toContain("Bun.password");
-    expect(c.clientLoadedText).toContain("argon2id");
-    expect(c.clientLoadedText).toContain("hashPassword");
+    expect(c.clientLoaded.length).toBe(0);
+    expect(c.clientLoadedText).not.toContain("Bun.password");
+    expect(c.clientLoadedText).not.toContain("argon2id");
+    expect(c.clientLoadedText).not.toContain("hashPassword");
   });
 });
 

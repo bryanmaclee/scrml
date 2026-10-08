@@ -1,0 +1,26 @@
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (path-leak incidents on record >0)
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- . Else STOP and report. Call it WORKTREE_ROOT.
+2. `git -C "$WORKTREE_ROOT" rev-parse --show-toplevel` == WORKTREE_ROOT; tree clean.
+3. Worktree is cut from origin/main. Run `git -C "$WORKTREE_ROOT" fetch origin wip/s449-scrml-fix-s66-twins` then `git -C "$WORKTREE_ROOT" reset --hard FETCH_HEAD`; verify HEAD == 9e72c53d6b4ebedef4a546ad3a93b679911b6fdf. (Run git commands as separate plain commands — the worktree guard rejects compound git shells.)
+4. `bun install`. TMPDIR per command = ~/.cache/scrml-agent-tmp/s451-fix-r4/ (never inside a repo).
+5. Edit/Write only absolute paths under WORKTREE_ROOT. Never `cd` into /home/bryan-maclee/scrmlMaster/scrml. Never `git stash`. Never bare `pkill -f`/`killall`. First commit: `WIP(s449-fix-r4): start at <pwd>`.
+6. Commit after each meaningful change; append timestamped lines to docs/changes/s449-scrml-fix-s66-twins/progress.md; archive this prompt verbatim as docs/changes/s449-scrml-fix-s66-twins/BRIEF-r4.md in the first commit. When done: `git push origin HEAD:wip/s449-scrml-fix-s66-twins` (fast-forward only, never force; regenerate docs/FACTS.md if the pre-push gate asks).
+
+MAPS: .claude/maps/primary.map.md (stamp 47c863556) — the r3 agent reported it not load-bearing for commands/fix*; read it briefly, report.
+
+CONTEXT: `scrml fix --s66` (compiler/src/commands/fix-s66.js, fix.js) decides (i) LOCK — a cell nobody writes loses `let`; (ii) `:int` — an untyped cell gets `int` only if every write is provably integer. Both must fail CLOSED. Read progress.md + BRIEF-r3.md. Three S239 review rounds have each found a new fail-open of the SAME root: the tool answers "who imports what" and "who writes this cell" with its OWN text scanners (regex import extraction, a home-grown comment/string masker `inertAt`, a lexical write scan only consulted when the AST shows zero writes). Every round patched positions; every review found new positions. This round must fix the ROOT (project Rule 7: don't ask the text what the tree already knows — impl#1 already parses these programs).
+
+r3 review findings, PA-reproduced by execution at 9e72c53d6:
+HIGH A — masker hides an unreadable import → cross-file writer invisible → cell LOCKED. bump.scrml: `${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }`; app.scrml: `<program>` / `<p>Press the ` + "`" + ` key</p>` / `${ import /* ui */ { Bump } from "./bump.scrml" }` / `<count> = 0` / `<Bump/>` / `<p>${@count}</p>` / `</program>` → `+<count:number=0/>`. Same with prose `src/*.scrml … a/*/b`, and an unbalanced `"` in prose before the import. impl#1 compiles all, and writes count.
+HIGH B — `:int` ignores writes the AST stores as raw text once one AST write is visible (fix-s66.js ~:746 `if (astWriteCount === 0 && sources.some(lexicalWritten))`). B2: `<k> = 0` / `<m> = 2` / `const <d>: int = @m * 2` / `${ function f() { @m = 3 } }` / `when @k changes { @m = 1.5 }` / button / p → `+let <m:int=2/>`. B1: same via an imported component `onclick=${@m = 0.5}` in another file.
+LOW C — destructuring targets `[@a, @b] = [@b, @a]` invisible to the LOCK path's `astWrites` (only fixed in the int path).
+
+REQUIRED SHAPE (by construction):
+1. IMPORTS: take the import graph from impl#1 itself — its module resolver / the dependency information impl#1's compile pipeline builds (find where compileScrml/api.js resolves `.scrml` imports). The project's write-set = writes in every file impl#1 resolves as reachable, plus all files in the project dir (keep the existing union). Delete the regex import extraction and `inertAt` as a decision source. If impl#1 cannot parse a file, or reports an import it cannot resolve → UNEXTRACTED (every cell `let`). Keep any remaining text check only as an ADDITIONAL reason to fail closed, never a reason to suppress.
+2. WRITES: classify from impl#1's AST. For any region impl#1 keeps as raw text (handler attribute bodies `${…}`, `when` bodies, `^{}` etc.): either parse it with impl#1's own expression/statement parser and classify, or — if that is not available — treat ANY occurrence of `@name` in that raw region as a write of unknown kind (→ cell stays `let`, int verdict `unknown`). Per-occurrence, independent of how many other writes exist. Over-conservatism is accepted; report how many example/sample cells it costs.
+3. LOCK path: destructuring / any non-ident assign target naming `@x` → `x` written.
+4. Tests: every repro above (A three variants, B1, B2, C) end to end through the CLI, plus the r2/r3 tests still green. Run fix-s66.test.js; the pre-commit subset must pass at commit.
+5. Re-run default CLI on copies of examples/*.scrml; compile original vs fixed with `bun compiler/bin/scrml.js compile`; no new E- codes. Re-run scripts/bootstrap-conformance.ts and report the counter (was PASS 76 / 62 non-vacuous / 138 graded).
+If (1) or (2) turns out to need impl#1 changes beyond reading its existing APIs, STOP and report the obstacle rather than writing a third lexer.
+
+Do NOT mark done without executing every repro post-fix and pasting outputs. Final report (<50 lines): worktree, final SHA pushed, files touched, tests, repro outputs, counter, conservatism cost, deferred items.

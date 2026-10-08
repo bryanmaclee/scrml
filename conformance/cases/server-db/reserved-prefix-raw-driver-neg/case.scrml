@@ -1,0 +1,19 @@
+<program db="sqlite:./notes.db">
+<db src="sqlite:./notes.db" tables="notes">
+  ${
+    ?{`CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)`}.run()
+    // _scrml_sql is the compiler's own handle; this comment names it and is not a reference.
+    server function everyNote() {
+      return ?{`SELECT body FROM notes`}.all() !{ _ :> [] }
+    }
+    function label() {
+      return "the _scrml_ prefix is reserved"
+    }
+  }
+  <main>
+    <p id="why">${label()}</p>
+    <p id="prose">names beginning _scrml_ belong to the compiler</p>
+    <button id="go" onclick={ everyNote() !{ .Transport(_) :> { return } } }>load</button>
+  </main>
+</db>
+</program>

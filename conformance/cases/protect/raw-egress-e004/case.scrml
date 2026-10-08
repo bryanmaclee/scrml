@@ -5,8 +5,8 @@
   <db src="app.db" protect="passwordHash" tables="users">
     ${
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let payload = _={ JSON.stringify(u) }=
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        let payload = _={ in: { u } JSON.stringify(u) }=
         return payload
       }
     }

@@ -1,0 +1,7 @@
+<program>
+try
+{
+  log(1)
+} catch (e) { }
+<p>x</p>
+</program>

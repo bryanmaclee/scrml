@@ -12,7 +12,8 @@
  * ⚑ NARROWED S437 (bryan: "a, freeze self-host" — dpa-051 R1). The bootstrap keeps the S233
  * four-phase re-cut, whose IRs are not impl#1's decorated FileAST, so a single-stage swap exists
  * only at the LEX seam (tokens) and for the whole compiler. For every other bootstrap module, done =
- * its conformance footprint. `compiler/self-host/` (what this harness swaps in today) is FROZEN.
+ * its conformance footprint. The frozen v1 `compiler/self-host/` tree was RETIRED at S447
+ * (s447-retire-self-host-v1); substitutes now come from `compiler/self-host-v2/`.
  *
  * ═══ USAGE ═══
  *
@@ -47,8 +48,8 @@
  *   A substitute may also export `executeClient({ html, clientJs })`: the runtime half then hands
  *   execution of the artifact to it (conformance/adapters/impl1-ts.ts `setClientExecutor`).
  *
- * <module> is LOCATION-AGNOSTIC — where the bootstrap lives (`stdlib/compiler/**` vs
- * `compiler/self-host/`) is unsettled, so the runner takes any path:
+ * <module> is LOCATION-AGNOSTIC — the runner takes any path (the bootstrap lives in
+ * `compiler/self-host-v2/`, but a substitute may come from anywhere):
  *   - a `.js` / `.ts` / `.mjs` path: imported directly; must export the stage's entry (see --list)
  *     or a default function.
  *   - a `.scrml` path: compiled FIRST by the pure TS compiler in library mode to a temp dir (in a

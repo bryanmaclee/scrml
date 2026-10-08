@@ -34,6 +34,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const DOLLAR = "$";
 
@@ -80,7 +81,7 @@ ${BADGE_FN}
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-value-form-if-rcdata");
+const tmpRoot = resolve(tmpdir(), "scrml-each-value-form-if-rcdata");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

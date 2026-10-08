@@ -5,9 +5,10 @@ import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
 import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
+import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
-import { parsePredicateAnnotation, predicateToJsExpr, deriveHtmlAttrs } from "./emit-predicates.ts";
+import { refinementOf, predicateToJsExpr, deriveHtmlAttrs, type Refinement } from "./emit-predicates.ts";
 import { collectCompoundLeafTargets, collectRequestIds } from "./reactive-deps.ts";
 
 /** A loosely-typed AST node from the pipeline. */
@@ -174,14 +175,29 @@ function collectEnumVariantNames(decl: any): string[] {
  *
  * Exported (C16) for emit-html.ts to derive HTML validation attrs (§53.7.1).
  */
-export function buildReactiveTypeMap(fileAST: any): Map<string, string> {
-  const result = new Map<string, string>();
+/**
+ * reactive var → typeAnnotation, plus (S458 one reader) `refinements`:
+ * reactive var → the TS-resolved refinement stamped on its declaration
+ * (`stmt.predicateCheck`). The §53.7 bind:value check and HTML attrs read
+ * `refinements`; nothing re-parses the annotation string.
+ */
+export type ReactiveTypeMap = Map<string, string> & { refinements?: Map<string, Refinement> };
+
+/** The TS-resolved refinement of reactive cell `name`, or null. */
+export function cellRefinement(map: Map<string, string> | null | undefined, name: string): Refinement | null {
+  const r = (map as ReactiveTypeMap | null | undefined)?.refinements?.get(name);
+  return r ?? null;
+}
+
+export function buildReactiveTypeMap(fileAST: any): ReactiveTypeMap {
+  const result = new Map<string, string>() as ReactiveTypeMap;
+  result.refinements = new Map();
   const topNodes: any[] = fileAST.nodes ?? (fileAST.ast ? fileAST.ast.nodes : []);
   walkForReactiveTypes(topNodes, result);
   return result;
 }
 
-function walkForReactiveTypes(nodes: any[], result: Map<string, string>): void {
+function walkForReactiveTypes(nodes: any[], result: ReactiveTypeMap): void {
   for (const node of nodes) {
     if (!node || typeof node !== "object") continue;
     if (node.kind === "logic" && Array.isArray(node.body)) {
@@ -189,6 +205,8 @@ function walkForReactiveTypes(nodes: any[], result: Map<string, string>): void {
         if (!stmt) continue;
         if ((stmt.kind === "state-decl") && stmt.name && stmt.typeAnnotation) {
           result.set(stmt.name, stmt.typeAnnotation as string);
+          const ref = refinementOf(stmt.predicateCheck);
+          if (ref) result.refinements!.set(stmt.name, ref);
         }
       }
     }
@@ -626,7 +644,7 @@ export function emitBindDirectiveBody(
     // §53.7.2: predicated-type write-gating (also drives the <select> cell-type
     // coercion below — a numeric refinement's base type is read off _bvPredInfo).
     const _bvTypeAnnotation = reactiveTypeMap.get(rootKey);
-    const _bvPredInfo = _bvTypeAnnotation ? parsePredicateAnnotation(_bvTypeAnnotation) : null;
+    const _bvPredInfo = _bvTypeAnnotation ? cellRefinement(reactiveTypeMap, rootKey) : null;
 
     // §5.4 (D-FORM-5): a <select> carries no `type=` attr, so `isNumericInput`
     // never fires for it. When the bound cell is number/boolean-typed — and NOT
@@ -774,7 +792,7 @@ export function emitBindings(ctx: CompileContext): string[] {
         // absent before first paint. Same `if (el)` shape as every other block here.
         lines.push(`// ref=@${refVarName}`);
         lines.push(`{`);
-        lines.push(`  const ${refElemId} = (root || document).querySelector('[data-scrml-ref="${refVarName}"]');`);
+        lines.push(`  const ${refElemId} = (_scrml_root || document).querySelector('[data-scrml-ref="${refVarName}"]');`);
         lines.push(`  if (${refElemId}) {`);
         lines.push(`    _scrml_reactive_set(${JSON.stringify(encodedRefName)}, ${refElemId});`);
         // A ref= INSIDE an if= subtree must not outlive the subtree: after unmount
@@ -815,7 +833,7 @@ export function emitBindings(ctx: CompileContext): string[] {
         // options (document.querySelector acquire + bare file-scope `_scrml_effect`)
         // reproduce the pre-extraction emission byte-for-byte.
         for (const _bindLine of emitBindDirectiveBody(bAttr, mkNode, {
-          acquire: (sel) => `(root || document).querySelector('${sel}')`,
+          acquire: (sel) => `(_scrml_root || document).querySelector('${sel}')`,
           // §17.1 — the whole emitBindings output is a root-scoped
           // `_scrml_bind_rewire(root)` re-invoked when an `if=` subtree mounts, so
           // the effect it creates must be owned by that mount's scope. Outside a
@@ -860,7 +878,7 @@ export function emitBindings(ctx: CompileContext): string[] {
             const cVarName = rawName.replace(/^@/, "");
             lines.push(`// class:${cClassName}=@${cVarName}`);
             lines.push(`{`);
-            lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+            lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
             lines.push(`    if (_scrml_reactive_get(${JSON.stringify(cVarName)})) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
             lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!_scrml_reactive_get(${JSON.stringify(cVarName)})); }));`);
@@ -878,7 +896,7 @@ export function emitBindings(ctx: CompileContext): string[] {
               : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
             lines.push(`// class:${cClassName}=${rawName}`);
             lines.push(`{`);
-            lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+            lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
             lines.push(`    if (${readExpr}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
             lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${readExpr})); }));`);
@@ -914,7 +932,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           const exprRefs = (_loweredDir ? _loweredDir.refs : []) as string[];
           lines.push(`// class:${cClassName}=${rawExpr}`);
           lines.push(`{`);
-          lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+          lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
           lines.push(`    if (${rewrittenExpr}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
           // Auto-tracking effect handles all reactive dependencies automatically
@@ -943,7 +961,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           }
           lines.push(`// class:${cClassName}=${callExpr}`);
           lines.push(`{`);
-          lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+          lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
           lines.push(`    if (${rewrittenCall}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
           if (callRefs.length > 0) {
@@ -1000,7 +1018,7 @@ export function emitBindings(ctx: CompileContext): string[] {
 
         lines.push(`// template-attr ${attrName}="${rawValue}"`);
         lines.push(`{`);
-        lines.push(`  const ${tplElemId} = (root || document).querySelector('${tplSelector}');`);
+        lines.push(`  const ${tplElemId} = (_scrml_root || document).querySelector('${tplSelector}');`);
         lines.push(`  if (${tplElemId}) {`);
         if (isFormControlValue) {
           const vVar = genVar("tpl_val");
@@ -1010,10 +1028,18 @@ export function emitBindings(ctx: CompileContext): string[] {
             lines.push(`    _scrml_mount_track(_scrml_effect(() => { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; }));`);
           }
         } else {
-          lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+          // §5.2 rule 3 (S457) — a URL attribute whose literal prefix commits to no scheme
+          // (`href="${@u}"`): the data supplies the scheme, so the write goes through the
+          // runtime guard. A literal relative path / safe scheme stays byte-identical.
+          // S457 — an SVG animation value (`<set attributeName="href" to="${@u}">`) is a
+          // write of the animated URL attribute: guarded, with that attribute as the target.
+          const valueJs = quotedUrlAttrNeedsGuard(mkTag, attrName, rawValue, nodeAttrs)
+            ? wrapUrlGuard(tplElemId, attrName, jsExpr, urlGuardTarget(mkTag, attrName, nodeAttrs))
+            : jsExpr;
+          lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
           // Auto-tracking effect handles all reactive dependencies automatically
           if (reactiveVars.size > 0) {
-            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
           }
         }
         lines.push(`  }`);
@@ -1066,7 +1092,7 @@ export function emitBindings(ctx: CompileContext): string[] {
     // checked/files/group flavours produce DOM-typed values that don't carry
     // refinement constraints in v0.next). Mirrors the source-level path.
     const typeAnnotation = reactiveTypeMap.get(cellName);
-    const predInfo = typeAnnotation ? parsePredicateAnnotation(typeAnnotation) : null;
+    const predInfo = typeAnnotation ? cellRefinement(reactiveTypeMap, cellName) : null;
 
     // §5.4 / §14.4.1 enum coercion for <select> + enum-typed cell.
     const enumTypeName = renderSpecTag === "select" ? enumVarMap.get(cellName) : undefined;
@@ -1098,7 +1124,7 @@ export function emitBindings(ctx: CompileContext): string[] {
       `// render-by-tag bind:${dispatch.flavour}=@${cellName} (cell=${cellName}, tag=${renderSpecTag})`,
     );
     lines.push(`{`);
-    lines.push(`  const ${elemId} = (root || document).querySelector('${selector}');`);
+    lines.push(`  const ${elemId} = (_scrml_root || document).querySelector('${selector}');`);
     lines.push(`  if (${elemId}) {`);
 
     // Initial DOM read — synchronise the rendered element with the cell's

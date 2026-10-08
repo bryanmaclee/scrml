@@ -29,6 +29,19 @@ function roundTripExpr(src) {
   return emitStringFromTree(node);
 }
 
+// #1333 — the string path lowers a call-tail / grouped compound `is` operand
+// to the SHARED §42.8 form (is-predicate-lowering.ts): both halves stated, the
+// operand bound ONCE by an IIFE (§42.2.4). It used to emit `(expr) == null`,
+// which the client pipeline's later rewriteEqualityOps turned into `=== null`
+// (the `undefined` half dropped).
+const PRESENT = (x) => `((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)(${x})`;
+const ABSENT = (x) => `((__scrml_is_v) => __scrml_is_v === null || __scrml_is_v === undefined)(${x})`;
+// Evaluate a lowered predicate against a binding, so the tests check the
+// ANSWER for null AND undefined, not only the text.
+function evalWith(lowered, name, value) {
+  return new Function(name, `return (${lowered});`)(value);
+}
+
 function parse(source) {
   const bsOut = splitBlocks("test.scrml", source);
   return buildAST(bsOut);
@@ -139,36 +152,37 @@ describe("not keyword — codegen rewrite", () => {
   // matched the call's `)` and grabbed only its OWN arg-parens (`(s)`), emitting
   // `re.exec((s) != null)` — the receiver `re.exec` was swallowed into the
   // comparison (valid JS, silent-WRONG). The call-vs-grouping guard now captures
-  // the WHOLE call chain as the LHS (single-eval), emitting `(re.exec(s) != null)`.
+  // the WHOLE call chain as the LHS (single-eval). #1333: lowered to the shared
+  // both-halves form, bound once by the IIFE.
   test("§5k `is some` with a call-tail LHS (the bug repro)", () => {
-    expect(rewriteNotKeyword("re.exec(s) is some")).toBe("(re.exec(s) != null)");
+    expect(rewriteNotKeyword("re.exec(s) is some")).toBe(PRESENT("re.exec(s)"));
   });
 
   test("§5l `is not` (absence) with a call-tail LHS", () => {
-    expect(rewriteNotKeyword("re.exec(s) is not")).toBe("(re.exec(s) == null)");
+    expect(rewriteNotKeyword("re.exec(s) is not")).toBe(ABSENT("re.exec(s)"));
   });
 
   test("§5m `is not not` with a call-tail LHS", () => {
-    expect(rewriteNotKeyword("re.exec(s) is not not")).toBe("(re.exec(s) != null)");
+    expect(rewriteNotKeyword("re.exec(s) is not not")).toBe(PRESENT("re.exec(s)"));
   });
 
   test("§5n nested-call LHS `f(g(x))`", () => {
-    expect(rewriteNotKeyword("f(g(x)) is some")).toBe("(f(g(x)) != null)");
+    expect(rewriteNotKeyword("f(g(x)) is some")).toBe(PRESENT("f(g(x))"));
   });
 
   test("§5o member-chain call LHS `o.a.b(x)`", () => {
-    expect(rewriteNotKeyword("o.a.b(x) is some")).toBe("(o.a.b(x) != null)");
+    expect(rewriteNotKeyword("o.a.b(x) is some")).toBe(PRESENT("o.a.b(x)"));
   });
 
   test("§5p index+member+call chain LHS `arr[i].f(x)`", () => {
-    expect(rewriteNotKeyword("arr[i].f(x) is some")).toBe("(arr[i].f(x) != null)");
+    expect(rewriteNotKeyword("arr[i].f(x) is some")).toBe(PRESENT("arr[i].f(x)"));
   });
 
   test("§5q explicit-grouping form `(re.exec(s)) is some` still works (keyword not swallowed)", () => {
     // `(...)` whose `(` is preceded by the `return` keyword must be read as a
     // GROUPING paren, not a call — else the keyword is swallowed into the LHS.
-    expect(rewriteNotKeyword("(re.exec(s)) is some")).toBe("((re.exec(s)) != null)");
-    expect(rewriteNotKeyword("return re.exec(s) is some")).toBe("return (re.exec(s) != null)");
+    expect(rewriteNotKeyword("(re.exec(s)) is some")).toBe(PRESENT("(re.exec(s))"));
+    expect(rewriteNotKeyword("return re.exec(s) is some")).toBe("return " + PRESENT("re.exec(s)"));
   });
 
   test("§5r call-tail fix does NOT disturb the bare-ident / dotted regex path", () => {
@@ -853,50 +867,50 @@ describe("§42.2.4 Phase A — parenthesized compound is not / is some (DQ-12)",
 
   test("§A1 (regex.exec(str)) is not — absence form", () => {
     const result = rewriteNotKeyword("(regex.exec(str)) is not");
-    expect(result).toBe("((regex.exec(str)) == null)");
+    expect(result).toBe(ABSENT("(regex.exec(str))"));
     expect(result).not.toContain("is not");
-    expect(result).not.toContain("=== null");  // must use double-equals for null+undefined
+    // §42.8 — BOTH halves, never the lone `=== null` (#1333).
+    expect(result).toContain("=== undefined");
   });
 
   test("§A2 (regex.exec(str)) is some — presence form", () => {
     const result = rewriteNotKeyword("(regex.exec(str)) is some");
-    expect(result).toBe("((regex.exec(str)) != null)");
+    expect(result).toBe(PRESENT("(regex.exec(str))"));
     expect(result).not.toContain("is some");
   });
 
   test("§A3 (getUser(id)) is not not — presence form", () => {
     const result = rewriteNotKeyword("(getUser(id)) is not not");
-    expect(result).toBe("((getUser(id)) != null)");
+    expect(result).toBe(PRESENT("(getUser(id))"));
     expect(result).not.toContain("is not not");
     expect(result).not.toContain("is not");  // fully consumed
   });
 
   test("§A4 (arr[0]) is not — absence form", () => {
     const result = rewriteNotKeyword("(arr[0]) is not");
-    expect(result).toBe("((arr[0]) == null)");
+    expect(result).toBe(ABSENT("(arr[0])"));
     expect(result).not.toContain("is not");
   });
 
   test("§A5 (x + y) is some — presence form", () => {
     const result = rewriteNotKeyword("(x + y) is some");
-    expect(result).toBe("((x + y) != null)");
+    expect(result).toBe(PRESENT("(x + y)"));
     expect(result).not.toContain("is some");
   });
 
   test("§A6 nested parens ((f(g()))) is not — correctly finds outermost paren", () => {
     const result = rewriteNotKeyword("((f(g()))) is not");
     // Should capture the full ((f(g()))) expression, not a partial inner paren
-    expect(result).toBe("(((f(g()))) == null)");
+    expect(result).toBe(ABSENT("((f(g())))"));
     expect(result).not.toContain("is not");
   });
 
   test("§A7 single-evaluation — expr appears in output exactly once", () => {
     const result = rewriteNotKeyword("(sideEffect()) is not");
     // sideEffect() must appear exactly once — single-evaluation is the load-bearing
-    // invariant. The paren-form emit guarantees this: expr is on the LHS, `null` is
-    // a constant on the RHS, no duplication.
+    // invariant (§42.2.4). The IIFE binds the operand once and tests the binding.
     expect(result.indexOf("sideEffect()")).toBe(result.lastIndexOf("sideEffect()"));
-    expect(result).toContain("== null");
+    expect(result).toBe(ABSENT("(sideEffect())"));
   });
 
   test("§A8 regression — existing identifier is not still works unchanged", () => {
@@ -922,29 +936,44 @@ describe("§42.2.4 Phase A — parenthesized compound is not / is some (DQ-12)",
 
   test("§A12 rewriteExpr pipeline — (regex.exec(str)) is not rewrites end-to-end", () => {
     const result = rewriteExpr("(regex.exec(str)) is not");
-    // Client pipeline applies rewriteEqualityOps after rewriteNotKeyword:
-    // `== null` → `=== null` (strict). Library-mode emit skips rewriteEqualityOps
-    // and preserves `== null` (matches both null + undefined).
-    expect(result).toContain("(regex.exec(str)) === null");
+    // #1333 — the client pipeline's rewriteEqualityOps used to turn the old
+    // `== null` into `=== null`, so an `undefined` operand answered FALSE. The
+    // §42.8 form survives the whole pipeline with both halves.
+    expect(result).toBe(ABSENT("(regex.exec(str))"));
+    const regex = { exec: () => undefined };
+    expect(new Function("regex", "str", `return (${result});`)(regex, "s")).toBe(true);
+  });
+
+  test("§A12b rewriteExpr — every compound form answers the same for null and undefined", () => {
+    for (const v of [null, undefined]) {
+      expect(evalWith(rewriteExpr("(f()) is not"), "f", () => v)).toBe(true);
+      expect(evalWith(rewriteExpr("(f()) is some"), "f", () => v)).toBe(false);
+      expect(evalWith(rewriteExpr("(f()) is not not"), "f", () => v)).toBe(false);
+      expect(evalWith(rewriteExpr("f() is not"), "f", () => v)).toBe(true);
+    }
+    for (const v of [0, "", false]) {
+      expect(evalWith(rewriteExpr("(f()) is not"), "f", () => v)).toBe(false);
+      expect(evalWith(rewriteExpr("(f()) is some"), "f", () => v)).toBe(true);
+    }
   });
 
   test("§A13 multiple parenthesized expressions in one segment", () => {
     const result = rewriteNotKeyword("(a()) is not && (b()) is some");
-    expect(result).toBe("((a()) == null) && ((b()) != null)");
+    expect(result).toBe(ABSENT("(a())") + " && " + PRESENT("(b())"));
     expect(result).not.toContain("is not");
     expect(result).not.toContain("is some");
   });
 
   test("§A14 (expr) is not not — presence, not absence", () => {
     const result = rewriteNotKeyword("(getValue()) is not not");
-    // is not not = presence check = != null
-    expect(result).toContain("!= null");
-    expect(result).not.toContain("== null");
+    // is not not = presence check
+    expect(result).toBe(PRESENT("(getValue())"));
   });
 
   test("§A15 bare paren around identifier — paren form lowers directly", () => {
+    // A trivial operand needs no IIFE: re-reading a name has no effect.
     const result = rewriteNotKeyword("(x) is not");
-    expect(result).toBe("((x) == null)");
+    expect(result).toBe("(x === null || x === undefined)");
   });
 });
 

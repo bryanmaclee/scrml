@@ -1,0 +1,3 @@
+<program auth="required" loginRedirect="/case">
+<p>members</p>
+</program>

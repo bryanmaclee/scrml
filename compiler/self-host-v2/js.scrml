@@ -41,11 +41,13 @@ ${
     export type JsStmt:enum = {
         SConst(name: string, e: JsExpr),
         SLet(name: string, e: JsExpr),
+        SDecl(name: string),                      // s451 (Ue): `let name;` — an Attempt's result, assigned in each branch
         SAssign(target: JsExpr, e: JsExpr),
         SExpr(e: JsExpr),
         SExprNote(e: JsExpr, note: string),
         SReturn(e: JsExpr),
         SIf(test: JsExpr, thenB: JsStmt[], elseB: JsStmt[]),
+        STry(body: JsStmt[], fin: JsStmt[]),      // s451: `try { body } finally { fin }` (the `defer` lowering)
         SFunc(name: string, params: string[], body: JsStmt[]),
         SComment(text: string),
         SImportAll(name: string, from: string),
@@ -270,11 +272,13 @@ ${
         return match s {
             .SConst(name: n, e: e) :> ind + "const " + n + " = " + expr(e, ind) + ";\n"
             .SLet(name: n, e: e) :> ind + "let " + n + " = " + expr(e, ind) + ";\n"
+            .SDecl(name: n) :> ind + "let " + n + ";\n"
             .SAssign(target: t, e: e) :> ind + expr(t, ind) + " = " + expr(e, ind) + ";\n"
             .SExpr(e: e) :> ind + exprStmtText(e, ind) + ";\n"
             .SExprNote(e: e, note: n) :> ind + exprStmtText(e, ind) + "; // " + n + "\n"
             .SReturn(e: e) :> ind + "return " + expr(e, ind) + ";\n"
             .SIf(test: t, thenB: a, elseB: b) :> ifText(t, a, b, ind)
+            .STry(body: a, fin: f) :> ind + "try {\n" + stmts(a, ind + "  ") + ind + "} finally {\n" + stmts(f, ind + "  ") + ind + "}\n"
             .SFunc(name: n, params: ps, body: body) :>
                 ind + "function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
             .SComment(text: t) :> ind + "// " + t + "\n"

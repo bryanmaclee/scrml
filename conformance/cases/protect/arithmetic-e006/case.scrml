@@ -5,12 +5,12 @@
   <db src="app.db" protect="passwordHash, pin" tables="users">
     ${
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         const qty = 3
         return { a: u.pin * 1, b: +u.pin, c: u.pin - 0, lineCost: u.pin * qty }
       }
     }
   </db>
   <user> = not
-  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

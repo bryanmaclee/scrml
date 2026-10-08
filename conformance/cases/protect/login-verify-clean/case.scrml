@@ -6,7 +6,7 @@
     ${
       import { verifyPassword } from 'scrml:auth'
       function login(name, pw) {
-        let u = ?{`SELECT id, name, passwordHash FROM users WHERE name = ${name}`}.get()
+        let u = ?{`SELECT id, name, passwordHash FROM users WHERE name = ${name}`}.get() !{ _ :> not }
         if (u is not) return { ok: false }
         const ok = verifyPassword(pw, u.passwordHash)
         if (!ok) return { ok: false }
@@ -15,5 +15,5 @@
     }
   </db>
   <result> = not
-  <button id="load" onclick=${ @result = login("Alice", "correct-pw") }>login</button>
+  <button id="load" onclick={ @result = login("Alice", "correct-pw") !{ .Transport(_) :> { return } } }>login</button>
 </program>

@@ -12,8 +12,10 @@
 //   L7  c ? a : b          → Match over a bool with `true` / `false` arms
 //   L9  <each> w/o key=    → key: not
 //   L11 given c = @h :> {} → Let c = Handle(h); If(IsSome(c), {…})
-//   L13 whitespace-only text containing a newline is dropped; other text is
-//       kept verbatim (comments are gone already — the parser drops them)
+//   L13 RETIRED (dpa-045 follow-up 4, RULED S442 — SPEC §4.18.5): every
+//       free-text run is kept verbatim, whitespace-only runs (a newline +
+//       indentation between two elements) included; comments are gone
+//       already (the parser drops them, keeping the bytes around them)
 //   L14 the program's markup is its renders; `type`s → CoreProgram.types
 //   L15 one CoreProgram per LINKED program (files in link order)
 //   L17 field order (analyze built it); L18 graph fields (analyze); L19 int
@@ -26,19 +28,59 @@
 // body is an object literal loses its bindings — constructors instead).
 // =============================================================================
 ${
-    import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldMode, FieldRole,
-             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram,
-             block, litStr } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, AParam, AFn,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
+    import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
+             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
+             ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
+             block, litStr, mkSym, typeDefSym } from "./core.scrml"
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail,
              mkSpan } from "./ast.scrml"
+    import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
-    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
-             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
+    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
+             SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK,
+             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
+             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName } from "./analyze.scrml"
 
-    export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
+    // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
+    // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
+    // read from the generated table (severity.scrml `severityOf`, which
+    // `newDiag` stamps on every Diag; a code with no §34 row is Error). The
+    // test FAILS CLOSED: anything not positively Warning or Info closes the
+    // gate. Warning / Info notes are non-fatal (§34) and do not close it — the
+    // prefix plays no part (§34 makes E-DG-002 a Warning). A Core is the
+    // only thing the printer takes, so a compile with an error has NO artifact to print — by
+    // construction, for every code, not a per-code refusal list. Before s451
+    // `lower` returned a Core unconditionally and the printer emitted a
+    // runnable program over a tree analysis had rejected
+    // (g-bootstrap-defer-scope-001-and-runs-anyway: `defer` reported as
+    // E-SCOPE-001, then run in place).
+    export type Lowered:struct = { core: CoreProgram | not, diags: Diag[] }
+
+    // Does the compile hold an error — an analysis diagnostic of severity Error,
+    // or a parse error (a file carries the spans of its Error-severity parse
+    // diagnostics in `errs`; the codes go to the driver)?
+    // s451: the test is the diagnostic's §34 SEVERITY, not its prefix — §34: "A
+    // code whose Severity column reads **Error** fails the compile, and a compile
+    // that reports one SHALL NOT produce a runnable artifact (§2.2.1). **Warning**
+    // and **Info** codes do not fail the compile."
+    // FAIL CLOSED (s451 review r2): a diagnostic is an error UNLESS its severity
+    // is Warning or Info — a Diag whose severity is missing or unrecognised
+    // closes the gate rather than opening it (the same rule as
+    // scripts/bootstrap-conformance.ts's error-code classification).
+    export fn hasError(tp: TypedProgram) -> boolean {
+        for (const d of tp.diags) { if (isErrorSeverity(d)) return true }
+        for (const d of tp.infos) { if (isErrorSeverity(d)) return true }
+        for (const f of tp.files) { if (f.errs.length > 0) return true }
+        return false
+    }
+
+    fn isErrorSeverity(d: Diag) -> boolean {
+        return d.severity != Severity.Warning && d.severity != Severity.Info
+    }
 
     // The lowering context: the tables, the file (for diagnostics), and — while
     // lowering a field initializer for `reset` (L4) — the instance being reset,
@@ -145,6 +187,11 @@ ${
             .StructOf(ty: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -168,6 +215,11 @@ ${
             .StructOf(ty: x) :> op
             .Handle(inst: x) :> op
             .InitOf(decl: x) :> op
+            .Host(call: x) :> op
+            .Lambda(params: x) :> op
+            .SeqCall(op: x) :> op
+            .Validity(of: x) :> op
+            .ServerCall(fn: x) :> op
         }
     }
 
@@ -221,6 +273,11 @@ ${
             .StructOf(ty: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -245,6 +302,21 @@ ${
     // emits an absence check, never JS truthiness") lowers to `IsSome(x)`.
     // (s442 — additive; the decision is the typer's `Typing.presence`.)
     export fn lowerExpr(c: LC, e: AExpr) -> Expr {
+        // s454 (U1b) — the suspension plan: an expression evaluated into a
+        // temporary before a suspension (ANF) reads the temporary; a call that
+        // suspends (a waiting client function's) reads the Suspend's bind. (A
+        // handling form that suspends reads its Attempt's result — handledRead.)
+        const plan: SuspendPlan = c.t.server.plan
+        if (plan.at.length > 0) {
+            const tmp: Sym | not = tempOf(plan, e.nid)
+            if (tmp is some) return Expr.Local(tmp)
+            const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
+            if (sa is some && handledOfK(e.k) is not) return Expr.Local(sa.bind)
+        }
+        return lowerExprAt(c, e)
+    }
+
+    fn lowerExprAt(c: LC, e: AExpr) -> Expr {
         if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [presenceOperand(c, e)])
         return lowerExprK(c, e)
     }
@@ -266,6 +338,7 @@ ${
             .NStruct(owner: o) :> not
             .NFn(sym: s) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -293,7 +366,7 @@ ${
             .Variant(name: n) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Member(obj: o, name: n) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
 
-            .Call(callee: cal, args: args) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .Call(callee: cal, args: args) :> callOrBuiltin(c, e, cal, args)
             .Unary(op: o, e: x) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, x)])
             .Binary(op: o, l: l, r: r) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, l), lowerExpr(c, r)])
             .Ternary(test: t, yes: y, no: n) :> boolMatch(lowerExpr(c, t), lowerExpr(c, y), lowerExpr(c, n))
@@ -302,7 +375,72 @@ ${
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
             .Spread(e: sx) :> missing()
             .Index(obj: ix) :> missing()
-            .Lambda(params: lp) :> missing()
+            .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
+            .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
+            .Handled(h: h) :> handledRead(c, e)
+        }
+    }
+
+    // s444 — a call: a host call / a sequence function (the binder's value
+    // fact on the call), else a call of a named function.
+    fn callOrBuiltin(c: LC, e: AExpr, cal: AExpr, args: AExpr[]) -> Expr {
+        const f: ValueFact | not = valueFact(c.t.values, e.nid)
+        return match f {
+            .VHost(call: h) :> Expr.Host(h)
+            .VSeqCall(op: o) :> seqCallExpr(c, o, cal, args)
+            .VLit(lit: l) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VVariant(enumSym: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VStructOf(ty: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+        }
+    }
+
+    fn seqCallExpr(c: LC, o: SeqFn, cal: AExpr, args: AExpr[]) -> Expr {
+        const obj: AExpr | not = calleeObj(cal)
+        if (obj is not || args.length != 1) return missing()
+        return Expr.SeqCall(o, lowerExpr(c, obj), lowerExpr(c, args[0]))
+    }
+
+    fn calleeObj(cal: AExpr) -> AExpr | not {
+        const k: AExprK = cal.k
+        return match k {
+            .Member(obj: o) :> o
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: x) :> not
+            .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+        }
+    }
+
+    fn lambdaExpr(c: LC, f: ValueFact | not, body: AExpr) -> Expr {
+        return match f {
+            .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
+            .VLit(lit: l) :> missing()
+            .VVariant(enumSym: x) :> missing()
+            .VStructOf(ty: x) :> missing()
+            .VOp(op: x) :> missing()
+            .VHost(call: x) :> missing()
+            .VSeqCall(op: x) :> missing()
+            not :> missing()
         }
     }
 
@@ -315,6 +453,7 @@ ${
             .NStruct(owner: o) :> missing()
             .NFn(sym: s) :> missing()
             .NLength :> missing()
+            .NSurface(of: x) :> missing()
             not :> missing()
         }
     }
@@ -328,6 +467,9 @@ ${
             .VVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
             .VStructOf(ty: t, order: order) :> Expr.StructOf(t, orderedProps(c, ps, order))
             .VOp(op: o) :> missing()
+            .VHost(call: h) :> missing()
+            .VSeqCall(op: x) :> missing()
+            .VLambda(params: x) :> missing()
             not :> missing()
         }
     }
@@ -338,6 +480,9 @@ ${
             .VLit(lit: l) :> PrimOp.Not
             .VVariant(enumSym: s) :> PrimOp.Not
             .VStructOf(ty: t) :> PrimOp.Not
+            .VHost(call: h) :> PrimOp.Not
+            .VSeqCall(op: x) :> PrimOp.Not
+            .VLambda(params: x) :> PrimOp.Not
             not :> PrimOp.Not
         }
     }
@@ -347,6 +492,7 @@ ${
     fn memberExpr(c: LC, f: NameFact | not, obj: AExpr) -> Expr {
         return match f {
             .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
+            .NSurface(of: v, prop: pr) :> Expr.Validity(validityOf(c, v), pr)
             .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
             .NLocal(sym: s) :> missing()
@@ -370,6 +516,11 @@ ${
             .StructOf(ty: t) :> missing()
             .Handle(inst: i) :> missing()
             .InitOf(decl: d) :> missing()
+            .Host(call: x) :> missing()
+            .Lambda(params: x) :> missing()
+            .SeqCall(op: x) :> missing()
+            .Validity(of: x) :> missing()
+            .ServerCall(fn: x) :> missing()
         }
     }
 
@@ -389,6 +540,7 @@ ${
             .NInst(decl: d) :> missing()
             .NStruct(owner: o) :> missing()
             .NLength :> missing()
+            .NSurface(of: x) :> missing()
             not :> missing()
         }
     }
@@ -434,11 +586,14 @@ ${
     fn lowerStmt(c: LC, s: AStmt) -> Stmt[] {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> exprStmt(c, e)
-            .Local(name: n, mutable: m, init: i) :> letStmt(c, s, i)
-            .Return(e: e) :> [Stmt.Return(returnValue(c, e))]
-            .If(cond: x, thenB: t, elseB: el) :> [Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))]
+            .Eval(e: e) :> hoistStmtExpr(c, e).concat(evalStmt(c, e))          // s451 (Ue): + the Attempt a handled value needs
+            .Local(name: n, mutable: m, init: i) :> hoistExpr(c, i).concat(attemptsFor(c, i)).concat(letStmt(c, s, i))
+            .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat([Stmt.Return(returnValue(c, e))])
+            .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
+            .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+            .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
+            .Fail(f: f) :> hoistExprs(c, f.args).concat(failStmt(c, s, f))   // s451 (Ue, §19.3)
         }
     }
 
@@ -471,10 +626,9 @@ ${
     fn givenStmts(c: LC, s: AStmt, body: ABlock) -> Stmt[] {
         const f: BindFact | not = bindFact(c.t.binds, s.nid)
         return match f {
-            .BGiven(sym: sym, inst: i) :> [
-                Stmt.Let(sym, Expr.Handle(i)),
+            .BGiven(sym: sym, inst: i) :> [Stmt.Let(sym, Expr.Handle(i))].concat(joinMark(c, s)).concat([
                 Stmt.If(Expr.Prim(PrimOp.IsSome, [Expr.Local(sym)]), lowerBlock(c, body), not),
-            ]
+            ])
             .BBind(sym: x) :> []
             .BParam(sym: x) :> []
             not :> []
@@ -493,8 +647,18 @@ ${
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
             .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
+            .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
+            .EElemAt(cap: cap, inst: i, index: ix, path: path) :> elemAtStmt(c, cap, i, ix, path, value)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
+    }
+
+    // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index
+    // and the value are lowered here; the element field's contract was judged
+    // by analyze (dpa-052 Q3) and is re-checked in Core (check.scrml C3).
+    fn elemAtStmt(c: LC, cap: Sym, i: InstRef, ix: AExpr, path: FieldRef[], value: AExpr | not) -> Stmt[] {
+        if (value is not) return []
+        return [Stmt.Write(cap, instOf(c, i), EditKind.ElemAt(lowerExpr(c, ix), path), lowerExpr(c, value), Check.Static)]
     }
     // The value a write stores: an assignment's right side, or the element of
     // an edit method call (`@x.push(v)`).
@@ -520,6 +684,8 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -676,6 +842,11 @@ ${
             .StructOf(ty: x) :> missing()
             .Handle(inst: x) :> missing()
             .InitOf(decl: x) :> missing()
+            .Host(call: x) :> missing()
+            .Lambda(params: x) :> missing()
+            .SeqCall(op: x) :> missing()
+            .Validity(of: x) :> missing()
+            .ServerCall(fn: x) :> missing()
         }
     }
 
@@ -686,6 +857,8 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -715,11 +888,52 @@ ${
         const di: DeclInfo | not = declInfo(c.t, d)
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
-        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)]
+        const surf: Stmt[] = surfaceReset(di, target, idx).concat(unpersistReset(c.t, di, target, idx))
+        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf)
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
         if (init is not) return []
-        return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
+        return [Stmt.Write(w.cap, target, w.edit, init, w.check)].concat(surf)
+    }
+
+    // s449 — §55.13: `reset(@x)` "clears synthesized validity state in
+    // addition to resetting the underlying value" — the field's surface, when
+    // it has one (every field of a user declaration, §55.6; a top-level value
+    // that carries validators, §55.5.1).
+    fn surfaceReset(di: DeclInfo, inst: InstRef, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= di.fields.length) return []
+        if (isProgramKind(di.kind) && di.fields[idx].vals.length == 0) return []
+        return [Stmt.ResetSurface(ValidityOf.OfField(di.sym, inst, idx))]
+    }
+
+    // s449 — one View.ResetOn per accepted `reset-on=` rule (§6.8.4): the
+    // triggers as cells of the program instance, and the reset as ONE Write of
+    // the cell's initializer — a replace, or a Static transition for a cell with
+    // a `rule=` graph (analyze proved every state admits the target, rule 6).
+    fn resetOnViews(c: LC, d: DeclInfo) -> View[] {
+        let out: View[] = []
+        for (const r of c.t.resets) {
+            const reset: Stmt[] = resetWrite(c, d, r.target)
+            if (reset.length >= 1) {
+                let triggers: EffectDep[] = []
+                for (const t of r.triggers) { triggers = triggers.concat([mkEffectDep(d.sym, InstRef.Lexical(0), t)]) }
+                out = out.concat([View.ResetOn(triggers, block(reset), r.rank)])
+            }
+        }
+        return out
+    }
+
+    fn resetWrite(c: LC, d: DeclInfo, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= d.fields.length) return []
+        const f: FieldInfo = d.fields[idx]
+        const cap: Sym | not = f.wcap
+        if (cap is not) return []
+        const ic: LC = { t: c.t, file: c.file, subst: InstRef.Lexical(0), snap: not }
+        const init: Expr | not = lowerValue(ic, f.init)
+        if (init is not) return []
+        let edit: EditKind = EditKind.Replace
+        if (f.graph is some) edit = EditKind.Transition
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx)).concat(unpersistReset(c.t, d, InstRef.Lexical(0), idx))
     }
 
     fn isProgramKind(k: DeclKind) -> boolean {
@@ -733,17 +947,140 @@ ${
     // =========================================================================
     // Views.
     // =========================================================================
-    // L13: whitespace-only text that contains a newline is formatting.
-    fn isFormatting(t: string) -> boolean {
-        const s: string = t.trim()
-        if (s != "") return false
-        return t.indexOf("\n") >= 0
-    }
-
     fn lowerNodes(c: LC, ns: ANode[]) -> View[] {
         let out: View[] = []
-        for (const n of ns) { out = out.concat(lowerNode(c, n)) }
+        let i = 0
+        while (i < ns.length) {
+            const j: int = chainEnd(ns, i)          // s451: an if-chain (§17.1.1) starting here
+            if (j > i + 1) {
+                out = out.concat([chainView(c, ns, i, j)])
+                i = j
+            } else {
+                out = out.concat(lowerNode(c, ns[i]))
+                i = i + 1
+            }
+        }
         return out
+    }
+
+    // ---- s451: if-chains (§17.1.1) -------------------------------------------
+    // "An if-chain desugars to a single `${ if / else if / else }` block" — ONE
+    // View.Cond whose arms are the members in declaration order (the runtime's
+    // `cond` renders the FIRST arm whose test holds, so exactly one member is
+    // in the DOM, reactively). An `else` arm's test is `true`. Each member is
+    // lowered as the bare element: "the structural attributes are consumed
+    // during desugaring and do not appear on the lifted element". Whitespace-
+    // only text between members is consumed with them (§17.1.1: it does not
+    // break a chain). analyze (chainCheck) refused every malformed chain; a lone
+    // `if=` is not a chain here — condWrap wraps it (L5).
+    fn elemOf(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: t) :> not
+            .Interp(e: e) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+        }
+    }
+
+    fn blankText(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: t) :> t.trim() == ""
+            .Elem(e: e) :> false
+            .Interp(e: e) :> false
+            .DeclNode(d: d) :> false
+            .Effect(w: w) :> false
+        }
+    }
+
+    fn hasAttrNamed(e: AElem, name: string) -> boolean {
+        for (const a of e.attrs) {
+            if (a.name == name) return true
+        }
+        return false
+    }
+
+    // The index just past the last member of the chain opened by ns[i] (an
+    // element carrying `if=`), or i + 1 when ns[i] opens none.
+    fn chainEnd(ns: ANode[], i: int) -> int {
+        const first: AElem | not = elemOf(ns[i])
+        if (first is not) return i + 1
+        if (!hasAttrNamed(first, "if")) return i + 1
+        let end: int = i + 1
+        let k: int = i + 1
+        let open = true
+        while (open && k < ns.length) {
+            const e: AElem | not = elemOf(ns[k])
+            if (e is some) {
+                if (hasAttrNamed(e, "if")) {
+                    open = false
+                } else if (hasAttrNamed(e, "else-if")) {
+                    end = k + 1
+                } else if (hasAttrNamed(e, "else")) {
+                    end = k + 1
+                    open = false
+                } else {
+                    open = false
+                }
+            } else if (!blankText(ns[k])) {
+                open = false
+            }
+            k = k + 1
+        }
+        return end
+    }
+
+    fn chainView(c: LC, ns: ANode[], i: int, j: int) -> View {
+        let arms: CondArm[] = []
+        let k: int = i
+        while (k < j) {
+            const e: AElem | not = elemOf(ns[k])
+            if (e is some) arms = arms.concat([{ test: chainTest(c, e), body: bareElem(c, e) }])
+            k = k + 1
+        }
+        return View.Cond(arms)
+    }
+
+    // A member's test: its `if=` / `else-if=` condition; `else` → true. A
+    // condition that does not lower (analyze reported it) is `false` — the
+    // branch never renders (fail closed), and the arms after it keep their
+    // place in the order.
+    fn chainTest(c: LC, e: AElem) -> Expr {
+        for (const a of e.attrs) {
+            if (a.name == "if" || a.name == "else-if") {
+                const t: Expr | not = lowerValue(c, a.value)
+                if (t is some) return t
+                return Expr.Lit(Literal.Bool(false))
+            }
+        }
+        return Expr.Lit(Literal.Bool(true))
+    }
+
+    // The element without its condition (the chain's arm carries it).
+    fn bareElem(c: LC, e: AElem) -> View[] {
+        const f: ElemFact | not = elemFact(c.t.elems, e.nid)
+        return match f {
+            .MHtml :> [htmlView(c, e)]
+            .MUse(decl: d, alias: a) :> [useView(c, e, d, a)]
+            .MEach(bind: b, handles: hs) :> lowerElem(c, e)
+            .MSlot :> lowerElem(c, e)
+            .MDb :> lowerElem(c, e)
+            .MErrors(of: v, all: a) :> lowerElem(c, e)
+            .MStateView(v: v) :> lowerElem(c, e)
+            .MInline(v: v) :> lowerElem(c, e)
+            .MStar(decl: d, inst: x) :> lowerElem(c, e)
+            not :> []
+        }
+    }
+
+    fn htmlView(c: LC, e: AElem) -> View {
+        return View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), lowerNodes(c, e.kids))
+    }
+
+    fn useView(c: LC, e: AElem, d: Sym, a: Sym | not) -> View {
+        return View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)
     }
 
     fn lowerNode(c: LC, n: ANode) -> View[] {
@@ -753,25 +1090,82 @@ ${
             .Interp(e: e) :> [View.Dyn(lowerExpr(c, e))]
             .Elem(e: e) :> lowerElem(c, e)
             .DeclNode(d: d) :> []
+            .Effect(w: w) :> [effectView(c, w)]
         }
     }
 
+    // s449 — an effect → View.Effect: each dependency's field fact (analyze
+    // resolved it, or reported E-LIFECYCLE-007 and left no fact — then the
+    // program does not run). Both spellings lower alike (§6.7.4 "Parses
+    // identically").
+    fn effectView(c: LC, w: AEffect) -> View {
+        let deps: EffectDep[] = []
+        for (const d of w.deps) { deps = deps.concat(effectDep(c, nameFact(c.t.names, d.nid))) }
+        return View.Effect(deps, cpsBody(lowerBlock(c, w.body), []))   // s454 (U1b): explicit continuations
+    }
+
+    fn effectDep(c: LC, f: NameFact | not) -> EffectDep[] {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> [mkEffectDep(d, instOf(c, i), x)]
+            .NLocal(sym: s) :> []
+            .NInst(decl: d) :> []
+            .NStruct(owner: o) :> []
+            .NFn(sym: s) :> []
+            .NLength :> []
+            .NSurface(of: x) :> []
+            not :> []
+        }
+    }
+
+    fn mkEffectDep(d: Sym, i: InstRef, x: int) -> EffectDep { return { decl: d, inst: i, idx: x } }
+
+    // dpa-045 follow-up 4 (RULED S442; SPEC §4.18.5 "whitespace-only text
+    // between elements is kept exactly too"): a Text node is free-text content
+    // (a code-default body never builds one for its formatting whitespace —
+    // parseCodeBody skips it) or a display-text literal segment — both
+    // verbatim. Only the parser's empty placeholder ("") renders nothing.
     fn textViews(t: string) -> View[] {
-        if (isFormatting(t)) return []
+        if (t == "") return []
         return [View.Text(t)]
     }
 
     fn lowerElem(c: LC, e: AElem) -> View[] {
         const f: ElemFact | not = elemFact(c.t.elems, e.nid)
         return match f {
-            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs), lowerNodes(c, e.kids))])
-            .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
+            .MHtml :> condWrap(c, e, [htmlView(c, e)])
+            .MUse(decl: d, alias: a) :> condWrap(c, e, [useView(c, e, d, a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
+            .MDb :> lowerNodes(c, e.kids)       // s452: a `<db>` state block renders its children in place (§4)
+            .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
+            .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]
             not :> []
         }
+    }
+
+    // s449 — a surface analyze resolved, its instance reference made Core's
+    // (the same `instOf` every cell read goes through).
+    fn validityOf(c: LC, v: ValidityOf) -> ValidityOf {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> ValidityOf.OfField(d, instOf(c, i), x)
+            .OfDecl(decl: d, inst: i) :> ValidityOf.OfDecl(d, instOf(c, i))
+        }
+    }
+
+    // s444 Phase B (RULED S442 (3): "the compiler adds `novalidate` to any form
+    // carrying lowered attributes") — analyze listed the forms.
+    // s449 — and the compiler submit gate (§55.17.3) on every gated form,
+    // first among the form's attributes: analyze listed the gated forms and
+    // the values that gate each (§55.17.6 names them).
+    fn noValidate(c: LC, e: AElem) -> Attr[] {
+        let out: Attr[] = []
+        for (const g of c.t.gated) {
+            if (g.form == e.nid) out = out.concat([Attr.Gate(g.values, [])])
+        }
+        if (c.t.novalidate.indexOf(e.nid) >= 0) out = out.concat([Attr.Static("novalidate", "")])
+        return out
     }
 
     // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
@@ -804,6 +1198,7 @@ ${
     fn isIf(k: AttrKind) -> boolean {
         return match k {
             .AIf :> true
+            .AShow :> false
             .AOn(event: ev) :> false
             .AConstruct(field: x) :> false
             .AStatic :> false
@@ -812,6 +1207,7 @@ ${
             .AEachIn :> false
             .AEachKey :> false
             .AEachAs :> false
+            .ABind(kind: k) :> false
         }
     }
 
@@ -844,11 +1240,58 @@ ${
             .ABound :> boundAttr(c, a)
             .AOn(event: ev) :> [Attr.On(ev, handlerBlock(c, a.value))]
             .AIf :> []
+            .AShow :> showAttr(c, a)
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
             .AEachKey :> []
             .AEachAs :> []
+            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk, vattrs: vs) :> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))
+        }
+    }
+
+    // s451 — `show=cond` (§17.2) → Attr.Show: the element stays in the DOM and
+    // is hidden (`display: none`) while the condition is false. Inside an
+    // if-chain arm it composes (§17.1.1): the arm decides presence, this
+    // decides visibility. A condition that does not lower (analyze reported
+    // it) hides the element (fail closed).
+    fn showAttr(c: LC, a: AAttr) -> Attr[] {
+        const t: Expr | not = lowerValue(c, a.value)
+        if (t is some) return [Attr.Show(t)]
+        return [Attr.Show(Expr.Lit(Literal.Bool(false)))]
+    }
+
+    // s444 Phase B (dpa-058, RULED S442 (2)) — the bound field's validators'
+    // HTML-native attributes (analyze computed them for THIS element).
+    fn validatorAttrs(vs: HtmlAttrPair[]) -> Attr[] {
+        let out: Attr[] = []
+        for (const v of vs) { out = out.concat([Attr.Static(v.name, v.value)]) }
+        return out
+    }
+
+    // s444 — `bind:value=@p` / `bind:checked=@p` → Attr.Bind: the read of the
+    // place (field `idx` of `decl` through the write's instance, then the
+    // write's FieldAt path) and ONE write of the event-value local `sink`
+    // (check.scrml C8 pins the pair to one place).
+    fn bindAttr(c: LC, k: BindKind, w: WriteFact, d: Sym, idx: int, sink: Sym) -> Attr {
+        const inst: InstRef = instOf(c, w.inst)
+        const read: Expr = cellRead(c, d, inst, [{ owner: d, idx: idx }].concat(editPath(w.edit)))
+        return Attr.Bind(k, read, sink, block([Stmt.Write(w.cap, inst, w.edit, Expr.Local(sink), w.check)]))
+    }
+
+    fn editPath(k: EditKind) -> FieldRef[] {
+        return match k {
+            .FieldAt(path: p) :> p
+            .Replace :> []
+            .Append :> []
+            .Prepend :> []
+            .Anywhere :> []
+            .PositionWrite :> []
+            .Transition :> []
+            .RemoveEnd :> []
+            .RemoveFront :> []
+            .RemoveAnywhere :> []
+            .ElemAt(index: x) :> []
         }
     }
 
@@ -870,13 +1313,43 @@ ${
 
     // A handler value is one statement (`f()`, `(@x = …)`) or a braced block.
     fn handlerBlock(c: LC, v: AAttrValue) -> Block {
-        return match v {
-            .Bare(e: e) :> block(exprStmt(c, e))
-            .Paren(e: e) :> block(exprStmt(c, e))
-            .Braced(b: b) :> lowerBlock(c, b)
+        const b0: Block = match v {
+            .Bare(e: e) :> block(handlerStmt(c, e))
+            .Paren(e: e) :> block(handlerStmt(c, e))
+            .Braced(b: b) :> bracedHandlerBlock(c, b)
             .Quoted(v: s) :> block([])
             .NoValue :> block([])
         }
+        return cpsBody(b0, [])     // s454 (U1b): a handler that suspends — explicit continuations
+    }
+
+    // s451 (Ue, review HIGH-2): an event-handler REFERENCE `onclick=f` /
+    // `onclick={ f }` CALLS f when the event fires (analyze admitted it: a
+    // parameterless function that cannot fail). Before, the name was lowered
+    // as a value — `null` — and the handler did nothing.
+    fn handlerStmt(c: LC, e: AExpr) -> Stmt[] {
+        // s454 (U1b): a reference / call that suspends was hoisted (handlerBlock)
+        const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
+        if (sa is some) return hoistExpr(c, e)
+        const f: NameFact | not = nameFact(c.t.names, e.nid)
+        const s: Sym | not = match f {
+            .NFn(sym: x) :> x
+            .NLocal(sym: x) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NLength :> not
+            .NSurface(of: x) :> not
+            not :> not
+        }
+        if (s is some) return [Stmt.Eval(Expr.Call(s, []))]
+        return hoistStmtExpr(c, e).concat(evalStmt(c, e))
+    }
+
+    fn bracedHandlerBlock(c: LC, b: ABlock) -> Block {
+        const r: AExpr | not = blockReference(b)
+        if (r is some) return block(handlerStmt(c, r))
+        return lowerBlock(c, b)
     }
 
     // L6 / O60: a use's attributes are construction values, IN FIELD-INDEX ORDER
@@ -921,10 +1394,12 @@ ${
             .AStatic :> -1
             .ABound :> -1
             .AIf :> -1
+            .AShow :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
             .AEachAs :> -1
+            .ABind(kind: k) :> -1
         }
     }
 
@@ -956,9 +1431,11 @@ ${
             .AStatic :> 0
             .ABound :> 0
             .AIf :> 0
+            .AShow :> 0
             .AConstruct(field: x) :> 0
             .AAs :> 0
             .AEachAs :> 0
+            .ABind(kind: k) :> 0
         }
     }
 
@@ -968,8 +1445,33 @@ ${
     fn lowerField(c: LC, f: FieldInfo) -> Field {
         return {
             sym: f.sym, ty: f.ty, init: lowerValue(c, f.init), mode: f.mode, role: f.role,
-            grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap,
+            grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
+            persist: persistOf(c.t, f.sym),
         }
+    }
+
+    // s451 — the field's accepted `persist=` (§6.14; analyze persistPass).
+    fn persistOf(t: Tables, s: Sym) -> Persist | not {
+        for (const p of t.persists) {
+            if (p.sym.id == s.id) return p.persist
+        }
+        return not
+    }
+
+    // s451 — §6.14.2 rule 9: a reset of a persisted field "SHALL **remove** the
+    // cell's storage key instead of storing that value" — an Unpersist after
+    // the reset's Write (and its ResetSurface).
+    fn unpersistReset(t: Tables, di: DeclInfo, inst: InstRef, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= di.fields.length) return []
+        if (persistOf(t, di.fields[idx].sym) is not) return []
+        return [Stmt.Unpersist(di.sym, inst, idx)]
+    }
+
+    // s449 — the field's validators as Core carries them (§55.1, declaration order).
+    fn valCores(vs: ValInfo[]) -> Validator[] {
+        let out: Validator[] = []
+        for (const v of vs) { out = out.concat([v.core]) }
+        return out
     }
 
     // The syntax of every declaration, by nid (user declarations: the ADecl; the
@@ -1067,6 +1569,12 @@ ${
         let renders: View[] | not = not
         const s: DeclSyntax | not = syntaxOf(ss, d.nid)
         if (s is some) renders = lowerRenders(c, s)
+        // s449: the program cells' `reset-on=` rules are registered with the
+        // program's scope, ahead of its markup (§6.8.4)
+        if (isProgramKind(d.kind)) {
+            const rv: View[] | not = renders
+            if (rv is some) renders = resetOnViews(c, d).concat(rv)
+        }
         const wiring: WiringAttr[] = []
         return { sym: d.sym, kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
     }
@@ -1115,26 +1623,1122 @@ ${
                 const c: LC = { t: t, file: info.file, subst: not, snap: not }
                 let params: Param[] = []
                 for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
-                return { sym: info.sym, params: params, body: lowerBlock(c, s.f.body), pure: info.pure }
+                // s454 (U1b): a WAITING function (the suspension plan's `waiting`) — its
+                // body in explicit continuations, every path ending in a Return (its
+                // Promise settles on every exit, print.scrml waiting functions)
+                const waits: boolean = t.server.plan.waiting.indexOf(info.sym.id) >= 0
+                let body: Block = lowerBlock(c, s.f.body)
+                if (waits) body = cpsBody(body, [Stmt.Return(Expr.Lit(Literal.Absent))])
+                return { sym: info.sym, params: params, body: body, pure: info.pure, err: info.err, waits: waits }
             }
         }
         return not
     }
 
+    // s451 (U1a): a function route inference placed on the server (analyze
+    // placePass — `Tables.server.servers`) lowers to a Core ServerFn. Lower
+    // decides nothing: the placement is analyze's fact.
+    fn lowerServerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> ServerFn | not {
+        const f: Fn | not = lowerFn(t, fs, info)
+        if (f is not) return not
+        // s454 (U1b): the wire type of its answer — declared, or (a `!` function has no
+        // success-type slot, §19.4.1) the one its returns prove (the plan's `rets`)
+        let ret: Type | not = info.ret
+        if (ret is not) ret = retOf(t.server.plan, info.sym.id)
+        return { sym: f.sym, params: f.params, ret: ret, body: f.body, err: f.err }
+    }
+
+    // =========================================================================
+    // s451 (Ue) — THE ERROR MODEL (§19). A handling form (`?` / `!{}` /
+    // `match`, AExprK.Handled) or a `?{}` its `!` function propagates (§19.8.2)
+    // stands as a statement's WHOLE value (analyze refuses it elsewhere — Ue2),
+    // so it lowers to ONE Stmt.Attempt placed before that statement, and the
+    // statement reads the Attempt's `result`. Everything here is analyze's
+    // facts (FHandled / FArm / FFail and the arm binders' Syms) — lower decides
+    // nothing.
+    // =========================================================================
+    // A handled value, read where it stands: its Attempt's result.
+    fn handledRead(c: LC, e: AExpr) -> Expr {
+        const h: HandledFact | not = handledFactOf(c.t, e.nid)
+        if (h is not) return missing()
+        return Expr.Local(h.result)
+    }
+
+    fn handledFactOf(t: Tables, nid: int) -> HandledFact | not {
+        const f: FailFact | not = failFact(t.fails, nid)
+        return match f {
+            .FHandled(h: h) :> h
+            .FArm(idx: x) :> not
+            .FFail(err: x) :> not
+            not :> not
+        }
+    }
+
+    // The Attempt a whole value needs (none when it is not a handled one).
+    fn attemptsFor(c: LC, e: AExpr | not) -> Stmt[] {
+        if (e is not) return []
+        const h: HandledFact | not = handledFactOf(c.t, e.nid)
+        if (h is not) return []
+        if (suspendAtOf(c.t.server.plan, e.nid) is some) return []    // s454: hoisted with its Suspend (hoistExpr)
+        return [attemptOf(c, e, h)]
+    }
+
+    fn attemptOf(c: LC, e: AExpr, h: HandledFact) -> Stmt {
+        let result: Sym | not = h.result
+        if (h.stmt) result = not
+        const hd: AHandled | not = handledOfK(e.k)
+        if (hd is not) {
+            // an implicit `?{}` propagation (§19.8.2): the query is the call
+            return Stmt.Attempt(result, failableOf(c, e), h.err, plainOk(h), retagArms(c, h))
+        }
+        // s454 (U1b): a handling form that suspends inspects the SETTLED outcome
+        // (design §2.1 "Suspend waits, Attempt inspects"); its failure set is the
+        // client call's, or — the call turned out server→server — the callee's own
+        const err: Sym = effErr(c, h)
+        let call: Failable = failableOf(c, hd.subject)
+        const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
+        if (sa is some) call = Failable.FSettled(sa.bind)
+        const how: AHow = hd.how
+        return match how {
+            .Propagate :> Stmt.Attempt(result, call, err, plainOk(h), retagArms(c, h))
+            .Guard(arms: arms) :> Stmt.Attempt(result, call, err, plainOk(h), errArms(c, h, arms, false))
+            .MatchOn(arms: arms) :> Stmt.Attempt(result, call, err, matchOk(c, h, arms), errArms(c, h, arms, true))
+        }
+    }
+
+    // s454 (U1b) — the failure set an Attempt handles: a handling form on a call
+    // of a server function made where the caller turned out SERVER-placed
+    // (§19.9.10 "Not affected: A server→server call") fails with the callee's
+    // own enum (RemoteFact.local); otherwise the binder's (the client set).
+    fn effErr(c: LC, h: HandledFact) -> Sym {
+        const rf: RemoteFact | not = h.remote
+        if (rf is not) return h.err
+        if (remoteCaller(c.t, rf.caller)) return h.err
+        const l: Sym | not = rf.local
+        if (l is some) return l
+        return h.err
+    }
+
+    // Is this handling form's call a CLIENT call of a server function (so `?`
+    // also re-fails the trailing `Transport`)?
+    fn clientCall(c: LC, h: HandledFact) -> boolean {
+        const rf: RemoteFact | not = h.remote
+        if (rf is not) return false
+        return remoteCaller(c.t, rf.caller)
+    }
+
+    // The success branch of `?` / `!{}`: the value itself.
+    fn plainOk(h: HandledFact) -> OkArm {
+        if (h.stmt) return { bind: h.ok, body: block([]), value: not }
+        return { bind: h.ok, body: block([]), value: Expr.Local(h.ok) }
+    }
+
+    // The call: a `!` function's (FCall) or a query (FSql).
+    fn failableOf(c: LC, e: AExpr) -> Failable {
+        const q: ASql | not = sqlOfExpr(e.k)
+        if (q is some) return Failable.FSql(sqlQueryOf(c, e, q))
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: cal, args: args) :> failableCall(c, nameFact(c.t.names, cal.nid), args)
+            .Name(name: n) :> noCall()
+            .At(name: n) :> noCall()
+            .AtItem :> noCall()
+            .Num(raw: r) :> noCall()
+            .Str(v: s) :> noCall()
+            .Bool(v: b) :> noCall()
+            .NotLit :> noCall()
+            .Recovered :> noCall()
+            .Variant(name: n) :> noCall()
+            .Member(obj: o) :> noCall()
+            .Unary(op: o) :> noCall()
+            .Binary(op: o) :> noCall()
+            .Ternary(test: t) :> noCall()
+            .Assign(target: t) :> noCall()
+            .ArrayLit(elems: es) :> noCall()
+            .ObjectLit(props: ps) :> noCall()
+            .Spread(e: x) :> noCall()
+            .Index(obj: o) :> noCall()
+            .Lambda(params: ps) :> noCall()
+            .Sql(q: x) :> noCall()
+            .Handled(h: x) :> noCall()
+        }
+    }
+
+    fn noCall() -> Failable { return Failable.FCall(mkSym(-1, "unhandled"), []) }
+
+    // (A subject analyze did not resolve to a `!` function never reaches here —
+    // it is E-ERROR-004 / refused, and the gate stops lowering; check.scrml's
+    // C-E2 names any FCall of a Sym that is no function.)
+    fn failableCall(c: LC, f: NameFact | not, args: AExpr[]) -> Failable {
+        return match f {
+            .NFn(sym: s) :> Failable.FCall(s, lowerExprs(c, args))
+            .NLocal(sym: s) :> noCall()
+            .NField(decl: d) :> noCall()
+            .NInst(decl: d) :> noCall()
+            .NStruct(owner: o) :> noCall()
+            .NLength :> noCall()
+            .NSurface(of: x) :> noCall()
+            not :> noCall()
+        }
+    }
+
+    // `?` (§19.5.2): one arm per callee variant, re-failing as the enclosing
+    // enum's variant with the same payload (analyze's Retag map).
+    fn retagArms(c: LC, h: HandledFact) -> ErrArm[] {
+        const into: Sym | not = h.into
+        if (into is not) return []
+        const err: Sym = effErr(c, h)
+        // s454 (U1b): a client call also re-fails its trailing `Transport` (§19.9.10)
+        let rs: Retag[] = h.retag
+        const rf: RemoteFact | not = h.remote
+        if (rf is some && clientCall(c, h)) rs = rs.concat(rf.retagT)
+        let out: ErrArm[] = []
+        for (const r of rs) {
+            let vals: Expr[] = []
+            for (const b of r.binds) { vals = vals.concat([Expr.Local(b)]) }
+            out = out.concat([{ pat: Pattern.PVariant(err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not, whole: not }])
+        }
+        return out
+    }
+
+    // A `match`'s success branch: its `.Ok(v)` arm, else its wildcard (which
+    // covers the success value too, §19.7.3).
+    fn matchOk(c: LC, h: HandledFact, arms: AArm[]) -> OkArm {
+        for (const a of arms) {
+            if (armIdxOf(c.t, a) == -2) return { bind: okBind(c, h, a), body: armBody(c, h, a), value: armValue(c, h, a) }
+        }
+        for (const a2 of arms) {
+            if (armIdxOf(c.t, a2) == -1) return { bind: h.ok, body: armBody(c, h, a2), value: armValue(c, h, a2) }
+        }
+        return plainOk(h)
+    }
+
+    fn okBind(c: LC, h: HandledFact, a: AArm) -> Sym {
+        const bs: Sym[] = armBindSyms(c, a)
+        if (bs.length == 1) return bs[0]
+        return h.ok
+    }
+
+    // The failure arms: every arm but a `match`'s `.Ok`, in source order.
+    // s452: a whole-error arm (`_ err`, analyze's FArm(-4), §18.6.1) is the
+    // wildcard binding the whole error value to its binder's Sym.
+    fn errArms(c: LC, h: HandledFact, arms: AArm[], isMatch: boolean) -> ErrArm[] {
+        let out: ErrArm[] = []
+        for (const a of arms) {
+            const idx: int = armIdxOf(c.t, a)
+            if (idx == -1) {
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
+            } else if (idx == -4) {
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }])
+            } else if (idx >= 0) {
+                out = out.concat([{ pat: Pattern.PVariant(effErr(c, h), idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
+            }
+        }
+        return out
+    }
+
+    // The whole-error binder's Sym (the binder minted it; `_ _` binds nothing visible but still has one).
+    fn wholeSym(c: LC, a: AArm) -> Sym | not {
+        const bs: Sym[] = armBindSyms(c, a)
+        if (bs.length == 1) return bs[0]
+        return not
+    }
+
+    fn armIdxOf(t: Tables, a: AArm) -> int {
+        const f: FailFact | not = failFact(t.fails, a.nid)
+        return match f {
+            .FArm(idx: i) :> i
+            .FHandled(h: x) :> -3
+            .FFail(err: x) :> -3
+            not :> -3
+        }
+    }
+
+    // The arm's binders' Syms (the binder minted one per written binder, `_` included).
+    fn armBindSyms(c: LC, a: AArm) -> Sym[] {
+        const p: APat = a.pat
+        const bs: ABind[] = match p {
+            .PName(binds: b) :> b
+            .PWild :> []
+            .PWhole(bind: b) :> [b]
+            .PBare(bind: b) :> [b]
+        }
+        let out: Sym[] = []
+        for (const b of bs) {
+            const s: Sym | not = letSym(bindFact(c.t.binds, b.nid))
+            if (s is some) out = out.concat([s])
+        }
+        return out
+    }
+
+    // An arm as a statement: its block, or its expression as a statement (a
+    // classified write, a call, a nested handling form). As a value: the
+    // statements its value needs first (a nested handling form's Attempt).
+    fn armBody(c: LC, h: HandledFact, a: AArm) -> Block {
+        const body: AArmBody = a.body
+        return match body {
+            .ArmBlock(b: b) :> armBlockBody(c, h, b)
+            .ArmExpr(e: x) :> armExprBody(c, h, x)
+        }
+    }
+
+    fn armExprBody(c: LC, h: HandledFact, x: AExpr) -> Block {
+        if (h.stmt) return block(evalStmt(c, x))
+        return block(attemptsFor(c, x))
+    }
+
+    // s452 — a block arm where the form has a VALUE (§18.5: "The block's
+    // result is its **last expression**"; §19.4.3 ruling 1a): its statements,
+    // then the Attempt its last expression needs; the expression itself is the
+    // arm's `value`. A block that does not end in an expression there diverges
+    // (analyze reports E-ERROR-012 for one that falls through), so it is
+    // lowered whole and carries no value.
+    fn armBlockBody(c: LC, h: HandledFact, b: ABlock) -> Block {
+        const last: AExpr | not = valueTail(h, b)
+        if (last is not) return lowerBlock(c, b)
+        const head: ABlock = { nid: b.nid, span: b.span, stmts: b.stmts.slice(0, b.stmts.length - 1) }
+        return block(lowerBlock(c, head).stmts.concat(attemptsFor(c, last)))
+    }
+
+    fn armValue(c: LC, h: HandledFact, a: AArm) -> Expr | not {
+        if (h.stmt) return not
+        const body: AArmBody = a.body
+        return match body {
+            .ArmBlock(b: b) :> blockValue(c, h, b)
+            .ArmExpr(e: x) :> lowerExpr(c, x)
+        }
+    }
+
+    fn blockValue(c: LC, h: HandledFact, b: ABlock) -> Expr | not {
+        const last: AExpr | not = valueTail(h, b)
+        if (last is not) return not
+        return lowerExpr(c, last)
+    }
+
+    // The last expression of a value-position block arm, else not.
+    fn valueTail(h: HandledFact, b: ABlock) -> AExpr | not {
+        if (h.stmt) return not
+        if (b.stmts.length == 0) return not
+        const k: AStmtK = b.stmts[b.stmts.length - 1].k
+        return match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: x) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    // `fail E.V(args)` (analyze's FFail).
+    fn failStmt(c: LC, s: AStmt, f: AFail) -> Stmt[] {
+        const ff: FailFact | not = failFact(c.t.fails, s.nid)
+        return match ff {
+            .FFail(err: e, idx: i) :> [Stmt.Fail(e, i, lowerExprs(c, f.args))]
+            .FHandled(h: x) :> []
+            .FArm(idx: x) :> []
+            not :> []
+        }
+    }
+
+    // An expression statement, with the Attempt its whole value — or its
+    // assigned value — needs before it.
+    fn evalStmt(c: LC, e: AExpr) -> Stmt[] {
+        if (suspendAtOf(c.t.server.plan, e.nid) is some) return []    // s454: the whole statement was its hoisted Suspend
+        const pre: Stmt[] = attemptsFor(c, e)
+        if (pre.length > 0) {
+            const h: HandledFact | not = handledFactOf(c.t, e.nid)
+            if (h is some) {
+                if (h.stmt) return pre
+            }
+        }
+        const v: AExpr | not = assignedValueOf(e.k)
+        return pre.concat(attemptsFor(c, v)).concat(exprStmt(c, e))
+    }
+
+    // The value of an assignment `t = v` (only an assignment's — an edit call's
+    // argument is never a handling form: analyze refuses it there).
+    fn assignedValueOf(k: AExprK) -> AExpr | not {
+        return match k {
+            .Assign(target: t, value: v) :> v
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+        }
+    }
+
+    fn handledOfK(k: AExprK) -> AHandled | not {
+        return match k {
+            .Handled(h: h) :> h
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+        }
+    }
+
+    fn sqlOfExpr(k: AExprK) -> ASql | not {
+        return match k {
+            .Sql(q: q) :> q
+            .Handled(h: x) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+        }
+    }
+
+    // The error enums the program's Core names (a `!` function's, an
+    // Attempt's, a Fail's) — a built-in enum's TypeDef ships only then.
+    fn usedErrs(t: Tables) -> int[] {
+        let out: int[] = []
+        for (const f of t.fns) {
+            const e: Sym | not = f.err
+            if (e is some) out = out.concat([e.id])
+        }
+        for (const ff of t.fails.facts) { out = out.concat(failFactErrs(ff)) }
+        return out
+    }
+
+    fn failFactErrs(f: FailFact) -> int[] {
+        return match f {
+            .FHandled(h: h) :> [h.err.id].concat(maybeId(h.into))
+            .FFail(err: e) :> [e.id]
+            .FArm(idx: x) :> []
+        }
+    }
+
+    fn maybeId(s: Sym | not) -> int[] {
+        if (s is not) return []
+        return [s.id]
+    }
+
+    // s451 (U1a) — a `?{}` query: its literal runs and its values, with the
+    // facts analyze recorded (the database, kind, tables, columns —
+    // Tables.server.sqls). §8.2: "If the same expression appears more than once
+    // in a single SQL template, the compiler SHALL assign it a single positional
+    // parameter slot and reuse that slot at every occurrence … in order of first
+    // appearance left-to-right" — the lowered values are compared structurally
+    // (`==` on Core Expr: the same local, the same call, the same literal), so
+    // a repeated value is ONE parameter, evaluated once.
+    fn sqlQueryOf(c: LC, e: AExpr, q: ASql) -> SqlQuery {
+        const info: SqlInfo | not = sqlInfo(c.t, e.nid)
+        let db: Sym = mkSym(-1, "nodb")
+        let kind: SqlKind = SqlKind.SqlWrite
+        let reads: SqlTables = SqlTables.TablesUnknown
+        let writes: SqlTables = SqlTables.TablesUnknown
+        let columns: SqlColumns = SqlColumns.ColsUnknown
+        if (info is some) {
+            db = info.db
+            kind = info.kind
+            reads = info.reads
+            writes = info.writes
+            columns = info.columns
+        }
+        let params: Expr[] = []
+        let slots: int[] = []
+        for (const p of q.params) {
+            const x: Expr = lowerExpr(c, p)
+            const at: int = exprIndex(params, x)
+            if (at < 0) {
+                params = params.concat([x])
+                slots = slots.concat([params.length - 1])
+            } else {
+                slots = slots.concat([at])
+            }
+        }
+        return { db: db, chunks: q.chunks, params: params, slots: slots, mode: sqlMode(q.mode),
+                 kind: kind, reads: reads, writes: writes, columns: columns,
+                 nobatch: q.nobatch, site: { n: e.nid } }
+    }
+
+    fn exprIndex(es: Expr[], x: Expr) -> int {
+        let i: int = 0
+        for (const y of es) {
+            if (y == x) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn sqlMode(m: ASqlMode) -> SqlMode {
+        return match m {
+            .SqlAll :> SqlMode.All
+            .SqlGet :> SqlMode.Get
+            .SqlRun :> SqlMode.Run
+        }
+    }
+
+    // s454 (U1b) — the types a shipped built-in enum's payloads NAME (the
+    // client-call failure enum's `Transport(t: ServerCallError)` names the
+    // built-in `ServerCallError`, which then ships too).
+    fn namedIn(t: Tables, used: int[]) -> int[] {
+        let out: int[] = []
+        for (const ti of t.types) {
+            const ts: Sym = typeDefSym(ti.def)
+            if (used.indexOf(ts.id) >= 0) {
+                for (const v of enumVariantsOfDef(ti.def)) {
+                    for (const fd of v.fields) { out = out.concat(namedSyms(fd.ty)) }
+                }
+            }
+        }
+        return out
+    }
+
+    fn enumVariantsOfDef(td: TypeDef) -> VariantDef[] {
+        return match td {
+            .EnumDef(variants: vs) :> vs
+            .StructDef(sym: x) :> []
+        }
+    }
+
+    fn namedSyms(ty: Type) -> int[] {
+        return match ty {
+            .Named(sym: s) :> [s.id]
+            .Seq(elem: e) :> namedSyms(e)
+            .Maybe(inner: i) :> namedSyms(i)
+            .Int :> []
+            .Num :> []
+            .Str :> []
+            .Bool :> []
+        }
+    }
+
+    // =========================================================================
+    // s454 (U1b) — HOISTING (design §2.2, ANF): before a statement, in
+    // evaluation order, every temporary the plan named (`Let tmp = <expr>`) and
+    // every suspension point (`Suspend(bind, <call>, [])` — then, for a handling
+    // form, its Attempt over the settled outcome). The statement itself then
+    // reads the temporaries / binds / results (lowerExpr, handledRead). The walk
+    // order is the planner's (analyze.scrml planExpr) — they must agree.
+    // =========================================================================
+    fn hoistMaybe(c: LC, e: AExpr | not) -> Stmt[] {
+        if (e is not) return []
+        return hoistExpr(c, e)
+    }
+
+    fn hoistExprs(c: LC, es: AExpr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const e of es) { out = out.concat(hoistExpr(c, e)) }
+        return out
+    }
+
+    // An expression statement: an assignment hoists its VALUE (its target is written after).
+    fn hoistStmtExpr(c: LC, e: AExpr) -> Stmt[] {
+        if (c.t.server.plan.at.length == 0) return []
+        const v: AExpr | not = assignedValueOf(e.k)
+        if (v is some) return hoistExpr(c, v)
+        return hoistExpr(c, e)
+    }
+
+    fn hoistExpr(c: LC, e: AExpr) -> Stmt[] {
+        const plan: SuspendPlan = c.t.server.plan
+        if (plan.at.length == 0) return []
+        const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
+        if (sa is some) return hoistKids(c, suspendArgsOf(e)).concat(suspendStmts(c, e, sa))
+        return hoistKids(c, hoistOrder(e))
+    }
+
+    fn hoistKids(c: LC, ks: AExpr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const k of ks) {
+            out = out.concat(hoistExpr(c, k))
+            const t: Sym | not = tempOf(c.t.server.plan, k.nid)
+            if (t is some) out = out.concat([Stmt.Let(t, lowerExprAt(c, k))])
+        }
+        return out
+    }
+
+    // The planner's evaluation order (analyze.scrml planExpr): the branches of
+    // `&&` / `||` / `? :`, a lambda body and a handling form's arms hold no
+    // lowered suspension point (refused there), so they are not walked.
+    fn hoistOrder(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .Binary(op: o, l: l, r: r) :> [l, r]
+            .Ternary(test: t) :> [t]
+            .Lambda(params: lp) :> []
+            .Handled(h: h) :> [h.subject]
+            .Member(obj: o) :> [o]
+            .Call(callee: x, args: a) :> a
+            .Unary(op: o, e: x) :> [x]
+            .Assign(target: t, value: v) :> [v]
+            .ArrayLit(elems: es) :> es
+            .ObjectLit(props: ps) :> propValues(ps)
+            .Spread(e: x) :> [x]
+            .Index(obj: o, idx: i) :> [o, i]
+            .Sql(q: q) :> q.params
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+        }
+    }
+
+    fn propValues(ps: AProp[]) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const p of ps) { out = out.concat([p.value]) }
+        return out
+    }
+
+    // A suspension point's own arguments (evaluated before it suspends).
+    fn suspendArgsOf(e: AExpr) -> AExpr[] {
+        const h: AHandled | not = handledOfK(e.k)
+        if (h is some) return callArgsOf(h.subject)
+        return callArgsOf(e)
+    }
+
+    fn callArgsOf(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: x, args: a) :> a
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+        }
+    }
+
+    // The Suspend (and, for a handling form, its Attempt). Its `then` is filled
+    // by the continuation pass (cpsBody) with the rest of the block.
+    fn suspendStmts(c: LC, e: AExpr, sa: SuspendAt) -> Stmt[] {
+        const args: Expr[] = lowerExprs(c, suspendArgsOf(e))
+        const kd: SuspendK = sa.kind
+        const on: Expr = match kd {
+            .SRemote(callee: f) :> Expr.ServerCall(f, args)
+            .SWaits(callee: f) :> Expr.Call(f, args)
+        }
+        const sus: Stmt = Stmt.Suspend(sa.bind, on, block([]))
+        const h: HandledFact | not = handledFactOf(c.t, e.nid)
+        if (h is some && handledOfK(e.k) is some) return [sus, attemptOf(c, e, h)]
+        return [sus]
+    }
+
+    // An `if` / `given` that suspends in a branch with statements after it: a
+    // Join marker (filled by cpsBody with the rest of the block).
+    fn joinMark(c: LC, s: AStmt) -> Stmt[] {
+        const k: Sym | not = joinOf(c.t.server.plan, s.nid)
+        if (k is not) return []
+        return [Stmt.Join(k, block([]))]
+    }
+
+    // =========================================================================
+    // s454 (U1b) — THE CONTINUATION PASS. Lowering leaves each Suspend with an
+    // empty `then` and each Join with an empty body (markers); this moves the
+    // rest of the block into them, so a Suspend stands at the tail of its block
+    // and everything after it is its continuation (check.scrml C12):
+    //   Suspend(b, on, [])  s…   →  Suspend(b, on, [s…])
+    //   Join(k, []) If(…)   s…   →  Join(k, [s…])  If(…, [… Jump(k)], [… Jump(k)])
+    // `tail`: what ends every path that falls off the block — [] for a handler or
+    // an effect body; `[Return(not)]` for a waiting function (its Promise settles
+    // on every exit). A body with no suspension point is returned unchanged.
+    // =========================================================================
+    fn cpsBody(b: Block, tail: Stmt[]) -> Block {
+        if (!holdsSuspension(b.stmts)) return b
+        return block(cpsStmts(b.stmts, tail))
+    }
+
+    fn cpsStmts(ss: Stmt[], tail: Stmt[]) -> Stmt[] {
+        let i: int = 0
+        while (i < ss.length) {
+            const s: Stmt = ss[i]
+            const sus: SuspendParts | not = suspendParts(s)
+            if (sus is some) {
+                const rest: Stmt[] = ss.slice(i + 1)
+                return ss.slice(0, i).concat([Stmt.Suspend(sus.bind, sus.on, block(cpsStmts(sus.then.stmts.concat(rest), tail)))])
+            }
+            const jk: Sym | not = joinMarkOf(s)
+            if (jk is some && i + 1 < ss.length) {
+                const ip: IfParts | not = ifParts(ss[i + 1])
+                if (ip is some) {
+                    const body: Stmt[] = cpsStmts(ss.slice(i + 2), tail)
+                    const jump: Stmt[] = [Stmt.Jump(jk)]
+                    return ss.slice(0, i).concat([Stmt.Join(jk, block(body)), Stmt.If(ip.cond, block(cpsStmts(ip.thenB.stmts, jump)), block(cpsStmts(elseStmts(ip.elseB), jump)))])
+                }
+            }
+            const ip2: IfParts | not = ifParts(s)
+            if (ip2 is some && i == ss.length - 1 && holdsSuspension([s])) {
+                // the last statement: its branches end the block — each gets the tail
+                let eb: Block | not = not
+                if (ip2.elseB is some || tail.length > 0) eb = block(cpsStmts(elseStmts(ip2.elseB), tail))
+                return ss.slice(0, i).concat([Stmt.If(ip2.cond, block(cpsStmts(ip2.thenB.stmts, tail)), eb)])
+            }
+            i = i + 1
+        }
+        if (tail.length == 0) return ss
+        if (ss.length > 0 && endsPath(ss[ss.length - 1])) return ss
+        return ss.concat(tail)
+    }
+
+    fn elseStmts(b: Block | not) -> Stmt[] {
+        if (b is not) return []
+        return b.stmts
+    }
+
+    type SuspendParts:struct = { bind: Sym, on: Expr, then: Block }
+    type IfParts:struct = { cond: Expr, thenB: Block, elseB: Block | not }
+
+    fn suspendParts(s: Stmt) -> SuspendParts | not {
+        return match s {
+            .Suspend(bind: b, on: on, then: t) :> { bind: b, on: on, then: t }
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    fn ifParts(s: Stmt) -> IfParts | not {
+        return match s {
+            .If(cond: c, thenB: t, elseB: e) :> { cond: c, thenB: t, elseB: e }
+            .Suspend(bind: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    fn joinMarkOf(s: Stmt) -> Sym | not {
+        return match s {
+            .Join(k: k, body: b) :> k
+            .If(cond: x) :> not
+            .Suspend(bind: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    // A path through the block ends here (nothing after it would run).
+    fn endsPath(s: Stmt) -> boolean {
+        return match s {
+            .Return(e: x) :> true
+            .Fail(err: x) :> true
+            .Jump(k: x) :> true
+            .Suspend(bind: x) :> true
+            .If(cond: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Join(k: x) :> false
+        }
+    }
+
+    fn holdsSuspension(ss: Stmt[]) -> boolean {
+        for (const s of ss) {
+            for (const n of allNodes(Node.NStmt(s))) {
+                if (nodeSuspends(n)) return true
+            }
+        }
+        return false
+    }
+
+    fn nodeSuspends(n: Node) -> boolean {
+        return match n {
+            .NStmt(s: s) :> suspendParts(s) is some || joinMarkOf(s) is some
+            .NExpr(e: x) :> false
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    // s451 — §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole
+    // `reset` layer." analyze accepts `reset="none"` and refuses any other value,
+    // so here the program's opener has either no `reset=` or exactly that one.
+    fn resetShips(files: FileAst[], t: Tables) -> boolean {
+        let nid = -1
+        for (const d of t.decls) { if (d.sym.id == t.program.id) nid = d.nid }
+        for (const f of files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k
+                const p: AProgram | not = match k {
+                    .ProgramItem(p: p) :> p
+                    .DeclItem(d: d) :> not
+                    .ImportItem(i: i) :> not
+                    .TypeItem(t: tx) :> not
+                    .FnItem(f: fx) :> not
+                    .MarkupItem(n: n) :> not
+                }
+                if (p is some && p.nid == nid) {
+                    for (const a of p.attrs) { if (a.name == "reset") return false }
+                }
+            }
+        }
+        return true
+    }
+
     export fn lower(tp: TypedProgram) -> Lowered {
+        if (hasError(tp)) return { core: not, diags: tp.diags }   // s451: the diagnostics gate
         const t: Tables = tp.tables
         const ss: DeclSyntax[] = declSyntaxes(tp.files)
         let decls: Decl[] = []
         for (const d of t.decls) { decls = decls.concat([lowerDecl(t, ss, d)]) }
         let types: TypeDef[] = []
-        for (const ti of t.types) { types = types.concat([ti.def]) }
+        // s451 (Ue): a built-in error enum ships only when the Core names it
+        const used: int[] = usedErrs(t)
+        let sqlError: Sym | not = not
+        let serverCallError: Sym | not = not
+        const used2: int[] = used.concat(namedIn(t, used))
+        for (const ti of t.types) {
+            const ts: Sym = typeDefSym(ti.def)
+            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0) types = types.concat([ti.def])
+            if (ti.file == builtinFile() && ti.name == "SqlError" && used2.indexOf(ts.id) >= 0) sqlError = ts
+            if (ti.file == builtinFile() && ti.name == serverCallErrorName() && used2.indexOf(ts.id) >= 0) serverCallError = ts
+        }
         const fsx: FnSyntax[] = fnSyntaxes(tp.files)
         let fns: Fn[] = []
+        let server: ServerFn[] = []
         for (const info of t.fns) {
-            const f: Fn | not = lowerFn(t, fsx, info)
-            if (f is some) fns = fns.concat([f])
+            if (isServerPlaced(t, info.sym)) {
+                const sf: ServerFn | not = lowerServerFn(t, fsx, info)
+                if (sf is some) server = server.concat([sf])
+            } else {
+                const f: Fn | not = lowerFn(t, fsx, info)
+                if (f is some) fns = fns.concat([f])
+            }
         }
-        const core: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: [] }
+        const dbs: Db[] = t.server.dbs
+        const reset: boolean = resetShips(tp.files, t)
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError }
         return { core: core, diags: tp.diags }
+    }
+
+    // =========================================================================
+    // s449 — THE GATE'S STATIC REACH (§55.17.3). "Mark `touched = true` on
+    // every bound validated value of the form — every value that carries
+    // validators … whose `bind:` is on a native control inside the form (the
+    // §55.17.2 rule 1 composed subtree)". The composed subtree is STATIC: a
+    // value bound in an `if=` region or a state-view arm gates the submit
+    // whether or not that region is mounted (a multi-step form submitted at
+    // step 2 is blocked by an empty step-1 field). Once the whole program is
+    // lowered, each form's Gate is given the fields its subtree NAMES — its own
+    // markup, Cond arms, slot content written in it, and `<*x/>` Stars (whose
+    // renders' `.Lexical(0)` is the Star's instance). An `<each>` row, a use's
+    // instance and a slot's filler instance are not nameable here; the runtime
+    // finds them on the live form (runtime.gate).
+    // =========================================================================
+    fn gateDecls(p: CoreProgram) -> Decl[] {
+        let out: Decl[] = []
+        for (const d of p.decls) {
+            const rs: View[] | not = d.renders
+            if (rs is some) {
+                out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gateViews(p, rs),
+                                    wiring: d.wiring, handles: d.handles }])
+            } else {
+                out = out.concat([d])
+            }
+        }
+        return out
+    }
+
+    fn gateViews(p: CoreProgram, vs: View[]) -> View[] {
+        let out: View[] = []
+        for (const v of vs) { out = out.concat([gateView(p, v)]) }
+        return out
+    }
+
+    fn gateView(p: CoreProgram, v: View) -> View {
+        return match v {
+            .El(tag: tag, attrs: attrs, kids: ks) :> View.El(tag, gateAttrs(p, attrs, ks), gateViews(p, ks))
+            .Cond(arms: arms) :> View.Cond(gateArms(p, arms))
+            .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateViews(p, row))
+            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateViews(p, sl), al)
+            .Text(text: x) :> v
+            .Dyn(e: x) :> v
+            .Slot :> v
+            .Star(decl: x) :> v
+            .Effect(deps: x) :> v
+            .ResetOn(triggers: x) :> v
+            .Errors(of: x) :> v
+        }
+    }
+
+    fn gateArms(p: CoreProgram, arms: CondArm[]) -> CondArm[] {
+        let out: CondArm[] = []
+        for (const a of arms) { out = out.concat([{ test: a.test, body: gateViews(p, a.body) }]) }
+        return out
+    }
+
+    fn gateAttrs(p: CoreProgram, attrs: Attr[], ks: View[]) -> Attr[] {
+        let out: Attr[] = []
+        for (const a of attrs) { out = out.concat([gateAttr(p, a, ks)]) }
+        return out
+    }
+
+    fn gateAttr(p: CoreProgram, a: Attr, ks: View[]) -> Attr {
+        return match a {
+            .Gate(values: vs) :> Attr.Gate(vs, namedFields(p, ks, not, []))
+            .Static(name: x) :> a
+            .Bound(name: x) :> a
+            .Show(test: x) :> a
+            .On(event: x) :> a
+            .Bind(kind: x) :> a
+        }
+    }
+
+    // The bound surfaced fields `vs` names, each once, in document order.
+    // `subst`: inside a Star's renders, the Star's instance (what `.Lexical(0)`
+    // means there); `seen`: the declarations being expanded (a renders may
+    // reach itself through a Star).
+    fn namedFields(p: CoreProgram, vs: View[], subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        for (const v of vs) { out = addFields(out, viewFields(p, v, subst, seen)) }
+        return out
+    }
+
+    fn addFields(xs: ValidityOf[], ys: ValidityOf[]) -> ValidityOf[] {
+        let out: ValidityOf[] = xs
+        for (const y of ys) {
+            let dup = false
+            for (const x of out) {
+                if (fieldKey(x) == fieldKey(y)) dup = true
+            }
+            if (!dup) out = out.concat([y])
+        }
+        return out
+    }
+
+    fn fieldKey(v: ValidityOf) -> string {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> d.id + "/" + instKey(i) + "/" + x
+            .OfDecl(decl: d, inst: i) :> d.id + "/" + instKey(i)
+        }
+    }
+
+    fn viewFields(p: CoreProgram, v: View, subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        return match v {
+            .El(attrs: attrs, kids: ks) :> addFields(attrFields(p, attrs, subst), namedFields(p, ks, subst, seen))
+            .Cond(arms: arms) :> armFields(p, arms, subst, seen)
+            .Instance(slot: sl) :> namedFields(p, sl, subst, seen)
+            .Star(decl: d, inst: i) :> starFields(p, d, i, subst, seen)
+            .Each(src: x) :> []
+            .Text(text: x) :> []
+            .Dyn(e: x) :> []
+            .Slot :> []
+            .Effect(deps: x) :> []
+            .ResetOn(triggers: x) :> []
+            .Errors(of: x) :> []
+        }
+    }
+
+    fn armFields(p: CoreProgram, arms: CondArm[], subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        for (const a of arms) { out = addFields(out, namedFields(p, a.body, subst, seen)) }
+        return out
+    }
+
+    fn starFields(p: CoreProgram, d: Sym, i: InstRef, subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        if (seen.indexOf(d.id) >= 0) return []
+        const inner: InstRef | not = nameable(i, subst)
+        if (inner is not) return []
+        for (const x of p.decls) {
+            if (x.sym.id == d.id) {
+                const rs: View[] | not = x.renders
+                if (rs is some) return namedFields(p, rs, inner, seen.concat([d.id]))
+            }
+        }
+        return []
+    }
+
+    fn attrFields(p: CoreProgram, attrs: Attr[], subst: InstRef | not) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        for (const a of attrs) { out = addFields(out, bindField(p, a, subst)) }
+        return out
+    }
+
+    fn bindField(p: CoreProgram, a: Attr, subst: InstRef | not) -> ValidityOf[] {
+        return match a {
+            .Bind(read: r) :> bindReadField(p, r, subst)
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .Show(test: x) :> []
+            .On(event: x) :> []
+            .Gate(values: x) :> []
+        }
+    }
+
+    fn bindReadField(p: CoreProgram, r: Expr, subst: InstRef | not) -> ValidityOf[] {
+        return match r {
+            .Read(place: pl) :> placeField(p, pl, subst)
+            .Lit(lit: x) :> []
+            .Local(sym: x) :> []
+            .Call(callee: x) :> []
+            .Prim(op: x) :> []
+            .Match(scrut: x) :> []
+            .ArrayOf(elems: x) :> []
+            .StructOf(ty: x) :> []
+            .Handle(inst: x) :> []
+            .InitOf(decl: x) :> []
+            .Host(call: x) :> []
+            .Lambda(params: x) :> []
+            .SeqCall(op: x) :> []
+            .Validity(of: x) :> []
+            .ServerCall(fn: x) :> []
+        }
+    }
+
+    // A bind of a field's WHOLE value, when the field has a surface (every
+    // field of a user declaration; a top-level value only with validators).
+    fn placeField(p: CoreProgram, pl: Place, subst: InstRef | not) -> ValidityOf[] {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> cellField(p, d, i, path, subst)
+            .LocalPath(sym: x) :> []
+        }
+    }
+
+    fn cellField(p: CoreProgram, d: Sym, i: InstRef, path: FieldRef[], subst: InstRef | not) -> ValidityOf[] {
+        if (path.length != 1) return []
+        const inst: InstRef | not = nameable(i, subst)
+        if (inst is not) return []
+        for (const x of p.decls) {
+            if (x.sym.id == d.id) {
+                const idx: int = path[0].idx
+                if (idx < 0 || idx >= x.fields.length) return []
+                if (isProgramKind(x.kind) && x.fields[idx].vals.length == 0) return []
+                return [ValidityOf.OfField(d, inst, idx)]
+            }
+        }
+        return []
+    }
+
+    // An instance reference the form's render can evaluate at submit: a
+    // shared instance, or the enclosing instance. An `as=` handle or a
+    // `given` local may name no instance by then — those binds are found on
+    // the live form instead. Inside a Star's renders, `.Lexical(0)` is the
+    // Star's own instance (`subst`).
+    fn nameable(i: InstRef, subst: InstRef | not) -> InstRef | not {
+        return match i {
+            .Shared(decl: d) :> i
+            .Lexical(depth: k) :> lexicalThrough(k, i, subst)
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn lexicalThrough(k: int, i: InstRef, subst: InstRef | not) -> InstRef | not {
+        if (subst is not) return i
+        if (k == 0) return subst
+        return not
     }
 }

@@ -21,11 +21,12 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 function compileClient(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-bug73-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-bug73-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -61,7 +62,7 @@ function pick(nm) { @items = @items }
     // The per-item handler re-resolves the live item by its create-time key,
     // bails on canonical absence (null), THEN calls the handler with the live field.
     expect(clientJs).toMatch(
-      /\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_pick_\d+\(_scrml_each_item\.name\); \}\)/,
+      /\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_pick_\d+\(_scrml_each_item\.name\); \}\)/,
     );
   });
 

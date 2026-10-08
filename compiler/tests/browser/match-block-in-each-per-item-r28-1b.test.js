@@ -42,6 +42,7 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Block-form `<match>` as a child of `<each>`. The `<empty>` sub-element adds
 // the empty-state guard (the each render fn's `if (!_items || length === 0)`
@@ -67,7 +68,7 @@ const SRC = `<program title="T">
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-r28-1b");
+const tmpRoot = resolve(tmpdir(), "scrml-r28-1b");
 
 function compileToOutputs(source, baseName = "app") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -133,7 +134,7 @@ describe("R28-1b §1 — match-in-each emits per-item dispatch, NOT a dropped ch
 
   test("the match dispatch fn is item-scoped (takes the mount as a parameter)", () => {
     const { clientJs } = compileToOutputs(SRC);
-    expect(clientJs).toMatch(/function __scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_mount, _v\)/);
+    expect(clientJs).toMatch(/function __scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_arm_mount, _scrml_arm_v\)/);
   });
 });
 

@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-meta-emit-neg",
+  "description": "§5.2 executable-sink rule (S456 review F2): a quoted onclick with `${…}` spliced in by `^{ emit(…) }` is refused — the check runs over the post-meta AST.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule applies \"in every position (… and markup spliced in by `^{ emit(…) }`)\". Before the fix the meta-emitted handler compiled to `setAttribute(\"onclick\", `go('${…}')`)` at exit 0, because VP-3 runs before ME.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

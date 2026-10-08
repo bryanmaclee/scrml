@@ -1,0 +1,16 @@
+{
+  "id": "tenant-undeclared-live-db-neg",
+  "description": "§14.8.10 (S456) — a `<db src=\"./live.db\" tables=\"assets\">` whose live SQLite file (the `live.db.sql` fixture) also holds `invoices (…, tenant_id)`. The compile opens the file and now scans EVERY relation: `invoices` carries `tenant_id` but no `<schema>` / `<db tables=>` declares it, so it is refused. Compiled clean on 2dd6d35d9.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-undeclared.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10 (ruling user-voice-scrml.md S456 \"b, startup check lands with it\"): a SQLite database file the compiler opens at compile time is scanned, and any relation with a `tenant_id` column outside the compilation's tenant set is E-TENANT-UNDECLARED.",
+  "expect": {
+    "codes": [
+      "E-TENANT-UNDECLARED"
+    ],
+    "codeCounts": {
+      "E-TENANT-UNDECLARED": 1
+    }
+  }
+}

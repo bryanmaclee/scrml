@@ -1,0 +1,34 @@
+{
+  "id": "forms-errors-top-level-renders",
+  "description": "§55.8 with a validated top-level value (S447 call 6 (v)): typing too little renders one `.scrml-error`; a valid value renders none (no DOM at all).",
+  "language-version": "1.0",
+  "spec": "§55.8",
+  "rationale": "§55.8: `of=expr` \"References a per-field cell (`@signup.name`), a compound cell (`@signup`), or a validated top-level value (`@email`, §55.5.1 — S447 call 6 (v))\"; \"Default rendering. A single first error wrapped as `<p class=\\\"scrml-error\\\">` … When `errors.length == 0`, the element produces NO DOM at all\". The message text is impl freedom (not asserted).",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "input": "#email",
+        "value": "ab"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#errs .scrml-error",
+        "count": 1
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=2"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

@@ -12,8 +12,8 @@
 //     (`Str.v`, `Num.raw`, `Text.text`, `Quoted.v`, `Import.from`),
 //     identifiers (names, tags, attribute names, grant words) and spans. No
 //     expression, statement, handler, arm or markup body is ever text.
-//   - Comments are trivia: the parser drops them (and the whitespace-only text
-//     they leave behind is normalized by `lower`, L13).
+//   - Comments are trivia: the parser drops them (the whitespace around them
+//     stays content — L13 retired, dpa-045 follow-up 4, RULED S442).
 //   - The FileAst is SYNTAX. Whether `@x` names a field, a handle or a shared
 //     instance, whether `open` in a renders is a bare projection, what `.Closed`
 //     is a variant of — all of that is analyze's (side-tables by nid).
@@ -24,6 +24,8 @@
 // workaround: F15 — no helper fn in this file shares a name with a field.
 // =============================================================================
 ${
+    import { Severity, severityOf } from "./severity.scrml"
+
     export type ASpan:struct = { start: int, end: int }
 
     // -------------------------------------------------------------------------
@@ -61,7 +63,69 @@ ${
         Spread(e: AExpr),
         Index(obj: AExpr, idx: AExpr),
         Lambda(params: string[], body: AExpr),
+        // s451 (U1a) — a `?{ `…` }` SQL context (§8.1, §44.8), its call chain
+        // absorbed (ASql). Placement, the database, the failable rule and the
+        // query's facts are analyze's.
+        Sql(q: ASql),
+        // s451 (Ue) — a failable result HANDLED (§19.4.3): `e?` (§19.5),
+        // `e !{ arms }` (item 3), or `match e { arms }` (§19.7.1). Whether
+        // `e` is failable, which enum the arms name, and what each binds are
+        // analyze's.
+        Handled(h: AHandled),
     }
+
+    // s451 (Ue) — the handling forms. `subject` is the failable (a call of a
+    // `!` function, or a `?{}` query).
+    export type AHow:enum = {
+        Propagate,                  // `subject?`
+        Guard(arms: AArm[]),        // `subject !{ | .V(a) :> … | _ :> … }`
+        MatchOn(arms: AArm[]),      // `match subject { .Ok(v) :> …  .V :> … }`
+    }
+    export type AHandled:struct = { subject: AExpr, how: AHow }
+    // One arm. `legacy`: written with a deprecated `=>` / `->` separator
+    // (W-MATCH-ARROW-LEGACY — the `!{}` arms share the match rule, §19).
+    export type AArm:struct = { nid: int, span: ASpan, pat: APat, body: AArmBody, legacy: boolean }
+    // `.V` / `::V` with its positional binders (`parens`: written `(…)`),
+    // or the wildcard (`_` / `else`, §19 alias note).
+    // s452: `PWhole` — the wildcard carrying one binder, `_ err` (§18.6.1, the
+    // whole-error binder; `viaElse`: written `else err`, which §18.6.1 makes
+    // E-MATCH-BARE-BINDER); `PBare` — a bare identifier as the WHOLE pattern
+    // (`err :>`, §18.2 E-MATCH-BARE-BINDER). Both are syntax: whether the arm is
+    // legal (a failable site or not) is analyze's.
+    export type APat:enum = {
+        PName(name: string, binds: ABind[], parens: boolean),
+        PWild,
+        PWhole(bind: ABind, viaElse: boolean),
+        PBare(bind: ABind),
+    }
+    // A binder: a name, or `_` (binds nothing).
+    export type ABind:struct = { nid: int, span: ASpan, name: string }
+    // An arm's body: an expression (a value, or a statement such as a write),
+    // or a braced block.
+    export type AArmBody:enum = {
+        ArmExpr(e: AExpr),
+        ArmBlock(b: ABlock),
+    }
+
+    // s451 (Ue) — `fail E.V(args)` / `fail E::V` / `fail .V(args)` /
+    // `fail ::V` (§19.3.1). `enumName` "" = the bare form (resolved against the
+    // function's declared error type, §19.3.3). `target`: a `fail` whose
+    // target is not a variant at all (`fail "x"`) — kept, so analyze reports
+    // E-ERROR-009 ("a `fail` target that is not an enum variant").
+    export type AFail:struct = { enumName: string, variant: string, args: AExpr[], target: AExpr | not }
+
+    // s451 (U1a) — the terminator of a `?{}` chain (§8.3): `.all()` (or none
+    // written — "`.all()` (or bare `?{}`)"), `.get()`, `.run()`.
+    export type ASqlMode:enum = { SqlAll, SqlGet, SqlRun }
+    // s451 (U1a) — a SQL context. `chunks` are the template's literal text runs
+    // (cooked; a foreign language's literal, never scrml source), `params` the
+    // `${…}` expressions between them, in order — `chunks.length ==
+    // params.length + 1`, so a value can only ever be a BOUND parameter (§8.1:
+    // "SHALL NOT be compiled to string interpolation under any circumstance").
+    // `nobatch`: `.nobatch()` was written (§8.9.5). `handled`: the query is
+    // the subject of a handling form (`?`, `!{}`, `match` — AExprK.Handled), so
+    // analyze does not call it unhandled (E-ERROR-002, §19.8.3).
+    export type ASql:struct = { chunks: string[], params: AExpr[], mode: ASqlMode, nobatch: boolean, handled: boolean }
 
     // -------------------------------------------------------------------------
     // Statements.
@@ -69,12 +133,35 @@ ${
     export type AStmt:struct = { nid: int, span: ASpan, k: AStmtK }
     export type ABlock:struct = { nid: int, span: ASpan, stmts: AStmt[] }
 
+    // s449 — a reactive effect (SPEC §6.7.4): `<effect deps=[@a, @b]>${ body }</>`,
+    // or its soft-deprecated keyword spelling `when @a changes { body }` /
+    // `when (@a, @b) changes { body }` (`keyword` = true; §6.7.4 "Parses
+    // identically"). `deps` are the entries as written — analyze decides what
+    // each names (E-LIFECYCLE-007 for anything but a mutable cell); an empty
+    // list on the markup form is E-EFFECT-NO-DEPS (the keyword form's empty
+    // list is a parse error). A self-closing `<effect …/>` has an empty body.
+    export type AEffect:struct = { nid: int, span: ASpan, deps: AExpr[], body: ABlock, keyword: boolean }
+
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
         Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
         Return(e: AExpr | not),
         If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
+        // s449: an effect written where a STATEMENT stands (a function or
+        // handler body, another effect's body). Parsed so analyze can name it
+        // (E-LIFECYCLE-016 inside an effect body); an effect where markup
+        // stands is ANodeK.Effect.
+        EffectStmt(w: AEffect),
+        // s451 — `defer <stmt>` / `defer { … }` (§19.16.1; `defer` is a
+        // contextual keyword — parse.scrml `deferAhead`). `body` is the
+        // deferred statement(s). `arrayLead`: the single-statement form was led
+        // by a `[` (§19.16.1 E-DEFER-AMBIGUOUS-LEAD when a binding named `defer`
+        // is visible). `bare`: the defer is the whole UNBRACED arm of an
+        // `if` / `else` (§19.16.2 E-DEFER-UNSUPPORTED-SITE).
+        Defer(body: ABlock, arrayLead: boolean, bare: boolean),
+        // s451 (Ue) — `fail …` (§19.3).
+        Fail(f: AFail),
     }
 
     // -------------------------------------------------------------------------
@@ -100,9 +187,16 @@ ${
     // -------------------------------------------------------------------------
     export type AParam:struct = { nid: int, span: ASpan, name: string, ty: AType | not }
     // `pure` = declared with `fn` (§48.3); `function` otherwise.
+    // s451 (U1a): `server` = written with the DEPRECATED `server` modifier
+    // (§12.2 Trigger 4, §52.10 — analyze warns W-DEPRECATED-SERVER-MODIFIER);
+    // `failable` = declared `!` (§19.4.1); `err` (s451 Ue) = the error type
+    // written after it (`! E` / `! -> E`), `not` for a bare `!` (the built-in
+    // `Error`, §19.4.2). A failable function has no success-type slot (§19.4.1),
+    // so its `ret` is `not`.
     export type AFn:struct = {
         nid: int, span: ASpan, exported: boolean, pure: boolean,
         name: string, params: AParam[], ret: AType | not, body: ABlock,
+        server: boolean, failable: boolean, err: AType | not,
     }
     export type AImportName:struct = { nid: int, span: ASpan, name: string }
     export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string }
@@ -128,9 +222,13 @@ ${
     export type ANode:struct = { nid: int, span: ASpan, k: ANodeK }
     export type ANodeK:enum = {
         Elem(e: AElem),
-        Text(text: string),        // verbatim (comments removed); normalized by lower (L13)
+        Text(text: string),        // verbatim (comments removed; whitespace-only runs kept — L13 retired, dpa-045 fu4)
         Interp(e: AExpr),          // ${ expr }
         DeclNode(d: ADecl),        // a declaration where markup may stand (a program body)
+        // s449: a reactive effect where markup stands — owned, by its position in
+        // the tree, by the nearest enclosing element scope (§6.7.4 "Scope and
+        // teardown"): the program, an `if=` element, an `<each>` row.
+        Effect(w: AEffect),
     }
 
     // -------------------------------------------------------------------------
@@ -154,12 +252,27 @@ ${
         StateChild(s: AStateChild),
     }
 
+    // s444 Phase B (dpa-058) — a validator in a declaration opener (§55.1, §66.4
+    // rule 3: it binds that declaration's own value), by its argument shape:
+    // `req` (NoArgs) · `length(>=5)` (Cmp: the comparison and its operand) ·
+    // `min(0)` / `eq(@x)` / `oneOf([…])` / `req("msg")` (Exprs) · `pattern(/re/i)`
+    // (Regex: the source between the slashes and the flags).
+    export type AValArg:enum = {
+        NoArgs,
+        Cmp(op: string, e: AExpr),
+        Exprs(es: AExpr[]),
+        Regex(source: string, flags: string),
+    }
+    export type AValidator:struct = { nid: int, span: ASpan, name: string, arg: AValArg }
+
     // `ty` = the own type (`name:Type`); `own` = the own value (NoValue = none);
-    // `mods` = the opener's other words (`single`, validators, …).
+    // `mods` = the opener's other words (`single`, …); `validators` = its
+    // validators, in source order (§55.12: error order is declaration order).
     export type ADecl:struct = {
         nid: int, span: ASpan, exported: boolean, isLet: boolean,
         name: string, ty: AType | not, own: AAttrValue,
         attrs: ADeclAttr[], mods: AAttr[], body: ADeclChild[], renders: AElem | not,
+        validators: AValidator[],
     }
 
     // -------------------------------------------------------------------------
@@ -181,10 +294,22 @@ ${
     // file, used to resolve import sources).
     // `errs`: the spans the parser reported an error at — a declaration or
     // signature containing one is not trusted by the typer (no check against it).
-    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[] }
+    // s454 (U1b): `lines` — the offset where each line starts (lines[0] = 0), so a
+    // diagnostic can name "file and line" (§19.9.10 the client-caller cause).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[], lines: int[] }
 
-    // A diagnostic: a code, a message, where. (§4 permits message text.)
-    export type Diag:struct = { code: string, message: string, file: string, span: ASpan }
+    // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
+    // message text.)
+    // `severity` (s451) is the CODE's §34 row — §34: "A code whose Severity
+    // column reads **Error** fails the compile … **Warning** and **Info** codes
+    // do not fail the compile." It is never a call site's choice: build every
+    // Diag with `newDiag`, which reads the generated §34 table (severity.scrml).
+    export type Diag:struct = { code: string, severity: Severity, message: string, file: string, span: ASpan }
+
+    // The ONE Diag constructor (s451): the severity is derived from the code.
+    export fn newDiag(code: string, message: string, file: string, span: ASpan) -> Diag {
+        return { code: code, severity: severityOf(code), message: message, file: file, span: span }
+    }
 
     export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end } }
 }

@@ -51,7 +51,10 @@ ${
     // -------------------------------------------------------------------------
     export type SeqAt:enum = { End, Front, Anywhere }
     export type LengthGrant:enum = { Fixed, Bounded(min: int, max: int), Free }
-    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], positionsWritable: boolean }
+    // `at` = the places the sequence may GROW, `shrink` = the places it may
+    // SHRINK (RULED S442 grow/shrink split: `append`/`pop`, `prepend`/`shift`,
+    // `insert`/`remove`; s444: shrink joined Core when removals became edits).
+    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], shrink: SeqAt[], positionsWritable: boolean }
 
     export type Type:enum = {
         Int,
@@ -134,6 +137,43 @@ ${
         PWild,
     }
 
+    // s444 — the host calls Core admits (a CLOSED set; see progress.md
+    // "host call surface"): `Date.now()` only — the §66.19.5 timestamp.
+    export type HostCall:enum = { DateNow }
+    // s444 — the sequence functions a lambda is admitted as the argument of.
+    // Each makes a NEW sequence value (R3: values are immutable).
+    export type SeqFn:enum = { Filter, Map }
+
+    // s449 — the §55 validity surface. A surface is the reactive validity
+    // state the compiler synthesizes for a value that carries validators
+    // (§55.5.1 — a top-level value), for every child field of a user
+    // declaration (§55.6, Edge B: a field with no validators reads trivially
+    // valid) and for a user declaration as a whole (§55.5 — the compound). It
+    // is READ-ONLY by construction: nothing here names a write capability, so
+    // no Write can target it (§55.7, E-SYNTHESIZED-WRITE). `OfField` is field
+    // `idx` of `decl` through `inst`; `OfDecl` is the compound of the
+    // instance `inst` of user declaration `decl`.
+    export type SurfaceProp:enum = { IsValid, Errors, Touched, Submitted }
+    export type ValidityOf:enum = {
+        OfField(decl: Sym, inst: InstRef, idx: int),
+        OfDecl(decl: Sym, inst: InstRef),
+    }
+
+    // s449 — one validator a field carries (§55.1), as the bootstrap admits it
+    // (the predicates whose meaning it evaluates; analyze refuses the rest).
+    // Declaration order is kept (§55.12: errors are reported in source order).
+    // `LengthCmp.op` is the comparison as written (`>=`, `>`, `<=`, `<`, `==`)
+    // and `n` its int literal; `Min` / `Max` carry the numeric literal;
+    // `Pattern` carries the regex source (no flags — analyze admits only an
+    // exact, flag-free pattern).
+    export type Validator:enum = {
+        Req,
+        LengthCmp(op: string, n: int),
+        Min(n: number),
+        Max(n: number),
+        Pattern(source: string),
+    }
+
     export type Expr:enum = {
         Lit(lit: Literal),
         Local(sym: Sym),
@@ -149,8 +189,113 @@ ${
         // L6 / §66.9, else the declared default), evaluated again now. What
         // `reset(@x.f)` writes (L4) when the instance may have had a use site.
         InitOf(decl: Sym, inst: InstRef, idx: int),
+        // s444: a host call (the closed HostCall set; never in a pure `fn`).
+        Host(call: HostCall),
+        // s444: a function value — its parameters are binder-minted locals;
+        // the body is ONE expression. Only as a SeqCall's argument.
+        Lambda(params: Sym[], body: Expr),
+        // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
+        SeqCall(op: SeqFn, seq: Expr, f: Expr),
+        // s449: a read of the validity surface (§55.5 / §55.6) — read-only.
+        Validity(of: ValidityOf, prop: SurfaceProp),
+        // s454 (U1b) — a CLIENT call of a server function (§12.3 "a client fetch
+        // call", §19.9.10): `fn` names a ServerFn, `args` its arguments (encoded
+        // by the §57 codec against its parameter types). Legal ONLY as the `on`
+        // of a Suspend in client code (check.scrml C-S3): the call is a round
+        // trip the client waits on, and its outcome — a value, or a failure of
+        // the call's failure enum (§19.9.10) — is inspected by the Attempt that
+        // begins the Suspend's `then` (C-S7), never read raw.
+        ServerCall(fn: Sym, args: Expr[]),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
+
+    // -------------------------------------------------------------------------
+    // s451 (Ue) — the error model (SPEC §19). A FAILABLE is something whose
+    // result may be a failure (§19.4.2 "a tagged union of the success type and
+    // the error type"): a call of a function declared `!` (§19.4), or a `?{}`
+    // query (§19.8.3, S451 R11: "a failable expression everywhere"). A
+    // failable exists in Core ONLY as the `call` of a Stmt.Attempt — the node
+    // that inspects its result with arms total over its error enum — so an
+    // unhandled failable is unrepresentable (§19.4.3 "SHALL NOT be ignored"):
+    // an Expr.Call never names a function whose `err` is some (check.scrml
+    // C-E1), and a query is not an Expr at all.
+    //
+    // FSql (U1a's query, moved here from Expr): legal ONLY in a ServerFn body
+    // (check.scrml C-S2). Its values are `q.params` — Exprs, never text: there
+    // is no node that can carry a runtime value into SQL text, so E-SQL-001
+    // (§8.1) is unrepresentable rather than checked.
+    // -------------------------------------------------------------------------
+    // s454 (U1b) — FSettled: the SETTLED outcome of the enclosing Suspend
+    // (`outcome` = that Suspend's `bind`) — a server call's (design §2.1 "Suspend
+    // waits, Attempt inspects"), or a waiting client function's that is declared
+    // `!`. Only as the call of the Attempt that is the first statement of the
+    // Suspend's `then`, and the outcome is read nowhere else (check.scrml C-S7):
+    // a raw outcome (a value or a Failure) reaches no other expression.
+    export type Failable:enum = {
+        FCall(fn: Sym, args: Expr[]),
+        FSql(q: SqlQuery),
+        FSettled(outcome: Sym),
+    }
+    // The success branch: the result is bound to `bind`, `body` runs, and
+    // `value` is the branch's value (when the Attempt has a `result`).
+    export type OkArm:struct = { bind: Sym, body: Block, value: Expr | not }
+    // A failure branch: `pat` matches the error value (a variant of the
+    // Attempt's `err` enum, or PWild), its payload bound positionally.
+    // s452 — `whole`: the local bound to the WHOLE error value (variant and
+    // payload) — the whole-error binder `| _ err :>` (SPEC §18.6.1). Only on a
+    // PWild arm (check.scrml C-E2): the binder is the wildcard's; a whole-value
+    // binder is not a Pattern, because §18's MatchArm shares Pattern and an
+    // ordinary `match` arm binds no whole value (§18.6).
+    export type ErrArm:struct = { pat: Pattern, body: Block, value: Expr | not, whole: Sym | not }
+
+    // -------------------------------------------------------------------------
+    // s451 (U1a) — SQL (SPEC §8, §44). A query is the ONE place SQL lives in
+    // Core, and its facts are recorded ONCE, at analysis, from the literal SQL
+    // text (a foreign language — never scrml source): what it does (`kind`),
+    // which tables it reads and writes, and what it selects. Later passes
+    // (READ classification §6.7.7.1, cache invalidation §6.7.7.2, batching
+    // §19.9.6) read these facts; nobody rescans SQL. Every fact FAILS CLOSED:
+    // a query not provably a pure SELECT is `SqlWrite`; a table set not
+    // provably known is `TablesUnknown` (= every table).
+    //
+    // `chunks` are the literal SQL runs; `slots[i]` is the parameter the i-th
+    // `${…}` binds — `chunks.length == slots.length + 1`, every slot indexes
+    // `params` (check.scrml C-SQL1). §8.2: "If the same expression appears more
+    // than once in a single SQL template, the compiler SHALL assign it a single
+    // positional parameter slot" — so `params` holds each DISTINCT expression
+    // once (structurally equal Core Exprs are one parameter, evaluated once).
+    // `db` names the CoreProgram.dbs entry the query runs on (§8.1.1).
+    // `site`: the `?{}` node (its NodeId), for diagnostics and later passes.
+    // -------------------------------------------------------------------------
+    export type SqlMode:enum = { All, Get, Run }
+    export type SqlKind:enum = { SqlSelect, SqlWrite }
+    export type SqlTables:enum = { TablesKnown(names: string[]), TablesUnknown }
+    // What a query's rows carry: `*` (ColsAll), a list of result names
+    // (ColsListed), no rows (ColsNone — a write without RETURNING), or not
+    // provable (ColsUnknown). Recorded for column provenance (protect=, later).
+    export type SqlColumns:enum = { ColsAll, ColsListed(names: string[]), ColsNone, ColsUnknown }
+    export type SqlQuery:struct = {
+        db: Sym,
+        chunks: string[],
+        params: Expr[],
+        slots: int[],
+        mode: SqlMode,
+        kind: SqlKind,
+        reads: SqlTables,
+        writes: SqlTables,
+        columns: SqlColumns,
+        nobatch: boolean,
+        site: NodeId,
+    }
+
+    // s451 (U1a) — a database a program's queries run on (§8.1.1, §44.2):
+    // `<program db=…>`. `target` is the connection value with any `sqlite:`
+    // prefix removed (a SQLite path, `:memory:`, or the forwarded URL); `file`
+    // is the declaring file a relative SQLite path resolves against (§8.1.1
+    // "Resolution base"); `owner`: that file declares schema for it — a query
+    // in it creates a table (§8.1.1 "Ownership").
+    export type Driver:enum = { Sqlite, Postgres, Mysql }
+    export type Db:struct = { sym: Sym, driver: Driver, target: string, file: string, owner: boolean }
 
     // -------------------------------------------------------------------------
     // Statements. `Let` and `Assign` are DIFFERENT nodes (§3.3 — the
@@ -160,6 +305,13 @@ ${
     // capability symbol, so no Write can name it — see progress.md "grants are
     // symbols".
     // -------------------------------------------------------------------------
+    // s444: the SHRINK edits (a Write's value is the COUNT removed, an Int
+    // literal, for RemoveEnd / RemoveFront — `pop()` / `shift()` remove 1; the
+    // NEW whole value, `SeqCall(Filter, <the field>, λ)`, for RemoveAnywhere —
+    // `@x = @x.filter(λ)`), and ElemAt: a write of struct path `path` inside the
+    // element at position `index` (`@xs[i].f = v`, dpa-052 Q3 — judged by the
+    // ELEMENT field's own contract). In a GrantSet, an element-field grant is
+    // listed as `FieldAt(path)` over the element struct (it names no index).
     export type EditKind:enum = {
         Replace,
         Append,
@@ -168,6 +320,10 @@ ${
         PositionWrite,
         FieldAt(path: FieldRef[]),
         Transition,
+        RemoveEnd,
+        RemoveFront,
+        RemoveAnywhere,
+        ElemAt(index: Expr, path: FieldRef[]),
     }
     // RuntimeEdge: a `rule=` edge whose from-state is not statically known
     // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
@@ -180,6 +336,16 @@ ${
     // Writes applied, in order; on a refusal NONE is applied. Its Writes' values
     // are Locals — the one snapshot, evaluated by the Lets before it (check.scrml
     // C7), so checking and applying never re-evaluate a value.
+    // s449 — Suspend: the CPS suspension point (§19.9.8: "the canonical scrml
+    // async surface is the body-split / CPS mechanism"; §13.2: the compiler
+    // inserts the await). Evaluate `on`; suspend; when it settles with a value,
+    // bind it to `bind` and run `then` — unless the effect that owns the
+    // suspension was re-run (newest run wins) or torn down meanwhile, in which
+    // case `then` never runs. The continuation is EXPLICIT: nothing follows a
+    // Suspend in its block, and a Suspend stands only at the tail of an
+    // `<effect>` body or of another Suspend's `then` (check.scrml C12). No
+    // source form produces one until server calls land (a server call will be
+    // its `on`); hand-built Core exercises it.
     export type Stmt:enum = {
         Let(sym: Sym, init: Expr),
         Assign(local: Sym, value: Expr),
@@ -188,6 +354,55 @@ ${
         If(cond: Expr, thenB: Block, elseB: Block | not),
         Return(e: Expr),
         Eval(e: Expr),
+        Suspend(bind: Sym, on: Expr, then: Block),
+        // s449 — the surface half of `reset(@x)` (§55.13): it follows the
+        // reset's Write of the value. `touched` reverts to false; a validated
+        // top-level value's `submitted` reverts too (S447 call 6 (ii)); a child
+        // field's compound `submitted` is unchanged (§55.13 row 2). Writes no
+        // cell a program can name (the surface is read-only to programs).
+        ResetSurface(of: ValidityOf),
+        // s451 — `defer` (§19.16): register `body` against the ENCLOSING block;
+        // when that block is left — falling off its end, a `return` (after the
+        // value is evaluated), or a host error passing through — every body
+        // its executed Defers registered runs once, last registered first
+        // (§19.16.2). A Defer stands only in a function body, and its body holds
+        // no Return / Defer / Suspend (check.scrml C16; §19.16.3 rules 1-2).
+        Defer(body: Block),
+        // s451 — the storage half of `reset(@x)` on a `persist=` field
+        // (§6.14.2 rule 9: the reset "SHALL write the reset value to the cell
+        // … and SHALL **remove** the cell's storage key instead of storing
+        // that value"). It follows the reset's Write (and its ResetSurface)
+        // of that same field: the key is removed and the store the Write
+        // queued is cancelled. Writes no cell (check.scrml C17).
+        Unpersist(decl: Sym, inst: InstRef, idx: int),
+        // s451 (Ue) — run the failable `call`. Success: bind its value to
+        // `ok.bind`, run `ok.body`. Failure: run the FIRST arm whose pattern
+        // matches the error value (a value of enum `err`), its payload bound.
+        // When `result` is some, it is bound to the taken branch's `value`
+        // and is in scope after the Attempt. Every handling form lowers to
+        // this one node — `!{}` (§19.4.3 item 3), a `match` on the result
+        // (§19.7.1; `.Ok` is the success arm), `?` (§19.5.2: one arm per
+        // callee variant re-failing as the enclosing enum's same-named
+        // variant) and the implicit propagation of a `?{}` in a `!` function
+        // (§19.8.2). check.scrml C-E2 / C-E3: the arms are total over `err`;
+        // with a `result`, every branch has a value or diverges.
+        Attempt(result: Sym | not, call: Failable, err: Sym, ok: OkArm, arms: ErrArm[]),
+        // s451 (Ue) — `fail Err.V(args)` (§19.3): return the failure whose
+        // error value is variant `idx` of enum `err` built from `args` — "it
+        // returns the error variant value to its caller exactly as if a
+        // `return` statement had been used" (§19.3.2). The ONLY construction of
+        // an error value: no failure value exists in Core outside a Fail.
+        // Legal only in a function whose `err` is this enum (check.scrml C-E4).
+        Fail(err: Sym, idx: int, args: Expr[]),
+        // s454 (U1b) — the if-join continuation (U1 design §1, design §2.2
+        // "inside an `If` branch with statements after the `If`"): `body` is the
+        // rest of the block after an If one of whose branches suspends; it runs
+        // when a branch reaches its Jump(k). Join stands immediately before that
+        // If, which is the last statement of its block; every path through the
+        // If that does not leave ends in Jump(k) — after the suspension, inside
+        // the Suspend's `then` (check.scrml C12).
+        Join(k: Sym, body: Block),
+        Jump(k: Sym),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -195,13 +410,53 @@ ${
     // Views. Every child position is a View LIST (no Fragment variant).
     // Events are attributes of their element (§3.2 had View.On).
     // -------------------------------------------------------------------------
+    // s444 — a two-way bind (§5.4): `read` is shown in the element's `value`
+    // / `checked` property; on the element's input / change event its property
+    // value is bound to `sink` (a binder-minted local) and `write` runs — ONE
+    // capability-checked Write of `Local(sink)` to the place `read` reads
+    // (check.scrml C8). The event-value round trip, with no expression text.
+    export type BindKind:enum = { Value, Checked }
+
     export type Attr:enum = {
         Static(name: string, value: string),
         Bound(name: string, e: Expr),
+        // s451 — `show=` (§17.2): "The element EXISTS in the DOM regardless of
+        // `expr`. When `expr` evaluates to false, the element is hidden. The
+        // compiler generates a CSS `display: none` toggle." While `test` is
+        // false the element's inline `display` is `none`; while true it is the
+        // element's own (its static `style`'s `display`, else none set).
+        Show(test: Expr),
         On(event: string, body: Block),
+        Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
+        // s449 — the form's submit listener for the §55 surface, on every
+        // `<form>` whose composed subtree (§55.17.2 rule 1) binds a field that
+        // has a surface. It runs BEFORE any author handler and synchronously.
+        //  - It sets `submitted` (§55.7: "the first submit of a `<form>` that
+        //    binds the value — for a compound, a form that binds any of its
+        //    fields") on every bound value with a surface.
+        //  - When `values` is non-empty the form is GATED (§55.17.3): it also
+        //    marks `touched` on every bound validated value and, if any is
+        //    invalid, cancels the submission and runs no author handler; a
+        //    `formnovalidate` submitter bypasses the touch and the block
+        //    (§55.17.4). `values` names the gating values in source order (a
+        //    top-level value by its name, a child field by `decl.field`) — the
+        //    `data-scrml-gated` marker (§55.17.6).
+        // `fields` are the bound surfaced fields the composed subtree NAMES —
+        // through the form's own markup, `if=` / state-view arms (mounted or
+        // not: §55.17.3 reach is the static subtree), slot content written
+        // here and `<*x/>` Stars. A field the subtree cannot name statically
+        // (an instance a use, an `<each>` row or a slot creates) is found on
+        // the live form, through the control that binds it.
+        Gate(values: string[], fields: ValidityOf[]),
     }
     export type ConstructAttr:struct = { field: int, value: Expr }
     export type CondArm:struct = { test: Expr, body: View[] }
+
+    // s449 — one `deps=` entry of an `<effect>` (§6.7.4: `'@' identifier`): ONE
+    // cell, field `idx` of `decl` through `inst`. A whole instance, a member
+    // path or a computed value is unrepresentable here; that the field is a
+    // MUTABLE cell (has a write capability) is check.scrml C11.
+    export type EffectDep:struct = { decl: Sym, inst: InstRef, idx: int }
 
     export type View:enum = {
         El(tag: string, attrs: Attr[], kids: View[]),
@@ -211,6 +466,36 @@ ${
         Each(src: Expr, bind: Sym, key: Expr | not, handles: Sym[], row: View[]),
         Instance(decl: Sym, attrs: ConstructAttr[], slot: View[], alias: Sym | not),
         Slot,
+        // s444 — `<*x/>` (§66.6.2): the EXISTING instance `inst` of `decl`,
+        // rendered with decl's renders; constructs nothing (M1 D4 closed).
+        Star(decl: Sym, inst: InstRef),
+        // s449 — `<effect deps=[…]>${ body }</>` (§6.7.4): a reactive effect on
+        // the outside world, OWNED BY THE SCOPE THIS VIEW LIST RENDERS INTO (a
+        // declaration's render, a Cond arm, an Each row — its position in the
+        // tree) and unregistered when that scope is destroyed (teardown step
+        // 1). It renders no DOM. It runs `body` when a listed cell changes,
+        // never on mount; unlisted reads are not triggers. The body writes no
+        // reactive cell, directly or through a called function (check.scrml
+        // C11). Nesting is unrepresentable (a body is a Block; no Stmt holds a
+        // View).
+        Effect(deps: EffectDep[], body: Block),
+        // s449 — `reset-on=[@a, @b]` on a program cell (§6.8.4): when any
+        // `triggers` cell changes, run `reset` — exactly ONE Write of the cell's
+        // reset value to the cell (its initializer; a transition for a cell with
+        // a `rule=` graph) — in the SAME flush as the triggering write, before
+        // any render or effect reads the cell. `rank` is the cell's depth in the
+        // static reset-on graph (0 = no trigger is itself reset); a chain applies
+        // in rank order, so a reset chain is one change for every dependent. The
+        // graph is acyclic by construction (E-RESET-ON-CYCLE), so a chain
+        // terminates without any runtime bound. Registered with the program's
+        // scope; renders no DOM.
+        ResetOn(triggers: EffectDep[], reset: Block, rank: int),
+        // s449 — `<errors of=expr/>` (§55.8): the errors of the surface `of`,
+        // each rendered as `<p class="scrml-error">message</p>` (the first
+        // only, or all when `all`); when there are none it renders NO DOM.
+        // The message is the §55.10 Level-3 English default for the
+        // ValidationError tag and the field's name.
+        Errors(of: ValidityOf, all: boolean),
     }
 
     // -------------------------------------------------------------------------
@@ -230,6 +515,16 @@ ${
     export type Edge:struct = { origin: int, targets: int[] }
     export type TransitionGraph:struct = { enumSym: Sym, edges: Edge[] }
 
+    // s451 — `persist="local" | "session"` + `key=` (§6.14): browser
+    // persistence is a LIFETIME property of a client-owned cell (§6.14 — not a
+    // §52 authority value). `Local` = Web localStorage (restored, written on
+    // change, synced across tabs — §6.14.2 rules 1-5), `Session` = Web
+    // sessionStorage (no cross-tab sync, rule 5). `key` is the author's
+    // external storage contract (§6.14.1 rule 2 — never derived). The value is
+    // encoded / decoded with the §57 codec against the field's type (codec.scrml).
+    export type PersistStore:enum = { Local, Session }
+    export type Persist:struct = { store: PersistStore, key: string }
+
     // `init` is `not` for an attribute declared without a default (O33).
     export type Field:struct = {
         sym: Sym,
@@ -241,6 +536,11 @@ ${
         graph: TransitionGraph | not,
         exported: boolean,
         wcap: Sym | not,
+        // s449: the validators the field carries (§55.1), in declaration order.
+        vals: Validator[],
+        // s451: its browser persistence (§6.14) — only on a field of the
+        // PROGRAM that has a write capability (check.scrml C17).
+        persist: Persist | not,
     }
 
     export type DeclKind:enum = { Program, User, Predefined }
@@ -260,17 +560,43 @@ ${
     }
 
     export type Param:struct    = { sym: Sym, ty: Type }
-    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean }
-    export type ServerFn:struct = { sym: Sym, params: Param[], body: Block }
+    // s451 (Ue): `err` — the error enum of a function declared `!` (§19.4: the
+    // declared `! E`, or the built-in `Error` for a bare `!`); `not` for a
+    // function that cannot fail. A call of a function with an `err` exists only
+    // as an Attempt's call (check.scrml C-E1); a Fail only in its body (C-E4).
+    // s454 (U1b): `waits` — the function is ASYNC-COLOURED on the client (§13.2:
+    // it calls, directly or transitively, a server function): its body holds a
+    // Suspend at some depth (check.scrml C-S8), so a call of it is itself a
+    // suspension point (a caller's Suspend `on: Call(fn, …)`). Attached by
+    // lower from the effect summary's `waits` (design §2.5); check re-verifies.
+    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not, waits: boolean }
+    // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its
+    // body holds the program's SQL and no client state (check.scrml C-S1/C-S2);
+    // `ret` is its declared return type (`not`: none written). Placement lives
+    // in the SHAPE of Core — a ServerFn, not a Fn with a flag — so no later pass
+    // re-derives it. `err`: as Fn's (Ue).
+    export type ServerFn:struct = { sym: Sym, params: Param[], ret: Type | not, body: Block, err: Sym | not }
 
     // One CoreProgram per linked program (a library's declarations appear in
     // the consumer's Core). `program` names the program declaration.
+    // s451 (U1a): `dbs` — the databases its queries run on (SqlQuery.db).
     export type CoreProgram:struct = {
         program: Sym,
         decls: Decl[],
         types: TypeDef[],
         fns: Fn[],
         server: ServerFn[],
+        dbs: Db[],
+        // s451 — §65.3.4: the built-in reset layer ships unless the top-level
+        // program opts out with `<program reset="none">`.
+        reset: boolean,
+        // s451 (Ue): the built-in `SqlError` enum (§19.8.1) — the error type
+        // of every query (an Attempt's FSql); `not` when the program has none.
+        sqlError: Sym | not,
+        // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10) — the
+        // payload of every client call's `Transport` variant; `not` when no
+        // client call is made.
+        serverCallError: Sym | not,
     }
 
     // -------------------------------------------------------------------------
@@ -345,6 +671,21 @@ ${
         return not
     }
 
+    // s451 (U1a)
+    export fn findServerFn(p: CoreProgram, s: Sym) -> ServerFn | not {
+        for (const f of p.server) {
+            if (f.sym.id == s.id) return f
+        }
+        return not
+    }
+
+    export fn findDb(p: CoreProgram, s: Sym) -> Db | not {
+        for (const d of p.dbs) {
+            if (d.sym.id == s.id) return d
+        }
+        return not
+    }
+
     // The declaration + field index a write capability belongs to.
     export type CapOwner:struct = { decl: Decl, idx: int }
 
@@ -360,6 +701,20 @@ ${
             }
         }
         return not
+    }
+
+    // s449 — the declaration and instance reference a surface is reached through.
+    export fn validityDecl(v: ValidityOf) -> Sym {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> d
+            .OfDecl(decl: d, inst: i) :> d
+        }
+    }
+    export fn validityInst(v: ValidityOf) -> InstRef {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> i
+            .OfDecl(decl: d, inst: i) :> i
+        }
     }
 
     // Does a field's contract grant ANY write? (the wcap invariant, §66.11.1)

@@ -94,7 +94,7 @@ ${
     // There is no unified "receive" with pattern matching across all events.
     ${
         server function loadRooms() {
-            let rows = ?{`SELECT id, name, description FROM rooms ORDER BY name ASC`}.all()
+            let rows = ?{`SELECT id, name, description FROM rooms ORDER BY name ASC`}.all() !{ _ :> [] }
             return rows
         }
 
@@ -110,7 +110,7 @@ ${
                 WHERE m.room_id = ${roomId}
                 ORDER BY m.inserted_at ASC
                 LIMIT 100
-            `}.all()
+            `}.all() !{ _ :> [] }
             return rows
         }
 
@@ -158,7 +158,7 @@ ${
                 SELECT username FROM typing_status
                 WHERE room_id = ${roomId}
                 AND last_typed > datetime('now', '-5 seconds')
-            `}.all()
+            `}.all() !{ _ :> [] }
             return rows
         }
 
@@ -186,7 +186,7 @@ ${
             if (@userName.trim().length == 0) {
                 return
             }
-            let result = joinRoom(@currentRoomId, @userName)
+            let result = joinRoom(@currentRoomId, @userName) !{ .Transport(_) :> { return } }
             if (result.ok) {
                 @hasJoined = true
             }
@@ -198,16 +198,16 @@ ${
             }
             @isSending = true
             // Clear typing status when sending
-            setTypingStatus(@currentRoomId, @userName, false)
+            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> { return } }
             @isTyping = false
 
-            let result = sendMessage(@currentRoomId, @userName, @messageText)
+            let result = sendMessage(@currentRoomId, @userName, @messageText) !{ .Transport(_) :> { return } }
             if (result.ok) {
                 @messageText = ""
                 // Immediately refresh messages after send.
                 // In LiveView, the server pushes the update. No polling lag.
                 // Here we manually trigger a reload.
-                @messages = loadMessages(@currentRoomId)
+                @messages = loadMessages(@currentRoomId) !{ .Transport(_) :> { return } }
             }
             @isSending = false
         }
@@ -217,10 +217,10 @@ ${
             // Updates socket.assigns.current_room_id, reloads messages, re-subscribes to PubSub topic.
             // All happens server-side. New DOM diff pushed to client.
             // In scrml: update client state, manually reload messages.
-            setTypingStatus(@currentRoomId, @userName, false)
+            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> { return } }
             @currentRoomId = roomId
             @currentRoomName = roomName
-            @messages = loadMessages(roomId)
+            @messages = loadMessages(roomId) !{ .Transport(_) :> { return } }
         }
 
         function handleTyping() {
@@ -230,7 +230,7 @@ ${
             // with debouncing built into phx-debounce attribute.
             if (!@isTyping) {
                 @isTyping = true
-                setTypingStatus(@currentRoomId, @userName, true)
+                setTypingStatus(@currentRoomId, @userName, true) !{ .Transport(_) :> { return } }
             }
         }
 
@@ -238,7 +238,7 @@ ${
             // When input is cleared/blurred, remove typing indicator
             if (@isTyping) {
                 @isTyping = false
-                setTypingStatus(@currentRoomId, @userName, false)
+                setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> { return } }
             }
         }
 

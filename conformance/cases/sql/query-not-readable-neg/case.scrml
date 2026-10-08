@@ -1,0 +1,11 @@
+<program db="./app.db">
+    // An unbackticked, ;-chained ?{ … } in a condition: the parser cannot structure it, and
+    // codegen's text path lowers only the backtick form — so no check could read it (§8.1.2).
+    ${
+        function check() {
+            if (?{ SELECT 1; select 2 }.get()) { return 1 }
+            return 0
+        }
+    }
+    <button onclick=${ check() }>check</button>
+</program>

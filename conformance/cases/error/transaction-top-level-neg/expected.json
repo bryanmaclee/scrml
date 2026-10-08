@@ -1,0 +1,14 @@
+{
+  "id": "error-transaction-top-level-neg",
+  "description": "§19.10.4 (S453/B1b, RULED) — a `transaction { }` block at the TOP LEVEL of a `${}` logic block, outside any function, is E-ERROR-001. §19.10.4 already said the block is \"valid only inside `!` functions\"; S450 enforced that for a non-`!` FUNCTION (see ../transaction-non-failable-fn-neg/) and deliberately left the top level alone, routing it. bryan ruled it rejected, on E-ERROR-001 rather than a new code — the condition is one condition (\"outside a `!` function\") and the reason is one reason: a `fail` inside the block has nowhere to go, so the commit-or-rollback promise has no failure path to keep. `notCodes` pins that this is the governed refusal and not the pre-S450 E-SCOPE-001 parse degradation, and that the block is not mistaken for a nested one.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/transaction-in-function-body.test.js",
+  "spec": "§19.10.4",
+  "rationale": "§19.10.4: \"`transaction { }` SHALL be valid only inside `!` functions. A `transaction` block outside a `!` function — in a function not declared `!`, or at a top-level logic block — SHALL be a compile error (E-ERROR-001 applies).\" Provenance: ruling:user-voice-scrml.md S449 (B1b) — \"a top-level `transaction` is rejected (§19.10.4 already says `!` functions only)\".",
+  "expect": {
+    "codes": ["E-ERROR-001"],
+    "notCodes": ["E-SCOPE-001", "E-ERROR-007", "E-TRANSACTION-CONTROL-FLOW"],
+    "severity": { "E-ERROR-001": "error" },
+    "codeCounts": { "E-ERROR-001": 1 }
+  }
+}

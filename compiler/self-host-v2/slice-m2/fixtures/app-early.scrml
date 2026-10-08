@@ -6,8 +6,8 @@ ${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
 <program>
     type Line:struct = { id: int, name: string }
     <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>   // locked: no grants (§66.12.1)
-    <let showColor:bool=false/>
-    <let firstCountry:string=(countryValue())/>                  // seeded at construction (L12 (b))
+    let <showColor:bool=false/>
+    let <firstCountry:string=(countryValue())/>                  // seeded at construction (L12 (b))
 
     function closeCountry() { @country.open = .Closed }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
     function clearColor() {

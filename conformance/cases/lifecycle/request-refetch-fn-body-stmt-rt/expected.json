@@ -1,0 +1,31 @@
+{
+  "id": "request-refetch-fn-body-stmt-rt",
+  "description": "§6.7.7 `<#id>.refetch()` as a STATEMENT in a <program>-level function body re-executes the fetch (RUNTIME, sqlEngine:\"real\"). The request is mount-only (deps=[]); showSecond() writes @userId = 2 then calls <#userReq>.refetch() (the EC-7 write-then-refetch idiom). After the click @userData is user 2 (\"b\"). Pre-S444 the block splitter cut the function at the `<#`: the function emitted EMPTY and the rest of its source shipped into <body> as page text.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Properties: \"`<#id>.refetch()` | `() -> void` | Imperatively re-execute the fetch body\"; EC-7: \"Developers write directly to the `@variable` before calling `refetch()`.\" g-request-refetch-statement-dropped (S444).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "a" },
+        { "id": 2, "name": "b" }
+      ]
+    },
+    "input": [
+      { "wait": "settle" },
+      { "click": "#again" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "userId": 2,
+      "userData": { "id": 2, "name": "b" }
+    },
+    "domAnchored": [
+      { "selector": "#who", "text": "b" }
+    ]
+  }
+}

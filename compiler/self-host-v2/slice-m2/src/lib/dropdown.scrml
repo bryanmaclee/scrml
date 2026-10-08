@@ -1,7 +1,8 @@
 // lib/dropdown.scrml
 export type Openness:enum = { Closed, Opened }
 
-export <dropdown label:string options:string[] export let value:string="">   // `value`: exported, writable (E2)
+export <dropdown label:string options:string[]>               // `label`, `options`: locked attributes (data)
+    export let <value:string=""/>                             // `value`: an exported, writable CHILD (E2; §66.4 rule 6, S447)
     export <open:Openness=.Closed>                            // a per-instance transition-graph field (§66.13.2), exported
         <Closed rule=.Opened/>              // ⚑ O52: state-child marker
         <Opened rule=.Closed/>

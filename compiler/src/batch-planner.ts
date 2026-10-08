@@ -25,6 +25,11 @@
  * Idempotency: re-running on a BatchPlan-annotated input is a no-op.
  */
 
+import { classifyHoistableQuery, HOIST_VAL_ALIAS } from "./hoist-sql-shape.ts";
+import { buildCompilationWriteFacts, loopBodyWriteReason, type LoopWriteFacts } from "./hoist-write-scan.ts";
+import { resolveDbScopes } from "./db-ownership.ts";
+import { dialectOfDbValue } from "./codegen/tenant-egress.ts";
+
 // ---------------------------------------------------------------------------
 // Public types — mirrored from SPEC.md §8.9 / §8.10 / §8.11 and
 // PIPELINE.md Stage 7.5.
@@ -62,11 +67,23 @@ export interface LoopHoist {
   /** Original SQL template body, e.g. "SELECT * FROM users WHERE id = ${x.id}". */
   sqlTemplate: string;
   /**
-   * Rewritten SQL with `WHERE <keyColumn> IN (${keysVar})` in place of the
-   * single equality. The `${keysVar}` slot is kept parameter-bound via
-   * bun:sqlite spread args at emit time (`.all(...keys)`).
+   * The pre-fetch (hoist-sql-shape.ts): the query joined to a key table of
+   * `(slot, key)` rows, `WHERE <keyColumn> = <key table>.<key>`, with the slot
+   * projected. `__SCRML_BATCH_VALUES__` is replaced at run time by the VALUES rows
+   * `(0, ?1), (1, ?2), …` — the keys stay bound parameters (§8.2).
    */
   inSqlTemplate: string;
+  /**
+   * The alias `inSqlTemplate` projects each row's key SLOT under (`HOIST_KEY_ALIAS`):
+   * the index of the distinct loop key the row matched. The pre-fetch keys its Map on
+   * it and strips it from each row.
+   */
+  keyAlias: string;
+  /**
+   * The bound key's column name in the pre-fetch's key table (`HOIST_VAL_ALIAS`). A
+   * `SELECT *` pre-fetch carries it in each row, so the emitter strips it too.
+   */
+  valAlias: string;
   terminator: "get" | "all";
   rowCacheColumns: Set<string>;
 }
@@ -384,8 +401,10 @@ function extractKeyColumn(
 ): { keyColumn: string; keyField: string } | { reason: string } {
   const trimmed = sqlBody.trim();
   // Reject tuple WHERE (`col1 = ${x.a} AND col2 = ${x.b}`) — out of v1 scope.
+  // An AND predicate with no `${}` (`AND t.label <> 'zz'`) is not a tuple; the
+  // allow-list (hoist-sql-shape.ts) decides it.
   const tupleRe = new RegExp(
-    `WHERE\\s+[\\w.]+\\s*=\\s*\\$\\{\\s*${loopVar}\\.\\w+\\s*\\}\\s+AND\\s+`,
+    `WHERE\\s+[\\w.]+\\s*=\\s*\\$\\{\\s*${loopVar}\\.\\w+\\s*\\}\\s+AND\\s+[\\s\\S]*\\$\\{`,
     "i",
   );
   if (tupleRe.test(trimmed)) {
@@ -480,12 +499,91 @@ function findProtectOverlap(
   return [...overlap].sort();
 }
 
+/** The reserved alias the §8.10 pre-fetch projects the key column under. */
+export const HOIST_KEY_ALIAS = "__scrml_batch_key";
+
+/**
+ * §14.8.9 × §8.10 — why a read over `tables` may not be hoisted, or null.
+ * `protectAnalysis` absent = a direct planner call without the PA stage (unit
+ * seam); the compile pipeline always supplies it.
+ */
+function protectBlocksHoist(tables: string[], protectAnalysis: unknown): string | null {
+  if (!protectAnalysis || typeof protectAnalysis !== "object") return null;
+  const pa = protectAnalysis as {
+    views?: Map<unknown, { tables?: Map<string, { protectedFields?: Set<string> }> }>;
+    declaredTables?: Set<string>;
+  };
+  // No protected column anywhere in the compile: the §14.8.9 floor strips
+  // nothing, so there is nothing for the pre-fetch to bypass.
+  let anyProtected = false;
+  for (const view of pa.views?.values() ?? []) {
+    for (const tv of view?.tables?.values() ?? []) {
+      if (tv?.protectedFields && tv.protectedFields.size > 0) anyProtected = true;
+    }
+  }
+  if (!anyProtected) return null;
+  for (const t of tables) {
+    const lower = t.toLowerCase();
+    if (pa.declaredTables && !pa.declaredTables.has(lower)) {
+      return `table \`${t}\` is not a declared table, so its protected columns are unknown (§14.8.9) — not hoisted`;
+    }
+    for (const view of pa.views?.values() ?? []) {
+      for (const [name, tv] of view?.tables ?? []) {
+        if (name.toLowerCase() === lower && tv?.protectedFields && tv.protectedFields.size > 0) {
+          return `table \`${t}\` has protected column(s); the hoisted pre-fetch would bypass the §14.8.9 row strip — not hoisted`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * §8.10 — why this compilation's database cannot take the Tier 2 pre-fetch, or
+ * null. The pre-fetch is SQLite SQL: `?N` placeholders, and a key table whose
+ * `VALUES` column has no type affinity, so the `=` against the key column applies
+ * the column's affinity and collation exactly as the per-iteration `= ?` does
+ * (§8.10.2). Postgres rejects `?N` outright (measured S456: `operator does not
+ * exist: ? integer`) and types an untyped VALUES column differently. Fail closed:
+ * every database handle of the compilation must be a literal SQLite target. With
+ * no handle at all there is no database for the pre-fetch to run on and nothing
+ * to refuse.
+ */
+function hoistDialectReason(files: unknown[]): string | null {
+  for (const f of files) {
+    const filePath = typeof (f as any)?.filePath === "string" && (f as any).filePath ? (f as any).filePath : null;
+    let handles: Array<{ value: string }> = [];
+    try {
+      handles = resolveDbScopes(getFileNodes(f), filePath).handles;
+    } catch {
+      return "the compilation's database handles could not be resolved — the Tier 2 pre-fetch is SQLite SQL, so the loop is not hoisted";
+    }
+    for (const h of handles) {
+      const d = dialectOfDbValue(h.value);
+      if (d !== "sqlite") {
+        return `the database \`${h.value}\` is not a literal SQLite target (${d}) — the Tier 2 pre-fetch is SQLite SQL, so the loop is not hoisted`;
+      }
+    }
+  }
+  return null;
+}
+
+/** The context `analyzeForLoop` reads beyond the loop itself. */
+interface LoopContext {
+  protectAnalysis: unknown;
+  /** The file's write facts (hoist-write-scan.ts), computed on first use. */
+  writeFacts: () => LoopWriteFacts;
+  /** Why the compilation's database cannot take the pre-fetch, or null (computed on first use). */
+  dialectReason: () => string | null;
+}
+
 function analyzeForLoop(
   forStmt: Record<string, unknown>,
   plan: BatchPlan,
   errors: BatchPlannerError[],
-  protectAnalysis: unknown,
+  ctx: LoopContext,
 ): void {
+  const protectAnalysis = ctx.protectAnalysis;
   const loopVar = typeof forStmt.variable === "string" ? forStmt.variable : "";
   if (!loopVar) return;
 
@@ -525,19 +623,18 @@ function analyzeForLoop(
     return;
   }
 
-  // Build the IN-form SQL template by substituting the single equality
-  // predicate with `WHERE <keyColumn> IN (${__KEYS__})`. We use a distinct
-  // placeholder token rather than a real `${}` so the SQL rewriter at CG
-  // time won't try to turn it into a bound param — the emit step replaces
-  // the placeholder with a spread-rendered IN-list.
-  const keyEqPattern = new RegExp(
-    `WHERE\\s+${keyResult.keyColumn}\\s*=\\s*\\$\\{\\s*${loopVar}\\.${keyResult.keyField}\\s*\\}`,
-    "i",
-  );
-  const inSqlTemplate = site.body.replace(
-    keyEqPattern,
-    `WHERE ${keyResult.keyColumn} IN (__SCRML_BATCH_IN__)`,
-  );
+  // §8.10.1 / §8.10.3 — the ALLOW-LIST (hoist-sql-shape.ts): only a query whose
+  // `WHERE <key> IN (…)` pre-fetch, grouped by key, IS the per-key answer. The
+  // classifier also builds the pre-fetch: §8.10.4 — the key column is projected
+  // under a reserved alias whatever the SELECT list says (`SELECT body`,
+  // `id AS note_id`, `n.id` all left the rows without a bare key, so every lookup
+  // missed); the emitter keys on the alias and strips it.
+  const shape = classifyHoistableQuery(site.body, loopVar, HOIST_KEY_ALIAS);
+  if ("reason" in shape) {
+    emitNearMiss(plan, loopId, shape.reason, forStmt.span);
+    return;
+  }
+  const inSqlTemplate = shape.inSqlTemplate;
 
   // §8.10.7: populate rowCacheColumns from the SELECT column list, then
   // cross-reference against protectedFields on the target table. Overlap
@@ -560,16 +657,43 @@ function analyzeForLoop(
     });
     return;
   }
+  // §14.8.9 — the per-iteration query strips protected columns from its rows at
+  // the egress floor; the hoisted pre-fetch does not pass through that strip, so an
+  // aliased / computed protected column (`secret AS s`, `lower(secret)`) reached the
+  // client. Fail closed: a read over a table with ANY protected column, or one the
+  // protect analysis does not know, is not hoisted.
+  const protectReason = protectBlocksHoist(shape.tables, protectAnalysis);
+  if (protectReason !== null) {
+    emitNearMiss(plan, loopId, protectReason, forStmt.span);
+    return;
+  }
+  const dialectReason = ctx.dialectReason();
+  if (dialectReason !== null) {
+    emitNearMiss(plan, loopId, dialectReason, forStmt.span);
+    return;
+  }
+  // §8.10.3 — the pre-fetch is taken before iteration 1, so a body that can write
+  // the database between iterations would read stale rows (executed S456: a call to
+  // a function that UPDATEs the read row). Hoist only a body PROVEN not to write.
+  const isSite = (n: any): boolean =>
+    typeof n === "string" ? n.includes("`" + site.body + "`") : (n?.kind === "sql" && n.query === site.body);
+  const writeReason = loopBodyWriteReason(forStmt.body, ctx.writeFacts(), isSite);
+  if (writeReason !== null) {
+    emitNearMiss(plan, loopId, writeReason, forStmt.span);
+    return;
+  }
 
   plan.loopHoists.push({
     loopNode: loopId,
     queryNode: `${String(loopId)}#query`,
-    keyColumn: keyResult.keyColumn,
-    keyExpr: `${loopVar}.${keyResult.keyField}`,
+    keyColumn: shape.keyColumn,
+    keyExpr: `${loopVar}.${shape.keyField}`,
     loopVar,
-    keyField: keyResult.keyField,
+    keyField: shape.keyField,
     sqlTemplate: site.body,
     inSqlTemplate,
+    keyAlias: HOIST_KEY_ALIAS,
+    valAlias: HOIST_VAL_ALIAS,
     terminator: site.terminator as "get" | "all",
     rowCacheColumns,
   });
@@ -626,11 +750,28 @@ export function runBatchPlanner(input: BPInput): BPOutput {
   // file, regardless of enclosing handler — `?{}` is server-only by
   // route inference (§12.2 Trigger 1), so any for-stmt containing SQL
   // is inherently server-bound. Near-miss shapes emit D-BATCH-001.
-  for (const file of input.files ?? []) {
-    const topNodes = getFileNodes(file);
+  // Both computed on the first loop that reaches them (most files have none).
+  let dialectReason: string | null | undefined;
+  const dialectReasonOnce = (): string | null =>
+    dialectReason === undefined ? (dialectReason = hoistDialectReason(input.files ?? [])) : dialectReason;
+  // The write facts are compilation-wide (a writer passed by value in one file can
+  // reach a loop in another — hoist-write-scan.ts), aligned with input.files.
+  let compilationWriteFacts: LoopWriteFacts[] | null = null;
+  const files = input.files ?? [];
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const topNodes = getFileNodes(files[fileIndex]);
+    const writeFactsOnce = (): LoopWriteFacts =>
+      (compilationWriteFacts ??= buildCompilationWriteFacts(files.map((f) => ({
+        nodes: getFileNodes(f),
+        filePath: typeof (f as any)?.filePath === "string" && (f as any).filePath ? (f as any).filePath : null,
+      }))))[fileIndex];
     walkAst(topNodes, (node) => {
       if (node.kind !== "for-stmt") return true;
-      analyzeForLoop(node, batchPlan, errors, input.protectAnalysis);
+      analyzeForLoop(node, batchPlan, errors, {
+        protectAnalysis: input.protectAnalysis,
+        writeFacts: writeFactsOnce,
+        dialectReason: dialectReasonOnce,
+      });
       return true;
     });
   }

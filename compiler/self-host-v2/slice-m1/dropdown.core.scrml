@@ -8,7 +8,8 @@
 //
 // lib/dropdown.scrml:
 //   export type Openness:enum = { Closed, Opened }
-//   export <dropdown label:string options:string[] export let value:string="">
+//   export <dropdown label:string options:string[]>
+//       export let <value:string=""/>                // an exported, writable CHILD (§66.4 rule 6, S447)
 //       export <open:Openness=.Closed>
 //           <Closed rule=.Opened/>              // ⚑ O52 (ruled S435): state-child marker
 //           <Opened rule=.Closed/>
@@ -29,7 +30,7 @@
 //   <program>
 //       type Line:struct = { id: int, name: string }
 //       <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>
-//       <let showColor:bool=false/>
+//       let <showColor:bool=false/>
 //       function closeCountry() { @country.open = .Closed }
 //       function clearColor() { given c = @color :> { c.value = "" } }
 //       <main class="filters">
@@ -65,7 +66,7 @@ ${
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
-        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], positionsWritable: false })
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false })
     }
 
     fn strList(xs: string[]) -> Expr {
@@ -91,7 +92,7 @@ ${
     // A TEST FIXTURE for L12 (b) (ruled S437): the same program plus user code
     // that reads the unconditional handle `@country` BEFORE the first render —
     //   function countryValue() { return @country.value }
-    //   <let firstCountry:string=(countryValue())/>     // seeded at construction
+    //   let <firstCountry:string=(countryValue())/>     // seeded at construction
     //   <p class="early">Early ${countryValue()} / ${@firstCountry}</p>   // placed BEFORE the instances
     // The instance record must exist when the program is CONSTRUCTED, not when
     // its DOM mounts.
@@ -110,7 +111,7 @@ ${
         const sOptions: Sym   = mkSym(8, "options")
         const sValue: Sym     = mkSym(9, "value")
         const sOpen: Sym      = mkSym(10, "open")
-        const wValue: Sym     = mkSym(11, "value")       // write capability: `export let value`
+        const wValue: Sym     = mkSym(11, "value")       // write capability: `export let <value/>`
         const wOpen: Sym      = mkSym(12, "open")        // write capability: the `rule=` graph
         const sProgram: Sym   = mkSym(13, "program")
         const sLines: Sym     = mkSym(14, "lines")
@@ -153,17 +154,17 @@ ${
         const fLabel: Field = {
             sym: sLabel, ty: Type.Str, init: not,                          // ⚑ O33
             mode: FieldMode.Locked, role: FieldRole.Attribute, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         const fOptions: Field = {
             sym: sOptions, ty: fixedSeq(Type.Str), init: not,              // ⚑ O33
             mode: FieldMode.Locked, role: FieldRole.Attribute, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         const fValue: Field = {
             sym: sValue, ty: Type.Str, init: litStr(""),
-            mode: FieldMode.Let, role: FieldRole.Attribute, grants: replaceGrant(),
-            graph: not, exported: true, wcap: wValue,
+            mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),      // a child since S447 (§66.4 rule 6)
+            graph: not, exported: true, wcap: wValue, vals: [], persist: not,
         }
         const fOpen: Field = {
             sym: sOpen, ty: Type.Named(sOpenness), init: litVariant(sOpenness, CLOSED),
@@ -173,7 +174,7 @@ ${
                 { origin: CLOSED, targets: [OPENED] },
                 { origin: OPENED, targets: [CLOSED] },
             ] },
-            exported: true, wcap: wOpen,
+            exported: true, wcap: wOpen, vals: [], persist: not,
         }
 
         const readOpen: Expr = readField(sDropdown, here, OPEN)
@@ -194,21 +195,31 @@ ${
             Stmt.Write(wOpen, here, EditKind.Transition, litVariant(sOpenness, CLOSED), Check.RuntimeEdge),
         ])], [dyn(Expr.Local(sOpt))])
 
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly — the source's newline + indentation
+        // (and the spaces before a dropped `// …` comment; the comment's bytes
+        // are gone, the bytes around it stay). L13 (which dropped these) is retired.
         const dropdownView: View = el("div", [staticAttr("class", "dropdown")], [
+            textView("\n    "),
             el("button", [staticAttr("class", "dropdown__toggle"), onEvent("click", [toggle])], [
                 dyn(readField(sDropdown, here, LABEL)),
                 textView(": "),
                 dyn(readField(sDropdown, here, VALUE)),
             ]),
+            textView("\n    "),
             // `if=` on an element lowers to a one-arm Cond around the element (L5).
             View.Cond([{
                 test: prim2(PrimOp.EqPrim, readOpen, litVariant(sOpenness, OPENED)),
                 body: [el("ul", [staticAttr("class", "dropdown__menu")], [
+                    textView("\n        "),
                     // No key= → positional keys (L9).
-                    View.Each(readField(sDropdown, here, OPTIONS), sOpt, not, [], [pick]),
+                    View.Each(readField(sDropdown, here, OPTIONS), sOpt, not, [], [textView("\n            "), pick, textView("\n        ")]),
+                    textView("\n    "),
                 ])],
             }]),
+            textView("\n    "),
             View.Slot,
+            textView("                                                   \n"),
         ])
 
         const dropdown: Decl = {
@@ -223,19 +234,19 @@ ${
         let fLines: Field = {
             sym: sLines, ty: fixedSeq(Type.Named(sLine)), init: initLines,
             mode: FieldMode.Locked, role: FieldRole.Child, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         if (reorderable) {
             fLines = {
                 sym: sLines, ty: fixedSeq(Type.Named(sLine)), init: initLines,
                 mode: FieldMode.Locked, role: FieldRole.Child, grants: replaceGrant(),
-                graph: not, exported: false, wcap: wLines,
+                graph: not, exported: false, wcap: wLines, vals: [], persist: not,
             }
         }
         const fShowColor: Field = {
             sym: sShowColor, ty: Type.Bool, init: litBool(false),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
-            graph: not, exported: false, wcap: wShowColor,
+            graph: not, exported: false, wcap: wShowColor, vals: [], persist: not,
         }
 
         const qtyValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hQty), [{ owner: sDropdown, idx: VALUE }]))
@@ -253,52 +264,65 @@ ${
                 dyn(call0(sCountryValue)),
                 textView(" / "),
                 dyn(readField(sProgram, here, FIRSTCOUNTRY)),
-            ])]
+            ]), textView("\n        ")]
         }
 
-        const main: View = el("main", [staticAttr("class", "filters")], earlyViews.concat([
+        const main: View = el("main", [staticAttr("class", "filters")], [textView("\n        ")].concat(earlyViews).concat([
             View.Instance(sDropdown, [
                 construct(LABEL, litStr("Country")),
                 construct(OPTIONS, strList(["US", "CA", "MX"])),
                 construct(VALUE, litStr("US")),
             ], [], hCountry),
+            textView("   \n        "),
             View.Instance(sDropdown, [
                 construct(LABEL, litStr("Size")),
                 construct(OPTIONS, strList(["S", "M", "L"])),
                 construct(VALUE, litStr("M")),
             ], [], not),
+            textView("                     \n        "),
             View.Cond([{
                 test: readField(sProgram, here, SHOWCOLOR),
                 body: [el("div", [], [
+                    textView("\n            "),
                     View.Instance(sDropdown, [
                         construct(LABEL, litStr("Color")),
                         construct(OPTIONS, strList(["red", "blue"])),
                     ], [], hColor),
+                    textView("                 \n        "),
                 ])],
             }]),
+            textView("\n        "),
             el("p", [], [textView("Shipping to "), dyn(countryValue)]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sCloseCountry))])], [textView("Done")]),
+            textView("\n        "),
             el("button", [onEvent("click", [
                 Stmt.Write(wShowColor, here, EditKind.Replace,
                     prim1(PrimOp.Not, readField(sProgram, here, SHOWCOLOR)), Check.Static),
             ])], [textView("Colours")]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sClearColor))])], [textView("Clear colour")]),
+            textView("\n\n        "),
             View.Each(readField(sProgram, here, LINES), sLineRow,
                 readLocalField(sLineRow, sLine, LINE_ID),
                 [hQty],
                 [
+                    textView("                      \n            "),
                     View.Instance(sDropdown, [
                         // A locked attribute set from a row value tracks it (L6).
                         construct(LABEL, readLocalField(sLineRow, sLine, LINE_NAME)),
                         construct(OPTIONS, strList(["1", "2", "3"])),
                         construct(VALUE, litStr("1")),
                     ], [], hQty),
+                    textView("        \n            "),
                     el("span", [], [
                         dyn(readLocalField(sLineRow, sLine, LINE_NAME)),
                         textView(" × "),
                         dyn(qtyValue),
                     ]),
+                    textView("\n        "),
                 ]),
+            textView("\n\n        \n        \n    "),
         ]))
 
         let programFields: Field[] = [fLines, fShowColor]
@@ -306,7 +330,7 @@ ${
             programFields = programFields.concat([{
                 sym: sFirstCountry, ty: Type.Str, init: call0(sCountryValue),
                 mode: FieldMode.Seeded, role: FieldRole.Child, grants: replaceGrant(),
-                graph: not, exported: false, wcap: wFirstCountry,
+                graph: not, exported: false, wcap: wFirstCountry, vals: [], persist: not,
             }])
         }
 
@@ -319,7 +343,7 @@ ${
 
         // function closeCountry() { @country.open = .Closed }
         const closeCountry: Fn = {
-            sym: sCloseCountry, params: [], pure: false,
+            sym: sCloseCountry, params: [], pure: false, err: not, waits: false,
             body: block([
                 Stmt.Write(wOpen, InstRef.Alias(hCountry), EditKind.Transition,
                     litVariant(sOpenness, CLOSED), Check.RuntimeEdge),
@@ -329,7 +353,7 @@ ${
         // `given` over an instance handle → Let + If(IsSome) + a write through
         // `.Narrowed(c)` (L11).
         const clearColor: Fn = {
-            sym: sClearColor, params: [], pure: false,
+            sym: sClearColor, params: [], pure: false, err: not, waits: false,
             body: block([
                 Stmt.Let(sC, Expr.Handle(InstRef.Alias(hColor))),
                 Stmt.If(prim1(PrimOp.IsSome, Expr.Local(sC)),
@@ -353,7 +377,7 @@ ${
         if (earlyRead) {
             // function countryValue() { return @country.value }
             const fCountryValue: Fn = {
-                sym: sCountryValue, params: [], pure: false,
+                sym: sCountryValue, params: [], pure: false, err: not, waits: false,
                 body: block([Stmt.Return(countryValue)]),
             }
             fns = fns.concat([fCountryValue])
@@ -365,6 +389,10 @@ ${
             types: [openness, lineType],
             fns: fns,
             server: [],
+            dbs: [],
+            reset: true,
+            sqlError: not,
+            serverCallError: not,
         }
     }
 
@@ -372,7 +400,7 @@ ${
     // reassignment, i.e. a `.Replace` (§66.11.2).
     fn rewriteLines(name: Sym, cap: Sym, shared: InstRef, rows: Expr[]) -> Fn {
         return {
-            sym: name, params: [], pure: false,
+            sym: name, params: [], pure: false, err: not, waits: false,
             body: block([Stmt.Write(cap, shared, EditKind.Replace, Expr.ArrayOf(rows), Check.Static)]),
         }
     }

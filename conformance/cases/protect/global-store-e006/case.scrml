@@ -1,0 +1,21 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function stash(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        process.env.LAST_HASH = u.passwordHash
+        return 1
+      }
+      function peek() {
+        let n = ?{`SELECT id FROM users WHERE id = 1`}.get() !{ _ :> not }
+        return process.env.LAST_HASH
+      }
+    }
+  </db>
+  <out> = not
+  <button id="stash" onclick={ @out = stash(1) !{ .Transport(_) :> { return } } }>stash</button>
+  <button id="peek" onclick={ @out = peek() !{ .Transport(_) :> { return } } }>peek</button>
+</program>

@@ -1,0 +1,17 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT, pin INTEGER)`}
+  </schema>
+  <db src="app.db" protect="passwordHash, pin" tables="users">
+    ${
+      function getUser(id) {
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let b = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        Object.assign(a, b)
+        return a
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
+</program>

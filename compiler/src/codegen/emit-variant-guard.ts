@@ -95,6 +95,8 @@
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
+import { wrapUrlGuard } from "./url-attr-guard.ts";
+import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -504,10 +506,14 @@ function emitArmWireFunction(
   // declaration (SyntaxError → E-CODEGEN-INVALID-LOGIC) or, worse, was silently
   // SHADOWED by the internal (`${el}` rendered the element). An internal that
   // collides with an arm name takes a `_scrml_arm`-prefixed spelling instead
-  // (the `_scrml_` namespace is the compiler's); without a collision the
-  // spelling — and so the emitted bytes — are unchanged.
-  const _armTaken = new Set(armParams);
-  const armLocal = (n: string): string => (_armTaken.has(n) ? `_scrml_arm${n.startsWith("_") ? "" : "_"}${n}` : n);
+  // (the `_scrml_` namespace is the compiler's).
+  //
+  // s457 (capture) — the internals are prefixed ALWAYS, not only on a collision
+  // with an arm name: the arm body also reads the user's TOP-LEVEL names (a
+  // function `_root`, `_d`, `el`, ...), which this scope would equally shadow.
+  // The `_scrml_` namespace is reserved to the compiler (§47.1.1), so a
+  // prefixed internal can never capture a user name.
+  const armLocal = (n: string): string => `_scrml_arm${n.startsWith("_") ? "" : "_"}${n}`;
   const R = armLocal("_root");
   const DS = armLocal("_disposers");
   const EL = armLocal("el");
@@ -587,6 +593,13 @@ function emitArmWireFunction(
     };
     const textReads = (text: string): boolean =>
       _readsAny(text.includes("`") ? text : _blankLits(text), armParams);
+    // S446 (S439 #4) — a §5.2.3 statement-list handler (`${f(); @s = note; h()}`)
+    // runs EVERY statement in `handlerBlock.stmts`, but `handlerExprNode` is
+    // the FIRST statement's expression only. Scanning just that left a later
+    // statement's arm-name read unseen: the handler stayed a module-scope
+    // registry entry and threw `ReferenceError: note is not defined` at click.
+    // Scan the parsed statements — the nodes that are actually emitted.
+    if (b.handlerBlock && Array.isArray(b.handlerBlock.stmts) && exprReadsArmName(b.handlerBlock.stmts, null)) return true;
     if (typeof b.handlerExpr === "string" && b.handlerExpr.length > 0) {
       if (b.handlerExprNode) collect(b.handlerExprNode);
       else if (textReads(b.handlerExpr)) return true;
@@ -634,7 +647,8 @@ function emitArmWireFunction(
   // `armLogicFactoryName(id)(_root, ...armParams)` (see its `armCapture`); this
   // function calls it after every arm entry and owns the returned disposer.
   // A binding that reads no arm name is untouched (byte-identical).
-  const exprReadsArmName = (node: unknown, text: unknown): boolean => {
+  // (A hoisted declaration: handlerReadsArmName above also reads statement lists with it.)
+  function exprReadsArmName(node: unknown, text: unknown): boolean {
     if (armParamSet.size === 0) return false;
     let hit = false;
     const collect = (n: any): void => {
@@ -653,7 +667,7 @@ function emitArmWireFunction(
     };
     collect(node);
     return hit || (typeof text === "string" && sourceTextReads(text));
-  };
+  }
   // Source-text read test: string / regex literals blanked (unless a template
   // literal, whose `${…}` IS a read), `@cell` / `@.x` reads blanked (a cell is
   // never an arm name), then an identifier-boundary match (`x.note` is not a read
@@ -905,10 +919,15 @@ function emitArmWireFunction(
       }
     } else {
       // attr-template — set the interpolated attribute value once, then subscribe.
+      // §5.2 rule 3 (S457): a URL attribute whose literal prefix commits to no scheme
+      // (`directiveUrlGuard`, stamped by emit-html) writes through `_scrml_safe_url`.
       const attrName = binding.attrName as string;
-      lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+      const valueJs = binding.directiveUrlGuard === true
+        ? wrapUrlGuard(EL, attrName, jsExpr, binding.directiveUrlGuardTarget ?? null)
+        : jsExpr;
+      lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
       if (refs.length > 0 || readsRow(jsExpr)) {
-        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
+        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
       }
     }
     lines.push(`    }`);
@@ -966,6 +985,8 @@ function emitArmWireFunction(
       attrName,
       binding.valueAttrIsFormValue === true,
       EL,
+      binding.valueAttrUrlGuard === true,
+      binding.valueAttrUrlGuardTarget ?? null,
     );
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);
@@ -1273,7 +1294,28 @@ function emitArmWireFunction(
     const placeholderId = binding.placeholderId as string;
     const eventName = binding.eventName as string; // e.g. "onfocus"
     const domEvent = eventName.replace(/^on/, "");
-    const handlerExpr = buildHandlerExpr(binding);
+    // S454 (bryan: "a yes, b yes, root fix") — §19.6.8 B7: every handler's
+    // rejection reaches the logging surface, whatever its form and whatever
+    // site registers it. This in-arm, NON-delegable registration never
+    // coloured its handler (a 16th listener-registration site the S453
+    // inventory missed), so an async callee was fired unobserved — and a
+    // `${ if (isOk(1)) {…} }` handler here tested a Promise, the s441 class
+    // the page-level emitter closed. Colour it under the active client
+    // emission exactly as the page-level / row / lift emitters do, with the
+    // same statement-list options (`colorActiveHandler`): async calls are
+    // awaited inside the S453 rejection arm; a handler with no async call is
+    // returned verbatim (byte-identical). Handler text here carries AUTHOR
+    // names (the post-fn-name-mangle pass renames them), which is what the
+    // colouring resolves. Coloured ONCE, here — `buildHandlerExpr` stays a
+    // pure lowering.
+    const handlerExpr = colorActiveHandler(
+      buildHandlerExpr(binding),
+      binding.span,
+      {
+        ...activeHandlerStatementListColor(binding.handlerBlock?.stmts),
+        boundaryId: `${eventName} ${placeholderId}`,
+      },
+    );
     const dataAttr = `data-scrml-bind-${eventName}`;
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector('[${dataAttr}=${JSON.stringify(placeholderId)}]');`);
@@ -1474,8 +1516,9 @@ export function emitVariantGuardedRender(
   // names share a scope with the row names it takes as parameters (item-scoped
   // mode). A row alias spelled like one of them (`as _v`, `as _mount`) was a
   // duplicate parameter or was shadowed by the internal; a colliding internal
-  // takes a `_scrml_arm`-prefixed spelling. No collision → unchanged bytes.
-  const dispLocal = (n: string): string => (rowScopeParams.includes(n) ? `_scrml_arm${n}` : n);
+  // takes a `_scrml_arm`-prefixed spelling — always (s457 capture: the user's
+  // top-level names reach this scope too).
+  const dispLocal = (n: string): string => `_scrml_arm${n}`;
   const MT = dispLocal("_mount");
   const VV = dispLocal("_v");
   const TG = dispLocal("_tag");

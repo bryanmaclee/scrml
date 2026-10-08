@@ -58,7 +58,7 @@ ${
     }
 
     server function doResetPassword(userId) {
-        let user = ?{`SELECT email FROM users WHERE id = ${userId} LIMIT 1`}.get()
+        let user = ?{`SELECT email FROM users WHERE id = ${userId} LIMIT 1`}.get() !{ _ :> not }
         if (user is not) { return }
         let token = crypto.randomUUID()
         ?{`UPDATE users SET reset_token = ${token} WHERE id = ${userId}`}.run()

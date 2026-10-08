@@ -1,0 +1,7 @@
+// §55.5.2 — validators on a LOCKED value nothing can change (no bind, no write grant, no use-site seed) are dead.
+<program>
+    <code:string="ABC" req length(>=5)/>
+    <main>
+        <p>${@code}</p>
+    </main>
+</program>

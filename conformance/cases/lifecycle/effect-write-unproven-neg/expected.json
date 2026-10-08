@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-effect-write-unproven-neg",
+  "description": "§6.7.4 negative twin: the same function called by its declared name is resolved and proven write-free — NOT E-EFFECT-WRITE-UNPROVEN.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 rule 2: a call to a statically resolved scrml function is judged by its write summary; an empty summary certifies. ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "E-EFFECT-WRITE-UNPROVEN"
+    ]
+  }
+}

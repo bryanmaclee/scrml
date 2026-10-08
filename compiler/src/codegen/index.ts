@@ -18,6 +18,7 @@
  */
 
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
+import { setFileSqlFallback, fallbackSqlHandle } from "./sql-handle-name.ts";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename, dirname, relative, resolve } from "path";
 import { toPosix } from "../path-canonical.js";
@@ -54,18 +55,26 @@ const RUNTIME_FILENAME_PLACEHOLDER = "__SCRML_RUNTIME_FILENAME_PLACEHOLDER__";
 import { resetVarCounter } from "./var-counter.ts";
 import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-provenance.ts";
 import { escapeHtmlAttr } from "./utils.ts";
-import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
+import { generateHtml, augmentHtmlForChunks, buildChunksBootJs } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
-import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile } from "./emit-control-flow.ts";
+import { compilationTenantSet, COMPILATION_TENANT_KEY, type CompilationTenantSet } from "./tenant-egress.ts";
+import { buildProtectContext } from "./protect-egress.ts";
+import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
-import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
+import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
+import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering-errors.ts";
+import { setProgramBodySqlPolicy, setProgramBodySqlFile, resetProgramStatementRefusals, drainProgramStatementRefusals } from "./sql-one-statement-guard.ts";
+import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
+import { getElementAttrSchema } from "../attribute-registry.js";
+
 import { classifyFileShape } from "../library-shape.js";
-import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { resolveModulePath, isPromiseReturningStdlibFn, localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
@@ -73,9 +82,10 @@ import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-pr
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
-import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
+import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
 import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
+import { setServerSessionUserCell, resetServerAmbientSessionRefusals, drainServerAmbientSessionRefusalErrors, fileScopeDeclaresSessionCell, fileNodesOf } from "./server-session-guard.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
   setChunkNamespaceState,
@@ -98,6 +108,7 @@ import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { resolveDbScopes } from "../db-ownership.ts";
 import { parseSchemaBlock } from "../schema-differ.js";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
 import { lowerDefers } from "./lower-defer.ts";
@@ -107,6 +118,11 @@ import {
   type ChunkOutput,
   type ChunksManifest,
 } from "./route-splitter.ts";
+
+/** Membership in the `<program>` attribute registry (S445 item 5 — the closed set the nested rule ranges over). */
+const _programAttrSchema: any = getElementAttrSchema("program");
+const _isRegisteredProgramAttr = (n: string): boolean =>
+  !!(_programAttrSchema && _programAttrSchema.allowedAttrs && _programAttrSchema.allowedAttrs.has(n));
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -145,6 +161,8 @@ export interface CgDepGraph {
 
 export interface CgProtectAnalysis {
   views?: Map<string, object>;
+  /** §14.8.9 — base tables whose columns the compile knows (see ProtectAnalysis). */
+  declaredTables?: Set<string>;
 }
 
 export interface CgInput {
@@ -152,6 +170,20 @@ export interface CgInput {
   routeMap?: CgRouteMap;
   depGraph?: CgDepGraph;
   protectAnalysis?: CgProtectAnalysis;
+  /**
+   * §14.8.10 (S455) — the compilation's ONE tenant set, computed once by the api.js
+   * TENANT-SCHEMA stage (`compilationTenantSet`) and shared with the `<schema>`
+   * declaration rule. When absent (runCG driven directly), runCG computes it from
+   * `files` + `protectAnalysis` with the same function.
+   */
+  compilationTenant?: CompilationTenantSet;
+  /**
+   * §14.8.10 item (1) (S457) — whether the compilation has a database (api.js
+   * `compilationHasDatabase`, the TENANT-SCHEMA stage's value): the program-body statement
+   * allow-list governs only such a compilation, and codegen enforces it at every `?{}` lowering.
+   * When absent, runCG computes it from `files` with the same function.
+   */
+  compilationHasDatabase?: boolean;
   sourceMap?: boolean;
   embedRuntime?: boolean;
   mode?: "browser" | "library";
@@ -206,6 +238,15 @@ export interface CgInput {
    * Threaded into per-file `CompileContext.exportRegistry`.
    */
   exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
+  /**
+   * g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the cross-file
+   * type map the TS stage seeds from (api.js `importedTypesByFile`: importing
+   * file → local name → ResolvedType; alias-aware, re-export-chasing). Codegen
+   * reads the imported ENUMS out of it so the per-file variant-payload registry
+   * (positional match binding, tag-vs-`.variant` comparison, bare-dot
+   * constructor lowering) sees the same enums exhaustiveness does.
+   */
+  importedTypesByFile?: { get(filePath: string): Map<string, any> | undefined } | null;
   /**
    * known-gaps-#6 (S152) — MOD's `importGraph` (per-file imports with resolved
    * `absSource` edges). Threaded into per-file `CompileContext.importGraph` so
@@ -331,7 +372,21 @@ export interface CgOutput {
    * Absent (undefined) when the splitter is not invoked.
    */
   chunksManifest?: ChunksManifest;
+  /**
+   * s444-csp-inline-chunks — the build's chunk-activation script
+   * (`window._SCRML_CHUNKS` manifest + role-detection bootstrap), referenced by
+   * every augmented page as `<script src="/<chunksBootFilename>">`. The caller
+   * writes it to `<outputDir>/<chunksBootFilename>`.
+   *
+   * Absent when no page was augmented (splitter not invoked / no chunks).
+   */
+  chunksBootJs?: string;
+  /** Content-addressed dist-root filename: `scrml-chunks.<hash>.js`. */
+  chunksBootFilename?: string;
 }
+
+/** Basename of the build's chunk-activation script (`<base>.<hash>.js`). */
+export const CHUNKS_BOOT_BASENAME = "scrml-chunks";
 
 /**
  * Source path → the POSIX path the artifact ACTUALLY occupies relative to the
@@ -381,6 +436,27 @@ function distRelRef(hostDistDir: string, targetDistRel: string): string {
  * (resolve them relative to the child's dist dir). Defaults to `entryFilePath`,
  * the own-document case, which stays byte-identical to pre-#235 behaviour.
  */
+/**
+ * s457 (§21.4) — the LOCAL `.scrml` re-export edges of `filePath` (module-resolver
+ * `localReExportEdges`), minus every name whose declaring module exports it as a
+ * type, a channel or an engine — none of which is a runtime value in a `.server.js`.
+ */
+function serverReExportEdges(
+  importGraph: any,
+  filePath: string,
+): Array<{ specifier: string; names: Array<{ exported: string; imported: string }> }> {
+  if (!importGraph || !filePath) return [];
+  const out: Array<{ specifier: string; names: Array<{ exported: string; imported: string }> }> = [];
+  for (const edge of localReExportEdges(importGraph, filePath)) {
+    const names = edge.names.filter((n: { exported: string; imported: string }) => {
+      const b = resolveExportedBinding(importGraph, edge.absSource, n.imported);
+      return !b || (b.kind !== "type" && b.kind !== "channel" && b.kind !== "engine");
+    });
+    if (names.length > 0) out.push({ specifier: edge.specifier, names });
+  }
+  return out;
+}
+
 function computeDependencyClientScripts(
   entryFilePath: string,
   importGraph: Map<string, { imports: Array<{ source?: string; absSource: string }> }> | null,
@@ -440,6 +516,15 @@ function computeDependencyClientScripts(
           visit(imp.absSource);
         }
       }
+    }
+    // s457 (§21.4) — a local `.scrml` RE-EXPORT is a dependency too: the
+    // re-exporter's registry footer reads the source module's registry entry when it
+    // loads, so the source's `<script>` must be on the page, and earlier.
+    // S458 (re-review N1) — only a module this compile emits: a re-export source
+    // outside the graph (a missing file is E-IMPORT-006) has no `.client.js`, and a
+    // `<script>` for it would 404 and leave the re-exporter's footer throwing.
+    for (const edge of localReExportEdges(importGraph, absScrml)) {
+      if (importGraph.has(edge.absSource)) visit(edge.absSource);
     }
     visiting.delete(absScrml);
     if (!done.has(absScrml)) {
@@ -506,7 +591,8 @@ function isCrossFileLinked(
       if (imp.absSource === fpKey) return true;
     }
   }
-  return false;
+  // (c) s457 (§21.4) — it re-exports a local `.scrml`, or one re-exports from it.
+  return localReExportEdges(importGraph, filePath).length > 0 || isReExportedByAnother(importGraph, filePath);
 }
 
 /**
@@ -1120,23 +1206,30 @@ export function resetCodegenModuleState(): void {
   setBatchLoopHoists(null);
   setBatchInListCap(null);
   setVariantFieldsForFile(null, null);
+  setShadowedVariantNames(null);
+  // emit-client — per-compile cross-file imported-types map (F11/F16).
+  setImportedTypesForCodegen(null);
   // rewrite.ts — per-file variant / protect / bool-column / tenant contexts.
   setVariantFieldsForRewriter(null, null);
   setProtectContextForRewriter(null);
   setBoolColumnsForRewriter(null);
   setTenantContextForRewriter(null);
+  // sql-one-statement-guard — the program-body SQL policy + file (S457; null = fail closed).
+  setProgramBodySqlPolicy(null);
+  setProgramBodySqlFile(null);
   // emit-expr — per-file shadow / ambient flags, request ids, server async
-  // classifier, session diagnostic sink. (The log production flag + `~` sink
-  // are set/reset by runCG itself.)
+  // classifier. (The log production flag, the `~` sink and the refused-lowering
+  // sink are set/reset by runCG itself.)
   setLogShadowedInFile(false);
   setRenderShadowedInFile(false);
   setPrintShadowedNames([]);
   setSessionShadowedInFile(false);
   setSessionProjectionActive(false);
+  setServerSessionUserCell(false);
+  resetServerAmbientSessionRefusals();
   setCurrentUserAmbientActive(false); // also resets rewrite.ts + expression-parser mirrors
   setCurrentFileRequestIds(null);
   setServerAsyncClassifier(null);
-  resetSessionValueUseErrors();
   // chunk-namespace — per-unit id namespace token.
   resetChunkNamespaceState();
 }
@@ -1150,6 +1243,8 @@ export function runCG(input: CgInput): CgOutput {
     routeMap,
     depGraph,
     protectAnalysis,
+    compilationTenant: compilationTenantInput,
+    compilationHasDatabase: compilationHasDatabaseInput,
     embedRuntime = false,
     sourceMap = false,
     mode = "browser",
@@ -1159,6 +1254,7 @@ export function runCG(input: CgInput): CgOutput {
     batchPlan = null,
     batchPlannerErrors = [],
     exportRegistry: exportRegistryInput = null,
+    importedTypesByFile: importedTypesByFileInput = null,
     importGraph: importGraphInput = null,
     outputBaseDir: cgOutputBaseDir = null,
     reachabilityRecord: reachabilityRecordInput = null,
@@ -1258,6 +1354,9 @@ export function runCG(input: CgInput): CgOutput {
   // function of the input regardless of what this process compiled before (an
   // exception mid-emit in a PREVIOUS compile can otherwise strand a value).
   resetCodegenModuleState();
+  // F11/F16 — install the per-compile cross-file imported-types map (cleared by
+  // resetCodegenModuleState at the head of the next compile).
+  setImportedTypesForCodegen(importedTypesByFileInput ?? null);
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];
@@ -1270,6 +1369,13 @@ export function runCG(input: CgInput): CgOutput {
   // sink from a PREVIOUS `runCG` in the same process (every test file does this)
   // would otherwise attribute one compile's orphan to the next compile.
   resetTildeUnresolvedErrors();
+  resetExprGuardErrors();
+  // §2.2.1 (S456) — the run-wide refused-lowering sink (refused-lowering-errors.ts):
+  // a site that declines to lower records here, whatever opts reached it.
+  resetRefusedLowerings();
+  // §14.8.10 item (1) (S457) — the program-body statement refusals codegen records at the
+  // lowering point (sql-one-statement-guard.ts); same reset / drain discipline.
+  resetProgramStatementRefusals();
   // S91 A-4.1 — per-file CompileContext map, populated during the per-
   // file Plan/Emit phase. Passed to the route-splitter when
   // `emitPerRoute` is set so future A-4.2+ sub-phases can read per-file
@@ -1337,6 +1443,19 @@ export function runCG(input: CgInput): CgOutput {
             set.add(s.imported);
           }
         }
+      }
+    }
+    // s457 (§21.4) — a name read through a RE-EXPORT is a read of the module that
+    // DECLARES it: `import { K } from "./b.scrml"` where b re-exports c's `K` must
+    // mark c's `K`, or c never emits its client binding and b's footer registers
+    // `undefined`. Same confidentiality contract — only names the client really reads.
+    for (const [absSource, names] of [...crossFileClientReads]) {
+      for (const name of [...names]) {
+        const b = resolveExportedBinding(importGraphInput, absSource, name);
+        if (!b || b.filePath === toPosix(absSource)) continue;
+        let set = crossFileClientReads.get(b.filePath);
+        if (!set) { set = new Set<string>(); crossFileClientReads.set(b.filePath, set); }
+        set.add(b.name);
       }
     }
   }
@@ -1490,6 +1609,9 @@ export function runCG(input: CgInput): CgOutput {
     // builtin, so its member / index / call lowerings step aside (honor the user's
     // value). Mirrors the render/log shadow flags — set per-file by runCG.
     setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
+    // §6.6.9 / §20.5 (S449) — a FILE-SCOPE user `<session>` cell owns `@session` (not a component-local one); otherwise a
+    // server `@session` lowering is refused (server-session-guard.ts backstop).
+    setServerSessionUserCell(fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
     // §52 (S233) — default the `@currentUser` ambient OFF in worker bundles
     // (re-set per-file in the main emit loop). A worker carries no session.
     setCurrentUserAmbientActive(false);
@@ -1564,49 +1686,192 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     // §40.7 documentary-attrs-on-nested-program detection (Phase A1a, 2026-05-05).
-    // Walk all <program> nodes; the FIRST top-level <program> is the document
-    // root (its documentary attrs emit head metadata in the head-emission pass
-    // below). Any deeper <program> with one of the five documentary attrs
-    // (title, description, version, author, license) emits W-PROGRAM-TITLE-NESTED.
+    // The file's top-level <program> is the document root (its documentary attrs
+    // emit head metadata in the head-emission pass below). Any NESTED <program>
+    // with one of the five documentary attrs (title, description, version,
+    // author, license) emits W-PROGRAM-TITLE-NESTED. Top-level vs nested is the
+    // ONE shared definition (program-role.ts, §4.12 / S445): nested = has a
+    // <program> or <page> ancestor, whatever markup sits between.
     // Runs BEFORE extractWorkerPrograms() so worker-program nodes are still in
     // tree and discoverable.
+    // S445 item 1 — a route file of a build with an application program has the
+    // application program as an IMPLIED ancestor: all its programs are nested.
+    const _roleOpts = programRoleOptionsOf(fileAST);
     const DOC_ATTR_NAMES = ["title", "description", "version", "author", "license"];
-    function detectNestedDocAttrs(parentChildren: any[], depth: number): void {
-      for (const node of parentChildren) {
-        if (!node || typeof node !== "object") continue;
-        if (node.kind === "markup" && node.tag === "program") {
-          if (depth >= 1) {
-            // Nested <program> — check for documentary attrs
-            const attrs: any[] = node.attributes ?? node.attrs ?? [];
-            const offending = attrs.filter((a: any) =>
-              DOC_ATTR_NAMES.includes(a.name) &&
-              a.value && a.value.kind === "string-literal" &&
-              typeof a.value.value === "string" && a.value.value !== ""
-            );
-            for (const a of offending) {
-              const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
-              errors.push(new CGError(
-                "W-PROGRAM-TITLE-NESTED",
-                `W-PROGRAM-TITLE-NESTED: Documentary attribute \`${a.name}=\` on a nested ` +
-                `<program> has no effect — workers have no DOM <head>. Move \`${a.name}=\` to ` +
-                `the top-level <program> or remove it. (§40.7)`,
-                { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
-                "warning",
-              ));
-            }
-          }
-          // Recurse into nested program children at the next depth
-          if (Array.isArray(node.children)) {
-            detectNestedDocAttrs(node.children, depth + 1);
-          }
-          continue;
+    forEachProgramWithRole(nodes, (node: any, role) => {
+      if (role !== "nested") return;
+      const attrs: any[] = node.attributes ?? node.attrs ?? [];
+      const offending = attrs.filter((a: any) =>
+        DOC_ATTR_NAMES.includes(a.name) &&
+        a.value && a.value.kind === "string-literal" &&
+        typeof a.value.value === "string" && a.value.value !== ""
+      );
+      for (const a of offending) {
+        const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+        errors.push(new CGError(
+          "W-PROGRAM-TITLE-NESTED",
+          `W-PROGRAM-TITLE-NESTED: Documentary attribute \`${a.name}=\` on a nested ` +
+          `<program> has no effect — workers have no DOM <head>. Move \`${a.name}=\` to ` +
+          `the top-level <program> or remove it. (§40.7)`,
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "warning",
+        ));
+      }
+    }, _roleOpts);
+
+    // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
+    // a nested-valid `<program>` attribute: a nested `<program>` is not an auth
+    // scope, and its `auth=` was silently dropped (MEASURED S441: an anonymous POST
+    // wrote a row; S443: 200 for an anonymous GET under a `<page>`). Fail closed:
+    // any `auth=` there, whatever its value, is an error, never a no-op.
+    //
+    // §40.8 / §20.5.1 (S443 item 3) — a file declares its top-level `<program>`
+    // exactly once; two or more is `E-PROGRAM-002`. NARROW: same-file only — the
+    // §40.8 cross-file case stays reserved.
+    //
+    // BOTH detectors read ONE definition of a program's role (program-role.ts;
+    // §4.12, ruling S445 option b): a `<program>` is TOP-LEVEL when it has no
+    // `<program>` or `<page>` ancestor, whatever markup wraps it, and NESTED when
+    // it has one. Before S445 the E-PROGRAM-002 count read only the file's DIRECT
+    // top-level nodes while the nested-auth detector tracked ancestors, so a
+    // `<div>`-wrapped `<program auth="required">` was neither — no error, its
+    // `auth=` dropped, its server functions open to anonymous callers
+    // (g-wrapped-program-auth-silently-dropped). Wrapper markup never changes a
+    // program's role, and no placement rule is added: a `<program>` may appear
+    // anywhere. S445 item 1: in a route file of a build with an application
+    // program, every `<program>` is nested (the implied ancestor, `_roleOpts`).
+    //
+    // §4.12.2 (S445 item 3) — a SESSION attribute (`sessionExpiry=`,
+    // `session-secure=`) on a nested `<program>` is `E-PROGRAM-NESTED-SESSION`.
+    // The session cookie is application-scope (§20.5.1), and a nested program's
+    // declaration used to reach the resolver's last-wins read: a nested
+    // `session-secure="false"` silently downgraded the application's `__Host-`
+    // cookie to plain `scrml_sid` (g-two-programs-one-file-session-attr-last-wins).
+    // Placeholder until dpa-064 designs nested auth / session scopes.
+    {
+      const topPrograms: any[] = [];
+      // Programs that are top-level STRUCTURALLY but nested only by the implied
+      // application ancestor (a route file's <program>, S445 item 1) — the
+      // diagnostics say which, since nothing in the file itself encloses them.
+      const _impliedOnly = new Set<any>(_roleOpts.impliedAncestor ? findTopLevelPrograms(nodes) : []);
+      const _whyNested = (node: any): string => _impliedOnly.has(node)
+        ? "(this file is a route file under pages/ or routes/ of an application, so its " +
+          "<program>s are nested under the application's <program>, §4.12)"
+        : "(one inside another <program> or a <page>)";
+      forEachProgramWithRole(nodes, (node: any, role) => {
+        if (role === "top-level") {
+          topPrograms.push(node);
+          return;
         }
-        if (node.kind === "markup" && Array.isArray(node.children) && node.children.length > 0) {
-          detectNestedDocAttrs(node.children, depth);
+        const attrs: any[] = node.attributes ?? node.attrs ?? [];
+        const authAttr = attrs.find((a: any) => a && a.name === "auth");
+        if (authAttr) {
+          const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-AUTH",
+            "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> " + _whyNested(node) +
+            " — a nested <program> is not an auth scope, so its " +
+            "server functions would run unauthenticated. Put `auth=` on the top-level <program> " +
+            "(the whole application) or on the <page> that needs it, and remove it from the " +
+            "nested <program>. (§4.12.2, §52.13)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+        for (const sessAttr of attrs.filter((a: any) => a && NESTED_SESSION_ATTRS.has(a.name))) {
+          const span = (sessAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-SESSION",
+            `E-PROGRAM-NESTED-SESSION: \`${sessAttr.name}=\` is not valid on a nested <program> ` +
+            _whyNested(node) + " — the session cookie belongs to the whole application, so a nested " +
+            "program's session setting would silently change the application's cookie. Put it " +
+            "on the top-level <program> and remove it from the nested one. (§4.12.2, §20.5.1)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+        // §4.12.2 (S445 item 5) — every OTHER application-level `<program>` attribute
+        // on a nested program fails loudly: the §4.12.2 table (+ §43.4 lifecycle) is
+        // the nested-valid list (program-role.ts `nestedProgramAttrVerdict`). Before
+        // S445 item 5 these were read from the top-level program only and silently
+        // dropped here — MEASURED (review of 5c706940b): a route file's nested
+        // `ratelimit="1/min"` stopped limiting (200/429/429 → 200/200/200) and its
+        // `headers="strict"` stopped sending CSP / X-Frame-Options.
+        for (const a of attrs) {
+          if (!a || typeof a.name !== "string") continue;
+          if (nestedProgramAttrVerdict(a.name, _isRegisteredProgramAttr) !== "E-PROGRAM-NESTED-ATTR") continue;
+          const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-ATTR",
+            `E-PROGRAM-NESTED-ATTR: \`${a.name}=\` is an application-level <program> attribute and ` +
+            "is not valid on a nested <program> " + _whyNested(node) + " — a nested <program> is " +
+            "a worker, sidecar or scoped-db context and carries only name=, lang=, db=, mode=, " +
+            "build=, port=, health=, route=, protect=, callchar=, story=, capabilities= and the " +
+            "§43.4 lifecycle attributes, so this setting would be silently ignored. Put it on " +
+            "the top-level <program> (the whole application) and remove it from the nested " +
+            "one. (§4.12.2)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+      }, _roleOpts);
+      for (const extra of topPrograms.slice(1)) {
+        const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+        errors.push(new CGError(
+          "E-PROGRAM-002",
+          "E-PROGRAM-002: a file declares its top-level <program> exactly once, but this file " +
+          `has ${topPrograms.length}. A <program> is top-level when no other <program> or ` +
+          "<page> encloses it, whatever markup (a <div>, <main>, …) wraps it, so this one is a " +
+          "second application program, not a nested one. The compiler cannot tell which " +
+          "program's auth=, session and middleware settings govern this file's routes, so " +
+          "the file does not compile. Merge them into one <program> carrying one set of " +
+          "those settings, or build the second as a separate application. If the second is " +
+          "meant as a worker, sidecar or scoped-db context, place it inside the first WITHOUT " +
+          "auth=, session or other application-level attributes — a nested <program> takes " +
+          "none of them (§4.12.2). (§40.8)",
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "error",
+        ));
+      }
+
+      // F2 (S445 review, fail-open) — the program-config reader runs at PRECG,
+      // BEFORE component expansion; these detectors run after it. A `<program>`
+      // that only becomes top-level through CE (`const Svc = <div><program
+      // auth="required">…</program></div>` + `<Svc/>`) was invisible to PRECG, so
+      // its `auth=` / session / middleware attributes were never read and its
+      // server functions answered anonymous callers. Do not guess a config for it:
+      // the post-CE top-level program MUST be the node PRECG configured (compared by
+      // source span); if it is not, refuse the build. Skipped only when PRECG never
+      // ran on this FileAST (a direct-codegen unit test — the field is undefined).
+      const _precgSpan = (fileAST as any)?.ast?.precgTopLevelProgramSpan !== undefined
+        ? (fileAST as any).ast.precgTopLevelProgramSpan
+        : (fileAST as any)?.precgTopLevelProgramSpan;
+      if (_precgSpan !== undefined) {
+        const cgTop: any = topPrograms[0] ?? null;
+        const same = cgTop === null
+          ? _precgSpan === null
+          : _precgSpan !== null && cgTop.span != null &&
+            (cgTop.span.start ?? null) === _precgSpan.start && (cgTop.span.end ?? null) === _precgSpan.end;
+        if (!same) {
+          const offender: any = cgTop ?? null;
+          const span = offender?.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+          errors.push(new CGError(
+            "E-PROGRAM-CONFIG-UNREAD",
+            "E-PROGRAM-CONFIG-UNREAD: " + (offender
+              ? "this file's top-level <program> only exists after component expansion (it comes " +
+                "from a component such as `const X = <div><program …>…</program></div>` used as " +
+                "`<X/>`), so its auth=, session and middleware attributes were never read — its " +
+                "routes would run without them. "
+              : "the top-level <program> this file was configured from is gone after component " +
+                "expansion, so its auth=, session and middleware settings cannot be applied. ") +
+            "Write the application's <program> directly in the file (it may be wrapped in " +
+            "markup), not inside a component. (§4.12, §40.8)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
         }
       }
     }
-    detectNestedDocAttrs(nodes, 0);
 
     extractWorkerPrograms(nodes);
 
@@ -1623,7 +1888,12 @@ export function runCG(input: CgInput): CgOutput {
     // §4.12.6: DB scope annotation — tag children of <program db="..."> with _dbScope.
     // §44.2: classify the db= URI into a driver kind (sqlite | postgres | mysql).
     // Unsupported prefixes (e.g. mongodb://) emit E-SQL-005 at compile time.
-    let dbScopeCounter = 0;
+    // §8.1.1 (S451) — which handle each node's `?{}` runs on is its NEAREST database
+    // scope (`<program db=>` or `<db src=>`), resolved ONCE from the ancestor chain
+    // (`db-ownership.ts resolveDbScopes`, also read by `collectDbScopes` to declare the
+    // handles). Every node under a scope is tagged `_dbVar = <that scope's handle>`;
+    // `emitLogicNode` lowers a `?{}` onto `opts.dbVar ?? node._dbVar`.
+    const _dbResolution = resolveDbScopes(nodes, typeof filePath === "string" && filePath ? filePath : null);
     function annotateDbScopes(parentChildren: any[]): void {
       for (const node of parentChildren) {
         if (!node || typeof node !== "object") continue;
@@ -1632,9 +1902,9 @@ export function runCG(input: CgInput): CgOutput {
           const dbAttr = attrs.find((a: any) => a.name === "db");
           const nameAttr = attrs.find((a: any) => a.name === "name");
           if (dbAttr && !nameAttr) {
-            // Scoped DB context — tag all children with the scoped DB variable
+            // Scoped DB context — the handle comes from the §8.1.1 resolution.
             const dbVal = dbAttr.value?.value ?? dbAttr.value?.name ?? "";
-            const scopedDbVar = `_scrml_sql_${++dbScopeCounter}`;
+            const scopedDbVar = _dbResolution.scopeOf.get(node)?.ident ?? "_scrml_sql";
             // §44.2 driver resolution — emit E-SQL-005 on unsupported prefix.
             // On error we still annotate the scope (with driver=sqlite default)
             // so downstream codegen does not crash; the user sees the diagnostic.
@@ -1651,20 +1921,6 @@ export function runCG(input: CgInput): CgOutput {
               ));
             }
             (node as any)._dbScope = { dbVar: scopedDbVar, connectionString: dbVal, driver };
-            // Tag all descendant logic/sql nodes
-            function tagDescendants(children: any[]): void {
-              for (const child of children) {
-                if (!child) continue;
-                (child as any)._dbVar = scopedDbVar;
-                if (child.children) tagDescendants(child.children);
-                if (child.body && Array.isArray(child.body)) {
-                  for (const stmt of child.body) {
-                    if (stmt) (stmt as any)._dbVar = scopedDbVar;
-                  }
-                }
-              }
-            }
-            tagDescendants(node.children ?? []);
           }
         }
         if (node.kind === "markup" && node.children?.length > 0) {
@@ -1673,6 +1929,24 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
     annotateDbScopes(nodes);
+    {
+      // Tag every node under a database scope with its nearest scope's handle — the
+      // whole subtree (statement bodies, nested blocks, expression trees), not one
+      // level of it, so no lowering path falls through to the file default.
+      const seen = new WeakSet<object>();
+      const tag = (value: unknown): void => {
+        if (value === null || typeof value !== "object" || seen.has(value as object)) return;
+        seen.add(value as object);
+        if (Array.isArray(value)) { for (const v of value) tag(v); return; }
+        const h = _dbResolution.scopeOf.get(value as object);
+        if (h) (value as any)._dbVar = h.ident;
+        for (const key of Object.keys(value as object)) {
+          if (key === "span" || key.startsWith("_")) continue;
+          tag((value as any)[key]);
+        }
+      };
+      tag(nodes);
+    }
 
     // §14.8.11 — E-DBAUTH-SQLITE gate. A `db-authoritative` table relocates the
     // tenant-isolation floor to Postgres RLS (roles/FORCE-RLS/GUC) — primitives
@@ -1897,9 +2171,11 @@ export function runCG(input: CgInput): CgOutput {
   // There is no reliable unit → owning-`<program>` relation to key this on. The
   // compiler says so itself at the shell-composition post-pass below: per SPEC §40.8
   // the entry file is "the file resolved by the build root" — a BUILD fact — this
-  // pipeline infers it from file CONTENT and takes the first match, `E-PROGRAM-002`
-  // is reserved-not-implemented, so a second top-level `<program>` in a compile unit
-  // is silently tolerated. Inventing a membership notion here (by directory, by
+  // pipeline infers it from file CONTENT and takes the first match, and the
+  // CROSS-FILE case of `E-PROGRAM-002` is reserved-not-implemented, so a second
+  // program-bearing FILE in a compile unit is silently tolerated. (The same-file
+  // case fires since S443, counting markup-wrapped programs since S445 — see the
+  // `forEachProgramWithRole` block above.) Inventing a membership notion here (by directory, by
   // import graph) would be guessing at the language.
   //
   // So FAIL CLOSED ON THE COUNT, which needs no membership notion to be sound:
@@ -1938,7 +2214,7 @@ export function runCG(input: CgInput): CgOutput {
   // it extends a settled rule rather than setting one — SPEC §40 (`:23763`) already
   // makes "two applications in one compiled server" an Error via `E-MW-007`, with
   // the same remedy, and explicitly frames `E-MW-007` as the emitted-server
-  // consequence of the reserved `E-PROGRAM-002` shape. Contested session config is
+  // consequence of the reserved (cross-file) `E-PROGRAM-002` shape. Contested session config is
   // the same class of application-scope conflict.
   //
   // ⚑ THE INVARIANT THIS BUYS, and it is why the suppression below is now
@@ -1959,9 +2235,11 @@ export function runCG(input: CgInput): CgOutput {
   // declaring `session-secure="false"`) plus a plain minting `pages/other.scrml` →
   // `other` emitted `scrml_sid`/604800, identical to the unfixed compiler, while the
   // same page compiled alone emitted `__Host-`/3600. Note the irony recorded above:
-  // `E-PROGRAM-002` being reserved-not-implemented is exactly WHY a second top-level
-  // `<program>` can sit in one file, so the file-granular count was blind to the very
-  // shape its own rationale cited.
+  // `E-PROGRAM-002` being reserved-not-implemented was exactly WHY a second top-level
+  // `<program>` could sit in one file, so the file-granular count was blind to the very
+  // shape its own rationale cited. (Since S443 that same-file shape IS `E-PROGRAM-002`,
+  // and since S445 it counts a markup-wrapped program too and the build is refused
+  // before any write; nested `<program>`s are still counted here.)
   //
   // RECURSIVE (S436 fix-round, F3). A top-level-only scan cannot see a `<program>`
   // nested inside other markup, but `_readRawProgramAttr` in emit-server — the reader
@@ -2017,9 +2295,10 @@ export function runCG(input: CgInput): CgOutput {
   // session attribute, some `<program>` declares it AND some compilation unit cannot
   // resolve it for itself — i.e. exactly when the compiler would otherwise have to
   // GUESS that unit's owner. Scoped EXACTLY there, and deliberately NOT to the
-  // general second-`<program>` shape: that is `E-PROGRAM-002`, still reserved, and
-  // implementing it would reject a MEASURED 75 of 1137 corpus compile sets — a
-  // separate and much larger arc.
+  // general second-`<program>` shape: that is `E-PROGRAM-002` — its SAME-FILE case
+  // fires since S443 (S445: whatever markup wraps either program), its CROSS-FILE case
+  // is still reserved, and implementing that would reject a MEASURED 75 of 1137 corpus
+  // compile sets — a separate and much larger arc.
   //
   // ⛔ THE DRIVER NO LONGER COMPUTES THIS PREDICATE (S436 round 4). It ASKS.
   //
@@ -2114,6 +2393,26 @@ export function runCG(input: CgInput): CgOutput {
     }
   }
 
+  // §14.8.10 (S455) — the compilation's ONE tenant set reaches every file's floor
+  // (web-app, headless and tool emit alike) on the file AST, the same carrier as
+  // `_asyncImportedLocals` (the emitters have no `files` handle). A file whose reads
+  // touch a table tenant-scoped ANYWHERE in the compilation is filtered at the source
+  // exactly as if it declared the table — the per-file set served every tenant's rows
+  // through a second `<program>` sharing the database (executed, S455).
+  const compilationTenant: CompilationTenantSet =
+    compilationTenantInput ?? compilationTenantSet(files, buildProtectContext(protectAnalysis));
+  for (const fileAST of files) {
+    if (fileAST && typeof fileAST === "object") (fileAST as any)[COMPILATION_TENANT_KEY] = compilationTenant;
+  }
+  // §14.8.10 item (1) (S457, g-sql-checker-and-lowering-read-different-text-s457) — every
+  // `?{}` lowering holds the SQL its driver call sends to the program-body statement allow-list,
+  // over the SAME tenant set and database scope the TENANT-SCHEMA stage used.
+  setProgramBodySqlPolicy({
+    hasDatabase: compilationHasDatabaseInput ?? compilationHasDatabase(files),
+    tenantTables: compilationTenant.tables ?? [],
+    dialect: compilationTenant.dialect ?? "unknown",
+  });
+
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
   // in emit would otherwise leave the last file's token installed in this
@@ -2124,6 +2423,11 @@ export function runCG(input: CgInput): CgOutput {
   try {
     for (const fileAST of files) {
       const filePath = (fileAST as any).filePath as string;
+      // §8.1.1 (S451 review) — this file's fallback database handle: `_scrml_sql` with
+      // one database, UNRESOLVED (a compile error) with two or more — a lowering that
+      // was told no handle never lands on the file's first database.
+      setFileSqlFallback(resolveDbScopes(getNodes(fileAST as never), filePath || null).handles.length);
+      setProgramBodySqlFile(filePath || null);
       // §20.6 — register this file's source for log() file:line resolution.
       registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
       // §20.6 (shadowing) — a file-level `function log` shadows the builtin
@@ -2147,6 +2451,9 @@ export function runCG(input: CgInput): CgOutput {
       // worker-loop note above). A file-scope `let session` / `<session>` cell shadows
       // the reserved server establishment builtin file-wide.
       setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
+      // §6.6.9 / §20.5 (S449) — a FILE-SCOPE user `<session>` cell owns `@session` (not a component-local one); otherwise a
+      // server `@session` lowering is refused (server-session-guard.ts backstop).
+      setServerSessionUserCell(fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
       // §52 (S233) — default the `@currentUser` ambient OFF; re-set per-file below.
       setCurrentUserAmbientActive(false);
       // s430-emit-state-leak — install THIS file's emit-logic state (§6.8
@@ -2282,6 +2589,14 @@ export function runCG(input: CgInput): CgOutput {
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
       (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
 
+      // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
+      // value-export block (`export { w as helper } from "./c.server.js"`). A name
+      // whose declaring module exports a TYPE, a channel or an engine has no runtime
+      // server binding, so it is left out here; whether the source `.server.js`
+      // really exports the rest is decided off the emitted output in api.js
+      // (`reconcileServerReExports`). Stashed because emit-server has no graph handle.
+      (fileAST as any)._serverReExportEdges = serverReExportEdges(importGraphInput, filePath);
+
       // ---------------------------------------------------------------------------
       // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets
       // the emit from a web application (html + client.js + CSRF + server routes) to
@@ -2352,7 +2667,7 @@ export function runCG(input: CgInput): CgOutput {
           encodingCtx: null,
           mode,
           testMode,
-          dbVar: "_scrml_sql",
+          dbVar: fallbackSqlHandle(), // S451: never the first database of a multi-database file
           workerNames: [],
           errors,
           registry: new BindingRegistry(),
@@ -2436,7 +2751,7 @@ export function runCG(input: CgInput): CgOutput {
         encodingCtx: null,
         mode,
         testMode,
-        dbVar: "_scrml_sql",
+        dbVar: fallbackSqlHandle(), // S451: never the first database of a multi-database file
         workerNames: fileWorkerNames,
         errors,
         registry,
@@ -2657,9 +2972,10 @@ export function runCG(input: CgInput): CgOutput {
       // version, author, license) emit standard HTML head tags. Empty-string
       // values are treated as absent. Non-string-literal values are silently
       // ignored — head metadata is static, not reactive.
-      const topLevelProgram = (nodes as any[]).find(
-        (n: any) => n && n.kind === "markup" && n.tag === "program",
-      );
+      // The file's top-level <program> by the shared role definition
+      // (program-role.ts, §4.12 / S445) — a <div>-wrapped application program
+      // is still the document root whose head metadata this reads.
+      const topLevelProgram: any = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
       function getDocAttr(name: string): string | null {
         if (!topLevelProgram) return null;
         const attrs: any[] = topLevelProgram.attributes ?? topLevelProgram.attrs ?? [];
@@ -2946,7 +3262,7 @@ export function runCG(input: CgInput): CgOutput {
           encodingCtx: null,
           mode: "library",
           testMode,
-          dbVar: "_scrml_sql",
+          dbVar: fallbackSqlHandle(), // S451: never the first database of a multi-database file
           workerNames: [],
           errors,
           registry: new BindingRegistry(),
@@ -2991,6 +3307,9 @@ export function runCG(input: CgInput): CgOutput {
         lintCompiledForUndefined(filePath, clientJs, serverJs)
       );
       if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
+      // §6.6.9 / §20.5 (S449) — server `@session` lowerings refused outside this
+      // file's server-emit window (server-session-guard.ts backstop).
+      for (const e of drainServerAmbientSessionRefusalErrors(filePath, resolveSpanLineCol)) errors.push(e);
     }
   } finally {
     // chunk-namespacing — the per-file loop is done; drop the last file's
@@ -3020,6 +3339,9 @@ export function runCG(input: CgInput): CgOutput {
     // a WRONG OFFSET upstream, which no amount of line/col resolution can repair.
     // Filed; not fixed here. Do not restore the stronger claim.
     for (const e of drainTildeUnresolvedErrors()) errors.push(e);
+    for (const e of drainExprGuardErrors()) errors.push(e);
+    for (const e of drainRefusedLowerings()) errors.push(e);
+    for (const e of drainProgramStatementRefusals()) errors.push(e);
   }
 
   // -------------------------------------------------------------------------
@@ -3091,7 +3413,8 @@ export function runCG(input: CgInput): CgOutput {
           `${_plural(_blocked.length, "itself", "themselves")}: ${_blocked.join(", ")}. ` +
           `The compiler cannot attribute ${_plural(_blocked.length, "it", "them")} to an owning ` +
           `<program> — §40.8 makes entry identity a BUILD fact, not a file fact, and ` +
-          `E-PROGRAM-002 is reserved-not-implemented. Applying one program's declaration ` +
+          `a second <program> in another file is not yet an error (E-PROGRAM-002's cross-file ` +
+          `case is reserved). Applying one program's declaration ` +
           `build-wide silently strips __Host- and Secure from the other's cookie; ` +
           `withholding it splits one program's own units across two disjoint readers, ` +
           `so a login on one route leaves that program's other routes logged out.\n` +
@@ -3174,9 +3497,10 @@ export function runCG(input: CgInput): CgOutput {
     // are the same test; the gap is the QUESTION. Per SPEC §40.8 the entry file
     // is *"the file resolved by the build root"* — a BUILD fact. This site
     // infers it from file CONTENT and takes the first match, and the compiler
-    // does not enforce uniqueness (`E-PROGRAM-002` is reserved-not-implemented,
-    // §40.8: "TBD — separate diagnostic; not part of Wave 1"), so a second
-    // top-level `<program>` in the compile unit is silently ignored here.
+    // does not enforce uniqueness ACROSS FILES (`E-PROGRAM-002`'s cross-file case
+    // is reserved-not-implemented, §40.8: "TBD — separate diagnostic; not part of
+    // Wave 1"; the same-file case fires since S443/S445), so a second
+    // program-bearing file in the compile unit is silently ignored here.
     // Closing this needs a build-root entry resolver over the file SET, which
     // is a separate arc.
     // `hasProgramRoot` lives on the FileAST. In the CG pipeline,
@@ -3207,7 +3531,7 @@ export function runCG(input: CgInput): CgOutput {
       const stamped = f?.ast?.fileShape ?? f?.fileShape;
       if (stamped) return stamped;
       const nodes = f?.ast?.nodes ?? f?.nodes ?? [];
-      return classifyFileShape(nodes, getHasProgramRoot(f));
+      return classifyFileShape(nodes, getHasProgramRoot(f), programRoleOptionsOf(f));
     }
     let entryFile: any = null;
     for (const f of files) {
@@ -3829,6 +4153,10 @@ export function runCG(input: CgInput): CgOutput {
   // -------------------------------------------------------------------------
   let chunks: Map<ChunkKey, ChunkOutput> | undefined;
   let chunksManifest: ChunksManifest | undefined;
+  // s444-csp-inline-chunks — the build's chunk-activation script + its
+  // content-addressed dist-root filename (set by the A-4.7 augmentation pass).
+  let chunksBootJs: string | undefined;
+  let chunksBootFilename: string | undefined;
   if (emitPerRoute && reachabilityRecordInput) {
     const splitterResult = emitPerRouteChunks({
       reachabilityRecord: reachabilityRecordInput,
@@ -3886,12 +4214,14 @@ export function runCG(input: CgInput): CgOutput {
     // with the chunk-activation scaffolding emitted by
     // `emit-html.ts:augmentHtmlForChunks`:
     //
-    //   - Inline `<script>window._SCRML_CHUNKS = { ... }</script>` (route-
-    //     keyed manifest for runtime `_scrml_prefetch_tier2` lookup +
-    //     bootstrap dispatch).
     //   - `<link rel="modulepreload">` for non-empty tier-1 chunks.
-    //   - Role-detection bootstrap `<script>` (localStorage > cookie >
-    //     <meta name="scrml-role"> > "_anonymous").
+    //   - `<script src="/scrml-chunks.<hash>.js" data-scrml-route="…">` — the
+    //     build's same-origin chunk-activation script (`buildChunksBootJs`):
+    //     the route-keyed `_SCRML_CHUNKS` manifest (runtime
+    //     `_scrml_prefetch_tier2` lookup + bootstrap dispatch) and the
+    //     role-detection bootstrap (localStorage > cookie >
+    //     <meta name="scrml-role"> > "_anonymous"). NOT inline — see
+    //     s444-csp-inline-chunks in `buildChunksBootJs`.
     //
     // Per OQ-A4-E ratification (S91): ONE HTML per route + role-detection
     // bootstrap loads the per-role initial chunk. No per-(route, role)
@@ -3976,6 +4306,15 @@ export function runCG(input: CgInput): CgOutput {
         if (!list.includes(epId)) list.push(epId);
       }
 
+      // s444-csp-inline-chunks — the manifest + role-detection bootstrap ship
+      // as ONE same-origin, content-addressed file at the dist root (never an
+      // inline `<script>`: `headers="strict"` pins `default-src 'self'`, which
+      // refuses inline script). Every page references it by root-absolute URL
+      // — the manifest's own chunk URLs are root-absolute already.
+      chunksBootJs = buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat });
+      chunksBootFilename = `${CHUNKS_BOOT_BASENAME}.${fnv1aHash(chunksBootJs)}.js`;
+      const chunksBootSrc = `/${chunksBootFilename}`;
+
       // Augment each file's HTML in place. Files without HTML
       // (library mode, worker bundles, fixture files with no markup)
       // are skipped — the augmenter would have nothing to inject into.
@@ -3988,7 +4327,7 @@ export function runCG(input: CgInput): CgOutput {
           chunks,
           fileEntryPointIds: fileEpIds,
           epIdToRoutePath,
-          moduleFormat,
+          chunksBootSrc,
         });
         // Avoid mutating the existing output object reference; replace
         // the HTML field on a fresh shallow copy. (`output` is the
@@ -4052,6 +4391,14 @@ export function runCG(input: CgInput): CgOutput {
   // returns. Draining is idempotent (it clears), so the first drain having already
   // run costs nothing here.
   for (const e of drainTildeUnresolvedErrors()) errors.push(e);
+  for (const e of drainExprGuardErrors()) errors.push(e);
+  for (const e of drainRefusedLowerings()) errors.push(e);
+  for (const e of drainProgramStatementRefusals()) errors.push(e);
+  for (const e of drainServerAmbientSessionRefusalErrors(null, resolveSpanLineCol)) errors.push(e);
+  // S457 — this compile's program-body SQL policy ends with it (an emitter driven directly
+  // afterwards fails closed instead of inheriting this compilation's database scope).
+  setProgramBodySqlPolicy(null);
+  setProgramBodySqlFile(null);
 
   return {
     outputs,
@@ -4064,6 +4411,7 @@ export function runCG(input: CgInput): CgOutput {
     runtimeFilename,
     ...(chunks !== undefined && { chunks }),
     ...(chunksManifest !== undefined && { chunksManifest }),
+    ...(chunksBootJs !== undefined && { chunksBootJs, chunksBootFilename }),
   };
 }
 

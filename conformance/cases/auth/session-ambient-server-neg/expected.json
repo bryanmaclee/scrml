@@ -1,0 +1,12 @@
+{
+  "id": "auth-session-ambient-server-neg",
+  "description": "§6.6.9 / §20.5 (S449 ruling item 1) — the clean control: the server reads its own session as `session.userId` (§20.5), and `@session` appears only in CLIENT code (the §20.5 projection: `@session.current` in markup, `@session.destroy()` in a client function). No E-SESSION-AMBIENT-SERVER.",
+  "language-version": "1.0",
+  "spec": "§6.6.9, §20.5",
+  "source-test": "compiler/tests/integration/session-ambient-server-refused.test.js",
+  "rationale": "§20.5: '`session` is a compiler-provided scope binding available only inside server-escalated function bodies.' The ruling (user-voice-scrml.md S449 item 1) refuses `@session` in a server context only; the client projection is unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SESSION-AMBIENT-SERVER", "E-INTERNAL-SESSION-AMBIENT-SERVER", "E-SCOPE-012"]
+  }
+}

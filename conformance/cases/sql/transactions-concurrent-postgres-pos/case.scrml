@@ -1,0 +1,9 @@
+<program db="postgres://app:secret@localhost:5432/ledger" transactions="concurrent">
+    ${
+        function record(note) {
+            ?{`INSERT INTO entries (note) VALUES (${note})`}.run()
+            return 1
+        }
+    }
+    <button id="add" onclick={ record("hello") !{ .Transport(_) :> { return } } }>Add</>
+</program>

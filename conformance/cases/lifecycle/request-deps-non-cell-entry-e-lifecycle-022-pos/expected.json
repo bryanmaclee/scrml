@@ -1,0 +1,13 @@
+{
+  "id": "request-deps-non-cell-entry-e-lifecycle-022-pos",
+  "description": "§6.7.7 a `deps=` entry that is a MEMBER ACCESS (`deps=[@u.id]`) is not a bare `@identifier` and fires E-LIFECYCLE-022. An explicit `deps=` overrides inference, so without the diagnostic the unrecognized entry left the request mount-only and silent. Twin of request-deps-non-cell-entry-e-lifecycle-022-neg (the same program listing the cell `@u`).",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 grammar `deps-list ::= ('@' identifier (',' '@' identifier)*)?` and \"The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an undeclared or non-`@` variable.\" (S444 review fix round).",
+  "expect": {
+    "codes": ["E-LIFECYCLE-022"],
+    "notCodes": [],
+    "codeCounts": { "E-LIFECYCLE-022": 1 },
+    "severity": { "E-LIFECYCLE-022": "error" }
+  }
+}

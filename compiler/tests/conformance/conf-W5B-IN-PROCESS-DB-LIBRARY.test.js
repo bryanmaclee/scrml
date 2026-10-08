@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { emittedDbFile } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
@@ -60,10 +61,15 @@ function main(args: string[]): number {
   insertItem("b")
   insertItem("c")
   const c = countItems()
-  _={ console.log("CONF_COUNT=" + c) }=
+  _={ in: { c } console.log("CONF_COUNT=" + c) }=
   return 0
 }
 </program>`;
+
+// S445 review F1 — an OWNING program announces, on stderr, a database it creates
+// (§8.1.1 *Creation*). Every other stderr line is still a failure.
+const stderrBeyondCreated = (run) => run.stderr.toString().split("\n")
+  .filter((l) => l.length > 0 && !/^scrml: created new database /.test(l)).join("\n");
 
 describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () => {
   test("POS: tool-dep <base>.js = real in-process db callable + tool RUNS the SQL", () => {
@@ -76,7 +82,8 @@ describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () =
       const libJs = readFileSync(join(dist, "dblib.js"), "utf8");
       expect(libJs).toContain("export async function countItems");
       expect(libJs).toContain("await _scrml_sql`");
-      expect(libJs).toContain('new SQL("sqlite:./conf.db")');
+      // S445 — the library declares the table, so it OWNS conf.db (beside the source).
+      expect(emittedDbFile(libJs)).toEqual({ file: join(tmpDir, "conf.db"), owns: true });
       // NOT the client null-stub.
       expect(libJs).not.toContain("= null; // SQL-init");
       // The tool imports the mapped `.js` module.
@@ -84,9 +91,9 @@ describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () =
       expect(toolJs).toContain('from "./dblib.js"');
 
       // NORMATIVE runtime — the imported SQL executes in-process.
-      rmSync(join(dist, "conf.db"), { force: true });
+      rmSync(join(tmpDir, "conf.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "tool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString()).toContain("CONF_COUNT=3");
     } finally {

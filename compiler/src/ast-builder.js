@@ -35,6 +35,7 @@
  * No type information, no scope resolution, no code generation here.
  */
 
+import { PHP_MV, placeholderParam } from "./placeholder-nonce.ts";
 import {
   tokenizeAttributes as _defaultTokenizeAttributes,
   tokenizeLogic as _defaultTokenizeLogic,
@@ -53,7 +54,54 @@ import {
 // `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
 // this file does not import it.
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings } from "./expression-parser.ts";
+import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
+import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
+import { declExtent, liveStmtNothingReason, liveLabelIsTargeted } from "../native-parser/body-top-coverage.js";
+import * as acornForEffects from "acorn";
+
+// S441 round 5d — the live front end's analyzer for escape-hatch TEXT in the
+// ruling-S445-#2 effect check (body-top-coverage.js liveExprHasEffect): an
+// expression the structured parser left as raw text (`this`, a regex literal,
+// a block-body lambda, an ESTree fallback) is parsed with the same ES grammar
+// that produced the escape-hatch and searched for an effect — a call, `new`,
+// a tagged template, an assignment, `++` / `--`, `delete`, `await` / `yield`,
+// or a `class` (a forbidden construct with its own diagnostic). A lambda's
+// body is not searched. Text that does not parse whole is answered "effect"
+// (unknown — the one answer that does not invent an error).
+const _ESTREE_EFFECT_TYPES = new Set([
+  "CallExpression", "NewExpression", "TaggedTemplateExpression", "AssignmentExpression",
+  "UpdateExpression", "AwaitExpression", "YieldExpression", "ImportExpression",
+  "ClassExpression", "ClassDeclaration",
+]);
+function escapeRawHasEffect(raw) {
+  const src = String(raw).replace(/@(?=[A-Za-z_$])/g, "__scrml_at_");
+  let node;
+  try {
+    node = acornForEffects.parseExpressionAt(src, 0, { ecmaVersion: "latest", allowAwaitOutsideFunction: true });
+  } catch {
+    return true;
+  }
+  if (!node || src.slice(node.end).trim().replace(/;$/, "") !== "") return true;
+  // A NAMED function standing as the statement is a declaration (it binds its
+  // name), not a discarded value.
+  if (node.type === "FunctionExpression" && node.id) return true;
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return false;
+    if (Array.isArray(n)) return n.some(walk);
+    if (typeof n.type === "string") {
+      if (_ESTREE_EFFECT_TYPES.has(n.type)) return true;
+      if (n.type === "UnaryExpression" && n.operator === "delete") return true;
+      if (n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression") return false;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object" && walk(v)) return true;
+    }
+    return false;
+  };
+  return walk(node);
+}
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -63,6 +111,7 @@ import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
+import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -120,6 +169,22 @@ function reemitJsStringLiteral(rawInner) {
     }
   }
   return JSON.stringify(out);
+}
+
+/**
+ * S458 — one token's text as it belongs in a re-joined TYPE ANNOTATION string.
+ * A STRING token's `.text` is the inner text with its delimiters stripped, so
+ * joining `.text` turned `string(.kind == "a b")` into `string(.kind==a b)`: the
+ * §53 reader then could not tell the literal `"a b"` from the identifiers `a b`
+ * (refused), and `.kind == "a"` from `.kind == a`. Re-quote it (canonical
+ * double-quoted, escapes interpreted — `reemitJsStringLiteral`); a template keeps
+ * its back-ticks. Every other token is its text.
+ */
+function typeTokenText(t) {
+  if (t && t.kind === "STRING") {
+    return t.isTemplate ? "`" + t.text + "`" : reemitJsStringLiteral(t.text);
+  }
+  return t ? t.text : "";
 }
 
 /**
@@ -717,6 +782,9 @@ const TILDE_TOKEN_RE = /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/;
  * codegen with no diagnostic. (Bug-q-1 reproducer: `<program>` body opening
  * with `@cell = X` produced a silent runtime miss.)
  *
+ * ⛑ S441: RETIRED as an error — the body is code now (§40.8 S441 bullet), so
+ * the write is plain body-top logic; the paragraph below is the S123 history.
+ *
  * Per the S122 user-voice Option-2 ratification, this shape is a SEMANTIC
  * error (writes are logic; logic goes in `${...}`). The lift wraps the text
  * in a synthetic `${...}` so the parser's V5-strict `@name = expr` site sees
@@ -1192,10 +1260,785 @@ function shiftBlockSpans(blocks, delta, lineDelta = 0) {
 // must be scanned for the bare-write-decl lint. (`engine`/`machine` are EXCLUDED
 // — they route to engine-decl, a different grammar with no bare-`@x=` decl site.)
 const _STATE_BLOCK_BARE_WRITE_NAMES = new Set(["db", "state", "schema"]);
+
+// S441 (SPEC §40.8 S441 bullet, §4.18.1 S441 amendment) — `subBlockSpan`:
+// the span of `raw.slice(start, end)` inside a block whose span starts at
+// `span`. Line/col advance over the newlines before `start`.
+function subBlockSpan(span, raw, start, end) {
+  if (!span) return span;
+  const before = raw.slice(0, start);
+  const nl = before.lastIndexOf("\n");
+  const newlines = (before.match(/\n/g) || []).length;
+  return {
+    ...span,
+    start: span.start + start,
+    end: span.start + end,
+    line: (span.line ?? 1) + newlines,
+    col: nl === -1 ? (span.col ?? 1) + start : start - nl,
+  };
+}
+
+// S441 — the body-top display-text split. In a `<program>` / `<page>` /
+// `<channel>` body (a code-default body), a `"..."` standing as its own
+// statement is a DECLARED display-text literal (§4.18.3) and renders as a text
+// node; everything else in a bare run is code. `segmentBodyTopItems`
+// (native-parser/body-top-prose.js — shared with the native front end so the
+// two pipelines agree on what is a literal) finds the literals; this maps its
+// answer back onto BS blocks:
+//   - a code piece      -> a text block marked `_bodyTopSegmented` (the lift
+//                          chain below turns it into logic);
+//   - a literal piece   -> a text block marked `_displayLiteral`, raw = the
+//                          decoded, HTML-escaped content (§4.18.3 / §4.18.6);
+//   - a `${...}` inside a literal -> the logic block marked `_displayInterp`
+//                          (it renders — §4.18.4 — where a body-top `${}` is
+//                          otherwise evaluated, not rendered).
+// An unterminated literal is E-CTX-001 (§4.18.3), recovered as literal text.
+function splitBodyTopDisplayLiterals(blocks, errors, filePath) {
+  const items = blocks.map((b) => {
+    if (!b) return { type: "break" };
+    if (b.type === "text") return { type: "text", raw: b.raw };
+    if (b.type === "logic") return { type: "interp" };
+    if (b.type === "comment") return { type: "neutral", raw: b.raw };
+    return { type: "break" };
+  });
+  const { segments, interpInLiteral, unterminated } = segmentBodyTopItems(items);
+  for (const u of unterminated) {
+    const b = blocks[u.itemIndex];
+    const span = subBlockSpan(b.span, b.raw, u.offset, b.raw.length);
+    errors.push(new TABError(
+      "E-CTX-001",
+      "E-CTX-001: unterminated display-text literal — the `\"` that opens it " +
+      "has no closing `\"` before the next element or the end of the body " +
+      "(SPEC §4.18.3). Close the literal with `\"`.",
+      { file: filePath, start: span.start, end: span.end, line: span.line, col: span.col },
+    ));
+  }
+  const out = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    const segs = segments[i];
+    if (b && b.type === "logic" && interpInLiteral[i]) {
+      out.push({ ...b, _displayInterp: true });
+      continue;
+    }
+    if (!segs || !b || (b.type !== "text" && b.type !== "comment")) {
+      out.push(b);
+      continue;
+    }
+    for (const s of segs) {
+      const span = subBlockSpan(b.span, b.raw, s.start, s.end);
+      if (s.kind === "literal") {
+        out.push({ ...b, type: "text", raw: s.value, span, _displayLiteral: true });
+      } else {
+        out.push({ ...b, type: "text", raw: b.raw.slice(s.start, s.end), span, _bodyTopSegmented: true });
+      }
+    }
+  }
+  return out;
+}
+
+// S441 — `rejectBodyTopProse`: the strict half of the body-top code rule
+// (SPEC §40.8 S441 bullet, §4.18.7). `body` is the statement list the logic
+// parser built for one body-top run (`srcText`, starting at source offset
+// `srcOffset`). The statement collector is lenient: it hands acorn whatever
+// tokens it gathered, and acorn's `parseExpressionAt` keeps the longest valid
+// prefix — so the prose `Welcome to the dashboard.` becomes a bare expression
+// `Welcome` with the rest silently dropped, and a prose line ending in `.`
+// swallows the NEXT line too (`Welcome here.⏎<count> = 0` collected as one
+// markup-ish fragment, the declaration lost — S441 review #3).
+//
+// So the check is LINE-granular at the first failure: the first statement that
+// is not valid code (`stmtHasInvalidOwnExpr`, or an `html-fragment` — markup
+// text in statement position) marks its first source LINE as prose; everything
+// after that line is RE-PARSED as body-top code (`reparseTail`), so a
+// declaration / function / statement below a prose line survives (no cascade).
+// Consecutive prose lines merge into ONE `E-UNQUOTED-DISPLAY-TEXT` naming the
+// declared-prose forms; the rejected statements' own diagnostics (an `E-EQ-005`
+// for a prose `is`, an E-SCOPE-001 on the first word, …) are withdrawn.
+//
+// The statement shapes prose lands in, and the HEAD-expression field of each.
+// Only a head is judged: other expression-valued fields (a `when` statement's
+// `bodyExpr`, a handler body, ...) hold a statement LIST that is not a single
+// expression by design. Declarations are never judged - they are code by their
+// head keyword, and a broken initializer has its own diagnostics.
+const BODY_TOP_PROSE_HEADS = {
+  "bare-expr": ["exprNode"],
+  "if-stmt": ["condExpr"],
+  "for-stmt": ["iterExpr"],
+  "while-stmt": ["condExpr"],
+  "return-stmt": ["exprNode"],
+  // `Are you sure?` collects as a §19.5 `expr?` propagate statement.
+  "propagate-expr": ["exprNode"],
+};
+function stmtHasInvalidOwnExpr(st) {
+  if (!st || typeof st !== "object") return false;
+  if (st.kind === "html-fragment") return true;
+  // S441 round 5 — a statement that compiles nothing (bodyTopAcceptance:
+  // `import stuff`, `type here`, `fn heading`, a bare `404`) is not code.
+  if (st._s441Accepted && st._s441Accepted.nothing === true) return true;
+  // An `on mount { … }` / `on dismount { … }` desugars to a bare-expr whose
+  // exprNode is the BODY (a statement list), not a head — code by its head.
+  if (st._onMountEffect === true) return false;
+  let heads = BODY_TOP_PROSE_HEADS[st.kind];
+  if (!heads) return false;
+  // S441 round 5c (R1) — a C-style `for (init; cond; update)` head is THREE
+  // clauses, not one expression: its `iterExpr` is the whole parenthesised
+  // header, skipped by the expression collector and not an expression at all
+  // (`let i = 0; …` never parses as one). Judge the clauses the loop compiles
+  // — the condition and the update, and an init that is not a declaration.
+  // Round 5d — read from the header TEXT (split at its top-level `;`), so an
+  // EMPTY clause (`for (;;)`, `for (; c; u)`) — for which the collector
+  // records no `cStyleParts` at all — is simply absent, as in the grammar.
+  let owner = st;
+  if (st.kind === "for-stmt" && st.variable == null) {
+    const hdr = typeof st.iterable === "string" ? st.iterable.trim() : "";
+    if (hdr.startsWith("(") && hdr.endsWith(")")) {
+      const inner = hdr.slice(1, -1);
+      const clauses = [];
+      let depth = 0, from = 0, q = null;
+      for (let k = 0; k < inner.length; k++) {
+        const c = inner[k];
+        if (q) { if (c === "\\") k++; else if (c === q) q = null; continue; }
+        if (c === "\"" || c === "'" || c === "`") { q = c; continue; }
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") depth--;
+        else if (c === ";" && depth === 0) { clauses.push(inner.slice(from, k)); from = k + 1; }
+      }
+      clauses.push(inner.slice(from));
+      if (clauses.length === 3) {
+        for (let ci = 0; ci < 3; ci++) {
+          const text = clauses[ci].trim();
+          if (text === "") continue;
+          if (ci === 0 && /^(?:let|const|var|lin)\b/.test(text)) continue;
+          try {
+            const n = parseExprToNode(text, "", 0);
+            if (!n || hasLostTrailingContent(n) || (n.kind === "escape-hatch" && n.nativeKind === "ParseError")) return true;
+          } catch {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+  }
+  for (const key of heads) {
+    const v = owner[key];
+    if (!v || typeof v !== "object" || typeof v.kind !== "string") continue;
+    if (hasLostTrailingContent(v)) return true;
+    if (v.kind === "escape-hatch" && v.nativeKind === "ParseError") return true;
+    // S441 round 4 — a head the statement collector declined to parse
+    // (`SkippedExpr`: `...`, `.hidden file note`) is judged by parsing it.
+    if (v.kind === "escape-hatch" && v.nativeKind === "SkippedExpr" && typeof v.raw === "string") {
+      try {
+        const re = parseExprToNode(v.raw, "", 0);
+        if (hasLostTrailingContent(re) || (re && re.kind === "escape-hatch" && re.nativeKind === "ParseError")) return true;
+      } catch {
+        return true;
+      }
+    }
+    // S441 round 4 (#6) — a prefix-`not` head (`not available`) is not valid
+    // scrml (§42.6 E-TYPE-045): at a body-top it is prose, not code.
+    if (v._notPrefixNegation === true) return true;
+    // S441 review #6 — a comma SEQUENCE (`Hello, world`) is not a scrml
+    // expression: §4.18.2 lists what a bare run may be (identifier, keyword,
+    // call, member access, literal, nested tag, `${…}`), the SPEC has no comma
+    // operator, and the expression layer does not model one (it survives only
+    // as a `SequenceExpression` escape hatch, emitted verbatim — `Hello, world`
+    // shipped as `Hello , world;` and threw a ReferenceError at boot). So a
+    // body-top statement whose head is a sequence is not valid code.
+    if (key === "exprNode" && v.kind === "escape-hatch" && v.nativeKind === "SequenceExpression") return true;
+  }
+  return false;
+}
+
+function errStart(e) {
+  if (!e) return undefined;
+  if (e.tabSpan && typeof e.tabSpan.start === "number") return e.tabSpan.start;
+  if (e.span && typeof e.span.start === "number") return e.span.start;
+  return undefined;
+}
+
+// S441 round 4 — the head-expression fields whose LOST TAIL is checked on
+// every body-top statement (declarations included). A lost tail that starts on
+// a LATER line is text the collector swallowed across an un-inserted ASI
+// boundary (`<count> = 3⏎5 items`, `g()⏎"abc".toUpperCase()`): the statement
+// keeps its valid prefix and the tail is re-parsed as its own statements. A
+// lost tail on the statement's own line is reported where it is.
+const BODY_TOP_TRAIL_FIELDS = ["exprNode", "condExpr", "iterExpr", "initExpr", "valueExpr"];
+const BODY_TOP_TRAIL_STRING_FIELD = { exprNode: "expr", condExpr: "condition", iterExpr: "iterable", initExpr: "init", valueExpr: "value" };
+function stmtLostTail(st) {
+  if (!st || typeof st !== "object") return null;
+  for (const key of BODY_TOP_TRAIL_FIELDS) {
+    const v = st[key];
+    if (v && typeof v === "object" && hasLostTrailingContent(v)) {
+      return { key, text: String(v._s441TrailingText ?? ""), line: Number(v._s441TrailingLine ?? 0) };
+    }
+  }
+  return null;
+}
+
+// S441 round 4 — a SPLIT statement keeps only its valid prefix: cut its
+// expression text at the line the lost tail starts on and re-parse the head,
+// so nothing downstream (a text-based check reading `init`, an `is`-detector
+// stamp from the swallowed line) still sees the swallowed text.
+function truncateStmtAtTail(st, tail, filePath) {
+  const strKey = BODY_TOP_TRAIL_STRING_FIELD[tail.key];
+  const str = strKey && typeof st[strKey] === "string" ? st[strKey] : null;
+  if (str === null) return;
+  const lines = str.split("\n");
+  if (tail.line <= 0 || tail.line >= lines.length + 1) return;
+  const kept = lines.slice(0, tail.line).join("\n").replace(/\s+$/, "");
+  st[strKey] = kept;
+  const old = st[tail.key];
+  try {
+    st[tail.key] = parseExprToNode(kept, filePath, (old && old.span && typeof old.span.start === "number") ? old.span.start : 0);
+  } catch {
+    // keep the old node — the text cut above already removed the swallowed tail
+  }
+}
+
+function unquotedError(filePath, shown, start, end, line, col) {
+  return new TABError(
+    "E-UNQUOTED-DISPLAY-TEXT",
+    `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
+    `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
+    `not allowed there. If this is displayed text, declare it: wrap it in a ` +
+    `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
+    `(\`"${shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"\`, §4.18.3).`,
+    { file: filePath, start, end, line, col },
+  );
+}
+
+function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePath, reparseTail, srcLine = 1) {
+  if (!Array.isArray(body) || body.length === 0) return 0;
+  const lineNoAt = (rel) => srcLine + (srcText.slice(0, rel).match(/\n/g) || []).length;
+  // First problem statement, in source order.
+  let fi = -1;
+  let splitRel = -1;
+  for (let si = 0; si < body.length; si++) {
+    const st = body[si];
+    if (!(st && st.span && typeof st.span.start === "number")) continue;
+    const tail = stmtLostTail(st);
+    // Two statements juxtaposed on ONE line with no `;` / `}` between them
+    // (`let me explain`, `Are you sure?`, `(optional) fill this in`) is not a
+    // statement sequence (§4 E-STMT-MISSING-SEMICOLON): the line is prose.
+    if (si > 0) {
+      const prev = body[si - 1];
+      // (An `export` carries its declaration as a second node on the same
+      // line — `export fn greet() { … }` — which is one statement, not two.)
+      if (prev && prev.span && typeof prev.span.line === "number" && prev.span.line === st.span.line
+          && prev.kind !== "export-decl" && prev.kind !== "import-decl" && prev.span.start !== st.span.start) {
+        const relSt = st.span.start - srcOffset;
+        const between = srcText.slice(Math.max(0, prev.span.start - srcOffset), Math.max(0, relSt));
+        const lastSig = between.replace(/\s+$/, "").slice(-1);
+        // (A statement the parser already REPORTED and recovered from —
+        // `const <x>: int` → E-DECL-NEEDS-INITIALIZER, re-collected as two
+        // nodes — keeps that diagnostic; it is not prose.)
+        const reported = errors.some((e, k) => k >= errsBefore && e && e.code !== "E-UNQUOTED-DISPLAY-TEXT" && errStart(e) === prev.span.start);
+        if (!reported && lastSig !== ";" && lastSig !== "}") { fi = si; break; }
+      }
+    }
+    // S441 round 5 — the statement's grammar ended before the tokens its parse
+    // consumed (bodyTopAcceptance): the rest of its own line is reported, and
+    // anything it swallowed from later lines is re-parsed as the next
+    // statements. A statement that compiles nothing is invalid (below).
+    const acc = st._s441Accepted;
+    if (acc && acc.nothing !== true) {
+      if (acc.sameStart >= 0) {
+        const tRel = acc.sameStart - srcOffset;
+        const tCol = tRel - (srcText.lastIndexOf("\n", tRel - 1) + 1) + 1;
+        const shownT = acc.sameText.length > 80 ? acc.sameText.slice(0, 77) + "..." : acc.sameText;
+        errors.push(unquotedError(filePath, shownT, acc.sameStart, acc.sameEnd, lineNoAt(tRel), tCol));
+      }
+      if (acc.laterStart >= 0) {
+        const lRel = acc.laterStart - srcOffset;
+        const rel = srcText.lastIndexOf("\n", lRel - 1) + 1;
+        if (rel > 0 && rel < srcText.length) { fi = si; splitRel = rel; break; }
+      }
+      continue;
+    }
+    if (tail && tail.line > 0) {
+      // SPLIT — keep this statement; re-parse from the line the tail is on.
+      let rel = Math.max(0, st.span.start - srcOffset);
+      for (let k = 0; k < tail.line; k++) {
+        const nl = srcText.indexOf("\n", rel);
+        if (nl === -1) { rel = -1; break; }
+        rel = nl + 1;
+      }
+      if (rel > 0 && rel < srcText.length) { fi = si; splitRel = rel; break; }
+    }
+    if (tail && tail.line === 0 && BODY_TOP_PROSE_HEADS[st.kind] === undefined && st.kind !== "html-fragment") {
+      // SAMELINE on a statement that is code by its head (a declaration …):
+      // keep it, report the lost text on its own line.
+      const rel0 = Math.max(0, st.span.start - srcOffset);
+      const lineEnd = srcText.indexOf("\n", rel0);
+      const shownT = tail.text.length > 80 ? tail.text.slice(0, 77) + "..." : tail.text;
+      const at = srcText.slice(rel0, lineEnd === -1 ? srcText.length : lineEnd).lastIndexOf(tail.text.split(/\s+/)[0]);
+      const tRel = at > 0 ? rel0 + at : rel0;
+      const tCol = tRel - (srcText.lastIndexOf("\n", tRel - 1) + 1) + 1;
+      errors.push(unquotedError(filePath, shownT, srcOffset + tRel, srcOffset + (lineEnd === -1 ? srcText.length : lineEnd), lineNoAt(tRel), tCol));
+      continue;
+    }
+    if (stmtHasInvalidOwnExpr(st)) { fi = si; break; }
+    // `let me explain` collects as a let-decl `me` whose initializer is
+    // `explain` — with no `=` in its source. A binding without `=` that
+    // still carries an initializer is not valid code.
+    if ((st.kind === "let-decl" || st.kind === "const-decl") && typeof st.init === "string" && st.init.trim() !== "") {
+      const relSt = st.span.start - srcOffset;
+      const nextSt = body[si + 1] && body[si + 1].span ? body[si + 1].span.start - srcOffset : srcText.length;
+      const lineEnd = srcText.indexOf("\n", relSt);
+      const stText = srcText.slice(relSt, Math.min(nextSt, lineEnd === -1 ? srcText.length : lineEnd));
+      if (!stText.includes("=")) { fi = si; break; }
+    }
+  }
+  if (fi >= 0 && splitRel > 0) {
+    const splitAbs = srcOffset + splitRel;
+    for (let k = errors.length - 1; k >= errsBefore; k--) {
+      const s0 = errStart(errors[k]);
+      if (typeof s0 === "number" && s0 >= splitAbs && errors[k].code !== "E-UNQUOTED-DISPLAY-TEXT") errors.splice(k, 1);
+    }
+    const lostTail = stmtLostTail(body[fi]);
+    if (lostTail) truncateStmtAtTail(body[fi], lostTail, filePath);
+    clipBodyTopCover(body[fi], splitAbs);
+    // The kept prefix is judged like any other statement: `careful, world`
+    // that swallowed the next line is, once cut back to its own line, a comma
+    // sequence — prose — not code to keep (found by the round-4 fuzz). An
+    // invalid prefix falls through to the line-granular rejection below.
+    if (!stmtHasInvalidOwnExpr(body[fi])) {
+      body.splice(fi + 1);
+      for (const st of body) {
+        if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+      }
+      const tail = srcText.slice(splitRel).trim() !== "" ? (reparseTail(splitRel) || []) : [];
+      for (const st of tail) body.push(st);
+      return 1;
+    }
+  }
+  if (fi < 0) {
+    // A lone identifier IS valid code (`Counter`) and is checked as code; mark
+    // it so E-SCOPE-001 can name the declared-prose forms (§4.18.7 SHOULD).
+    for (const st of body) {
+      if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+    }
+    return 0;
+  }
+  // Prose is LINE-granular: the whole source line holding the first invalid
+  // statement is prose, including any statements the lenient collector cut
+  // from the SAME line before it (`Items for sale (…)` collects as a valid
+  // bare `Items` plus an invalid `for …`).
+  const firstRel = Math.max(0, body[fi].span.start - srcOffset);
+  const lineStartRel = srcText.lastIndexOf("\n", firstRel - 1) + 1;
+  const leadWs = srcText.slice(lineStartRel).search(/\S/);
+  const rel = lineStartRel + (leadWs < 0 ? 0 : leadWs);
+  const start = srcOffset + rel;
+  // Ruling S445 item 2 — a statement that is valid code but has NO EFFECT
+  // (`@count`, `@a == 1`) is reported as that, not as "not valid code".
+  // Only when that statement IS the whole line: a no-effect word that is one
+  // piece of a prose line (`Welcome` in `Welcome to the app`) is prose.
+  // Only when the line is nothing but such statements — each piece between
+  // top-level `;` ONE valid expression, and every statement on the line one
+  // with no effect (`@a; @b`). A no-effect word that is one piece of a prose
+  // line (`Welcome` in `Welcome to the app`), or `★`, `!!!`, `Hello, world`,
+  // `not available`, is not code at all — prose, E-UNQUOTED-DISPLAY-TEXT.
+  const fiNoEffect = (() => {
+    const s0 = body[fi];
+    if (!s0 || !s0.span || typeof s0.span.line !== "number") return false;
+    const onLine = body.filter((x) => x && x.span && x.span.line === s0.span.line);
+    if (onLine.length === 0 || onLine.some((x) => !(x._s441Accepted && x._s441Accepted.reason === "no-effect") || stmtLostTail(x))) return false;
+    const r0 = s0.span.start - srcOffset;
+    const ls = srcText.lastIndexOf("\n", r0 - 1) + 1;
+    const le = srcText.indexOf("\n", r0);
+    const txt = srcText.slice(ls, le === -1 ? srcText.length : le).trim();
+    const pieces = [];
+    let depth = 0, from = 0, q = null;
+    for (let k = 0; k < txt.length; k++) {
+      const c = txt[k];
+      if (q) { if (c === "\\") k++; else if (c === q) q = null; continue; }
+      if (c === "\"" || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(" || c === "[" || c === "{") depth++;
+      else if (c === ")" || c === "]" || c === "}") depth--;
+      else if (c === ";" && depth === 0) { pieces.push(txt.slice(from, k)); from = k + 1; }
+    }
+    pieces.push(txt.slice(from));
+    const exprs = pieces.map((x) => x.trim()).filter((x) => x !== "");
+    if (exprs.length !== onLine.length) return false;
+    return exprs.every((t) => {
+      try {
+        const n = parseExprToNode(t, "", 0);
+        return !!n && !hasLostTrailingContent(n) && n._notPrefixNegation !== true
+          && !(n.kind === "escape-hatch" && (n.nativeKind === "ParseError" || n.nativeKind === "SequenceExpression" || n.nativeKind === "SkippedExpr"));
+      } catch {
+        return false;
+      }
+    });
+  })();
+  let cut = fi;
+  while (cut > 0 && body[cut - 1] && body[cut - 1].span && body[cut - 1].span.start >= start) cut--;
+  const nl = srcText.indexOf("\n", rel);
+  let end = srcOffset + (nl === -1 ? srcText.length : nl);
+  // Withdraw every diagnostic this parse raised from the rejected line on —
+  // the tail is re-parsed below and reports for itself.
+  for (let k = errors.length - 1; k >= errsBefore; k--) {
+    const s0 = errStart(errors[k]);
+    if (typeof s0 === "number" && s0 >= start) errors.splice(k, 1);
+  }
+  body.splice(cut);
+  for (const st of body) clipBodyTopCover(st, start);
+  for (const st of body) {
+    if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+  }
+  const lineText = srcText.slice(rel, nl === -1 ? srcText.length : nl).trim();
+  const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+  const lineNo = srcLine + (srcText.slice(0, rel).match(/\n/g) || []).length;
+  let tail = [];
+  if (nl !== -1 && srcText.slice(nl + 1).trim() !== "") {
+    const mark = errors.length;
+    tail = reparseTail(nl + 1) || [];
+    const lead = srcText.slice(nl + 1).search(/\S/);
+    const tailFirst = srcOffset + nl + 1 + (lead < 0 ? 0 : lead);
+    const k = fiNoEffect ? -1 : errors.findIndex((e, i) => i >= mark && e && e.code === "E-UNQUOTED-DISPLAY-TEXT" && errStart(e) === tailFirst);
+    if (k >= 0) {
+      // The next line is prose too: one diagnostic for the whole run.
+      end = errors[k].tabSpan && typeof errors[k].tabSpan.end === "number" ? errors[k].tabSpan.end : end;
+      errors.splice(k, 1);
+    }
+  }
+  errors.push(fiNoEffect
+    ? noEffectError(filePath, shown, start, end, lineNo, 1 + (leadWs < 0 ? 0 : leadWs))
+    : new TABError(
+    "E-UNQUOTED-DISPLAY-TEXT",
+    `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
+    `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
+    `not allowed there. If this is displayed text, declare it: wrap it in a ` +
+    `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
+    `(\`"${shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"\`, §4.18.3).`,
+    { file: filePath, start, end, line: lineNo, col: 1 + (leadWs < 0 ? 0 : leadWs) },
+  ));
+  for (const st of tail) body.push(st);
+  return 1;
+}
+
+// noEffectError — ruling S445 item 2 (SPEC §40.8): an expression statement at a
+// \`<program>\` / \`<page>\` / \`<channel>\` body top that has no effect.
+function noEffectError(filePath, shown, start, end, line, col) {
+  return new TABError(
+    "E-STMT-NO-EFFECT",
+    `E-STMT-NO-EFFECT: \`${shown}\` has no effect. An expression statement at the top of a ` +
+    `\`<program>\` / \`<page>\` / \`<channel>\` body must do something — a call, an assignment, ` +
+    `\`++\` / \`--\`, or a \`send\` (SPEC §40.8, S445). To show a value, declare it: ` +
+    `\`<span>\${${shown}}</span>\` or a display-text literal \`"\${${shown}}"\` (§4.18.4).`,
+    { file: filePath, start, end, line, col },
+  );
+}
+
+// S441 round 4 — see the call site in buildBlock's `logic` case. Returns a new
+// token array with an IDENT token inserted for every maximal run of
+// non-whitespace characters no token (and no comment) covers.
+function coverUnknownBodyTopChars(tokens, text, baseOffset, baseLine, baseCol) {
+  if (!Array.isArray(tokens) || typeof text !== "string" || text.length === 0) return tokens;
+  const covered = new Uint8Array(text.length);
+  for (const t of tokens) {
+    if (!t || !t.span || t.kind === "EOF") continue;
+    let a = t.span.start - baseOffset;
+    const b = t.span.end - baseOffset;
+    // A COMMENT token's span starts after its `//` / `/*` opener.
+    if (t.kind === "COMMENT") a -= 2;
+    for (let i = Math.max(0, a); i < Math.min(text.length, b); i++) covered[i] = 1;
+  }
+  const extra = [];
+  let i = 0;
+  while (i < text.length) {
+    if (covered[i] || /\s/.test(text[i])) { i++; continue; }
+    let j = i;
+    while (j < text.length && !covered[j] && !/\s/.test(text[j])) j++;
+    const before = text.slice(0, i);
+    const nl = before.lastIndexOf("\n");
+    const line = baseLine + (before.match(/\n/g) || []).length;
+    const col = nl === -1 ? baseCol + i : i - nl;
+    extra.push({ kind: "IDENT", text: text.slice(i, j), span: { start: baseOffset + i, end: baseOffset + j, line, col }, _s441Uncovered: true });
+    i = j;
+  }
+  if (extra.length === 0) return tokens;
+  const merged = tokens.concat(extra);
+  merged.sort((x, y) => {
+    if (x.kind === "EOF") return 1;
+    if (y.kind === "EOF") return -1;
+    return x.span.start - y.span.start;
+  });
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// S441 round 4 — the body-top COVERAGE INVARIANT (SPEC §40.8 S441 bullet).
+//
+// Every non-whitespace byte of a `<program>` / `<page>` / `<channel>` body-top
+// run ends up in exactly one of: (a) a statement that is compiled, or (b) a
+// diagnostic. Nothing is dropped silently. The per-shape fixes above make the
+// parser produce the right statement or diagnostic for the shapes found so
+// far; this CHECK is what makes an unforeseen shape loud instead of silent.
+//
+// "Compiled" is measured, not assumed:
+//   - parseLogicBody attributes every token a top-level iteration consumed to
+//     the node(s) that iteration produced (`_s441Cover`, token spans only — a
+//     byte no token covers was dropped by the tokenizer and is never covered);
+//   - a node whose expression parse LOST text (`_s441Trailing` anywhere in
+//     it — acorn kept a valid prefix) counts as compiled only when an error
+//     diagnostic overlaps it (the loss was reported);
+//   - a comment or a `;` is source formatting, not content;
+//   - an error diagnostic (E-*) covers the source lines it spans.
+// A byte in none of these is `E-INTERNAL-BODY-TOP-DROPPED` — an internal
+// compiler error, fail-closed: the build stops instead of shipping without it.
+// ---------------------------------------------------------------------------
+
+// addBodyTopCover — attach (append) token ranges to a node's coverage record.
+// Non-enumerable: invisible to AST snapshots, parity canaries, and every
+// field-walking consumer.
+function addBodyTopCover(node, ranges) {
+  if (!node || typeof node !== "object" || !Array.isArray(ranges) || ranges.length === 0) return;
+  if (!Array.isArray(node._s441Cover)) {
+    Object.defineProperty(node, "_s441Cover", { value: [], enumerable: false, configurable: true, writable: true });
+  }
+  for (const r of ranges) node._s441Cover.push(r);
+}
+
+// S441 round 5 — bodyTopAcceptance: which prefix of the tokens one top-level
+// iteration consumed does the statement it produced COMPILE? (SPEC §40.8
+// coverage invariant; ruling S443 item 4 — "a node covers only tokens it
+// compiles".) The grammar-side answer lives in native-parser/body-top-
+// coverage.js, shared with the native front end; this maps the live nodes
+// onto it. Returns null (all compiled), { nothing: true }, or { count } —
+// the number of `consumed` tokens compiled (comments excluded).
+//   - import-decl: `import … from "<source>"` ends at the source string; with
+//     no source at all it is not a declaration (`import stuff`). A host
+//     import is judged by its own diagnostics (E-IMPORT-009 / E-STMT-EXPECT-FROM).
+//   - export-decl: by what is exported — a re-export ends at its source
+//     string, a declaration where that declaration ends, an `export` of
+//     nothing it recognised (`export data`) compiles nothing.
+//   - type-decl: `type Name[:kind] = <type-expr>` ends where the type
+//     expression does; `type Name` with neither a kind nor a body is nothing.
+//   - function-decl: a function with no `{ … }` body (`fn heading`) is nothing.
+//   - bare-expr: a statement built only from literals (`404`, `-1`, `"a" + 1`)
+//     computes nothing observable — nothing.
+function bodyTopAcceptance(node, consumed) {
+  if (!node || typeof node !== "object" || !Array.isArray(consumed) || consumed.length === 0) return null;
+  // (A STRING token's text is its content without the quotes; the shared
+  // grammar classifies by the first character, so restore the delimiter.)
+  const texts = consumed.map((t) => (t.kind === "STRING" ? "\"" : "") + String(t.text ?? ""));
+  // The live-shape judgment both front ends share (the native front end
+  // applies it to the bridge's translation of its statement).
+  const _why = liveStmtNothingReason(node, escapeRawHasEffect);
+  if (_why) return { nothing: true, reason: _why };
+  // Ruling S445 item 2 — a label nothing targets compiles nothing: the loop
+  // stays, the `label:` tokens are reported (a gap at the head).
+  if (typeof node.label === "string" && node.label !== "" && !liveLabelIsTargeted(node)
+      && texts[0] === node.label && texts[1] === ":") {
+    return { count: consumed.length, gap: [0, 2] };
+  }
+  let res = null;
+  switch (node.kind) {
+    case "import-decl": {
+      if (typeof node.hostTag === "string") return null;
+      if (!node.source) return { nothing: true };
+      res = declExtent("import", texts);
+      break;
+    }
+    case "export-decl": {
+      // Skip `export` and the `pure` / `server` modifiers the handler consumed.
+      let k = 0;
+      if (texts[k] === "export") k++;
+      while (texts[k] === "pure" || texts[k] === "server") k++;
+      const rest = texts.slice(k);
+      const kind = node.exportKind;
+      let sub;
+      if (kind === "re-export" || kind === "re-export-all") sub = declExtent("re-export", ["export", ...rest]);
+      else if (kind === "local" || kind === "rename") sub = null;
+      else if (kind === "type") sub = declExtent("type", rest);
+      else if (kind === "function" || kind === "fn") sub = declExtent("function", rest);
+      else if (kind === "const" || kind === "let") sub = constInitAcceptance(consumed.slice(k));
+      else if (node.exportedName) sub = null;     // `export async function` — the name was harvested
+      else return { nothing: true };
+      if (!sub) return null;
+      if (sub.nothing) return sub;
+      const off = kind === "re-export" || kind === "re-export-all" ? k - 1 : k;
+      res = { count: off + sub.count, ...(sub.gap ? { gap: [off + sub.gap[0], off + sub.gap[1]] } : {}) };
+      break;
+    }
+    case "type-decl":
+      if (node.fromExport) return null;
+      res = declExtent("type", texts);
+      break;
+    case "function-decl":
+      if (node.fromExport) return null;
+      res = declExtent("function", texts);
+      break;
+    default:
+      return null;
+  }
+  if (!res || res.nothing) return res;
+  // (Round 5c — a function whose head is followed by stray tokens before its
+  // body keeps the body; `gap` names the tokens it does not compile.)
+  if (res.gap) return res;
+  return res.count >= consumed.length ? null : res;
+}
+
+// constInitAcceptance — `const|let NAME = init` (an exported value). The init
+// is an expression; when its parse kept only a valid PREFIX (acorn's longest
+// prefix, `_s441Trailing`), the declaration compiles only up to the end of
+// that prefix — found as the longest token prefix of the init that parses
+// whole.
+function constInitAcceptance(toks) {
+  const eq = toks.findIndex((t, idx) => idx > 0 && t.text === "=" );
+  if (eq < 0 || eq + 1 >= toks.length) return null;
+  const init = toks.slice(eq + 1);
+  if (init.some((t) => t.kind === "BLOCK_REF" || t.text === "<")) return null;
+  const parses = (list) => {
+    try {
+      // (A STRING token's text has no delimiters: re-quote it, or `"a b"`
+      // would read as two juxtaposed names.)
+      const n = parseExprToNode(list.map((t) => (t.kind === "STRING" ? JSON.stringify(String(t.text)) : t.text)).join(" "), "", 0);
+      return !!n && !hasLostTrailingContent(n) && !(n.kind === "escape-hatch" && n.nativeKind === "ParseError");
+    } catch {
+      return false;
+    }
+  };
+  if (parses(init)) return null;
+  for (let m = init.length - 1; m >= 1; m--) {
+    if (parses(init.slice(0, m))) return { count: eq + 1 + m };
+  }
+  return null;
+}
+
+// clipBodyTopCover — drop the part of a node's coverage at or after `at`
+// (a statement cut at a swallowed line keeps only its own prefix).
+function clipBodyTopCover(node, at) {
+  if (!node || !Array.isArray(node._s441Cover)) return;
+  node._s441Cover = node._s441Cover.filter((r) => r[0] < at).map((r) => [r[0], Math.min(r[1], at)]);
+}
+
+// nodeLostText — true when one of the statement's own HEAD expressions (the
+// fields body-top text lands in — BODY_TOP_TRAIL_FIELDS) was parsed as a
+// valid PREFIX of its text with the rest dropped (the `_s441Trailing` stamp
+// parseExprToNode sets). Only the heads: a nested statement list (a function
+// body, a `!{}` arm's `handlerExpr`) is parsed and emitted by the ordinary
+// statement machinery — the same as inside an explicit `${ … }` — and some of
+// those fields are advisory ExprNodes over a multi-statement string the
+// emitter reads instead (`@s = "x"; return` → handlerExpr keeps `@s = "x"`,
+// the emitted arm still returns).
+function nodeLostText(node) {
+  if (!node || typeof node !== "object") return false;
+  for (const key of BODY_TOP_TRAIL_FIELDS) {
+    const v = node[key];
+    if (v && typeof v === "object" && v._s441Trailing === true) return true;
+  }
+  return false;
+}
+
+export function assertBodyTopCoverage(body, tokens, text, textOffset, errors, filePath, srcLine, srcCol) {
+  if (typeof text !== "string" || text.length === 0) return 0;
+  const len = text.length;
+  const covered = new Uint8Array(len);
+  const mark = (a, b) => {
+    const s = Math.max(0, a - textOffset);
+    const e = Math.min(len, b - textOffset);
+    for (let k = s; k < e; k++) covered[k] = 1;
+  };
+  const lineStartAbs = (abs) => textOffset + text.lastIndexOf("\n", Math.max(0, abs - textOffset) - 1) + 1;
+  const lineEndAbs = (abs) => {
+    const nl = text.indexOf("\n", Math.max(0, abs - textOffset));
+    return nl === -1 ? textOffset + len : textOffset + nl;
+  };
+  // (b) error diagnostics on this run cover the lines they span.
+  const errRanges = [];
+  for (const e of errors) {
+    if (!e || typeof e.code !== "string" || !e.code.startsWith("E-")) continue;
+    const sp = e.tabSpan ?? e.span;
+    if (!sp || typeof sp.start !== "number") continue;
+    const end = typeof sp.end === "number" && sp.end >= sp.start ? sp.end : sp.start;
+    if (end < textOffset || sp.start > textOffset + len) continue;
+    const a = lineStartAbs(Math.max(sp.start, textOffset));
+    const b = lineEndAbs(Math.min(end, textOffset + len));
+    errRanges.push([a, b]);
+    mark(a, b);
+  }
+  // Comments and `;` are source formatting.
+  for (const t of tokens || []) {
+    if (!t || !t.span || typeof t.span.start !== "number") continue;
+    if (t.kind === "COMMENT") mark(t.span.start - 2, t.span.end);
+    else if (t.kind === "PUNCT" && t.text === ";") mark(t.span.start, t.span.end);
+  }
+  // (a) compiled statements.
+  for (const st of body || []) {
+    const cov = st && Array.isArray(st._s441Cover) ? st._s441Cover : null;
+    if (!cov) continue;
+    if (nodeLostText(st)) {
+      const reported = errRanges.some((er) => cov.some((r) => r[0] < er[1] && er[0] < r[1]));
+      if (!reported) continue;
+    }
+    // S441 round 5 — only what the statement compiles (bodyTopAcceptance).
+    const acc = st._s441Accepted;
+    if (acc && acc.nothing === true) continue;
+    const upTo = acc && typeof acc.end === "number" ? acc.end : Infinity;
+    for (const r of cov) if (r[0] < upTo) mark(r[0], Math.min(r[1], upTo));
+  }
+  // Uncovered non-whitespace bytes, grouped per run of consecutive lines.
+  const segs = [];
+  let segA = -1;
+  let segB = -1;
+  for (let k = 0; k <= len; k++) {
+    const ch = k < len ? text[k] : "\n";
+    if (k < len && !covered[k] && !/\s/.test(ch)) {
+      if (segA < 0) segA = k;
+      segB = k + 1;
+      continue;
+    }
+    if (ch === "\n" && segA >= 0) {
+      const prev = segs[segs.length - 1];
+      if (prev && text.slice(prev.b, segA).split("\n").length <= 2 && text.slice(prev.b, segA).trim() === "") prev.b = segB;
+      else segs.push({ a: segA, b: segB });
+      segA = -1;
+      segB = -1;
+    }
+  }
+  // Round 5 — an error diagnostic already reported in this run stops the
+  // build, so nothing can ship silently; the internal error would only add
+  // noise beside the author's real one (mirrors the native check).
+  if (segs.length > 0 && errRanges.length > 0) return 0;
+  for (const s of segs) {
+    const firstLine = text.slice(s.a, s.b).split("\n")[0].trim();
+    const shown = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
+    const before = text.slice(0, s.a);
+    const nl = before.lastIndexOf("\n");
+    const line = srcLine + (before.match(/\n/g) || []).length;
+    const col = nl === -1 ? (srcCol ?? 1) + s.a : s.a - nl;
+    errors.push(new TABError(
+      "E-INTERNAL-BODY-TOP-DROPPED",
+      `E-INTERNAL-BODY-TOP-DROPPED: internal compiler error — \`${shown}\` at the top of this ` +
+      `\`<program>\` / \`<page>\` / \`<channel>\` body was neither compiled nor reported; ` +
+      `the compiler would have dropped it silently (SPEC §40.8 S441 coverage invariant). ` +
+      `This is a compiler bug — please report it with this source. If the text is meant ` +
+      `to be displayed, declare it: \`<p>${shown}</p>\` or \`"${shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"\`.`,
+      { file: filePath, start: textOffset + s.a, end: textOffset + s.b, line, col },
+    ));
+  }
+  return segs.length;
+}
+
 function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
+  // S441 — at a default-logic body (`<program>` / `<page>` / `<channel>`
+  // direct children) split the declared `"..."` literals out of the bare runs
+  // first. Skipped on the recursive re-lift of an already-split code piece.
+  if (isDefaultLogicBody && blocks.some((b) => b && b.type === "text" && b._bodyTopSegmented !== true && b._displayLiteral !== true)) {
+    blocks = splitBodyTopDisplayLiterals(blocks, errors, filePath);
+  }
   const result = [];
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
+
+    // S441 — a declared display-text literal is display text, never lifted.
+    if (block && block.type === "text" && block._displayLiteral === true) {
+      result.push(block);
+      continue;
+    }
 
     // Recurse into state children — server fns inside <db>/state contexts
     // are real declarations and need the same lift treatment. Pass
@@ -1848,9 +2691,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
 
     // Unit CC (S123) — bare `@name = expr` write at <program>/<page>/
     // <channel> direct-child text position. Wrap in synthetic `${...}` so
-    // the parser observes the write and the SYM PASS 3 fire site reaches
-    // E-WRITE-NOT-IN-LOGIC-CONTEXT. See TOPLEVEL_AT_WRITE_RE comment for
-    // rationale (pre-Unit-CC silent drop closed at the lift gate).
+    // the parser observes the write. ⛑ S441: the write is now ordinary
+    // body-top logic (E-WRITE-NOT-IN-LOGIC-CONTEXT is RETIRED — see the
+    // parseOneStatement `@name =` site); this lift is kept because it is the
+    // same lift the S441 catch-all below would perform, with its own marker.
     //
     // Gated on `isDefaultLogicBody === true` — the PRECISE §40.8 default-
     // logic-body surface. Suppressed inside `<db>` / `<state>` STATE-block
@@ -1989,7 +2833,39 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
       continue;
     }
 
+    // S441 (SPEC §40.8 S441 bullet) — a `<program>` / `<page>` / `<channel>`
+    // body carries NO loose prose. Every bare run the specific lifts above did
+    // not claim is CODE: lift it so the logic parser checks it exactly as the
+    // same text inside `${ … }` (every §7.2.1 `E-*-NOT-IN-SCRML` fires; a bare
+    // expression statement is evaluated, never rendered). A run that is not
+    // valid code is `E-UNQUOTED-DISPLAY-TEXT` — found by the `_bodyTop` check in
+    // buildBlock's `logic` case. Whitespace between children is formatting and
+    // stays a text block (§4.18.5).
+    if (block.type === "text" && isDefaultLogicBody && typeof block.raw === "string" && block.raw.trim() !== "") {
+      result.push({
+        type: "logic",
+        raw: "${" + block.raw + "}",
+        span: block.span,
+        depth: block.depth,
+        children: [],
+        name: null,
+        closerForm: null,
+        _synthetic: true,
+        _bodyTopCodeLift: true, // diagnostic marker — S441 catch-all lift
+        // S180 D3.1 — the fictional `${` is not in the source; see above.
+        _bareDeclLift: true,
+      });
+      continue;
+    }
+
     result.push(block);
+  }
+  // S441 — every synthetic lift at a default-logic body is body-top code: the
+  // `logic` case in buildBlock runs the strict statement check on it.
+  if (isDefaultLogicBody) {
+    for (const b of result) {
+      if (b && b.type === "logic" && b._synthetic === true) b._bodyTop = true;
+    }
   }
   return result;
 }
@@ -3196,7 +4072,7 @@ function flushHeldHandlerWarnings(value) {
   if (!value.handlerBlock) for (const w of held) console.warn(w);
 }
 
-function parseAttributes(tokens, filePath, errors, isComponent = false, tagName = null) {
+function parseAttributes(tokens, filePath, errors, isComponent = false, tagName = null, effectIsLogicBlock = false) {
   const attrs = [];
   let i = 0;
   // §23.5.2 — the `capabilities=` attribute is a `<program>` attribute (§4.12.2:
@@ -3278,6 +4154,8 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               // so baseOffset = valSpan.start + 1.
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
               value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+              // §5.2.4 (S450) — a statement list on a NON-handler attribute.
+              checkAttrMultiStatement(name, value, filePath, errors, true, effectIsLogicBlock);
             }
           } else if (valTok.kind === "ATTR_EXPR") {
             // Boolean expression for if= attribute (e.g. !@var, @a === 1, @a && @b quoted).
@@ -3299,6 +4177,8 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
             value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+            // §5.2.4 (S450) — a statement list on a NON-handler attribute.
+            checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true, effectIsLogicBlock);
           } else if (valTok.kind === "ATTR_OP_REJECT") {
             // cluster-A (S188 "reject + parens") — an unquoted CONDITION
             // attribute (`if=`/`show=`/`else-if=`) whose value contains a bare
@@ -4444,7 +5324,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     for (let s = 0; s < spans.length; s++) {
       const [a, b] = spans[s];
       skeleton += expr.slice(last, a);
-      const ph = `__scrml_mv_${s}__`;
+      const ph = `${PHP_MV()}${s}__`; // unforgeable (placeholder-nonce.ts)
       skeleton += ph;
       last = b;
       // Recover the markup node by re-tokenizing `lift <markup>` and parsing.
@@ -4491,9 +5371,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const substitute = (n) => {
       if (!n || typeof n !== "object") return n;
       if (n.kind === "ident" && typeof n.name === "string") {
-        const m = /^__scrml_mv_(\d+)__$/.exec(n.name);
-        if (m) {
-          const idx = Number(m[1]);
+        const mvIdx = placeholderParam(n.name, "mv");
+        if (mvIdx !== null && /^\d+$/.test(mvIdx)) {
+          const idx = Number(mvIdx);
           return { kind: "markup-value", span: n.span, node: markupNodes[idx] };
         }
         return n;
@@ -4631,6 +5511,35 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return result;
   }
 
+  // S441 review #2 — `collectExprAfterLead(leadTok)`: the tail of a bare
+  // expression statement whose head (`@y`, `@y.a`, …) the caller already
+  // consumed. `collectExpr`'s newline / statement-keyword boundaries all key
+  // on `parts.length > 0`, which is false here, so a head followed by a
+  // statement on the NEXT line (`@y⏎return x`, `@y⏎if …`, `@y⏎const k = 5`)
+  // swallowed that statement and it was silently dropped. After a complete
+  // value, a later-line token that can only start a statement (a statement
+  // keyword, an identifier that is not a word operator, another `@cell`) is a
+  // boundary, exactly as JS ASI treats `a⏎b`.
+  const _LEAD_STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
+  function collectExprAfterLead(leadTok) {
+    const nt = peek();
+    if (leadTok && leadTok.span && nt && nt.span && nt.kind !== "EOF"
+        && typeof nt.span.line === "number" && typeof leadTok.span.line === "number"
+        && nt.span.line > leadTok.span.line
+        && ((nt.kind === "KEYWORD" && _LEAD_STMT_KEYWORDS.has(nt.text))
+          || (nt.kind === "IDENT" && nt.text !== "and" && nt.text !== "or")
+          || nt.kind === "AT_IDENT"
+          // S441 round 5b (D3) — a state declaration on the next line
+          // (`@count⏎<total> = 0`): the same `<`-IDENT boundary collectExpr
+          // applies after a value (Step 11.0b), which its `parts.length > 0`
+          // gate never reaches for a lead the caller consumed.
+          || (nt.kind === "PUNCT" && nt.text === "<" && peek(1) && peek(1).kind === "IDENT"
+            && scanStructuralDeclLookahead()))) {
+      return { expr: "", span: spanOf(leadTok, leadTok) };
+    }
+    return collectExpr();
+  }
+
   function collectExpr(stopAt = null, opts = null) {
     // Phase A1a Step 11.0a — when called from inside a Variant C compound
     // body, the RHS of a child state-decl must terminate at the next
@@ -4650,6 +5559,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const pushPartSpan = () => partSpans.push(angleDepth > 0 && lastTok && lastTok.span ? lastTok.span : null);
     const startTok = peek();
     let lastTok = startTok;
+    // The token collected BEFORE `lastTok` (null until two are collected) — read
+    // by the ASI-NEWLINE boundary to tell a POSTFIX `++`/`--` (it follows its
+    // operand on the same line) from a prefix one.
+    let prevLastTok = null;
     let depth = 0;
     let angleDepth = 0; // Track < ... > nesting for component tag expressions
     // Cluster-C Bug 2 (S190) — markup-RHS over-consumption boundary.
@@ -5280,7 +6193,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // STRING) while never breaking those declaration heads.
           // (`null`/`undefined` do not exist in scrml.)
           const _lk = lastTok.kind, _lt = lastTok.text;
+          // S446 — a POSTFIX update (`@a++ f()`) is a hard terminal too: the
+          // operand precedes it on the same line, so nothing can continue it.
+          // Pre-S446 `f()` was silently dropped here (the expression view stopped
+          // at `@a++`); it now gets the same E-STMT-MISSING-SEMICOLON as `g() f()`.
+          const _pl = prevLastTok;
+          const _lastIsPostfixUpdate = (_lt === "++" || _lt === "--") &&
+            !!_pl && !!_pl.span && _pl.span.line === lastTok.span.line &&
+            (_pl.kind === "IDENT" || _pl.kind === "AT_IDENT" ||
+             (_pl.kind === "PUNCT" && (_pl.text === ")" || _pl.text === "]")));
           const _lastEndsValue = (
+            _lastIsPostfixUpdate ||
             _lk === "NUMBER" || _lk === "STRING" ||
             (_lk === "KEYWORD" && (_lt === "true" || _lt === "false" || _lt === "this" || _lt === "not")) ||
             (_lk === "PUNCT" && (_lt === ")" || _lt === "]" || _lt === "}"))
@@ -5339,12 +6262,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // token is something OTHER than BLOCK_REF (e.g., `<NAME>`
           // sibling decl opener) on a later line.
           const VALUE_KEYWORDS = new Set(["true", "false", "null", "undefined", "this", "not"]);
+          // S441 review #1 — a word-form INFIX operator (`and` / `or`, §45.9) is
+          // IDENT-shaped but ENDS NOTHING: `@a and⏎ @b` continues the
+          // expression. Pre-S441 this was masked because an `@cell` never
+          // started a statement here; once it does (below), counting `and` as
+          // value-ending split `@a and` from `@b` (E-CODEGEN-INVALID-LOGIC).
+          // S446 (S439 #4) — a POSTFIX update (`@a++` / `x--`) ends a value too:
+          // it is postfix when it sits on the SAME line right after an operand
+          // (a newline before `++` would make it prefix — JS restricted
+          // production). Pre-S446 `@a++⏎ f()` collected as ONE statement
+          // `@a ++ f ( )` whose expression view stopped at `@a++`, so `f()` was
+          // silently dropped — in every function body and every multi-statement
+          // event handler (both parse with this collector).
+          const _p = prevLastTok;          const lastIsPostfixUpdate = (lastText === "++" || lastText === "--") &&
+            !!_p && !!_p.span && typeof _p.span.line === "number" && _p.span.line === lastTok.span.line &&
+            (_p.kind === "IDENT" || _p.kind === "AT_IDENT" ||
+             (_p.kind === "PUNCT" && (_p.text === ")" || _p.text === "]")));
           const lastEndsValue = (
-            lastKind === "IDENT" ||
+            (lastKind === "IDENT" && !WORD_INFIX_OPERATORS.has(lastText)) ||
             lastKind === "NUMBER" ||
             lastKind === "STRING" ||
             lastKind === "AT_IDENT" ||
             lastKind === "BLOCK_REF" ||
+            lastIsPostfixUpdate ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
@@ -5352,9 +6292,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // A word-form INFIX operator (`or`/`and`, §45.9) is IDENT-shaped but continues
           // the expression across a newline (`(a)\n  or (b)`) — it never starts a
           // statement, so exclude it by operator class (mirrors the same-line detector).
+          // S441 — a bare `@cell` read on a later line after a value is a new
+          // statement too (JS ASI: `a⏎b` is two statements). Pre-S441 it was
+          // excluded, so `<count> = 3⏎@count` collected `3 @count` and acorn
+          // dropped `@count` — a silent statement loss the body-top strictness
+          // check (rejectBodyTopProse) would otherwise read as prose.
           const tokStartsStmt = (
             (tok.kind === "IDENT" && !WORD_INFIX_OPERATORS.has(tok.text)) ||
-            (tok.kind === "KEYWORD" && !STMT_KEYWORDS.has(tok.text))
+            (tok.kind === "KEYWORD" && !STMT_KEYWORDS.has(tok.text)) ||
+            tok.kind === "AT_IDENT"
           );
           if (lastEndsValue && tokStartsStmt) break;
           // Phase A1a Step 11.0b — newline-as-statement-separator for state-decls.
@@ -5607,6 +6553,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
       }
+      // Before anything is collected `lastTok` is the start token itself, so the
+      // token before it is the one preceding the collection (a caller that
+      // consumed `@a` hands `++` in as the start token).
+      prevLastTok = parts.length > 0 ? lastTok : (peek(-1) ?? null);
       lastTok = consume();
       // Re-quote STRING tokens so their delimiters are preserved in the expression
       if (lastTok.kind === "STRING") {
@@ -5638,6 +6588,37 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * Collect a braced block body as raw text.  Returns { body: string, span }
    * Caller should have already seen the opening `{`.
    */
+  // scanRendersMarkupEnd — token index just past ONE markup element starting at
+  // the cursor (`<tag …>` … `</tag>` / `</>`, or a self-closing `<tag …/>`),
+  // nested elements counted; -1 when the tokens do not form one.
+  function scanRendersMarkupEnd() {
+    let k = i;
+    let depth = 0;
+    while (k < tokens.length) {
+      const t = tokens[k];
+      if (!t || t.kind === "EOF") return -1;
+      if (t.kind === "PUNCT" && t.text === "<") {
+        const closing = tokens[k + 1] && tokens[k + 1].kind === "PUNCT" && tokens[k + 1].text === "/";
+        // to the tag's `>`
+        let m = k + 1;
+        while (m < tokens.length && !(tokens[m].kind === "PUNCT" && tokens[m].text === ">")) {
+          if (tokens[m].kind === "EOF") return -1;
+          m++;
+        }
+        if (m >= tokens.length) return -1;
+        const selfClosing = !closing && tokens[m - 1] && tokens[m - 1].kind === "PUNCT" && tokens[m - 1].text === "/";
+        if (closing) depth--;
+        else if (!selfClosing) depth++;
+        k = m + 1;
+        if (depth <= 0) return k;
+        continue;
+      }
+      if (depth === 0) return -1;
+      k++;
+    }
+    return -1;
+  }
+
   function collectBracedBody() {
     const startTok = peek();
     let depth = 1;
@@ -5667,6 +6648,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // token-walk helpers skip COMMENT tokens (tokenizer.ts ~995).
       lastTok = consume();
       if (lastTok.kind === "COMMENT") continue;
+      // S441 round 5e — a `renders <markup>` clause (§14.4 enum variant) is
+      // MARKUP, whose text is content kept exactly (dpa-045: "Whitespace is
+      // kept exactly"). Rebuilding it from logic tokens joined with spaces
+      // inserted spaces (`No #${id}` → `No # ${id}`) and lost every character
+      // the logic tokenizer has no token for (the `#` — main rendered `No 42`).
+      // When the source text is known, the markup is taken verbatim from it:
+      // from the `<` after `renders` to the `>` that closes that element.
+      if (lastTok.kind === "IDENT" && lastTok.text === "renders" && peek().kind === "PUNCT" && peek().text === "<"
+          && tokens._s441Src && typeof tokens._s441Src.text === "string") {
+        const markupEnd = scanRendersMarkupEnd();
+        if (markupEnd > i) {
+          parts.push(lastTok.text);
+          partLines.push(lastTok.span?.line ?? 0);
+          const first = tokens[i];
+          const last = tokens[markupEnd - 1];
+          const off = tokens._s441Src.offset;
+          const slice = tokens._s441Src.text.slice(first.span.start - off, last.span.end - off);
+          i = markupEnd;
+          lastTok = last;
+          parts.push(slice);
+          partLines.push(first.span?.line ?? 0);
+          continue;
+        }
+      }
       // g-literal-arg-expr-serializer-wrong-span (string half): re-quote STRING
       // tokens so their delimiters are preserved when the braced body is
       // reassembled. The tokenizer stores a STRING token's `.text` as the
@@ -5890,6 +6895,24 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           consume(); // =
           const value = _parseLiftAttrValue(attrSpan);
           if (value === null) return null;
+          // S446 (S439 #4) — a `${…}` event handler on lifted markup carries its
+          // §5.2.3 statement list (`value.handlerBlock`) exactly as top-level and
+          // `<each>` markup do (attachHandlerStatementLists): the SAME
+          // function-body statement parser decides the statements. Pre-S446 a
+          // `for … lift` row handler had only the one-expression view, so
+          // every statement after the first was silently dropped.
+          if (value.kind === "expr" && value._liftInnerOffset !== undefined && isEventHandlerAttrName(attrName)) {
+            if (!counter._handlerStmtIds) counter._handlerStmtIds = { next: HANDLER_STMT_ID_BASE };
+            const o = value._liftInnerOffset;
+            attachHandlerStatementList(value, filePath, counter._handlerStmtIds, null, o.start, o.line, o.col, "$", errors);
+          }
+          // A `${…}` value (BLOCK_REF) carries `_liftInnerOffset`: its interior is
+          // judged as a statement list (§5.2.4).
+          const _liftInterp = value.kind === "expr" && value._liftInnerOffset !== undefined;
+          if (value.kind === "expr") delete value._liftInnerOffset;
+          // §5.2.4 (S450) — lifted / `for … lift` markup attributes are parsed
+          // here, not in parseAttributes: the same non-handler check.
+          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, isEngineEffectSite(tag, null));
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -6134,12 +7157,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // so the keyword surfaces a diagnostic. baseOffset uses refSpan.start
       // for uniqueness; the inner content starts ~2 chars in (after `${`).
       emitForbiddenSwitchInRaw(inner, refSpan, refSpan?.start ?? 0, filePath, errors);
+      // Where `inner` starts in the file (after `${` + leading whitespace), so a
+      // handler statement list parsed from it keeps file-true spans. Transient:
+      // parseLiftTag reads and deletes it.
+      const _pre = raw.match(/^\$\{\s*/)?.[0] ?? "";
+      const _preNl = (_pre.match(/\n/g) ?? []).length;
+      const _liftInnerOffset = {
+        start: (refSpan?.start ?? 0) + _pre.length,
+        line: (refSpan?.line ?? 1) + _preNl,
+        col: _preNl === 0 ? (refSpan?.col ?? 1) + _pre.length : _pre.length - _pre.lastIndexOf("\n"),
+      };
       return {
         kind: "expr",
         raw: inner,
         refs: [],
         exprNode: safeParseExprToNode(inner, refSpan?.start ?? 0),
         span: refSpan,
+        _liftInnerOffset,
       };
     }
     // Identifier or call: ident / ident.prop / ident(args)
@@ -6441,7 +7475,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // so `(not to User)` and `lin`-typed annotations are unaffected.
         break;
       } else {
-        parts.push(t.text);
+        parts.push(typeTokenText(t)); // S458 — a string literal keeps its quotes
         consume();
       }
     }
@@ -6771,6 +7805,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       body,
       blockForm,
       ...(unbracedArm ? { unbracedArm: true } : {}),
+      span: spanOf(startTok, peek()),
+    };
+  }
+
+  /**
+   * Parse a `transaction { body }` block (§19.10.2). Called from both
+   * parseLogicBody's top-level loop and parseOneStatement (nested bodies — a
+   * function body, if/else, loop and match-arm blocks). Assumes peek() is the
+   * `transaction` keyword. The §19.10.4 placement rules (non-`!` function →
+   * E-ERROR-001, nesting → E-ERROR-007) are checked post-TAB by
+   * validators/lint-transaction.ts, not here.
+   */
+  function parseTransactionBlock() {
+    const startTok = consume(); // consume `transaction`
+    let body = [];
+    if (peek().text === "{") {
+      consume(); // consume `{`
+      body = parseRecursiveBody();
+    }
+    return {
+      id: ++counter.next,
+      kind: "transaction-block",
+      body,
       span: spanOf(startTok, peek()),
     };
   }
@@ -8638,6 +9695,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       return parseFailStmt();
     }
 
+    // TRANSACTION BLOCK: `transaction { body }` (§19.10.2) in a NESTED body — a
+    // function body (every fn-decl site, incl. the `export` re-parse, takes its
+    // body from parseRecursiveBody → here), an if/else / loop / match-arm block.
+    // Without this arm the statement fell through to the expression path, where
+    // `transaction` degraded to an undeclared identifier (E-SCOPE-001) — S450,
+    // g-transaction-block-not-recognized-inside-a-function-body. Gated on a
+    // following `{` so any other use of the word keeps its prior handling.
+    if (tok.kind === "KEYWORD" && tok.text === "transaction" && peek(1)?.text === "{") {
+      return parseTransactionBlock();
+    }
+
     // DEFER: `defer <statement>` — §19.16 scope-exit statement (contextual keyword)
     if (isDeferStatementLead()) {
       return parseDeferStmt();
@@ -8941,7 +10009,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
         // Not a write — a READ (e.g. @arr[i].foo()) — reconstruct as bare-expr
         // verbatim from the faithful path source-text suffix. Reads are NOT COW'd.
-        const { expr, span } = collectExpr();
+        const { expr, span } = collectExprAfterLead(peek(-1));
         const _be4 = startTok.text + pathStr + (expr ? " " + expr : "");
         return { id: ++counter.next, kind: "bare-expr", expr: _be4, exprNode: safeParseExprToNode(_be4, 0), span: spanOf(startTok, peek()) };
       }
@@ -9049,14 +10117,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         //     it ONLY at the IMMEDIATE body-top surface.
         //   - isMetaContext → no tag (BUG-META-6 dependency)
         //   - else (fn / function / user-written ${}) → _isReactiveAssign (V-kill fire)
+        //
+        // ⛑ S441 — Unit CC is RETIRED (ruling: user-voice-scrml.md S441
+        // "declared-prose implementation … yes to all four", item 4). A
+        // `<program>` / `<page>` / `<channel>` body is CODE now (§40.8 S441
+        // bullet), so a bare write at its body-top is a write in a logic context
+        // and is treated EXACTLY as the same write inside an explicit `${ … }`
+        // there: the V-kill discrimination (`_isReactiveAssign` — a write to a
+        // declared cell, E-STATE-UNDECLARED otherwise). The `_isUnitCCWrite` tag
+        // and E-WRITE-NOT-IN-LOGIC-CONTEXT no longer exist. Nested writes under
+        // the synthetic wrapper (`function f() { @x = 5 }`) keep the V-kill
+        // carve-out unchanged.
         const isDefaultLogicLift = parentBlock && parentBlock._synthetic === true;
         const isMetaContext = blockContext === "meta";
         const isAtBodyTopOfSyntheticLift = isDefaultLogicLift && _nestedBlockDepth === 0;
-        const isUnitCCWrite = isAtBodyTopOfSyntheticLift;
-        // V-kill fire region: preserve original V-kill discrimination
-        // (synthetic-wrapper carve-out) to avoid expanding V-kill's surface
-        // beyond Unit CC's narrow body-top fire.
-        const isReactiveAssign = !isDefaultLogicLift && !isMetaContext;
+        const isReactiveAssign = !isMetaContext && (!isDefaultLogicLift || isAtBodyTopOfSyntheticLift);
         return {
           id: ++counter.next,
           kind: "state-decl",
@@ -9067,7 +10142,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           structuralForm: false,
           isConst: false,
           ...(isReactiveAssign ? { _isReactiveAssign: true } : {}),
-          ...(isUnitCCWrite ? { _isUnitCCWrite: true } : {}),
           span: spanOf(startTok, peek()),
         };
       }
@@ -9094,7 +10168,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       // Otherwise: bare-expr starting with @name
-      const { expr, span } = collectExpr();
+      const { expr, span } = collectExprAfterLead(startTok);
       const _be5 = startTok.text + (expr ? " " + expr : "");
       return { id: ++counter.next, kind: "bare-expr", expr: _be5, exprNode: safeParseExprToNode(_be5, 0), span: spanOf(startTok, peek()) };
     }
@@ -9240,7 +10314,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             consume();
           }
           // collect iterable expression up to `)`
-          const { expr: iterExpr } = collectExpr(")");
+          let { expr: iterExpr } = collectExpr(")");
+          // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
+          // collectExpr stops at the `!{}` handler (a BLOCK_REF is a statement
+          // boundary), which then became the loop BODY (E-PARSE-001). Inside the
+          // parenthesized head it is part of the iterable expression.
+          while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+            iterExpr += " " + consume().text;
+            if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
+          }
           iterable = iterExpr.trim();
           if (peek().kind === "PUNCT" && peek().text === ")") {
             consume(); // consume `)`
@@ -9966,10 +11048,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -9979,14 +11061,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (peek().text === "-" && peek(1)?.text === ">") {
@@ -10000,10 +11082,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -10013,14 +11095,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -10249,10 +11331,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -10262,14 +11344,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
@@ -10282,10 +11364,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -10295,14 +11377,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -11532,7 +12614,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (peek().kind === 'KEYWORD' && (peek().text === 'of' || peek().text === 'in')) {
           consume();
         }
-        const { expr: iterExpr } = collectExpr(')');
+        let { expr: iterExpr } = collectExpr(')');
+        // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
+        // collectExpr stops at the `!{}` handler (a BLOCK_REF is a statement
+        // boundary), which then became the loop BODY (E-PARSE-001). Inside the
+        // parenthesized head it is part of the iterable expression.
+        while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+          iterExpr += " " + consume().text;
+          if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
+        }
         iterable = iterExpr.trim();
         if (peek().kind === 'PUNCT' && peek().text === ')') {
           consume(); // consume `)`
@@ -11754,7 +12844,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         next += ' ';
       }
       if (tok.kind === 'STRING') {
-        next += tok.isTemplate ? '`' + tok.text + '`' : JSON.stringify(tok.text);
+        // S458 — one cooking path for every annotation collector (typeTokenText):
+        // `.text` is the RAW inner text (escapes NOT interpreted), so
+        // JSON.stringify(text) re-escaped the backslash — `"a\"b"` became
+        // `"a\\\"b"` (a different string) in a parameter's refinement and in a
+        // parameter default value.
+        next += typeTokenText(tok);
       } else {
         next += tok.text;
       }
@@ -11912,7 +13007,82 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return isMatchArrow(peek(la));
   }
 
+  // S441 round 4 — the body-top COVERAGE record (see assertBodyTopCoverage).
+  // For a `<program>` / `<page>` / `<channel>` body-top run, every top-level
+  // iteration's consumed tokens are attributed to the node(s) that iteration
+  // produced (`_s441Cover`, non-enumerable). Tokens an iteration consumed
+  // WITHOUT producing a node carry no attribution — the coverage check then
+  // sees them as neither compiled nor reported.
+  const _covTrack = !!(parentBlock && parentBlock._bodyTop === true);
+  let _covI0 = -1;
+  let _covN0 = 0;
+  let _covLast;
+  const _covFlush = () => {
+    if (_covI0 < 0) return;
+    const ranges = [];
+    for (let k = _covI0; k < i && k < tokens.length; k++) {
+      const t = tokens[k];
+      if (t && t.span && t.kind !== "EOF" && typeof t.span.start === "number") ranges.push([t.span.start, t.span.end]);
+    }
+    let targets = nodes.slice(_covN0);
+    // A node REPLACED in place (the guarded-expr wrap) inherits the cover of
+    // the node it wraps.
+    if (targets.length === 0 && nodes.length > 0 && nodes[nodes.length - 1] !== _covLast) {
+      const n = nodes[nodes.length - 1];
+      addBodyTopCover(n, (_covLast && _covLast._s441Cover) || []);
+      targets = [n];
+    }
+    for (const n of targets) addBodyTopCover(n, ranges);
+    // S441 round 5 — credit only what the statement COMPILES (see
+    // bodyTopAcceptance). The export-decl of an `export <decl>` iteration
+    // speaks for the declaration node synthesized beside it.
+    if (targets.length > 0) {
+      const consumed = [];
+      for (let k = _covI0; k < i && k < tokens.length; k++) {
+        const t = tokens[k];
+        // (Comments and `;` are source formatting, not content.)
+        if (t && t.span && t.kind !== "EOF" && t.kind !== "COMMENT" && !(t.kind === "PUNCT" && t.text === ";")
+            && typeof t.span.start === "number") consumed.push(t);
+      }
+      const primary = targets.find((n) => n && n.kind === "export-decl") || (targets.length === 1 ? targets[0] : null);
+      const acc = primary ? bodyTopAcceptance(primary, consumed) : null;
+      if (acc) {
+        let rec;
+        if (acc.nothing) {
+          rec = { nothing: true, reason: acc.reason };
+        } else {
+          const lastTok = consumed[acc.count - 1];
+          const rest = consumed.slice(acc.count);
+          // A head GAP (round 5c) is reported in place of a same-line rest:
+          // the tokens between a function's head and its body.
+          const same = acc.gap ? consumed.slice(acc.gap[0], acc.gap[1]) : rest.filter((t) => t.span.line === lastTok.span.line);
+          const later = rest.find((t) => t.span.line > lastTok.span.line);
+          rec = {
+            end: lastTok.span.end,
+            sameStart: same.length ? same[0].span.start : -1,
+            sameEnd: same.length ? same[same.length - 1].span.end : -1,
+            sameText: same.map((t) => t.text).join(" "),
+            laterStart: later ? later.span.start : -1,
+          };
+        }
+        // The primary node reports the rest; a sibling (the declaration an
+        // `export` synthesizes) only has its credit clipped.
+        for (const n of targets) {
+          const v = n === primary || rec.nothing ? rec : { end: rec.end, sameStart: -1, sameEnd: -1, sameText: "", laterStart: -1 };
+          Object.defineProperty(n, "_s441Accepted", { value: v, enumerable: false, configurable: true, writable: true });
+        }
+      }
+    }
+    _covI0 = -1;
+  };
+
   while (true) {
+    if (_covTrack) {
+      _covFlush();
+      _covI0 = i;
+      _covN0 = nodes.length;
+      _covLast = nodes[nodes.length - 1];
+    }
     const tok = peek();
     if (tok.kind === "EOF") break;
 
@@ -12736,6 +13906,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume `{`
         const { body, span: bodySpan } = collectBracedBody();
         raw = "{ " + body + " }";
+        // S441 round 5b (D2) — a braced type is an operand of the type
+        // grammar like any other: `= { a: number }[]`, `= { … } | { … }`,
+        // `= { … } & { … }` continue on the same line. Before this the
+        // continuation was cut off into a separate (no-effect) statement and
+        // the declared type silently lost its `[]` / union arm.
+        const _cont = peek();
+        const _braceEnd = tokens[i - 1];
+        if (_cont && _cont.kind !== "EOF" && _braceEnd && _braceEnd.span && _cont.span
+            && _cont.span.line === _braceEnd.span.line
+            && (_cont.text === "[" || _cont.text === "|" || _cont.text === "&" || _cont.text === "&&" || _cont.text === "?")) {
+          const { expr: _more } = collectExpr();
+          raw = raw + " " + _more;
+        }
         nodes.push({
           id: ++counter.next,
           kind: "type-decl",
@@ -12887,7 +14070,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
         // Not a write — a READ — reconstruct as bare-expr from the faithful
         // path source-text suffix. Reads are NOT COW'd.
-        const { expr, span } = collectExpr();
+        const { expr, span } = collectExprAfterLead(peek(-1));
         const _be9 = startTok.text + pathStr + (expr ? " " + expr : "");
         nodes.push({
           id: ++counter.next,
@@ -12984,9 +14167,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
         const { expr, span } = collectExpr();
-        const isDefaultLogicLift_ml = parentBlock && parentBlock._synthetic === true;
-        const isAtBodyTopOfSyntheticLift_ml = isDefaultLogicLift_ml && _nestedBlockDepth === 0;
-        const isUnitCCWrite_ml = isAtBodyTopOfSyntheticLift_ml;
+        // ⛑ S441 — Unit CC RETIRED (see the parseOneStatement site): a bare
+        // write at a `<program>` / `<page>` / `<channel>` body-top is treated
+        // exactly as the same write in an explicit top-level `${ … }`.
         nodes.push({
           id: ++counter.next,
           kind: "state-decl",
@@ -12996,7 +14179,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           shape: "plain",
           structuralForm: false,
           isConst: false,
-          ...(isUnitCCWrite_ml ? { _isUnitCCWrite: true } : {}),
           span: spanOf(startTok, peek()),
         });
         continue;
@@ -13025,7 +14207,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       // @name used as expression (not declaration)
-      const { expr, span } = collectExpr();
+      const { expr, span } = collectExprAfterLead(startTok);
       const _be10 = startTok.text + (expr ? " " + expr : "");
       nodes.push({
         id: ++counter.next,
@@ -13583,10 +14765,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -13596,14 +14778,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
@@ -13617,10 +14799,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -13630,14 +14812,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -13899,10 +15081,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -13912,14 +15094,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
@@ -13933,10 +15115,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -13946,14 +15128,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -14123,7 +15305,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             consume();
           }
           // collect iterable expression up to `)`
-          const { expr: iterExpr } = collectExpr(")");
+          let { expr: iterExpr } = collectExpr(")");
+          // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
+          // collectExpr stops at the `!{}` handler (a BLOCK_REF is a statement
+          // boundary), which then became the loop BODY (E-PARSE-001). Inside the
+          // parenthesized head it is part of the iterable expression.
+          while (peek().kind === "BLOCK_REF" && peek().block && peek().block.type === "error-effect") {
+            iterExpr += " " + consume().text;
+            if (!(peek().kind === "PUNCT" && peek().text === ")")) iterExpr += " " + collectExpr(")").expr;
+          }
           iterable = iterExpr.trim();
           if (peek().kind === "PUNCT" && peek().text === ")") {
             consume(); // consume `)`
@@ -14547,20 +15737,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
-    // TRANSACTION BLOCK: `transaction { body }`
+    // TRANSACTION BLOCK: `transaction { body }` (§19.10.2) — shared with
+    // parseOneStatement (nested bodies) via parseTransactionBlock.
     if (tok.kind === "KEYWORD" && tok.text === "transaction") {
-      const startTok = consume(); // consume `transaction`
-      let body = [];
-      if (peek().text === "{") {
-        consume(); // consume `{`
-        body = parseRecursiveBody();
-      }
-      nodes.push({
-        id: ++counter.next,
-        kind: "transaction-block",
-        body,
-        span: spanOf(startTok, peek()),
-      });
+      nodes.push(parseTransactionBlock());
       continue;
     }
 
@@ -15041,6 +16221,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
   }
+  if (_covTrack) _covFlush();
 
   return nodes;
 }
@@ -15147,7 +16328,7 @@ function sqlBodyIsRuntimeExpr(query) {
   // than guessed at, so `?{ VACUUM }` keeps working.
   if (interpolations === 0) {
     const bare = query
-      .replace(/--[^\n]*/g, " ")
+      .replace(/--[^\r\n]*/g, " ")
       .replace(/\/\*[\s\S]*?\*\//g, " ")
       .trim();
     if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bare) && !SINGLE_WORD_SQL_STATEMENTS.has(bare.toUpperCase())) {
@@ -15955,21 +17136,303 @@ function reemitHandlerStringToken(tok) {
     : '"' + tok.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
 
-function parseErrorTokens(tokens, filePath) {
+/**
+ * S452 — is the token at `i` the start of a PIPE-LESS `!{}` handler arm?
+ *
+ * `!{}` handler arms use the §18.2 `match`-arm grammar (ruling:
+ * user-voice-scrml.md S452 "c looks right"): `arm-pattern (':>' | '=>' | '->')
+ * arm-body` with no leading `|`. The `|`-prefixed spelling stays accepted
+ * unchanged. A pipe-less head is EXACTLY one of:
+ *
+ *   .Variant        ['(' binder (',' binder)* ')'] arrow
+ *   ::Variant       ['(' binder (',' binder)* ')'] arrow
+ *   Type.Variant    ['(' binder (',' binder)* ')'] arrow
+ *   Type::Variant   ['(' binder (',' binder)* ')'] arrow
+ *   _ arrow
+ *   _ Identifier arrow          (§18.2 whole-error-arm, §18.6.1)
+ *   else arrow
+ *
+ * where arrow is `:>` / `=>` (one OPERATOR token) or `-` `>` (two PUNCT
+ * tokens), and it must come IMMEDIATELY after the pattern. Two rules keep the
+ * tail of an arm body from being read as the next arm's head (S452 review r1:
+ * `.Bad(m) :> S.Empty` + newline + `_ :> …` was read as head `.Empty` with
+ * binder `_` — a silent miscompile):
+ *
+ *   1. A pipe-less head never takes a parenthesis-free binder. §19.4.5 (S452)
+ *      admits the paren-free binder (`| .V m :>`) ONLY after a leading `|`, so
+ *      a pipe-less pattern is followed by `( … )` or the arrow, nothing else.
+ *   2. A `.` / `::` glued to the preceding token (no whitespace between them)
+ *      is member / qualified access and never starts a pipe-less head; the
+ *      same holds for a `Type` glued after a `.` / `::`.
+ *
+ * Variant names (and `Type`) must start uppercase, as the `|`-prefixed `.V`
+ * path requires. Returns false for anything else; the caller then falls
+ * through to the pre-existing branches (the old short form `Name :>` among
+ * them, unchanged).
+ */
+function isPipelessErrorArmStart(tokens, i) {
+  const at = (k) => (k < tokens.length ? tokens[k] : null);
+  const isArrowAt = (k) => {
+    const t = at(k);
+    if (!t) return false;
+    if (t.kind === "OPERATOR" && (t.text === ":>" || t.text === "=>")) return true;
+    const t2 = at(k + 1);
+    return t.kind === "PUNCT" && t.text === "-" && !!t2 && t2.kind === "PUNCT" && t2.text === ">";
+  };
+  const t0 = at(i);
+  if (!t0) return false;
+  // Rule 2 — a token glued to the previous one continues an expression.
+  if (_errArmGluedToPrev(tokens, i)) return false;
+  // Wildcard: `_ :>` / `else :>`, and the whole-error arm `_ err :>`.
+  if ((t0.kind === "IDENT" && t0.text === "_") || (t0.kind === "KEYWORD" && t0.text === "else")) {
+    if (isArrowAt(i + 1)) return true;
+    // S452 r3 — `_ <Identifier> :>` is the §18.2 whole-error-arm (§18.6.1,
+    // S451 "a"); `else` takes no binder. Parsed by the `|` path, so it is
+    // byte-identical to `| _ err :>`.
+    const nb = at(i + 1);
+    return t0.text === "_" && !!nb && nb.kind === "IDENT" && nb.text !== "_" && isArrowAt(i + 2);
+  }
+  const k = _errArmVariantPatternEnd(tokens, i);
+  if (k < 0) return false;
+  // Optional parenthesized binder `(a, b, …)` — rule 1: no paren-free binder.
+  let j = k;
+  const b = at(j);
+  if (b && b.kind === "PUNCT" && b.text === "(") {
+    j++;
+    while (at(j) && !(at(j).kind === "PUNCT" && at(j).text === ")")) {
+      const t = at(j);
+      if (t.kind === "IDENT" || (t.kind === "PUNCT" && t.text === ",")) { j++; continue; }
+      return false;
+    }
+    if (!at(j)) return false;
+    j++; // `)`
+  }
+  return isArrowAt(j);
+}
+
+/** Is an arm arrow (`:>` / `=>`, or `-` `>`) at token `k`? */
+function _errArmIsArrowAt(tokens, k) {
+  const t = tokens[k];
+  if (!t) return false;
+  if (t.kind === "OPERATOR" && (t.text === ":>" || t.text === "=>")) return true;
+  const t2 = tokens[k + 1];
+  return t.kind === "PUNCT" && t.text === "-" && !!t2 && t2.kind === "PUNCT" && t2.text === ">";
+}
+
+/** Is a `.` / `::` token, by kind and text? */
+function _errArmIsSep(t) {
+  return !!t && ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::"));
+}
+
+/** S452 rule 2 — does token `i` touch token `i-1` (no whitespace between)? */
+function _errArmGluedToPrev(tokens, i) {
+  if (i <= 0) return false;
+  const prev = tokens[i - 1];
+  const cur = tokens[i];
+  const pe = prev && prev.span && typeof prev.span.end === "number" ? prev.span.end : null;
+  const cs = cur && cur.span && typeof cur.span.start === "number" ? cur.span.start : null;
+  if (pe === null || cs === null || pe !== cs) return false;
+  // Glued only matters where it makes `cur` a continuation: `.`/`::` after any
+  // token (member / qualified access), or a name right after a `.`/`::`.
+  return _errArmIsSep(cur) || _errArmIsSep(prev);
+}
+
+/**
+ * Variant-pattern head at `i` — `.V`, `::V`, `T.V`, `T::V` (V and T start
+ * uppercase for the `.` / `T` forms; `::V` keeps the legacy `|`-path rule of
+ * any name). Returns the index just past the variant name, or -1.
+ */
+function _errArmVariantPatternEnd(tokens, i) {
+  const at = (k) => (k < tokens.length ? tokens[k] : null);
+  const isName = (t) => !!t && (t.kind === "IDENT" || t.kind === "KEYWORD");
+  const upper = (t) => /^[A-Z]/.test((t && t.text) || "");
+  const t0 = at(i);
+  if (!t0) return -1;
+  if (t0.kind === "PUNCT" && t0.text === ".") {
+    return isName(at(i + 1)) && upper(at(i + 1)) ? i + 2 : -1;
+  }
+  if (t0.kind === "OPERATOR" && t0.text === "::") {
+    return isName(at(i + 1)) ? i + 2 : -1;
+  }
+  if (t0.kind === "IDENT" && upper(t0) && _errArmIsSep(at(i + 1))) {
+    const v = at(i + 2);
+    return isName(v) && upper(v) ? i + 3 : -1;
+  }
+  return -1;
+}
+
+/**
+ * Bracket-depth delta of one handler token — used so a pipe-less arm head is
+ * only recognized at the arm-list's own level, never inside a `{ … }` / `( … )`
+ * / `[ … ]` of an arm body (e.g. a nested `match` arm list in a block body).
+ */
+function _errArmDepthDelta(tok) {
+  if (!tok || tok.kind !== "PUNCT") return 0;
+  if (tok.text === "{" || tok.text === "(" || tok.text === "[") return 1;
+  if (tok.text === "}" || tok.text === ")" || tok.text === "]") return -1;
+  return 0;
+}
+
+/**
+ * §19.4.5 — the source text of tokens [from, to), single-spaced where the
+ * source had whitespace between two tokens and glued where it had none.
+ */
+function _errArmTokensText(tokens, from, to) {
+  let out = "";
+  for (let k = from; k < to && k < tokens.length; k++) {
+    const t = tokens[k];
+    if (k > from) {
+      const pe = tokens[k - 1].span?.end;
+      const cs = t.span?.start;
+      if (typeof pe !== "number" || typeof cs !== "number" || cs > pe) out += " ";
+    }
+    out += t.text;
+  }
+  return out;
+}
+
+/**
+ * §19.4.5 (S452) — the `!{}` handlers NESTED in an arm body. The tokenizer lexes
+ * a `!{…}` inside an arm body as one error-effect BLOCK_REF token, so its arms
+ * reach no AST node (the arm body stays text; codegen re-parses it). Each one is
+ * parsed here with the same arm parser — positions only, NO diagnostics (the
+ * `errors` sink is omitted, so nothing a compile reports changes) — so the
+ * W-ARM-PIPE-LEGACY lint and `scrml fix` see its `|`-led arms.
+ * Returns `{ nestedHandlers: [{ raw, arms }] }` (spread into the arm record), or
+ * `{}` when the body holds none. Kind-less on purpose: AST walkers keyed on
+ * `kind` do not see it.
+ */
+function _nestedHandlersIn(tokens, from, to, filePath) {
+  const out = [];
+  for (let k = from; k < to && k < tokens.length; k++) {
+    const t = tokens[k];
+    if (t.kind !== "BLOCK_REF" || !t.block || t.block.type !== "error-effect") continue;
+    const raw = typeof t.block.raw === "string" ? t.block.raw : t.text;
+    if (typeof raw !== "string" || !raw.startsWith("!{") || !raw.endsWith("}")) continue;
+    const start = t.span?.start ?? t.block.span?.start ?? 0;
+    try {
+      const inner = tokenizeError(raw.slice(2, raw.length - 1), start + 2, t.span?.line ?? 1, (t.span?.col ?? 1) + 2);
+      const arms = parseErrorTokens(inner, filePath);
+      if (arms.length > 0) out.push({ raw, arms });
+    } catch {
+      // a nested body the arm parser cannot read is left to the codegen re-parse
+    }
+  }
+  return out.length > 0 ? { nestedHandlers: out } : {};
+}
+
+function parseErrorTokens(tokens, filePath, errors) {
   const arms = [];
   let i = 0;
+
+  // S452 r3 — the arm list never drops a token silently. A token at arm level
+  // that no arm head consumes, and an arm arrow `:>` at depth 0 inside an arm
+  // body (an arm whose head was not recognized), are E-PARSE-001. One error
+  // per contiguous run of stray tokens. `errors` is optional (no reporting
+  // when a caller passes none).
+  const ARM_SHAPES =
+    "An arm is `.V(x) :> body`, `.V :> body`, `T.V(x) :> body`, `_ :> body`, `_ err :> body` or " +
+    "`else :> body`; a binder without parentheses (`.V x :>`) needs the legacy leading `|`.";
+  let _strayRunOpen = false;
+  const reportStrayToken = (k) => {
+    if (_strayRunOpen) return;
+    _strayRunOpen = true;
+    if (!errors) return;
+    const t = tokens[k];
+    // The likeliest mistake now that the `|` is deprecated: a paren-free
+    // binder written without it (`.Bad m :>`). Name the fix outright.
+    const pe = _errArmVariantPatternEnd(tokens, k);
+    const b = pe > 0 ? tokens[pe] : null;
+    if (b && b.kind === "IDENT" && _errArmIsArrowAt(tokens, pe + 1)) {
+      const head = tokens.slice(k, pe).map((x) => x.text).join("");
+      errors.push(new TABError(
+        "E-PARSE-001",
+        `E-PARSE-001: \`${head} ${b.text}\` in a \`!{}\` handler is not an arm — a binder without parentheses ` +
+        `needs the legacy leading \`|\`. Write \`${head}(${b.text}) :>\`, or add the legacy \`|\`.`,
+        tokenSpan(t, filePath),
+      ));
+      return;
+    }
+    // S452 r5 — a named-field binder `.V(field: x) :>` is valid §18.2
+    // (`binding ::= FieldName ':' Identifier`) but impl#1's `!{}` arm parser
+    // does not support it yet. Say so instead of calling it malformed.
+    if (b && b.kind === "PUNCT" && b.text === "(") {
+      let j = pe + 1;
+      let sawColon = false;
+      const binders = [];
+      while (j < tokens.length && !(tokens[j].kind === "PUNCT" && tokens[j].text === ")")) {
+        if (tokens[j].text === ":") sawColon = true;
+        else if (tokens[j].kind === "IDENT") {
+          // keep the binder (the ident after `:`), not the field name
+          if (tokens[j - 1] && tokens[j - 1].text === ":") binders.push(tokens[j].text);
+        }
+        else if (!(tokens[j].kind === "PUNCT" && tokens[j].text === ",")) break;
+        j++;
+      }
+      if (sawColon && tokens[j] && tokens[j].text === ")" && _errArmIsArrowAt(tokens, j + 1)) {
+        const head = tokens.slice(k, pe).map((x) => x.text).join("");
+        errors.push(new TABError(
+          "E-PARSE-001",
+          `E-PARSE-001: the named-field binder in \`${head}(…: …)\` is not yet supported in impl#1's \`!{}\` handlers ` +
+          `(it is valid §18.2). Bind the payload positionally instead, in field order — e.g. \`${head}(${binders.length ? binders.join(", ") : "x"}) :>\`.`,
+          tokenSpan(t, filePath),
+        ));
+        return;
+      }
+    }
+    errors.push(new TABError(
+      "E-PARSE-001",
+      `E-PARSE-001: unexpected \`${t.text}\` in a \`!{}\` handler — it does not start an arm, so it would be dropped. ${ARM_SHAPES}`,
+      tokenSpan(t, filePath),
+    ));
+  };
+  const reportStrayArrow = (t) => {
+    if (!errors) return;
+    errors.push(new TABError(
+      "E-PARSE-001",
+      `E-PARSE-001: unexpected \`${t.text}\` inside a \`!{}\` handler arm body — the text before it on this line is not an arm pattern the handler accepts. ${ARM_SHAPES}`,
+      tokenSpan(t, filePath),
+    ));
+  };
+  const isStrayArrowAt = (k, depth) =>
+    depth === 0 && tokens[k] && tokens[k].kind === "OPERATOR" && tokens[k].text === ":>";
 
   while (i < tokens.length && tokens[i].kind !== "EOF") {
     const tok = tokens[i];
 
-    // Arm starts with `|`
-    if (tok.kind === "PUNCT" && tok.text === "|") {
+    // Arm starts with `|`, OR (S452) is a pipe-less §18.2 arm head. A
+    // pipe-less arm is parsed by the SAME path as its `|`-prefixed spelling —
+    // the only difference is that there is no `|` token to consume — so the
+    // arm record (pattern / binding / handler / arrow) and the emitted JS are
+    // identical for both spellings.
+    const _pipeless = !(tok.kind === "PUNCT" && tok.text === "|") && isPipelessErrorArmStart(tokens, i);
+
+    // S452 r4 — §19.4.5: the paren-free binder is legal ONLY after a leading
+    // `|`. A pipe-less `::V m :>` (pre-§19 legacy `::` arm) is E-PARSE-001, the
+    // same as `.V m :>` (corpus measured zero sites, 2321 files).
+    if (!_pipeless && tok.kind === "OPERATOR" && tok.text === "::") {
+      const pe = _errArmVariantPatternEnd(tokens, i);
+      const b = pe > 0 ? tokens[pe] : null;
+      if (b && b.kind === "IDENT" && _errArmIsArrowAt(tokens, pe + 1)) {
+        reportStrayToken(i);
+        i++;
+        continue;
+      }
+    }
+    if ((tok.kind === "PUNCT" && tok.text === "|") || _pipeless) {
+      _strayRunOpen = false;
       const armStart = tok;
-      i++;
+      if (!_pipeless) i++; // consume `|`
+      // §19.4.5 (S452) — the `|`-led arm is soft-deprecated. Remember where its
+      // pattern starts so the arm record can carry the legacy spelling for the
+      // W-ARM-PIPE-LEGACY lint (type-system.ts `guarded-expr`) and the
+      // `scrml fix` arm-pipe rule (commands/fix-arm-pipe.js).
+      const _patTokStart = i;
 
       // Pattern: `::TypeName`, `.Variant` (bare-dot per §14.10 / M9), or `_`
       let pattern = "_";
       let binding = "";
+      let armTypeQualifier = ""; // S452 — `T` of a `T.V` / `T::V` pattern
 
       if (i < tokens.length && tokens[i].kind === "OPERATOR" && tokens[i].text === "::") {
         i++; // consume `::`
@@ -15997,7 +17460,34 @@ function parseErrorTokens(tokens, filePath) {
       } else if (i < tokens.length && tokens[i].text === "_") {
         pattern = "_";
         i++;
+      } else if (
+        // S452 — type-qualified variant pattern `T.V` / `T::V` (§19.4.5
+        // legacy-arm-pattern + §18.2 arm heads). Pre-S452 `T` was taken as a
+        // paren-free binder and `.V…` leaked into the handler. The qualifier
+        // is recorded; the pattern is the same `.V` / `::V` the unqualified
+        // spelling produces (dispatch is by variant name).
+        i < tokens.length && tokens[i].kind === "IDENT" &&
+        _errArmVariantPatternEnd(tokens, i) === i + 3
+      ) {
+        armTypeQualifier = tokens[i].text;
+        pattern = (tokens[i + 1].text === "::" ? "::" : ".") + tokens[i + 2].text;
+        i += 3;
+      } else if (
+        // S452 — `else` is the §18.2 wildcard spelling (`| else :>` / `else :>`),
+        // the same pattern as `_`. Pre-S452 the `else` was left unconsumed and
+        // leaked into the handler text (`else :> 9` → E-CODEGEN-INVALID-LOGIC).
+        // Gated on a following arm arrow so nothing else changes.
+        i < tokens.length && tokens[i].kind === "KEYWORD" && tokens[i].text === "else" &&
+        i + 1 < tokens.length &&
+        ((tokens[i + 1].kind === "OPERATOR" && (tokens[i + 1].text === ":>" || tokens[i + 1].text === "=>")) ||
+         (tokens[i + 1].kind === "PUNCT" && tokens[i + 1].text === "-" &&
+          i + 2 < tokens.length && tokens[i + 2].kind === "PUNCT" && tokens[i + 2].text === ">"))
+      ) {
+        pattern = "_";
+        i++;
       }
+      const _patHeadEnd = i; // token index just past the pattern head (`.V`, `T.V`, `_`, …)
+      let _bareBinderIdx = -1; // token index of a parenthesis-free binder (`| .V m`, `| _ e`, `| e`)
 
       // Binding variable: bare ident, or `(ident, ...)` tuple-style (§19.4.3
       // canonical). A multi-field error variant binds ALL its payload fields
@@ -16021,6 +17511,7 @@ function parseErrorTokens(tokens, filePath) {
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ")") i++;
         binding = _bindNames.join(", ");
       } else if (i < tokens.length && (tokens[i].kind === "IDENT")) {
+        _bareBinderIdx = i;
         binding = tokens[i].text;
         i++;
       }
@@ -16028,25 +17519,71 @@ function parseErrorTokens(tokens, filePath) {
       // Arm arrow — `:>` (canonical), `=>` / `->` (deprecated aliases, §18.2).
       // Record which glyph the source used so the typer can fire the
       // W-MATCH-ARROW-LEGACY lock-step lint for `!{}` handler arms.
+      const _arrowIdx = i;
       let armArrow = ":>";
+      let _arrowFound = false;
       if (i < tokens.length && tokens[i].kind === "OPERATOR" && (tokens[i].text === "=>" || tokens[i].text === ":>")) {
         armArrow = tokens[i].text;
+        _arrowFound = true;
         i++;
       } else if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === "-") {
         armArrow = "->";
+        _arrowFound = true;
         i++; // consume `-`
         if (i < tokens.length && tokens[i].kind === "OPERATOR" && tokens[i].text === ">") i++; // won't happen with `>`
         // `>` is emitted as PUNCT `>`
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ">") i++;
       }
 
+      // §19.4.5 (S452) — the legacy `|`-led arm, recorded for W-ARM-PIPE-LEGACY
+      // (type-system.ts `guarded-expr`) and the `scrml fix` arm-pipe rule
+      // (commands/fix-arm-pipe.js). `pattern` is the source text between the
+      // `|` and the arm arrow; `canonical` is that pattern without the `|`: a
+      // parenthesis-free variant binder `.V m` is `.V(m)` (§19.4.3), and a bare
+      // binder with no pattern, `| e :>`, is the whole-error arm `_ e` (§18.6.1
+      // — what impl#1 has always read it as; a pipe-less `e :>` would be
+      // E-MATCH-BARE-BINDER, §18.2). The `…At` offsets are RELATIVE to the
+      // arm's `span.start` (its `|`), so they stay right when a caller re-bases
+      // the spans of a handler parsed out of an attribute value.
+      let legacyPipe = null;
+      if (!_pipeless) {
+        const patText = _errArmTokensText(tokens, _patTokStart, _arrowIdx);
+        const pipeAt = armStart.span?.start ?? 0;
+        const rel = (off) => (typeof off === "number" ? off - pipeAt : undefined);
+        legacyPipe = {
+          pattern: patText,
+          canonical: patText,
+          arrowFound: _arrowFound,
+          patternAt: rel(tokens[_patTokStart]?.span?.start),
+        };
+        if (_bareBinderIdx >= 0) {
+          const bt = tokens[_bareBinderIdx];
+          legacyPipe.binderAt = rel(bt.span?.start);
+          legacyPipe.binderEndAt = rel(bt.span?.end);
+          if (_patHeadEnd === _patTokStart) {
+            legacyPipe.bareBinder = true;
+            legacyPipe.canonical = `_ ${bt.text}`;
+          } else if (pattern !== "_") {
+            legacyPipe.parenFreeBinder = true;
+            legacyPipe.headEndAt = rel(tokens[_patHeadEnd - 1].span?.end);
+            legacyPipe.canonical = `${_errArmTokensText(tokens, _patTokStart, _patHeadEnd)}(${bt.text})`;
+          }
+        }
+      }
+
       // Handler: collect until next `|`, next simplified arm start, or EOF
       // BUG-ASI-ERROR-ARM: Track source line per token so newlines between statements
       // survive into rewriteBlockBody (which splits on semicolons and newlines).
+      const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      let _armDepth = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
+        // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
+        if (_armDepth === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        if (isStrayArrowAt(i, _armDepth)) reportStrayArrow(tokens[i]);
+        _armDepth += _errArmDepthDelta(tokens[i]);
         // Also stop at simplified arm start (TypeName => or _ =>)
         if (
           i + 1 < tokens.length &&
@@ -16080,11 +17617,15 @@ function parseErrorTokens(tokens, filePath) {
         handler: _handlerTrimmed,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow,
+        ...(armTypeQualifier ? { typeQualifier: armTypeQualifier } : {}),
+        ...(legacyPipe ? { legacyPipe } : {}),
+        ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
       });
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {
       // Canonical arm syntax (§19.4.3): ::TypeName(binding) -> handler
       // No leading pipe. Binding may be bare ident or paren-wrapped `(ident)`.
+      _strayRunOpen = false;
       const armStart = tok;
       i++; // consume `::`
       let pattern = "_";
@@ -16125,11 +17666,19 @@ function parseErrorTokens(tokens, filePath) {
         i++;
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ">") i++;
       }
+      const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = [];
+      let _armDepth2 = 0; // S452 r3 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
         if (tokens[i].kind === "OPERATOR" && tokens[i].text === "::") break;
+        // S452 r3 — stop at a pipe-less §18.2 arm head at the arm-list's level
+        // (as the `|` and short-form paths do); a following `else :>` /
+        // `.Gone :>` was absorbed into this arm's body.
+        if (_armDepth2 === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        if (isStrayArrowAt(i, _armDepth2)) reportStrayArrow(tokens[i]);
+        _armDepth2 += _errArmDepthDelta(tokens[i]);
         if (
           i + 1 < tokens.length &&
           (tokens[i].kind === "IDENT" || tokens[i].kind === "KEYWORD") &&
@@ -16157,6 +17706,7 @@ function parseErrorTokens(tokens, filePath) {
         handler: _handlerTrimmed3,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed3, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow: armArrow2,
+        ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
       });
     } else if (
@@ -16167,6 +17717,7 @@ function parseErrorTokens(tokens, filePath) {
       (tok.text === "_" || /^[A-Z]/.test(tok.text))
     ) {
       // Simplified arm syntax (§19 short form): TypeName => handler
+      _strayRunOpen = false;
       // No leading pipe, no :: prefix, no explicit binding variable name.
       // Produces the same arm shape as pipe-style arms, with implicit binding "e".
       const armStart = tok;
@@ -16179,9 +17730,15 @@ function parseErrorTokens(tokens, filePath) {
       const armArrow3 = tokens[i + 1] && tokens[i + 1].text === "=>" ? "=>" : ":>";
       i++; // consume TypeName or _
       i++; // consume arm arrow
+      const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
+        // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
+        if (_armDepth3 === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        if (isStrayArrowAt(i, _armDepth3)) reportStrayArrow(tokens[i]);
+        _armDepth3 += _errArmDepthDelta(tokens[i]);
         // Stop at next simplified arm start (TypeName => or _ =>)
         if (
           i + 1 < tokens.length &&
@@ -16213,9 +17770,13 @@ function parseErrorTokens(tokens, filePath) {
         handler: _handlerTrimmed2,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed2, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow: armArrow3,
+        ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
       });
     } else {
+      // S452 r3 — never skip silently: a comment between arms is fine; any
+      // other token here starts no arm and would be dropped -> E-PARSE-001.
+      if (tok.kind !== "COMMENT") reportStrayToken(i);
       i++;
     }
   }
@@ -16478,7 +18039,9 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // `<each>` row or an engine state-child compiled at exit 0 with its tail read
 // as HTML attributes (SPEC §5.2.3: "The error is kept so the unbraced sequence
 // can never be silently read the wrong way").
-const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER"]);
+// E-ATTR-MULTI-STATEMENT (§5.2.4, S450) qualifies the same way: decided only in
+// parseAttributes / parseLiftTag, re-derived by nothing downstream.
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT"]);
 
 /**
  * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
@@ -16603,7 +18166,17 @@ function parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, 
     // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
     // write — round-4 #3), not a top-level declaration. The frame tokens borrow
     // the first real token's span; the statements keep their own file spans.
-    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
+    // g-request-refetch-statement-dropped (S444) — lower `<#id>` refs FIRST,
+    // exactly as a `${…}` logic body does (preprocessWorkerAndStateRefs). The
+    // tokenizer drops `#`, so without this a `<#hunt>.refetch()` statement in a
+    // multi-statement handler tokenized as markup (`html-fragment "< hunt>…"`,
+    // which emits NOTHING — `${ @x = 1; <#hunt>.refetch() }` lost the refetch
+    // at exit 0), and a leading one broke the parse outright (the value fell to
+    // the raw string path with its `@x` unrewritten → E-CODEGEN-INVALID-LOGIC).
+    // The lowered `_scrml_input_<id>_` placeholder routes to
+    // `_scrml_request_<id>` / the §36 registry at emit, as in a function body.
+    // Like the logic-body path, the replacement shifts the spans of later tokens.
+    tokens = tokenizeLogic(preprocessWorkerAndStateRefs(value.raw), baseOffset, baseLine, baseCol, []);
     const inner = tokens.slice();
     const last = inner[inner.length - 1];
     const eof = last && last.kind === "EOF" ? inner.pop() : null;
@@ -16782,6 +18355,32 @@ function handlerStmtsContainGuard(node, seen = new Set()) {
 
 const _handlerCheckStmtIds = { next: HANDLER_STMT_ID_BASE + 750_000_000 };
 
+const _guardArmStmtIds = { next: HANDLER_STMT_ID_BASE + 800_000_000 };
+
+/**
+ * §19.4.3 / §19.8.3 (S454) — the arms of a `!{ … }` handler that sits INSIDE an
+ * expression (a `match` scrutinee, an `if` condition, a parenthesized operand).
+ * The expression parser carries such a handler as its exact source text
+ * (expression-parser `extractHandledOperands`); codegen recovers the arms here
+ * with the SAME statement parser that builds a statement-level guard, so the
+ * arm grammar (patterns, payload binders, block bodies, `fail` re-raise) is one
+ * grammar, not two. `rawBang` is the handler text, `!{ … }`. Returns the
+ * `LogicArm[]`, or null when the handler does not parse as one guard (the
+ * caller then refuses the site loudly). The nodes are fresh (their own id range).
+ */
+export function parseGuardArmsFromRaw(rawBang, filePath) {
+  if (typeof rawBang !== "string" || !rawBang.trim().startsWith("!{")) return null;
+  const res = parseHandlerStatementListCore(
+    { kind: "expr", raw: `_scrml_guard_operand ${rawBang.trim()}`, span: { file: filePath, start: 0, end: 0, line: 1, col: 1 } },
+    filePath, _guardArmStmtIds, null, 0, 1, 1,
+  );
+  if (!res || !Array.isArray(res.stmts) || res.stmts.length !== 1) return null;
+  if (res.parseErrors.some(isFatalHandlerParseError)) return null;
+  const g = res.stmts[0];
+  if (!g || g.kind !== "guarded-expr" || !Array.isArray(g.arms) || g.arms.length === 0) return null;
+  return g.arms;
+}
+
 /**
  * §19.4.3 (S440) — the statement view of an event-handler value FOR CHECKING
  * ONLY, independent of which codegen path the value takes. A one-statement,
@@ -16815,6 +18414,181 @@ export function parseHandlerStatementsForCheck(value, filePath) {
   if (res.parseErrors.some(isFatalHandlerParseError)) return null;
   if (res.stmts.length === 1 && isCallableOrOpaqueHandlerStmt(res.stmts[0], value)) return null;
   return res.stmts;
+}
+
+/**
+ * S450 — SPEC §5.2.4 (ruling (v), user-voice-scrml.md S447 "stamp all"):
+ * "a multi-statement value in a non-handler attribute is an error."
+ *
+ * A NON-handler attribute value is ONE expression. When its `(…)` / `{…}` /
+ * `${…}` value (or a quoted `if="…"` condition) holds two or more statements
+ * separated by `;`, the expression view (`exprNode`) holds only the first and
+ * the attribute took the wrong value (`title=${f(); "t"}` → `f()`) or was not
+ * emitted at all (`title=(f(); "t")` → W-CG-VALUE-ATTR-UNLOWERABLE). This
+ * returns the statement count when the value is such a list, else 0.
+ *
+ * The decision is STRUCTURAL: the value is parsed with the same function-body
+ * statement parser the handler statement lists use
+ * (`parseHandlerStatementListCore` — `tokenizeLogic` + `parseLogicBody`).
+ *   - A delimited `${…}` / `{…}` value is a statement list when that parse is
+ *     clean and yields 2+ statements, however they are separated — unless the
+ *     EXPRESSION parser consumes the whole value (then it is one expression).
+ *   - A `(…)` value or a quoted condition is one when, in addition, some
+ *     statement after the first is directly preceded (comments skipped) by a
+ *     depth-0 `;` token (inside `(…)` a newline is whitespace, §7.2.2 rule 4).
+ * So a `;` in a string / template / regex / comment, in a nested arrow or
+ * function body, or in the text of a markup value is never a separator, and a
+ * trailing `;` (`${f();}`) is not a second statement. A value whose statement
+ * parse reports a fatal error, or that the statement parser reads as ONE
+ * statement (`${f()⏎"u"}`, `${ f() g() }`), is not detected — a recorded
+ * limitation (§5.2.4, gap g-attr-multi-statement-undetected-forms).
+ */
+const _attrMultiStmtIds = { next: HANDLER_STMT_ID_BASE + 900_000_000 };
+
+/**
+ * Attributes whose value is a statement position, not a value: exempt.
+ * §5.2.3 event handlers (inline blocks are legal there; their own rule is
+ * E-MULTI-STATEMENT-HANDLER), and `effect=` ONLY where §51.0.H defines it as a
+ * logic block — the engine opener (`<engine>` / deprecated `<machine>`) and an
+ * engine state-child (a PascalCase element built inside an engine body). An
+ * `effect=` on any other element (`<div effect=${ f(); g() }>`) is a plain
+ * attribute and is judged (S450 fix round, S239 review fn05).
+ */
+function isStatementPositionAttr(name, effectIsLogicBlock) {
+  if (isEventHandlerAttrName(name)) return true;
+  return name === "effect" && effectIsLogicBlock === true;
+}
+
+/**
+ * The DIRECT children of an engine body (its state-children), recorded by the
+ * engine-body build before each is built — structural, so a component or any
+ * other element NESTED inside a state-child is not one (S450 re-review NIT 1:
+ * `<Idle><Card effect=${ f(); g() }/></>` was exempt by a PascalCase test).
+ */
+const _engineStateChildBlocks = new WeakSet();
+
+/** Does `effect=` on this element name a §51.0.H logic block? */
+function isEngineEffectSite(tagName, block) {
+  if (tagName === "engine" || tagName === "machine") return true;
+  return !!block && typeof block === "object" && _engineStateChildBlocks.has(block);
+}
+
+function attrValueSemicolonStatementCount(raw, span, filePath, delimited = false) {
+  if (typeof raw !== "string") return 0;
+  if (delimited) {
+    // A `${…}` / `{…}` value: `raw` is the interior, read as a statement list.
+    // ANY clean parse with 2+ statements is a multi-statement value, however
+    // the statements are separated (`;`, a newline, a block statement's `}`).
+    // (S450 fix round, S239 review: `${ if (c) { f() } "t" }`, `${ let a = f()⏎a }`.)
+    if (raw.trim() === "") return 0;
+    const res = parseHandlerStatementListCore(
+      { raw, span }, filePath, _attrMultiStmtIds, null, 0, 1, 1,
+    );
+    if (!res || !Array.isArray(res.stmts) || res.stmts.length < 2) return 0;
+    if (res.parseErrors.some(isFatalHandlerParseError)) return 0;
+    // A value the EXPRESSION parser consumes whole is one expression even when
+    // the statement grammar splits it (`${ function () { … }() }` — an
+    // anonymous function-expression IIFE reads as a declaration + `()` there).
+    // Decided by the parsed node's extent, not by the text.
+    // Same `<#id>` lowering the statement parse applies, so both views read
+    // the same text.
+    const trimmed = preprocessWorkerAndStateRefs(raw).trim();
+    try {
+      const { result: node } = captureTrailingContentWarnings(() => parseExprToNode(trimmed, filePath, 0));
+      if (node && typeof node === "object" && node.kind !== "escape-hatch" &&
+          node.span && typeof node.span.end === "number" && node.span.end >= trimmed.length) {
+        return 0;
+      }
+    } catch (_e) { /* no expression view — the statement count stands */ }
+    return res.stmts.length;
+  }
+  // Every other form — `(…)` (newlines inside parens are whitespace, §7.2.2
+  // rule 4, so only a `;` can separate statements there) and a quoted `if="…"`
+  // condition — is judged by a statement-level `;` separator.
+  // Cheap necessary-condition pre-filter (Rule 7 justification: a `;`
+  // separator token cannot exist without a `;` character; the DECISION below is
+  // made on the parsed statements, never on this text test).
+  if (!raw.includes(";")) return 0;
+  let inner = raw;
+  // A parenthesized value `(…)` keeps its outer parens in `raw` (tokenizer
+  // ATTR_EXPR). Strip them when the FIRST token's `(` is matched by the LAST
+  // token — read from the logic token stream, so a `)` inside a string or
+  // comment is not mistaken for the closer.
+  try {
+    const toks = tokenizeLogic(raw, 0, 1, 1, []).filter((t) => t && t.kind !== "EOF" && t.kind !== "COMMENT");
+    if (toks.length >= 2 && toks[0].kind === "PUNCT" && toks[0].text === "(") {
+      let depth = 0, closeIdx = -1;
+      for (let i = 0; i < toks.length; i++) {
+        const t = toks[i];
+        if (t.kind !== "PUNCT") continue;
+        if (t.text === "(" || t.text === "[" || t.text === "{") depth++;
+        else if (t.text === ")" || t.text === "]" || t.text === "}") {
+          depth--;
+          if (depth === 0) { closeIdx = i; break; }
+        }
+      }
+      if (closeIdx === toks.length - 1) {
+        inner = raw.slice(toks[0].span.start + 1, toks[closeIdx].span.start);
+      }
+    }
+  } catch (_e) {
+    return 0;
+  }
+  if (!inner.includes(";")) return 0;
+  const res = parseHandlerStatementListCore(
+    { raw: inner, span }, filePath, _attrMultiStmtIds, null, 0, 1, 1,
+  );
+  if (!res || !Array.isArray(res.stmts) || res.stmts.length < 2) return 0;
+  if (res.parseErrors.some(isFatalHandlerParseError)) return 0;
+  const toks = Array.isArray(res.tokens)
+    ? res.tokens.filter((t) => t && t.kind !== "EOF" && t.kind !== "COMMENT" && t.span && typeof t.span.start === "number")
+    : [];
+  // Bracket depth of each token, so only a statement-level `;` counts.
+  const depthAt = [];
+  let d = 0;
+  for (const t of toks) {
+    if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d = Math.max(0, d - 1);
+    depthAt.push(d);
+    if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
+  }
+  for (let s = 1; s < res.stmts.length; s++) {
+    const st = res.stmts[s];
+    const at = st && st.span && typeof st.span.start === "number" ? st.span.start : null;
+    if (at === null) continue;
+    // The token immediately before this statement's first token.
+    let prev = -1;
+    for (let i = 0; i < toks.length && toks[i].span.start < at; i++) prev = i;
+    if (prev >= 0 && toks[prev].kind === "PUNCT" && toks[prev].text === ";" && depthAt[prev] === 0) {
+      return res.stmts.length;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Push E-ATTR-MULTI-STATEMENT for a non-handler attribute whose expression
+ * value is a statement list (SPEC §5.2.4). Returns true when it fired. The
+ * attribute value is left as parsed (the error fails the compile; nothing is
+ * dropped here). `delimited` = the value is a `${…}` / `{…}` interior;
+ * `effectIsLogicBlock` = the element is an engine opener or one of its
+ * state-children (§51.0.H), where `effect=` is a statement position.
+ */
+function checkAttrMultiStatement(name, value, filePath, errors, delimited = false, effectIsLogicBlock = false) {
+  if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttr(name, effectIsLogicBlock)) return false;
+  if (!value || value.kind !== "expr") return false;
+  const n = attrValueSemicolonStatementCount(value.raw, value.span, filePath, delimited);
+  if (n < 2) return false;
+  const msg =
+    `E-ATTR-MULTI-STATEMENT: The value of attribute \`${name}\` holds ${n} statements, ` +
+    `but a non-handler attribute value is ONE expression. Write a single expression, or move the ` +
+    `statements into a function and use its result (\`function compute() { … }\` then \`${name}=compute()\`). ` +
+    `Only an event-handler attribute (\`on…=\`) or an engine opener / state-child \`effect=\` ` +
+    `takes a statement list (SPEC §5.2.3, §5.2.4, §51.0.H).`;
+  const err = new TABError("E-ATTR-MULTI-STATEMENT", msg, value.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 });
+  // Kept so _forwardSubparseErrors can rebuild it with a file-true span.
+  err.baseMessage = msg;
+  errors.push(err);
+  return true;
 }
 
 /**
@@ -17052,6 +18826,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         kind: "text",
         value: block.raw,
         span,
+        // S441 — a declared `"..."` display-text literal at a default-logic
+        // body (§4.18.3); `value` is already decoded + HTML-escaped.
+        ...(block._displayLiteral === true ? { _displayLiteral: true } : {}),
       };
 
     // --------------------------------------------------------------- comment
@@ -18554,7 +20331,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         block.span.col,
         "markup"
       );
-      const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true, block.name);
+      const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true, block.name, isEngineEffectSite(block.name, block));
       // S437 — §5.2.3 statement-list view of multi-statement handler values.
       attachHandlerStatementLists(attrs, block, filePath, counter, errors);
 
@@ -19403,6 +21180,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           try {
             for (const child of block.children) {
               if (child.raw) rulesRaw += child.raw;
+              // §5.2.4 — a direct child is a state-child: its `effect=` is a
+              // §51.0.H logic block (isEngineEffectSite).
+              if (child && typeof child === "object") _engineStateChildBlocks.add(child);
               // Build the child node. Use parentContextKind="markup" so any
               // nested state-children inside the engine body are walked with
               // markup-tree semantics (consistent with the block-splitter's
@@ -19416,6 +21196,23 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // _bodyErrors intentionally discarded — see comment block above —
           // EXCEPT the codes no downstream validator re-derives (S437).
           _forwardSubparseErrors(_bodyErrors, errors, 0, block);
+        }
+        // §19.4.5 (S452 review r1) — the source position where the TRIMMED
+        // rulesRaw begins, when rulesRaw is the concatenation of the body
+        // children (contiguous source): lets a message-arm diagnostic carry its
+        // own span (symbol-table.ts W-ARM-PIPE-LEGACY). Absent otherwise.
+        let rulesRawPos = null;
+        {
+          const c0 = block.children && block.children[0];
+          if (rulesRaw && c0 && c0.span && typeof c0.span.start === "number" && typeof c0.span.line === "number") {
+            const lead = rulesRaw.slice(0, rulesRaw.length - rulesRaw.trimStart().length);
+            const nl = lead.lastIndexOf("\n");
+            rulesRawPos = {
+              start: c0.span.start + lead.length,
+              line: c0.span.line + (lead.match(/\n/g) ?? []).length,
+              col: nl < 0 ? (c0.span.col ?? 1) + lead.length : lead.length - nl,
+            };
+          }
         }
         // Also extract from raw content after the header line
         if (!rulesRaw && firstLineEnd >= 0) {
@@ -19451,6 +21248,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           engineName: engineName,
           governedType,
           rulesRaw,
+          ...(rulesRawPos ? { rulesRawPos } : {}),
           // Phase A10 (S78, 2026-05-10) — walkable body children. See note
           // above the bodyChildren = [] declaration for full rationale.
           // ADDITIVE field: undefined on legacy zero-child engine bodies,
@@ -19916,8 +21714,65 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         }
       }
 
-      const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
-      const body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");
+      let tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
+      // S441 round 4 — the COVERAGE invariant, at the token level: the logic
+      // tokenizer silently DROPS characters it has no token for (`★ ✓ →`,
+      // `©`, `🎉`), so body-top text made of them vanished at exit 0. Every
+      // non-whitespace, non-comment character of a body-top run must reach the
+      // parser: each uncovered stretch becomes an IDENT-kind token carrying its
+      // own text and position, which the parser then judges like any other
+      // token (a line of them is not valid code → E-UNQUOTED-DISPLAY-TEXT at
+      // its own line/col; an identifier-shaped one on a new line after a
+      // value also ends the previous statement).
+      if (block._bodyTop === true) tokens = coverUnknownBodyTopChars(tokens, bodyRaw, bodyOffset, bodyLine, bodyCol);
+      // S441 round 5e — the text the token spans index (non-enumerable), so a
+      // collector can take MARKUP verbatim instead of re-joining tokens (the
+      // `renders <markup>` clause of an enum variant — see collectBracedBody).
+      Object.defineProperty(tokens, "_s441Src", { value: { text: bodyRaw, offset: bodyOffset }, enumerable: false, configurable: true });
+      let body;
+      if (block._bodyTop === true) {
+        // S441 — body-top code: parse, then reject what is not valid code.
+        const _errsBefore = errors.length;
+        const _tw = captureTrailingContentWarnings(() =>
+          parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic"));
+        body = _tw.result;
+        // Re-parse the text after a rejected prose line as body-top code
+        // (S441 review #3/#5 — the line-granular recovery; see
+        // rejectBodyTopProse). `_rawBody` is the ORIGINAL run text (before the
+        // worker/state-ref preprocessing), anchored at `bodyOffset`.
+        const _reparseTail = (relStart) => {
+          const _tailText = _rawBody.slice(relStart);
+          const _tailSpan = subBlockSpan(
+            { ...block.span, start: bodyOffset, line: bodyLine, col: bodyCol },
+            _rawBody, relStart, _rawBody.length);
+          const _tailBlock = {
+            type: "logic",
+            raw: "${" + _tailText + "}",
+            span: _tailSpan,
+            depth: block.depth,
+            children: [],
+            name: null,
+            closerForm: null,
+            _synthetic: true,
+            _bareDeclLift: true,
+            _bodyTop: true,
+            // The outer run's coverage check covers the tail too.
+            _bodyTopTail: true,
+          };
+          const _tailNode = buildBlock(_tailBlock, filePath, parentContextKind, counter, errors, parentStateName);
+          return _tailNode && Array.isArray(_tailNode.body) ? _tailNode.body : [];
+        };
+        const _rejected = rejectBodyTopProse(body, _rawBody, bodyOffset, errors, _errsBefore, filePath, _reparseTail, bodyLine);
+        if (_rejected === 0) for (const w of _tw.warnings) console.warn(w);
+        // S441 round 4 — the coverage invariant: every non-whitespace byte of
+        // this run is in a compiled statement or a diagnostic, or the build
+        // fails with E-INTERNAL-BODY-TOP-DROPPED (see assertBodyTopCoverage).
+        if (block._bodyTopTail !== true) {
+          assertBodyTopCoverage(body, tokens, bodyRaw, bodyOffset, errors, filePath, bodyLine, bodyCol);
+        }
+      } else {
+        body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");
+      }
 
       // Hoist imports and exports from the body
       const imports = body.filter(n => n.kind === "import-decl");
@@ -20016,6 +21871,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // so the W-PROGRAM-REDUNDANT-LOGIC walker can distinguish author-written
         // `${...}` blocks from compiler-synthesised lift wrappers. SPEC §40.8.
         ...(block._synthetic ? { _synthetic: true } : {}),
+        // S441 — a `${...}` inside a body-top `"..."` display-text literal
+        // (§4.18.4): it renders, where a body-top `${}` is otherwise evaluated.
+        ...(block._displayInterp === true ? { _displayInterp: true } : {}),
       };
     }
 
@@ -20092,7 +21950,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // their body is "composed solely of ${...} interpolations" describes a
         // construct that is not on their screen.
         const bareIdent = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(
-          query.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim(),
+          query.replace(/--[^\r\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim(),
         );
         const lead = bareIdent
           ? "E-SQL-003: the `?{}` SQL template body is a bare identifier, not a " +
@@ -20237,7 +22095,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const bodyRaw = rawContent.slice(0, rawContent.length - 1); // strip trailing `}`
         const bodyOffset = block.span.start + 2;
         const tokens = tokenizeError(bodyRaw, bodyOffset, block.span.line, block.span.col + 2);
-        const legacyArms = parseErrorTokens(tokens, filePath);
+        const legacyArms = parseErrorTokens(tokens, filePath, errors);
         return {
           id: ++counter.next,
           kind: "error-effect",
@@ -20832,10 +22690,10 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // from logic blocks + top-level markup.
   const { imports, exports, typeDecls, components, machineDecls, channelDecls } = collectHoisted(nodes);
 
-  // W-PROGRAM-001: Check for <program> root element
-  const hasProgramRoot = nodes.some(
-    n => n.kind === "markup" && n.tag === "program"
-  );
+  // W-PROGRAM-001: Check for <program> root element — a TOP-LEVEL `<program>` by
+  // the one shared role definition (program-role.ts; §4.12, S445): no `<program>`
+  // / `<page>` ancestor, whatever markup wraps it.
+  const hasProgramRoot = hasTopLevelProgram(nodes);
 
   // S115 (DD #27 / F6 / Pivot 2) — `authConfig` / `middlewareConfig`
   // extraction from the <program> attributes is NO LONGER done at TAB time.
@@ -20845,7 +22703,9 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // same field names and reproduces the <program>-node annotation side-effect.
   // The E-MW-002 ratelimit-format validation below is an error-emitting CHECK
   // (not extraction) and STAYS here at TAB time.
-  const programNode = nodes.find(n => n.kind === "markup" && n.tag === "program");
+  // The file's top-level <program> by the one shared role definition
+  // (program-role.ts; §4.12, S445) — the same node computeProgramConfig reads.
+  const programNode = findTopLevelProgram(nodes);
 
   // E-MW-002: ratelimit= value must match N/unit where unit is sec, min, or hour.
   if (programNode) {
@@ -21253,9 +23113,8 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // ---------------------------------------------------------------------------
   {
     // Condition (1): top-level <program> present.
-    const entryProgramNode = nodes.find(
-      n => n && n.kind === "markup" && n.tag === "program"
-    );
+    // (program-role.ts, S445 — top-level whatever markup wraps it.)
+    const entryProgramNode = findTopLevelProgram(nodes);
 
     // §64 — a `kind="tool"` program emits a plain runnable MODULE (a CLI / server),
     // not a web application, so the SPA-vs-multi-page-app filesystem inference is

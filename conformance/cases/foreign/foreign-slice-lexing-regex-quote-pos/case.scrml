@@ -1,0 +1,24 @@
+<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        const word = "it's"
+        const clean = _={ in: { word }
+            const strip = (x) => String(x).replace(/['x]/g, "")
+            return strip(word)
+        }=
+        const quotes = _={ in: { word }
+            const dq = /["]/g
+            const bt = /[`]/g
+            const sl = /[/]+/g
+            return [word.replace(dq, ""), "a`b".replace(bt, "-"), "p//q".replace(sl, "|")].join(" ")
+        }=
+        const divided = _={ in: { word } 12 / 3 / 2 }=
+        const templated = _={ in: { word }
+            // a comment's apostrophe and a "quote" are not strings
+            /* nor are they 'here' */
+            return `<${word.length > 3 ? `${word}!` : "short"}>`
+        }=
+        const iter = _={ in: { word } ({ return: (v) => v + "?" }).return(word) }=
+        println(clean, quotes, divided, templated, iter)
+        return 0
+    }
+</program>

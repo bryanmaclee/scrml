@@ -1,0 +1,13 @@
+{
+  "id": "schema-schema-015-comment-in-head-neg",
+  "description": "§39.2 / §14.8.10 — the live declaration of `assets` (WITH `tenant_id`) carries a comment inside its head (`CREATE TABLE assets /* live */ (…)`), and a commented-out stale copy WITHOUT `tenant_id` follows. A comment inside a head does not hide the declaration: both are declarations, they disagree on `tenant_id`, E-SCHEMA-015 (S450 fix round — the first cut lost the live head behind the copy and left the tenant floor off at exit 0).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-tenant-union-and-like.test.js",
+  "spec": "§39.2",
+  "rationale": "§39.2: every table declaration in a `<schema>` body counts, however its head is spelled; same-name declarations that disagree on `tenant_id` SHALL be a compile error (E-SCHEMA-015). Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" (i).",
+  "expect": {
+    "codes": ["E-SCHEMA-015"],
+    "codeCounts": { "E-SCHEMA-015": 1 },
+    "notCodes": ["E-SCHEMA-012", "E-SCHEMA-013", "E-SCHEMA-014"]
+  }
+}

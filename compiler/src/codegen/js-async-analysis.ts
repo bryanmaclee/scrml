@@ -448,6 +448,78 @@ interface AnalyzeOpts {
   eventParam?: string | null;
   /** Leave a SERVER fn call that is the direct value of `_scrml_(cs_)reactive_set` alone (emit-client's IIFE lift owns it). */
   reactiveArg1Skip: boolean;
+  /** Callees that keep that skip when `reactiveArg1Skip` is false (ColorOpts.reactiveArg1SkipKeep). */
+  reactiveArg1SkipKeep?: ReadonlySet<string> | null;
+  /**
+   * S450 (S447 ruling iii) — the root is an EVENT HANDLER: `reactiveArg1Skip` applies
+   * only to the write that is the handler's SOLE root statement (`soleRootWriteCall`),
+   * and an immediately-invoked function expression (a `match` arm body's lowering)
+   * that reaches an awaited call is made `async` and awaited in place, so a write
+   * nested in it is awaited before the next statement. `reactiveArg1SkipKeep`
+   * callees (§36 SSE) keep the skip at every position.
+   */
+  handlerRoot?: boolean;
+}
+
+/**
+ * S450 (S447 ruling iii) — the `_scrml_(cs_)reactive_set(…)` call that is the
+ * handler function's SOLE root statement, or null.
+ *
+ * The handler's root statements are the statements of the listener function's own
+ * body (for a `${(e) => …}` closure handler, the closure's body; a concise body is
+ * its one statement). The compiler-inserted preamble an emitter puts before the
+ * user's statement is not a root statement: the per-item re-resolve and its
+ * replayed / destructured locals (`let`/`const` declarations that reach no async
+ * call), the stale-item guard `if (…) return;`, and the submit
+ * `<event>.preventDefault();`. Empty statements are ignored. The write must be the
+ * LAST such statement and every statement before it preamble; any other shape —
+ * the write nested in an `if` / loop / block / `match` arm, or one of several root
+ * statements — is not the sole root write.
+ */
+function soleRootWriteCall(root: N, eventParam: string | null | undefined, reachesAsyncCall: (n: N) => boolean): N | null {
+  if (!root || !root.body) return null;
+  const isWrite = (e: N): boolean =>
+    !!e && e.type === "CallExpression" && !!e.callee && e.callee.type === "Identifier" &&
+    REACTIVE_ARG1_WRAPPERS.has(e.callee.name);
+  if (root.body.type !== "BlockStatement") return isWrite(root.body) ? root.body : null;
+  const stmts: N[] = root.body.body.filter((s: N) => s && s.type !== "EmptyStatement");
+  if (stmts.length === 0) return null;
+  const last = stmts[stmts.length - 1];
+  let write: N | null = last.type === "ExpressionStatement" && isWrite(last.expression) ? last.expression : null;
+  // The §19.4.3 guarded write `@x = f() !{ … }` is ONE statement, lowered (emit-logic)
+  // to `let R = _scrml_reactive_set("x", f()); if (R && R.__scrml_error) { … }`.
+  if (!write && last.type === "IfStatement" && stmts.length >= 2) {
+    const decl = stmts[stmts.length - 2];
+    const d = decl.type === "VariableDeclaration" && decl.declarations.length === 1 ? decl.declarations[0] : null;
+    const t = last.test;
+    if (d && d.id && d.id.type === "Identifier" && isWrite(d.init) &&
+        t && t.type === "LogicalExpression" && t.operator === "&&" &&
+        t.left && t.left.type === "Identifier" && t.left.name === d.id.name &&
+        t.right && t.right.type === "MemberExpression" && !t.right.computed &&
+        t.right.object && t.right.object.type === "Identifier" && t.right.object.name === d.id.name &&
+        t.right.property && t.right.property.name === "__scrml_error") {
+      write = d.init;
+      stmts.pop();
+    }
+  }
+  if (!write) return null;
+  const isBareReturn = (s: N): boolean =>
+    !!s && ((s.type === "ReturnStatement" && !s.argument) ||
+      (s.type === "BlockStatement" && s.body.length === 1 && s.body[0].type === "ReturnStatement" && !s.body[0].argument));
+  const isPreamble = (s: N): boolean => {
+    if (s.type === "VariableDeclaration") return !reachesAsyncCall(s);
+    if (s.type === "IfStatement") return !s.alternate && isBareReturn(s.consequent) && !reachesAsyncCall(s.test);
+    if (s.type === "ExpressionStatement") {
+      const e = s.expression;
+      return !!eventParam && !!e && e.type === "CallExpression" && e.arguments.length === 0 &&
+        !!e.callee && e.callee.type === "MemberExpression" && !e.callee.computed &&
+        !!e.callee.object && e.callee.object.type === "Identifier" && e.callee.object.name === eventParam &&
+        !!e.callee.property && e.callee.property.name === "preventDefault";
+    }
+    return false;
+  };
+  for (let i = 0; i < stmts.length - 1; i++) if (!isPreamble(stmts[i])) return null;
+  return write;
 }
 
 function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFree: FreeAsyncResolver, opts: AnalyzeOpts): ColoredBody {
@@ -545,6 +617,76 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
     return found;
   };
 
+  // S450 (S447 ruling iii) — handler roots only (AnalyzeOpts.handlerRoot).
+  // A server call that is the direct value of a reactive set and whose callee keeps
+  // the skip at every position (§36 SSE — a subscription, never awaited).
+  const keepsArg1Skip = (call: N, parent: N): boolean => {
+    if (!opts.reactiveArg1SkipKeep || !call.callee || call.callee.type !== "Identifier") return false;
+    if (!opts.reactiveArg1SkipKeep.has(call.callee.name)) return false;
+    const r = asyncOf(call.callee);
+    return !!r && r.root.kind === "server" && !r.local &&
+      !!parent && parent.type === "CallExpression" && !!parent.callee && parent.callee.type === "Identifier" &&
+      REACTIVE_ARG1_WRAPPERS.has(parent.callee.name) && parent.arguments[1] === call;
+  };
+  // Does `n` (not crossing any function) call an async function?
+  const reachesAsyncCall = (n: N): boolean => {
+    let found = false;
+    const walk = (x: N): void => {
+      if (found || !x || typeof x !== "object") return;
+      if (Array.isArray(x)) { for (const c of x) walk(c); return; }
+      if (isFn(x)) return;
+      if (x.type === "CallExpression" && x.callee && x.callee.type === "Identifier" && asyncOf(x.callee)) { found = true; return; }
+      for (const key of Object.keys(x)) {
+        if (key === "type" || key === "start" || key === "end") continue;
+        const v = x[key];
+        if (v && typeof v === "object") walk(v);
+      }
+    };
+    walk(n);
+    return found;
+  };
+  const isIife = (call: N): boolean => {
+    const c = call && call.callee;
+    return !!c && (c.type === "FunctionExpression" || c.type === "ArrowFunctionExpression") && !c.async && !c.generator;
+  };
+  // Will the body of an immediately-invoked function expression await something of
+  // its own once it is made async — an async call (other than an SSE keep write),
+  // an async-callback combinator, or a nested IIFE that does?
+  const iifeAwaits = (fnNode: N): boolean => {
+    let found = false;
+    const walk = (x: N, parent: N): void => {
+      if (found || !x || typeof x !== "object") return;
+      if (Array.isArray(x)) { for (const c of x) walk(c, parent); return; }
+      if (isFn(x)) return;
+      if (x.type === "CallExpression") {
+        if (isIife(x) && iifeAwaits(x.callee)) { found = true; return; }
+        if (x.callee && x.callee.type === "Identifier" && asyncOf(x.callee) && !keepsArg1Skip(x, parent)) { found = true; return; }
+        const m = staticMethodOf(x);
+        const cb = x.arguments[0];
+        if (m && ASYNC_COMBINATOR_METHODS.has(m) && cb && (
+          (cb.type === "Identifier" && !!asyncOf(cb)) ||
+          ((cb.type === "ArrowFunctionExpression" || cb.type === "FunctionExpression") && !cb.async && reachesAsync(cb))
+        )) { found = true; return; }
+      }
+      for (const key of Object.keys(x)) {
+        if (key === "type" || key === "start" || key === "end") continue;
+        const v = x[key];
+        if (v && typeof v === "object") walk(v, x);
+      }
+    };
+    walk(fnNode.body, fnNode);
+    return found;
+  };
+  const soleRootWrite: N | null = opts.handlerRoot && opts.root
+    ? soleRootWriteCall(opts.root, opts.eventParam, reachesAsyncCall)
+    : null;
+  // The functions whose statements run AS PART OF the handler's own statement
+  // sequence: the root, and every IIFE in it that the rule below makes async.
+  // A write inside any other nested function (a callback handed to a scheduler or
+  // a collection method, a closure stored or passed on) runs at its own time and is
+  // not reached by ruling iii — it keeps its existing treatment.
+  const sequenceFns = new Set<N>(opts.handlerRoot && opts.root ? [opts.root] : []);
+
   const edits: Edit[] = [];
   const calls: JsAsyncCall[] = [];
   const escapes: JsAsyncEscape[] = [];
@@ -626,6 +768,20 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
       const method = staticMethodOf(node);
       const args: N[] = node.arguments;
 
+      // S450 (S447 ruling iii) — handler roots: an immediately-invoked function
+      // expression (a `match` arm body is lowered to `(function() { … })()`) whose
+      // body awaits is made `async` and awaited in place, exactly as the same
+      // `match` in a function body is — so a cell write inside it lands before the
+      // handler's next statement. In a sync context it is left alone (the call
+      // inside then fails closed as before).
+      if (opts.handlerRoot && opts.transform && awaitLegal && sequenceFns.has(curFn) && isIife(node) &&
+          !madeAsync.has(node.callee) && iifeAwaits(node.callee)) {
+        madeAsync.add(node.callee);
+        sequenceFns.add(node.callee);
+        makeAsync(node.callee, depth);
+        addAwait(node, parent, depth);
+      }
+
       // (a) clean-family combinator with an async callback → `_scrml_<m>Async`.
       if (method && ASYNC_COMBINATOR_METHODS.has(method) && args.length >= 1) {
         const cb = args[0];
@@ -691,7 +847,12 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
         consumed.add(node.callee);
         const r = asyncOf(node.callee);
         if (r) {
-          const arg1Skip = opts.reactiveArg1Skip && r.root.kind === "server" && !r.local &&
+          // S450 (S447 ruling iii) — in a handler the skip (fire-and-forget) holds only
+          // for the write that is the handler's SOLE root statement; everywhere else
+          // the write is awaited in place. SSE keep callees skip at every position.
+          const skipPositionOk = !opts.handlerRoot || parent === soleRootWrite || !sequenceFns.has(curFn);
+          const arg1Skip = ((opts.reactiveArg1Skip && skipPositionOk) || !!opts.reactiveArg1SkipKeep?.has(node.callee.name)) &&
+            r.root.kind === "server" && !r.local &&
             parent && parent.type === "CallExpression" && parent.callee && parent.callee.type === "Identifier" &&
             REACTIVE_ARG1_WRAPPERS.has(parent.callee.name) && parent.arguments[1] === node;
           const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
@@ -1216,6 +1377,8 @@ export function bodyTextHasOwnAwait(bodyText: string): boolean | null {
 export interface ActiveClientAsync {
   resolveFree: FreeAsyncResolver;
   report: (uses: JsAsyncUses, span: unknown) => void;
+  /** The file's §36 SSE generator server fns (see `handlerStatementListColor`). */
+  sseFnNames?: ReadonlySet<string> | null;
 }
 
 let _activeClientAsync: ActiveClientAsync | null = null;
@@ -1232,10 +1395,13 @@ export function setActiveClientAsync(next: ActiveClientAsync | null): ActiveClie
  * client emission (see `colorAsyncFunctionExpr`); unchanged when no emission is
  * active or the text is not a single function expression that parses.
  */
-export function colorActiveHandler(fnText: string, span?: unknown): string {
+export function colorActiveHandler(fnText: string, span?: unknown, opts: ColorOpts = {}): string {
   const active = _activeClientAsync;
   if (!active || !fnText) return fnText;
-  const colored = colorAsyncFunctionExpr(fnText, active.resolveFree);
+  // S450 — every row / lift handler gets the file's SSE keep set (see
+  // handlerStatementListColor), whatever opts its site passes.
+  const colored = colorAsyncFunctionExpr(fnText, active.resolveFree,
+    opts.reactiveArg1SkipKeep === undefined ? { ...opts, reactiveArg1SkipKeep: active.sseFnNames ?? null } : opts);
   if (!colored) {
     const u = unanalyzableHandlerUses(fnText, active.resolveFree);
     if (u) active.report(u, span);
@@ -1264,8 +1430,194 @@ export function unanalyzableHandlerUses(fnText: string, resolveFree: FreeAsyncRe
 }
 
 export interface ColorOpts {
-  /** See AnalyzeOpts.reactiveArg1Skip. Default true. */
+  /**
+   * See AnalyzeOpts.reactiveArg1Skip. Default true.
+   *
+   * S446 (S439 #4 + §13.2) — a §5.2.3 multi-statement handler (`${s1; s2}`, the
+   * `handlerBlock` form) passes `false`, through `handlerStatementListColor`.
+   * Its statements run IN ORDER, so `@x = save(); @y = @x + 1` must await the
+   * write before the next statement reads `@x` — exactly as the same statements
+   * in a function body do. With the skip on, the arg1 call was left to
+   * emit-client's detached `(async () => …)()` IIFE and the next statement read
+   * the pre-fetch value. Off, the call is awaited in place (the handler becomes
+   * `async`, the same lowering a bare `save()` statement already gets), and
+   * emit-client's `emitterAwaited` branch leaves the awaited site as emitted.
+   * A 1-statement handler keeps the default: `handlerStatementListColor` leaves
+   * `reactiveArg1Skip` unset below two statements, including the 1-statement
+   * values that still carry a handlerBlock (a guarded `!{}` write, a write split
+   * over lines).
+   *
+   * S450 (S447 ruling iii) — for a handler (`colorAsyncFunctionExpr`, i.e. every
+   * listener emitter) the default skip applies ONLY to the write that is the
+   * handler's SOLE root statement (`soleRootWriteCall`): `${@x = save()}` stays
+   * fire-and-forget, byte-identical. A write nested in an `if` / `else` / loop /
+   * block / `match` arm, or in a multi-statement closure body, is awaited in place.
+   */
   reactiveArg1Skip?: boolean;
+  /**
+   * S446 (PR #1217 fix round) — callees that KEEP the arg1 skip when
+   * `reactiveArg1Skip` is false: the §36 SSE generator server fns. Their cell
+   * write is not a value to await — emit-client's GITI-026 pass rewrites
+   * `_scrml_reactive_set(N, _scrml_sse_X(args))` into a subscription, and an
+   * awaited value no longer matches it (the cell would hold the EventSource and
+   * every message would drop).
+   */
+  reactiveArg1SkipKeep?: ReadonlySet<string> | null;
+  /**
+   * S453 (bryan S449 ruling A3) — the boundary id this listener's rejection is
+   * logged under (see `wrapHandlerRejectionLog`). A site that knows its event
+   * and placeholder passes `"<eventName> <placeholderId>"`; everything else
+   * takes `DEFAULT_HANDLER_BOUNDARY_ID`.
+   */
+  boundaryId?: string;
+}
+
+/**
+ * S453 (bryan, user-voice-scrml.md S449 — ruling A3: *"every async event listener
+ * routes its rejection to `_scrml_error_boundary_log`"*, extending B5 to handlers
+ * and closing `g-handler-level-rejection-bypasses-scrml-logging`).
+ *
+ * The problem this closes: `addEventListener` ignores a listener's return value,
+ * so an `async` listener's rejection is observed by NOBODY — it surfaces only as a
+ * browser `unhandledrejection`, outside scrml's logging surface. S450's #1242 made
+ * that reachable from ordinary source: a nested server-call cell write is now
+ * awaited IN PLACE, which colours the handler `async`, so a failed call that used
+ * to reach `_scrml_error_boundary_log` through emit-client's detached
+ * `(async () => …)().catch(…)` IIFE stopped reaching it.
+ *
+ * SHAPE — an in-body `try` / `catch`, NOT a sync listener that fires an async
+ * IIFE. A handler body runs synchronously up to its first `await`, and
+ * `event.preventDefault()` / `stopPropagation()` live in that synchronous prefix.
+ * An IIFE wrapper would move them past a microtask boundary, by which time the
+ * browser has already committed the default action — a silent event-semantics
+ * change nobody asked for. The try/catch keeps the prefix exactly where it is.
+ *
+ * NOT CAUGHT, deliberately: a rejection from a DETACHED promise the body itself
+ * created (emit-client's fire-and-forget `(async () => …)()` write). A
+ * surrounding `try`/`catch` cannot see it — but those sites already carry their
+ * OWN `.catch(… → _scrml_error_boundary_log)` arm, so the surface is covered
+ * there rather than widened here.
+ *
+ * `_scrml_error_boundary_log` is called UNGUARDED, mirroring every sibling emit
+ * site (emit-engine `effect=`, emit-reactive-wiring `on mount`, emit-client
+ * `session.destroy`): it lives in the always-included `errors` runtime chunk.
+ */
+export const DEFAULT_HANDLER_BOUNDARY_ID = "event handler";
+
+/** The catch binding; `_scrml_async_err` matches the sibling `.catch(…)` sites. */
+const HANDLER_ERR_VAR = "_scrml_async_err";
+
+function freshHandlerErrVar(code: string): string {
+  if (!code.includes(HANDLER_ERR_VAR)) return HANDLER_ERR_VAR;
+  for (let i = 2; i < 1000; i++) {
+    const n = `${HANDLER_ERR_VAR}_${i}`;
+    if (!code.includes(n)) return n;
+  }
+  return `${HANDLER_ERR_VAR}_x`;
+}
+
+/**
+ * Wrap one ALREADY-COLOURED async listener's body in the rejection log (see the
+ * block comment above). `code` is the full function-expression text AFTER the
+ * `async` prefix is applied, so it parses and the offsets below are exact
+ * (`analyze`'s edits all land at call sites inside the body, never in a
+ * prologue). Returns `null` — leaving the caller's text byte-identical to the
+ * pre-S453 emission — only when the text does not parse as a single function
+ * expression.
+ *
+ * ⛑ A DIRECTIVE PROLOGUE IS KEPT OUTSIDE THE `try`, NOT BAILED ON. The first
+ * cut of this function returned `null` for a body whose first statement is a
+ * string literal, reasoning (correctly) that moving `"use strict"` inside a
+ * `try` demotes it to an ordinary expression statement and silently changes the
+ * body's strictness. The CONSEQUENCE of that bail was not measured, and it was
+ * the worse bug: the listener is still emitted `async`, so its rejection still
+ * escaped — with no arm, no diagnostic and exit 0. Any string-literal first
+ * statement triggered it, not just `"use strict"`. Emitting
+ * `async function(event) { "use strict"; try { … } catch … }` keeps the
+ * directive in directive position AND gets the arm.
+ */
+function wrapHandlerRejectionLog(code: string, boundaryId: string): string | null {
+  const PREFIX = "(";
+  const SUFFIX = "\n)";
+  const src = PREFIX + code + SUFFIX;
+  const program = tryParse(src);
+  if (!program || program.body.length !== 1) return null;
+  const root = program.body[0]?.expression;
+  if (!root || (root.type !== "FunctionExpression" && root.type !== "ArrowFunctionExpression")) return null;
+  if (root.start !== PREFIX.length) return null;
+  const body = root.body;
+  if (!body || typeof body.start !== "number" || typeof body.end !== "number") return null;
+  const v = freshHandlerErrVar(code);
+  const arm = ` catch (${v}) { _scrml_error_boundary_log(${JSON.stringify(boundaryId)}, ${v}); }`;
+  // src offset `o` is code offset `o - PREFIX.length`.
+  const toCode = (o: number) => o - PREFIX.length;
+  if (body.type === "BlockStatement") {
+    // The DIRECTIVE PROLOGUE — every leading string-literal statement, not just
+    // `"use strict"` — stays where it is; the `try` opens after it.
+    let afterPrologue = body.start + 1;
+    for (const st of (Array.isArray(body.body) ? body.body : []) as N[]) {
+      const isDirective = st && st.type === "ExpressionStatement" &&
+        (typeof st.directive === "string" ||
+          (st.expression && st.expression.type === "Literal" && typeof st.expression.value === "string"));
+      if (!isDirective) break;
+      afterPrologue = st.end;
+    }
+    return `${code.slice(0, toCode(body.start))}{${src.slice(body.start + 1, afterPrologue)} try {` +
+      `${src.slice(afterPrologue, body.end - 1)}}${arm} }` + code.slice(toCode(body.end));
+  }
+  // CONCISE ARROW BODY — the expression becomes a `return`.
+  //
+  // ⚑ The slice must start after the `=>`, NOT at `body.start`. Parentheses are
+  // not AST nodes, so for `(e) => ({a: 1})` acorn puts `body.start` on the
+  // object's `{`, i.e. INSIDE the wrapping parens — slicing from there leaves the
+  // `(` in the head and the `)` in the tail and emits `=> ({ try { … } })`, which
+  // is an object literal with a property named `try`: a SyntaxError. So walk
+  // outward over any balanced wrapping parens first, bounded so the walk can
+  // never reach PREFIX / SUFFIX.
+  //
+  // ⚑ HARDENING NOTE — THE SAME HAZARD SURVIVES ONE LAYER OUT, AND THIS WALK
+  // DOES NOT CLOSE IT. The walk below tests CHARACTERS, so it steps over
+  // whitespace but NOT over comments: `(event) => ( /*x*/ save() /*y*/ )`
+  // reproduces exactly the `try`-as-an-object-literal-property defect described
+  // above, because the comment stops the paren from being found.
+  // It is UNREACHABLE from scrml source today — every handler path re-emits from
+  // the AST and drops comment tokens before reaching this seam (probed across
+  // the delegated, `<each>` and `for … lift` paths) — so it is recorded here
+  // rather than fixed, and the fix is deliberately NOT more character cases.
+  // THE STRUCTURAL FORM IS TO ASK THE TREE, NOT THE TEXT: take the extent from
+  // the AST (the arrow's `=>` token end, or the parenthesized body's own range
+  // via a parser that records parens) instead of scanning backwards for `(`.
+  // Anything that makes this seam see comment tokens must do that first.
+  let s = body.start, e = body.end;
+  for (;;) {
+    let l = s - 1;
+    while (l >= 0 && /\s/.test(src[l]!)) l--;
+    let r = e;
+    while (r < src.length && /\s/.test(src[r]!)) r++;
+    if (l > PREFIX.length && r < src.length - SUFFIX.length && src[l] === "(" && src[r] === ")") {
+      s = l; e = r + 1;
+    } else break;
+  }
+  // Re-parenthesized, so an object literal and a sequence expression stay intact.
+  return `${code.slice(0, toCode(s))}{ try { return (${src.slice(s, e)}); }${arm} }${code.slice(toCode(e))}`;
+}
+
+/**
+ * S446 (S439 #4) — the ColorOpts a §5.2.3 statement-list handler site passes
+ * (see ColorOpts.reactiveArg1Skip). `{}` (the unchanged default) unless the
+ * handler has two or more statements; SSE generator writes keep the skip.
+ */
+export function handlerStatementListColor(stmts: unknown, sseFnNames?: ReadonlySet<string> | null): ColorOpts {
+  // S450 — the SSE keep set is passed at every statement count: a 1-statement
+  // handler can nest an SSE write (`${ if (c) { @feed = ticks() } }`), which is no
+  // longer at the sole root and must still keep its subscription.
+  if (!Array.isArray(stmts) || stmts.length < 2) return { reactiveArg1SkipKeep: sseFnNames ?? null };
+  return { reactiveArg1Skip: false, reactiveArg1SkipKeep: sseFnNames ?? null };
+}
+
+/** `handlerStatementListColor` under the active client emission (row / lift handlers). */
+export function activeHandlerStatementListColor(stmts: unknown): ColorOpts {
+  return handlerStatementListColor(stmts, _activeClientAsync?.sseFnNames ?? null);
 }
 
 /**
@@ -1300,7 +1652,20 @@ export function colorAsyncFunctionExpr(code: string, resolveFree: FreeAsyncResol
   if (!root || (root.type !== "FunctionExpression" && root.type !== "ArrowFunctionExpression")) return null;
   if (root.start !== PREFIX.length) return null;
   const eventParam = root.params && root.params[0] && root.params[0].type === "Identifier" ? root.params[0].name : null;
-  let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, eventParam, reactiveArg1Skip: opts.reactiveArg1Skip !== false });
+  let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, eventParam, reactiveArg1Skip: opts.reactiveArg1Skip !== false, reactiveArg1SkipKeep: opts.reactiveArg1SkipKeep ?? null, handlerRoot: true });
   if (r.rootAsync && !root.async) r = { ...r, code: "async " + r.code };
+  // S453 (bryan S449 A3) — the listener is async exactly when `rootAsync`, and an
+  // async listener's rejection is observed by nobody; route it to
+  // `_scrml_error_boundary_log`. Done HERE, at the one seam every listener
+  // emitter shares (`colorHandlerAsync` → the delegated / non-delegable /
+  // arm-bound-factory registrations in emit-event-wiring.ts; `colorActiveHandler`
+  // → emit-each rows and emit-lift's per-element listeners), rather than at the
+  // call sites: patching one branch of a surface with several spellings is how an
+  // incomplete fix ships (primary.map.md invariant 69). A handler that is NOT
+  // coloured async is byte-identical — the wrap is inside this `if`.
+  if (r.rootAsync) {
+    const wrapped = wrapHandlerRejectionLog(r.code, opts.boundaryId ?? DEFAULT_HANDLER_BOUNDARY_ID);
+    if (wrapped !== null) r = { ...r, code: wrapped };
+  }
   return r;
 }

@@ -1,0 +1,12 @@
+{
+  "id": "program-from-component-config-unread-pos",
+  "description": "§4.12 (S445 review F2) — a `<program auth=\"required\">` that only becomes the file's top-level program through a component expansion (`const Svc = <div><program …>…</program></div>` + `<Svc/>`) has never had its configuration read, so the compiler refuses it with E-PROGRAM-CONFIG-UNREAD rather than guessing. Before S445 it compiled at exit 0 and its server functions answered anonymous callers (reviewer-executed: 200 \"s3cret\").",
+  "language-version": "1.0",
+  "spec": "§4.12, §40.8",
+  "rationale": "§4.12: 'a top-level `<program>` that only exists after component expansion has never had its configuration read, and SHALL be a compile error (`E-PROGRAM-CONFIG-UNREAD`), never a guessed configuration.'",
+  "expect": {
+    "codes": ["E-PROGRAM-CONFIG-UNREAD"],
+    "severity": { "E-PROGRAM-CONFIG-UNREAD": "error" },
+    "codeCounts": { "E-PROGRAM-CONFIG-UNREAD": 1 }
+  }
+}

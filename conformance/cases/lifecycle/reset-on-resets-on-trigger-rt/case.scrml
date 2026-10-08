@@ -1,0 +1,8 @@
+// §6.8.4 — the search page.
+<program>
+  <query> = ""
+  <page reset-on=[@query]> = 1
+  <button id="next" onclick=${@page = @page + 1}>next</>
+  <button id="type" onclick=${@query = @query + "x"}>type</>
+  <p id="page">${@page}</p>
+</program>

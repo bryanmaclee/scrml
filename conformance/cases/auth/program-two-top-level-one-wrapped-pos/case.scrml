@@ -1,0 +1,8 @@
+<program>
+<p>public</p>
+</program>
+<div>
+<program auth="required">
+<p>admin</p>
+</program>
+</div>

@@ -22,6 +22,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const SRC = `<program>
 type Row:struct = { id: string, note: string }
@@ -47,7 +48,7 @@ const SRC_C1 = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-each-if");
+const tmpRoot = resolve(tmpdir(), "scrml-g-each-if");
 
 function compileCase(src = SRC) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

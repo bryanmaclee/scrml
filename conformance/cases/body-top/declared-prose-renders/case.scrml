@@ -1,0 +1,7 @@
+<program>
+<count> = 3
+<p id="a">Welcome to the dashboard.</p>
+"Items ship on Friday."
+"Count is ${@count} now."
+"a < b & c"
+</program>

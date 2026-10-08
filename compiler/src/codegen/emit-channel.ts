@@ -995,6 +995,9 @@ export function emitChannelWatchesServerBoot(
   filePath: string,
   protectedColsByTable: Map<string, Set<string>> | null = null,
   projectReconnectDefault: number | null = null,
+  // §8.1.1 (S451) — the handle of the database scope the `watches=` channels sit in
+  // (the trigger install and the re-SELECT run on the database `pgConnStr` names).
+  sqlHandle: string = "_scrml_sql",
 ): string[] {
   const feeds = channelNodes.filter(
     (n) => n && n._rowChangeSynth && typeof n._rowChangeSynth.pkColumn === "string" && n._rowChangeSynth.pkColumn,
@@ -1029,9 +1032,9 @@ export function emitChannelWatchesServerBoot(
   lines.push("async function _scrml_watches_install_triggers() {");
   lines.push("  try {");
   for (const { ddl } of derived) {
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.fnDDL)});`);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.dropTrigDDL)});`);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.createTrigDDL)});`);
+    lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.fnDDL)});`);
+    lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.dropTrigDDL)});`);
+    lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.createTrigDDL)});`);
   }
   lines.push("  } catch (_e) {");
   lines.push('    console.error("[scrml] watches= trigger install failed:", _e && _e.message);');
@@ -1076,9 +1079,9 @@ export function emitChannelWatchesServerBoot(
     const _hasProt = !!(_protCols && _protCols.size > 0);
     const _selectSql = `SELECT * FROM ${qT} WHERE ${qPk} = $1`;
     if (_hasProt) {
-      lines.push(`        const _rows = _scrml_protect_tag(await _scrml_sql.unsafe(${JSON.stringify(_selectSql)}, [_p.key]), ${JSON.stringify([..._protCols!])});`);
+      lines.push(`        const _rows = _scrml_protect_tag(await ${sqlHandle}.unsafe(${JSON.stringify(_selectSql)}, [_p.key]), ${JSON.stringify([..._protCols!])});`);
     } else {
-      lines.push(`        const _rows = await _scrml_sql.unsafe(${JSON.stringify(_selectSql)}, [_p.key]);`);
+      lines.push(`        const _rows = await ${sqlHandle}.unsafe(${JSON.stringify(_selectSql)}, [_p.key]);`);
     }
     lines.push(`        const _row = _rows && _rows[0];`);
     lines.push(`        if (!_row) return;`);
@@ -1131,22 +1134,31 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
   lines.push(`// WebSocket handlers for ${channelNodes.length} channel(s) — passed to Bun.serve() websocket:`);
   lines.push(`export const _scrml_ws_handlers = {`);
 
+  // §19.10.6 (S449 review F5) — every callback is `async` and AWAITS its onserver
+  // handler. The handler is an async server function; called un-awaited, the
+  // callback returned at once, the request scope _scrml_db_request_scope wraps it
+  // with ended before the handler ran its first statement, and a transaction the
+  // handler left open had no backstop. Awaited, the scope spans the handler.
+
   // open
-  lines.push(`  open(ws) {`);
+  lines.push(`  async open(ws) {`);
   lines.push(`    ws.subscribe(ws.data.__topic);`);
   for (const node of channelNodes) {
     const { name } = extractChannelAttrs(node);
     const { open: openHandler } = extractChannelHandlers(node);
     if (openHandler) {
-      lines.push(`    if (ws.data.__ch === ${JSON.stringify(name)}) { ${openHandler}; }`);
+      lines.push(`    if (ws.data.__ch === ${JSON.stringify(name)}) { await ${openHandler}; }`);
     }
   }
   lines.push(`  },`);
 
   // message
-  lines.push(`  message(ws, raw) {`);
+  lines.push(`  async message(ws, raw) {`);
+  // A malformed client frame is ignored silently, as before — and ONLY that: the parse
+  // has its own `try`, so a handler's own SyntaxError is not mistaken for one.
+  lines.push(`    let d;`);
+  lines.push(`    try { d = JSON.parse(raw); } catch (_e) { return; }`);
   lines.push(`    try {`);
-  lines.push(`      const d = JSON.parse(raw);`);
   lines.push(`      const __ch = ws.data.__ch;`);
   for (const node of channelNodes) {
     const { name } = extractChannelAttrs(node);
@@ -1171,22 +1183,26 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
       if (messageParam) {
         lines.push(`        const ${messageParam} = d;`);
       }
-      lines.push(`        ${msgHandler};`);
+      lines.push(`        await ${msgHandler};`);
     }
 
     lines.push(`      }`);
   }
-  lines.push(`    } catch (_e) {}`);
+  // A FAILING handler — reachable now that it is awaited, previously an unhandled
+  // rejection — is logged.
+  lines.push(`    } catch (_e) {`);
+  lines.push(`      console.error("[scrml] WebSocket onserver:message handler failed:", _e);`);
+  lines.push(`    }`);
   lines.push(`  },`);
 
   // close — Bug 5 fix: include code and reason params (Bun passes them)
-  lines.push(`  close(ws, code, reason) {`);
+  lines.push(`  async close(ws, code, reason) {`);
   lines.push(`    ws.unsubscribe(ws.data.__topic);`);
   for (const node of channelNodes) {
     const { name } = extractChannelAttrs(node);
     const { close: closeHandler } = extractChannelHandlers(node);
     if (closeHandler) {
-      lines.push(`    if (ws.data.__ch === ${JSON.stringify(name)}) { ${closeHandler}; }`);
+      lines.push(`    if (ws.data.__ch === ${JSON.stringify(name)}) { await ${closeHandler}; }`);
     }
   }
   lines.push(`  },`);

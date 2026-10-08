@@ -301,12 +301,14 @@ ${schemaSrc}
     expect(sc.table).toBe("ASSETS");
   });
 
-  test("writes fold too — an UPDATE on a differently-cased name still hard-fails", () => {
+  test("writes fold too — an UPDATE / DELETE on a differently-cased name is still tenant-constrained", () => {
     const ctx = ctxOf("    CREATE TABLE Assets (id INTEGER PRIMARY KEY, tenant_id TEXT)");
     expect(classifyTenantWrite("UPDATE assets SET name = ${1} WHERE id = ${2}", ctx))
-      .toEqual({ kind: "hard-fail", table: "assets", op: "UPDATE" });
+      .toEqual({ kind: "filter-inject", table: "assets", op: "UPDATE" });
     expect(classifyTenantWrite("DELETE FROM ASSETS WHERE id = ${1}", ctx))
-      .toEqual({ kind: "hard-fail", table: "ASSETS", op: "DELETE" });
+      .toEqual({ kind: "filter-inject", table: "ASSETS", op: "DELETE" });
+    expect(classifyTenantWrite("UPDATE ASSETS SET TENANT_ID = ${1}", ctx))
+      .toEqual({ kind: "hard-fail", table: "ASSETS", op: "UPDATE" });
   });
 
   test("NO over-fire: a genuinely different table is still not tenant-scoped", () => {
@@ -615,12 +617,14 @@ ${q}
 </program>`);
   const outDir = join(dir, "out");
   const r = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
-  let server = "";
-  try { server = readFileSync(join(outDir, "app.server.js"), "utf8"); } catch {}
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file. The
+  // fail-closed pins below inspect the codegen of compiles that DO report one
+  // (defense in depth past the error), so read the in-memory server output.
+  const server = r.outputs.get(file)?.serverJs ?? "";
   return { r, server };
 }
 const errCodes = (r) => (r.errors ?? []).map((d) => d.code);
-const tagged = (server) => /_scrml_tenant_tag\(await _scrml_sql/.test(server);
+const tagged = (server) => /_scrml_tenant_scope\(await _scrml_sql/.test(server);
 const COLS = "(id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)";
 const NOTES = "\n    CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)";
 
@@ -693,10 +697,13 @@ describe("E-SCHEMA-012 — compile level: a qualified or unreadable `<schema>` C
     "an unqualified head": `    CREATE TABLE assets ${COLS}`,
     "an unqualified quoted head": `    CREATE TABLE "assets" ${COLS}`,
     "an unqualified IF NOT EXISTS head, lowercase": `    create table if not exists assets ${COLS}`,
+    // S450: the commented copy carries `tenant_id` like the live table — a copy that
+    // DISAGREES on `tenant_id` is E-SCHEMA-015 since S447 "stamp all" (i)
+    // (schema-tenant-union-and-like.test.js), which is not what this row pins.
     "a qualified head inside a -- comment is not rejected":
-      `    CREATE TABLE assets ${COLS}\n    -- CREATE TABLE old.assets (id INTEGER)`,
+      `    CREATE TABLE assets ${COLS}\n    -- CREATE TABLE old.assets (id INTEGER, tenant_id TEXT)`,
     "a qualified head inside a /* */ comment is not rejected":
-      `    CREATE TABLE assets ${COLS}\n    /* CREATE TABLE old.public.assets (id INTEGER) */`,
+      `    CREATE TABLE assets ${COLS}\n    /* CREATE TABLE old.public.assets (id INTEGER, tenant_id TEXT) */`,
     "a qualified head inside a DSL string is not rejected (was a false positive)":
       `    notes {\n      id: integer primary key\n      body: text default("CREATE TABLE x.y.z (a)")\n    }\n    CREATE TABLE assets ${COLS}`,
     "a DOT INSIDE a quoted name is one identifier, not a qualifier":
@@ -812,7 +819,7 @@ ${sql}
     rows
   }
 </program>`;
-  const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[23]$/.test(c));
+  const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[234]$/.test(c));
 
   // ⚑ FLIPPED by the S438 FINAL commit. Round 3 made these silent via a fn-body
   // exemption; both exemption attempts opened escapes, so it was REMOVED
@@ -824,14 +831,16 @@ ${sql}
     expect(schemaCodes(r)).toEqual(["E-SCHEMA-012"]);
   });
 
-  test("F-A: readable unqualified heads in a SECDEF body stay silent", () => {
-    for (const sql of [
-      "      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;",
-      "      CREATE TABLE archived PARTITION OF invoices DEFAULT;",
-    ]) {
-      const { r } = compileSchemaApp(null, secdef(sql));
-      expect(schemaCodes(r)).toEqual([]);
-    }
+  test("F-A: a TEMP staging head in a SECDEF body stays silent", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;"));
+    expect(schemaCodes(r)).toEqual([]);
+  });
+
+  // ⚑ FLIPPED S446 fix round: the fn-body exemption is TEMP/TEMPORARY-only, so a
+  // non-temp no-column-list head in a SECDEF body is E-SCHEMA-014.
+  test("F-A: a non-temp `PARTITION OF` head in a SECDEF body is E-SCHEMA-014", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TABLE archived PARTITION OF invoices DEFAULT;"));
+    expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
   });
 
   test("F-A: a qualified head AFTER a closed `\"\"\"` body is rejected too", () => {
@@ -840,7 +849,10 @@ ${sql}
     ).map((h) => h.name)).toEqual(["b", "t"]);
   });
 
-  test("F-B: `PARTITION OF` and `OF type` heads read fine — no error", () => {
+  // ⚑ FLIPPED S446 (bryan RULED S440 #15, gap g-schema-no-column-list-heads-declare-
+  // nothing): these heads READ fine — never E-SCHEMA-013 — but they declare no column
+  // list the floors can see, so at top level they are now E-SCHEMA-014.
+  test("F-B: `PARTITION OF` / `OF type` / TEMP CTAS heads are READABLE (no 012/013) but are E-SCHEMA-014", () => {
     for (const extra of [
       "    CREATE TABLE assets_default PARTITION OF assets DEFAULT",
       "    CREATE TABLE assets_2026 PARTITION OF assets FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
@@ -848,7 +860,7 @@ ${sql}
       "    CREATE TEMP TABLE scratch ON COMMIT DROP AS SELECT 1",
     ]) {
       const { r } = compileSchemaApp(`    CREATE TABLE assets ${COLS}\n${extra}`);
-      expect(schemaCodes(r)).toEqual([]);
+      expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
     }
   });
 
@@ -963,7 +975,9 @@ ${schema}
   });
 
   test("F3: `PARTITION` is a name follower only as `PARTITION OF`", () => {
-    expect(kinds("CREATE TABLE assets_p PARTITION OF assets DEFAULT")).toEqual([]);
+    // S446: a readable `PARTITION OF` head is no longer accepted silently — it has
+    // no column list, so it is E-SCHEMA-014 (not E-SCHEMA-013 "unreadable").
+    expect(kinds("CREATE TABLE assets_p PARTITION OF assets DEFAULT")).toEqual(["not-a-declaration:assets_p"]);
     expect(kinds("CREATE TABLE assets_p PARTITION assets DEFAULT")).toEqual(["unreadable:assets_p"]);
   });
 });

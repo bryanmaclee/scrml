@@ -1,9 +1,9 @@
 ${
     <items> = []
     function loadTasks() {
-        return ?{`SELECT id, text FROM tasks`}.all()
+        return ?{`SELECT id, text FROM tasks`}.all() !{ _ :> [] }
     }
 }
 <program db="./app.db">
-    <button id="load" onclick=@items = loadTasks()>Load</>
+    <button id="load" onclick={ @items = loadTasks() !{ .Transport(_) :> { return } } }>Load</>
 </program>

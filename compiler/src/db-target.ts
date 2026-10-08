@@ -6,6 +6,8 @@
  * builds `resolveDbDriver` on it. Pure: no I/O.
  */
 
+import { resolve as resolvePath, dirname as dirnamePath } from "node:path";
+
 /**
  * THE classifier for a `db=` / `<db src=>` value (s430-dev-db-stub R2-1). Both
  * `resolveDbDriver` (codegen) and the protect-analyzer (compile-time schema
@@ -26,7 +28,12 @@
  *   mongo               starts with `mongo://` | `mongodb://`   (E-SQL-005)
  *   unsupported-scheme  any other `scheme://` shape, matched case-INsensitively
  *                       exactly as `resolveDbDriver`'s E-SQL-005 branch did — so
- *                       `POSTGRES://` / `MONGODB://` / `SQLITE://` land HERE
+ *                       `POSTGRES://` / `MONGODB://` / `SQLITE://` land HERE.
+ *                       Also a `file:` URI (any case, with or without `//`): it
+ *                       used to fall through to `sqlite-file` and name a file
+ *                       literally called `file:./x.db` beside the source (S445 F8);
+ *                       it is now an unsupported target (E-SQL-005) — write the
+ *                       path itself, or `sqlite:<path>`.
  *   empty               "" / whitespace
  *
  * `scheme` is the matched scheme as WRITTEN (case preserved — it is quoted
@@ -58,6 +65,9 @@ export function classifyDbTarget(raw: string): DbTargetClass {
   if (trimmed.startsWith("mongo://") || trimmed.startsWith("mongodb://")) {
     return { kind: "mongo", trimmed, scheme: trimmed.slice(0, trimmed.indexOf(":")), sqlitePath: null };
   }
+  // S445 F8 — a `file:` URI is not a path; refuse it loudly rather than resolve it as one.
+  const fileUri = trimmed.match(/^(file):/i);
+  if (fileUri !== null) return { kind: "unsupported-scheme", trimmed, scheme: fileUri[1], sqlitePath: null };
   const m = trimmed.match(/^([a-z][a-z0-9+.\-]*):\/\//i);
   if (m !== null) return { kind: "unsupported-scheme", trimmed, scheme: m[1], sqlitePath: null };
   return { kind: "sqlite-file", trimmed, scheme: null, sqlitePath: trimmed };
@@ -69,3 +79,37 @@ export function isDriverConnectionUri(raw: string): boolean {
   return k === "postgres" || k === "mysql";
 }
 
+
+/**
+ * THE resolver for a database FILE target (s445-dev-db-side-file) — the one place
+ * a `db=` / `<db src=>` value becomes an absolute filesystem path.
+ *
+ * A relative SQLite path is resolved against the directory of the SOURCE FILE THAT
+ * DECLARES IT — never against the process working directory. Two consumers call
+ * this and nothing else, so they cannot disagree about which file a value names:
+ *
+ *   - the compile-time schema read (`protect-analyzer.ts`, E-PA-002/003/004), and
+ *   - the emitted runtime handle (`codegen/sqlite-file-target.ts`, reached from
+ *     `emit-server.ts` and `emit-tool.ts`), which writes this same absolute path
+ *     into the server/tool module RELATIVE TO THE MODULE ITSELF, so `scrml dev`,
+ *     `scrml serve`, a built `_server.js` and a `kind="tool"` binary all open the
+ *     file the compiler checked, whatever directory the process was started in.
+ *
+ * Before this existed the two halves used different bases (compile: the source
+ * file's directory; runtime: the process CWD, via a literal re-relativized to the
+ * compile unit's output base), so `scrml dev` opened — and SQLite CREATED — an
+ * empty file the compiler never looked at, or one it did look at and then
+ * reported every declared table missing from (flogence S49/S51).
+ *
+ * SPEC §8.1.1 *Resolution base* (ruling:user-voice-scrml.md S445 item 6) is the
+ * governing sentence: "A relative SQLite file path in a `db=` or `<db src=>` value
+ * … SHALL resolve against the directory of the `.scrml` file that declares it."
+ *
+ * `cls.sqlitePath` is the path with any `sqlite:` prefix removed; for a target the
+ * classifier does not call a sqlite file the trimmed value is resolved as-is, which
+ * reproduces the schema read's pre-existing behaviour for those kinds exactly.
+ * Pure: path arithmetic only, no filesystem access.
+ */
+export function resolveDbFilePath(cls: DbTargetClass, declaringSourceFile: string): string {
+  return resolvePath(dirnamePath(declaringSourceFile), cls.sqlitePath ?? cls.trimmed);
+}

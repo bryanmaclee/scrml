@@ -6,7 +6,7 @@
  *   - emitRuntimeCheck         — emits E-CONTRACT-001-RT boundary check lines
  *   - emitServerParamCheck     — emits server-side boundary check for a parameter
  *   - deriveHtmlAttrs          — derives HTML validation attrs from a predicate
- *   - parsePredicateAnnotation — parses a scrml type annotation string
+ *   - readRefinement — the ONE reader (type-system resolveTypeExpr) as codegen sees it (refinementOf)
  *
  * Coverage:
  *   §1  predicateToJsExpr — comparison predicates (>, >=, <, <=)
@@ -29,12 +29,12 @@
  *   §18 deriveHtmlAttrs — string(uuid) → pattern="..."
  *   §19 deriveHtmlAttrs — string(phone) → type="tel"
  *   §20 deriveHtmlAttrs — or predicate → no HTML attrs (conservative)
- *   §21 parsePredicateAnnotation — number(>0 && <10000) → comparison predicates
- *   §22 parsePredicateAnnotation — string(email) → named-shape
- *   §23 parsePredicateAnnotation — string(.length > 2 && .length < 32) → property predicates
- *   §24 parsePredicateAnnotation — number(>0 && <10000) [invoice_amount] → label
- *   §25 parsePredicateAnnotation — plain "number" → null (not predicated)
- *   §26 parsePredicateAnnotation — unknown base type → null
+ *   §21 readRefinement — number(>0 && <10000) → comparison predicates
+ *   §22 readRefinement — string(email) → named-shape
+ *   §23 readRefinement — string(.length > 2 && .length < 32) → property predicates
+ *   §24 readRefinement — number(>0 && <10000) [invoice_amount] → label
+ *   §25 readRefinement — plain "number" → null (not predicated)
+ *   §26 readRefinement — unknown base type → null
  *   §27 emitRuntimeCheck — check expression uses correct value expression (not hardcoded "value")
  *   §28 E-CONTRACT-004-WARN — deriveHtmlAttrs returns type="email" that conflicts with type="text"
  *   §29 emitServerParamCheck — named shape check validates string format at runtime
@@ -47,8 +47,18 @@ import {
   emitRuntimeCheck,
   emitServerParamCheck,
   deriveHtmlAttrs,
-  parsePredicateAnnotation,
+  refinementOf,
 } from "../../src/codegen/emit-predicates.ts";
+import { resolveTypeExpr } from "../../src/type-system.js";
+
+// S458 one reader — the codegen mirror `parsePredicateAnnotation` is gone. An
+// annotation is read ONCE, by the type-system reader (`resolveTypeExpr`), and
+// codegen consumes the stamped result through `refinementOf`. §21-§26 pin that
+// reader through the same path codegen sees.
+function readRefinement(annotation) {
+  if (typeof annotation !== "string" || annotation.length === 0) return null;
+  return refinementOf(resolveTypeExpr(annotation, new Map()));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers — build PredicateExpr objects directly (mirrors type-system.ts shapes)
@@ -146,10 +156,11 @@ describe("§3 predicateToJsExpr — named-shape predicates", () => {
     expect(expr).toContain("@");  // email regex should include @
   });
 
-  test("url shape emits a URL parsing check", () => {
+  test("url shape emits a call to the shared url shape judge (S457 '6a')", () => {
     const expr = predicateToJsExpr(mkNamedShape("url"), "urlVal");
-    expect(expr).toContain("urlVal");
-    expect(expr).toContain("URL");
+    // The judge (URL parse + §5.2 safe-scheme check) lives in runtime-url-guard.js; the emitted
+    // check calls it rather than carrying a second copy of the reader.
+    expect(expr).toBe("_scrml_url_shape_ok(urlVal)");
   });
 
   test("uuid shape emits a pattern check", () => {
@@ -164,9 +175,19 @@ describe("§3 predicateToJsExpr — named-shape predicates", () => {
     expect(expr).toContain("test");
   });
 
-  test("unknown shape emits pass-through true (defensive)", () => {
+  // S458 F1 — the judge fails CLOSED. (Was: "unknown shape emits pass-through
+  // true (defensive)" — a check that admitted every value.)
+  test("unknown shape fails closed (false), never admits", () => {
     const expr = predicateToJsExpr(mkNamedShape("ssn"), "val");
-    expect(expr).toBe("true");
+    expect(new Function("val", `return ${expr};`)("anything")).toBe(false);
+    expect(expr).not.toMatch(/^\(?true\)?$/);
+  });
+
+  test("an error node and an unknown kind fail closed too", () => {
+    for (const p of [{ kind: "error", message: "x" }, { kind: "bogus" }, null]) {
+      const expr = predicateToJsExpr(p, "val");
+      expect(new Function("val", `return ${expr};`)(5)).toBe(false);
+    }
   });
 });
 
@@ -523,12 +544,12 @@ describe("§20 deriveHtmlAttrs — or predicate → no specific attrs", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §21 parsePredicateAnnotation — number(>0 && <10000)
+// §21 readRefinement — number(>0 && <10000)
 // ---------------------------------------------------------------------------
 
-describe("§21 parsePredicateAnnotation — number range", () => {
+describe("§21 readRefinement — number range", () => {
   test("number(>0 && <10000) returns and-predicate with two comparisons", () => {
-    const result = parsePredicateAnnotation("number(>0 && <10000)");
+    const result = readRefinement("number(>0 && <10000)");
     expect(result).not.toBeNull();
     expect(result.baseType).toBe("number");
     expect(result.label).toBeNull();
@@ -543,12 +564,12 @@ describe("§21 parsePredicateAnnotation — number range", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §22 parsePredicateAnnotation — string(email)
+// §22 readRefinement — string(email)
 // ---------------------------------------------------------------------------
 
-describe("§22 parsePredicateAnnotation — string(email)", () => {
+describe("§22 readRefinement — string(email)", () => {
   test("string(email) returns named-shape predicate", () => {
-    const result = parsePredicateAnnotation("string(email)");
+    const result = readRefinement("string(email)");
     expect(result).not.toBeNull();
     expect(result.baseType).toBe("string");
     expect(result.predicate.kind).toBe("named-shape");
@@ -557,12 +578,12 @@ describe("§22 parsePredicateAnnotation — string(email)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §23 parsePredicateAnnotation — string(.length > 2 && .length < 32)
+// §23 readRefinement — string(.length > 2 && .length < 32)
 // ---------------------------------------------------------------------------
 
-describe("§23 parsePredicateAnnotation — string(.length > 2 && .length < 32)", () => {
+describe("§23 readRefinement — string(.length > 2 && .length < 32)", () => {
   test("parses property predicates from annotation string", () => {
-    const result = parsePredicateAnnotation("string(.length > 2 && .length < 32)");
+    const result = readRefinement("string(.length > 2 && .length < 32)");
     expect(result).not.toBeNull();
     expect(result.baseType).toBe("string");
     expect(result.predicate.kind).toBe("and");
@@ -574,12 +595,12 @@ describe("§23 parsePredicateAnnotation — string(.length > 2 && .length < 32)"
 });
 
 // ---------------------------------------------------------------------------
-// §24 parsePredicateAnnotation — label parsing
+// §24 readRefinement — label parsing
 // ---------------------------------------------------------------------------
 
-describe("§24 parsePredicateAnnotation — label parsing", () => {
+describe("§24 readRefinement — label parsing", () => {
   test("number(>0 && <10000) [invoice_amount] → label = 'invoice_amount'", () => {
-    const result = parsePredicateAnnotation("number(>0 && <10000) [invoice_amount]");
+    const result = readRefinement("number(>0 && <10000) [invoice_amount]");
     expect(result).not.toBeNull();
     expect(result.label).toBe("invoice_amount");
     expect(result.predicate.kind).toBe("and");
@@ -587,44 +608,44 @@ describe("§24 parsePredicateAnnotation — label parsing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §25 parsePredicateAnnotation — plain type → null
+// §25 readRefinement — plain type → null
 // ---------------------------------------------------------------------------
 
-describe("§25 parsePredicateAnnotation — non-predicated types", () => {
+describe("§25 readRefinement — non-predicated types", () => {
   test("plain 'number' returns null", () => {
-    expect(parsePredicateAnnotation("number")).toBeNull();
+    expect(readRefinement("number")).toBeNull();
   });
 
   test("plain 'string' returns null", () => {
-    expect(parsePredicateAnnotation("string")).toBeNull();
+    expect(readRefinement("string")).toBeNull();
   });
 
   test("empty string returns null", () => {
-    expect(parsePredicateAnnotation("")).toBeNull();
+    expect(readRefinement("")).toBeNull();
   });
 
   test("null input returns null", () => {
-    expect(parsePredicateAnnotation(null)).toBeNull();
+    expect(readRefinement(null)).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// §26 parsePredicateAnnotation — unknown base type
+// §26 readRefinement — unknown base type
 // ---------------------------------------------------------------------------
 
-describe("§26 parsePredicateAnnotation — unknown base type", () => {
+describe("§26 readRefinement — unknown base type", () => {
   test("'MyType(>0)' returns null (not a primitive base type)", () => {
-    const result = parsePredicateAnnotation("MyType(>0)");
+    const result = readRefinement("MyType(>0)");
     expect(result).toBeNull();
   });
 
   test("'boolean(true)' returns null (no valid comparison for boolean)", () => {
     // boolean is in the grammar but 'true' is not a numeric comparison
     // parsePredicateExprInternal won't recognize it as comparison/property/named-shape
-    const result = parsePredicateAnnotation("boolean(true)");
+    const result = readRefinement("boolean(true)");
     // May return null if parsing fails, or a named-shape "true" — either is acceptable.
     // The key requirement: it does NOT throw.
-    expect(() => parsePredicateAnnotation("boolean(true)")).not.toThrow();
+    expect(() => readRefinement("boolean(true)")).not.toThrow();
   });
 });
 
@@ -717,7 +738,18 @@ describe("§31 predicateToJsExpr — enum-subset variant-set (§53.15.2)", () =>
   test("variant-set → `[...].includes(valueExpr)` membership test", () => {
     const pred = { kind: "variant-set", variantMode: "oneOf", variants: ["Admin", "Editor"] };
     const js = predicateToJsExpr(pred, "_v");
-    expect(js).toBe(`(["Admin","Editor"].includes(_v))`);
+    // S458 — membership is read off the TAG: a payload variant lowers to
+    // `{ variant, data }`, a unit variant to its bare name.
+    expect(js).toBe(`(["Admin","Editor"].includes(typeof _v === "object" && _v !== null ? _v.variant : _v))`);
+  });
+
+  test("S458: a PAYLOAD variant is judged by its tag (§53.15.5 admits payload variants in a subset)", () => {
+    const pred = { kind: "variant-set", variantMode: "oneOf", variants: ["Ok", "Err"] };
+    const fn = new Function("_v", `return ${predicateToJsExpr(pred, "_v")};`);
+    expect(fn({ variant: "Ok", data: { value: 1 } })).toBe(true);
+    expect(fn({ variant: "Pending", data: {} })).toBe(false);
+    expect(fn("Err")).toBe(true);
+    expect(fn(null)).toBe(false);
   });
 
   test("emitted membership expression is valid, parseable JS that evaluates correctly", () => {
@@ -735,7 +767,7 @@ describe("§31 predicateToJsExpr — enum-subset variant-set (§53.15.2)", () =>
     const lines = emitRuntimeCheck(pred, "_chk_role", "role", null, "narrow:1");
     const code = lines.join("\n");
     expect(code).toContain("E-CONTRACT-001-RT");
-    expect(code).toContain(`["Admin","Editor"].includes(_chk_role)`);
+    expect(code).toContain(`["Admin","Editor"].includes(typeof _chk_role === "object" && _chk_role !== null ? _chk_role.variant : _chk_role)`);
     // Display string is the canonical positive subset form.
     expect(code).toContain("oneOf([.Admin, .Editor])");
     // The whole guard must be valid JS.

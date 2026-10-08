@@ -33,16 +33,17 @@
  * whether driving the cell TRUE actually MOUNTS the gated subtree.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-const TMP_ROOT = resolve("/tmp", "scrml-if-attr-synth-toggle");
+const TMP_ROOT = resolve(tmpdir(), "scrml-if-attr-synth-toggle");
 
 /**
  * A fresh document per test. Every mount registers its own `DOMContentLoaded`
@@ -561,4 +562,11 @@ describe("g-if-attr-per-field-synth-cell — the over-fire guard still holds", (
     expect(document.getElementById("ctl")?.textContent).toBe("true");
     expect(document.body.textContent.includes("GATED")).toBe(true);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

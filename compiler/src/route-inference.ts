@@ -72,7 +72,7 @@ import type {
 } from "./types/ast.ts";
 
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
-import { exprNodeCollectCallees, emitStringFromTree, forEachIdentInExprNode } from "./expression-parser.ts";
+import { exprNodeCollectCallees, emitStringFromTree, emitCodeOnlyStringFromTree, blankLiteralTextInSource, forEachIdentInExprNode } from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, fnParamNameSet } from "./indirect-callee-resolver.ts";
 // Type-only import — `monotonicity-analyzer.ts` imports `CPSSplit` from this
@@ -83,11 +83,16 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 // Ext 1 M1.2 + M1.3 — statement-grain body-DG + multi-batch CPS planner.
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
-import { isToolProgram, findToolMainFn } from "./tool-program.ts";
+import { isToolProgram, findToolMainFn, findTopLevelProgramNode } from "./tool-program.ts";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
+import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
+import { rewriteCodeSegments } from "./codegen/code-segments.ts";
+import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -451,7 +456,10 @@ interface ServerOnlyPattern {
 
 /**
  * Patterns that indicate server-only resource access.
- * Applied to bare-expr node `expr` strings.
+ * Applied to an expression's CODE-ONLY text (`codeOnlyTextForTrigger`): string
+ * literal, template-quasi and comment text is blanked first, so no entry fires
+ * on a literal's contents (§12.4; s451-ri-string-literal — the bare-`session`
+ * entry server-placed `function label(x) { return "your session ended: " + x }`).
  *
  * NOTE — the `Bun.*` / `process.*` namespace-member signal set is NOT in this
  * string-scanned table. A raw-source regex over `emitStringFromTree(exprNode)`
@@ -903,13 +911,50 @@ function clientOnlyGlobalAccessOfNode(
 }
 
 /**
+ * §12.4 — the text a Trigger-1 text pattern is matched against: `exprString`
+ * with every string literal / template quasi / comment's text blanked.
+ *
+ * When `exprString` IS the tree's rendering (`emitStringFromTree(exprNode)` —
+ * every call site but one), the blanking is done on the TREE
+ * (`emitCodeOnlyStringFromTree`): a `lit` node's text is blanked by kind, no
+ * lexing involved. When the caller scanned text the tree does NOT carry (the
+ * match-arm site passes the raw `.expr` because its `?{}` lives only there), or
+ * there is no tree at all (runtime-string fallback), the ACTUAL text is lexed
+ * with the parser's acorn tokenizer (`blankLiteralTextInSource`). Both are
+ * fail-closed: anything they cannot classify is left unblanked (over-fire,
+ * never a leak) — the scanned text never LOSES code the caller handed in.
+ */
+function codeOnlyTextForTrigger(exprNode: unknown, exprString: string): string {
+  if (exprNode && typeof exprNode === "object") {
+    try {
+      if (emitStringFromTree(exprNode as ExprNode) === exprString) {
+        return emitCodeOnlyStringFromTree(exprNode as ExprNode);
+      }
+    } catch {
+      // fall through to the lexer over the actual text
+    }
+  }
+  return blankLiteralTextInSource(exprString);
+}
+
+/**
  * §12.2 Trigger 1 — unified server-only-resource detection for a statement's
  * expression surface. The SINGLE entry point every trigger scanner routes
  * through so the AST-migrated `Bun.*` / `process.*` namespace set is detected
  * string/comment-safe (via the parsed `exprNode`) at EVERY site, not just the
  * bare-expr one. Order:
- *   1. the reduced string patterns (fs.*, `?{`, env(), session, `new SQL/Database`)
- *      — these have no clean AST form here and keep their prior string behaviour;
+ *   1. the reduced text patterns (fs.*, `?{`, env(), session, `new SQL/Database`)
+ *      — matched against the CODE-ONLY rendering of `exprNode`
+ *      (`emitCodeOnlyStringFromTree`: every string literal / template quasi /
+ *      comment's text blanked), NOT the plain `exprString`. §12.4: route
+ *      inference "SHALL NOT classify a function based on the names of
+ *      identifiers that appear inside string-literal contents of its body" —
+ *      `return "your session ended: " + x` server-placed a pure client fn
+ *      through the bare-`session` entry (s451-ri-string-literal; it broke the
+ *      bootstrap build). The patterns are unchanged, so every REAL code use
+ *      still matches exactly as before; only literal text stops matching. When
+ *      `exprNode` is absent (rare runtime-string path) the raw `exprString` is
+ *      scanned as before (fail-closed: over-fires, never leaks);
  *   2. the namespace set (`Bun.*` / `process.*`) via the AST when `exprNode` is
  *      present (the FP fix), or via the fail-closed string fallback when it is
  *      absent (rare runtime-string path; over-fires but never leaks).
@@ -919,7 +964,7 @@ function detectServerOnlyResourceForNode(
   exprNode: unknown,
   exprString: string,
 ): string | null {
-  const strHit = detectServerOnlyResource(exprString);
+  const strHit = detectServerOnlyResource(codeOnlyTextForTrigger(exprNode, exprString));
   if (strHit !== null) return strHit;
   return exprNode
     ? exprNodeCallsServerOnlyResource(exprNode)
@@ -1743,6 +1788,20 @@ export function walkBodyForTriggers(
         localArrayBindings.add(declName);
       }
 
+      // §19.8.3 / §12.2 (S454) — a declaration whose value is a `match` / `if` /
+      // `for` EXPRESSION carries it on `matchExpr` / `ifExpr` / `forExpr` (with
+      // `init: ""`), so none of the scans above saw it. Walk it like any other
+      // statement: `const r = match ?{…}.get() { … }` must server-escalate on the
+      // `?{}` in its scrutinee exactly as `const r = ?{…}.get()` does (before
+      // this, the function was silently CLIENT-placed and the query emitted as
+      // `null /* sql-ref unresolved */`), and calls in the arms are call-graph edges.
+      for (const valueKey of ["matchExpr", "ifExpr", "forExpr"] as const) {
+        const valueNode = (node as any)[valueKey];
+        if (valueNode && typeof valueNode === "object" && typeof valueNode.kind === "string") {
+          visitNode(valueNode);
+        }
+      }
+
       return;
     }
 
@@ -2102,6 +2161,16 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
       return null;
     }
 
+    // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the WHOLE statement
+    // (`guarded-expr { guardedNode }`, a single-object field the array walk
+    // below never reaches). `@c = ?{…}.get() !{…}` is the same cell write as
+    // the unhandled `@c = ?{…}.get()`.
+    const _handledInner = handledSqlGuardInner(node);
+    if (_handledInner) {
+      const found = visitNode(_handledInner as LogicStatement);
+      if (found !== null) return found;
+    }
+
     // Recurse into array children.
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id") continue;
@@ -2452,6 +2521,140 @@ function detectServerFreeClientCellReads(
 
   for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined);
   return out;
+}
+
+/**
+ * Raw-text fields that hold UNPARSED scrml expression text on some AST nodes —
+ * scanned only when the node carries no parsed counterpart for the same field
+ * (`init`/`initExpr`, `expr`/`exprNode`, `value`/`valueExpr`, `result`/
+ * `resultExpr`, `condition`/`conditionExpr`), so a read is never reported twice.
+ */
+const SESSION_RAW_TEXT_FIELDS: ReadonlyArray<[string, readonly string[]]> = [
+  ["init", ["initExpr"]],
+  ["expr", ["exprNode", "exprExpr"]],
+  ["value", ["valueExpr"]],
+  ["result", ["resultExpr"]],
+  ["condition", ["conditionExpr", "condExpr"]],
+  ["bodyRaw", []],
+];
+
+/**
+ * §6.6.9 / §20.5 (S449 ruling item 1) — every `@session` read in a SERVER
+ * context, for E-SESSION-AMBIENT-SERVER. Returns one entry per read (in order)
+ * with the member it names, if any (`@session.userId` → `"userId"`, a bare
+ * `@session` → null).
+ *
+ * Why the read is refused rather than lowered: every server lowering of an
+ * `@name` read produces `_scrml_body["name"]` — the CLIENT request body — so a
+ * server `@session.userId` took its value from whatever the caller sent
+ * (MEASURED S449: `{"session":{"userId":"victim"}}` wrote a row as "victim").
+ * §6.6.9: "`@session` is server-only identity and SHALL NEVER be marshalled
+ * from the client". The server's own session is the §20.5 `session` object.
+ *
+ * Surfaces (verified against real parser output):
+ *   - ExprNode `{kind:"ident", name:"@session"}` anywhere by full-node recursion
+ *     (match arms, conditions, call arguments, lambda bodies…);
+ *   - the LIVE `${…}` interpolations of a `sql` node's query text (`?{}` keeps
+ *     them as text) — `liveSqlInterpolations`, so `${…}` inside SQL strings or
+ *     comments is not a read;
+ *   - a template literal (`lit` with `litType: "template"` keeps its raw text) —
+ *     the interpolations, nested templates included (S449 review F3);
+ *   - a member assignment `@session.userId = …` (`reactive-nested-assign`,
+ *     target "session" — S449 review F3);
+ *   - raw-text expression fields with no parsed counterpart (see
+ *     `SESSION_RAW_TEXT_FIELDS`).
+ * Raw text is scanned with `detectServerAmbientSessionReadsInText` (comment-,
+ * string- and template-aware). Unlike `detectServerFreeClientCellReads` this
+ * walk DOES descend into nested `function-decl` / lambda bodies: they are
+ * emitted inside the server body, so a read there is a server read too.
+ * Whatever this misses is refused by the codegen backstop (server-session-guard.ts).
+ */
+export function detectServerAmbientSessionReads(
+  body: unknown,
+): Array<{ member: string | null; span: Span | undefined; anchor: Span | undefined }> {
+  const out: Array<{ member: string | null; span: Span | undefined; anchor: Span | undefined }> = [];
+  const visited = new WeakSet<object>();
+  // `anchor` = the nearest enclosing span whose line/col were really computed
+  // (statement spans). Expression spans carry a placeholder 1:1, and an
+  // expression re-parsed from a substring carries offsets relative to it.
+  let anchor: Span | undefined;
+  const realLine = (sp: any): boolean => !!sp && typeof sp.line === "number" && !(sp.line === 1 && sp.col === 1);
+  const scanText = (text: string, span: Span | undefined): void => {
+    for (const r of detectServerAmbientSessionReadsInText(text)) out.push({ member: r.member, span, anchor });
+  };
+  const visit = (node: any, inherited: Span | undefined, parent: any): void => {
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : inherited;
+    const savedAnchor = anchor;
+    if (realLine(node.span)) anchor = node.span;
+    if (node.kind === "ident" && node.name === "@session") {
+      const member = parent && parent.kind === "member" && parent.object === node
+        && typeof parent.property === "string" ? parent.property as string : null;
+      out.push({ member, span: sp, anchor });
+    }
+    if (node.kind === "sql" && typeof node.query === "string") {
+      for (const interp of liveSqlInterpolations(node.query)) scanText(interp.expr, sp);
+    } else if (node.kind === "lit") {
+      if (node.litType === "template" && typeof node.raw === "string") scanText(node.raw, sp);
+    } else if (node.kind === "reactive-nested-assign" && node.target === "session") {
+      out.push({ member: Array.isArray(node.path) && typeof node.path[0] === "string" ? node.path[0] : null, span: sp, anchor });
+    } else if (node.kind !== "comment" && node.kind !== "text") {
+      for (const [field, parsed] of SESSION_RAW_TEXT_FIELDS) {
+        const v = node[field];
+        if (typeof v !== "string" || !v.includes("@session")) continue;
+        if (parsed.some((pf) => node[pf] && typeof node[pf] === "object")) continue;
+        scanText(v, sp);
+      }
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const val = node[key];
+      if (Array.isArray(val)) { for (const c of val) visit(c, sp, node); }
+      else if (val && typeof val === "object") visit(val, sp, node);
+    }
+    anchor = savedAnchor;
+  };
+  if (Array.isArray(body)) {
+    for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined, null);
+  } else {
+    visit(body, undefined, null);
+  }
+  return out;
+}
+
+/**
+ * `@session` reads in RAW scrml expression text — an `<endpoint>` arm body
+ * (`bodyRaw`, §61), a template literal's raw text, a `?{}` interpolation. Uses
+ * the shared comment / string / regex / template-aware segmenter
+ * (`rewriteCodeSegments`, code-segments.ts): `'…'` / `"…"` strings, `//` and
+ * `/* *\/` comments and template STATIC text are not code, while `${…}`
+ * interpolations (nested templates included) are (S449 review F5 — the earlier
+ * quote-blanker false-fired inside comments and template text, and an apostrophe
+ * in a comment could hide a real read).
+ */
+export function detectServerAmbientSessionReadsInText(text: string): Array<{ member: string | null }> {
+  const out: Array<{ member: string | null }> = [];
+  if (typeof text !== "string" || !text.includes("@session")) return out;
+  rewriteCodeSegments(text, (code) => {
+    const re = /(?<![\w$@.])@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
+    let r: RegExpExecArray | null;
+    while ((r = re.exec(code)) !== null) out.push({ member: r[1] ?? null });
+    return code;
+  });
+  return out;
+}
+
+/** The author-facing E-SESSION-AMBIENT-SERVER message for one server `@session` read. */
+export function sessionAmbientServerMessage(where: string, member: string | null): string {
+  const fix = member ? `\`session.${member}\`` : "`session.userId` / `session.role` / `session.isAuth` / `session.get(key)`";
+  const read = member ? `\`@session.${member}\`` : "`@session`";
+  return `E-SESSION-AMBIENT-SERVER: ${where} reads ${read}, but \`@session\` is not read on the ` +
+    `server. \`@session\` is the client-side session projection (§20.5); on the server it ` +
+    `would be taken from the request body the client sends, so any caller could claim any ` +
+    `identity — \`@session\` is server-only identity and is never marshalled from the client ` +
+    `(§6.6.9). Use the server's own session object instead: ${fix} (§20.5). ` +
+    `(\`session\` is available in a web-app server function body; see §20.5.1 for where it is not.)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2870,6 +3073,8 @@ export function analyzeCPSEligibility(
    * for back-compat with self-host RI and external callers.
    */
   importedServerNamespaces: Set<string> = new Set(),
+  /** S455 — the function's plain parameter names (what a handled `?{}`'s arm may read on the server). */
+  fnParamNames: ReadonlySet<string> = new Set(),
 ): CPSResult | null {
   if (!body || body.length === 0) return null;
 
@@ -2880,8 +3085,17 @@ export function analyzeCPSEligibility(
   const deferServerIndices: number[] = []; // §19.16.5 — `defer` stmts whose deferred body is server-tier
 
   for (let i = 0; i < body.length; i++) {
-    const node = body[i];
-    if (!node || typeof node !== "object") continue;
+    const stmt = body[i];
+    if (!stmt || typeof stmt !== "object") continue;
+    // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the whole statement; it is tiered
+    // exactly as the statement it guards (`@c = ?{…} !{…}` is reactive-server,
+    // `?{…}.run() !{…}` is server), so a handled query splits the function the
+    // way the unhandled one does. The arms run with the statement, on the
+    // server; an arm that is not a plain value (a block with statements, a
+    // `fail`) could `return` / write a cell there, which a split cannot honour,
+    // so that statement is unsplittable (fail closed, E-RI-002) — never moved.
+    const _handledInner = handledSqlGuardInner(stmt);
+    const node = (_handledInner ?? stmt) as LogicStatement;
 
     const isReactive = isReactiveStatement(node);
     const isServer = isServerTriggerStatement(
@@ -2903,7 +3117,9 @@ export function analyzeCPSEligibility(
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node, importedServerNamespaces));
 
-    if (isServer && (node as any).kind === "defer-stmt") {
+    if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt, fnParamNames)) {
+      mixedIndices.push(i);
+    } else if (isServer && (node as any).kind === "defer-stmt") {
       // §19.16.5 — a server-tier deferred body. Tier it SERVER (never "mixed")
       // so the split is still computed and the caller can report the precise
       // E-DEFER-SERVER-IN-SPLIT instead of a cascading E-RI-002.
@@ -2945,7 +3161,7 @@ export function analyzeCPSEligibility(
   // Detect returnVarName from reactive-server statements.
   let returnVarName: string | null = null;
   for (const ri of reactiveServerIndices) {
-    const node = body[ri];
+    const node = (handledSqlGuardInner(body[ri]) ?? body[ri]) as LogicStatement;
     if (node.kind === "state-decl" && (node as any).name) {
       returnVarName = (node as any).name;
       break;
@@ -2962,6 +3178,82 @@ export function analyzeCPSEligibility(
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
   };
+}
+
+/**
+ * S455 — can every arm of a `!{}` guard on a `?{}` run on the SERVER, with the
+ * query, in a function the CPS split divides? Decided on the arm's AST, as an
+ * ALLOW-LIST (anything not positively known to be safe keeps the split refused,
+ * E-RI-002): an arm is admitted only when its body is a parsed pure VALUE
+ * (`handlerExpr`) built from literals, the function's own parameters and the
+ * arm's own payload binding, with no call, no `@cell` read or write, no
+ * assignment, no lambda — or the empty block `{ }` (no value). A block holding
+ * statements, a `fail`, a call (it may write a cell transitively), or any other
+ * free identifier (a client local is not in the server batch) is refused.
+ */
+function guardArmsAreValues(guard: any, fnParamNames: ReadonlySet<string>): boolean {
+  const arms: any[] = Array.isArray(guard?.arms) ? guard.arms : [];
+  for (const arm of arms) {
+    if (!arm || arm.failExpr) return false;
+    if (!arm.handlerExpr) {
+      // The no-value arm: an empty block. Compared exactly (whitespace aside) —
+      // any other unparsed body is refused.
+      const h = typeof arm.handler === "string" ? arm.handler.split("").filter((c: string) => c.trim() !== "").join("") : "";
+      if (h !== "{}") return false;
+      continue;
+    }
+    const allowed = new Set<string>(fnParamNames);
+    if (typeof arm.binding === "string") {
+      for (const b of arm.binding.split(",")) { const n = b.trim(); if (n && n !== "_") allowed.add(n); }
+    }
+    if (!armExprIsPureValue(arm.handlerExpr, allowed)) return false;
+  }
+  return true;
+}
+
+const PURE_ARM_UNARY_OPS = new Set(["!", "-", "+", "typeof"]);
+/** Allow-list walk for `guardArmsAreValues` — see there. Unknown kinds are refused. */
+function armExprIsPureValue(e: any, allowed: ReadonlySet<string>): boolean {
+  if (!e || typeof e !== "object") return false;
+  switch (e.kind) {
+    case "lit":
+      return e.litType !== "template" || typeof e.raw !== "string" || !e.raw.includes("${");
+    case "ident":
+      return typeof e.name === "string" && !e.name.startsWith("@") && allowed.has(e.name);
+    case "array":
+      return Array.isArray(e.elements) && e.elements.every((x: any) =>
+        x && x.kind === "spread" ? armExprIsPureValue(x.argument, allowed) : armExprIsPureValue(x, allowed));
+    case "object":
+      return Array.isArray(e.props) && e.props.every((p: any) => {
+        if (!p) return false;
+        if (p.kind === "prop") return (!p.computed || armExprIsPureValue(p.key, allowed)) && armExprIsPureValue(p.value, allowed);
+        if (p.kind === "shorthand") return typeof p.name === "string" && allowed.has(p.name);
+        if (p.kind === "spread") return armExprIsPureValue(p.argument, allowed);
+        return false;
+      });
+    case "unary":
+      return PURE_ARM_UNARY_OPS.has(e.op) && armExprIsPureValue(e.argument, allowed);
+    case "binary":
+      return armExprIsPureValue(e.left, allowed) && armExprIsPureValue(e.right, allowed);
+    case "ternary":
+      return armExprIsPureValue(e.condition, allowed) && armExprIsPureValue(e.consequent, allowed) && armExprIsPureValue(e.alternate, allowed);
+    case "member":
+      return armExprIsPureValue(e.object, allowed);
+    case "index":
+      return armExprIsPureValue(e.object, allowed) && armExprIsPureValue(e.index, allowed);
+    default:
+      return false;
+  }
+}
+
+/** The plain parameter names of a function node (destructured params contribute nothing — fail closed). */
+function plainParamNames(fnNode: any): Set<string> {
+  const out = new Set<string>();
+  for (const p of Array.isArray(fnNode?.params) ? fnNode.params : []) {
+    const n = typeof p === "string" ? p : (p && typeof p.name === "string" ? p.name : null);
+    if (n) out.add(n.split(":")[0].trim());
+  }
+  return out;
 }
 
 /**
@@ -3011,8 +3303,8 @@ function hasServerOnlyResourceInInit(
   const init = (node as any).initExpr ? emitStringFromTree((node as any).initExpr) : (typeof (node as any).init === "string" ? (node as any).init : "");
   if (!init) return false;
 
-  // Check for SQL sigil (?{`)
-  if (/\?\{`/.test(init)) return true;
+  // Check for SQL sigil (?{`) — in CODE only, never a string literal's text (§12.4).
+  if (/\?\{`/.test(codeOnlyTextForTrigger((node as any).initExpr, init))) return true;
 
   // Check for other server-only resource patterns (Bun.*/process.* via the
   // parsed initExpr — string/comment-safe, S252 — plus the string patterns).
@@ -4349,6 +4641,118 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
   return found;
 }
 
+/**
+ * §52.13 (S443, g-page-auth-required-protects-nothing) — find the file's
+ * `<page auth="required">` declaration, if any.
+ *
+ * A route is a FILE (buildPageRouteTree maps one file to one URL pattern), and a
+ * `<page>` is that route's per-route attribute container (§40.8). So a
+ * `<page auth="required">` anywhere in the file makes the file's route an
+ * `auth="required"` scope: its document, its compose route and every server
+ * function it declares SHALL be gated. This walk looks for `"required"`
+ * SPECIFICALLY — unlike getExplicitAuthDeclaration, it does not stop at the
+ * first `<page auth=>` of any value and does not let a `<program auth=>` in the
+ * same file answer first — so a stricter page declaration is never shadowed by
+ * a laxer one elsewhere in the file (fail closed).
+ */
+function findPageAuthRequired(fileAST: FileAST): { csrf: string | null } | null {
+  // Only `csrf=` is read from the page: `loginRedirect=` is not a `<page>` attribute
+  // (E-PAGE-INVALID-ATTR — the redirect target comes from the program), and the
+  // `<page>` limb of `session-secure=` is struck (§20.5.1, S440 #13).
+  let found: { csrf: string | null } | null = null;
+  for (const d of collectFileAuthDecls(fileAST)) {
+    if (d.site === "page" && d.value === "required") {
+      found = { csrf: readStringAttrOf(d.node.attrs, "csrf") };
+      break;
+    }
+  }
+  return found;
+}
+
+function readStringAttrOf(attrs: any[] | undefined, name: string): string | null {
+  if (!Array.isArray(attrs)) return null;
+  const a = attrs.find((x: any) => x && x.name === name);
+  if (!a || !a.value || a.value.kind !== "string-literal") return null;
+  return a.value.value ?? null;
+}
+
+/**
+ * Every literal `auth=` declaration that governs this file's route, in document
+ * order: the file's top-level `<program>` (program-role.ts — the only one
+ * compute-program-config reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
+ * is E-PROGRAM-NESTED-AUTH, not a declaration of this route.
+ */
+function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> {
+  const nodes: any[] =
+    (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
+  const out: Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> = [];
+  const at = (node: any) => {
+    const a = Array.isArray(node.attrs) ? node.attrs.find((x: any) => x && x.name === "auth") : null;
+    const sp = (a && a.span) || node.span || {};
+    return { line: sp.line ?? 0, col: sp.col ?? 0 };
+  };
+  // The file's top-level `<program>` by the ONE shared role definition
+  // (program-role.ts; §4.12, S445): no `<program>` / `<page>` ancestor, whatever
+  // markup wraps it — the same node compute-program-config reads.
+  const topProgram = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
+  const walk = (ns: any[] | undefined): void => {
+    if (!Array.isArray(ns)) return;
+    for (const node of ns) {
+      if (!node || node.kind !== "markup") continue;
+      if (node.tag === "program") {
+        // Only the top-level `<program>`'s auth= is this route's program
+        // declaration; a nested / second top-level one is not recorded (its
+        // children are still walked so a `<page auth=>` inside is never missed).
+        if (node === topProgram) {
+          const v = readStringAttrOf(node.attrs, "auth");
+          if (v) out.push({ site: "program", value: v, node, ...at(node) });
+        }
+        walk(node.children);
+        continue;
+      }
+      if (node.tag === "page") {
+        const v = readStringAttrOf(node.attrs, "auth");
+        if (v) out.push({ site: "page", value: v, node, ...at(node) });
+      }
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+/**
+ * Build the auth-middleware entry for a `<page auth="required">` unit. Shared by
+ * Step 8a-page (every such page) and the Step 8b explicit-required limb.
+ * §20.5.1 (S438) — the session fields carry ONLY what this unit itself declares.
+ * A `<page>` carries no `sessionExpiry=`, and one without `session-secure=`
+ * declares no cookie mode, so both stay undefined and the shared resolver
+ * answers from the enclosing `<program>` (or the program stash, or the secure
+ * default). A 2+-`<program>` file keeps the pre-S438 stamp (see Step 8b).
+ */
+function pageAuthRequiredEntry(
+  filePath: string,
+  decl: { loginRedirect: string | null; csrf: string | null; sessionExpiry?: string | null; sessionSecure: string | null },
+  multiProgram: boolean,
+): AuthMiddleware {
+  const entry: AuthMiddleware = {
+    filePath,
+    auth: "required",
+    loginRedirect: decl.loginRedirect ?? "/login",
+    // §40.2 / §52.13 (S441) — `csrf="auto"` is the default under `auth=`.
+    csrf: effectiveCsrfUnderAuth(decl.csrf),
+  };
+  if (multiProgram) {
+    // Pre-S438 stamp, byte-identical (see multiProgramFile in Step 8b).
+    entry.sessionExpiry = decl.sessionExpiry ?? "1h";
+    entry.sessionSecure = (decl.sessionSecure ?? "true") !== "false";
+  } else {
+    if (decl.sessionExpiry != null) entry.sessionExpiry = decl.sessionExpiry;
+    if (decl.sessionSecure != null) entry.sessionSecure = decl.sessionSecure !== "false";
+  }
+  return entry;
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -4357,6 +4761,14 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
 export interface RIInput {
   files: FileAST[];
   protectAnalysis: ProtectAnalysis;
+  /**
+   * The build root (S445): the directory the compile set's route files are
+   * classified against — a file is a route file when its path RELATIVE TO THIS
+   * ROOT has a `pages/` or `routes/` component (§40.2 / §40.8). `compileScrml`
+   * passes its caller's `buildRoot` option; absent, it is inferred from the
+   * application's entry file (`resolveBuildRoot`, SPEC §40.8 "The build root").
+   */
+  buildRoot?: string;
 }
 
 /** Output of the RI stage. */
@@ -4370,6 +4782,11 @@ export interface RIOutput {
  */
 export function runRI(input: RIInput): RIOutput {
   const { files, protectAnalysis } = input;
+  // S445 — the build root and the route-file classifier (§40.2 / §40.8; one rule,
+  // resolveBuildRoot). The resolution's origin feeds W-AUTH-REQUIRED-NOT-INHERITED.
+  const buildRootRes = resolveBuildRoot(files, input.buildRoot);
+  const buildRoot = buildRootRes.root;
+  const findRoutePrefix = makeRouteClassifier(buildRootRes);
 
   // Reset the route counter for deterministic output within a single runRI call.
   _routeCounter = 0;
@@ -5865,12 +6282,120 @@ export function runRI(input: RIInput): RIOutput {
   // Step 6: Finalize RouteMap entries, apply CPS analysis, collect errors.
   // ------------------------------------------------------------------
 
+  // E-SESSION-AMBIENT-SERVER de-dup key set (a nested function can be both its
+  // own record and part of its server parent's body).
+  const _sessionAmbientSeen = new Set<string>();
+  // Only a FILE-SCOPE `<session>` cell owns the name (S449 review F2) — a
+  // component-local one does not: a top-level server read never resolves to it.
+  const _fileScopeSessionCell = new Map<string, boolean>();
+  for (const fileAST of files) {
+    _fileScopeSessionCell.set(fileAST.filePath, fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
+  }
+  // Expression spans carry byte offsets but no line/col; resolve them against the
+  // file source (CE stamps `_sourceText`) so the diagnostic points at the read
+  // rather than 1:1 (S449 review F3).
+  const _sessionSourceByFile = new Map<string, string>();
+  for (const fileAST of files) {
+    const src = (fileAST as any)._sourceText ?? (fileAST as any).ast?._sourceText;
+    if (typeof src === "string") _sessionSourceByFile.set(fileAST.filePath, src);
+  }
+  const sessionSpanWithLine = (span: Span | undefined, anchor: Span | undefined, filePath: string, fallback: Span): Span => {
+    const sp = span as any;
+    const anc = (anchor ?? fallback) as any;
+    if (sp && typeof sp.line === "number" && !(sp.line === 1 && sp.col === 1)) return sp as Span;
+    const src = _sessionSourceByFile.get(filePath);
+    // Trust the expression's byte offset only when it falls inside its enclosing
+    // statement (an expression re-parsed from a substring has relative offsets).
+    const inside = sp && typeof sp.start === "number" && anc && typeof anc.start === "number"
+      && typeof anc.end === "number" && sp.start >= anc.start && sp.start <= anc.end;
+    if (!inside || typeof src !== "string" || sp.start > src.length) return (anc ?? sp) as Span;
+    let line = 1, lineStart = 0;
+    for (let i = 0; i < sp.start; i++) if (src.charCodeAt(i) === 10) { line++; lineStart = i + 1; }
+    return { ...sp, file: sp.file ?? filePath, line, col: sp.start - lineStart + 1 } as Span;
+  };
+  /** Report every `@session` read in `stmts` — the SERVER part of a function body. */
+  const reportServerSessionReads = (record: AnalysisRecord, stmts: unknown[]): void => {
+    if (_fileScopeSessionCell.get(record.filePath) === true) return;
+    const _fnName = record.fnNode.name ?? "<anonymous>";
+    for (const _r of detectServerAmbientSessionReads(stmts)) {
+      const _sp = sessionSpanWithLine(_r.span, _r.anchor, record.filePath, record.fnNode.span as Span);
+      const _key = `${record.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+      if (_sessionAmbientSeen.has(_key)) continue;
+      _sessionAmbientSeen.add(_key);
+      errors.push(new RIError(
+        "E-SESSION-AMBIENT-SERVER",
+        sessionAmbientServerMessage(`Server function \`${_fnName}\``, _r.member),
+        _sp,
+      ));
+    }
+  };
+  // §6.6.9 / §20.5 (S449 ruling item 1) — the other server context that can
+  // name `@session`: a `<cell server> = ?{…}` declaration, whose inline query
+  // runs on the server (§52.6.5 Pattern C). Same refusal, same reason.
+  for (const fileAST of files) {
+    if (_fileScopeSessionCell.get(fileAST.filePath) === true) continue;
+    const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
+    const visitDecls = (list: any[]): void => {
+      if (!Array.isArray(list)) return;
+      for (const node of list) {
+        if (!node || typeof node !== "object") continue;
+        if (node.kind === "state-decl" && node.isServer === true && node.sqlNode) {
+          for (const _r of detectServerAmbientSessionReads([node.sqlNode])) {
+            const _sp = sessionSpanWithLine(_r.span, _r.anchor, fileAST.filePath, node.span as Span);
+            const _key = `${fileAST.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+            if (_sessionAmbientSeen.has(_key)) continue;
+            _sessionAmbientSeen.add(_key);
+            errors.push(new RIError(
+              "E-SESSION-AMBIENT-SERVER",
+              sessionAmbientServerMessage(`The server cell \`<${node.name} server>\`'s load query`, _r.member),
+              _sp,
+            ));
+          }
+        }
+        // An `<endpoint>` arm body (§61) runs on the server; it is kept as raw text.
+        if (node.kind === "endpoint-decl" && Array.isArray(node.arms)) {
+          for (const arm of node.arms) {
+            if (!arm || typeof arm.bodyRaw !== "string") continue;
+            for (const _r of detectServerAmbientSessionReadsInText(arm.bodyRaw)) {
+              const _start = typeof arm.spanStart === "number" ? arm.spanStart : (node.span?.start ?? -1);
+              const _key = `${fileAST.filePath}:endpoint:${_start}:${_r.member ?? ""}`;
+              if (_sessionAmbientSeen.has(_key)) continue;
+              _sessionAmbientSeen.add(_key);
+              const _sp = typeof arm.spanStart === "number"
+                ? sessionSpanWithLine({ file: fileAST.filePath, start: arm.spanStart, end: typeof arm.spanEnd === "number" ? arm.spanEnd : arm.spanStart } as unknown as Span, node.span as Span, fileAST.filePath, node.span as Span)
+                : node.span as Span;
+              errors.push(new RIError(
+                "E-SESSION-AMBIENT-SERVER",
+                sessionAmbientServerMessage(
+                  `The \`<endpoint path="${node.path ?? ""}">\` arm \`${arm.variantName ?? (arm.isWildcard ? "_" : "?")}\``,
+                  _r.member,
+                ),
+                _sp,
+              ));
+            }
+          }
+        }
+        if (node.kind === "logic" && Array.isArray(node.body)) visitDecls(node.body);
+        if (Array.isArray(node.children)) visitDecls(node.children);
+      }
+    };
+    visitDecls(nodes);
+  }
+
   for (const [fnNodeId, record] of analysisMap) {
     // Accumulate E-ROUTE-001 warnings (with severity propagated).
     for (const w of record.warnings) {
       const riErr = new RIError(w.code, w.message, w.span);
       if (w.severity) riErr.severity = w.severity;
       errors.push(riErr);
+    }
+
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER for a
+    // handle() middleware body (wholly server; it leaves this loop just below).
+    // Every other function is checked after its CPS split is known (see
+    // "E-SESSION-AMBIENT-SERVER — the server part" further down).
+    if ((record.fnNode as any).isHandleEscapeHatch === true) {
+      reportServerSessionReads(record, Array.isArray(record.fnNode.body) ? record.fnNode.body : []);
     }
 
     // §39.3: handle() escape hatch — treat as middleware boundary.
@@ -5960,6 +6485,7 @@ export function runRI(input: RIInput): RIOutput {
             importedServerFnNames,
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
+            plainParamNames(record.fnNode),
           );
 
           if (cpsResult && cpsResult.eligible) {
@@ -6100,10 +6626,23 @@ export function runRI(input: RIInput): RIOutput {
               const _cellPhrase = _assignedCellName != null
                 ? `the reactive cell \`@${_assignedCellName}\``
                 : "a `@` reactive variable";
+              // S455 (§19.8.3) — name the cause when the split was refused because
+              // a handled `?{}` has an arm that is not a plain value: the arms run
+              // on the server with the query, and an arm that returns / writes a
+              // cell cannot run there (analyzeCPSEligibility, guardArmsAreValues).
+              const _armBlocker = (body as any[]).find((s) => handledSqlGuardInner(s) && !guardArmsAreValues(s, plainParamNames(record.fnNode)));
+              const _armNote = _armBlocker
+                ? ` The function cannot be split around the \`!{}\` handler on the \`?{}\` at line ${_armBlocker.span?.line ?? "?"}: ` +
+                  `a handled query's arms run on the server with the query, so every arm must be a plain value built ` +
+                  `from literals, the function's parameters and the arm's own binding — and an arm here is not (a block ` +
+                  `with statements, \`fail\`, a call, a \`@cell\`, or a local the server side does not have). Make every ` +
+                  `arm such a value (\`!{ _ :> not }\`) and act on the result after the query, or move the query into a ` +
+                  `\`!\` function and handle it at the call (§19.8.3).`
+                : "";
               errors.push(new RIError(
                 "E-RI-002",
                 `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
-                `assigns to ${_cellPhrase}. Reactive state is client-side; a server ` +
+                `assigns to ${_cellPhrase}.${_armNote} Reactive state is client-side; a server ` +
                 `function has no client-reactive referent and cannot write it directly (§12.2). ` +
                 `For server-authoritative engine state, name a server-owned source cell the engine ` +
                 `hydrates from: \`<engine for=T server=@source ...>\` (§51.0.E — hydrates guard-free ` +
@@ -6161,6 +6700,25 @@ export function runRI(input: RIInput): RIOutput {
           }
         }
       }
+    }
+
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER: an
+    // `@session` read in a SERVER context. Every server lowering of `@name` reads
+    // the CLIENT request body, so a server `@session` was client-controlled
+    // identity. Refused here, before codegen, so no lowering path can emit it
+    // (codegen keeps a fail-closed E-INTERNAL backstop). The server context of a
+    // server-placed function is its whole body — EXCEPT a CPS-split function,
+    // whose client statements run in the browser, where `@session` is the §20.5
+    // projection (S449 review F1): only the statements of its server batches are
+    // scanned (`serverStmtIndices`, which also holds the reactive-server
+    // statements whose initializer runs on the server). A file-scope `<session>`
+    // cell owns the name (E-REACTIVE-003 / the CPS marshal govern it).
+    if (isServer) {
+      const _body: unknown[] = Array.isArray(record.fnNode.body) ? record.fnNode.body : [];
+      const _serverPart = cpsSplit
+        ? cpsSplit.serverStmtIndices.map((i) => _body[i]).filter((x) => x != null)
+        : _body;
+      reportServerSessionReads(record, _serverPart);
     }
 
     // Build the FunctionRoute entry.
@@ -6235,7 +6793,7 @@ export function runRI(input: RIInput): RIOutput {
   // Step 7: Build page route tree from file paths (file-based routing).
   // ------------------------------------------------------------------
 
-  const pages = buildPageRouteTree(files);
+  const pages = buildPageRouteTree(files, buildRootRes);
 
   // ------------------------------------------------------------------
   // Step 8: Collect auth middleware from <program auth="required"> across
@@ -6260,6 +6818,93 @@ export function runRI(input: RIInput): RIOutput {
       // (incl. the "true" default) → secure mode.
       sessionSecure: (authConfig.sessionSecure ?? "true") !== "false",
     });
+  }
+
+  // 8a-page (S443, g-page-auth-required-protects-nothing): a `<page auth="required">`
+  // is an auth scope on its own — §52.13 names `<page>` among the elements whose
+  // `auth="required"` makes "every request to this scope" authenticated. Before
+  // S443 a page's auth= was consulted ONLY on the protect= auto-escalation path
+  // (8b), so a page with no protected columns got no `_scrml_auth_check`, no
+  // protected-document guard, no compose-route gate and only the baseline CSRF
+  // arm: anonymous GET → 200 with the page body; anonymous POST → the server fn
+  // ran. Registering the entry here gives the page exactly the gate
+  // `<program auth="required">` gets (emit-server consumes the one entry).
+  // A `<program auth="required">` in the same file already registered in 8a.
+  //
+  // The APPLICATION's top-level `<program>` (S443 round 3). §40.8: an application
+  // declares its `<program>` exactly once, in its entry file. The entry file is
+  // the web-application file (not a §64 tool) whose FIRST top-level node set
+  // holds a `<program>` and which is NOT a route file under `pages/` / `routes/` —
+  // a `<program>` inside a route file is that file's own (8a gates that file only).
+  // Exactly one such file identifies the application; zero or several identify
+  // none, and nothing is inherited from a guess.
+  // S445: the candidates come from the build-root rule (resolveBuildRoot) — with a
+  // given root exactly the definition above; with an inferred one, the entry file
+  // it was inferred from (never a route file of its own project).
+  const rootCandidates = buildRootRes.candidates;
+  const appRoot: FileAST | null = rootCandidates.length === 1 ? rootCandidates[0] : null;
+
+  // S445 re-review nit (a) — a GIVEN build root that does not contain an application
+  // `<program>` file of the build. Route files are classified relative to the given
+  // root only, so a `<program>` file outside it is neither a route file nor inside
+  // the application the root describes, and a page under the root may stop
+  // inheriting that program's gate (measured: `buildRoot="<src>/pages"` with the app
+  // at `<src>/app.scrml` — a member page holding a wrapped worker program became a
+  // second application and served its server fn anonymously). Say so; the root is
+  // the caller's configuration, so this warns rather than guessing a different root.
+  if (buildRootRes.origin === "given" && buildRoot !== "") {
+    for (const f of rootCandidates) {
+      const norm = f.filePath.replace(/\\/g, "/");
+      if (norm.startsWith(buildRoot + "/")) continue;
+      const w = new RIError(
+        "W-BUILD-ROOT-EXCLUDES-PROGRAM",
+        `W-BUILD-ROOT-EXCLUDES-PROGRAM: this file declares a top-level <program> but lies outside the ` +
+        `build root the compiler was given ("${buildRoot}"). Route files (pages/, routes/) are classified ` +
+        `relative to that root only, so pages under it may not inherit this program's auth= gate — they ` +
+        `can be served without authentication. Give the build root that contains the application's entry ` +
+        `file (compileScrml's buildRoot; §40.8 "The build root").`,
+        { file: f.filePath, start: 0, end: 0, line: 1, col: 1 } as any,
+      );
+      w.severity = "warning";
+      errors.push(w);
+    }
+  }
+
+  // The redirect target of a page scope (S443 rounds 2-3): `loginRedirect=` is not a
+  // `<page>` attribute (E-PAGE-INVALID-ATTR), so it comes from the application's
+  // top-level `<program>`'s declared `loginRedirect=`, else the §52.13 default
+  // `/login`. With no identifiable application program, a single value declared by
+  // the build's `<program>`s answers; several different values answer nothing, the
+  // default applies, and W-AUTH-LOGIN-REDIRECT-AMBIGUOUS says so (emitted below,
+  // only when some page scope actually used the fallback). Shared by 8a-page, 8b, 8c.
+  const declaredRedirectOf = (f: FileAST): string | null =>
+    readStringAttrOf((findTopLevelProgramNode(f) as any)?.attrs, "loginRedirect");
+  let programLoginRedirect = "/login";
+  let ambiguousRedirects: string[] = [];
+  if (appRoot) {
+    programLoginRedirect = declaredRedirectOf(appRoot) ?? "/login";
+  } else {
+    const declared = new Set<string>();
+    for (const f of files) {
+      if (isToolProgram(f)) continue;
+      const v = declaredRedirectOf(f);
+      if (v) declared.add(v);
+    }
+    if (declared.size === 1) programLoginRedirect = [...declared][0];
+    else if (declared.size > 1) ambiguousRedirects = [...declared].sort();
+  }
+  for (const fileAST of files) {
+    if (authMiddleware.has(fileAST.filePath)) continue;
+    const pageDecl = findPageAuthRequired(fileAST);
+    if (!pageDecl) continue;
+    authMiddleware.set(
+      fileAST.filePath,
+      pageAuthRequiredEntry(
+        fileAST.filePath,
+        { csrf: pageDecl.csrf, loginRedirect: programLoginRedirect, sessionSecure: null },
+        countUnitProgramNodes(getNodes(fileAST as any)) >= 2,
+      ),
+    );
   }
 
   // 8b: Auto-escalate auth for files with protect= fields
@@ -6338,21 +6983,10 @@ export function runRI(input: RIInput): RIOutput {
         // `session-secure=` declares no cookie mode, so both stay undefined and
         // the shared resolver answers from the enclosing `<program>` (or the
         // program stash, or the secure default). See the AuthMiddleware fields.
-        const pageEntry: AuthMiddleware = {
-          filePath,
-          auth: "required",
-          loginRedirect: explicit.loginRedirect ?? "/login",
-          csrf: effectiveCsrfUnderAuth(explicit.csrf),
-        };
-        if (multiProgramFile.has(filePath)) {
-          // Pre-S438 stamp, byte-identical (see multiProgramFile above).
-          pageEntry.sessionExpiry = explicit.sessionExpiry ?? "1h";
-          pageEntry.sessionSecure = (explicit.sessionSecure ?? "true") !== "false";
-        } else {
-          if (explicit.sessionExpiry != null) pageEntry.sessionExpiry = explicit.sessionExpiry;
-          if (explicit.sessionSecure != null) pageEntry.sessionSecure = explicit.sessionSecure !== "false";
-        }
-        authMiddleware.set(filePath, pageEntry);
+        // S443: Step 8a-page now registers every `<page auth="required">`, so the
+        // .has() guard above normally skips this file; kept as the same builder
+        // for defense in depth.
+        authMiddleware.set(filePath, pageAuthRequiredEntry(filePath, { ...explicit, loginRedirect: explicit.loginRedirect ?? programLoginRedirect }, multiProgramFile.has(filePath)));
         continue;
       }
 
@@ -6366,7 +7000,7 @@ export function runRI(input: RIInput): RIOutput {
       const autoEntry: AuthMiddleware = {
         filePath,
         auth: "required",
-        loginRedirect: "/login",
+        loginRedirect: programLoginRedirect, // S443 — the program's loginRedirect= (else "/login")
         csrf: "auto",
         autoEscalated: true,
       };
@@ -6398,6 +7032,254 @@ export function runRI(input: RIInput): RIOutput {
         severity: "warning",
         filePath,
       });
+    }
+  }
+
+  // 8c (S443 round 2): a member page of a `<program auth="required">` application
+  // is inside that program's auth scope. §52.13: "`auth="required"` — every
+  // request to this scope SHALL be authenticated"; §34 W-AUTH-PAGE-INFERRED: a
+  // `<page>` without `auth=` under a `<program auth="required">` — "program-level
+  // auth still enforces at the request boundary". Before S443 it did not: entries
+  // are per FILE, the program's entry (8a) covered only the entry file, so a
+  // member route file with no `auth=` served its document and ran its server
+  // functions for anonymous callers (MEASURED: `/plain` 200 with the page body).
+  //
+  // Scope, deliberately narrow:
+  //   - the unit is a §40.8 member route file (`non-entry-page` shape: no
+  //     `<program>`, a top-level `<page>`; or `bare-markup`: top-level markup and
+  //     no `<program>`), not a `_layout.scrml` wrapper;
+  //   - it declares NO `auth=` anywhere. An explicit `auth="optional"` / `"none"`
+  //     page is left exactly as it was (whether it may relax a required program
+  //     is an open ruling — preserved, not decided, here); an explicit
+  //     `auth="required"` page was registered by 8a-page;
+  //   - a unit already registered (8a / 8a-page / 8b) keeps its entry.
+  // The entry is the `<page auth="required">` entry: csrf="auto" (the §40.2
+  // default under auth=), no session fields of its own (the shared resolver
+  // answers from the program, as for every page entry since S438).
+  // S443 round 3 (review F2): inherit ONLY from the application's top-level
+  // `<program>` (appRoot, above). A `<program auth="required">` inside a route file
+  // gates its own file (8a) and nothing else — before r3 any required `<program>`
+  // anywhere gated every unannotated page of a public application.
+  // S443 round-3 PA fix (review): "zero or several → nothing inherited" was fail-OPEN —
+  // adding one innocuous non-route file with its own top-level `<program>` made the
+  // root ambiguous and every unannotated member page of a required application
+  // served anonymously (measured: /about 302 → 200). With several candidates the
+  // application is ambiguous, so fail closed: inherit if ANY candidate declares
+  // `auth="required"`. Route files are already excluded from the candidates, so a
+  // `<program auth="required">` in a page file still gates only its own file (F2).
+  const cfgOf = (f: FileAST): any =>
+    f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null);
+  const rootCfg = appRoot
+    ? cfgOf(appRoot)
+    : (rootCandidates.map(cfgOf).find((c: any) => c && c.auth === "required") ?? null);
+  // S443 round 3 (review F1): only a RECOGNIZED literal (§52.13's three values) is an
+  // auth declaration. `auth="Required"`, `"requird"`, `" required"`, `"off"`,
+  // `auth=${…}` / `auth=@x` declare nothing and the page inherits — fail closed, like
+  // §40.2's unknown csrf= literal resolving to "auto". Since S449 (ruling item 4) every
+  // such value is ALSO E-AUTH-ATTR-INVALID (VP-1), which refuses the build; this
+  // inheritance is the defense-in-depth floor under that error, not a supported shape.
+  const RECOGNIZED_AUTH = new Set(["required", "optional", "none"]);
+  // An unregistered member page of the application that declares no recognized
+  // `auth=` of its own — the unit 8c gates (and, when nothing is inherited, the
+  // unit W-AUTH-REQUIRED-NOT-INHERITED names).
+  const isUnannotatedMember = (fileAST: FileAST): boolean => {
+    const filePath = fileAST.filePath;
+    if (authMiddleware.has(filePath)) return false;
+    const shape = (fileAST as any).fileShape ?? ((fileAST as any).ast ? (fileAST as any).ast.fileShape : undefined);
+    // `bare-markup` (top-level markup, no `<page>` wrapper — W-PROGRAM-001) also
+    // renders a served document of this application (MEASURED: `/side` 200), so
+    // it is in the scope too. A component/library file (`pure-module`) emits no
+    // document and is not gated.
+    if (shape !== "non-entry-page" && shape !== "bare-markup") return false;
+    if (filePath.replace(/\\/g, "/").split("/").pop() === "_layout.scrml") return false;
+    if (collectFileAuthDecls(fileAST).some((d) => RECOGNIZED_AUTH.has(d.value))) return false;
+    return true;
+  };
+  if (rootCfg && rootCfg.auth === "required") {
+    // The redirect target: the program's loginRedirect (see 8a-page).
+    const inheritedLoginRedirect = programLoginRedirect;
+    for (const fileAST of files) {
+      const filePath = fileAST.filePath;
+      if (!isUnannotatedMember(fileAST)) continue;
+      authMiddleware.set(
+        filePath,
+        pageAuthRequiredEntry(
+          filePath,
+          { loginRedirect: inheritedLoginRedirect, csrf: null, sessionSecure: null },
+          countUnitProgramNodes(getNodes(fileAST as any)) >= 2,
+        ),
+      );
+    }
+  }
+
+  // 8d (S443 review F2): one file, conflicting auth= values. A route is one file
+  // and one document, so it cannot be half-served: when a file declares
+  // `auth="required"` at one site and a laxer value at another, the stricter one
+  // wins (8a / 8a-page gate the whole route). That is fail-closed but it silently
+  // overrides the laxer declaration, so it is said out loud.
+  const warn = (code: string, message: string, filePath: string, line: number, col: number): void => {
+    const e = new RIError(code, message, { file: filePath, start: 0, end: 0, line, col } as unknown as Span);
+    e.severity = "warning";
+    e.filePath = filePath;
+    errors.push(e);
+  };
+  for (const fileAST of files) {
+    const decls = collectFileAuthDecls(fileAST);
+    const strict = decls.find((d) => d.value === "required");
+    const lax = decls.filter((d) => d.value !== "required");
+    if (!strict || lax.length === 0) continue;
+    const where = (d: { site: string; value: string; line: number; col: number }) =>
+      `\`<${d.site} auth="${d.value}">\` at ${d.line}:${d.col}`;
+    warn(
+      "W-AUTH-FILE-CONFLICT",
+      `W-AUTH-FILE-CONFLICT: this file declares ${where(strict)} and ${lax.map(where).join(", ")}. ` +
+        `A route is one file and one document, so the stricter declaration wins: the whole route ` +
+        `(its document and every server function in this file) requires authentication and ` +
+        `${lax.length === 1 ? "the laxer declaration has" : "the laxer declarations have"} no effect. ` +
+        `Move the public content to its own page file, or make the declarations agree. (§40.2, §52.13)`,
+      fileAST.filePath,
+      lax[0].line,
+      lax[0].col,
+    );
+  }
+
+  // 8c-warn (S445, g-required-program-with-no-identified-app-root-is-silent): a
+  // `<program auth="required">` that is NOT the application's program — a route
+  // file's own `<program>` (under the build root's `pages/` / `routes/`) — gates
+  // only its own file (§40.2), so when the application program (if one is
+  // identified) is not itself required, the unannotated member pages are public.
+  // §40.2 fixes that outcome ("When the build has zero such files, no application
+  // `<program>` is identified and nothing below is inherited"; "A `<program>`
+  // declared inside a route file is that file's own: its `auth=` governs that file
+  // only"), and §40.8 already makes a `<program>` outside the entry file off-shape.
+  // What was wrong is that it was SILENT: an author who wrote the required
+  // `<program>` in the wrong file (the entry placed under `pages/`, or the build
+  // root pointed one directory too deep) shipped every member page anonymously
+  // with no diagnostic. Said out loud, naming the pages and the build root.
+  const inheritanceInEffect = !!(rootCfg && rootCfg.auth === "required");
+  if (!inheritanceInEffect) {
+    const routeRequiredPrograms = files.filter((f) => {
+      if (isToolProgram(f)) return false;
+      if (rootCandidates.includes(f)) return false;
+      const cfg = cfgOf(f);
+      return !!(cfg && cfg.auth === "required") && findTopLevelProgramNode(f) !== null;
+    });
+    if (routeRequiredPrograms.length > 0) {
+      const ungated = files.filter((f) => isUnannotatedMember(f)).map((f) => f.filePath);
+      if (ungated.length > 0) {
+        const shown = ungated.slice(0, 8).map((p) => `"${p}"`).join(", ") +
+          (ungated.length > 8 ? `, and ${ungated.length - 8} more` : "");
+        const rootShown = `"${buildRoot || "/"}"`;
+        const entryWhy = buildRootRes.entryBasis === "shallowest"
+          ? `it is the shallowest <program> file (every <program> file of the build lies under a directory named pages or routes)`
+          : `it is the one <program> file with no pages/ or routes/ directory in its path`;
+        const rootHow = buildRootRes.origin === "given"
+          ? `relative to the build root the compiler was given (compileScrml's buildRoot), ${rootShown}`
+          : buildRootRes.origin === "inferred"
+            ? `relative to the build root ${rootShown}, the directory of the entry file ` +
+              `"${buildRootRes.entry?.filePath ?? ""}" — inferred as the entry because ${entryWhy}`
+            : `with no single build root inferable (several application <program>s), by the pages/ and routes/ ` +
+              `directories in its path`;
+        const appSentence = appRoot
+          ? `The application's <program> ("${appRoot.filePath}") does not declare auth="required"`
+          : rootCandidates.length === 0
+            ? `No application <program> is identified in this build: no file with a top-level <program> ` +
+              `sits outside the build root's pages/ and routes/`
+            : `None of the application <program>s (${rootCandidates.map((f) => `"${f.filePath}"`).join(", ")}) declares auth="required"`;
+        const one = ungated.length === 1;
+        for (const f of routeRequiredPrograms) {
+          const norm = f.filePath.replace(/\\/g, "/");
+          const rel = buildRoot && norm.startsWith(buildRoot + "/") ? norm.slice(buildRoot.length + 1) : norm;
+          const isRoute = findRoutePrefix(norm) !== null;
+          const where = isRoute
+            ? `the file is the route file "${rel}", and a route file's own <program> is not the application's`
+            : `the file ("${rel}") lies outside that root, so its <program> is not the application's`;
+          const cliRemedy = buildRootRes.origin === "given"
+            ? `If this file is meant to be the application's entry file, give the project directory as ` +
+              `compileScrml's buildRoot.`
+            : buildRootRes.origin === "inferred"
+              ? `If this file is meant to be the application's entry file, move it out of the pages/ or routes/ ` +
+                `directory it is in — the compiler infers the build root from where the <program> files are ` +
+                `(§40.8 "The build root"), and a <program> file that is not under the root's pages/ or routes/ is ` +
+                `an application program.`
+              : `If this file is meant to be the application's entry file, move it out of the pages/ or routes/ ` +
+                `directory it is in (§40.8 "The build root").`;
+          warn(
+            "W-AUTH-REQUIRED-NOT-INHERITED",
+            `W-AUTH-REQUIRED-NOT-INHERITED: this file's <program auth="required"> gates only this file: ` +
+              `classified ${rootHow}, ${where} (§40.2). ` +
+              `${appSentence}, so ${one ? "this page, which declares" : `these ${ungated.length} pages, which declare`} ` +
+              `no auth= of ${one ? "its" : "their"} own, ${one ? "is" : "are"} served WITHOUT ` +
+              `authentication: ${shown}. ${cliRemedy} Otherwise: if the whole application requires sign-in, declare ` +
+              `<program auth="required"> in the application's entry file; if only this ` +
+              `route does, write <page auth="required"> here instead. (§40.2, §40.8)`,
+            f.filePath,
+            0,
+            0,
+          );
+        }
+      }
+    }
+  }
+
+  // 8e (S443 review F3): a gated route whose redirect target is itself 302s to
+  // itself forever. Compare the entry's loginRedirect with the route's own URL
+  // (the page-route pattern for a `pages/`/`routes/` file, else `/<basename>`),
+  // ignoring a trailing `/`, a `.html` suffix and any query/fragment. Compared
+  // CASE-SENSITIVELY (S443 r3 review F5): routing is case-sensitive (`/SECRET` 404s
+  // where `/secret` is served), so `/Login` is not `/login` and does not loop.
+  const normPath = (p: string): string => {
+    let s = p.split(/[?#]/)[0].replace(/\.html$/, "");
+    if (s.length > 1) s = s.replace(/\/+$/, "");
+    return s;
+  };
+  for (const [filePath, entry] of authMiddleware) {
+    if (entry.auth !== "required" || !entry.loginRedirect) continue;
+    const norm = filePath.replace(/\\/g, "/");
+    const base = norm.split("/").pop()!.replace(/\.scrml$/, "");
+    const own = new Set<string>();
+    if (findRoutePrefix(norm)) {
+      const pr = pages.get(filePath);
+      if (pr) own.add(normPath(pr.urlPattern));
+    } else {
+      own.add(normPath("/" + base));
+      if (base === "index") own.add("/");
+    }
+    if (!own.has(normPath(entry.loginRedirect))) continue;
+    warn(
+      "W-AUTH-REDIRECT-LOOP",
+      `W-AUTH-REDIRECT-LOOP: this route requires authentication and its unauthenticated requests ` +
+        `are redirected to "${entry.loginRedirect}" — which is this route itself, so an anonymous ` +
+        `visitor is redirected in a loop and never reaches a login form. Give the login page ` +
+        `\`<page auth="optional">\` or \`<page auth="none">\`, or point the <program>'s ` +
+        `loginRedirect= at a page that does. (§52.13)`,
+      filePath,
+      0,
+      0,
+    );
+  }
+
+  // 8f (S443 r3 review nit): the redirect-target fallback is said out loud. When no
+  // application `<program>` is identifiable and the build's `<program>`s declare
+  // different `loginRedirect=` values, a page scope (8a-page / 8b / 8c — every
+  // entry that is not a `<program auth="required">`'s own) redirects to `/login`.
+  if (ambiguousRedirects.length > 0) {
+    const pageScope = [...authMiddleware.keys()].find((fp) => {
+      const f = files.find((x) => x.filePath === fp);
+      const cfg = f ? (f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null)) : null;
+      return !(cfg && cfg.auth === "required");
+    });
+    if (pageScope) {
+      warn(
+        "W-AUTH-LOGIN-REDIRECT-AMBIGUOUS",
+        `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS: this build has no single application <program> and its ` +
+          `<program>s declare different loginRedirect= values (${ambiguousRedirects.map((v) => `"${v}"`).join(", ")}), ` +
+          `so page scopes redirect unauthenticated requests to the default "/login". Build one ` +
+          `application per output directory, or make the loginRedirect= values agree. (§40.2, §52.13)`,
+        pageScope,
+        0,
+        0,
+      );
     }
   }
 
@@ -6437,7 +7319,7 @@ export function runRI(input: RIInput): RIOutput {
         if (!rec || rec.filePath !== epFilePath) return false;
         const nm = rec.fnNode.name;
         if (!nm || exportedFnNames.has(nm)) return false;
-        if ((rec.fnNode as Record<string, unknown>).isGenerator === true) return false;
+        if (rec.fnNode.isGenerator === true) return false;
         const route = functions.get(id);
         if (route && route.boundary !== "client") return false;
         return true;
@@ -6525,20 +7407,185 @@ export function runRI(input: RIInput): RIOutput {
 const ROUTE_PREFIXES: readonly string[] = ["/routes/", "/pages/"];
 
 /**
- * Find the first matching route-directory prefix in a file path.
+ * How the route files of a build are told apart from its application entry file
+ * (S445 — SPEC §40.8 "The build root"). ONE rule, `resolveBuildRoot`:
  *
- * Returns the matched prefix string and the index where it appears, or `null`
- * if the file is not under any recognized route directory (i.e. a single-page
- * application file at the project root). The matched prefix is returned so
- * callers can compute `routesIdx + prefix.length` without re-hardcoding either
- * prefix literal.
+ *   - GIVEN (`compileScrml({ buildRoot })`): the build root is that directory. A
+ *     route file is one whose path BELOW it has a `pages/` or `routes/` component;
+ *     the application `<program>` candidates are the web-application files with a
+ *     top-level `<program>` that are not route files (§40.2, verbatim).
+ *   - INFERRED (no root given — every CLI form, and a file list). The build root is
+ *     not known, so it is read off the application's entry file (§40.8: "The entry
+ *     file is the file resolved by the build root" — read in reverse). Let E be the
+ *     web-application files with a top-level `<program>`. The candidates are the
+ *     members of E with no `pages/` or `routes/` directory ANYWHERE in their path
+ *     (these cannot be route files whatever the root is); when there are none —
+ *     every `<program>` lies under some directory so named, which is exactly the
+ *     case where a directory ABOVE the project could be one — the candidates are
+ *     the members of E in the shallowest directory. Exactly one candidate is the
+ *     entry file, and the build root is ITS directory: route files are then the
+ *     files with a `pages/` or `routes/` component below it, or — when none lies
+ *     below — the files directly in it when it is itself named `pages` or
+ *     `routes` (a flat route directory whose entry file sits beside its pages).
+ *     The application-`<program>` candidates are then RE-READ against that root by
+ *     the given-root definition (the entry, plus every `<program>` file that is not
+ *     a route file relative to it), so a second non-route `<program>` makes the
+ *     application ambiguous (§40.2 fail-closed) wherever the project lives.
+ *   - NO SINGLE ENTRY (zero candidates, or several): no build root is inferred.
+ *     Route files keep the pre-S445 classification (a `pages/` / `routes/`
+ *     component anywhere in the path). Security does not depend on it: with zero
+ *     `<program>`s nothing can be inherited, and with several §40.2's ambiguity
+ *     rule fails closed.
+ *
+ * Why the entry file decides, not a directory: the only way the absolute-path
+ * reading could open a page (g-app-root-route-prefix-matched-on-absolute-path) is
+ * by mistaking the application's `<program>` for a route file's; anchoring on that
+ * `<program>` removes the mistake, and every build with no `pages`/`routes`
+ * directory above its entry file classifies exactly as before.
  */
-function findRoutePrefix(filePath: string): { idx: number; prefix: string } | null {
+export interface BuildRootResolution {
+  /** "given" / "inferred" — a root is known; "none" — no single entry, legacy classification. */
+  origin: "given" | "inferred" | "none";
+  /** Separator-normalized, no trailing "/" ("" when origin is "none"). */
+  root: string;
+  /** The application-`<program>` candidates for Step 8 (§40.2). */
+  candidates: FileAST[];
+  /** Inferred roots only: the entry file the root was read off, and why it was chosen. */
+  entry?: FileAST;
+  entryBasis?: "outside-route-dirs" | "shallowest";
+}
+
+/** A web-application file (not a §64 tool) with a top-level `<program>`. */
+function isApplicationProgramFile(f: FileAST): boolean {
+  try {
+    return !isToolProgram(f) && findTopLevelProgramNode(f) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** `\` → `/`, trailing `/` dropped (so the filesystem root `/` becomes `""`). */
+function normalizeBuildRoot(root: string): string {
+  return root.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** The pre-S445 reading: a `pages/` / `routes/` component anywhere in the path. */
+function legacyRoutePrefix(norm: string): { idx: number; prefix: string } | null {
   for (const prefix of ROUTE_PREFIXES) {
-    const idx = filePath.indexOf(prefix);
+    const idx = norm.indexOf(prefix);
     if (idx !== -1) return { idx, prefix };
   }
   return null;
+}
+
+/** A `pages/` / `routes/` component BELOW `root` (norm must lie under it). */
+function belowRootPrefix(norm: string, root: string): { idx: number; prefix: string } | null {
+  const view = norm.slice(root.length); // begins with the "/" after the root
+  for (const prefix of ROUTE_PREFIXES) {
+    const i = view.indexOf(prefix);
+    if (i !== -1) return { idx: i + root.length, prefix };
+  }
+  return null;
+}
+
+export function resolveBuildRoot(files: readonly FileAST[], givenRoot?: string): BuildRootResolution {
+  const programs = files.filter(isApplicationProgramFile);
+  if (typeof givenRoot === "string" && givenRoot !== "") {
+    const res: BuildRootResolution = { origin: "given", root: normalizeBuildRoot(givenRoot), candidates: [] };
+    const classify = makeRouteClassifier(res);
+    res.candidates = programs.filter((f) => classify(f.filePath) === null);
+    return res;
+  }
+  const norm = (f: FileAST): string => f.filePath.replace(/\\/g, "/");
+  let candidates = programs.filter((f) => legacyRoutePrefix(norm(f)) === null);
+  if (candidates.length === 0 && programs.length > 0) {
+    const depth = (f: FileAST): number => norm(f).split("/").length;
+    const min = Math.min(...programs.map(depth));
+    candidates = programs.filter((f) => depth(f) === min);
+  }
+  const basis: "outside-route-dirs" | "shallowest" =
+    programs.some((f) => legacyRoutePrefix(norm(f)) === null) ? "outside-route-dirs" : "shallowest";
+  if (candidates.length === 1) {
+    const entry = candidates[0];
+    const n = norm(entry);
+    const res: BuildRootResolution = {
+      origin: "inferred",
+      root: n.slice(0, n.lastIndexOf("/")),
+      candidates: [],
+      entry,
+      entryBasis: basis,
+    };
+    // The root is now known: the candidates are recomputed by the given-root
+    // definition (§40.2 — the `<program>` files that are not route files relative
+    // to it), plus the entry itself. A second `<program>` that is not a route file
+    // of the inferred root (S445 review round 4: `…/pages/deep/{scratch.scrml,
+    // src/app.scrml}`) makes the application ambiguous — §40.2 fails closed —
+    // exactly as it would outside a `pages` ancestor; the pick of the shallowest
+    // file must not make it location-dependent.
+    const classify = makeRouteClassifier(res);
+    res.candidates = programs.filter((f) => f === entry || classify(f.filePath) === null);
+    return res;
+  }
+  return { origin: "none", root: "", candidates };
+}
+
+/**
+ * The route-file classifier for a resolution — the ONE test every route decision
+ * in this file uses (Step 8's candidates, the 8e redirect-loop URL, the page tree).
+ * Returns the matched prefix and its index in the separator-normalized path
+ * (callers slice `normalized.slice(idx + prefix.length)`), or `null`.
+ * `routes/` is looked up before `pages/` (the legacy tiebreak, above).
+ */
+function makeRouteClassifier(res: BuildRootResolution): (filePath: string) => { idx: number; prefix: string } | null {
+  const root = res.root;
+  const rootName = root.slice(root.lastIndexOf("/") + 1);
+  return (filePath: string) => {
+    const norm = filePath.replace(/\\/g, "/");
+    if (res.origin === "none") return legacyRoutePrefix(norm);
+    const under = root === "" ? norm.startsWith("/") : norm.startsWith(root + "/");
+    if (!under) return res.origin === "given" ? null : legacyRoutePrefix(norm);
+    const below = belowRootPrefix(norm, root);
+    if (below || res.origin === "given") return below;
+    // Inferred root itself named pages/routes, nothing below it: a flat route directory.
+    if (rootName === "pages" || rootName === "routes") {
+      return { idx: root.length - rootName.length - 1, prefix: "/" + rootName + "/" };
+    }
+    return null;
+  };
+}
+
+/**
+ * S445 item 1 — the build facts `program-role.ts#stampImpliedProgramAncestors`
+ * needs: does an application program exist, and which files are its route files.
+ * Decided by THIS file's build-root resolution (`resolveBuildRoot` +
+ * `makeRouteClassifier`), the same rule Step 8 uses, so the implied ancestor and
+ * the app-root identification cannot disagree. `api.js` calls it once, after
+ * parsing and before PRECG, over the parsed FileASTs (no file is stamped yet, so
+ * every `<program>` has its structural role here).
+ *
+ * An application program exists when a candidate is a real application file —
+ * the inferred/given entry, or a candidate that is not itself a route file.
+ * `origin: "none"` with only route-file candidates (the legacy all-`<program>`
+ * `routes/` set, where the shallowest route files are the fallback candidates)
+ * has NO application program, so nothing becomes nested there.
+ */
+export function programRoleBuildFacts(
+  files: readonly FileAST[],
+  givenRoot?: string,
+): { applicationExists: boolean; isRouteFile: (fileAST: unknown) => boolean } {
+  const res = resolveBuildRoot(files, givenRoot);
+  const classify = makeRouteClassifier(res);
+  const appFiles = new Set<FileAST>(
+    res.candidates.filter((f) => f === res.entry || classify(f.filePath) === null),
+  );
+  return {
+    applicationExists: appFiles.size > 0,
+    isRouteFile: (fileAST: unknown) => {
+      const f = fileAST as FileAST;
+      if (!f || typeof f.filePath !== "string" || appFiles.has(f)) return false;
+      return classify(f.filePath) !== null;
+    },
+  };
 }
 
 /**
@@ -6573,8 +7620,16 @@ function findRoutePrefix(filePath: string): { idx: number; prefix: string } | nu
  * loginRedirect targets to pages under `pages/...`, closing the Batch A.1 loop
  * on `scrml generate auth` scaffold output.
  */
-export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
+export function buildPageRouteTree(
+  files: FileAST[],
+  buildRoot?: string | BuildRootResolution,
+): Map<string, PageRoute> {
   const pages = new Map<string, PageRoute>();
+  // Route files are classified by the build-root rule (S445, resolveBuildRoot):
+  // a given root, else one inferred from the application's entry file.
+  const findRoutePrefix = makeRouteClassifier(
+    typeof buildRoot === "object" && buildRoot !== null ? buildRoot : resolveBuildRoot(files, buildRoot),
+  );
 
   for (const fileAST of files) {
     const filePath = fileAST.filePath;

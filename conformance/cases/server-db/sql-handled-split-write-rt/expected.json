@@ -1,0 +1,31 @@
+{
+  "id": "server-db-sql-handled-split-write-rt",
+  "description": "§19.9.9 body split × §19.8.3 (RUNTIME, sqlEngine:\"real\"): `addNote()` runs a HANDLED write `?{INSERT …}.run() !{ _ :> {} }` and then writes `@status`. It splits exactly as the unhandled form does — the INSERT runs on the server, `@status` lands on the client (\"added\"), and a later read sees the new row (n=2). Pre-S455 (g-impl1-handled-sql-lowering-defects-s455 item 9) the guard hid the query from the split classifier: the statement was tiered CLIENT, the function was not split, and the cell write raised E-RI-002.",
+  "language-version": "1.0",
+  "spec": "§19.9.9, §19.8.3",
+  "rationale": "§19.9.9.1: a statement is `server` tier when it holds its own `?{}` SQL; §19.8.3: a `!{}` handler on the query adds a failure path and changes nothing else about the statement it handles.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ]
+    },
+    "input": [
+      { "click": "#add" },
+      { "wait": "settle" },
+      { "click": "#refresh" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "status": "added",
+      "count": "n=2"
+    },
+    "domAnchored": [
+      { "selector": "#status", "text": "added" },
+      { "selector": "#count", "text": "n=2" }
+    ]
+  }
+}

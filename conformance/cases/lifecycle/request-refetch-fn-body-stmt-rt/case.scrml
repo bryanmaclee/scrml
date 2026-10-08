@@ -1,0 +1,21 @@
+<program db="./app.db">
+type User:struct = { id: number, name: string }
+<userId> = 1
+<userData> : User | not = not
+
+function loadUser(id: number) : User | not {
+    return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+}
+
+<request id="userReq" deps=[]>
+    ${ @userData = loadUser(@userId) }
+</>
+
+function showSecond() {
+    @userId = 2
+    <#userReq>.refetch()
+}
+
+<button id="again" onclick=showSecond()>user 2</button>
+<p id="who">${@userData?.name}</p>
+</program>

@@ -238,8 +238,9 @@ describe("Peter #21 — end-to-end compile", () => {
     const outDir = join(tmpDir, "dist");
     writeFileSync(srcPath, src);
     const result = compileScrml({ inputFiles: [srcPath], outputDir: outDir, log: () => {} });
-    let out = "";
-    try { out = readFileSync(join(outDir, "repro.client.js"), "utf8"); } catch {}
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+    // in-memory client output (a clean compile writes the same codegen).
+    const out = result.outputs.get(srcPath)?.clientJs ?? "";
     return { result, out };
   }
 

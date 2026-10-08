@@ -45,6 +45,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // --- item 4 + 5: top-level ternary markup-value with a `${@cell}` TEXT child. ---
 const TERNARY_SRC = `<program>
@@ -104,7 +105,7 @@ const EACH_SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-emit-lift-markup-text-interp");
+const tmpRoot = resolve(tmpdir(), "scrml-emit-lift-markup-text-interp");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

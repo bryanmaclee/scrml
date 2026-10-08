@@ -32,8 +32,9 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-deepset-write-loss");
+const tmpRoot = resolve(tmpdir(), "scrml-deepset-write-loss");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

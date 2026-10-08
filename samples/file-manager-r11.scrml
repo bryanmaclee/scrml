@@ -30,7 +30,7 @@ ${
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
     }
 
     server function deleteFiles(ids) {
@@ -41,13 +41,13 @@ ${
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all()
+        `}.all() !{ _ :> [] }
     }
 }
 
 ${
     function initLoad() {
-        @files = loadFiles()
+        @files = loadFiles() !{ .Transport(_) :> { return } }
     }
 }
 
@@ -121,7 +121,7 @@ ${
     }
 
     function doDelete() {
-        @files = deleteFiles(@selectedIds)
+        @files = deleteFiles(@selectedIds) !{ .Transport(_) :> { return } }
         @selectedIds = []
         @showConfirm = false
     }

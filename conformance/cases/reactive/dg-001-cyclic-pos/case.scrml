@@ -1,15 +1,15 @@
 <program db="postgres://localhost/app">
 
   function loadOwner(id) {
-    ?{`SELECT id FROM owners WHERE id = ${id}`}.all()
+    ?{`SELECT id FROM owners WHERE id = ${id}`}.all() !{ _ :> [] }
     loadPet(id)
   }
 
   function loadPet(id) {
-    ?{`SELECT id FROM pets WHERE owner_id = ${id}`}.all()
+    ?{`SELECT id FROM pets WHERE owner_id = ${id}`}.all() !{ _ :> [] }
     loadOwner(id)
   }
 
-  <button onclick=loadOwner(1)>Load</button>
+  <button onclick={ loadOwner(1) !{ .Transport(_) :> { return } } }>Load</button>
 
 </program>

@@ -1,0 +1,8 @@
+{
+  "id": "fixture-twins-extra-error",
+  "description": "KNOWN FAIL (twin-extra-error): the case asserts no codes; its twin `<n:integer=5/>` makes the bootstrap emit E-TYPE-UNKNOWN. A generated twin that emits an unasserted error is never a pass.",
+  "language-version": "1.0",
+  "spec": "§66.21",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": { "codes": [] }
+}

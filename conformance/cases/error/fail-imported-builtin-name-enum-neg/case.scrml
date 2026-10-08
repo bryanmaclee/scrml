@@ -9,8 +9,8 @@ ${
 
     function run() {
         let r = check("") !{
-            | .Missing :> { return }
-            | .Bad(why) :> { return }
+            .Missing :> { return }
+            .Bad(why) :> { return }
         }
     }
 }

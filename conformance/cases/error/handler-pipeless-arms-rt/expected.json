@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-pipeless-arms-rt",
+  "description": "S452 — `!{}` handler arms use the §18.2 match-arm grammar with NO leading `|`: `.NotFound(reason) :> …`, `.Pair(a, b) :> …`, `else :> …`. risky() fails with NotFound(\"was-zero\"); the pipe-less `.NotFound(reason)` arm runs and its value lands in @result. Pre-fix impl#1 silently dropped the first pipe-less arm (E-TYPE-080 / wrong arm). Driven by a user click.",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "ruling:user-voice-scrml.md S452 \"c looks right\" — `!{}` handler arms are §18.2 match arms (`match-arm ::= arm-pattern (':>' | '=>' | '->') arm-body`, `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`, wildcard `else` / `_`); the `|`-prefixed spelling remains accepted. The handler is exhaustive (`else` covers .Empty), and the recovery value \"recovered: was-zero\" is the final cell value.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-080"],
+    "input": [{ "click": "#go" }],
+    "state": { "result": "recovered: was-zero" },
+    "domAnchored": [{ "selector": "#out", "text": "recovered: was-zero" }]
+  }
+}

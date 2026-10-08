@@ -861,7 +861,7 @@ function parseEnumVariantFieldsForType(
 /**
  * §51.0.S (S155 batch 3) — Resolve payload-binding declarations into JS prelude
  * lines that destructure the binding locals out of a payload source object
- * (`_stateData` for state bindings, `_msgData` for message bindings).
+ * (`_scrml_state_data` for state bindings, `_scrml_msg_data` for message bindings).
  *
  * Positional bindings resolve their field name by DECLARATION ORDER against the
  * variant's declared fields (§51.0.B.1 — position-determined, not name-
@@ -897,7 +897,7 @@ function emitPayloadBindingPrelude(
 
 /**
  * §51.0.S (S155 batch 3) — Lower ONE `(state × message)` arm body into a JS
- * arm fn `function (_stateData, _msgData) { <bindings>; <effects>; return
+ * arm fn `function (_scrml_state_data, _scrml_msg_data) { <bindings>; <effects>; return
  * <target>; }`.
  *
  * The arm body is either a bare target expression (`.Dragging(id)`) or a block
@@ -912,8 +912,8 @@ function emitPayloadBindingPrelude(
  * through the rule= guard). The final expression is emitted as `return <expr>`.
  *
  * Both payload planes are in scope: state-payload bindings (the `.Dragging(id)`
- * state binding, §51.0.B.1) are pulled from `_stateData`; message-payload
- * bindings (the `.Drop(col)` message binding, §18.7) from `_msgData`.
+ * state binding, §51.0.B.1) are pulled from `_scrml_state_data`; message-payload
+ * bindings (the `.Drop(col)` message binding, §18.7) from `_scrml_msg_data`.
  */
 function emitMessageArmBodyFn(
   arm: MessageArmEntryShape,
@@ -930,9 +930,9 @@ function emitMessageArmBodyFn(
   };
 
   // STATE payload prelude (the current state's `.Dragging(id)` binding).
-  const statePrelude = emitPayloadBindingPrelude(stateBindings, stateFields, "_stateData");
+  const statePrelude = emitPayloadBindingPrelude(stateBindings, stateFields, "_scrml_state_data");
   // MESSAGE payload prelude (the dispatched message's `.Drop(col)` binding).
-  const msgPrelude = emitPayloadBindingPrelude(arm.payloadBindings, msgFields, "_msgData");
+  const msgPrelude = emitPayloadBindingPrelude(arm.payloadBindings, msgFields, "_scrml_msg_data");
 
   // Re-parse the arm body. For a block body, strip the surrounding `{ }` (the
   // parser retains them); for a bare target, use the body verbatim.
@@ -995,7 +995,7 @@ function emitMessageArmBodyFn(
   }
 
   const indented = bodyLines.map((l) => `    ${l}`).join("\n");
-  return `function (_stateData, _msgData) {\n${indented}\n  }`;
+  return `function (_scrml_state_data, _scrml_msg_data) {\n${indented}\n  }`;
 }
 
 /**
@@ -1005,16 +1005,16 @@ function emitMessageArmBodyFn(
  * Shape (only emitted when `engineHasMessageArms(meta)` is true):
  *   const __scrml_engine_dragPhase_msg_arms = Object.freeze({
  *     "Idle": {
- *       "Start": function (_stateData, _msgData) { ...; return "Dragging"; },
+ *       "Start": function (_scrml_state_data, _scrml_msg_data) { ...; return "Dragging"; },
  *     },
  *     "Dragging": {
- *       "Drop": function (_stateData, _msgData) {
- *                  var id  = _stateData ? _stateData["id"]  : undefined;
- *                  var col = _msgData   ? _msgData["col"]   : undefined;
+ *       "Drop": function (_scrml_state_data, _scrml_msg_data) {
+ *                  var id  = _scrml_state_data ? _scrml_state_data["id"]  : undefined;
+ *                  var col = _scrml_msg_data   ? _scrml_msg_data["col"]   : undefined;
  *                  _scrml_reactive_set("tasks", taskMovedTo(_scrml_reactive_get("tasks"), id, col));
  *                  return "Idle";
  *                },
- *       "End":  function (_stateData, _msgData) { return "Idle"; },
+ *       "End":  function (_scrml_state_data, _scrml_msg_data) { return "Idle"; },
  *     },
  *   });
  *
@@ -4366,7 +4366,7 @@ function unwrapIfExprRaw(raw: string): string {
  *
  * Note: hook bodies CAN read the engine variable (`@marioState`) via
  * `_scrml_reactive_get` — and per Q2 split, the body fires AFTER the write,
- * so the read sees the new value (matches `toVariant` parameter).
+ * so the read sees the new value (matches `_scrml_to` parameter).
  */
 function rewriteHookExprText(raw: string): string {
   // Lazy require to avoid the circular import at module-init time.
@@ -4461,7 +4461,7 @@ function emitHookArm(arm: EngineHookArm, varName: string): string[] {
 
   // For effect arms there is no once / if=expr (Form 1 has no such attrs).
   if (arm.kind === "effect") {
-    lines.push(`  if (fromVariant === ${fromKey} && toVariant === ${toKey}) {`);
+    lines.push(`  if (_scrml_from === ${fromKey} && _scrml_to === ${toKey}) {`);
     lines.push(`    // §51.0.H effect= body for state-child .${arm.from} → .${arm.to}`);
     lines.push(`    ${bodyText};`);
     lines.push(`  }`);
@@ -4487,7 +4487,7 @@ function emitHookArm(arm: EngineHookArm, varName: string): string[] {
       ? `<onTransition from=.${arm.from}> in .${arm.to}`
       : `<onTransition from=.${arm.from} to=.${arm.to}> (engine-direct)`;
 
-  lines.push(`  if (fromVariant === ${fromKey} && toVariant === ${toKey}) {`);
+  lines.push(`  if (_scrml_from === ${fromKey} && _scrml_to === ${toKey}) {`);
   lines.push(`    // §51.0.H ${placement}`);
 
   if (hasOnce && hasIfExpr) {
@@ -4559,7 +4559,7 @@ export function emitEngineHookFiringFunction(meta: EngineMetadata): string[] {
   if (lines.length > 0) lines.push("");
 
   lines.push(`// §51.0.H hook-firing function for engine ${varName} (${meta.forType})`);
-  lines.push(`function ${fnName}(fromVariant, toVariant) {`);
+  lines.push(`function ${fnName}(_scrml_from, _scrml_to) {`);
 
   for (const arm of arms) {
     const armLines = emitHookArm(arm, varName);

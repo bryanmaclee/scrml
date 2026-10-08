@@ -32,6 +32,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 // Component with an `export fn` helper used in its OWN body — the load-card.scrml
 // shape (`formatRate` / `${formatRate(load.rate_dollars)}`).
@@ -77,7 +78,7 @@ const PAGE_EACH = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-each-helper-hoist");
+const tmpRoot = resolve(tmpdir(), "scrml-g-each-helper-hoist");
 
 /**
  * Write card.scrml + the given page source, compile both via the real compile

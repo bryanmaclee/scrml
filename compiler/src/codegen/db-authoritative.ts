@@ -32,8 +32,9 @@
  * P1-tail follow-on.)
  */
 
-import { parseSchemaBlock, harvestRawCreateTableDecls } from "../schema-differ.js";
+import { parseSchemaBlock, harvestRawCreateTableDecls, schemaTableDeclarations } from "../schema-differ.js";
 import { DBAUTH_ROLE, DBAUTH_TENANT_GUC, DBAUTH_CAPS_GUC } from "../schema-differ.js";
+import { sqlHandleAt } from "./sql-handle-name.ts";
 
 /**
  * Walk a file AST for `<schema>` state blocks and report whether ANY declared
@@ -122,8 +123,10 @@ export function extractDesiredSchema(
   fileAST: unknown,
 ): {
   tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
+  tenantTables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
   fns: Array<{ name: string; [k: string]: unknown }>;
   warnings: string[];
+  schemaText: string;
 } {
   const seen = new WeakSet<object>();
   const bodies: string[] = [];
@@ -235,7 +238,44 @@ export function extractDesiredSchema(
     }
   }
 
-  return { tables, fns, warnings };
+  // ---------------------------------------------------------------------
+  // §14.8.10 tenant-floor read — the UNION over every same-name declaration
+  // (bryan RULED S447 "stamp all" (i), gap
+  // g-schema-commented-out-declaration-shadows-live-table). `tables` above is
+  // first-wins per name and stays so: it is `scrml db-migrate`'s desired state,
+  // and a union there would change what migrate creates. The tenant floor instead
+  // reads `tenantTables` — `tables` with each entry's column NAMES widened by
+  // every other declaration of the same name (case-insensitive, across bodies and
+  // forms, commented-out copies included, as the recognizers read them), so a
+  // stale copy can no longer shadow a live `tenant_id`. The union alone
+  // over-scopes when the declarations DISAGREE on `tenant_id`; that case is
+  // rejected at GCP1 (E-SCHEMA-015, `findTenantDeclarationDisagreements`), so in
+  // a program that compiles every declaration of a table agrees and the union
+  // decides exactly what each declaration does.
+  // ---------------------------------------------------------------------
+  const unionCols = new Map<string, Array<{ name: string }>>();
+  for (const body of bodies) {
+    for (const d of schemaTableDeclarations(body)) {
+      const cols = unionCols.get(d.key) ?? [];
+      for (const c of d.columns as Array<{ name?: unknown }>) {
+        if (typeof c?.name !== "string") continue;
+        const lower = c.name.toLowerCase();
+        if (!cols.some((x) => x.name.toLowerCase() === lower)) cols.push({ name: c.name });
+      }
+      unionCols.set(d.key, cols);
+    }
+  }
+  const tenantTables = tables.map((t) => {
+    const extra = unionCols.get(String(t.name).toLowerCase()) ?? [];
+    const own = Array.isArray((t as any).columns) ? ((t as any).columns as Array<{ name?: unknown }>) : [];
+    const have = new Set(own.map((c) => (typeof c?.name === "string" ? c.name.toLowerCase() : "")));
+    const added = extra.filter((c) => !have.has(c.name.toLowerCase()));
+    return added.length === 0 ? t : { ...t, columns: [...own, ...added] };
+  });
+
+  // §14.8.10 (S452 r4) — the raw `<schema>` text, so the tenant floor can see the
+  // triggers / rules / cascading foreign keys a tenant write would set off.
+  return { tables, tenantTables, fns, warnings, schemaText: bodies.join("\n") };
 }
 
 /**
@@ -323,7 +363,9 @@ function matchingParenEnd(src: string, openIdx: number): number {
 }
 
 const IDENT_CHAR = /[A-Za-z0-9_$]/;
-const HANDLE = "_scrml_sql";
+// The handle names are THE shared list (sql-handle-name.ts) — every `_scrml_sql` / `_scrml_sql_<n>`
+// handle (S451 review HIGH-1: matching only `_scrml_sql` skipped the tenant floor on every
+// scoped handle, and with a sibling `<db src>` inverted it).
 const REQ_PARAM = "_scrml_req";
 
 /** True iff `word` sits at `src[at]` as a standalone identifier (word-boundary). */
@@ -402,9 +444,11 @@ function arrowParamsHaveReq(src: string, arrowIdx: number): boolean {
  * never mistaken for a query site.
  *
  * @param src the assembled server-module text
+ * @param handles the module's declared handle names (`collectDbScopes` keys) — the
+ *   structural set; when omitted, every name of the shared handle shape is a handle
  * @returns the transformed text
  */
-export function wrapPrincipalTxn(src: string): string {
+export function wrapPrincipalTxn(src: string, handles?: ReadonlySet<string> | null): string {
   let out = "";
   let i = 0;
   const n = src.length;
@@ -447,14 +491,10 @@ export function wrapPrincipalTxn(src: string): string {
 
     // `_scrml_sql` handle — classified BEFORE the bare-template branch so a
     // `_scrml_sql`…`` tagged template is treated as a query, not a skip.
-    if (matchesWordAt(src, i, HANDLE)) {
-      let j = i + HANDLE.length;
-      if (src[j] === "_") {
-        let k = j + 1;
-        while (k < n && /[0-9]/.test(src[k])) k++;
-        if (k > j + 1) j = k; // scoped `_scrml_sql_<n>`
-      }
-      const ident = src.slice(i, j);
+    const handleHere = sqlHandleAt(src, i, handles);
+    if (handleHere !== null) {
+      const ident = handleHere;
+      const j = i + ident.length;
 
       let exprEnd = -1;
       const next = src[j];

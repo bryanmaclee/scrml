@@ -4,10 +4,10 @@ ${
 }
 <engine for=Gate initial=.Closed accepts=GateMsg>
     <Closed rule=.Open>
-        | .Toggle :> .Open
+        .Toggle :> .Open
     </>
     <Open rule=.Closed>
-        | .Toggle :> .Closed
+        .Toggle :> .Closed
     </>
 </>
 <program>

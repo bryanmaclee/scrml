@@ -1,0 +1,12 @@
+// §6.7.4 rule 3 — a writer named as a value.
+<program>
+  <n> = 0
+  <hits> = 0
+  function bump() {
+    @hits = @hits + 1
+  }
+  <effect deps=[@n]>${
+    const handler = bump
+  }</>
+  <p>${@n}</p>
+</program>

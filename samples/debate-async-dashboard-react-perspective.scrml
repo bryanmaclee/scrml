@@ -108,11 +108,11 @@ ${
     // CPS handles the @state = Loading; @data = fn(); @state = Loaded(data) pattern.
 
     server function fetchUsers() {
-        return ?{`SELECT id, name, email FROM users ORDER BY name`}.all()
+        return ?{`SELECT id, name, email FROM users ORDER BY name`}.all() !{ _ :> [] }
     }
 
     server function fetchOrders() {
-        return ?{`SELECT id, product, amount, status FROM orders ORDER BY id DESC LIMIT 50`}.all()
+        return ?{`SELECT id, product, amount, status FROM orders ORDER BY id DESC LIMIT 50`}.all() !{ _ :> [] }
     }
 
     server function fetchMetrics() {
@@ -127,7 +127,7 @@ ${
 
     server function createOrder(product, amount) {
         ?{`INSERT INTO orders (product, amount, status) VALUES (${product}, ${amount}, "pending")`}.run()
-        return ?{`SELECT id, product, amount, status FROM orders ORDER BY id DESC LIMIT 50`}.all()
+        return ?{`SELECT id, product, amount, status FROM orders ORDER BY id DESC LIMIT 50`}.all() !{ _ :> [] }
     }
 
     // ── Load functions (CPS boundary) ──────────────────────────────────

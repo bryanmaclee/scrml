@@ -40,7 +40,7 @@
       <noteBody>    = ""
 
       function lookupUser(email) {
-        return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get()
+        return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get() !{ _ :> not }
       }
 
       // postNote is server-side (writes to DB). Returns nothing —
@@ -71,7 +71,7 @@
       // (E-RI-002 separation).
       function publish() {
         if (@authorEmail == "" || @noteTitle == "" || @noteBody == "") return
-        postNote(@authorEmail, @noteTitle, @noteBody)
+        postNote(@authorEmail, @noteTitle, @noteBody) !{ .Transport(_) :> { return } }
         reset(@noteTitle)
         reset(@noteBody)
       }

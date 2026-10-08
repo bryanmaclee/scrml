@@ -9,8 +9,9 @@
 // over Core (the TS compiler's F1 "walker misses a position" family).
 // =============================================================================
 ${
-    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block,
-             Attr, View, CondArm, ConstructAttr, Field, Decl, Fn, ServerFn, CoreProgram } from "./core.scrml"
+    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm,
+             Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
+             ValidityOf, validityInst } from "./core.scrml"
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
     // the walk (they carry no Expr/Stmt/View below them).
@@ -102,7 +103,7 @@ ${
             .NPlace(pl: pl) :> placeKids(pl)
             .NInst(i: i) :> []
             .NPattern(pat: pat) :> []
-            .NEdit(k: k) :> []
+            .NEdit(k: k) :> editKids(k)
             .NView(v: v) :> viewKids(v)
             .NAttr(a: a) :> attrKids(a)
         }
@@ -133,7 +134,35 @@ ${
                 [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB))
             .Return(e: e) :> [Node.NExpr(e)]
             .Eval(e: e) :> [Node.NExpr(e)]
+            .Suspend(bind: b, on: on, then: t) :> [Node.NExpr(on), Node.NBlock(t)]
+            .ResetSurface(of: v) :> [Node.NInst(validityInst(v))]
+            .Defer(body: b) :> [Node.NBlock(b)]
+            .Unpersist(inst: i) :> [Node.NInst(i)]
+            .Attempt(result: r, call: c, ok: ok, arms: arms) :> failableKids(c).concat(okKids(ok)).concat(errArmKids(arms))
+            .Fail(args: args) :> exprNodes(args)
+            .Join(k: k, body: b) :> [Node.NBlock(b)]          // s454 (U1b)
+            .Jump(k: k) :> []
         }
+    }
+
+    // s451 (Ue): an Attempt's children — the failable's values, the success
+    // branch, then each failure arm (its pattern, body and value).
+    fn failableKids(c: Failable) -> Node[] {
+        return match c {
+            .FCall(fn: f, args: args) :> exprNodes(args)
+            .FSql(q: q) :> exprNodes(q.params)
+            .FSettled(outcome: o) :> []                 // s454 (U1b): a local, read where it settled
+        }
+    }
+
+    fn okKids(ok: OkArm) -> Node[] {
+        return [Node.NBlock(ok.body)].concat(maybeExpr(ok.value))
+    }
+
+    fn errArmKids(arms: ErrArm[]) -> Node[] {
+        let out: Node[] = []
+        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NBlock(a.body)]).concat(maybeExpr(a.value)) }
+        return out
     }
 
     fn exprKids(e: Expr) -> Node[] {
@@ -148,6 +177,28 @@ ${
             .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
             .Handle(inst: inst) :> [Node.NInst(inst)]
             .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
+            .Host(call: c) :> []
+            .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
+            .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
+            .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
+            .ServerCall(fn: f, args: args) :> exprNodes(args)   // s454 (U1b)
+        }
+    }
+
+    // s444: an ElemAt edit holds its index expression.
+    fn editKids(k: EditKind) -> Node[] {
+        return match k {
+            .ElemAt(index: i, path: p) :> [Node.NExpr(i)]
+            .Replace :> []
+            .Append :> []
+            .Prepend :> []
+            .Anywhere :> []
+            .PositionWrite :> []
+            .FieldAt(path: p) :> []
+            .Transition :> []
+            .RemoveEnd :> []
+            .RemoveFront :> []
+            .RemoveAnywhere :> []
         }
     }
 
@@ -169,15 +220,37 @@ ${
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :>
                 constructNodes(attrs).concat(viewNodes(slot))
             .Slot :> []
+            .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
+            .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
+            .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
+            .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))]
         }
+    }
+
+    // s449: an `<effect>` dependency's instance reference is a child (sharedRefs
+    // sees a `.Shared` dep; check.scrml resolves it as it resolves a read's).
+    fn effectDepNodes(ds: EffectDep[]) -> Node[] {
+        let out: Node[] = []
+        for (const d of ds) { out = out.concat([Node.NInst(d.inst)]) }
+        return out
     }
 
     fn attrKids(a: Attr) -> Node[] {
         return match a {
             .Static(name: name, value: value) :> []
             .Bound(name: name, e: e) :> [Node.NExpr(e)]
+            .Show(test: t) :> [Node.NExpr(t)]
             .On(event: event, body: body) :> [Node.NBlock(body)]
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
+            .Gate(values: vs, fields: fs) :> validityNodes(fs)
         }
+    }
+
+    // s449: a form gate's statically named fields — their instance references are children.
+    fn validityNodes(fs: ValidityOf[]) -> Node[] {
+        let out: Node[] = []
+        for (const f of fs) { out = out.concat([Node.NInst(validityInst(f))]) }
+        return out
     }
 
     // Every node under (and including) `root`, preorder.
@@ -256,20 +329,59 @@ ${
             .NView(v: v) :> viewBinds(v)
             .NPattern(pat: pat) :> patternBinds(pat)
             .NFn(f: f) :> paramSyms(f)
+            .NExpr(e: e) :> exprBinds(e)
+            .NAttr(a: a) :> attrBinds(a)
             .NProgram(p: p) :> []
             .NDecl(d: d) :> []
             .NField(f: f) :> []
-            .NServerFn(f: f) :> []
+            .NServerFn(f: f) :> serverParamSyms(f)
             .NBlock(b: b) :> []
-            .NExpr(e: e) :> []
             .NPlace(pl: pl) :> []
             .NInst(i: i) :> []
             .NEdit(k: k) :> []
-            .NAttr(a: a) :> []
+        }
+    }
+
+    // s444: a lambda binds its parameters; a bind binds its event-value sink.
+    fn exprBinds(e: Expr) -> Sym[] {
+        return match e {
+            .Lambda(params: ps) :> ps
+            .Lit(lit: x) :> []
+            .Local(sym: x) :> []
+            .Read(place: x) :> []
+            .Call(callee: x) :> []
+            .Prim(op: x) :> []
+            .Match(scrut: x) :> []
+            .ArrayOf(elems: x) :> []
+            .StructOf(ty: x) :> []
+            .Handle(inst: x) :> []
+            .InitOf(decl: x) :> []
+            .Host(call: x) :> []
+            .SeqCall(op: x) :> []
+            .Validity(of: x) :> []
+            .ServerCall(fn: x) :> []
+        }
+    }
+
+    fn attrBinds(a: Attr) -> Sym[] {
+        return match a {
+            .Bind(sink: s) :> [s]
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .Show(test: x) :> []
+            .On(event: x) :> []
+            .Gate(values: x) :> []
         }
     }
 
     fn paramSyms(f: Fn) -> Sym[] {
+        let out: Sym[] = []
+        for (const p of f.params) { out = out.concat([p.sym]) }
+        return out
+    }
+
+    // s451 (U1a): a server function binds its parameters too.
+    fn serverParamSyms(f: ServerFn) -> Sym[] {
         let out: Sym[] = []
         for (const p of f.params) { out = out.concat([p.sym]) }
         return out
@@ -284,7 +396,27 @@ ${
             .If(cond: cond, thenB: thenB, elseB: elseB) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
+            .Suspend(bind: b) :> [b]
+            .ResetSurface(of: v) :> []
+            .Defer(body: b) :> []
+            .Unpersist(decl: x) :> []
+            .Attempt(result: r, ok: ok, arms: arms) :> maybeSym(r).concat([ok.bind]).concat(wholeSyms(arms))
+            .Fail(err: x) :> []
+            .Join(k: k) :> [k]                           // s454 (U1b): the continuation is a named local
+            .Jump(k: x) :> []
         }
+    }
+
+    // s452: the whole-error binders of an Attempt's arms (§18.6.1).
+    fn wholeSyms(arms: ErrArm[]) -> Sym[] {
+        let out: Sym[] = []
+        for (const a of arms) { out = out.concat(maybeSym(a.whole)) }
+        return out
+    }
+
+    fn maybeSym(s: Sym | not) -> Sym[] {
+        if (s is not) return []
+        return [s]
     }
 
     fn viewBinds(v: View) -> Sym[] {
@@ -296,6 +428,10 @@ ${
             .Cond(arms: arms) :> []
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> []
             .Slot :> []
+            .Star(decl: d) :> []
+            .Effect(deps: ds) :> []
+            .ResetOn(triggers: ds) :> []
+            .Errors(of: x) :> []
         }
     }
 
@@ -346,6 +482,14 @@ ${
             .If(cond: cond, thenB: thenB, elseB: elseB) :> -1
             .Return(e: e) :> -1
             .Eval(e: e) :> -1
+            .Suspend(bind: b) :> -1
+            .ResetSurface(of: v) :> -1
+            .Defer(body: b) :> -1
+            .Unpersist(decl: x) :> -1
+            .Attempt(result: r) :> -1
+            .Fail(err: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
         }
     }
 }

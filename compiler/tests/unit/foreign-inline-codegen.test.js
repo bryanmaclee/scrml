@@ -14,8 +14,9 @@
  *   - ast-builder.js: buildBlock case "foreign" (FIRST ForeignBlock producer —
  *     raw/body/crossings/level) + tryConsumeForeignInit wired into
  *     const/let-decl + return-stmt paths (foreignNode attachment).
- *   - emit-logic.ts: case "foreign" — `await (async (<in>) => { <slice> })(<in>)`
- *     (codegen-injected await at the §13180 boundary); const/let-decl foreignNode
+ *   - emit-logic.ts: case "foreign" — `await _scrml_foreign_seal(site, `async function (<in>) { <slice> }`)(<in>)`
+ *     (the SEALED slice, §23.2.4a — originally an in-place async IIFE, which closed
+ *     over every enclosing binding; codegen-injected await at the §13180 boundary); const/let-decl foreignNode
  *     handling mirrors sqlNode.
  *   - route-inference.ts: a foreign node / foreignNode is a server trigger
  *     (dpa-004 C2; mirrors E-SQL-004) — keeps the opaque slice off the client.
@@ -57,6 +58,12 @@ function compileSource(scrmlSource, testName) {
     if (existsSync(tmpInput)) rmSync(tmpInput);
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
   }
+}
+
+// §23.2.4a — the sealed-slice call shape: `await _scrml_foreign_seal("<site>", `async function (<params>) {`.
+function SEALED(params) {
+  const p = params.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("await _scrml_foreign_seal\\(\"[^\"]*\", `async function \\(" + p + "\\) \\{");
 }
 
 function runAst(src) {
@@ -106,14 +113,17 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     expect(fn.body).toContain("Bun.spawn");
   });
 
-  test("§2 codegen — server JS wraps the slice in an async IIFE with the named crossings + an injected await", () => {
+  test("§2 codegen — server JS builds the slice as a SEALED async function of the named crossings + an injected await", () => {
     const { errors, serverJs } = compileSource(DISPATCHER, "disp");
     const cgErr = errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
     expect(cgErr.length).toBe(0);
     expect(serverJs).toBeTruthy();
-    // `await (async (prompt, path) => { … })(prompt, path)` — boundary await injected.
-    expect(serverJs).toMatch(/await \(async \(prompt, path\) =>/);
-    expect(serverJs).toMatch(/\}\)\(prompt, path\)/);
+    // `await _scrml_foreign_seal("<file>:<line>", `async function (prompt, path) { … }`)(prompt, path)`
+    // — the crossings are the parameters, the boundary await is injected at the call
+    // (§23.2.4a; the seal itself is executed in foreign-sealed-scope.test.js).
+    expect(serverJs).toMatch(SEALED("prompt, path"));
+    expect(serverJs).toMatch(/\}`\)\(prompt, path\)/);
+    expect(serverJs).toContain("function _scrml_foreign_seal(site, source)");
     expect(serverJs).toContain("Bun.spawn");
   });
 
@@ -122,7 +132,8 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     expect(serverJs).toContain("Bun.spawn");
     expect(clientJs ?? "").not.toContain("Bun.spawn");
     expect(clientJs ?? "").not.toContain("claude");
-    expect(clientJs ?? "").not.toContain("async (prompt, path)");
+    expect(clientJs ?? "").not.toContain("async function (prompt, path)");
+    expect(clientJs ?? "").not.toContain("_scrml_foreign_seal");
   });
 
   test("§4 server-color — the dispatcher fn is escalated to a server route, the client gets a fetch stub", () => {
@@ -151,7 +162,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
 `;
     const { errors, serverJs } = compileSource(src, "typed");
     expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
-    expect(serverJs).toMatch(/await \(async \(prompt, path\) =>/);
+    expect(serverJs).toMatch(SEALED("prompt, path"));
   });
 
   test("§7 lang gate — a non-ts/js `lang=` on a value-returning _{} fires E-FOREIGN-005 (once)", () => {
@@ -212,7 +223,7 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     const { errors, serverJs } = compileSource(src, "lvl2");
     expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC" || e.code === "E-CTX-001").length).toBe(0);
     expect(serverJs).toContain("contains }= inside safely");
-    expect(serverJs).toMatch(/await \(async \(p\) =>/);
+    expect(serverJs).toMatch(SEALED("p"));
   });
 
   test("§11 mixed sigils — a `?{}` and a `_{}` in the same server fn both stay server, neither leaks to client", () => {
@@ -261,9 +272,9 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
   });
 
   // --- E-FOREIGN-006: crossing-shadow (ss23 item 3) ------------------------
-  // The `in:{}` crossing names become the async-IIFE PARAMETERS. If the
+  // The `in:{}` crossing names become the sealed slice's PARAMETERS. If the
   // verbatim slice ALSO declares a TOP-LEVEL binding of the same name, the
-  // emitted IIFE redeclares the parameter — invalid JS. Pre-fix this surfaced
+  // emitted slice redeclares the parameter — invalid JS. Pre-fix this surfaced
   // as the MISLEADING post-emit E-CODEGEN-INVALID-LOGIC ("compiler defect, please
   // report it"), even though it is AUTHOR error. A pre-emit syntactic scan now
   // fires the clear E-FOREIGN-006 (naming the shadowed binding) instead.
@@ -336,8 +347,8 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     const { errors, serverJs } = compileSource(src, "nonshadow");
     expect(errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(0);
     expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
-    // The non-colliding crossing still lowers to the canonical IIFE.
-    expect(serverJs).toMatch(/await \(async \(y\) =>/);
+    // The non-colliding crossing still lowers to the canonical sealed slice.
+    expect(serverJs).toMatch(SEALED("y"));
   });
 
   test("§17 scope-precision — a NESTED `const x` (inside an arrow/block body) is NOT a top-level collision; compiles clean", () => {
@@ -357,6 +368,6 @@ describe("inline _{} foreign-code codegen (dpa-003 / S216)", () => {
     // NOT collide with the `x` parameter — the scan is brace-depth-aware.
     expect(errors.filter((e) => e.code === "E-FOREIGN-006").length).toBe(0);
     expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC").length).toBe(0);
-    expect(serverJs).toMatch(/await \(async \(x\) =>/);
+    expect(serverJs).toMatch(SEALED("x"));
   });
 });

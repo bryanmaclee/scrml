@@ -41,7 +41,7 @@
  *   §4  `<request url="...">` still emits the machinery (regression guard)
  *   §5  Non-server-fn assignment stays synchronous (regression guard)
  *   §6  GITI-001 in EXPRESSION CONTEXT (S84 fix-lift-async-iife-paren) —
- *       the same wrap, when nested inside `el.textContent = await (...)`,
+ *       the same wrap, when nested inside `_scrml_el.textContent = await (...)`,
  *       must NOT append a trailing `;` (would produce malformed `await ((...)();)`)
  */
 
@@ -118,7 +118,7 @@ beforeAll(() => {
   //
   // HISTORY: pre-S217 the `on mount` block was MIS-CLASSIFIED as a reactive
   // DISPLAY wiring whose expression was `@var = serverFn()` — it allocated a
-  // render slot and emitted `el.textContent = await ((async () => ...)())`. That
+  // render slot and emitted `_scrml_el.textContent = await ((async () => ...)())`. That
   // was the g-onmount-async bug (a desugared `on mount {}` is a fire-and-forget
   // mount effect per SPEC §6.7.1a, it NEVER renders its return). The S84 GITI-001
   // `;`-context fix that this describe-block originally guarded was a downstream
@@ -317,7 +317,7 @@ describe("§5: `@count = @count + 1` stays synchronous (regression guard)", () =
 // ---------------------------------------------------------------------------
 //
 // When `@var = serverFn()` appears as a MARKUP EXPRESSION (e.g. `<p>${@x = load()}</p>`),
-// the rewrite-reactive-display-wiring path emits `el.textContent = await (${rewrittenExpr})`.
+// the rewrite-reactive-display-wiring path emits `_scrml_el.textContent = await (${rewrittenExpr})`.
 // The rewrittenExpr is the expression form `_scrml_reactive_set("x", _scrml_fetch_load_N())`
 // (NO trailing `;`). GITI-001 then wraps it in `(async () => _scrml_reactive_set(..., await ...))()`.
 //
@@ -357,7 +357,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
     // The on-mount's call must NOT be rendered into the DOM (the former bug shape).
     expect(js).not.toMatch(/el\.textContent\s*=\s*await\s*\(\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data"/);
-    expect(js).not.toMatch(/_scrml_render_value\(el, _scrml_fetch_loadValue_\d+\(\)\)/);
+    expect(js).not.toMatch(/_scrml_render_value\(_scrml_el, _scrml_fetch_loadValue_\d+\(\)\)/);
   });
 
   test("the `${@data}` display binding (the cell read, not the on-mount) still renders", () => {
@@ -365,7 +365,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     const js = result.outputs.get(exprCtxFx).clientJs;
     // The genuine markup interpolation inside <div><p> reads the cell the mount
     // effect populated — this is the ONLY display binding in the fixture.
-    expect(js).toMatch(/_scrml_render_value\(el, _scrml_cs_reactive_get\("data"\)\)/);
+    expect(js).toMatch(/_scrml_render_value\(_scrml_el, _scrml_cs_reactive_get\("data"\)\)/);
   });
 
   test("statement-context wrap (top-level or in fn body) still ends with `().catch(...);`", () => {

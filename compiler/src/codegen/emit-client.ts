@@ -1,21 +1,24 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
+import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
 import { toPosix } from "../path-canonical.js";
+import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, type RequestBodyCell } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
+import { renameUserFnRefsScoped } from "./fn-name-rename.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
 import { setActiveClientAsync } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
-import { getNodes, isServerOnlyNode } from "./collect.ts";
+import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -27,8 +30,8 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
-import { _clientServerFnNames } from "./scheduling.ts";
-import { setVariantFieldsForFile } from "./emit-control-flow.ts";
+import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
+import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. `collectThemeContext`
@@ -165,6 +168,10 @@ function buildModuleRegistryFooter(
     }
     if (isImportedByAnother) break;
   }
+  // s457 (§21.4) — a module another module RE-EXPORTS from is read through the
+  // re-exporter's footer (`helper: _scrml_modules["c.client.js"].w`), so it needs a
+  // footer exactly as if it were imported.
+  if (!isImportedByAnother) isImportedByAnother = isReExportedByAnother(importGraph, filePath);
   if (!isImportedByAnother) return [];
 
   const exports = exportRegistry.get(filePath);
@@ -200,9 +207,33 @@ function buildModuleRegistryFooter(
     return false;
   };
 
+  // s457 (§21.4) — re-exports of other local `.scrml` modules. A re-export binds
+  // nothing in THIS module, so it is read from the source module's registry entry,
+  // which (dependencies load first) is already populated: `helper:
+  // _scrml_modules["c.client.js"].w`. `export *` arrives expanded to names. The pair
+  // mirrors a DIRECT import of the source exactly: whatever the source registers (a
+  // fn, a const, an enum's variant object) comes through, and a name it does not
+  // register (a pure struct type, a component) reads `undefined` — never a throw. A
+  // channel is skipped, as in the source's own footer (CHX inlines it at the
+  // consumer). A re-exported name never falls through to a same-named local binding
+  // below: that local is not what the module exports.
+  const reExportPairs: string[] = [];
+  const reExported = new Set<string>();
+  for (const edge of localReExportEdges(importGraph, filePath)) {
+    const srcKey = JSON.stringify(moduleRegistryKey(edge.absSource, ctx.outputBaseDir));
+    for (const { exported, imported } of edge.names) {
+      reExported.add(exported);
+      const b = resolveExportedBinding(importGraph, edge.absSource, imported);
+      if (b && b.kind === "channel") continue;
+      if (!/^[A-Za-z_$][\w$]*$/.test(imported) || !/^[A-Za-z_$][\w$]*$/.test(exported)) continue;
+      reExportPairs.push(`${exported}: _scrml_modules[${srcKey}].${imported}`);
+    }
+  }
+
   const pairs: string[] = [];
   if (exports) {
     for (const [publicName, info] of exports) {
+      if (reExported.has(publicName)) continue; // registered from its source (above)
       // Channels are inlined at the consumer site by CHX, never registered.
       if ((info as any)?.category === "channel" || (info as any)?.kind === "channel") continue;
       const emitted = fnNameMap.get(publicName) ?? publicName;
@@ -210,6 +241,7 @@ function buildModuleRegistryFooter(
       pairs.push(`${publicName}: ${emitted}`);
     }
   }
+  pairs.push(...reExportPairs);
 
   return [
     "// --- cross-file module registry footer (known-gaps-#6, §21.3) ---",
@@ -1175,6 +1207,11 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         if (crossFileLocal) break;
       }
     }
+    // (c) s457 (§21.4) — this file re-exports a local `.scrml`, or is re-exported by one?
+    if (!crossFileLocal && importGraph && filePath) {
+      crossFileLocal = localReExportEdges(importGraph, filePath).length > 0 ||
+        isReExportedByAnother(importGraph, filePath);
+    }
     if (crossFileLocal) chunks.add("modules");
   }
 
@@ -2010,11 +2047,18 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, imported, shadowed } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions);
-  setVariantFieldsForRewriter(fields, collisions);
+  setVariantFieldsForFile(fields, collisions, imported);
+  setShadowedVariantNames(shadowed, imported);
+  // S438 review N3 — the string-rewrite path (handler bodies) cannot be typed:
+  // a local-shadowed name is treated as a collision there (left unlowered →
+  // a loud invalid-output error), never guessed. S446 — so is an IMPORTED-ONLY
+  // name: the string path never sees a TS position stamp, and a by-name hit on
+  // an imported enum (`.Lit(n) :> yOf(.Neg(n))`, `yOf(o: Other)` elsewhere,
+  // `Expr.Neg(x)` imported) is a silent guess; it stays the pre-F11 loud form.
+  setVariantFieldsForRewriter(fields, new Set([...collisions, ...shadowed, ...imported]));
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
   // the file's registered-`<request>` id set ONCE, here at the per-file client-
@@ -2338,6 +2382,7 @@ export function generateClientJs(ctx: CompileContext): string {
       report: (uses, span) => {
         for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
       },
+      sseFnNames: ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null,
     });
   }
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
@@ -2496,13 +2541,56 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("    }");
     lines.push("    const session = {");
     lines.push("      get current() { return _scrml_session; },");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — the
+    // destroy route is CSRF-gated under `csrf="auto"`, so logout carries the
+    // session's synchronizer token and retries ONCE on a 403 (whose Set-Cookie
+    // plants the current token), the same shape as `_scrml_fetch_with_csrf_retry`.
+    // Self-contained ON PURPOSE rather than a call to that helper: the helper is
+    // emitted only for a file with a mutating server fn and only where csrf is on,
+    // but this projection is a window singleton any auth page's script may build,
+    // and the build mounts ONE destroy handler for the whole app (first module
+    // wins, commands/build.js) — so logout must work whichever handler is mounted,
+    // gated or not. First try: the first-paint `<meta name="csrf-token">`, else the
+    // readable `scrml_csrf` cookie. Retry: the cookie the 403 just planted (the meta
+    // may be stale), copied into the meta so later mutations agree.
     lines.push("      async destroy() {");
-    lines.push("        await fetch('/_scrml/session/destroy', {");
+    lines.push("        const _scrml_cookie_tok = () => { const m = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; };");
+    lines.push("        const _scrml_meta = document.querySelector ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+    lines.push("        const _scrml_post = (tok) => fetch('/_scrml/session/destroy', {");
     lines.push("          method: 'POST',");
     lines.push("          credentials: 'include',");
+    lines.push("          headers: tok ? { 'X-CSRF-Token': tok } : {},");
     lines.push("        });");
+    // S449 review fix — fail HONESTLY. Only a 2xx clears the projection and
+    // redirects: on a final non-2xx (e.g. 403 after the one retry) or a network
+    // failure the server session may still be alive, so redirecting to the login
+    // page would tell the user they are logged out when they are not (the
+    // shared-computer hazard). Instead the projection is left intact and the
+    // failure is reported through the scrml client error surface
+    // `_scrml_error_boundary_log` (the always-included 'errors' runtime chunk —
+    // the same reporter the server-fn call IIFEs route rejections to). destroy()
+    // resolves `true` on logout, `false` on failure; it does not reject, because
+    // `onclick=session.destroy()` is wired without a `.catch` and a rejection
+    // would be a silent browser-level unhandledrejection.
+    lines.push("        let _scrml_resp;");
+    lines.push("        try {");
+    lines.push("          _scrml_resp = await _scrml_post((_scrml_meta && _scrml_meta.getAttribute('content')) || _scrml_cookie_tok());");
+    lines.push("          if (_scrml_resp.status === 403) {");
+    lines.push("            const _scrml_fresh = _scrml_cookie_tok();");
+    lines.push("            if (_scrml_meta && _scrml_fresh) _scrml_meta.setAttribute('content', _scrml_fresh);");
+    lines.push("            _scrml_resp = await _scrml_post(_scrml_fresh);");
+    lines.push("          }");
+    lines.push("        } catch (_scrml_err) {");
+    lines.push("          _scrml_error_boundary_log('session.destroy', _scrml_err);");
+    lines.push("          return false;");
+    lines.push("        }");
+    lines.push("        if (!_scrml_resp.ok) {");
+    lines.push("          _scrml_error_boundary_log('session.destroy', new Error('session.destroy() failed: the server answered ' + _scrml_resp.status + ' — the session was NOT ended'));");
+    lines.push("          return false;");
+    lines.push("        }");
     lines.push("        _scrml_session = null;");
     lines.push(`        window.location.href = ${JSON.stringify(loginRedirect)};`);
+    lines.push("        return true;");
     lines.push("      },");
     lines.push("    };");
     lines.push("    _scrml_session_init();");
@@ -2767,7 +2855,7 @@ export function generateClientJs(ctx: CompileContext): string {
   const bindingLines = clientStage(ctx, "emit-bindings", () => emitBindings(ctx));
   if (bindingLines.length > 0) {
     lines.push("// --- ref= / bind: / class: wiring; re-invoked per if= mount with the mounted root ---");
-    lines.push("function _scrml_bind_rewire(root) {");
+    lines.push("function _scrml_bind_rewire(_scrml_root) {");
     for (const line of bindingLines) lines.push(line);
     lines.push("}");
     lines.push("_scrml_bind_rewire(document);");
@@ -3003,6 +3091,16 @@ export function generateClientJs(ctx: CompileContext): string {
     // defined` on the first arm entry. The factory name gates exactly the files
     // that emit one.
     ["_scrml_armb_", "deep_reactive"],
+    // §5.2 rule 3 (S457) — a URL-attribute write the compiler could not prove safe is routed
+    // through `_scrml_safe_url(` (codegen/url-attr-guard.ts), DEFINED in the `urlguard` chunk. The
+    // call is emitted by many lowerings (top level, arms, <each> rows, lift), so the emitted text is
+    // the one exact signal; a page with no such write ships without the chunk.
+    ["_scrml_safe_url(", "urlguard"],
+    // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls `_scrml_url_shape_ok(`
+    // (emit-predicates.ts), defined in the same `urlguard` chunk (runtime-url-guard.js). The check is
+    // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text
+    // is the one exact signal.
+    ["_scrml_url_shape_ok(", "urlguard"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;
@@ -3255,8 +3353,16 @@ export function generateClientJs(ctx: CompileContext): string {
         return out.join("");
       };
 
-      const mangle = (segment: string): string =>
+      const regexMangle = (segment: string): string =>
         rewriteCodeSegments(segment, rewriteCodeSegment);
+      // g-user-function-named-id-breaks-click-dispatch-s457 — the rename is
+      // SCOPE-AWARE: only a reference no enclosing scope binds (i.e. one that
+      // means the user's top-level function) is renamed, in the same syntactic
+      // positions as the regex above. The regex is kept only for a segment that
+      // does not parse, so an already-invalid buffer compiles exactly as before.
+      // See codegen/fn-name-rename.ts.
+      const mangle = (segment: string): string =>
+        renameUserFnRefsScoped(segment, fnNameMap) ?? regexMangle(segment);
       // g-embed-runtime-ships-mangled-runtime-identifiers (S325) — the runtime
       // slot is COMPILER-OWNED text and a user fn name must never reach it.
       // The mangle is a whole-buffer text pass, so before this fence a user
@@ -3294,6 +3400,7 @@ export function generateClientJs(ctx: CompileContext): string {
     // now throws on a non-`{__scrml_error}` non-2xx (emit-functions.ts), so a
     // transport/host failure routes to `.error` here, never the success cell.
     const requestBodyCells: Map<string, RequestBodyCell> = collectRequestBodyCells(fileAST);
+    const requestDerivedNames: Set<string> = requestBodyCells.size > 0 ? collectDerivedVarNames(fileAST) : new Set<string>();
     // A request-body cell's mount-fetch is emitted ONCE at module-init (before
     // the DOMContentLoaded wiring), so it is the FIRST occurrence in the client.
     // Convert only that first occurrence per request id; any later reassignment
@@ -3344,12 +3451,18 @@ export function generateClientJs(ctx: CompileContext): string {
         // Re-fetch on any declared/inferred `@var` dependency change (§6.7.7).
         // The reads inside the effect establish the reactive subscription; the
         // effect also fires once on registration → the mount fetch.
-        const depsJs = info.depsVars
-          .map((d) => `_scrml_reactive_get(${JSON.stringify(d)})`)
-          .join(", ");
+        //
+        // The fetch itself runs UNTRACKED (S444). Its synchronous prologue — up
+        // to the first `await` — reads `${stateVar}.data` (the stale check) and
+        // evaluates the call's ARGUMENTS. Tracked, the first read subscribed the
+        // effect to its own result (every settle re-fired it: an endless refetch
+        // loop), and the argument reads added the body's `@var`s as deps even
+        // under an explicit `deps=[…]`, which §6.7.7 says "overrides inference".
+        // A DERIVED dep is read through requestDepReadLines' untracked settle so
+        // one upstream write re-fires the fetch once, not 2x (S444 review).
         lines.push(`_scrml_effect(function() {`);
-        lines.push(`  var _scrml_deps = [${depsJs}];`);
-        lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+        lines.push(...requestDepReadLines(info.depsVars, requestDerivedNames, "_scrml_deps"));
+        lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
         lines.push(`});`);
       } else {
         lines.push(`${fetchFn}();`);
@@ -3382,8 +3495,19 @@ export function generateClientJs(ctx: CompileContext): string {
       }
       return depth === 0 ? j : -1;
     };
-    for (const [, mangledName] of fnNameMap) {
-      if (!/^_scrml_(fetch|cps)_/.test(mangledName)) continue;
+    // g-request-body-client-wrapper-unawaited-one-shot (S444) — the callee set is
+    // every ASYNC-COLORED function, not only the server stubs. A client fn that
+    // reaches a server fn (`function wrap(q) { return suggest(q) }`) is emitted
+    // `async` by the same coloring (`clientAsyncFactsOf` — the analysis the
+    // E-ASYNC-FN-ESCAPES-AS-VALUE / sync-callback checks consult), so a
+    // module-init `_scrml_reactive_set("hits", _scrml_wrap_8(…))` stored a
+    // PROMISE in the cell. For a `<request>` body it also skipped the §6.7.7
+    // settle machine below — no fetch fn, no seq, no dep effect, `.loading`
+    // stuck `true`. Keyed by SOURCE name (fnNameMap's key), so a user name that
+    // merely looks like a stub is never swept in.
+    const asyncClientFnNames = clientAsyncFactsOf(ctx).asyncFnNames ?? new Set<string>();
+    for (const [sourceName, mangledName] of fnNameMap) {
+      if (!/^_scrml_(fetch|cps)_/.test(mangledName) && !asyncClientFnNames.has(sourceName)) continue;
       // Match _scrml_reactive_set("NAME", <mangledName>( ... );) at statement level.
       // Body args may themselves contain `(`; count parens to find the matching close.
       const setHead = "_scrml_reactive_set(";
@@ -4230,7 +4354,7 @@ export function generateClientJs(ctx: CompileContext): string {
   const SQL_LEAK_PATTERNS: RegExp[] = [
     /_scrml_sql_exec\s*\(/,                 // legacy helper name (defensive)
     /_scrml_db\s*\./,                       // legacy bun:sqlite db var (defensive)
-    /\b_scrml_sql(?:_\d+)?\s*[.`]/,         // §44 Bun.SQL tag/method calls
+    new RegExp(`\\b${SQL_HANDLE_PATTERN}\\s*[.\`]`), // §44 Bun.SQL tag/method calls — EVERY handle name (sql-handle-name.ts)
     /\bprocess\.env\b/,
     /\bBun\.env\b/,
     /\bbun\.eval\s*\(/,
@@ -4262,6 +4386,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // S22 §1a slice 2: release the per-file variant registry.
   // S95 Bug 2: also release the rewriter's mirror.
   setVariantFieldsForFile(null, null);
+  setShadowedVariantNames(null);
   setVariantFieldsForRewriter(null, null);
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
   // registered-request id set so it cannot leak into the next file's emission.
@@ -4282,20 +4407,85 @@ export function generateClientJs(ctx: CompileContext): string {
 //     flagging positional-binding ambiguity for emitMatchExpr.
 // Uses the same decl.variants / decl.raw fallback logic as emitEnumVariantObjects
 // (the type system may not attach .variants back onto the AST node).
+//
+// g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the registry also
+// carries every enum the file IMPORTS. The cross-file source is the SAME map the
+// type system seeds its registry from (api.js `importedTypesByFile`: alias-aware,
+// re-export-chasing, keyed by the importing file), installed once per compile via
+// setImportedTypesForCodegen — so exhaustiveness (E-TYPE-020, which already saw
+// imported enums) and codegen can no longer disagree about which enums exist.
+// Before this, only the CURRENT file's enums were here: a positional binder over
+// an imported enum was dropped (F11) and tag-only arms over an imported payload
+// enum compared the tagged object to a string and never matched (F16).
+//
+// Precedence: a file-local enum's variant always wins over an imported one of the
+// same name (the pre-fix behaviour for every local match is unchanged). Two
+// IMPORTED variants of one name with DIFFERENT field lists are a collision
+// (by-name positional binding over it is refused, exactly as for two local
+// enums); an identical field list (the same enum reached through two import
+// paths) is not. This by-NAME table is the fallback: a match whose subject TS
+// resolved binds against that enum's own schema (getMatchSubjectVariantFields,
+// emit-control-flow.ts), so neither precedence rule can mis-bind it.
 // ---------------------------------------------------------------------------
+
+/** Per-compile cross-file type map: importing file → (local name → ResolvedType). */
+type ImportedTypesByFile = { get(filePath: string): Map<string, any> | undefined } | null;
+let _importedTypesByFile: ImportedTypesByFile = null;
+
+/**
+ * Install (or clear, with null) the per-compile cross-file imported-types map —
+ * api.js's `importedTypesByFile`, the one the TS stage seeds from. Set by runCG
+ * at the head of each compile and cleared by resetCodegenModuleState.
+ */
+export function setImportedTypesForCodegen(map: ImportedTypesByFile): void {
+  _importedTypesByFile = map ?? null;
+}
+
+/**
+ * The enums a file imports, as `{ localName, enumType }` (the resolved EnumType
+ * carries `variants[].payload` as an ordered Map — declaration order). Includes
+ * the base enum of an enum-subset refinement alias. Empty when no cross-file map
+ * is installed (single-file compiles) or the file imports no enum.
+ */
+export function getImportedEnumTypes(fileAST: any): Array<{ localName: string; enumType: any }> {
+  const filePath: string | undefined = fileAST?.filePath ?? fileAST?.ast?.filePath;
+  if (!_importedTypesByFile || !filePath) return [];
+  const imported = _importedTypesByFile.get(filePath);
+  if (!imported) return [];
+  const out: Array<{ localName: string; enumType: any }> = [];
+  for (const [localName, t] of imported) {
+    if (t && t.kind === "enum" && Array.isArray(t.variants)) out.push({ localName, enumType: t });
+  }
+  return out;
+}
+
+function sameFieldList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((f, i) => f === b[i]);
+}
 
 export function buildVariantFieldsRegistry(fileAST: any): {
   fields: Map<string, string[]>;
   collisions: Set<string>;
+  /** Names in `fields` contributed by an IMPORTED enum (no local declaration). */
+  imported: Set<string>;
+  /** Names a LOCAL enum and an IMPORTED enum both declare with different fields (see setShadowedVariantNames). */
+  shadowed: Set<string>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
+  const imported = new Set<string>();
+  const shadowed = new Set<string>();
+  const localShape = new Map<string, string[] | null>();
   const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
 
+  // Every variant name a LOCAL enum declares (unit or payload) — local wins.
+  const localVariantNames = new Set<string>();
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
     const info = getAllVariantInfo(decl);
     for (const v of info) {
+      localVariantNames.add(v.name);
+      if (!localShape.has(v.name)) localShape.set(v.name, v.fieldNames);
       if (v.fieldNames === null) continue; // unit variants have no bindings
       if (fields.has(v.name)) {
         // Same variant name used in a second enum → positional ambiguity.
@@ -4305,7 +4495,35 @@ export function buildVariantFieldsRegistry(fileAST: any): {
       }
     }
   }
-  return { fields, collisions };
+
+  // Imported enums (F11/F16). The same enum can arrive under two local names
+  // (an alias beside the plain import) — dedupe by the resolved type object.
+  // A local variant name is never touched here, so every local match / local
+  // constructor resolves exactly as before this registry saw imports; a match
+  // whose TS-resolved subject is an imported enum reads that enum's own schema
+  // instead (getMatchSubjectVariantFields), so a same-named local variant cannot
+  // mis-bind it.
+  const seenEnums = new Set<any>();
+  for (const { localName, enumType } of getImportedEnumTypes(fileAST)) {
+    const info = getAllVariantInfo({ variants: enumType.variants } as unknown as TypeDecl);
+    if (seenEnums.has(enumType)) continue;
+    seenEnums.add(enumType);
+    for (const v of info) {
+      if (localVariantNames.has(v.name)) {
+        const mine = localShape.get(v.name) ?? null;
+        const same = mine === null || v.fieldNames === null
+          ? mine === v.fieldNames
+          : sameFieldList(mine, v.fieldNames);
+        if (!same) shadowed.add(v.name);
+        continue;
+      }
+      if (v.fieldNames === null) continue; // unit variants have no bindings
+      const prev = fields.get(v.name);
+      if (prev === undefined) { fields.set(v.name, v.fieldNames); imported.add(v.name); }
+      else if (!sameFieldList(prev, v.fieldNames)) collisions.add(v.name);
+    }
+  }
+  return { fields, collisions, imported, shadowed };
 }
 
 // ---------------------------------------------------------------------------
@@ -4603,6 +4821,23 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
   const lines: string[] = [];
   const typeDecls: TypeDecl[] = fileAST.typeDecls ?? fileAST.ast?.typeDecls ?? [];
 
+  // F15 (g-impl1-match-miscompiles-hit-by-the-bootstrap) — a payload FIELD named
+  // like a function declared in this file. The whole-buffer fn-name mangle
+  // (post-fn-name-mangle) renames that identifier in the constructor's parameter
+  // list AND in a SHORTHAND `data: { params }` — the shorthand group sits after
+  // `:`, which the mangler's object-literal expansion deliberately does not treat
+  // as an object (code-segments.ts BRACE_OPENS_OBJECT_AFTER) — so the KEY became
+  // `_scrml_params_N` and every `.params` read was undefined. Emitting the
+  // colliding field as an explicit `params: params` pins the KEY (the mangler
+  // never rewrites an identifier followed by `:`) while the parameter and the
+  // value are renamed together and stay bound. Only colliding fields change, so
+  // every other constructor is byte-identical.
+  const fnNames = new Set<string>();
+  for (const fn of collectFunctions(fileAST)) {
+    const n = (fn as { name?: unknown }).name;
+    if (typeof n === "string" && n.length > 0) fnNames.add(n);
+  }
+
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
 
@@ -4615,7 +4850,8 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
         entries.push(`${v.name}: "${v.name}"`);
       } else {
         const params = v.fieldNames.join(", ");
-        const dataInit = v.fieldNames.length === 0 ? "{}" : `{ ${params} }`;
+        const dataFields = v.fieldNames.map((f) => (fnNames.has(f) ? `${f}: ${f}` : f)).join(", ");
+        const dataInit = v.fieldNames.length === 0 ? "{}" : `{ ${dataFields} }`;
         entries.push(`${v.name}: function(${params}) { return { variant: "${v.name}", data: ${dataInit} }; }`);
       }
     }

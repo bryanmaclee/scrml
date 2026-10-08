@@ -1,0 +1,370 @@
+// =============================================================================
+// self-host-v2 / codec.scrml — the §57 wire codec, COMPILE-TIME half (arc unit Uc).
+//
+// SPEC §57 (Wire Format), §12.5.1, §42.3.1, §42.8, §6.14.2 rule 2-3, §66.12.
+// The codec is TYPE-DIRECTED: a Core `Type` (plus the program's TypeDefs) is
+// resolved here, once, at compile time, into a closed WIRE DESCRIPTOR — a
+// `WireTable` — which the printer emits as a JS literal (`wireTableJs`). The
+// RUNTIME half (`slice-codec/runtime/codec.js`) encodes and decodes values
+// against that literal. Nothing here touches a value.
+//
+// Why a descriptor and not a per-type emitted encoder: one runtime function
+// pair covers every type, the descriptor is data (inspectable, testable, and
+// the same literal serves U1's server-fn boundary and U5's `persist=` restore),
+// and the "never guess" rule is enforced in ONE place — here — by REFUSING a
+// type whose wire shape the SPEC does not fix (see `why` below).
+//
+// What a descriptor covers (the Core types of arc plan Uc):
+//   Int · Num · Str · Bool · Named(struct) · Named(enum) · Seq · Maybe.
+// An enum def carries every variant WITH its declared payload fields (s454):
+// §57.8 (S451 R8) — "An enum value whose variant carries NO payload SHALL be
+// encoded as the variant name, a JSON string" and "An enum value whose variant
+// carries a payload SHALL be encoded as a JSON object with exactly two own
+// properties: `"variant"` … and `"data"`, a JSON object whose keys are the
+// variant's DECLARED field names". (Until s454 a payload variant was refused
+// here: R8 had not ruled the shape — docs/changes/s446-bootstrap-uc-codec Q1.)
+// Refused (with a reason in `WireBuild.why`, never a guessed shape):
+//   - a struct field named `__scrml_absent` — its value would be the §57.2
+//     envelope itself, so a present struct in a `T | not` position would decode
+//     as absence (lossy). §57.2 puts the envelope in the `__scrml_*` namespace.
+//   - `Named(sym)` that names no TypeDef (a §66 declaration type: an instance
+//     snapshot is not a wire value in this unit).
+//   - maps (§59.10) — Core has no map type yet, so none can reach here.
+//
+// §42.3.1 union-`not` normalization: `Maybe(Maybe(T))` resolves to ONE
+// `WMaybe(T)` — duplicate `not` members collapse, and at runtime both are JS
+// `null` (§42.8), so the collapse loses nothing.
+//
+// Recursive types (a struct reaching itself through a Seq or Maybe) are
+// closed: every Named type gets ONE def slot, referenced by `WRef(def)`.
+// =============================================================================
+${
+    import { Sym, Type, SeqGrants, LengthGrant, FieldDef, VariantDef, TypeDef, CoreProgram, findTypeDef } from "./core.scrml"
+    import { JsExpr, JsProp, jstr, jnum, expr } from "./js.scrml"
+
+    // -------------------------------------------------------------------------
+    // The descriptor. Field names and enum tags are the DECLARED names (the
+    // Sym hints) — the same data layout print.scrml gives runtime values
+    // (`memberAt`, `variantAt`), so the wire key IS the runtime key.
+    // -------------------------------------------------------------------------
+    // A sequence's §66.12 length axis. Only `Bounded` constrains a VALUE (a
+    // decoded sequence must lie in min..max); `Fixed` constrains WRITES (the
+    // length never changes from what the value was constructed with) and has
+    // no static length, so the decoder cannot check it alone.
+    export type WireBound:enum = { Free, Fixed, Bounded(min: int, max: int) }
+
+    export type WireTy:enum = {
+        WInt,
+        WNum,
+        WStr,
+        WBool,
+        WMaybe(inner: WireTy),
+        WSeq(elem: WireTy, bound: WireBound),
+        WRef(def: int),
+    }
+
+    export type WireField:struct = { name: string, ty: WireTy }
+
+    // One enum variant: its declared name and its payload fields in declared
+    // order (empty for a unit variant). The order is the runtime value's
+    // positional `data` order (print.scrml `variantValueJs`), so the runtime
+    // half maps wire key <-> index through this list alone.
+    export type WireVariant:struct = { name: string, fields: WireField[] }
+
+    export type WireDef:enum = {
+        WStruct(name: string, fields: WireField[]),
+        WEnum(name: string, variants: WireVariant[]),
+    }
+
+    export type WireTable:struct = { defs: WireDef[], root: WireTy }
+
+    // `table` is `not` iff `why` is non-empty: a refused type has NO descriptor
+    // (fail closed — a caller cannot emit a half-described codec).
+    export type WireBuild:struct = { table: WireTable | not, why: string[] }
+
+    // The envelope key (§57.2). The runtime half carries the same constant.
+    export fn absentKey() -> string { return "__scrml_absent" }
+
+    // -------------------------------------------------------------------------
+    // Pass 1 — the closure of Named types reachable from the root, in first-
+    // visit order. A Sym already listed is not revisited (recursion closes).
+    // -------------------------------------------------------------------------
+    fn symListed(ss: Sym[], s: Sym) -> boolean {
+        for (const x of ss) {
+            if (x.id == s.id) return true
+        }
+        return false
+    }
+
+    fn symIndex(ss: Sym[], s: Sym) -> int {
+        let i = 0
+        for (const x of ss) {
+            if (x.id == s.id) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn reach(p: CoreProgram, t: Type, acc: Sym[]) -> Sym[] {
+        return match t {
+            .Int :> acc
+            .Num :> acc
+            .Str :> acc
+            .Bool :> acc
+            .Maybe(inner: i) :> reach(p, i, acc)
+            .Seq(elem: e) :> reach(p, e, acc)
+            .Named(sym: s) :> reachNamed(p, s, acc)
+        }
+    }
+
+    fn reachNamed(p: CoreProgram, s: Sym, acc: Sym[]) -> Sym[] {
+        if (symListed(acc, s)) return acc
+        const out: Sym[] = acc.concat([s])
+        const td: TypeDef | not = findTypeDef(p, s)
+        if (td is not) return out
+        return reachDef(p, td, out)
+    }
+
+    fn reachDef(p: CoreProgram, td: TypeDef, acc: Sym[]) -> Sym[] {
+        return match td {
+            .StructDef(fields: fs) :> reachFields(p, fs, acc)
+            .EnumDef(variants: vs) :> reachVariants(p, vs, acc)
+        }
+    }
+
+    fn reachFields(p: CoreProgram, fs: FieldDef[], acc: Sym[]) -> Sym[] {
+        let out: Sym[] = acc
+        for (const f of fs) { out = reach(p, f.ty, out) }
+        return out
+    }
+
+    fn reachVariants(p: CoreProgram, vs: VariantDef[], acc: Sym[]) -> Sym[] {
+        let out: Sym[] = acc
+        for (const v of vs) { out = reachFields(p, v.fields, out) }
+        return out
+    }
+
+    // -------------------------------------------------------------------------
+    // Pass 2 — types to WireTy against the closure (`syms[i]` is def slot i).
+    // -------------------------------------------------------------------------
+    fn wireTy(syms: Sym[], t: Type) -> WireTy {
+        return match t {
+            .Int :> WireTy.WInt
+            .Num :> WireTy.WNum
+            .Str :> WireTy.WStr
+            .Bool :> WireTy.WBool
+            .Maybe(inner: i) :> WireTy.WMaybe(wireTy(syms, unMaybe(i)))
+            .Seq(elem: e, grants: g) :> WireTy.WSeq(wireTy(syms, e), wireBound(g))
+            .Named(sym: s) :> WireTy.WRef(symIndex(syms, s))
+        }
+    }
+
+    // §42.3.1: `(T | not) | not` is `T | not`.
+    fn unMaybe(t: Type) -> Type {
+        return match t {
+            .Maybe(inner: i) :> unMaybe(i)
+            .Int :> t
+            .Num :> t
+            .Str :> t
+            .Bool :> t
+            .Named :> t
+            .Seq :> t
+        }
+    }
+
+    fn wireBound(g: SeqGrants) -> WireBound {
+        return match g.length {
+            .Free :> WireBound.Free
+            .Fixed :> WireBound.Fixed
+            .Bounded(min: lo, max: hi) :> WireBound.Bounded(lo, hi)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Pass 3 — one def per closure Sym, collecting refusals.
+    // -------------------------------------------------------------------------
+    export type DefBuild:struct = { def: WireDef | not, why: string[] }
+
+    fn defOf(p: CoreProgram, syms: Sym[], s: Sym) -> DefBuild {
+        const td: TypeDef | not = findTypeDef(p, s)
+        if (td is not) {
+            return { def: not, why: ["Named(" + s.hint + "#" + s.id + ") names no type definition (a declaration-typed value has no wire form in this codec)"] }
+        }
+        return defOfTypeDef(syms, td)
+    }
+
+    fn defOfTypeDef(syms: Sym[], td: TypeDef) -> DefBuild {
+        return match td {
+            .StructDef(sym: ts, fields: fs) :> structDef(syms, ts, fs)
+            .EnumDef(sym: es, variants: vs) :> enumDef(syms, es, vs)
+        }
+    }
+
+    fn structDef(syms: Sym[], ts: Sym, fs: FieldDef[]) -> DefBuild {
+        let fields: WireField[] = []
+        let why: string[] = []
+        for (const f of fs) {
+            if (f.sym.hint == absentKey()) {
+                why = why.concat(["struct " + ts.hint + " has a field named " + absentKey() + ": a present value would be the §57.2 absence envelope"])
+            }
+            fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }])
+        }
+        if (why.length > 0) return { def: not, why: why }
+        return { def: WireDef.WStruct(ts.hint, fields), why: [] }
+    }
+
+    // §57.8: a variant's wire `data` keys are its DECLARED field names. A
+    // payload field named `__scrml_absent` is NOT refused (unlike a struct
+    // field): the `data` object never stands in a `T | not` position, so it
+    // can never be read as the §57.2 envelope.
+    fn enumDef(syms: Sym[], es: Sym, vs: VariantDef[]) -> DefBuild {
+        let variants: WireVariant[] = []
+        for (const v of vs) {
+            let fields: WireField[] = []
+            for (const f of v.fields) {
+                fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }])
+            }
+            variants = variants.concat([{ name: v.sym.hint, fields: fields }])
+        }
+        return { def: WireDef.WEnum(es.hint, variants), why: [] }
+    }
+
+    // -------------------------------------------------------------------------
+    // Entry.
+    // -------------------------------------------------------------------------
+    export fn wireBuild(p: CoreProgram, t: Type) -> WireBuild {
+        const syms: Sym[] = reach(p, t, [])
+        let defs: WireDef[] = []
+        let why: string[] = []
+        for (const s of syms) {
+            const b: DefBuild = defOf(p, syms, s)
+            why = why.concat(b.why)
+            const d: WireDef | not = b.def
+            // a refused def contributes only its `why`
+            if (d is some) {
+                defs = defs.concat([d])
+            }
+        }
+        if (why.length > 0) return { table: not, why: why }
+        return { table: { defs: defs, root: wireTy(syms, t) }, why: [] }
+    }
+
+    // -------------------------------------------------------------------------
+    // The JS literal the printer embeds (and the runtime half reads):
+    //   { defs: [ { k: "struct", name, fields: [ { name, ty } ] } |
+    //             { k: "enum", name, variants: [ { name, fields: [ { name, ty } ] } ] } ],
+    //     root: ty }
+    //   ty = { k: "int" | "num" | "str" | "bool" }
+    //      | { k: "maybe", inner: ty }
+    //      | { k: "seq", elem: ty, bound: { k: "free" | "fixed" } | { k: "bounded", min, max } }
+    //      | { k: "ref", def: <index into defs> }
+    // -------------------------------------------------------------------------
+    fn prop(k: string, v: JsExpr) -> JsProp { return { key: k, value: v } }
+
+    fn kind(k: string) -> JsProp { return prop("k", jstr(k)) }
+
+    export fn wireTyJs(t: WireTy) -> JsExpr {
+        return match t {
+            .WInt :> JsExpr.JObject([kind("int")])
+            .WNum :> JsExpr.JObject([kind("num")])
+            .WStr :> JsExpr.JObject([kind("str")])
+            .WBool :> JsExpr.JObject([kind("bool")])
+            .WMaybe(inner: i) :> JsExpr.JObject([kind("maybe"), prop("inner", wireTyJs(i))])
+            .WSeq(elem: e, bound: b) :> JsExpr.JObject([kind("seq"), prop("elem", wireTyJs(e)), prop("bound", boundJs(b))])
+            .WRef(def: d) :> JsExpr.JObject([kind("ref"), prop("def", jnum(d))])
+        }
+    }
+
+    fn boundJs(b: WireBound) -> JsExpr {
+        return match b {
+            .Free :> JsExpr.JObject([kind("free")])
+            .Fixed :> JsExpr.JObject([kind("fixed")])
+            .Bounded(min: lo, max: hi) :> JsExpr.JObject([kind("bounded"), prop("min", jnum(lo)), prop("max", jnum(hi))])
+        }
+    }
+
+    fn wireDefJs(d: WireDef) -> JsExpr {
+        return match d {
+            .WStruct(name: n, fields: fs) :> JsExpr.JObject([kind("struct"), prop("name", jstr(n)), prop("fields", fieldsJs(fs))])
+            .WEnum(name: n, variants: vs) :> JsExpr.JObject([kind("enum"), prop("name", jstr(n)), prop("variants", variantsJs(vs))])
+        }
+    }
+
+    fn variantsJs(vs: WireVariant[]) -> JsExpr {
+        let out: JsExpr[] = []
+        for (const v of vs) {
+            out = out.concat([JsExpr.JObject([prop("name", jstr(v.name)), prop("fields", fieldsJs(v.fields))])])
+        }
+        return JsExpr.JArray(out)
+    }
+
+    fn fieldsJs(fs: WireField[]) -> JsExpr {
+        let out: JsExpr[] = []
+        for (const f of fs) {
+            out = out.concat([JsExpr.JObject([prop("name", jstr(f.name)), prop("ty", wireTyJs(f.ty))])])
+        }
+        return JsExpr.JArray(out)
+    }
+
+    export fn wireTableJs(t: WireTable) -> JsExpr {
+        let defs: JsExpr[] = []
+        for (const d of t.defs) { defs = defs.concat([wireDefJs(d)]) }
+        return JsExpr.JObject([prop("defs", JsExpr.JArray(defs)), prop("root", wireTyJs(t.root))])
+    }
+
+    // The literal's text (tests, debugging, and any printer that wants a string).
+    export fn wireTableText(t: WireTable) -> string { return expr(wireTableJs(t), "") }
+
+    // s451 (U5): does the descriptor hold a FIXED-length sequence anywhere?
+    // `Fixed` constrains writes against the length the value was CONSTRUCTED
+    // with and has no static length (see WireBound), so a decoder cannot judge
+    // a stored value against it alone — `persist=` refuses such a type.
+    export fn hasFixedLength(t: WireTable) -> boolean {
+        if (tyHasFixed(t.root)) return true
+        for (const d of t.defs) {
+            if (defHasFixed(d)) return true
+        }
+        return false
+    }
+
+    fn tyHasFixed(t: WireTy) -> boolean {
+        return match t {
+            .WInt :> false
+            .WNum :> false
+            .WStr :> false
+            .WBool :> false
+            .WMaybe(inner: i) :> tyHasFixed(i)
+            .WSeq(elem: e, bound: b) :> boundIsFixed(b) || tyHasFixed(e)
+            .WRef(def: d) :> false
+        }
+    }
+
+    fn boundIsFixed(b: WireBound) -> boolean {
+        return match b {
+            .Fixed :> true
+            .Free :> false
+            .Bounded(min: lo) :> false
+        }
+    }
+
+    fn defHasFixed(d: WireDef) -> boolean {
+        return match d {
+            .WStruct(fields: fs) :> fieldsHaveFixed(fs)
+            .WEnum(variants: vs) :> variantsHaveFixed(vs)
+        }
+    }
+
+    fn variantsHaveFixed(vs: WireVariant[]) -> boolean {
+        for (const v of vs) {
+            if (fieldsHaveFixed(v.fields)) return true
+        }
+        return false
+    }
+
+    fn fieldsHaveFixed(fs: WireField[]) -> boolean {
+        for (const f of fs) {
+            if (tyHasFixed(f.ty)) return true
+        }
+        return false
+    }
+}

@@ -7,7 +7,7 @@ server function rankHashes(pw, hashes) {
   return hashes.sort((a, b) => matches(a) ? -1 : 1)
 }
 function go() {
-  const r = rankHashes("pw", ["a", "b"])
+  const r = rankHashes("pw", ["a", "b"]) !{ .Transport(_) :> { return } }
   console.log(r)
 }
 <button onclick=go()>go</button>

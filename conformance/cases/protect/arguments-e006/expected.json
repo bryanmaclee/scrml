@@ -1,0 +1,13 @@
+{
+  "id": "protect-arguments-e006",
+  "description": "§14.8.9 S443 round 6 (L2) — a helper that returns `arguments[0]` returns its argument; passing it the protected column and returning the result is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9 (S441 amendment): provenance is preserved by default through every binding. `arguments` read as a free, clean name, so `first(u.passwordHash)` with `function first() { return arguments[0] }` served the hash over HTTP (measured, S443 round 6). `arguments` now carries the join of every argument.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "notCodes": ["I-PROTECT-STRIP-001"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

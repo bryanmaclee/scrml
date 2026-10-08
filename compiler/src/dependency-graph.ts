@@ -32,6 +32,7 @@
  * Performance budget: <= 20 ms for the full project.
  */
 
+import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 import type {
   Span,
   FileAST,
@@ -682,7 +683,9 @@ function collectAllReactiveDecls(fileAST: FileAST): ReactiveDeclNode[] {
   function visit(list: ASTNode[]): void {
     for (const node of list) {
       if (node.kind === "logic" && Array.isArray(node.body)) {
-        for (const child of node.body) {
+        for (const child0 of node.body) {
+          // S455 (§19.8.3) — `@x = ?{…} !{…}` declares `@x` as the unhandled form does.
+          const child = (handledSqlGuardInner(child0) ?? child0) as ASTNode;
           if (child.kind === "state-decl" && !isFoldedDerived(child)) result.push(child);
         }
       }
@@ -814,7 +817,9 @@ function collectAllSqlBlocks(fileAST: FileAST): SQLNode[] {
     for (const node of list) {
       if (node.kind === "sql") result.push(node);
       if (node.kind === "logic" && Array.isArray(node.body)) {
-        for (const child of node.body) {
+        for (const child0 of node.body) {
+          // S455 (§19.8.3) — `?{…} !{…}` wraps the statement; same block.
+          const child = (handledSqlGuardInner(child0) ?? child0) as ASTNode;
           if (child.kind === "sql") result.push(child);
         }
       }
@@ -971,7 +976,9 @@ function hasLiftAfter(
   serverFunctionNames: Set<string>,
 ): boolean {
   for (let i = nodeIndex + 1; i < body.length; i++) {
-    const stmt = body[i];
+    // S455 (§19.8.3) — a handled `lift ?{…} !{…}` / `?{…} !{…}` is the
+    // statement it guards.
+    const stmt = (handledSqlGuardInner(body[i]) ?? body[i]) as LogicStatement;
 
     // Found a lift-expr at direct body level => hasLift is true
     if (stmt.kind === "lift-expr") return true;
@@ -1913,6 +1920,12 @@ export function runDG(input: DGInput): DGOutput {
       function walkBodyForReactiveRefs(nodes: any[]): void {
         for (const bodyNode of nodes) {
           if (!bodyNode || typeof bodyNode !== "object") continue;
+
+          // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the WHOLE statement: its
+          // cell write and its query's `${@var}` reads are the guarded
+          // statement's, exactly as when unhandled.
+          const _handledInner = handledSqlGuardInner(bodyNode);
+          if (_handledInner) { walkBodyForReactiveRefs([_handledInner]); continue; }
 
           // bare-expr / derived state-decl: check for @varName references.
           // Prefer ExprNode walk; fall back to string regex.

@@ -1,0 +1,19 @@
+{
+  "id": "tenant-floor-alter-add-tenant-column-pos",
+  "description": "§14.8.10 (S455) — `CREATE TABLE notes (id, body)` followed by `ALTER TABLE notes ADD COLUMN tenant_id TEXT` in `<schema>`: the schema carries a `tenant_id` column for `notes`, so `notes` is tenant-scoped and its read is filtered at the source (I-TENANT-STRIP). Before S455 only CREATE TABLE column lists and DSL heads were read: the read was emitted unfiltered and pinned tenant A received B's note (executed on e014f20ce). The CREATE without `tenant_id` and the ALTER that adds it AGREE — no E-SCHEMA-015.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-floor-project-set.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: \"A table whose `<schema>` carries a `tenant_id` column IS tenant-scoped; the column's presence is the declaration.\" S455: an `ALTER TABLE <t>` statement in `<schema>` that names `tenant_id` makes `<t>` tenant-scoped.",
+  "expect": {
+    "codes": [
+      "I-TENANT-STRIP"
+    ],
+    "notCodes": [
+      "E-SCHEMA-015"
+    ],
+    "notCodePrefixes": [
+      "E-TENANT-"
+    ]
+  }
+}

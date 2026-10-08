@@ -134,8 +134,9 @@ const MUTATIONS = [
 const FRONT_MUTATIONS = [
   // §66.19.6 — an engine as a `single` declaration
   { c: "Parse.ShorthandBody", id: "a `:`-shorthand body's expression is dropped (an empty text)", file: PARSE,
-    from: "const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }",
-    to: 'const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }', tests: ["engine.test.js"] },
+    // (site moved with dpa-045 follow-up 3: parseShorthand now hands its expression to displayNodes)
+    from: "        return displayNodes(m, e, start, tp)",
+    to: '        return { nodes: [{ nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }], mp: mBump(m) }', tests: ["engine.test.js"] },
   { c: "Analyze.StateBodies", id: "state-child bodies are never resolved (no facts for their expressions)", file: ANALYZE,
     from: "st = resolveNodes(renv, stateBodies(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["engine.test.js"] },
   { c: "Analyze.StateView", id: "every state-view arm is keyed to the enum's first variant", file: ANALYZE,
@@ -146,7 +147,7 @@ const FRONT_MUTATIONS = [
     from: "                if (isNestedUserDecl(d)) {\n                    const n: RDeclStubs", to: "                if (false) {\n                    const n: RDeclStubs", tests: ["engine.test.js"] },
   { c: "Lower.NestedDeclSyntax", id: "a nested declaration's renders is never lowered", file: LOWER,
     from: ".concat(nestedSyntaxes(file, p.items))", to: "", tests: ["engine.test.js"] },
-  // §66.19.5 — an append-only audit log (the fixture minus its Core-blocked constructs)
+  // §66.19.5 — an append-only audit log (s444: the VERBATIM program, run)
   { c: "Analyze.SeqShape", id: "a recognized append shape records no element to write", file: ANALYZE,
     from: "                elems = elems.concat([x])\n", to: "                elems = elems\n", tests: ["audit.test.js"] },
   { c: "Analyze.SeqShape", id: "`[...@x, e]` classified as the front shape (a prepend)", file: ANALYZE,
@@ -157,15 +158,33 @@ const FRONT_MUTATIONS = [
     from: "        const prepend: boolean = w.edit == EditKind.Prepend", to: "        const prepend: boolean = false", tests: ["audit.test.js"] },
   { c: "Parse.ArraySpread", id: "a spread element keeps only its operand's position (`[...@x, e]` read as `[e, ...@x]`)", file: PARSE,
     from: "                out = out.concat([sp.e])", to: "                out = [sp.e].concat(out)", tests: ["audit.test.js"] },
-  // §66.19.2 — a validated form (the fixture minus its validators and binds)
-  { c: "Analyze.StarShared", id: "`<*x/>` of a shared instance inlines with no instance substitution", file: ANALYZE,
-    from: "MInline({ nodes: nodes, subst: InstRef.Shared(d.info.sym) })", to: "MInline({ nodes: nodes, subst: not })", tests: ["form.test.js"] },
-  { c: "Lower.Inline", id: "an inlined renders keeps the caller's instance context", file: LOWER,
-    from: "        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }", to: "        const ic: LC = { t: c.t, file: c.file, subst: c.subst, snap: not }", tests: ["form.test.js"] },
+  // s444: the host call and the bind the verbatim §66.19.5 uses
+  { c: "Analyze.Host", id: "`Date.now()` records no host fact (lowered as a missing value)", file: ANALYZE,
+    from: "            .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))", to: "            .HostOk :> plain(Type.Num, st)", tests: ["audit.test.js"] },
+  { c: "Analyze.Bind", id: "a bind records no attribute fact (the element is not bound)", file: ANALYZE,
+    from: "        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s, vattrs))", to: "        return m.st", tests: ["audit.test.js"] },   // s444 Phase B: with no bind, §66.19.2's validators are dead (E-VALIDATOR-DEAD) — the form is rejected, so it cannot judge this
+  { c: "Lower.Bind", id: "lower drops the bind", file: LOWER,
+    from: ":> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))", to: ":> [].concat(validatorAttrs(vs))", tests: ["audit.test.js", "form.test.js"] },
+  // §66.19.2 — a validated form (s444: the verbatim program minus its validators — Phase B)
+  { c: "Analyze.Star", id: "`<*x/>` of a declaration names no Star (the shared form is never rendered)", file: ANALYZE,
+    from: "        return addElem(st, e.nid, ElemFact.MStar(d.info.sym, InstRef.Shared(d.info.sym)))", to: "        return st", tests: ["form.test.js"] },
+  { c: "Lower.Star", id: "lower drops a Star", file: LOWER,
+    from: "            .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]", to: "            .MStar(decl: d, inst: i) :> []", tests: ["form.test.js"] },
+  { c: "Analyze.O54Own", id: "`@f` inside f's own renders names the NEXT field (email binds password)", file: ANALYZE,
+    from: "        return fieldIndex(d.info, name)\n    }", to: "        return fieldIndex(d.info, name) + 1\n    }", tests: ["form.test.js"] },
+  // s444 Phase B — the dpa-058 build (§66.19.2's validators land on its bound inputs; its form takes `novalidate`)
+  { c: "Parse.Validators", id: "a declaration's validators are never recorded (they vanish)", file: PARSE,
+    from: "            validators: bySource(bare.concat(o.vals)),", to: "            validators: [],", tests: ["validators.test.js"] },
+  { c: "Analyze.ValidatorLowering", id: "`req` lowers to nothing (no `required`)", file: ANALYZE,
+    from: "        if (isStrLike(ty)) return valOk(v, [pair(\"required\", \"\")], st)", to: "        if (isStrLike(ty)) return valOk(v, [], st)", tests: ["validators.test.js"] },
+  { c: "Lower.ValidatorAttrs", id: "lower drops the lowered validator attributes", file: LOWER,
+    from: ":> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))", to: ":> [bindAttr(c, bk, w, d, x, sk)]", tests: ["validators.test.js"] },
+  { c: "Lower.NoValidate", id: "lower drops `novalidate`", file: LOWER,
+    from: "        if (c.t.novalidate.indexOf(e.nid) >= 0) return [Attr.Static(\"novalidate\", \"\")]", to: "        if (false) return [Attr.Static(\"novalidate\", \"\")]", tests: ["validators.test.js"] },
   { c: "Analyze.ChildRenders", id: "`<*f/>` of a child field with renders inlines nothing", file: ANALYZE,
     from: "MInline({ nodes: own, subst: not })", to: "MInline({ nodes: [], subst: not })", tests: ["form.test.js"] },
   { c: "Analyze.ChildRenders", id: "a child field's renders is never resolved", file: ANALYZE,
-    from: "st = resolveNodes(renv, childRenders(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["form.test.js"] },
+    from: "st = resolveNodes(withOwn(renv, fd.name), rendersOf(fd), st)", to: "st = resolveNodes(withOwn(renv, fd.name), [], st)", tests: ["form.test.js"] },
 ];
 
 function runFront(tests) {

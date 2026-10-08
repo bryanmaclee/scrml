@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-reset-on-cycle-neg",
+  "description": "§6.8.4 negative twin: a CHAIN (`a` resets on `b`, `b` resets on `c`) is legal — NOT E-RESET-ON-CYCLE.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 3: \"Chains (`a` resets on `b`, `b` resets on `c`) are legal; a write to `c` resets `b`, which resets `a`.\" ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "notCodes": [
+      "E-RESET-ON-CYCLE"
+    ]
+  }
+}

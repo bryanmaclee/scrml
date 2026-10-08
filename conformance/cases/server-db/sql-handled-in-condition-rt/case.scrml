@@ -1,0 +1,48 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        empties {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <hit> = "init"
+    <miss> = "init"
+    <failed> = "init"
+    // A handled `?{}` INSIDE an expression: the `if` condition. Every arm yields a
+    // value (§19.4.3 value position), so the handled query is an ordinary operand.
+    function hasNotes() {
+        if (?{`SELECT id FROM notes`}.get() !{ _ :> not }) {
+            return "found"
+        }
+        return "absent"
+    }
+    function hasEmpties() {
+        if (?{`SELECT id FROM empties`}.get() !{ _ :> not }) {
+            return "found"
+        }
+        return "absent"
+    }
+    function hasGone() {
+        if (?{`SELECT id FROM gone`}.get() !{ _ :> not }) {
+            return "found"
+        }
+        return "absent"
+    }
+    function go() {
+        @hit = hasNotes() !{ .Transport(_) :> { return } }
+        @miss = hasEmpties() !{ .Transport(_) :> { return } }
+        @failed = hasGone() !{ .Transport(_) :> { return } }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="hit">${@hit}</p>
+    <p id="miss">${@miss}</p>
+    <p id="failed">${@failed}</p>
+</program>

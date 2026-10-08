@@ -1,0 +1,9 @@
+- 2026-09-29T16:24:05-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aeea2fc505bd3a76c; base 6dccbd6cf
+- 2026-09-29T16:29:17-06:00 A: route-inference Step 8a-page registers <page auth=required> entry; probes: page 302/302/302 (was 200/200/200)
+- 2026-09-29T16:46:51-06:00 B: E-PROGRAM-NESTED-AUTH (codegen/index.ts detectNestedProgramAuth), SPEC §4.12.2 + §4.12.9 + §34 rows, §40.2 page note replaced; conf cases x4; integration tests
+- 2026-09-29T17:19:17-06:00 blast radius probed (variants/index/softnav/per-route/if-block/crosspage/dev parity/ex23); corpus 2082 units: 0 pre-existing changes; page emission test hardened (loginRedirect= on <page> is E-PAGE-INVALID-ATTR)
+- 2026-09-29T17:42:12-06:00 DONE: gate 26434 pass/0 fail; conformance 1108/1115 + 7 xfail (0 failed); pushing
+- 2026-09-29T17:54:02-06:00 R2: Step 8c member-page inheritance (non-entry-page + bare-markup, not _layout, no auth=); program loginRedirect reaches all page scopes (8a-page/8b/8c); SPEC §40.2 two paragraphs; migration 0 pages; new test 9 (6 red on r1)
+- 2026-09-29T18:14:02-06:00 R2 review items: F1 (already fixed in b92f3459a), F2 W-AUTH-FILE-CONFLICT, F3 W-AUTH-REDIRECT-LOOP, nits (§20.5.1 kinds, dead page reads); F4 NOT emitted (E-PROGRAM-002 reserved-not-defined for same-file; corpus 0); corpus: +1 W-AUTH-REDIRECT-LOOP on already-erroring samples/login.scrml
+- 2026-09-29T18:50:56-06:00 R2 done: conformance 1112/1119 + 7 xfail; served table re-run; pushing
+- 2026-09-29T19:11:13-06:00 R3: F1 recognized-literal rule + W-ATTR-002 auth text; F2 app-root-only inheritance; F5 case-sensitive loop; nit W-AUTH-LOGIN-REDIRECT-AMBIGUOUS; 5 new tests red on r2; corpus unchanged vs r2

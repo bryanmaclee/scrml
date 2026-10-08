@@ -45,7 +45,7 @@ ${ import { uuid } from 'scrml:crypto' }
     <h1>${pipelineVersion}</>
     <div class="create-form">
         <input type="text" bind:value=@newJobName placeholder="Job name"/>
-        <button onclick=createJob()>Create Job</>
+        <button onclick={ createJob() !{ .Transport(_) :> { return } } }>Create Job</>
     </div>
     <table>
         <thead>

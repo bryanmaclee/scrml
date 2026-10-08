@@ -1,0 +1,65 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        empties {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <hit> = "init"
+    <miss> = "init"
+    <failed> = "init"
+    <allFailed> = "init"
+    // §19.8.3 handling form 2: a `match` on the query's result. The success value
+    // arrives as `::Ok`; a query that fails to run arrives as its SqlError variant.
+    function matchHit() {
+        const r = match ?{`SELECT id, body FROM notes`}.get() {
+            ::Ok(row)        :> row is not ? "none" : row.body
+            ::QueryFailed(m) :> "failed"
+            _                :> "other"
+        }
+        return r
+    }
+    function matchMiss() {
+        const r = match ?{`SELECT id, body FROM empties`}.get() {
+            ::Ok(row)        :> row is not ? "none" : row.body
+            ::QueryFailed(m) :> "failed"
+            _                :> "other"
+        }
+        return r
+    }
+    function matchFailed() {
+        const r = match ?{`SELECT id, body FROM gone`}.get() {
+            ::Ok(row)        :> row is not ? "none" : row.body
+            ::QueryFailed(m) :> "failed"
+            _                :> "other"
+        }
+        return r
+    }
+    function matchAllFailed() {
+        const r = match ?{`SELECT id FROM gone`}.all() {
+            ::Ok(rows)       :> "rows:" + rows.length
+            ::QueryFailed(m) :> "failed:" + m
+            _                :> "other"
+        }
+        return r
+    }
+    function go() {
+        @hit = matchHit() !{ .Transport(_) :> { return } }
+        @miss = matchMiss() !{ .Transport(_) :> { return } }
+        @failed = matchFailed() !{ .Transport(_) :> { return } }
+        @allFailed = matchAllFailed() !{ .Transport(_) :> { return } }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="hit">${@hit}</p>
+    <p id="miss">${@miss}</p>
+    <p id="failed">${@failed}</p>
+    <p id="allFailed">${@allFailed}</p>
+</program>

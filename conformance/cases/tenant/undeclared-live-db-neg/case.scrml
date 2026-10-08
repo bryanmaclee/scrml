@@ -1,0 +1,12 @@
+<program>
+    // live.db (built from live.db.sql) holds `assets` AND `invoices`, both with tenant_id.
+    // `tables=` names only `assets`, and no <schema> declares `invoices`: refused.
+    <db src="./live.db" tables="assets">
+        ${
+            function mine() {
+                return ?{`SELECT name FROM assets`}.all()
+            }
+        }
+        <button onclick=${ mine() }>mine</button>
+    </db>
+</program>

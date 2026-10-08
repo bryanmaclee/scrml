@@ -19,7 +19,7 @@
  * uses). emit-expr.ts `case "markup-value"` then lowers it to a real DOM-node
  * IIFE (emit-lift.js `emitMarkupValueExpr`). Coupled: the arm-body interpolation
  * DISPLAY (emit-variant-guard.ts `wireableLogic` loop) now routes through the
- * node-aware `_scrml_render_value(el, v)` runtime helper (parity with the
+ * node-aware `_scrml_render_value(_scrml_el, v)` runtime helper (parity with the
  * top-level S201 path) — a bare `el.textContent =` would stringify a DOM node to
  * "[object HTMLParagraphElement]".
  *
@@ -31,11 +31,12 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 function compileToClient(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -95,7 +96,7 @@ describe("GITI-032 — ternary-returning-markup inside a <match> arm body", () =
     const { clientJs } = compileToClient(SINGLE, "giti032-single-render");
     // The arm-body `${...}` display must use the node-aware helper (a DOM node
     // is the ternary consequent value), NOT a bare `el.textContent =`.
-    expect(clientJs).toMatch(/_scrml_render_value\(el,\s*_scrml_structural_eq\(d,\s*"yes"\)\s*\?/);
+    expect(clientJs).toMatch(/_scrml_render_value\(_scrml_arm_el,\s*_scrml_structural_eq\(d,\s*"yes"\)\s*\?/);
     expect(clientJs).not.toMatch(/el\.textContent\s*=\s*_scrml_structural_eq/);
   });
 
@@ -155,7 +156,7 @@ describe("GITI-032 — engine state-child arm body (shared-helper parity)", () =
 
   test("engine arm-body display routes through node-aware _scrml_render_value", () => {
     const { clientJs } = compileToClient(ENGINE, "giti032-engine-render");
-    expect(clientJs).toMatch(/_scrml_render_value\(el,\s*_scrml_structural_eq\(d,\s*"yes"\)\s*\?/);
+    expect(clientJs).toMatch(/_scrml_render_value\(_scrml_arm_el,\s*_scrml_structural_eq\(d,\s*"yes"\)\s*\?/);
   });
 });
 

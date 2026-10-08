@@ -1,0 +1,11 @@
+<program>
+<items> = [{ name: "a" }]
+<nm> = "a"
+${ function go(n) { log(n) } }
+<button id="top" onclick="go('${@nm}')">top</button>
+<ul>
+  <each in=@items as it>
+    <li><button ONCLICK="go('${it.name}')">row</button></li>
+  </each>
+</ul>
+</program>

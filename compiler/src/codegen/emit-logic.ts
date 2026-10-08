@@ -1,24 +1,33 @@
 import { genVar } from "./var-counter.ts";
+import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRuntimeCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
+import { emitRuntimeCheck, refinementOf } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
+import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax, scanForeignSliceShape, scanForeignSliceTopLevelBindings } from "./foreign-seal.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
+import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { parseGuardArmsFromRaw } from "../ast-builder.js";
+import { tokenizeSQL } from "../tokenizer.ts";
+import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
+import type { ExprNode } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -523,6 +532,10 @@ export interface EmitLogicOpts {
    * defensive emission still produces recoverable output.
    */
   errors?: CGError[] | null;
+  /** S454 — set while lowering an expression-position `!{}` (emitNestedGuardExpr): an unmatched failure is re-raised. */
+  exprPositionGuard?: boolean;
+  /** S454 — case "sql": the query is handled; build the `_scrml_sql_attempt` driver-call form. */
+  sqlAttempt?: boolean;
   /**
    * C16 (§53.9.3) — The enclosing function's return-type annotation string,
    * threaded down so `return-stmt` can fire a §53.9.3 boundary check when
@@ -534,6 +547,12 @@ export interface EmitLogicOpts {
    * emits no boundary check (correct for non-refinement-typed returns).
    */
   returnTypeAnnotation?: string | null;
+  /**
+   * S458 one reader — the TS-resolved return refinement (`fnNode.returnRefinement`,
+   * stamped by type-system.ts). return-stmt judges THIS, never the annotation
+   * string. Threaded alongside `returnTypeAnnotation`.
+   */
+  returnRefinement?: unknown;
   /**
    * C16 (§53.9.3) — The enclosing function's name, used in error messages
    * for return-stmt boundary check failures. Paired with returnTypeAnnotation.
@@ -647,7 +666,13 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     data = "null";
   } else {
     const argParts = _splitTopLevelCommas(rawArgs);
-    const schema = getVariantFieldSchema(variant);
+    // The ERROR registry — exactly the pre-F11 lookup (file-local enums + the
+    // ambient ParseError schema), never an imported enum's same-named variant.
+    // Kept at the pre-F11 shape deliberately: a `fail` of an IMPORTED error enum
+    // stays `.data = <value>` so a reader in another file, which cannot type
+    // the callee's error enum, still agrees with it (S438 review N2; the
+    // field-keyed §51.3.2 shape for imported enums is residual (f)).
+    const schema = getErrorVariantFieldSchema(variant);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
     // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
@@ -671,7 +696,46 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
       data = `{ ${props.join(", ")} }`;
     }
   }
-  return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} };`;
+  const envelope = `{ __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} }`;
+  // §19.10.3 — a `fail` inside a `transaction { }` rolls the transaction back
+  // BEFORE the fail's return (marked by _markTransactionExits). One statement,
+  // so it stays valid as the unbraced body of an `if` / arm.
+  const txnRollback = (node as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+  if (typeof txnRollback === "string" && txnRollback.length > 0) {
+    return `return (await ${txnRollback}(), ${envelope});`;
+  }
+  return `return ${envelope};`;
+}
+
+/**
+ * §19.10.3 (S450) — mark every `fail` / `?` exit inside a `transaction { }`
+ * body, at ANY depth (if/else, loops, match arms, `!{}` re-fail arms carried as
+ * `failExpr` side-fields), with the transaction's rollback closure name, so
+ * their emitted `return` rolls back first. Does NOT descend into a nested
+ * function declaration or a lambda: their `fail` / `?` return from THAT
+ * function, not from the transaction's.
+ */
+function _markTransactionExits(body: unknown, rollbackName: string | null): void {
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const k = (n as { kind?: unknown }).kind;
+    if (k === "function-decl" || k === "fn-decl" || k === "lambda") return;
+    if (k === "fail-expr" || k === "propagate-expr") {
+      // null clears the mark after the block is emitted, so it can never leak into
+      // an emission of the same node outside this transaction.
+      if (rollbackName === null) delete (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+      else (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback = rollbackName;
+    }
+    for (const key of Object.keys(n as object)) {
+      if (key === "span" || key === "parent" || key === "_scrmlTxnRollback") continue;
+      walk((n as Record<string, unknown>)[key]);
+    }
+  };
+  walk(body);
 }
 
 // ---------------------------------------------------------------------------
@@ -811,10 +875,19 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
  *   producer side, which likewise emits the bare `.data` value for a single
  *   unknown-schema arg, keeping the reader and writer in step.
  */
-function emitGuardedArmBinding(binding: string, variantName: string, resultVar: string): string[] {
+function emitGuardedArmBinding(
+  binding: string,
+  variantName: string,
+  resultVar: string,
+): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  const schema = variantName ? getVariantFieldSchema(variantName) : null;
+  // S438 review F1 — the ERROR registry: exactly the pre-F11 lookup (local +
+  // ambient ParseError; an ambient CPS `NetworkError`/`ServerError` has no
+  // schema → whole `.data`), never an imported enum's same-named variant, which
+  // the by-name registry now also holds (F11). Same lookup as the `fail`
+  // producer, so producer and reader agree exactly as they did pre-F11.
+  const schema = variantName ? getErrorVariantFieldSchema(variantName) : null;
   if (names.length === 1) {
     // Declared single-field variant → project the field (§51.3.2). No schema
     // (wildcard / ambient variant) → bind the whole `.data` payload.
@@ -1066,7 +1139,148 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // single source of truth there.
     asyncCalleeMap: opts.asyncCalleeMap ?? null,
     asyncExportRegistry: opts.asyncExportRegistry ?? null,
+    // S454 — an expression-position `?{}` query / `!{}` handler lowers back
+    // through this emitter with the SAME options (see emitSqlQueryShape).
+    logicOpts: opts,
   };
+}
+
+/**
+ * S454 — the statement-emitter options to lower an expression-position `?{}`
+ * query or `!{}` handler with. The options the context was made from when it
+ * came from `_makeExprCtx`; otherwise the subset a context carries.
+ */
+function _logicOptsFromExprCtx(ctx: EmitExprContext): EmitLogicOpts {
+  if (ctx.logicOpts) return ctx.logicOpts as EmitLogicOpts;
+  return {
+    boundary: ctx.mode === "server" ? "server" : "client",
+    dbVar: ctx.dbVar,
+    errors: (ctx.errors as CGError[] | undefined) ?? null,
+    serverFnNames: ctx.serverFnNames ?? undefined,
+    serverFnPeerAliasNames: ctx.serverFnPeerAliasNames ?? undefined,
+    serverFnPeerDispatchObjs: ctx.serverFnPeerDispatchObjs ?? undefined,
+  } as EmitLogicOpts;
+}
+
+/**
+ * §19.8.3 (S454) — the `sql` node an expression-position `?{}` query stands for.
+ * The query text is read from the block's source exactly as the block builder
+ * reads it (`tokenizeSQL` → the `SQL_RAW` body); the chain comes from the
+ * expression tree (`.nobatch()` is a compile-time marker, dropped and flagged,
+ * §8.9.5).
+ */
+function _sqlNodeFromShape(shape: SqlQueryExprShape): any {
+  const toks = tokenizeSQL(shape.raw.slice(2, -1), 0, 1, 1);
+  const query = toks[0] && toks[0].kind === "SQL_RAW" ? toks[0].text : "";
+  const chainedCalls: Array<{ method: string; args: string }> = [];
+  let nobatch = false;
+  for (const c of shape.chain) {
+    if (c.method === "nobatch") { nobatch = true; continue; }
+    chainedCalls.push({ method: c.method, args: c.args.map((a) => emitStringFromTree(a)).join(", ") });
+  }
+  return { kind: "sql", query, chainedCalls, ...(nobatch ? { nobatch: true } : {}) };
+}
+
+/**
+ * §19.8.3 (S454) — lower an expression-position `?{}` query (a `sql-ref`
+ * carrying its source, plus its chain) to a JS expression, through `case "sql"`
+ * — the one query lowering every statement-position query uses (db handle,
+ * parameter rendering with peer awaits, the §14.8.10 tenant floor, §14.8.9
+ * protect tags, §39.4 bool coercion). Parenthesized, because the lowering may
+ * end in `?? null`, which binds looser than any operator around it.
+ * Server boundary only (emit-expr calls it only in server mode).
+ */
+export function emitSqlQueryShape(shape: SqlQueryExprShape, ctx: EmitExprContext, attempt = false): string {
+  const opts = _logicOptsFromExprCtx(ctx);
+  // `attempt`: the query is HANDLED (a `!{}` / `match` on it) — see case "sql"'s
+  // emitSqlDriverCall: only the driver call runs inside `_scrml_sql_attempt`.
+  const stmt = emitLogicNode(_sqlNodeFromShape(shape), { ...opts, boundary: "server", sqlAttempt: attempt });
+  return `(${stmt.replace(/;\s*$/, "")})`;
+}
+
+/**
+ * Does a `!{}` arm LEAVE — end in (or contain) `return`, `fail`, `break` or
+ * `continue`? Token test over the arm body with string / template contents
+ * blanked. Conservative: a leave word anywhere in the body counts (also one in a
+ * nested lambda), so a site is refused rather than mis-lowered.
+ */
+function _guardArmLeaves(arm: LogicArm): boolean {
+  if ((arm as { failExpr?: unknown }).failExpr) return true;
+  const body = String(arm.handler ?? "")
+    .replace(/`(?:\\[\s\S]|[^`\\])*`/g, "``")
+    .replace(/"(?:\\[\s\S]|[^"\\])*"/g, "\"\"")
+    .replace(/'(?:\\[\s\S]|[^'\\])*'/g, "''");
+  return /(?:^|[^\w$.])(?:return|fail|break|continue)(?![\w$])/.test(body);
+}
+
+/**
+ * §19.4.3 / §19.8.3 (S454) — lower a `!{ … }` handler that sits INSIDE an
+ * expression (`if (q() !{ _ :> not })`, `(f() !{ … })`, an argument) to an
+ * expression.
+ *
+ * The handler is the statement-level guard: its arms are parsed with the
+ * statement parser (ast-builder `parseGuardArmsFromRaw`) and the guard is lowered
+ * by `case "guarded-expr"` against a synthetic `const <tmp> = <operand>` — so the
+ * arm grammar, payload binders, envelope test and (for a `?{}` operand) the
+ * `_scrml_sql_attempt` wrap are the SAME code as a statement-level handler. The
+ * result is wrapped in an IIFE that evaluates to the guarded value (async +
+ * awaited when the lowering awaits).
+ *
+ * In this position every arm must YIELD a value (§19.4.3 value position, item
+ * 1). An arm that LEAVES (`return` / `fail` / `break` / `continue`, item 2)
+ * cannot be lowered inside an expression — the IIFE would capture the `return`
+ * and silently make it the handler's value — so such a site is REFUSED with
+ * E-CG-003. Write the handled call as the whole right-hand side of a
+ * declaration (`const v = f() !{ … }`) to use a leaving arm.
+ *
+ * A handler with no `_` arm must be exhaustive (E-TYPE-080, type-system); at run
+ * time an error no arm names is RE-RAISED (`unhandledFailureThrow`, S454 fix
+ * round F1), never left as the expression's value — an envelope is truthy.
+ */
+export function emitNestedGuardExpr(operand: ExprNode, rawArms: string, ctx: EmitExprContext): string {
+  const opts = _logicOptsFromExprCtx(ctx);
+  const span = (operand as { span?: any })?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 };
+  // ExprNode spans carry a file OFFSET but a placeholder line/col (1:1); drop the
+  // placeholder so the diagnostic resolves its position from the offset.
+  const diagSpan = { file: span.file, start: span.start, end: span.end };
+  const arms = parseGuardArmsFromRaw(rawArms, span.file ?? "") as LogicArm[] | null;
+  const siteText = `${emitStringFromTree(operand)} ${rawArms}`.replace(/\s+/g, " ").slice(0, 80);
+  const refuse = (why: string): string => {
+    // The module-level sink (emit-expr recordExprGuardError) — the contexts that
+    // reach here mostly carry no error channel; runCG drains it.
+    recordExprGuardError(new CGError(
+      "E-CG-003",
+      `E-CG-003: the \`!{ }\` handler in \`${siteText}\` is inside an expression, and ${why}. ` +
+      `Inside an expression every arm must yield a value of the handled expression's success ` +
+      `type (§19.4.3). To leave with \`return\` / \`fail\` from an arm, write the handled ` +
+      `expression as the whole right-hand side of a declaration — \`const v = … !{ … }\` — ` +
+      `and use \`v\` here.`,
+      diagSpan as any,
+    ));
+    return `(undefined) /* E-CG-003: unlowerable expression-position !{} handler */`;
+  };
+  if (!arms) return refuse("its arms could not be parsed");
+  const leaving = arms.find(_guardArmLeaves);
+  if (leaving) return refuse(`the arm \`${leaving.pattern}\` leaves (return / fail / break / continue)`);
+
+  const tmp = genVar("guarded");
+  const guardNode = {
+    kind: "guarded-expr",
+    guardedNode: { kind: "const-decl", name: tmp, init: emitStringFromTree(operand), initExpr: operand, span },
+    arms,
+    span,
+  };
+  const body = emitLogicNode(guardNode, {
+    ...opts,
+    insideFunctionBody: false,
+    returnExitsWrapper: false,
+    exprPositionGuard: true,
+    tildeContext: undefined,
+  });
+  const lines = body.split("\n").map((l) => `  ${l}`).join("\n");
+  return /\bawait\b/.test(body)
+    ? `(await (async () => {\n${lines}\n  return ${tmp};\n})())`
+    : `(() => {\n${lines}\n  return ${tmp};\n})()`;
 }
 
 /**
@@ -1519,11 +1733,13 @@ function _emitTier3PositionalSugar(
     fieldNames.push(fieldName);
   }
 
-  // §14.11 line 7226 — positional-arity mismatch is E-TYPE-001.
+  // §14.11 line 7226 — positional-arity mismatch is E-TYPE-001. With no `opts.errors`
+  // channel the refusal goes to the run-wide refused-lowering sink (s456) — the caller
+  // emits a `null` fallback, which must never ship without the diagnostic.
   if (positionals.length !== fieldNames.length) {
-    if (opts.errors) {
+    {
       const span = (initExpr && initExpr.span) ? initExpr.span : (node.span ?? { start: 0, end: 0 });
-      opts.errors.push(new CGError(
+      const refusal = new CGError(
         "E-TYPE-001",
         `E-TYPE-001: Positional binding for type \`${structType.name}\` expects ` +
         `${fieldNames.length} field${fieldNames.length === 1 ? "" : "s"} ` +
@@ -1532,7 +1748,9 @@ function _emitTier3PositionalSugar(
         `Provide values in the declared field order, or use the named-initialiser form ` +
         `(\`{${fieldNames.map(n => `${n}: …`).join(", ")}}\`). See SPEC §14.11.`,
         span,
-      ));
+      );
+      if (opts.errors) opts.errors.push(refusal);
+      else recordRefusedLowering(refusal, node);
     }
     return null;
   }
@@ -1868,7 +2086,19 @@ function _ensureBoundary(opts: EmitLogicOpts, context: string): EmitLogicOpts {
 
 export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "client" }): string {
   if (!node || typeof node !== "object") return "";
+  // §14.8.10 item (1) (S457) — a `?{}` the lowering refuses is reported at the statement that
+  // holds it when the site has no span of its own (a text-path site): track the statement being
+  // lowered, restoring the enclosing one on the way out.
+  if (!(node.span && typeof node.span.start === "number" && node.span.start > 0)) return _emitLogicNode(node, opts);
+  const _prevSqlSpan = swapSqlLoweringSpan(node.span);
+  try {
+    return _emitLogicNode(node, opts);
+  } finally {
+    swapSqlLoweringSpan(_prevSqlSpan);
+  }
+}
 
+function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
   opts = _ensureBoundary(opts, "emitLogicNode");
 
   // §20.6 — remember this statement's real source span so the log()
@@ -2160,7 +2390,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
           return [
             `const ${_checkTmpVar} = ${rhs};`,
             ..._checkLines,
@@ -2179,7 +2409,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
         return [`const ${_checkTmpVar} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`, ..._checkLines, `let ${node.name} = ${_checkTmpVar};`].join("\n");
       }
       return `let ${_letDeclLhs} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`;
@@ -2220,6 +2450,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           return `${node.name} = ${sqlExpr};`;
         }
         return `${node.name} = null; // SQL-init reassignment for ${node.name} — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function.`;
+      }
+      // §8.10 (S455) — the same reassignment after a Tier 2 loop hoist replaced its
+      // query with the per-iteration Map lookup (emit-control-flow
+      // `substituteHoistedSqlInBody`: the sqlNode is gone, the lookup is `init`).
+      // Still an assignment to the existing binding, never a re-declaration.
+      if (
+        (node as any)._bareAssign && !node.sqlNode
+        && typeof node.name === "string" && tildeDeclIsRebind(opts.declaredNames, node.name)
+      ) {
+        return `${node.name} = ${emitExprField(node.initExpr, node.init ?? "", _makeExprCtx(opts))};`;
       }
       // For tilde-decl with reactive deps: emit as derived reactive (auto-updates)
       // Phase 4d: ExprNode-first reactive dep extraction, string fallback
@@ -2879,7 +3119,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
           return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
@@ -2895,7 +3135,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
         return _appendSidecar([`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n"));
       }
       return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
@@ -2910,7 +3150,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // refinement-typed return type, wrap the return expression in a
       // boundary check (E-CONTRACT-001-RT) before returning.
       const _retPredInfo = opts.returnTypeAnnotation
-        ? parsePredicateAnnotation(opts.returnTypeAnnotation)
+        ? refinementOf(opts.returnRefinement)
         : null;
       const _wrapReturnWithCheck = (retExprStr: string): string => {
         if (!_retPredInfo) return `return ${retExprStr};`;
@@ -2923,6 +3163,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           `<return value of ${_fnName}>`,
           _label,
           `fn ${_fnName}, return statement`,
+          _retPredInfo,
         );
         return [
           `const ${_tmpVar} = ${retExprStr};`,
@@ -3286,12 +3527,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
     case "foreign": {
       // dpa-003 (S216) — inline value-returning `_={ … }=` foreign-code block.
-      // SPEC §23.2 / §13180: codegen wraps the OPAQUE verbatim slice in an
-      // async IIFE so its settled value flows back to the enclosing scrml
-      // expression with the await INJECTED at the boundary (no source-level
+      // SPEC §23.2 / §13180: codegen turns the OPAQUE verbatim slice into a
+      // SEALED async function (built once, in global scope — see the end of this
+      // arm and foreign-seal.ts) so its settled value flows back to the enclosing
+      // scrml expression with the await INJECTED at the boundary (no source-level
       // await needed on the scrml side — mirrors `case "sql"`). The `in:{}`
-      // crossing names become the IIFE params and are called with the same-named
-      // enclosing locals — the ONLY values that cross (no free lexical capture).
+      // crossing names are its parameters and it is called with the same-named
+      // enclosing locals — the ONLY values that cross (no free lexical capture,
+      // §23.2.4a).
       //
       // ts/js ONLY (the value crosses NATIVELY — same Bun runtime, no
       // marshaling). A non-ts/js `lang=` is rejected upstream (E-FOREIGN-005,
@@ -3302,7 +3545,6 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const crossings: string[] = Array.isArray((node as any).crossings)
         ? (node as any).crossings
         : [];
-      const params = crossings.join(", ");
       const argList = crossings.join(", ");
       // The slice is verbatim foreign ts/js. Value-flow rule (§23.2.4a):
       //   - SINGLE EXPRESSION (no top-level `;` statement separator and no
@@ -3314,132 +3556,105 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       //     via their own `return`; a body without one yields `undefined`
       //     (honest — they wrote statements, not a value expression).
       //
-      // The scan is brace/paren/bracket-depth-aware and skips string and comment
-      // spans so a nested `return` (inside an arrow/closure) or a `;` inside a
-      // string/`for(;;)` is NOT mistaken for a top-level statement boundary. This
-      // is a SYNTACTIC scan over the opaque slice (no parse) — it never
-      // type-checks or rewrites the interior (§23.2.3 opacity preserved).
-      const scanForeignSliceShape = (src: string): { topLevelReturn: boolean; topLevelStmtSep: boolean } => {
-        let depth = 0;          // () [] {} nesting
-        let parenForDepth = 0;  // track `for(` so its `;` are not statement seps
-        let inS = "", esc = false, inLine = false, inBlock = false, inTpl = false;
-        let topLevelReturn = false, topLevelStmtSep = false;
-        const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
-        for (let i = 0; i < src.length; i++) {
-          const ch = src[i], nx = src[i + 1];
-          if (inLine) { if (ch === "\n") inLine = false; continue; }
-          if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; } continue; }
-          if (inS) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === inS) inS = ""; continue; }
-          if (inTpl) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === "`") inTpl = false; continue; }
-          if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
-          if (ch === "/" && nx === "*") { inBlock = true; i++; continue; }
-          if (ch === '"' || ch === "'") { inS = ch; continue; }
-          if (ch === "`") { inTpl = true; continue; }
-          if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
-          if (ch === ")" || ch === "]" || ch === "}") { depth--; if (parenForDepth && depth < parenForDepth) parenForDepth = 0; continue; }
-          if (depth === 0) {
-            if (ch === ";") { topLevelStmtSep = true; continue; }
-            // `return` keyword at top level (whole-word).
-            if (ch === "r" && src.slice(i, i + 6) === "return" && !isWord(src[i - 1] ?? "") && !isWord(src[i + 6] ?? "")) {
-              topLevelReturn = true;
-            }
-          }
-        }
-        return { topLevelReturn, topLevelStmtSep };
-      };
-      // Find TOP-LEVEL binding declarations in the opaque slice whose name is in
-      // `names` (the crossing set). Same depth/string/comment/template skipping as
-      // scanForeignSliceShape — a binding keyword inside a nested `{}`/`()`/`[]`,
-      // a string, a comment, or a template literal is NOT top-level and does not
-      // collide with the IIFE parameter (only the IIFE-body's own top level does).
-      // Recognised binding heads: `const`/`let`/`var`/`function`/`class <name>`.
-      // (`function`/`class` may carry intervening `*`/whitespace before the name.)
-      const scanForeignSliceTopLevelBindings = (src: string, names: Set<string>): string[] => {
-        const found = new Set<string>();
-        let depth = 0;
-        let inS = "", esc = false, inLine = false, inBlock = false, inTpl = false;
-        const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
-        // Match a binding keyword starting at index `i` (whole-word, top level);
-        // returns the declared name if it is in `names`, else null.
-        const matchBinding = (i: number): string | null => {
-          for (const kw of ["const", "let", "var", "function", "class"]) {
-            if (src.slice(i, i + kw.length) === kw
-              && !isWord(src[i - 1] ?? "")
-              && !isWord(src[i + kw.length] ?? "")) {
-              // Skip past the keyword + any `*` (generator) + whitespace to the name.
-              let j = i + kw.length;
-              while (j < src.length && (src[j] === "*" || /\s/.test(src[j]))) j++;
-              let k = j;
-              while (k < src.length && isWord(src[k])) k++;
-              const name = src.slice(j, k);
-              return name && names.has(name) ? name : null;
-            }
-          }
-          return null;
-        };
-        for (let i = 0; i < src.length; i++) {
-          const ch = src[i], nx = src[i + 1];
-          if (inLine) { if (ch === "\n") inLine = false; continue; }
-          if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; } continue; }
-          if (inS) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === inS) inS = ""; continue; }
-          if (inTpl) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === "`") inTpl = false; continue; }
-          if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
-          if (ch === "/" && nx === "*") { inBlock = true; i++; continue; }
-          if (ch === '"' || ch === "'") { inS = ch; continue; }
-          if (ch === "`") { inTpl = true; continue; }
-          if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
-          if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
-          if (depth === 0 && (ch === "c" || ch === "l" || ch === "v" || ch === "f")) {
-            const hit = matchBinding(i);
-            if (hit) found.add(hit);
-          }
-        }
-        return [...found];
-      };
+      // Both scans (shape here, crossing-shadow below) read the slice as a JS
+      // TOKEN stream (foreign-seal.ts `scanForeignSliceShape` /
+      // `scanForeignSliceTopLevelBindings`), so a `;` / `return` / binding
+      // keyword inside a string, comment, template literal or REGEX literal, or
+      // nested in `()`/`[]`/`{}`, is never read as top-level structure. They never
+      // type-check or rewrite the interior (§23.2.3 opacity preserved).
+      //
+      // ⛔ A REFUSAL HERE GOES TO THE RUN-WIDE SINK (refused-lowering-errors.ts),
+      // never to an opts-threaded channel: an `if` / loop body is emitted with a
+      // freshly built opts, and a slice inside one used to reach this arm with no
+      // channel at all — exit 0 and only the `null /* … */` placeholder in the
+      // artifact (s456, flogence graph-ingest-tool).
+      const span = (node as any).span ?? { start: 0, end: 0 };
+      // The diagnostic's line/col come from the byte offset (the §20.6 source
+      // registry), not the node's own `line`, which is not reliable for a foreign
+      // node: measured on the flogence repro, a slice at line 136 carried line 99,
+      // so the CLI frame pointed 37 lines above the slice its message named.
+      const _sliceLoc = resolveSpanLineCol(span);
+      const diagSpan = _sliceLoc ? { ...span, line: _sliceLoc.line, col: _sliceLoc.col } : span;
       // CROSSING-SHADOW guard (E-FOREIGN-006). The `in:{}` crossing names become
-      // the async-IIFE PARAMETERS (above). If the verbatim slice ALSO declares a
-      // TOP-LEVEL binding of the same name (`const`/`let`/`var`/`function`/`class`),
-      // the emitted IIFE redeclares an identifier already bound by the parameter —
-      // e.g. `(async (x) => { const x = … })(x)` — which is invalid JS. Without
-      // this guard the failure surfaces post-emit as the MISLEADING
-      // E-CODEGEN-INVALID-LOGIC ("compiler defect — please report it"), even though
-      // it is AUTHOR error: the author chose a crossing name that collides with a
-      // name the slice itself declares. This pre-emit SYNTACTIC scan (no parse —
-      // §23.2.3 opacity preserved: it inspects only top-level binding KEYWORDS,
-      // never type-checks or rewrites the interior) names the shadowed binding so
-      // the diagnostic points at the real fix (rename the crossing OR the local).
+      // the sealed slice function's PARAMETERS (below). If the verbatim slice ALSO
+      // declares a TOP-LEVEL binding of the same name (`const`/`let`/`var`/
+      // `function`/`class`), the slice redeclares an identifier already bound by
+      // the parameter — e.g. `async function (x) { const x = … }` — which is
+      // invalid JS (and for `var`/`function`, a silent overwrite of the crossing).
+      // Named here as the AUTHOR error it is (rename the crossing OR the local),
+      // instead of a generic parse complaint.
       if (crossings.length > 0) {
         const shadowed = scanForeignSliceTopLevelBindings(slice, new Set(crossings));
-        // Dedicated narrow sink (`opts.foreignCrossingErrors`), NOT the broad
-        // `opts.errors`: the server-fn emit path (emit-server.ts) does not wire a
-        // general `opts.errors` sink, and threading one would surface OTHER arms'
-        // previously-swallowed errors (e.g. E-CG-003). The caller drains this
-        // sink into the live error stream after the function body emits.
-        const sink = (opts as any).foreignCrossingErrors as CGError[] | undefined;
-        if (shadowed.length > 0 && sink) {
-          const span = (node as any).span ?? { start: 0, end: 0 };
+        if (shadowed.length > 0) {
           const names = shadowed.map((n) => `\`${n}\``).join(", ");
           const singular = shadowed.length === 1;
-          sink.push(new CGError(
+          recordRefusedLowering(new CGError(
             "E-FOREIGN-006",
             `E-FOREIGN-006: the inline foreign block crosses ${singular ? "a name" : "names"} ` +
             `(${names}) that the slice ${singular ? "also declares" : "also declare"} ` +
-            `at its top level. The \`in:{}\` crossing ${singular ? "name becomes an async-IIFE parameter" : "names become async-IIFE parameters"}, ` +
+            `at its top level. The \`in:{}\` crossing ${singular ? "name becomes a parameter of the sealed slice" : "names become parameters of the sealed slice"}, ` +
             `so a same-named \`const\`/\`let\`/\`var\`/\`function\`/\`class\` inside the slice ` +
             `redeclares the parameter — invalid JS. Rename the crossing ${singular ? "name" : "names"} ` +
             `or the slice-local binding so they do not collide. See SPEC §23.2.4a.`,
-            span,
-          ));
-          // Decline to emit the redeclaring IIFE — the error stops the build, and
-          // a defensive `null` keeps the surrounding expression syntactically
-          // well-formed (no cascade into the misleading E-CODEGEN-INVALID-LOGIC).
+            diagSpan,
+          ), node);
+          // Decline to emit the redeclaring slice — the error fails the compile, and
+          // a `null` keeps the surrounding expression syntactically well-formed (no
+          // cascade into the misleading E-CODEGEN-INVALID-LOGIC).
           return `null /* E-FOREIGN-006: crossing-shadow (${names}) */`;
         }
       }
-      const { topLevelReturn, topLevelStmtSep } = scanForeignSliceShape(slice);
-      const singleExpression = !topLevelReturn && !topLevelStmtSep;
-      const inner = singleExpression ? `return (${slice});` : slice;
-      return `await (async (${params}) => { ${inner} })(${argList});`;
+      // A slice that parses in neither shape (`parsed: false`) is taken as a
+      // statement body, which the build check below then REFUSES (E-FOREIGN-007) —
+      // it does not parse there either. Fail closed; never a guessed shape.
+      const { topLevelReturn, topLevelStmtSep, parsed } = scanForeignSliceShape(slice);
+      const singleExpression = parsed && !topLevelReturn && !topLevelStmtSep;
+      // The newline before `)` keeps a trailing `//` comment in a one-expression
+      // slice from swallowing the paren.
+      const inner = singleExpression ? `return (${slice}\n);` : slice;
+      // §23.2.4a — NO free lexical capture. The slice is NOT spliced in place
+      // (an in-place IIFE closes over every enclosing local and every module
+      // binding, the raw db handle included — g-foreign-iife-captures-module-
+      // scope-s454). It is carried as source text and built ONCE, in global
+      // scope, by the `_scrml_foreign_seal` runtime helper (foreign-seal.ts):
+      // the crossings are its parameters and are passed at the call, which keeps
+      // the codegen-injected boundary `await` here at the call site.
+      const sliceSource = foreignSliceSource(crossings, inner);
+      const site = foreignSiteLabel(resolveLogLoc(span));
+      // The artifact's syntax gate cannot see inside a string, so the slice is
+      // checked HERE, as the helper will build it — an author error at the slice
+      // (E-FOREIGN-007), not the old post-emit "compiler defect" framing.
+      const syntaxProblem = checkForeignSliceSyntax(sliceSource);
+      if (syntaxProblem) {
+        // Name the ROOT cause. A slice with no top-level `;` and no top-level
+        // `return` is read as a SINGLE EXPRESSION (§23.2.4a rule 1) and given an
+        // injected `return (…)`. When that fails but the same text parses as a
+        // statement body, the author wrote statements, not a bad expression — the
+        // fix is the multi-statement shape, not "your JavaScript is invalid".
+        // (Recovering by re-reading it as multi-statement is NOT done here: that
+        // would turn a refusal into a silent `undefined` → `not`, the open fork in
+        // g-foreign-multistmt-value-block-mislowers.)
+        const statementsParse = singleExpression
+          && checkForeignSliceSyntax(foreignSliceSource(crossings, slice)) === null;
+        const where = syntaxProblem.sliceLine !== null ? ` (line ${syntaxProblem.sliceLine} of the slice)` : "";
+        recordRefusedLowering(new CGError(
+          "E-FOREIGN-007",
+          statementsParse
+            ? `E-FOREIGN-007: the inline foreign slice at ${site} has no top-level \`;\` and no top-level ` +
+              `\`return\`, so it is read as a SINGLE EXPRESSION and given an injected \`return\` — but it ` +
+              `is a sequence of statements, not one expression. Use the multi-statement shape: end each ` +
+              `statement with \`;\` and give the slice its own \`return\` for the value it produces. ` +
+              `See SPEC §23.2.4a (slice body — single-expression OR multi-statement).`
+            : `E-FOREIGN-007: the inline foreign slice at ${site} is not valid JavaScript as written: ` +
+              `${syntaxProblem.message}${where}. A slice is evaluated as the body of a sealed async ` +
+              `function — not a module — so \`import.meta\` and static \`import\` are unavailable ` +
+              `(use \`__dirname\` / \`__filename\` / \`require\` / \`await import(…)\`), and the compiler ` +
+              `does not strip TypeScript type syntax from a slice. See SPEC §23.2.4a.`,
+          diagSpan,
+        ), node);
+        return `null /* E-FOREIGN-007: the foreign slice at ${site.replace(/\*\//g, "* /")} does not parse */`;
+      }
+      return `await ${FOREIGN_SEAL_FN}(${JSON.stringify(site)}, ${templateLiteralOf(sliceSource)})(${argList});`;
     }
 
     case "sql": {
@@ -3458,15 +3673,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // terminator; filter it out of the chain and note the suppression.
       const _tenantAcross = _rawCalls.some((c) => c && c.method === "acrossTenants");
       const calls: any[] = _rawCalls.filter((c) => c && c.method !== "acrossTenants");
-      const _effMethod: string = calls.length > 0 ? calls[0].method : "";
-      const _isReadSql = _effMethod === "get" || _effMethod === "first" || _effMethod === "all";
-      // §14.8.10 — for a read, add `tenant_id` to the projection + get the row-tag
-      // wrapper; for an INSERT, inject the ambient tenant. No-op when tenant inactive.
-      const { effectiveSql: _tenantSql, tenantTag: _tenantTag } = _lowerTenantForQuery(rawQuery, _tenantAcross, _isReadSql);
+      // §14.8.10 — for a tenant-scoped read (any terminator), add its key
+      // column(s) to the projection + get the SOURCE-filter wrapper `_tenantScope`,
+      // applied to the driver's row array before `.get()` takes `[0]` and before
+      // the §14.8.9 / §39.4 per-row wrappers; for an INSERT, inject the ambient
+      // tenant. No-op (identity) when tenant inactive.
+      const db = opts.dbVar ?? fallbackSqlHandle();
+      const { effectiveSql: _tenantSql, tenantScope: _tenantScope } = _lowerTenantForQuery(rawQuery, _tenantAcross, db);
       const { sql, params, segments } = extractSqlParams(_tenantSql);
-      const db = opts.dbVar ?? "_scrml_sql";
+      // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver
+      // (sql-one-statement-guard.ts — every driver path runs a chained statement somewhere).
+      if (!sqlHoldsOneStatement(_tenantSql)) return `${refuseMultipleStatements(_tenantSql, rawQuery, (node as any).span)};`;
 
-      const taggedFromParams = (): string => {
+      const renderParams = (): string[] => {
         const _sqlExprCtx = _makeExprCtx(opts);
         const renderedParams = params.map((p: string) => {
           // ss22 #4 (g-peer-call-in-raw-template-unawaited) — a SQL `?{}` param
@@ -3559,7 +3778,36 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           }
           return emitExprField(null, p, _sqlExprCtx);
         });
-        return buildTaggedTemplate(db, segments, renderedParams);
+        return renderedParams;
+      };
+
+      // §19.8.3 (S454; fix round F3) — ONE place builds the driver call. Unhandled:
+      // `finish(await <driver>(<params>))`, exactly as before. HANDLED (a `!{}` /
+      // `match` on this query, `opts.sqlAttempt`): the parameters are evaluated
+      // FIRST, as ordinary arguments, then ONLY the driver call runs inside
+      // `_scrml_sql_attempt`; the row shaping and the floor wrappers run after it,
+      // outside the attempt. So a host error in a parameter (`${o.x.y}`) or a
+      // floor refusal (`_scrml_tenant_write_key()`, the tenant source filter) is
+      // never relabelled `QueryFailed` — only "a query that fails to run" is.
+      const emitSqlDriverCall = (driverOf: (args: string[]) => string, args: string[], finish: (rowsExpr: string) => string): string => {
+        // §8.1.2 (S456 fix round F1) — judge the driver call AS EMITTED: acorn reads the SQL
+        // text the driver will receive (the tagged template's quasis must be the segments the
+        // compiler read; one statement). Otherwise the site throws and nothing is sent.
+        // §14.8.10 item (1) (S457) — and the SAME text is held to the program-body statement
+        // allow-list here, at the lowering: a site lowered is a site checked, whatever reader
+        // found it (g-sql-checker-and-lowering-read-different-text-s457).
+        const { verdict: _verdict, refusal: _refusal } = judgeDriverCallDetail(driverOf(args), segments);
+        if (_verdict !== "ok") {
+          if (_verdict === "text-not-read") {
+            const sink = (opts as any).preparedStmtErrors as CGError[] | undefined;
+            if (sink) sink.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, (node as any).span ?? { start: 0, end: 0 }));
+          }
+          if (_refusal) recordProgramStatementRefusal(_refusal, rawQuery, (node as any).span);
+          return `${refusedDriverCallExpr(_verdict, _refusal)};`;
+        }
+        if (!(opts as { sqlAttempt?: boolean }).sqlAttempt) return finish(`await ${driverOf(args)}`) + ";";
+        const refs = args.map((_a, k) => `_scrml_p[${k}]`);
+        return `await ${SQL_ATTEMPT_FN}((_scrml_p) => ${driverOf(refs)}, [${args.join(", ")}], (_scrml_rows) => ${finish("_scrml_rows")});`;
       };
 
       if (calls.length > 0) {
@@ -3568,77 +3816,65 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
         // §44.3: .prepare() is removed.
         if (method === "prepare") {
-          // Push the mandated COMPILE diagnostic (E-SQL-006 — SPEC §34 / §44.3,
-          // "emitted at compiler/src/codegen") into the dedicated narrow
-          // `preparedStmtErrors` sink, an EXACT mirror of the `foreignCrossingErrors`
-          // precedent in `case "foreign"` above. The structured server-fn emit path
-          // (emit-server / emit-library / emit-tool) deliberately does NOT wire the
-          // broad `opts.errors` sink (threading it would surface OTHER arms'
-          // previously-swallowed errors, e.g. E-CG-003), so the caller drains this
-          // narrow sink into the live error stream AFTER the body emits. The prior
-          // comment here claimed rewriteSqlRefs (the TEXT/regex path) owned this
-          // emission — but a real top-level server `function` body lowers through
-          // THIS structured path, so with no sink the SHALL-mandated compile
-          // diagnostic never reached the developer (clean exit 0, runtime-only IIFE).
-          const sink = (opts as any).preparedStmtErrors as CGError[] | undefined;
-          if (sink) {
-            sink.push(new CGError(
-              "E-SQL-006",
-              `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
-              (node as any).span ?? { start: 0, end: 0 },
-            ));
-          }
+          // The mandated COMPILE diagnostic (E-SQL-006 — SPEC §34 / §44.3), recorded
+          // in the run-wide refused-lowering sink (refused-lowering-errors.ts, drained
+          // by runCG). It used to go to a `preparedStmtErrors` channel threaded through
+          // opts, which an `if` / loop body's freshly built opts dropped — a
+          // `.prepare()` one block deep in a tool `main` compiled exit 0 (s456).
+          recordRefusedLowering(new CGError(
+            "E-SQL-006",
+            `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
+            (node as any).span ?? { start: 0, end: 0 },
+          ), node);
           // STILL emit the runtime-throwing IIFE (defense-in-depth — PINNED by
           // sql-params / sql-write-ops §5): the JS parses and any runtime execution
-          // surfaces the issue immediately even when a caller drained no sink.
+          // surfaces the issue immediately.
           return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
         }
 
-        // Branch A: SQL has ${} params — use tagged template form.
-        // §14.8.9 — tag the SELECT row result with the protected-origin
-        // descriptor (no-op when protect inactive / no protected column).
-        if (params.length > 0) {
-          const tagged = taggedFromParams();
+        // The terminator's value shape over the driver's row array `rowsExpr`:
+        // §14.8.10 source filter innermost, then `.get()`'s first row, then the
+        // §39.4 bool coercion and the §14.8.9 protect tag. ⚑ S443 round 6:
+        // `.run()` / any other terminator / a bare `?{}` is the driver's result
+        // array when used as a value (`UPDATE … RETURNING *`), tagged as well.
+        const finish = (rowsExpr: string): string => {
+          const rows = _tenantScope(rowsExpr);
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${tagged})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery);
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, rawQuery, false), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery);
           }
-          return `await ${tagged};`;
+          return protectTagSqlResult(rows, rawQuery);
+        };
+
+        // Branch A: SQL has ${} params — use tagged template form.
+        if (params.length > 0) {
+          return emitSqlDriverCall((args) => buildTaggedTemplate(db, segments, args), renderParams(), finish);
         }
 
         // Branch B: SQL uses bare ? placeholders + explicit call.args.
         // Use sql.unsafe(rawSql, [argArray]) — unsafe() accepts a bound array.
         if (call.args && call.args.trim()) {
           const argList = emitExprField(null, call.args.trim(), _makeExprCtx(opts));
-          if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery, true), rawQuery)) + ";";
-          }
-          if (method === "all") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery, false), rawQuery)) + ";";
-          }
-          return `await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]);`;
+          return emitSqlDriverCall((args) => `${db}.unsafe(${JSON.stringify(sql)}, ${args[0]})`, [`[${argList}]`], finish);
         }
 
         // Branch C: no params, no call.args. Bare tagged template.
         const taggedNoParams = `${db}\`${sql.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
-        if (method === "get" || method === "first") {
-          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
-        }
-        if (method === "all") {
-          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${taggedNoParams}`, rawQuery, false), rawQuery)) + ";";
-        }
-        return `await ${taggedNoParams};`;
+        return emitSqlDriverCall(() => taggedNoParams, [], finish);
       }
 
-      // No chained call.
+      // No chained call. A bare `?{}` used as a value is the driver's row array —
+      // a tenant-scoped SELECT is filtered at the source like every read.
+      const finishBare = (rowsExpr: string): string => protectTagSqlResult(_tenantScope(rowsExpr), rawQuery);
       if (params.length > 0) {
         // Defaults to .run() semantics — value dropped.
-        return `await ${taggedFromParams()};`;
+        return emitSqlDriverCall((args) => buildTaggedTemplate(db, segments, args), renderParams(), finishBare);
       }
       // Static DDL — route through unsafe() so the runtime accepts no-param SQL.
-      return `await ${db}.unsafe(${JSON.stringify(rawQuery)});`;
+      // `_tenantSql` is `rawQuery` unless the floor added a key column to a SELECT.
+      return emitSqlDriverCall(() => `${db}.unsafe(${JSON.stringify(_tenantSql)})`, [], finishBare);
     }
 
     case "fail-expr": {
@@ -3656,7 +3892,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const expr = emitExprField(node.exprNode, node.expr ?? "", _makeExprCtx(opts));
       const lines: string[] = [];
       lines.push(`const ${tmpVar} = ${expr};`);
-      lines.push(`if (${tmpVar}.__scrml_error) return ${tmpVar};`);
+      // §19.10.3 / §19.5.2 — `?` is a `fail` of the callee's variant: inside a
+      // `transaction { }` it rolls back before returning (_markTransactionExits).
+      const txnRollback = (node as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+      lines.push(typeof txnRollback === "string" && txnRollback.length > 0
+        ? `if (${tmpVar}.__scrml_error) return (await ${txnRollback}(), ${tmpVar});`
+        : `if (${tmpVar}.__scrml_error) return ${tmpVar};`);
       if (node.binding) {
         lines.push(`const ${node.binding} = ${tmpVar};`);
       }
@@ -3755,6 +3996,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
       let bindingName: string | null = null;
       let initExpr: string | null = null;
+      // S454 — `x = f() !{…}` on a declared `x` assigns instead of declaring.
+      let rebindsExisting = false;
+      // S454 — `return f() !{…}` returns the guarded value after the arms.
+      let returnsResult = false;
+      // S455 — `yield ?{…} !{…}` yields the guarded value after the arms.
+      let yieldsResult = false;
+      // S454 — the guarded value is a handled `?{}` evaluated through `_scrml_sql_attempt`.
+      let handlesSql = false;
       // D3 (g-handler-recovery-into-cell) — set when the guarded expression is a
       // reactive assignment `@cell = call() !{...}`. In that shape emitLogicNode
       // lowers the guardedNode to the EAGER `_scrml_reactive_set("cell", call())`
@@ -3764,6 +4013,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // We record the cell name here and, after the arms run, re-set the cell to
       // the (possibly-recovered) resultVar — §19.4.3 catch-recovery-into-assignment.
       let reactiveCellName: string | null = null;
+      // S455 (2) — a server-boundary `@cell = ?{…} !{…}`: the state-decl whose
+      // cell receives the guarded value (success or arm) after the arms.
+      let cellWriteNode: any = null;
       // S89 §13.2 Sub-Phase B Step 3 — auto-await detection. When the guarded
       // node's init expression is a statically-known `Promise<T>`-returning
       // call (server fn OR stdlib `async` export per §13.2.1 Q1 BROAD), the
@@ -3772,12 +4024,77 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       let _autoAwait = false;
       if (guardedNode) {
         // M-7C-D-12 Track 3: missing init falls back to "null" (was "undefined") per §42.5/§42.8.
-        if (guardedNode.kind === "let-decl" && guardedNode.name) {
+        // §19.8.3 / §19.8.4 (S451 R11, S454) — a `?{}` query handled by this
+        // `!{}`. A query that FAILS TO RUN must reach the arms as a SqlError
+        // variant, so the query is evaluated through `_scrml_sql_attempt`
+        // (sql-attempt.ts); a query that runs and matches no row keeps its
+        // ordinary value. The query arrives either as a structured `sqlNode` (the
+        // whole right-hand side of a declaration / assignment / `return`, or a
+        // bare `?{}` statement) or as an expression-position `sql-ref` query
+        // (`const r = (?{…}.get()) !{…}`). Server boundary only.
+        // S455 — the guarded STATEMENT's structured query, through every
+        // statement kind that carries one (`handledSqlOfGuardedNode`): a bare
+        // `?{}`, a declaration / `return` / `@cell =` `sqlNode`, and `lift ?{…}`.
+        const _h = handledSqlOfGuardedNode(guardedNode);
+        const _handledSqlNode: any = _h && _h !== "expr" ? _h : null;
+        const _isDeclGuard = (guardedNode.kind === "let-decl" || guardedNode.kind === "const-decl" || guardedNode.kind === "tilde-decl") && !!guardedNode.name;
+        // S455 (1) — `lift ?{…}.all() !{…}`: in a server function body `lift` IS
+        // `return` (case "lift-expr"), so the guarded value is returned after the
+        // arms exactly like `return ?{…} !{…}`. It used to fall to the generic
+        // branch, which stripped the `return` and dropped the value (the client
+        // got null) and never attempt-wrapped the query (a failure still threw).
+        const _isLiftGuard = guardedNode.kind === "lift-expr";
+        // S455 (2) — `@cell = ?{…}.get() !{…}` on the server boundary (a
+        // whole-server function — a channel-cell write, or the E-RI-002 shape):
+        // attempt-wrap the query and write the cell with the guarded value after
+        // the arms. (A CPS-split function's cell write is lowered by emit-server /
+        // emit-functions; it never reaches here.)
+        const _isCellGuard = guardedNode.kind === "state-decl" && typeof guardedNode.name === "string" && guardedNode.name.length > 0 && opts.boundary === "server";
+        // S455 — `yield ?{…} !{…}` (an SSE generator): the guarded value is
+        // yielded after the arms, as `return` returns it.
+        const _isYieldGuard = guardedNode.kind === "yield-stmt";
+        if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt" || _isLiftGuard || _isCellGuard || _isYieldGuard)) {
+          if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name);
+          if (_isLiftGuard && opts.boundary === "server") returnsResult = true;
+          if (_isYieldGuard) yieldsResult = true;
+          if (_isCellGuard) cellWriteNode = guardedNode;
+          if (opts.boundary === "server") {
+            const sqlStmt = emitLogicNode(_handledSqlNode, { ...opts, tildeContext: undefined, sqlAttempt: true });
+            initExpr = `(${sqlStmt.replace(/;\s*$/, "")})`;
+            handlesSql = true;
+          } else {
+            // A query is never evaluated client-side (route inference
+            // server-places its function); keep the emitted JS parseable.
+            initExpr = `null /* SQL query — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function */`;
+          }
+          // A keywordless `w = ?{…} !{…}` on an already-declared `w` assigns it.
+          if (_isDeclGuard && guardedNode._bareAssign && typeof guardedNode.name === "string" && tildeDeclIsRebind(opts.declaredNames, guardedNode.name)) {
+            rebindsExisting = true;
+          }
+          if (guardedNode.kind === "return-stmt") returnsResult = true;
+        } else if (guardedNode.kind === "let-decl" && guardedNode.name) {
           bindingName = guardedNode.name;
           initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
+          if (opts.boundary === "server" && sqlQueryExprShape(guardedNode.initExpr) !== null) {
+            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.initExpr)!, _makeExprCtx(opts), true); // §19.8.3 — `let r = (?{…}.get()) !{…}`
+            handlesSql = true;
+          }
         } else if ((guardedNode.kind === "const-decl" || guardedNode.kind === "tilde-decl") && guardedNode.name) {
           bindingName = guardedNode.name;
           initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
+          if (opts.boundary === "server" && sqlQueryExprShape(guardedNode.initExpr) !== null) {
+            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.initExpr)!, _makeExprCtx(opts), true); // §19.8.3 — `const r = (?{…}.get()) !{…}`
+            handlesSql = true;
+          }
+          // §19.4.3 (S454) — `x = f() !{…}` on an already-declared `x` is an
+          // ASSIGNMENT: the guarded value lands in the existing binding. It used
+          // to emit `var x = …`, a redeclaration of a `let x` (E-CODEGEN-INVALID-LOGIC).
+          // A keywordless `w = ?{…} !{…}` whose query a §8.10 hoist replaced with
+          // its Map lookup (a `_bareAssign` const-decl, sqlNode gone — S455) is the
+          // same assignment as the un-hoisted `_bareAssign` arm above.
+          if ((guardedNode.kind === "tilde-decl" || guardedNode._bareAssign) && typeof guardedNode.name === "string" && tildeDeclIsRebind(opts.declaredNames, guardedNode.name)) {
+            rebindsExisting = true;
+          }
         } else {
           // s430-emit-state-leak — lower the guarded statement with THIS
           // statement's opts. It was called with none, so a reactive assignment
@@ -3791,6 +4108,20 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           const bodyCode = emitLogicNode(guardedNode, { ...opts, tildeContext: undefined });
           if (bodyCode) {
             initExpr = bodyCode.replace(/;\s*$/, "").replace(/^\s*return\s+/, "");
+          }
+          // §19.4.3 (S454) — `return f() !{…}`: a `return` operand is a value
+          // position. The `return` is stripped above to guard its operand; the
+          // guarded value is returned after the arms (it used to be dropped, so
+          // the function returned `undefined`).
+          if (guardedNode.kind === "return-stmt" && initExpr) returnsResult = true;
+          // §19.8.3 (S454) — the operand is an expression-position `?{}` query.
+          if (
+            initExpr && opts.boundary === "server" &&
+            (guardedNode.kind === "return-stmt" || guardedNode.kind === "bare-expr") &&
+            sqlQueryExprShape(guardedNode.exprNode) !== null
+          ) {
+            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.exprNode)!, _makeExprCtx(opts), true);
+            handlesSql = true;
           }
           // D3 — a reactive assignment `@cell = call()` lowers to a state-decl
           // node whose emit is the eager `_scrml_reactive_set("cell", call())`.
@@ -3827,6 +4158,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
 
       if (initExpr == null) return "";
+      // §8.10 + §19.8.3 (S455) — a handled query inside a hoisted loop: its
+      // operand is now the pre-fetch lookup (or the pre-fetch's SqlError
+      // envelope), and its arms still match SqlError variants.
+      if (node._hoistedHandledSql) handlesSql = true;
+      // §19.8.3 — the arms of a handled `?{}` match SqlError variants (released at return).
+      const _guardHandlesSql = handlesSql;
+      if (_guardHandlesSql) enterSqlErrorSchema();
 
       // Idempotency (Q2 / Seam-A finding-4) — the CLIENT-mode `emitCall` now also
       // auto-awaits a stdlib-async init, so a `!{}` guarded-expr whose init already
@@ -4012,7 +4350,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // unhandled error simply remains the value of resultVar (and of any
           // `var binding = resultVar` emitted below), which is the correct
           // top-level semantics — no statement is needed.
-          if ((opts.insideFunctionBody || opts.returnExitsWrapper) && !opts.inDeferredBody) {
+          if (_guardHandlesSql || opts.exprPositionGuard) {
+            // S454 fix round (F1) — FAIL CLOSED. A handler on a `?{}`, and any
+            // handler INSIDE an expression, never lets an unmatched failure
+            // through as a value (the envelope is truthy) nor as a `return` from
+            // a function whose caller does not expect one. The type checker
+            // makes these handlers exhaustive (E-TYPE-080), so this branch is
+            // unreachable for every variant it knows; anything else is re-raised.
+            lines.push(`  else { ${unhandledFailureThrow(resultVar)} }`);
+          } else if ((opts.insideFunctionBody || opts.returnExitsWrapper) && !opts.inDeferredBody) {
             lines.push(`  else { return ${resultVar}; }`);
           }
         }
@@ -4037,7 +4383,22 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
       lines.push(`}`);
       if (bindingName) {
-        lines.push(`var ${bindingName} = ${resultVar};`);
+        lines.push(rebindsExisting ? `${bindingName} = ${resultVar};` : `var ${bindingName} = ${resultVar};`);
+      }
+      if (cellWriteNode) {
+        // The cell write is the ordinary state-decl lowering with the guarded
+        // value as its initializer (no `sqlNode`: the query already ran above).
+        const _cellWrite = emitLogicNode(
+          { ...cellWriteNode, sqlNode: undefined, init: resultVar, initExpr: { kind: "ident", name: resultVar } },
+          { ...opts, tildeContext: undefined },
+        );
+        if (_cellWrite) lines.push(_cellWrite);
+      }
+      if (returnsResult) {
+        lines.push(`return ${resultVar};`);
+      }
+      if (yieldsResult) {
+        lines.push(`yield ${resultVar};`);
       }
       // §32 Gap 5: when this guarded-expr's success-path produces a value
       // (i.e. the guardedNode was a bare-expr call, not a let/const/tilde-decl
@@ -4055,6 +4416,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (opts.tildeContext && !bindingName && !_isDirectArmBodyStmt(node, opts)) {
         opts.tildeContext.var = resultVar;
       }
+      if (_guardHandlesSql) exitSqlErrorSchema();
       return lines.join("\n");
     }
 
@@ -4305,35 +4667,86 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     // emit-client.ts.
 
     case "transaction-block": {
-      // SPEC §44.6 — transactions are deferred to SPEC-ISSUE-018. The current
-      // workaround is to use Bun.SQL `sql.unsafe()` for BEGIN/COMMIT/ROLLBACK
-      // on the same connection. Proper `sql.begin(callback)` integration
-      // requires a callback-shaped emitter restructure and is out of scope
-      // for Phase 1.
+      // §19.10.3 — `transaction { }` lowers to BEGIN at the start, COMMIT at the
+      // end of normal completion, ROLLBACK before any `fail` in the block, and
+      // ROLLBACK before a SQL error propagates. §19.10.4 — no transaction is ever
+      // left open. BEGIN/COMMIT/ROLLBACK go through Bun.SQL `unsafe()` on the
+      // same handle the block's `?{}` queries use.
+      //
+      // Shape (S450):
+      //   await db.unsafe("BEGIN");
+      //   let open = true, threw = false;
+      //   const rollback = async () => { if (open) { open = false; await db.unsafe("ROLLBACK"); } };
+      //   try { <body> ; await db.unsafe("COMMIT"); open = false; }
+      //   catch (e) { threw = true; throw e; }
+      //   finally { if (open) { open = false; try { ROLLBACK } catch (r) { if (!threw) throw r; } } }
+      //
+      // `fail` / `?` (§19.5.2: `?` IS a `fail` of the callee's variant) at ANY
+      // depth in the block — not only a direct child — are marked so their
+      // emitted `return` runs the rollback FIRST (§19.10.3 "before the fail's
+      // return"): `return (await rollback(), <error envelope>);`. The `finally`
+      // is the backstop that makes "no transaction left open" hold for every
+      // other exit (a thrown SQL error; a re-`fail` carried as handler text).
+      //
+      // ⚑ S453/B1a (RULED) — a `return`, or a `break` / `continue` whose target
+      // is outside the block, now LEAVES the block with a ROLLBACK and proceeds;
+      // only normal completion COMMITs (§19.10.3). They are NOT marked by
+      // `_markTransactionExits`, and that is deliberate: the `finally` below
+      // already rolls back on every one of them (JS runs a `finally` on a
+      // `return` / `break` / `continue` out of its `try`), and it rolls back at
+      // the RIGHT moment — AFTER the return expression has been evaluated, so a
+      // `?{}` read in `return count` still executes inside the transaction. The
+      // `fail` / `?` pre-return marking stays as it is because an error envelope
+      // has nothing to evaluate inside the block. One mechanism, two entry
+      // points; no second rollback path was added.
+      // A `yield`, and an exit inside a `match` arm (which is lowered as a nested
+      // function and so never reaches this `finally`), are still rejected before
+      // codegen (validators/lint-transaction.ts, E-TRANSACTION-CONTROL-FLOW).
       const lines: string[] = [];
-      const db = opts.dbVar ?? "_scrml_sql";
+      // ⚑ #1264 (post-hold): the default handle is `fallbackSqlHandle()`, not a
+      // literal `"_scrml_sql"` — §8.1.1 gives one handle per database.
+      const db = opts.dbVar ?? fallbackSqlHandle();
+      const open = genVar("txn_open");
+      const threw = genVar("txn_threw");
+      const rollback = genVar("txn_rollback");
+      _markTransactionExits(node.body ?? [], rollback);
       lines.push(`await ${db}.unsafe("BEGIN");`);
+      lines.push(`let ${open} = true;`);
+      lines.push(`let ${threw} = false;`);
+      lines.push(`const ${rollback} = async () => { if (${open}) { ${open} = false; await ${db}.unsafe("ROLLBACK"); } };`);
       lines.push(`try {`);
-      for (const stmt of (node.body ?? [])) {
-        const code = emitLogicNode(stmt, opts);
-        if (code) {
-          for (const line of code.split("\n")) {
-            lines.push(`  ${line}`);
-          }
-          if (stmt.kind === "fail-expr") {
-            const lastIdx = lines.length - 1;
-            const lastLine = lines[lastIdx];
-            if (lastLine.trimStart().startsWith("return {")) {
-              lines[lastIdx] = `  await ${db}.unsafe("ROLLBACK");`;
-              lines.push(`  ${lastLine.trim()}`);
+      try {
+        for (const stmt of (node.body ?? [])) {
+          const code = emitLogicNode(stmt, opts);
+          if (code) {
+            for (const line of code.split("\n")) {
+              lines.push(`  ${line}`);
             }
           }
         }
+      } finally {
+        _markTransactionExits(node.body ?? [], null);
       }
+      // Defensive backstop ONLY: a marked `fail` / `?` rolled back but its
+      // `return` did not leave the block (it returned from a nested function —
+      // the statement-`match` arm IIFE, g-stmt-match-block-return-falls-through).
+      // That shape is REJECTED at compile time (E-TRANSACTION-CONTROL-FLOW,
+      // validators/lint-transaction.ts) because this guard cannot make it safe:
+      // the statements between the arm and this point have ALREADY run with no
+      // transaction open (autocommit) and persisted. The guard only stops a
+      // COMMIT past a rollback (on Postgres a COMMIT with no open transaction
+      // merely WARNS) if some other nested-function lowering reaches here.
+      lines.push(`  if (!${open}) throw new Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
       lines.push(`  await ${db}.unsafe("COMMIT");`);
+      lines.push(`  ${open} = false;`);
       lines.push(`} catch (_scrml_txn_err) {`);
-      lines.push(`  await ${db}.unsafe("ROLLBACK");`);
+      lines.push(`  ${threw} = true;`);
       lines.push(`  throw _scrml_txn_err;`);
+      lines.push(`} finally {`);
+      lines.push(`  if (${open}) {`);
+      lines.push(`    ${open} = false;`);
+      lines.push(`    try { await ${db}.unsafe("ROLLBACK"); } catch (_scrml_txn_rb_err) { if (!${threw}) throw _scrml_txn_rb_err; }`);
+      lines.push(`  }`);
       lines.push(`}`);
       return lines.join("\n");
     }
@@ -4821,12 +5234,27 @@ function _emitWhileStmtWithTilde(node: any, opts: EmitLogicOpts): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Count direct (top-level) lift-expr nodes in an arm body.
- * Used for E-LIFT-002 detection: multiple lift statements on the same
- * linear execution path in a value-lift arm are a compile error (§10).
+ * E-LIFT-002 (§10 / §17.6): two or more direct (top-level) `lift` statements in one
+ * value-lift arm body are on the same execution path — a compile ERROR.
+ *
+ * Until s456 this site only pushed a `/* E-LIFT-002 … *\/` comment into the artifact
+ * and reported nothing: SPEC §17.6 Example 6 compiled exit 0. The refusal is recorded in the run-wide refused-lowering sink
+ * (refused-lowering-errors.ts, drained by runCG), anchored on the first EXTRA `lift`.
+ * The comment stays as a marker in the (never-shipped) artifact.
  */
-function countTopLevelLifts(body: any[]): number {
-  return body.filter((n: any) => n?.kind === "lift-expr").length;
+function refuseExtraArmLifts(body: any[], lines: string[]): void {
+  const lifts = body.filter((n: any) => n?.kind === "lift-expr");
+  if (lifts.length <= 1) return;
+  const extra = lifts[1];
+  recordRefusedLowering(new CGError(
+    "E-LIFT-002",
+    "E-LIFT-002: Multiple `lift` statements on the same execution path in a value-lift arm. " +
+    "In an if-as-expression (§17.6), each arm produces exactly one value. Remove or consolidate " +
+    "the extra `lift` calls, or restructure into a separate accumulation context if multiple " +
+    "values are needed.",
+    extra?.span ?? { start: 0, end: 0 },
+  ), extra);
+  lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
 }
 
 /**
@@ -4911,9 +5339,7 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
     const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx(bodyOpts));
     const nestedConsequent: any[] = nestedIf.consequent ?? [];
     // E-LIFT-002: multiple lifts on same path in a value-lift arm
-    if (countTopLevelLifts(nestedConsequent) > 1) {
-      lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-    }
+    refuseExtraArmLifts(nestedConsequent, lines);
     lines.push(`else if (${nestedCond}) {`);
     // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
     const nestedSugar = _emitValueFormSugarArm(nestedConsequent, tildeVar, bodyOpts);
@@ -4936,9 +5362,7 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
   } else {
     // plain else
     // E-LIFT-002: multiple lifts in else arm
-    if (countTopLevelLifts(alternate) > 1) {
-      lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-    }
+    refuseExtraArmLifts(alternate, lines);
     lines.push(`else {`);
     // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
     const elseSugar = _emitValueFormSugarArm(alternate, tildeVar, bodyOpts);
@@ -5073,9 +5497,7 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
 
   // E-LIFT-002: multiple lifts on same linear path in a value-lift arm
   const consequent: any[] = ifExpr.consequent ?? [];
-  if (countTopLevelLifts(consequent) > 1) {
-    lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-  }
+  refuseExtraArmLifts(consequent, lines);
   lines.push(`if (${condition}) {`);
 
   // §17.6.2 value-form sugar — see `_emitValueFormSugarArm`.
@@ -5563,8 +5985,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   const lines: string[] = [];
   lines.push(`let ${tildeVar} = null;`);
 
-  // Emit the match header into a temporary variable
+  // Emit the match header into a temporary variable. The `const tmp = header`
+  // line is a placeholder slot filled once the arms are known (§19.8.3: a match
+  // on a `?{}` result evaluates its scrutinee through `_scrml_sql_attempt`).
   const header = emitExprField(matchExpr.headerExpr, (matchExpr.header ?? "").trim(), _makeExprCtx(opts));
+  const headerLineIdx = lines.length;
   lines.push(`const ${tmpVar} = ${header};`);
 
   // Create a tilde context so lift-expr inside match arms assigns to tildeVar
@@ -5590,13 +6015,13 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // local list) exactly as the sibling emitter in emit-control-flow.ts does —
       // a hard-coded `null` here emitted NO `const local = …data.field` prelude,
       // so a block arm of `const r = match …` referenced an unbound name.
-      const _pb = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
+
       arms.push({
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding: typeof child.binding === "string" && child.binding.trim()
-          ? child.binding
-          : (_pb.length > 0 ? _pb.join(", ") : null),
+        // F17 — a block arm's payload binding (was `null`: every binding of a
+        // block-bodied arm in a `const x = match …` was dropped).
+        binding: matchArmBlockBinding(child),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       });
@@ -5630,8 +6055,16 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare; the `::Ok` arm is recognized only via the
   // `__scrml_error`-sentinel tag).
-  const failableMatch = isFailableOkMatch(arms);
-  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
+  // §18.7 / F11-F16 — bind + tag-compare against the TS-resolved subject enum.
+  const subjectVariants = getMatchSubjectVariantFields(matchExpr);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(matchExpr))
+    || isSqlFailableMatch(matchExpr.headerExpr, arms);
+  const _matchHandlesSql = matchScrutineeHandlesSql(matchExpr.headerExpr, failableMatch, opts.boundary === "server" ? "server" : "client");
+  if (_matchHandlesSql) {
+    lines[headerLineIdx] = `const ${tmpVar} = ${emitSqlQueryShape(sqlQueryExprShape(matchExpr.headerExpr)!, _makeExprCtx(opts), true)};`;
+    enterSqlErrorSchema(); // the arms' error type is SqlError (released at return)
+  }
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   if (needsTagNormalization) {
     lines.push(emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch));
@@ -5640,7 +6073,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // Emit arms as if/else-if chain with tilde assignment
   let conditionIndex = 0;
   for (const arm of arms) {
-    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok") : "";
+    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch) : "";
     // Structured body: emit each statement via emitLogicNode (handles lift via tildeContext)
     if (arm.structuredBody) {
       const bodyCode: string[] = [];
@@ -5740,7 +6173,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // the server call(s) here; the enclosing fn is coloured `async` in parallel by
       // the match-arm callee harvest in collectCalleeIdents (emit-library-shared.ts),
       // so the `await` is always legal.
-      const rhs = _awaitMatchArmServerCalls(emitExprField(null, a.result, _makeExprCtx(opts)), opts);
+      // §14.10 — a whole-result bare-dot constructor takes the match VALUE's
+      // declared position type (`const e: Expr = match …`), never a by-name guess.
+      const _armCtx = _makeExprCtx(opts);
+      const rhs = _awaitMatchArmServerCalls(
+        emitTypedArmResultCtor(a.result, matchExpr, _armCtx) ?? emitExprField(null, a.result, _armCtx), opts);
       return `  ${tildeVar} = ${rhs};`;
     };
 
@@ -5766,6 +6203,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       conditionIndex++;
     }
   }
+  // S454 fix round (F1) — FAIL CLOSED: a match on a `?{}` with no catch-all re-raises
+  // a failure none of its arms names, rather than binding `not`.
+  if (_matchHandlesSql && conditionIndex > 0 && !arms.some((a) => a.kind === "wildcard")) {
+    lines.push(`else if (${tagVar} !== "Ok") { ${unhandledFailureThrow(tmpVar)} }`);
+  }
 
   lines.push(`${keyword} ${name} = ${tildeVar};`);
 
@@ -5784,6 +6226,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     opts.tildeContext.var = tildeVar;
   }
 
+  if (_matchHandlesSql) exitSqlErrorSchema();
   return lines.join("\n");
 }
 

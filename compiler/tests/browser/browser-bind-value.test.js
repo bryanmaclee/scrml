@@ -25,7 +25,7 @@
  * instead to avoid this happy-dom limitation.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
@@ -437,4 +437,11 @@ describe("bind:value §13: path binding preserves sibling object fields", () => 
     expect(profile.city).toBe("Lyon");
     expect(profile.country).toBe("France");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

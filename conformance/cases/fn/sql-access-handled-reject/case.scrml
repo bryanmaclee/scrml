@@ -1,0 +1,16 @@
+<program db="./test.db">
+${
+    fn readOne(id) {
+        ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        return 1
+    }
+    fn loadName(id) {
+        let row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
+        return row is not ? "" : row.name
+    }
+    fn loadAll() {
+        return ?{`SELECT name FROM users`}.all() !{ _ :> [] }
+    }
+}
+<p>${readOne(1)} ${loadName(1)} ${loadAll().length}</>
+</program>

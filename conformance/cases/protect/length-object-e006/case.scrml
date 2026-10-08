@@ -5,11 +5,11 @@
   <db src="app.db" protect="pin" tables="users">
     ${
       function getLen(id) {
-        const u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        const u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return new Array(u.pin).length
       }
     }
   </db>
   <n> = 0
-  <button id="load" onclick=${ @n = getLen(1) }>load</button>
+  <button id="load" onclick={ @n = getLen(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

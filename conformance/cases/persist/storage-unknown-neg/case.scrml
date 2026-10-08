@@ -1,0 +1,7 @@
+// §6.14.1 rule 1 — `persist=` takes "local" or "session"; the deferred "cookie" is neither.
+<program>
+    let <mode:string="light" persist="cookie" key="app.mode"/>
+    <main>
+        <p id="mode">${@mode}</p>
+    </main>
+</program>

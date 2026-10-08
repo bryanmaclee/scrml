@@ -1,0 +1,23 @@
+{
+  "id": "forms-validator-dead-locked-pos",
+  "description": "§55.5.2: a locked (no `let`) top-level value with validators, which nothing binds and no use site seeds, can never change — its validators are E-VALIDATOR-DEAD.",
+  "language-version": "1.0",
+  "spec": "§55.5.2",
+  "rationale": "§55.5.2: \"Validators on a value are dead — E-VALIDATOR-DEAD (§34), an error — only when nothing can ever change the value, which is when all three of the following hold and neither LIVE edge below applies: 1. no bind … 2. no write grant — the value is locked … 3. not server-loaded\". ruling:user-voice-scrml.md S447 \"validity calls 2-6\" call 4.",
+  "expect": {
+    "codes": [
+      "E-VALIDATOR-DEAD"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-VALIDATOR-DEAD"
+        ]
+      }
+    }
+  }
+}

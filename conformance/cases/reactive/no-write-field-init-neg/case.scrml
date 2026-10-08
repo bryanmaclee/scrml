@@ -1,0 +1,11 @@
+// §6.15 negative twin — the same position calling write-free functions.
+<program>
+    let <hits:int=0/>
+    fn bump() -> int { return 1 }
+    fn label() -> string { return "x" }
+    <box:struct> let <k:int=(bump())/> </>
+    renders <span>${k}</span>
+    <main>
+        <box/>
+    </main>
+</program>

@@ -5,5 +5,5 @@ ${
         return result
     }
 }
-<button id="save" onclick=@price = saveOrder()>Save</>
+<button id="save" onclick={ @price = saveOrder() !{ .Transport(_) :> { return } } }>Save</>
 <p id="p">Price: ${@price}</>

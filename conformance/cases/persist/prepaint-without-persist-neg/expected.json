@@ -1,0 +1,25 @@
+{
+  "id": "persist-prepaint-without-persist-neg",
+  "description": "§6.14.4.2 rule 2: `prepaint` on a cell with no `persist=` is E-PREPAINT-WITHOUT-PERSIST.",
+  "language-version": "1.0",
+  "spec": "§6.14.4.2",
+  "rationale": "§6.14.4.2 rule 2: \"**Requires `persist=`.** `prepaint` on a cell without `persist=` SHALL be `E-PREPAINT-WITHOUT-PERSIST` (rec 8).\"",
+  "expect": {
+    "codes": [
+      "E-PREPAINT-WITHOUT-PERSIST"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-persist-codes-unimplemented-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-PREPAINT-WITHOUT-PERSIST"
+        ]
+      }
+    }
+  }
+}

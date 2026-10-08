@@ -5925,11 +5925,15 @@ describe("F8 — Error-effect arms (!{...} — shapeErrorEffectBlock)", () => {
     // is only reached inside the leading-`|` branch). The native shaper is
     // more permissive (it recognizes a no-pipe `_` — see the unit test
     // above); the piped form is what both pipelines agree on for parity.
+    // S452 r4 — §19.4.5: a paren-free binder (`::NotFound e`) is legal only
+    // after a leading `|`; the live parser rejects the pipe-less spelling
+    // (E-PARSE-001), so the parity cases with a paren-free binder carry the
+    // legacy `|`.
     const ERR_PARITY_CASES = [
-        "!{ ::NotFound e -> fallback() }",
-        "!{ ::NotFound e -> a() | ::Timeout -> b() }",
+        "!{ | ::NotFound e -> fallback() }",
+        "!{ | ::NotFound e -> a() | ::Timeout -> b() }",
         "!{ ::QueryFailed (err) -> log(err) }",
-        "!{ ::A a -> x() | _ -> defaultHandler() }",
+        "!{ | ::A a -> x() | _ -> defaultHandler() }",
     ];
     const normWs = (s) => (typeof s === "string" ? s.replace(/\s+/g, "") : s);
     for (const src of ERR_PARITY_CASES) {
@@ -6055,19 +6059,30 @@ describe("P4-2 — bare-markup-statement segmentation (native vs live buildAST)"
         expect(native.exports.length).toBe(live.exports.length);
     });
 
-    // ANTI-OVER-FIRE #1 — a legitimate prose run directly inside `<program>`
-    // is NOT a declaration; it must stay a `text` node, never lift. The lift
-    // gates on the canonical decl-keyword regexes — prose like "Welcome to
-    // the app." does not match.
-    test("prose text directly inside <program> stays `text` (no over-fire)", () => {
+    // ⛑ S441 — this was ANTI-OVER-FIRE #1 ("prose directly inside <program>
+    // stays `text`"). S441 ruled the root (SPEC §40.8 S441 bullet): a
+    // `<program>` body carries no loose prose, so a bare run there is CODE —
+    // lifted in both front ends and rejected as E-UNQUOTED-DISPLAY-TEXT when
+    // it is not valid code. What still must hold is parity; and DECLARED prose
+    // (a `"..."` literal) stays a `text` node, never lifts.
+    test("S441 — bare prose inside <program> lifts to `logic` in BOTH front ends (parity)", () => {
         const src = "<program>\nWelcome to the app.\n${ a() }\n</program>";
         const liveKinds = programChildKinds(liveFileAST(src));
         const nativeKinds = programChildKinds(nativeFileAST(src));
-        // The native program-body child sequence matches the live oracle —
-        // the prose run is `text`, the explicit `${ a() }` is `logic`. The
-        // FIRST child (the prose run) must NOT have been lifted to `logic`.
         expect(nativeKinds).toEqual(liveKinds);
-        expect(nativeKinds[0]).toBe("text");
+        expect(nativeKinds[0]).toBe("logic");
+    });
+
+    test("S441 — a declared `\"...\"` literal inside <program> stays `text` in both front ends", () => {
+        const src = "<program>\n\"Welcome to the app.\"\n${ a() }\n</program>";
+        const liveKinds = programChildKinds(liveFileAST(src));
+        const nativeKinds = programChildKinds(nativeFileAST(src));
+        expect(nativeKinds).toEqual(liveKinds);
+        for (const ast of [liveFileAST(src), nativeFileAST(src)]) {
+            const prog = ast.nodes.find((n) => n.kind === "markup" && n.tag === "program");
+            const lit = prog.children.find((c) => c.kind === "text" && c._displayLiteral === true);
+            expect(lit && lit.value).toBe("Welcome to the app.");
+        }
     });
 
     // ANTI-OVER-FIRE #2 — a bare-decl-keyword-shaped run inside a NON-program

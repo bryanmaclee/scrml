@@ -47,7 +47,7 @@
     }
 
     function loadContacts() {
-      return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all()
+      return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all() !{ _ :> [] }
     }
 
     function removeContact(id) {
@@ -55,7 +55,7 @@
     }
 
     function addContact() {
-      const row = persistContact(@name, @email, @phone)
+      const row = persistContact(@name, @email, @phone) !{ .Transport(_) :> { return } }
       @contacts = [...@contacts, row]
       reset(@name)
       reset(@email)
@@ -63,7 +63,7 @@
     }
 
     function deleteContact(id) {
-      removeContact(id)
+      removeContact(id) !{ .Transport(_) :> { return } }
       @contacts = @contacts.filter(c => c.id != id)
     }
 

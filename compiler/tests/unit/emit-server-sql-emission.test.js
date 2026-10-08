@@ -28,6 +28,7 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { resolve as resolvePath } from "node:path";
 import { runCG } from "../../src/code-generator.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { collectDbScopes, generateServerJs } from "../../src/codegen/emit-server.ts";
@@ -139,7 +140,8 @@ describe("§A <db src=> form emits unscoped _scrml_sql declaration", () => {
     }
     expect(serverJs).toContain('import { SQL } from "bun"');
     // SQLite paths get `sqlite:` prefix to avoid Bun.SQL postgres-default.
-    expect(serverJs).toContain('const _scrml_sql = new SQL("sqlite:./contacts.db")');
+    // §19.10.6 (S449): every handle is wrapped by the transaction mutex.
+    expect(serverJs).toContain('const _scrml_sql = _scrml_db_guard(new SQL("sqlite:./contacts.db"), "sqlite", false);');
   });
 });
 
@@ -154,13 +156,14 @@ describe("§B <program db=> form emits scoped declaration (only when referenced)
       protectAnalysis: { views: new Map() },
     });
     expect(node._dbScope).toBeDefined();
-    expect(node._dbScope.dbVar).toBe("_scrml_sql_1");
+    // §8.1.1 (S451): one handle per DATABASE; the file default database is `_scrml_sql`.
+    expect(node._dbScope.dbVar).toBe("_scrml_sql");
 
     const ast = makeFileAST([node]);
     const scopes = collectDbScopes(ast);
-    expect(scopes.has("_scrml_sql_1")).toBe(true);
-    expect(scopes.get("_scrml_sql_1").connectionString).toBe("./tasks.db");
-    expect(scopes.get("_scrml_sql_1").driver).toBe("sqlite");
+    expect(scopes.has("_scrml_sql")).toBe(true);
+    expect(scopes.get("_scrml_sql").connectionString).toBe("./tasks.db");
+    expect(scopes.get("_scrml_sql").driver).toBe("sqlite");
   });
 
   test("scoped declaration only emitted when scoped identifier is actually referenced in body", () => {
@@ -223,13 +226,13 @@ describe("§D multi-scope file emits one decl per used identifier in stable orde
       depGraph: { nodes: new Map(), edges: [] },
       protectAnalysis: { views: new Map() },
     });
-    expect(node1._dbScope.dbVar).toBe("_scrml_sql_1");
-    expect(node2._dbScope.dbVar).toBe("_scrml_sql_2");
+    expect(node1._dbScope.dbVar).toBe("_scrml_sql");
+    expect(node2._dbScope.dbVar).toBe("_scrml_sql_1");
 
     const scopes = collectDbScopes(ast);
     expect(scopes.size).toBeGreaterThanOrEqual(2);
-    expect(scopes.get("_scrml_sql_1").driver).toBe("postgres");
-    expect(scopes.get("_scrml_sql_2").driver).toBe("sqlite");
+    expect(scopes.get("_scrml_sql").driver).toBe("postgres");
+    expect(scopes.get("_scrml_sql_1").driver).toBe("sqlite");
   });
 });
 
@@ -308,7 +311,7 @@ describe("§H collectDbScopes returns a Map keyed by dbVar identifier", () => {
   });
 });
 
-describe("§J multi-scope: both _scrml_sql_1 and _scrml_sql_2 produce decls when referenced", () => {
+describe("§J multi-scope: the default _scrml_sql and the second database _scrml_sql_1 (S451: one handle per database) when referenced", () => {
   test("collectDbScopes returns both scoped vars after annotation", () => {
     const node1 = makeProgramDbNode("postgres://host1/db1");
     const node2 = makeProgramDbNode("./local2.db");
@@ -320,17 +323,21 @@ describe("§J multi-scope: both _scrml_sql_1 and _scrml_sql_2 produce decls when
       protectAnalysis: { views: new Map() },
     });
     const scopes = collectDbScopes(ast);
+    expect(scopes.has("_scrml_sql")).toBe(true);
     expect(scopes.has("_scrml_sql_1")).toBe(true);
-    expect(scopes.has("_scrml_sql_2")).toBe(true);
-    expect(scopes.get("_scrml_sql_1").connectionString).toBe("postgres://host1/db1");
-    expect(scopes.get("_scrml_sql_1").driver).toBe("postgres");
-    expect(scopes.get("_scrml_sql_2").connectionString).toBe("./local2.db");
-    expect(scopes.get("_scrml_sql_2").driver).toBe("sqlite");
+    expect(scopes.get("_scrml_sql").connectionString).toBe("postgres://host1/db1");
+    expect(scopes.get("_scrml_sql").driver).toBe("postgres");
+    expect(scopes.get("_scrml_sql_1").connectionString).toBe("./local2.db");
+    expect(scopes.get("_scrml_sql_1").driver).toBe("sqlite");
   });
 });
 
 describe("§K SQLite path normalization — sqlite: prefix added when missing", () => {
-  test("bare relative path gets sqlite: prefix", () => {
+  // s445 — a SQLite FILE no longer rides a `sqlite:` literal (opened CWD-relative,
+  // created on open). The file the declaring file names is recorded relative to the
+  // project root (§47.14; here no manifest and no build root, so the file's own
+  // directory, /test) and resolved at runtime against SCRML_DATA_DIR ?? that root.
+  test("bare relative path opens the declaring-file-relative file, never CWD-relative", () => {
     const dbBlock = makeDbStateNode("./testdb.db");
     const fnNode = makeServerFn("getAll", [
       makeSqlNode("SELECT 1"),
@@ -351,9 +358,43 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     });
     const ast = makeFileAST([programNode]);
     const serverJs = generateServerJs(ast, { functions: fnRouteMap }, [], null, null);
-    if (serverJs.includes("new SQL(")) {
-      expect(serverJs).toContain('new SQL("sqlite:./testdb.db")');
-    }
+    // §19.10.6 (S449): the handle is wrapped by the transaction mutex.
+    expect(serverJs).toContain('const _scrml_sql = _scrml_db_guard(_scrml_sqlite_referenced("testdb.db", "./testdb.db", "app.scrml"), "sqlite", false);');
+    expect(serverJs).not.toContain('"sqlite:./testdb.db"');
+    // S445 ruling: `SELECT 1` declares no schema — a REFERENCING handle: opened lazily
+    // on first use, never created, loud when missing.
+    // The fixture's file lives at "/test/app.scrml"; the emitter resolves it to an absolute,
+    // forward-slashed root — "/test" on POSIX, "<drive>:/test" on Windows.
+    const expectedRoot = resolvePath("/test").replace(/\\/g, "/");
+    expect(serverJs).toContain(`const _scrml_project_root = ${JSON.stringify(expectedRoot)};`);
+    expect(serverJs).toContain('handle = new SQL({ adapter: "sqlite", filename, create: false, readwrite: true });');
+    expect(serverJs).toContain("scrml: database file not found: ${filename}");
+    expect(serverJs).toContain("const raw = process.env.SCRML_DATA_DIR;");
+    // s447 R4-1 — an owning handle refuses to create outside SCRML_DATA_DIR.
+    expect(serverJs).toContain("if (dataDir !== null && !_scrml_sqlite_inside(filename, dataDir)) {");
+  });
+
+  test("a program that declares the table (its own CREATE TABLE) OWNS the db → create allowed", () => {
+    const dbBlock = makeDbStateNode("./testdb.db");
+    const fnNode = makeServerFn("setup", [
+      makeSqlNode("CREATE TABLE IF NOT EXISTS t (n INTEGER)"),
+    ]);
+    const programNode = {
+      kind: "markup",
+      tag: "program",
+      attributes: [],
+      children: [dbBlock, { kind: "logic", body: [fnNode], span: span(35) }],
+      span: span(0),
+    };
+    const fnRouteMap = new Map();
+    fnRouteMap.set(`/test/app.scrml::${fnNode.span.start}`, {
+      boundary: "server",
+      generatedRouteName: "_scrml_route_setup_1",
+      explicitMethod: "POST",
+    });
+    const serverJs = generateServerJs(makeFileAST([programNode]), { functions: fnRouteMap }, [], null, null);
+    // §19.10.6 (S449): the handle is wrapped by the transaction mutex.
+    expect(serverJs).toContain('const _scrml_sql = _scrml_db_guard(new SQL(_scrml_sqlite_owned("testdb.db", "./testdb.db", "app.scrml")), "sqlite", false);');
   });
 
   test(":memory: passes through WITHOUT sqlite: prefix (Bun.SQL recognizes it)", () => {
@@ -390,8 +431,8 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
       protectAnalysis: { views: new Map() },
     });
     const scopes = collectDbScopes(makeFileAST([node]));
-    expect(scopes.get("_scrml_sql_1").driver).toBe("postgres");
-    expect(scopes.get("_scrml_sql_1").connectionString).toBe("postgres://user@localhost/mydb");
+    expect(scopes.get("_scrml_sql").driver).toBe("postgres");
+    expect(scopes.get("_scrml_sql").connectionString).toBe("postgres://user@localhost/mydb");
   });
 
   test("explicit sqlite: prefix preserved (idempotent)", () => {
@@ -440,7 +481,7 @@ describe("§I declarations precede idempotency helpers (ordering invariant)", ()
 
     if (serverJs.includes("import { SQL }")) {
       const sqlImportIdx = serverJs.indexOf('import { SQL } from "bun"');
-      const sqlDeclIdx = serverJs.indexOf("const _scrml_sql = new SQL(");
+      const sqlDeclIdx = serverJs.indexOf("const _scrml_sql = ");
       expect(sqlImportIdx).toBeGreaterThanOrEqual(0);
       expect(sqlDeclIdx).toBeGreaterThan(sqlImportIdx);
       // If the structural-eq helper or idempotency block also exists, they

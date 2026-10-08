@@ -1,0 +1,4 @@
+${
+    <level>: number(0 < value < 10) = 5
+}
+<program><p>${@level}</p></program>

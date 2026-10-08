@@ -7,7 +7,7 @@
 // slice-m1/progress.md.
 //
 //   <program>
-//       <let count:int=0/>
+//       let <count:int=0/>
 //       <step=1/>
 //       <doubled:int=(@count * 2)/>
 //       function bump()    { @count = @count + @step }
@@ -56,23 +56,23 @@ ${
         const fCount: Field = {
             sym: sCount, ty: Type.Int, init: litInt(0),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
-            graph: not, exported: false, wcap: wCount,
+            graph: not, exported: false, wcap: wCount, vals: [], persist: not,
         }
         const fStep: Field = {
             sym: sStep, ty: Type.Int, init: litInt(1),
             mode: FieldMode.Locked, role: FieldRole.Child, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         const fDoubled: Field = {
             sym: sDoubled, ty: Type.Int,
             init: prim2(PrimOp.Mul, readField(sProgram, here, COUNT), litInt(2)),
             mode: FieldMode.Derived, role: FieldRole.Child, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
 
         // function bump() { @count = @count + @step }  — a `.Replace` on a `let` scalar.
         const bump: Fn = {
-            sym: sBump, params: [], pure: false,
+            sym: sBump, params: [], pure: false, err: not, waits: false,
             body: block([
                 Stmt.Write(wCount, shared, EditKind.Replace,
                     prim2(PrimOp.Add, readField(sProgram, shared, COUNT), readField(sProgram, shared, STEP)),
@@ -82,11 +82,16 @@ ${
         // function restart() { reset(@count) }  — `reset` is a `.Replace` with the
         // field's initializer re-evaluated (L4).
         const restart: Fn = {
-            sym: sRestart, params: [], pure: false,
+            sym: sRestart, params: [], pure: false, err: not, waits: false,
             body: block([Stmt.Write(wCount, shared, EditKind.Replace, litInt(0), Check.Static)]),
         }
 
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly — the newline + indentation of the
+        // source (the two `<!-- … -->` comments are dropped; the bytes around
+        // them stay). L13 (which dropped these runs) is retired.
         const main: View = el("main", [], [
+            textView("\n        "),
             el("p", [], [
                 textView("Count "),
                 dyn(readField(sProgram, here, COUNT)),
@@ -94,11 +99,14 @@ ${
                 dyn(readField(sProgram, here, DOUBLED)),
                 textView(")"),
             ]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sBump))])], [
                 textView("+"),
                 dyn(readField(sProgram, here, STEP)),
             ]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sRestart))])], [textView("Reset")]),
+            textView("\n        \n        \n    "),
         ])
 
         const program: Decl = {
@@ -106,6 +114,6 @@ ${
             fields: [fCount, fStep, fDoubled],
             renders: [main], wiring: [], handles: [],
         }
-        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [] }
+        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not }
     }
 }

@@ -1,0 +1,6 @@
+// §6.7.4 — an empty effect.
+<program>
+  <n> = 0
+  <effect deps=[@n]/>
+  <p>${@n}</p>
+</program>

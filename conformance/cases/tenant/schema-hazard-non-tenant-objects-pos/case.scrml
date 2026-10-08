@@ -1,0 +1,22 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)`}
+        ?{`CREATE TABLE config (k TEXT PRIMARY KEY, v TEXT)`}
+        ?{`CREATE TABLE audit (id INTEGER PRIMARY KEY, msg TEXT)`}
+        ?{`CREATE TABLE notes (id INTEGER PRIMARY KEY, k TEXT REFERENCES config(k) ON DELETE CASCADE, body TEXT)`}
+        ?{`CREATE TRIGGER t_cfg_audit AFTER INSERT ON config BEGIN INSERT INTO audit (msg) VALUES (NEW.k); END`}
+        ?{`CREATE VIEW cfg_view AS SELECT k, v FROM config`}
+        ?{`CREATE INDEX ix_assets_name ON assets (name)`}
+    </>
+    // Triggers, cascades and views over non-tenant tables are untouched by the rule.
+    ${
+        function mine() {
+            return ?{`SELECT id, name FROM assets`}.all()
+        }
+        function settings() {
+            return ?{`SELECT k, v FROM cfg_view`}.all()
+        }
+    }
+    <button onclick=${ mine() }>mine</button>
+    <button onclick=${ settings() }>settings</button>
+</program>

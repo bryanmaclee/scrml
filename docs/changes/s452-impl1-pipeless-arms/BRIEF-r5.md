@@ -1,0 +1,6 @@
+# BRIEF r5 — s452-impl1-pipeless-arms (archived verbatim)
+
+PA → impl#1 pipe-less agent: a tiny r5 on the same branch (the re-review of b3773d7d was LAND-WITH-NITS). Archive this as BRIEF-r5.md.
+1. E-TYPE-ARM-QUALIFIER-MISMATCH (type-system.ts ~:12574) compares names without resolving aliases, which is a regression. `type A = E` + `function loc(n)! -> A` handled by `E.Bad(m) :>` / `E.Gone :>` compiled and ran on 39108436 and is now refused. Resolve BOTH the qualifier and the handled error type through type aliases before comparing (use the type checker's existing alias resolution; don't write a new one). If either side cannot be resolved, SKIP the check (same as the unknown-callee case today). Add tests: an alias-on-either-side passes, a genuine mismatch through an alias still fires.
+2. Message: `.Bad(msg: m) :>` (a named-field binder, valid under §18.2 `binding ::= FieldName ':' Identifier`) now gets E-PARSE-001 "does not start an arm". Make the message say the named-field binder is not yet supported in impl#1's `!{}` handlers (write `.Bad(m)`), rather than calling it malformed. Same code, message only, plus a test.
+Run the unit file + the full gate, push, and reply with FINAL_SHA and test counts (≤80 words).

@@ -2,6 +2,220 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S456 — 2026-10-06/07 (bryan · ASUS; solo, across a reboot) — tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting made per-row-equivalent, flogence's silent null slice
+
+Seven rulings (user-voice §S456). Every code landing went through at least one S239 round; four needed two to five. The recurring defect: two readers of one text disagree, and the disagreement is a bypass. Each fix made the checked text the text the runtime executes.
+
+**Landed:**
+- **#1330** `handle()` return is a `protect=` sink; the Response constructor is recognized by value (globalThis/self/alias/destructure/.json/.bind/Reflect.construct) — `new globalThis.Response(JSON.stringify(u))` no longer serves the protected column (executed on base: `passwordHash:"SECRET"`).
+- **#1331** W-TENANT-SUBSTRATE-SCOPED — a login read of a tenant-scoped identity table that decides the tenant pin (direct, destructured, @cell, same-file helper); the schema lexer ends `--` at CR or LF (r1 found a lone-CR comment hiding `PERMISSIVE`); `parseSchemaBlock` linear.
+- **#1332** §8.10 N+1 hoisting ≡ the per-row loop: DB-side key comparison via a (slot,key) join, hoist only provably write-free bodies (D-BATCH-001 names the call), per-read failure timing with single-key fallback, chunking at `batch-in-list-cap=`; SQLite-only (the PG pre-fetch was broken). SPEC §8.10.1 condition 6 + equivalence obligations; §8.10.6 throw struck.
+- **#1334** undeclared `tenant_id` tables refused (rulings "b, startup check lands with it", "a, fix F7/F9 too", "your recs, go"): program-body SQL in any DB compilation is a closed statement allow-list over a closed lexical subset (E-TENANT-UNDECLARED, E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED); compile-time SQLite scan + a startup check that serves 503 while an undeclared `tenant_id` relation exists (`table_xinfo`; re-check under backoff; fails closed). Five review rounds, two boundary changes.
+- **#1335** one SQL statement per program-body `?{}` (ruling "one statement per") + ONE JS-accurate `${}` slot reader shared by 8 consumers + an emitted-call guard; closed the live `set_config('scrml.tenant',…)` re-pin under the §14.8.11 tier (PG16) and a SQLite slot-desync bypass of #1334 (`${ x + '{' }); CREATE TABLE leak …`); CRLF fixed after a Windows-only failure.
+- **#1336** flogence's report: a `'` in a regex in a foreign slice compiled to `null` at exit 0 — codegen refusals now always reach the diagnostics (refusal sink; 5 more exit-0 refusals closed), slices are tokenized by `acorn.parse` in their real wrapper, `<each>` quoted handlers with `${}` refused (case-insensitive).
+- **#1337** E-ATTR-INTERP-EXECUTABLE (ruling "your recs on 1 and 2"): no `${…}` into any `on…` attribute (except exact `one`/`online`/`onboarding`), `srcdoc`, or a URL attribute led by an executable scheme — judged as emitted (after prop substitution and `^{emit}`).
+- **#1329** review carve-outs owed at boot.
+- PRs **#939 #865 #579** closed with evidence (obsolete / superseded).
+
+**Gate:** cloud `gate` green on every landing; corpus differentials showed 0 unintended changes on each. Review floor 0 owed.
+
+## S455 — 2026-10-05/06 (bryan · ASUS; solo) — the tenant floor's schema boundary built by allow-list, R11 migrated reads-only, the foreign slice sealed, #1305's lowering made whole
+
+**Landed (each S239-reviewed; markers in `docs/pr-reviews.md`):**
+- **#1311** `state.ts` recent-sessions SHAs pinned to `--abbrev=9` (S454 B-4a; `state.ts --check` had been FAIL on main).
+- **#1312** §23.2.4a — an inline `_={ }=` slice is built once in global scope and sees only its `in:{}` crossings (it could read `_scrml_sql`, the raw db handle); E-FOREIGN-007. flogence's 738 slices compile identically.
+- **#1313** security — `E-TENANT-SCHEMA-HAZARD`: a `<schema>` trigger / rule / cascading FK / view against a tenant table is refused at the declaration (ruling "go, comp-time schema"); one compilation-wide TENANT-SCHEMA stage. Five review rounds, each HIGH a class fix.
+- **#1315** `scrml fix sql-failable` (R11) — provable READS get the S451 fallback written out (150 sites / 117 files); every WRITE is listed (ruling "b your rec on R11" — the S451 "meaning-preserving" premise was false: impl#1 throws, so a silent fallback on a write failed open).
+- **#1316** security — the tenant floor reads ONE tenant set per compilation (a second `<program>` file or an imported module read tenant tables unfiltered); `ALTER … ADD COLUMN tenant_id` scopes a table.
+- **#1317** security — a tenant compilation's `<schema>` admits a closed set of statement kinds (rulings "yes both" → "your rec on the allow-list"); isolation removal and code-running expressions refused. Seven review rounds; landed PARTIAL on bryan's word.
+- **#1319** security — tenant `<schema>` bodies lie in the S452 SQL subset; `rel.f` closed for bodies AND queries; dialect-aware function allow-list; `::<built-in>` casts admitted (ruling "a").
+- **#1320** + **#1321** — the Postgres overload hijack is a deploy requirement (`REVOKE CREATE ON SCHEMA public`, ruling "a"), stated in §14.8.11 and printed by `scrml build`.
+- **#1322** impl#1 (#1305 exception) — a handled `?{}` is seen by every consumer exactly as the unhandled one: `lift`, cell writes, for-of, `fn` purity, protect, CPS, batching. Root: `!{}` wraps the whole statement.
+- **#1324** test — the executed tenant-floor tests get a 30 s timeout (Windows runner).
+- **#1325** impl#1 ("go") — §8.10 N+1 hoisting: a keyed read at any depth is rewritten or the loop is not hoisted (never `null`); only an allow-listed query shape is hoisted; protected tables never.
+- Docs: #1310 #1314 #1318 #1323.
+
+**Rulings (user-voice §S455):** "go, comp-time schema" · "b your rec on R11" · "yes both" · "your rec on the allow-list" · "yes, both" (land PARTIAL + bodies into the subset) · "a" (`::` casts) · "a" (overload = deploy requirement) · "go" (hoist fix, the S435 exception).
+
+**Lesson:** a text classifier for a foreign SQL dialect took ~12 review rounds across #1313/#1317 before the boundary moved to an allow-list plus one shared subset; the S452 rule ("three rounds → change the boundary") was applied at round 7, not round 3.
+
+## S454 — 2026-10-04/05 (bryan · ASUS; solo — Peter landed #1297/#1300 alongside) — three fail-open floors closed, U1b built, the Types gate made real
+
+**Landed (each S239-reviewed; markers in `docs/pr-reviews.md`, 0 owed):**
+- **#1295** bootstrap codec — §57.8 payload enums encode + strict decode; the `fail`-envelope decoder (U1b prerequisite).
+- **#1296** B-1 ("a yes, b yes, root fix") — call-ref handlers coloured by author name, so `onclick=fn()` and `onclick=${fn()}` emit the same logging wrapper; a 16th listener-registration site found; §5.2.2 states meaning, §19.6.8 B7.
+- **#1298** SPEC — §19.9.10 U1b (`ServerCallError`, one `Transport` wrapper, a client deadline, E-ERROR-016 reserved); owed S452 tenant-floor + arm-pipe text; Peter's S453 readings ratified.
+- **#1299** security — the `protect=` floor failed OPEN on any statement it could not read (13 executed leak shapes); inverted to positive-proof-only.
+- **#1301** security — `E-NAME-COLLIDES-RESERVED-PREFIX` (the S439/S440 ruling, never emitted): author code can no longer reach `_scrml_sql.unsafe`.
+- **#1302** the Types gate — red on main for ≥32 merges behind `continue-on-error`; 30 diagnostics cleared, the step is now BLOCKING in `gate`.
+- **#1303** bootstrap U1b — the client→server call end to end (Suspend/Attempt lowering, `rt.call` that never rejects, a 30 s deadline).
+- **#1305** impl#1 (freeze exception) — a handled `?{}` lowers in every expression position; handlers exhaustive everywhere and fail closed (r1 caught a fail-open "ADMIN-GRANTED").
+
+**Rulings (user-voice §S454):** B-1; U1b forks ("all your recs, F3 with the deadline"); Peter's S453 note ("your recs on all"); the Types gate ("fix the 30 then promote it"); deadline 30 s + double-click both continue; the handled-`?{}` impl#1 exception; bare-`return` arm body = grammar now, widen later (dpa-068 banked).
+
+**In flight at wrap:** F8 `scrml fix client-server-call` (`feat/s454-scrml-fix-f8-r11`) — fix round on four review findings. **Owed:** R11 `sql-failable` rule; the foreign-block closure hole; tenant r4 residuals.
+
+
+## S452 — 2026-10-04 (bryan · ASUS; S453-peter concurrent) — one pattern-arm spelling, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary
+
+**Rulings (user-voice §S452).** **One pattern-arm grammar** in logic: `!{}` handler arms and engine message arms take §18.2's
+`match`-arm — no leading `|` (`!{ .Network(msg) :> … }`); the `|` form soft-deprecates through §63 (W-ARM-PIPE-LEGACY + `scrml fix`).
+Markup element arms stay their own form ("possibly a bonus"). impl#1 freeze exceptions granted for both pipe-less forms. The
+**tenant floor filters at the SOURCE** (rows from a tenant table are filtered to the active tenant right after the query; server
+code never observes another tenant's rows without `.acrossTenants()`); E-TENANT-RAW-EGRESS narrowed to `.acrossTenants()` rows
+reaching a raw `Response`; an INSERT with no active tenant is a named refusal. **dpa-066 ratified** (one effect summary per callable
+in the bootstrap); **dpa-067 forks ratified** (protect as a dataflow pass keyed on origin; one origin lattice). Deterministic
+bootstrap compile. 483 merged/landed remote branches trimmed (bundle-backed: `scrml-support/archive/branch-trims/`).
+
+**Landed:** #1270 (bootstrap §34 severity, fail-closed gate) · #1272 (SPEC currency) · #1273 (SPEC: one pattern-arm grammar) ·
+#1274 (bootstrap: the S451 error-model rulings — E-ERROR-012..015, bare binder, `_ err`, value-arm `defer`, `<db src>` §8.1.1; one
+arm parser) · #1275 (impl#1: pipe-less engine message arms) · #1276 (impl#1: pipe-less `!{}` arms; the arm parser fails closed;
+E-TYPE-ARM-QUALIFIER-MISMATCH) · #1277 (dpa-066/067 banked) · #1278 (SPEC §14.8.10 filter-at-source) · #1279 (bootstrap
+W-ARM-PIPE-LEGACY; the counter grades only Error-severity parse rejections) · #1280 (bootstrap determinism, §58) · #1281 (SPEC:
+RAW-EGRESS narrowed, §14.8.9 keyed on origin, E-PROTECT-UNRESOLVED-COLUMNS, I-PROTECT-REVEAL) · #1285 (impl#1 W-ARM-PIPE-LEGACY +
+`scrml fix arm-pipe` + 170-arm corpus migration, 0/11,406 artifact diffs) · #1287 (impl#1 tenant filter-at-source — PARTIAL) ·
+#1290 (bootstrap dpa-066 M0–M3: one effect summary, rules as queries, G7 closed) · #1293 (impl#1 tenant SQL allow-listed subset +
+OR ABORT + schema hazards — PARTIAL). Peter (S453): #1283 #1286 #1289.
+
+**Security.** dpa-067's deep-dive found a live impl#1 leak: values extracted from tenant rows (`rows.map(r => r.name)`) shipped
+every tenant's data. Four review rounds on the floor's SQL handling (r1 classifier → r2 normalizer + allow-list → r3 token-level
+allow-listed subset → r4 OR ABORT + trigger hazards) — each review beat the previous design in one line until r3 changed the
+question from "is this dangerous?" to "is this in a subset we fully understand?". Open at close: schema write hazards beyond the
+ON table (HIGH), a VIEW over a tenant table (HIGH), the `_scrml_` prefix (MED, ruling), predicate oracles (LOW).
+
+**Bootstrap counter:** PASS 95 → 120 (the #1270 severity work; the rest held every bucket across the session's changes).
+
+## S451 — 2026-10-03/04 (bryan · ASUS; solo) — the U1 rulings in the SPEC, the error model in the bootstrap, a wrong-database bug closed in impl#1
+
+**Rulings (user-voice §S451).** All eleven U1 server-boundary rulings: a value position that would have to wait is
+`E-VALUE-SERVER-CALL` (R1); server calls parallelize only when provably read-only (R4); a batch reads its own writes (R7);
+**`?{}` is failable everywhere** (R11 = (b), not the PA's minimum rec); plus R2/R3/R5/R6/R8/R9/R10. The contradictions that
+left: R1 wins over `<errorBoundary>` (server data enters markup through `<request>` + `.error`); §52 hydration loads exempt but
+never silent (`@x.error`); §57.5 yields to R10; **§2.2.1 — any error, no runnable artifact**. `show=` does not narrow.
+**A `?{}` runs on its nearest database scope**; a lone direct-child `<db src>` supplies its program. Error model: value-position
+arms yield or leave (E-ERROR-012); `!{}` on a non-failable is an error (E-ERROR-013); no cross-database transaction envelope
+(E-SQL-011); **client calls to server functions are failable** (§19.9.10); `| _ err :>` binds the whole error.
+
+**impl#1 security fix.** impl#1 used one database handle per file, so a query could silently run against a different database
+than its scope (#1264). Bryan ruled it security-class. The S239 review then found the db-authoritative tenant floor skipped on
+every non-default handle — protection inverted next to a sibling `<db src>` — fixed before landing.
+
+**Bootstrap.** else-if/else chains; `defer` + no artifact on errors; `persist=`; `<program>` attributes checked or refused;
+`show=`; repeated and case-variant attributes refused; **U1a (SQL + placement, fail-closed query classification)**; **Ue (the
+error model — one `Attempt` node for `!{}` / `match` / `?` / `?{}`)**; function values no longer silently lower to `null`.
+Counter 34 → 95 PASS on main (119 with #1270).
+
+- #1253 SPEC U1 rulings R1–R11 + `scrml fix` forks a/c · #1259 SPEC open items · #1262 SPEC `show=` / nearest db · #1266 SPEC E-ERROR-012/013, E-SQL-011 · #1267 SPEC 11a · #1268 SPEC client calls failable
+- #1256 `scrml fix` — impl#1-safe codemod CLI + `--s66` (six S239 rounds; rebuilt on impl#1's own AST/resolver after three text-scanner fail-opens)
+- #1258 impl#1 route inference ignores string/template/comment contents (§12.4) · #1264 impl#1 nearest database scope (security)
+- #1254 else-chains · #1255 defer + gate · #1257 `<program>` shape · #1260 persist= · #1261 show= · #1263 U1a · #1265 Ue
+- At wrap, on auto-merge: #1269 SPEC `| _ err :>` · #1270 bootstrap §34 severity (counter 95 → 119)
+- Gate: cloud `gate` green on every landing; review floor 0 owed.
+
+## S449 — 2026-10-02/03 (bryan · ASUS; booted solo, ran autonomous while bryan was out)
+
+**Rulings (user-voice §S449).** Eight-question queue, "your recs.": `@session` in a server context = compile error (interim);
+**`<onMount>`** replaces `on mount` — outside-world setup only, may not write state during the mount; **§6.15: value positions
+(initializers, derived formulas, markup interpolations, attribute values) may not write reactive state** — closes a whole bug class by
+construction; invalid / dynamic `auth=` = compile error; the two possibly-accidental S447 accepts confirmed; **native parser frozen as
+part of impl#1, its unused 34k lines pruned**; the `<effect>` OPEN items closed per the rec pack. S450-peter's routed asks: B1
+exception granted (`return`/`break`/`continue` out of `transaction {}` roll back), **C: concurrent requests never share a transaction**
+(+ connection-per-transaction opt-in for Postgres), **D: `fail` rolls back the implicit envelope**. Opener-keyword follow-ups: `on`
+examples re-spelled, **prose stays prose** (`<p>Please let <b>me</b> know</p>`). Corpus dialect: twins generated at test time, §66.21
+amended, O35 banked as dpa-065, `scrml fix` lives in impl#1.
+
+**Landed (14 PRs, every code PR through an S239 adversarial review — 5 came back DO-NOT-LAND first):** #1232 impl#1 on-mount gaps ·
+#1233 data-root symlink containment · #1234 session store WAL + CSRF-gated honest logout · #1235 bootstrap `<effect>` + no-write rule +
+`reset-on=` (U0's runtime backstop deleted) · #1236 protect egress round 9 (4 review rounds) · #1237 SPEC: `<onMount>`, §6.15, effect
+OPENs · #1238 bootstrap §6.15 · #1239 `@session` identity hole closed (`E-SESSION-AMBIENT-SERVER`), `E-AUTH-ATTR-INVALID` ·
+#1240 native-parser freeze + prune (−34k) · #1247 bootstrap conformance counter (**19 real passes of 1278** — the honest baseline) ·
+#1248 dpa-065 banked · #1249 §66 opener keywords + bootstrap parser migration · #1250 bootstrap §55 validity surface + submit gate ·
+#1251 transaction guard (lost acknowledged writes, PG transactions fixed).
+
+**Found:** the conformance corpus is ~74% legacy dialect the bootstrap can't parse; `scrml fix` (in flight) twins it (~65 real passes).
+**Durable:** a precision shortcut in a soundness analysis is where leaks come back — protect r9's session-store summary opened a new
+HIGH in each of three rounds until its applicability became an allow-list precondition (fail closed to the faithful model).
+
+## S447 — 2026-10-01/02 (bryan · ASUS, successor to S446-xps; took the bootstrap lane after S448)
+
+**Rulings (user-voice §S447, ~25 entries).** `when` → **`<effect deps=[…]>`, outside-world effects only** — an effect may not write
+reactive state, so cascades are impossible by construction (the bootstrap's runaway net becomes deletable); **`reset-on=`** on the cell
+(engines allowed, checked against `rule=`); **write `<request>`s never run on mount, server-origin writes reset the baseline** (3c — the
+proposed autosave measured to WIPE a record). **Validated top-level cells get a validity surface** (§55.5 Edge A reversed) and the
+**compiler gates every form that binds a validated value** (§55.17). **Keywords go outside the declaration opener** (`let <x/>`; held for
+the bootstrap parser). **Argument arity + type checking** (§7.3.4). **dpa-063 statement termination** — the ten readings confirmed.
+**UFCS / `.=` explored and PARKED.** **TS policy sharpened:** a tooling carve-out (CLI / dev / build / codemods / LSP stay on TS); rulings
+no longer generate impl#1 semantics work; the frozen `compiler/self-host` retired. **Message delivery: an `inbox` branch in every repo**
+(pa-base v2.18), and flogence's cross-machine doorbell wired.
+
+**Landed:** #1215 dev-db data root (six review rounds) · #1216 §55 validity SPEC · #1218 protect egress r7 · #1222 §7.3.4 · #1225 inbox ·
+#1226 test temp root (870 /tmp entries per run → 0) + `scrml dev` children die with their parent (3 orphans/run → 0) · #1227 dpa-063 ·
+#1228 protect egress r8 (rows by path, global names through aliases; review caught 4 regressions it introduced) · #1229 `<effect>` /
+`reset-on=` / write requests · #1230 retire `compiler/self-host` v1 (−22.4k lines). Deep-dives: validity surface, opener keywords, UFCS,
+`when` fit, autosave mount, `on mount` (in flight). Held: #1214. Carried: bootstrap U0 (re-scope to `<effect>`).
+
+**Process:** a possibly-accidental "your recs on all of them" accept was caught and its five items re-surfaced individually; a machine-
+local post-commit hook (full suite, synchronous, 10–15 min per commit) moved to the background with a single-run lock; 45 orphaned dev
+servers (3.5 GB) cleaned up by captured PID.
+
+## S448 — 2026-10-01 (bryan · XPS, successor to the reboot-killed S446-xps)
+
+A reboot took S446-xps down mid-lane; S448 recovered its three in-flight pieces, landed the bootstrap wire codec, and traced the 1h45m boot to where the /tmp volume actually came from.
+
+- **#1213** — bootstrap §57 wire codec (type-directed encode, fail-closed decode); branch brought up to date + fresh `gate` before merge.
+- **#1221** — codec r2: option flags read as own properties only (a polluted `Object.prototype` can no longer enable raw-null passthrough), no throws on hostile input, undeclared keys refused; re-reviewed on a frozen ref.
+- **dpa-063 SPEC text** (§7.2.2 statement termination, E-STMT-NO-EFFECT language-wide, `when` re-trigger) recovered from the dead session's worktree; on `wip/s448-spec-dpa063`, awaiting bryan's veto of 10 PA readings.
+- **U0 (`when` effects)**: round 2 fixed N1-N3; its re-review found the run-count cap drops non-looping runs and an `<each>`-row runaway reachable from source → round 3 (cycle detection by causal ancestry + backstop) in flight at wrap (`wip/s448-bootstrap-u0-r3` + patch).
+- **/tmp hygiene**: measured the test suite at ~4-7k leaked files per hook run and scratchpad worktrees at ~20.5k files each. Layer 1 (bun test preload owning a per-process temp root outside any repo) in flight (`wip/s448-test-tmp-root` + patch); layer 2 rules in pa-scrml overlay v2.5; layer 3 (`/etc/tmpfiles.d` age-out instead of boot delete) owed by bryan. First wrap probe reading: 6,399 /tmp entries since boot.
+- `handOffs/dpa-queue.md`: dpa-062/064 result rows folded in from a stranded XPS commit; dpa-063 marked RULED S446.
+
+## S445 — 2026-09-30 (bryan · ASUS, concurrent with S444 on XPS)
+
+S443's held security pickup, driven through adversarial review until each landing was strictly better than main —
+four security arcs landed, eight rulings, and every one of them reproduced by execution before it entered a brief.
+
+- **App root relative to the build root** (#1194): a project living under any `…/pages/…` or `…/routes/…` directory
+  no longer serves member pages of a `<program auth="required">` app anonymously (`/about` 200 → 302). One rule for the
+  build root (§40.8 "The build root"): the application entry file's directory; `W-AUTH-REQUIRED-NOT-INHERITED`. Four
+  S239 rounds; corpus byte-identical.
+- **Declared prose** (#1196, rulings S441 / S443 #4 / S445 #2): `<program>`/`<page>`/`<channel>` bodies carry no loose
+  prose — every byte compiles or is an error, on both parsers; new `E-STMT-NO-EFFECT` (an expression statement with no
+  effect is an error — `@a == 1`, `"Total: " + @count`, bare `@count`). Enum `renders` bodies now taken verbatim
+  (`No #${id}` → `No #42`; main dropped the `#`). Five rounds.
+- **Protected-column egress round 6** (#1198, rulings S443 #7, S445 #4): nine leak classes closed; per-column markers;
+  the sink builds its own plain-data snapshot (getters/`toJSON` run once, against a stripped `this`); an HMAC key
+  declassifies only with positive runtime evidence. Six rounds; `this`-writes filed HIGH for round 7.
+- **Program role by ancestor** (#1201, rulings S445 (b) + items 1/3/5): a `<div>`-wrapped app program's `auth=` is
+  enforced; route-file programs are nested (implied ancestor); session + every app-level attribute on a nested program
+  are errors (`E-PROGRAM-NESTED-SESSION` / `-NESTED-ATTR` / `-CONFIG-UNREAD`); refused builds write nothing.
+- **In flight at wrap:** dev-db resolution (`db=` relative to the declaring file; ownership-gated creation;
+  `SCRML_DATA_DIR`) — round 4.
+- Banked dpa-063 (statement termination) + dpa-064 (nested program as an auth scope) (#1192). flogence: `@adv` lapsed,
+  carried in the overlay again. Gaps filed §S445 (incl. HIGH `scrml serve` exposure).
+
+## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
+
+The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape
+grow/shrink split, dpa-058 (renders / bind / validators) and dpa-045 (plain-markup text, axiom-level) — and every
+landing needed at least one review round to fix something its own round had made.
+
+- **Bootstrap typer** (#1151 #1157 #1159, #1167 queued): conditions (`E-COND-NOT-BOOLEAN`, bare `T | not` = a presence
+  test, bare `bool | not` refused), operators (`E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`) with flow
+  narrowing, `int` enforced everywhere, `E-CALL-ARITY` / `E-EACH-NOT-SEQUENCE` / `E-HANDLE-REDECLARE` /
+  `E-STRUCT-DUPLICATE-KEY`, an un-narrowed `T | not` into `T` refused for every type, full checks at arguments and
+  returns (§7.5.1 widening, PA-ruled, measured-zero corpus).
+- **Bootstrap §66.19 programs** (#1164, #1169 queued): §66.19.6 (engine as a `single`) runs verbatim; audit log and
+  form run minus Core-blocked constructs; tape grants (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`);
+  O55 (`E-DECL-SINGLE-INSTANTIATED`); O19 / O33 refused at compile time.
+- **SPEC** (#1156, #1170 queued): §66.12 grow/shrink split + `anywhere`, O55, O10 tokens, four typer codes; §4.18
+  rewritten for dpa-045 (two text-mode productions, a closed exit set, cooked, no display-text escapes, whitespace
+  kept).
+- **impl#1** (#1160): a self-closed non-void element gets an explicit end tag (`<textarea/>` no longer swallows the
+  page); dpa-058 D2-D9 filed.
+- **Docs**: maps refreshed to cf62b415 (#1144); dpa-058 banked, drained, ruled (#1148 #1154 #1168); dpa-045 queue rows
+  de-duplicated. Article draft `docs/articles/tape-2026-09-29.md` (untracked, bryan's).
+- Held for Oct 2 (agent weekly limit): the dpa-045 bootstrap branch (unreviewed), typer r8, the dpa-058 build.
+
 ## S441 — 2026-09-29 (bryan · ASUS)
 
 Spotlight prep: every public surface was audited for old or wrong information, and the audit surfaced a run of real security holes. Most of the session went into closing them, with S239 adversarial review on every code landing.
@@ -570,6 +784,35 @@ session put numbers against the question that raised: *is this language salvagea
 bathwater go out?*
 
 **12 PRs landed.** Full session stream in `handOffs/delta-log.md`.
+
+### 2026-10-08 — S458: the S457 in-flight branches landed, the §53 refinement arc opened (slice 1 landed), six review-gated branches parked at the weekly API limit
+
+Rulings (user-voice §S458): "1a, D1, refinement next. go" · "your recs on R1-R5, go". Every code landing took ≥1 S239 differential review; the sinks, re-export and refinement branches each took 2–3 rounds. Ended early: a network outage killed all six live agents once (resumed, nothing lost), then the weekly API limit stopped every agent (resets 2026-10-11 23:00 MT).
+
+**Landed (6 PRs):**
+- **#1345** scope-aware user-function rename; compiler locals in the `_scrml_` namespace; unquoted handler call chains read whole (S457) — plus 9 browser-tier spelling pins.
+- **#1350** maps refresh (S457).
+- **#1351** srcdoc / SVG animation / event-text executable sinks refused or guarded (S457, three review rounds) — landed onto #1345 by 3-way apply.
+- **#1352** `.scrml` re-exports reach server bundle / client registry / page order; `scrml dev` runs the undeclared-tenant-table startup gate; re-export cycles E-IMPORT-002, missing name/file E-IMPORT-004/006, memoised `export *` (77.9 s → 0.25 s on a depth-16 lattice); stdlib `TableSort` exported.
+- **#1353** Windows EBUSY in the dev tenant-gate test cleanup (main's `windows` job went red when #1352 auto-merged at its previous head).
+- **#1354** §53 refinement slice 1: one reader (the codegen regex mirror deleted), a base-type-first judge that fails closed (no `if (!(true))`), every annotation read whole, §55.3 in-paren shared-core words judged, E-CONTRACT-002 also = malformed predicate. The README flagship `createTask(text: string(.length >= 1))` was never enforced on main (`""` → 200).
+
+**Parked at the API limit (branches + salvage patches, see hand-off):** `^{}` allow-list (1a) — 4 review rounds, boundary moved to a capture object + emitted-text check; host-global alias (S457 2a) — `data:`-module import, CI gate `scripts/host-global-scan.ts`; unquoted values + `event` (S457 3a/4a) — one shared reader, E-EVENT-UNBOUND on emitted text; D1 declared props — round 4 (one scope model); refinement slice 2a fix round (judge at the runtime cell setter, hoisted judges).
+
+**Durable:** the same lesson six times — wherever a check and the emitter read the same thing through different readers (two attribute readers, two scope models, a text fallback beside a tree substituter, a deny-list beside an allow-list, a per-site judge beside a setter), the review found the gap between them. Every fix that held moved the boundary to ONE reader on the text/tree the runtime executes.
+
+### 2026-10-07 — S457: injection sinks and SQL checks moved to the text the runtime executes; `__scrml_` reserved; failed compiles write nothing
+
+Security-heavy session. Every landing was the S456 "two readers of one text" class, closed by moving the check to where the runtime reads (or refusing at the source). Eleven rulings (user-voice §S457). Eight PRs, each with ≥1 differential S239 review (several 2–6 rounds); adopter issue #1333 closed.
+- #1340 maps non-compliance: FACTS verbs, `scrml fix --help`, bootstrap-conformance report gate made blocking on corpus PRs.
+- #1341 SPEC §5.2 rule 3 — runtime scheme guard `_scrml_safe_url` on every data-supplied URL attribute write (17 emitters incl. SSR first paint; element-scoped; one scheme reader with the compile-time rule).
+- #1342 one JS-accurate SQL `${}` slot reader (acorn parse); `rewriteSqlRefs` lowers exactly the checker's sites; `.unsafe` params one per slot.
+- #1343 (#1333) `is some` / `is not` inside function-expression bodies lower correctly; `(expr) is not` treats undefined as absent.
+- #1344 program-body SQL checks (§8.1.2 + §14.8.10 item 1) run at every lowering on the SQL each driver call sends — three executed DROP TABLE bypasses closed.
+- #1346 `__scrml_` reserved; compiler placeholders carry a per-compilation unguessable token, never emitted; emit gate refuses any un-lowered placeholder.
+- #1347 `string(url)` refuses non-safe schemes (one judge with the URL guard).
+- #1348 any Error-severity diagnostic → no artifact written (compile / build / dev / serve).
+- In flight: #1345 (scope-aware user-fn rename + handler call chains; CI browser pins), srcdoc/SVG sinks, re-export + `scrml dev` tenant check, `^{}` allow-list (§22.12; held on a ruling). Gate: cloud green on every merge; main `125486345`.
 
 ### The execution half (before the assessment)
 
@@ -7730,6 +7973,191 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S453 (2026-10-04, Peter · AdiPDesk) — bryan's answered queue built end to end, and the review caught a gap marked resolved whose own reproducer still reproduced
+
+Every item bryan had ruled on S450-peter's routed asks was built, reviewed and landed: handler-rejection
+logging, the transaction-exit semantics, and the one he sent to the bootstrap. Three PRs merged, each
+through a full S239 adversarial pass, each verdict's findings reproduced by the PA before being acted on.
+The session ran alongside S452-bryan the whole time — he landed nine PRs into the same two generated docs,
+so every landing here was a real 3-way merge rather than a file-pull.
+
+- **#1283 — an async event listener's rejection now reaches scrml's logging surface** (`§13.2`, bryan's
+  A3 ruling). `addEventListener` ignores a listener's return value, so once S450's #1242 made handlers
+  await a server-call write in place, a failed call stopped reaching `_scrml_error_boundary_log` and
+  surfaced only as a browser `unhandledrejection`. The wrap went into the one primitive both colouring
+  entry points share, covering five registration paths — the dispatch brief had named only one, and the
+  other feeds 14 further listener sites. 57 of 57 async-coloured sites in 44 of 44 affected artifacts
+  carry exactly one arm; non-async handlers are byte-identical by construction.
+  **The adversarial pass returned FIX on a land-blocker**: the gap had been marked `resolved` while its
+  own S441 reproducer still reproduced on head. The §5.2.2 call-ref limb (`onclick=fn()`) leaves the
+  listener sync and is *not* closed — measured at 1251 sites across 640 files against the 57 covered — so
+  the parent gap stays open, narrowed to the limb that did close, and the rest is filed ruling-gated
+  (changing the auto-wrap moves the language surface).
+- **#1286 — a transaction rolls back on every exit the ruling names; a top-level block is refused**
+  (`§19.10`, bryan's B1a/B1b + the S435 policy exception). Lands the S450 work parked on a hold ref.
+  **B1a needed no codegen change at all**: the parked lowering's `try`/`finally` already rolled back on
+  `return`/`break`/`continue`, so S450 had spent a review round refusing a shape its own lowering
+  handled — and the `finally` is the better mechanism, rolling back *after* the return expression is
+  evaluated. The exits stay refused inside a `match` arm, because impl#1 lowers an arm as a nested
+  function; built without that limb, the shape compiled clean, swallowed the author's `return`, ran the
+  post-`match` write and persisted every row with no rollback anywhere. Four PA readings are flagged for
+  bryan's veto window, including a new evaluation-order `SHALL` the ruling did not decide.
+- **#1289 — bookkeeping**: review-floor markers for both landings (the floor binds merged PRs; 11 remain
+  owed, all bryan's), bryan's B2 ruling recorded by filing `g-each-row-whitespace-only-text-dropped` as
+  BOOTSTRAP-OWED on main with its hold retired unlanded, and a new LOW gap for an async
+  `<errorBoundary>` with no `fallback=` whose re-throw escapes unobserved — an adjacent surface the A3
+  review found and we deliberately did not widen that change into.
+- **assetManagement re-verified twice, because main moved mid-session.** Against #1258/#1264, as the
+  S450 hand-off owed: 26 of 26 emitted artifacts byte-identical, so #1257–#1272 is inert on aM — aM's
+  nested db scopes all name the same file, so the nearest-scope rule changed which scope is *nearest*,
+  not which database *opens*, and aM emits exactly one query handle per file so the S451 handle-name
+  hazard cannot reach it. Then against **#1287** (the tenant floor filtering at the source), which bryan
+  had explicitly asked be checked: that one **does** change aM's output — all four `.server.js`
+  artifacts gain the same +38-line `AsyncLocalStorage` request-scope preamble, and `I-TENANT-ACROSS`
+  drops 35 → 29 — but it is **behaviourally inert for aM**, because all 15 of aM's query lines touching
+  a tenant-scoped table already take `.acrossTenants()`, the only unscoped read. The standing risk is
+  recorded: with no active tenant, a tenant-scoped read without that opt-out now returns zero rows.
+- **Methodological, and the most reusable thing here**: a `compileScrml({write:false})` probe cannot
+  surface any `E-CODEGEN-*` diagnostic because it never runs codegen. It falsified two *correct* PA
+  corrections and had silently invalidated the authoring agent's own 993-file corpus differential, which
+  was re-closed with `write:true`.
+
+### S450 (2026-10-02, Peter · P-Tech1) — bryan's "stamp all" built end to end; two reviews found holes live on main; aM pin bumped behind a deploy guard
+
+**The arc.** bryan answered S446's routing note with *"stamp all"*: three held drafts to land and five language rulings to
+build. All eight reached main through the S239 floor and `merge-on-green.sh`. Three of the four new builds came back FIX from
+review, and two of those findings were holes already on main, not regressions: a comment inside a live `CREATE TABLE` header
+hid the table from the tenant floor (closed here), and one shared SQLite connection lets a concurrent request lose a write it
+already acknowledged (routed to bryan). Two aM-driven impl#1 fixes were built and reviewed but sit on hold refs pending a
+policy exception, because bryan's S435 policy retires adopter-reported impl#1 work.
+
+- **#1208** — defer SPEC calls B1/B2/B3/A2 + Part A (E-DEFER-OUTSIDE-FUNCTION widened to the missed bodies).
+- **#1210** — a bare-dot constructor takes the type it flows into, including an imported callee's parameter; 38 positions
+  that silently guessed are now E-VARIANT-AMBIGUOUS (accepted by bryan).
+- **#1211** — client-reachable plain-JS helpers are copied into dist; E-IMPORT-011 for helpers outside the project root or in
+  a denied class; `type="module"` on bundles that import.
+- **#1241** — (iv) generated headless serve targets bind loopback by default (`SCRML_HOST` opts in); the production server
+  still binds every interface.
+- **#1242** — (iii) a server-call cell write nested in a handler is awaited before the next statement; only a sole root
+  statement stays fire-and-forget.
+- **#1243** — (i)+(ii) E-SCHEMA-015 when same-name table declarations disagree on `tenant_id`; a `LIKE` template in a column
+  list fails closed (E-SCHEMA-014); a comment inside a header no longer hides a declaration from the floor.
+- **#1244** — (v) E-ATTR-MULTI-STATEMENT: a multi-statement value in a non-handler attribute is an error (it used to be
+  silently dropped).
+- **Held for bryan:** `transaction {}` inside `!` functions (§19.10.2's own example did not compile; a nested `fail` left the
+  transaction open) and `${a} ${b}` whitespace in `<each>` rows.
+- **Filed (reproduced on main):** quoted `else-if`/`show` conditions ignored; `title=f()` wired as an event listener; a `!`
+  helper reached through `?` from a server function never emitted server-side; a handler `match` value missing payload
+  variants; `${children}` duplicated into earlier siblings; the implicit per-handler transaction committing on `fail`;
+  concurrent requests sharing one transaction. Closed: tilde-in-string corruption, missing WAL/busy_timeout.
+- **assetManagement:** pin bumped to main; a deploy guard refuses Pi builds until `SCRML_DATA_DIR` is set and `/` + `sw.js`
+  are served again under the new static allowlist.
+
+### S446 (2026-10-01, Peter · P-Tech1) — six landings through scripted merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network
+
+**The arc.** Peter's ruled queue (bryan's S439/S440 answers to his S432/S438 notes) at full throttle. Every landing went
+through an adversarial (S239) review and, after any fix round, a narrow re-review; several reviews changed the outcome — the
+schema PR shipped WITHOUT its tenant-union (it caused silent data loss) and with a `"""` change reverted (it reopened an S438
+security escape); the loopback PR's two CI reds were real (Linux binds `--host 0` to every interface; 58 test files leaked
+happy-dom's `fetch` into every later test). Three drafts — defer Part A, client-JS helper copy, imported-enum — are reviewed
+and waiting on one word each from bryan.
+
+- **#1212** — handler statement lists: `for … lift` rows run every statement, later statements read match-arm bindings,
+  `@a++`⏎ no longer drops the next statement in any function body (S439 #4).
+- **#1209** — `<schema>` tenant-floor holes fail closed: E-SCHEMA-014 (TEMP / no column list / INHERITS), E-SCHEMA-012/013
+  on qualified and glued DSL heads (S440 #15). The commented-out-shadow hole is routed to bryan.
+- **#1207** — `scrml dev` / `scrml serve` bind loopback by default (`--host` opts in); numeric-shorthand and whitespace hosts
+  refused on every OS (S439 #1).
+- **#1217** — a server-call cell write in a `${s1; s2}` handler is awaited before the next statement; SSE writes keep their
+  subscription; single-statement handlers byte-identical (S439 #4 + §13.2).
+- **#1219** — 58 test files now unregister happy-dom; 9 server-fetch tests (incl. tracking's dev-watcher set) pass.
+- **#1220** — §K test expected a POSIX-only root; main's `windows` job was red since c12b52c2.
+- Held for bryan (drafts, reviewed): **#1208** (defer SPEC calls + Part A), **#1211** (client-JS helpers into dist),
+  **#1210** (imported-enum F11/F15–F17 via callee parameter types). ~30 gaps filed (§S446-peter + PR-filed entries).
+- Outside scrml: flogenceP `db=` paths fixed for #1215 (f3b1b28).
+
+### S444 (2026-09-30/10-01, bryan · XPS) — a coderlegion port became four rulings, and the TS compiler's `<request>` turned out to loop
+
+**The arc.** Booted as successor to S443 and worked S442's held bootstrap lane: the dpa-045 plain-markup parser (three review
+rounds — the second caught a fix that let a *closed* literal move a body's end), typer r8 (two rounds), then bootstrap Core
+additions + dpa-058 so §66.19.5 (audit log) and §66.19.2 (validated form) run from their verbatim SPEC sources. A side quest —
+porting the coderlegion article "Searching a billion records" to 37 compiled lines of scrml — surfaced three places scrml was
+not equivalent; bryan said "those first 3 are things we should look at", and they became dpa-059 (a superseded `<request>`
+aborts READS, discards WRITES), dpa-060 (a bare compiler-derived `cache`, no author TTL, revalidate on hit), dpa-061 (`persist=`
+— a lifetime attribute, not an authority value; `key=` required; decode-first; IndexedDB a planned stdlib), and dpa-062
+(`prepaint` REFLECT on the cell + `hold=@cell` on a region). All four are SPEC-landed (Nominal); the bootstrap has no server
+boundary yet, so the build is a planned multi-session arc. Ruled too: free-text `//` is a comment only after whitespace (and
+swallows the rest of the line); display-text escapes `\"` `\\` `\${` restored (reversing S442); a `"…"` is display text only as a
+standalone statement. The fix work found the impl#1 `<request>` re-fetched in a loop on its own settle (example 32: 51 calls on
+mount) — landed as an explicit S435 exception — and a strict-CSP break in per-route chunk loading (fixed, same-origin script).
+
+- #1181 maps · #1182 slice-m4 in CI + live-PG hook timeouts · #1184 honest E-ASYNC-FN-ESCAPES-AS-VALUE wording (flogence)
+- #1185 dpa-045 SPEC follow-ups + 6 gaps · #1186 bank dpa-059/060/061 (+062) · #1188 / #1197 gap filings (3 `<request>` resolved)
+- #1189 bootstrap typer r8 · #1190 dpa-045 bootstrap parser · #1195 `//` + escapes + standalone display literal
+- #1191 impl#1 `<request>`: deps= honored, re-fire loop, refetch() kept, client-async bodies awaited, E-LIFECYCLE-022
+- #1193 SPEC §6.7.7.1 / §6.7.7.2 / §6.14 · #1199 SPEC §6.14.4 prepaint/hold + CSP sha256
+- #1200 security: per-route chunk manifest/bootstrap → same-origin script (strict CSP refused the inline ones)
+- #1202 bootstrap Core additions (bind, Date.now, `<*x/>`, removals, index places, lambdas) + dpa-058 validators + fail-closed refusal of unimplemented elements
+- Gate: cloud `gate` green on every merge; review floor markers for all S444 PRs.
+
+### S443 (2026-09-29/30, bryan · ASUS) — the S441 review record was wrong, the auth holes closed, and two broken flagship examples work end to end
+
+**The arc.** Booted as successor to S442 (XPS, bootstrap lane) and took S441's held security pickup, whose
+worktrees lived on this machine. The session's most important finding was about the RECORD, not the code: a
+read-only reconstruction of the S441 transcript showed that three of four S441 PRs whose reviews were "lost
+in a compaction" (#1145 #1152 #1155) had **never been reviewed at all** — S441 had told bryan #1155 (the
+flagship's one-time-token security fix) was reviewed. All four got post-merge S239 reviews against their
+merge commits; #1147's un-re-reviewed fix-round commit turned out to carry a real regression (imported
+`AuthError` enums false-fired E-ERROR-009), fixed in #1172. Mid-session the sub-agent weekly quota ran out;
+reviews and landings continued PA-direct, disclosed as self-reviewed, and were re-reviewed by agents once the
+quota returned (outcomes below).
+
+**Landed (8 PRs):**
+- **#1171** — protected-column egress §14.8.9 (S441 rounds 1-4 + S443 round 5): extracted protected values are
+  E-PROTECT-006 at compile time; case-insensitive origin; SQL-computed columns over a protected column strip the
+  row (fail-closed over-approximation); `.length` a count only on known-count receivers; element-returning
+  collection methods join the alias class. Residual leak classes (all pre-existing, main shipped more) filed as
+  `g-protect-egress-round-6-residuals`.
+- **#1172** — a user enum named like a built-in error type (local, imported, re-exported) is the type the file
+  uses — the #1147 regression and the silent invalid-variant accept it hid.
+- **#1173** — `<page auth="required">` gates its document, compose route and server fns; `auth=` on a nested
+  `<program>` is E-PROGRAM-NESTED-AUTH; unannotated member pages inherit the application's required gate; the
+  program's `loginRedirect=` reaches page scopes; W-AUTH-FILE-CONFLICT / W-AUTH-REDIRECT-LOOP /
+  W-AUTH-LOGIN-REDIRECT-AMBIGUOUS. Three review rounds; the PA-direct round-3 review found "several root
+  candidates → nothing inherited" was fail-OPEN and fixed it (ee3af947b).
+- **#1174** — worker bundles are written and served; `.send()` no longer kills `when message from` handlers
+  (dpa-056 D1/D2) — examples/13 works in Chromium.
+- **#1175** — review ledger: post-merge markers, the S441 record corrected, §S443 gap filings.
+- **#1177** — two top-level `<program>`s in one file are E-PROGRAM-002 (bryan ruling; same-file only).
+- **#1180** — examples/23 works end to end: login creates a real framework session (the app's own token rode an
+  HttpOnly cookie set from JS, which browsers refuse), 18 pages read `session.userId`, BOL/POD check driver
+  assignment, the database ships seeded, links point at real pages; `scrml generate auth`'s template now
+  authenticates; examples/09 SubmitFailed reachable.
+- **#1183** — examples/23: no helper server routes — the post-merge review found #1180's per-page
+  `getCurrentUser(userId)` helpers were public routes (any logged-in user could enumerate accounts); lookups
+  inlined on `session.userId`, dead app-KV auth fns removed.
+- README (#1176) rewritten per the S441 two-register ruling — **held for bryan's read**.
+
+**Rulings (user-voice S443):** "your recs" ×7 — explicit page `optional`/`none` relaxes a required app; stricter
+`auth=` wins within a file; E-PROGRAM-002 same-file; body-top no-op code is an error; README held; derived SQL
+values over protected columns stay stripped; a bare digest of a protected value stays protected. Bun upgraded
+on ASUS (1.3.14 → 1.4.2). "no waiting, go now" (ex23 PA-direct).
+
+**Compiler defects found by dog-fooding the examples (filed):** a markup `${fn(@x.f)}` interpolation is ALSO
+emitted as a load-time statement and throws when `@x` is `not` (HIGH); an engine write inside a `!{}` arm
+bypasses the engine setter (HIGH); `class="…${…}"` templates don't lower scrml expressions; prod static has
+no directory index; worker supervision has no codegen.
+
+**Post-merge agent reviews (quota back):** #1173 → `finding` (a `/pages/` directory anywhere in the absolute
+project path disables member-page inheritance — HIGH, filed); #1177 → `finding` (a `<div>`-wrapped `<program auth>`
+runs anonymously — pre-existing HIGH, filed; message/SPEC text LOW); #1180 → `finding` (the helper-route enumeration,
+fixed #1183; plus pre-existing ex23 authz/routing holes, filed). Inbox triage: flint + flogence reports re-measured —
+two fixed (#900, #1046), three filed (incl. HIGH: a bare `{` in markup text swallows child tags); return legs sent.
+
+**Held for the next session:** declared-prose round 5 (round 4 DO-NOT-LAND; ruling #4 folds in), protect round
+6 (+ ruling #7), the `| err :>` S441 branch — briefs in `scrml-support/handOffs/s443-briefs/`.
+
 
 ### S433 (2026-09-26, Peter · AdiPDesk — a SECOND peter box, parallel to S432 on the laptop) — every fix that self-reported clean came back with a finding, and four measurement failures shared one shape
 

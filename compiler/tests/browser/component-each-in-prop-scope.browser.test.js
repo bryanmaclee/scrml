@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro: a component with a typed prop iterated by <each>, instantiated with @todos.
 const COMPONENT_SRC = `<program>
@@ -53,7 +54,7 @@ const TodoList = <ul props={ items: Todo[] }>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-component-each");
+const tmpRoot = resolve(tmpdir(), "scrml-component-each");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -94,8 +95,8 @@ describe("component-each §1 — emit shape (each survives expansion, prop + @. 
     const { clientJs } = compileToOutputs(COMPONENT_SRC, "comp");
     // FIX 2: no bare module-scope `const _items = items;` — the prop resolved to
     // the caller's reactive cell.
-    expect(clientJs).toContain('const _items = _scrml_cs_reactive_get("todos");');
-    expect(clientJs).not.toMatch(/const _items = items;/);
+    expect(clientJs).toContain('const _scrml_items = _scrml_cs_reactive_get("todos");');
+    expect(clientJs).not.toMatch(/const _scrml_items = items;/);
   });
 
   test("the @. sigil resolves in the keyFn + body (no leaked `@ . id` / bare `.name`)", () => {

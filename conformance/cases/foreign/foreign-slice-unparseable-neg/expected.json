@@ -1,0 +1,13 @@
+{
+  "id": "foreign-slice-unparseable-neg",
+  "description": "§23.2.4a E-FOREIGN-007 — the inline slice is not valid JavaScript as written (`x +;`). The slice is evaluated as the body of a sealed async function, so an implementation must refuse it at compile time as an AUTHOR error at the slice — not ship an artifact that fails when the server loads, and not report it as a compiler defect.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/foreign-sealed-scope.test.js",
+  "spec": "§23.2.4a",
+  "rationale": "§23.2.4a / §23.2.6 E-FOREIGN-007: an inline value-returning `_{}` whose slice is not valid JavaScript as the body of an async function SHALL be a compile error naming the slice. §23.2.3 opacity forbids type-checking or rewriting the interior; deciding whether the slice can be built at all is the same question the artifact's syntax gate asks of every emitted line.",
+  "expect": {
+    "codes": ["E-FOREIGN-007"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "severity": { "E-FOREIGN-007": "error" }
+  }
+}

@@ -16,7 +16,7 @@ ${
 
     function go() {
         @result = save(0) !{
-            | ::Rejected(reason) :> "failed: " + reason
+            ::Rejected(reason) :> "failed: " + reason
         }
     }
 }

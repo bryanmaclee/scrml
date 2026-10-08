@@ -30,6 +30,8 @@ import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import { createTenantGate, tenantHealthReason, TENANT_REFUSED_STATUS_TEXT } from "../codegen/tenant-startup-check.ts";
+import { listen, listenOrExit, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
 import {
   _scrml_static_request_path,
   _scrml_static_servable,
@@ -55,6 +57,12 @@ Arguments:
 Options:
   --output, -o <dir>      Output directory (default: dist/ next to input)
   --port, -p <n>          HTTP port for dev server (default: 3000)
+  --host [addr]           Address to listen on (default: 127.0.0.1 + ::1 — this
+                          machine only). Bare --host listens on every interface
+                          (0.0.0.0 + ::), e.g. to open the app from a phone on
+                          your LAN; the dev server and its compile-error page are
+                          then reachable by anyone on the network. --host=<addr>
+                          for a specific one; 127.0.0.1 / 0.0.0.0 also open ::1 / ::.
   --idle-timeout <n>      Bun.serve idleTimeout in seconds (default: 120; raises
                           the 10s default so long data-layer routes finish)
   --verbose, -v           Show per-stage timing and counts
@@ -71,6 +79,7 @@ Options:
 Examples:
   scrml dev src/app.scrml
   scrml dev src/ --port 8080
+  scrml dev src/app.scrml --host        # reachable from your LAN
 `);
 }
 
@@ -80,15 +89,18 @@ Examples:
  * @param {string[]} args
  * @returns {{ inputFiles: string[], outputDir: string|null, verbose: boolean,
  *             convertLegacyCss: boolean, embedRuntime: boolean, port: number,
- *             idleTimeout: number }}
+ *             host: string, idleTimeout: number }}
  */
-function parseArgs(args) {
+export function parseArgs(args) {
   const inputFiles = [];
   let outputDir = null;
   let verbose = false;
   let convertLegacyCss = false;
   let embedRuntime = false;
   let port = 3000;
+  // g-dev-server-binds-all-interfaces: loopback by default; `--host` opts in to
+  // the network (see ./listen.js for why 127.0.0.1 rather than "localhost").
+  let host = DEFAULT_HOST;
   // ss33 item 3 (g-dev-server-idletimeout-not-configurable): the S221 raise to
   // 120s (so legitimate >10s data-layer routes are not truncated mid-flight) is
   // now an overridable knob, mirroring `--port`. Default stays 120 so unset
@@ -144,6 +156,14 @@ function parseArgs(args) {
         console.error(`Invalid port: ${args[i]}`);
         process.exit(1);
       }
+    } else if (arg === "--host" || arg.startsWith("--host=")) {
+      const parsed = parseHostFlag(args, i, isDevPositional);
+      if (parsed.error) {
+        console.error(parsed.error);
+        process.exit(1);
+      }
+      host = parsed.host;
+      i = parsed.next;
     } else if (arg === "--idle-timeout") {
       idleTimeout = parseInt(args[++i], 10);
       if (isNaN(idleTimeout) || idleTimeout < 0) {
@@ -170,7 +190,20 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit, moduleFormat };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, host, idleTimeout, gather, validateEmit, moduleFormat };
+}
+
+/**
+ * Whether a token after a bare `--host` is a `scrml dev` positional input (a
+ * `.scrml` file or an existing path) rather than an address — so
+ * `scrml dev --host src/` means "every interface, serve src/".
+ *
+ * @param {string} token
+ * @returns {boolean}
+ */
+function isDevPositional(token) {
+  if (token.endsWith(".scrml")) return true;
+  try { statSync(token); return true; } catch { return false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +265,16 @@ let registeredProtectedDocs = new Map();
 /** @type {Map<string, (req: Request) => Promise<Response>>} */
 let registeredComposeDocs = new Map();
 
+// §14.8.10 (S456; s457 for dev) — the undeclared-tenant-table refusal gate over every
+// loaded module's `_scrml_tenant_startup_check`, or null when no module opens a
+// database. The SAME gate text `scrml build`'s `_server.js` runs
+// (codegen/tenant-startup-check.ts `createTenantGate`): the ruling ("b, startup check
+// lands with it") makes the check part of the tenant floor, not of one command, and an
+// undeclared tenant table fails open — its rows would reach every request unscoped —
+// under `scrml dev` exactly as under a built server.
+/** @type {import("../codegen/tenant-startup-check.ts").TenantGate | null} */
+let registeredTenantGate = null;
+
 /**
  * Test/introspection accessor for the currently mounted §40.3 onion. Still an
  * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
@@ -247,6 +290,41 @@ export function getRegisteredOnions() {
  */
 export function getRegisteredRoutes() {
   return registeredRoutes;
+}
+
+/** Test/introspection accessor for the undeclared-tenant-table gate (null when none). */
+export function getRegisteredTenantGate() {
+  return registeredTenantGate;
+}
+
+/**
+ * §14.8.10 — answer a request the way `_server.js` does while the undeclared-tenant-table
+ * gate refuses: `/_scrml/health` re-checks at once and answers 200 / 503 naming only a
+ * COUNT (the route is public); every other request answers a plain 503 while any finding
+ * stands (an ordinary request re-checks in the background under the gate's backoff).
+ * Returns null when the request may be served. Each finding is printed once to the log
+ * as `E-DEPLOY-DB-TENANT-UNDECLARED` by the gate itself.
+ *
+ * Exported for the dev-server unit tests.
+ *
+ * @param {import("../codegen/tenant-startup-check.ts").TenantGate} gate
+ * @param {string} pathname
+ * @returns {Promise<Response|null>}
+ */
+export async function devTenantGateResponse(gate, pathname) {
+  if (pathname === "/_scrml/health") {
+    const undeclared = await gate.refusals(true);
+    return new Response(JSON.stringify(undeclared === 0
+      ? { status: "ok", uptime: process.uptime() }
+      : { status: "unavailable", reason: `${tenantHealthReason(undeclared)} — see the server log` }), {
+      status: undeclared === 0 ? 200 : 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if ((await gate.refusals(false)) > 0) {
+    return new Response(TENANT_REFUSED_STATUS_TEXT, { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  }
+  return null;
 }
 
 /**
@@ -336,16 +414,37 @@ export function getCompileFailure() {
  * @param {string} outputDir
  * @returns {Promise<void>}
  */
-export async function loadServerRoutes(outputDir) {
+export async function loadServerRoutes(outputDir, serverModules = null) {
   registeredRoutes = [];
   registeredWsHandlers = null;
   registeredOnions = [];
   registeredProtectedDocs = new Map();
   registeredComposeDocs = new Map();
+  registeredTenantGate = null;
+  /** @type {import("../codegen/tenant-startup-check.ts").TenantStartupCheck[]} */
+  const tenantChecks = [];
 
   // F-COMPILE-001 Option A: outputDir may be a tree when sources have nested
   // subdirectories. Walk recursively for *.server.js entries.
-  const serverFiles = findOutputFiles(outputDir, ".server.js");
+  let serverFiles = findOutputFiles(outputDir, ".server.js");
+  // S445 review F3 — mount ONLY the modules the current compile wrote. An output
+  // dir accumulates `.server.js` files from earlier compiles (a different input
+  // set, a renamed source, an older compiler); importing one ran its module init —
+  // under an older compiler, a CWD-relative `new SQL("sqlite:…")` that CREATED an
+  // empty database where the next compile's schema read looked (flogence S49/S51).
+  // Leftovers are reported and left on disk, never imported. `serverModules` null
+  // (a caller that does not know the compile's output — unit tests) keeps loading all.
+  if (Array.isArray(serverModules)) {
+    const current = new Set(serverModules.map((p) => p.replace(/\\/g, "/")));
+    const stale = serverFiles.filter(({ relPath }) => !current.has(relPath.replace(/\\/g, "/")));
+    if (stale.length > 0) {
+      console.error(
+        `[dev] Not loading ${stale.length} .server.js file${stale.length === 1 ? "" : "s"} this compile did not ` +
+        `produce (left by an earlier compile): ${stale.map((s) => s.relPath).join(", ")}`,
+      );
+    }
+    serverFiles = serverFiles.filter(({ relPath }) => current.has(relPath.replace(/\\/g, "/")));
+  }
   if (serverFiles.length === 0) return;
 
   const allWsHandlers = [];
@@ -361,6 +460,11 @@ export async function loadServerRoutes(outputDir) {
       mod = await import(`file://${absPath}`);
     } catch (err) {
       console.error(`[dev] Failed to import ${relPath}: ${err.message}`);
+      // S445 review F7 — the module's routes are not mounted, so a request to one
+      // used to fall through to a bare 404. Mount each route path the module
+      // DECLARES as a 500 that carries the import error (e.g. the missing
+      // database's path), so the browser sees why, not "not found".
+      registeredRoutes.push(...failedModuleRoutes(absPath, relPath, err));
       continue;
     }
 
@@ -382,6 +486,13 @@ export async function loadServerRoutes(outputDir) {
       }
 
       if (!value || typeof value !== "object") continue;
+
+      // §14.8.10 — the module's undeclared-tenant-table check `{ undeclared }`, NOT a
+      // route. Every one runs in the gate built after the loop.
+      if (exportName === "_scrml_tenant_startup_check" && typeof value.undeclared === "function") {
+        tenantChecks.push(value);
+        continue;
+      }
 
       // WebSocket handlers export — collect separately, NOT as a route.
       // _scrml_ws_handlers has shape { open, message, close }, not { path, method, handler }.
@@ -417,6 +528,11 @@ export async function loadServerRoutes(outputDir) {
       }
     }
   }
+
+  // §14.8.10 — start the undeclared-tenant-table gate (its first check runs now, as it
+  // does when `_server.js` loads). The app process is respawned on every recompile, so
+  // each compile is checked afresh.
+  if (tenantChecks.length > 0) registeredTenantGate = createTenantGate(tenantChecks);
 
   // §40.3/§40.8 — mount THE application onion. `scrml build` fails on a second
   // one; dev surfaces the identical diagnostic through the compile-failure
@@ -583,6 +699,12 @@ function runOnce(opts, gatheredOut) {
       // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
       // `classic` keeps the shared runtime byte-identical to pre-arc output.
       moduleFormat,
+      // SPEC §2.2.1 (S457 "1a") — a recompile that reports any Error writes
+      // nothing (compileScrml decides it before the first byte; see
+      // ./refusal-gate.js), so the out dir keeps the last good build. The fetch
+      // handler serves the compile error at every request while the build is
+      // failing (`noteCompileResult` below), so that build is never served as
+      // current; the next green pass replaces it.
     });
   } catch (err) {
     // Fail CLOSED: a throw is a failed compile. Record it exactly like a
@@ -603,6 +725,12 @@ function runOnce(opts, gatheredOut) {
   // dirsToWatch to include any sibling-directory imports.
   if (gatheredOut && Array.isArray(result.gatheredFiles)) {
     gatheredOut.files = result.gatheredFiles;
+  }
+  // S440 item 16 — the client helper modules the compile copied into dist:
+  // watched like sources, so editing one re-runs the compile (and re-copies it)
+  // instead of leaving dev serving the stale copy.
+  if (gatheredOut && Array.isArray(result.clientHelperSources)) {
+    gatheredOut.helpers = result.clientHelperSources;
   }
 
 
@@ -659,8 +787,53 @@ function runOnce(opts, gatheredOut) {
     return { success: false, outputDir: result.outputDir };
   }
 
+  // S445 review F3 — the `.server.js` modules THIS compile wrote. The app child
+  // mounts exactly these (see `loadServerRoutes`); a leftover from an earlier
+  // compile under the same output dir is never imported.
+  lastCompileServerModules = Array.isArray(result.serverModules) ? result.serverModules : null;
   return { success: true, outputDir: result.outputDir };
 }
+
+/**
+ * S445 review F7 — stand-in routes for a `.server.js` that failed to import: every
+ * `{ path: "…", method: "…" }` route object the module declares answers 500 with
+ * the import error, instead of the bare 404 an unmounted route falls through to.
+ * Read from the module's TEXT (it cannot be evaluated). Exported for tests.
+ *
+ * @param {string} absPath
+ * @param {string} relPath
+ * @param {unknown} err
+ * @returns {Array<{ path: string, method: string, handler: Function }>}
+ */
+export function failedModuleRoutes(absPath, relPath, err) {
+  let text = "";
+  try { text = readFileSync(absPath, "utf8"); } catch { return []; }
+  const message = `scrml dev: ${relPath} failed to load, so this server function is unavailable — ` +
+    `${err && err.message ? err.message : String(err)}`;
+  const routes = [];
+  const re = /export\s+const\s+(?:_scrml_route_\w+|__ri_route_\w+)\s*=\s*\{\s*path:\s*("(?:[^"\\]|\\.)*")\s*,\s*method:\s*("[A-Z]+")/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    let path, method;
+    try { path = JSON.parse(m[1]); method = JSON.parse(m[2]); } catch { continue; }
+    routes.push({
+      path,
+      method,
+      handler: () => new Response(JSON.stringify({ error: message }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    });
+  }
+  return routes;
+}
+
+/**
+ * S445 review F3 — dist-relative POSIX paths of the `.server.js` modules the last
+ * successful compile wrote, handed to every app child. `null` = unknown (load all).
+ * @type {string[] | null}
+ */
+let lastCompileServerModules = null;
 
 // ---------------------------------------------------------------------------
 // Hot reload — SSE client registry
@@ -761,6 +934,21 @@ export const CHILD_READY_PREFIX = "__SCRML_DEV_CHILD_READY__ ";
 // Unique-suffix counter for the per-spawn child config file (avoids a same-ms
 // collision between two child spawns in one parent process).
 let childCfgSeq = 0;
+
+// Every app child this parent has spawned and that has not yet exited — the one
+// STARTING (spawned, not yet ready, so not yet `appChild`), the LIVE one, and an
+// old one inside its kill-grace window. The parent's exit/signal reaper kills all
+// of them; killing only the current `appChild` orphaned a respawn that was still
+// starting when the parent was stopped (s447-dev-child-leak — ~3 orphans per
+// commands-suite run, S445 measured 81 ≈ 3 GB).
+const spawnedAppChildren = new Set();
+
+/** Kill every app child this parent spawned that is still running. */
+function killAllAppChildren() {
+  for (const proc of spawnedAppChildren) {
+    try { proc.kill(); } catch { /* already gone */ }
+  }
+}
 
 /**
  * The hot-reload client itself. Served AS A FILE at `HOT_RELOAD_SRC`, not
@@ -1085,6 +1273,18 @@ function devClientAssets(serveDir) {
 }
 
 /**
+ * The fixed, value-free 500 `scrml dev` answers a failing request with (§14.8.9
+ * error egress — the detail goes to the server log, never the client).
+ * Exported for tests.
+ */
+export function devInternalErrorResponse() {
+  return new Response(
+    JSON.stringify({ error: "Internal server error" }),
+    { status: 500, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
  * §40.3 — the remainder of the `scrml dev` request pipeline: registered-route
  * match → static file → 404. This is exactly what `resolve(request)` runs
  * inside an author's `handle()`.
@@ -1122,11 +1322,17 @@ export async function devDispatch(req, server, serveDir, opts) {
         if (route.isWebSocket) return await route.handler(req, server);
         return await route.handler(req);
       } catch (err) {
-        console.error(`[dev] Route handler error for ${req.method} ${pathname}: ${err.message}`);
-        return new Response(
-          JSON.stringify({ error: "Internal server error", detail: err.message }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
-        );
+        // §14.8.9 error egress (S447 round 7) — the error's MESSAGE never goes to
+        // the client: it is logged here, in full, and the client gets a fixed,
+        // value-free 500 — exactly as the compiler-emitted production server
+        // answers (build.js `generateServerEntry` `error:`). An error a host API
+        // builds can quote server data the compiler cannot see into — measured:
+        // SQLite's `json_extract('{}', passwordHash)` fails with "bad JSON path:
+        // '<the hash>'", and this handler served it as `detail`. Not only under
+        // `protect=`: a message can as well carry a connection string, a file's
+        // contents or a path, and `scrml dev` is reachable from the network.
+        console.error(`[dev] Route handler error for ${req.method} ${pathname}:`, err);
+        return devInternalErrorResponse();
       }
     }
   }
@@ -1308,6 +1514,15 @@ export function buildServeConfig(opts, serveDir) {
     // `--idle-timeout <seconds>`; `?? 120` keeps direct callers (and tests that
     // build opts without the flag) byte-unchanged.
     idleTimeout: opts.idleTimeout ?? 120,
+    // §14.8.9 error egress (S447 round 7) — anything that throws past the route
+    // catch in `devDispatch` (an author `handle()` onion, a WebSocket upgrade
+    // route) would otherwise get Bun's development error page — the message and
+    // a source excerpt — because `scrml dev` does not run with
+    // NODE_ENV=production. Log it; answer the fixed 500 the prod entry answers.
+    error(err) {
+      console.error("[dev] unhandled server error:", err);
+      return devInternalErrorResponse();
+    },
     async fetch(req, server) {
       const url = new URL(req.url);
       const pathname = url.pathname;
@@ -1330,6 +1545,14 @@ export function buildServeConfig(opts, serveDir) {
       // ------------------------------------------------------------------
       if (compileFailure) {
         return buildCompileErrorResponse(req, compileFailure);
+      }
+
+      // §14.8.10 (s457) — no app request (a WebSocket upgrade included) is served while
+      // a database holds an undeclared tenant table or cannot be checked; the same gate
+      // and the same answers as `_server.js`.
+      if (registeredTenantGate) {
+        const refused = await devTenantGateResponse(registeredTenantGate, pathname);
+        if (refused) return refused;
       }
 
       // ------------------------------------------------------------------
@@ -1418,27 +1641,44 @@ export function launchingProcessGone(launchPpid) {
  * `/_scrml/live-reload` + hot-reload endpoints are simply never reached because
  * the parent proxy serves those from its own stable port.
  *
+ * ORPHAN GUARD. The child exits when the `scrml dev` parent that spawned it is
+ * gone. It guards against `parentPid` — the parent's own pid, written into the
+ * child config by `spawnAppChild` — NOT against whatever `process.ppid` is by
+ * the time the server is up: a parent that dies while the child is still
+ * loading routes has already been replaced as ppid by init / a subreaper
+ * (systemd --user), and a guard keyed to THAT pid never fires (the
+ * s447-dev-child-leak orphans: ppid = systemd --user, listening, idle forever).
+ * The guard is armed BEFORE route loading, so a child stuck at import also exits.
+ *
  * @param {string} serveDir
  * @param {object} opts   parsed dev opts (the port is overridden to 0 here)
+ * @param {string[]|null} [serverModules]
+ * @param {number} [parentPid]  pid of the spawning `scrml dev`; defaults to the
+ *   current `process.ppid` (a caller that is not `spawnAppChild`)
  * @returns {Promise<never>}
  */
-export async function runDevChildServer(serveDir, opts) {
-  await loadServerRoutes(serveDir);
-  const server = Bun.serve(buildServeConfig({ ...opts, port: 0 }, serveDir));
+export async function runDevChildServer(serveDir, opts, serverModules = null, parentPid = process.ppid) {
+  let server = null;
+  const shutdownIfOrphaned = () => {
+    if (!launchingProcessGone(parentPid)) return;
+    try { server?.stop(true); } catch { /* already stopped */ }
+    process.exit(0);
+  };
+  // The parent may already be gone (it died before this process got here).
+  shutdownIfOrphaned();
+  const guard = setInterval(shutdownIfOrphaned, 2000);
+  guard.unref?.();
+
+  await loadServerRoutes(serveDir, serverModules);
+  // The child is INTERNAL: only the parent proxy (which dials the 127.0.0.1
+  // literal) talks to it, so it binds IPv4 loopback only, regardless of
+  // `--host` — the browser-facing parent is the only listener `--host` exposes.
+  server = listen(buildServeConfig({ ...opts, port: 0 }, serveDir), "127.0.0.1", { ipv6Twin: false });
   // C18 (§38.6): channel `broadcast()` runs in THIS child; publishing on the
   // child server reaches the parent's upstream proxy socket, which forwards to
   // the browser — so realtime survives the proxy.
   globalThis._scrml_active_server = server;
   console.log(`${CHILD_READY_PREFIX}${server.port}`);
-
-  // Orphan guard — if the parent dev process dies, do not linger holding the port.
-  const launchPpid = process.ppid;
-  const guard = setInterval(() => {
-    if (!launchingProcessGone(launchPpid)) return;
-    try { server.stop(true); } catch { /* already stopped */ }
-    process.exit(0);
-  }, 2000);
-  guard.unref?.();
   await new Promise(() => {});
 }
 
@@ -1452,12 +1692,17 @@ export async function runDevChildServer(serveDir, opts) {
  */
 async function spawnAppChild(serveDir, opts) {
   const cfgPath = join(tmpdir(), `scrml-dev-child-${process.pid}-${childCfgSeq++}.json`);
-  writeFileSync(cfgPath, JSON.stringify({ serveDir, opts }));
+  // `parentPid`: the child's orphan guard follows THIS pid (see runDevChildServer).
+  writeFileSync(cfgPath, JSON.stringify({ serveDir, opts, serverModules: lastCompileServerModules, parentPid: process.pid }));
 
   const proc = Bun.spawn(
     [process.execPath, process.argv[1], "dev", "--__dev-child", cfgPath],
     { stdout: "pipe", stderr: "inherit", stdin: "ignore" },
   );
+  // Tracked from the moment it exists — before it is ready, before it becomes
+  // `appChild` — so no exit path of this parent can miss it.
+  spawnedAppChildren.add(proc);
+  proc.exited.then(() => spawnedAppChildren.delete(proc), () => spawnedAppChildren.delete(proc));
 
   let port;
   try {
@@ -1675,16 +1920,32 @@ const wsProxyHandlers = {
  * @param {string[]} args — raw argv slice after "dev"
  */
 export async function runDev(args) {
+  // Captured before anything else runs: the app child's fallback launcher pid when
+  // its config carries no `parentPid` (see runDevChildServer's orphan guard).
+  const launchPpidAtEntry = process.ppid;
+  // §47.14 / §8.1.1 (ruling:user-voice-scrml.md S445 — "dev / compile keep S445 item 6:
+  // relative to the declaring `.scrml` file") — SCRML_DATA_DIR is the BUILT server's
+  // data root. `scrml dev` opens each database beside its declaring file, so it drops the
+  // variable before any server module loads (the app child inherits this environment).
+  const childFlag = args.indexOf("--__dev-child");
+  if (process.env.SCRML_DATA_DIR !== undefined) {
+    if (childFlag === -1) {
+      console.error(
+        `scrml dev: ignoring SCRML_DATA_DIR=${process.env.SCRML_DATA_DIR} — dev opens each database ` +
+        `beside the .scrml file that declares it; SCRML_DATA_DIR applies to a server built by \`scrml build\`.`,
+      );
+    }
+    delete process.env.SCRML_DATA_DIR;
+  }
   // #724 child-process mode: re-entered by spawnAppChild with a config file path.
   // Run ONLY the app server (no compile/watch/proxy) and return.
-  const childFlag = args.indexOf("--__dev-child");
   if (childFlag !== -1) {
     const cfgPath = args[childFlag + 1];
     const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
     // The child owns its config file from here — delete it immediately so a later
     // hard-kill of either process cannot leak it in the temp dir.
     try { rmSync(cfgPath, { force: true }); } catch { /* parent may have removed it */ }
-    await runDevChildServer(cfg.serveDir, cfg.opts);
+    await runDevChildServer(cfg.serveDir, cfg.opts, cfg.serverModules ?? null, cfg.parentPid ?? launchPpidAtEntry);
     return;
   }
 
@@ -1740,15 +2001,22 @@ export async function runDev(args) {
     respawnChain = run.catch(() => {});
     return run;
   }
-  function killAppChild() { try { appChild?.proc.kill(); } catch { /* already gone */ } }
-  process.on("exit", killAppChild);
-  process.on("SIGINT", () => { killAppChild(); process.exit(0); });
-  process.on("SIGTERM", () => { killAppChild(); process.exit(0); });
+  // Reap EVERY spawned child (starting / live / in grace — see spawnedAppChildren)
+  // on the exit paths this process owns: a normal exit, Ctrl+C, a harness's SIGTERM.
+  // SIGHUP is deliberately NOT handled: a listener would override `nohup`'s
+  // inherited ignore (a nohup-started dev server would then die on HUP). A parent
+  // that dies of an unhandled HUP — or of SIGKILL — is covered by each child's own
+  // orphan guard, which exits within one 2 s poll of the parent's death.
+  process.on("exit", killAllAppChildren);
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.on(sig, () => { killAllAppChildren(); process.exit(0); });
+  }
 
   // The STABLE public server: dev-infra endpoints are served here (so the
   // hot-reload SSE stream survives every child respawn); everything else is
   // reverse-proxied to the current app child.
-  let server = Bun.serve({
+  const host = opts.host ?? DEFAULT_HOST;
+  let server = listenOrExit("[dev]", {
     port: opts.port,
     idleTimeout: opts.idleTimeout ?? 120,
     async fetch(req, srv) {
@@ -1783,7 +2051,7 @@ export async function runDev(args) {
       return proxyHttpToChild(req, url, childPort);
     },
     websocket: wsProxyHandlers,
-  });
+  }, host);
   globalThis._scrml_active_server = server;
 
   // Spawn the initial app child AFTER the parent port is bound (above). A first
@@ -1799,7 +2067,9 @@ export async function runDev(args) {
     console.error(`[dev] serving errors until the next successful recompile.`);
   }
 
-  console.log(`[dev] Serving ${serveDir} at http://localhost:${server.port}`);
+  console.log(`[dev] Serving ${serveDir} at ${displayUrl(host, server.port)}`);
+  const exposed = networkNotice("[dev]", host, server.port);
+  if (exposed) console.log(exposed);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
 
   // Parent-death guard (g-dev-watcher-tests-leak-server-processes): when `scrml
@@ -1815,7 +2085,11 @@ export async function runDev(args) {
   // NON-INTERACTIVE stdin so a human's terminal `scrml dev` — whose parent shell
   // is its rightful owner — is never affected.
   if (!process.stdin.isTTY) {
-    const launchPpid = process.ppid;
+    // The ppid captured at ENTRY, not now: a launcher that died during the initial
+    // compile / first child spawn has already been replaced as ppid by init or a
+    // subreaper, and a guard keyed to that pid would never fire (s447-dev-child-leak).
+    // The exit below runs the `exit` reaper, which kills every app child too.
+    const launchPpid = launchPpidAtEntry;
     const parentDeathTimer = setInterval(() => {
       if (!launchingProcessGone(launchPpid)) return;
       console.error("[dev] launching process is gone — shutting down so the watcher is not orphaned");
@@ -2035,6 +2309,7 @@ export async function runDev(args) {
     for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
       watchFile(f);
     }
+    for (const h of recomputeGathered.helpers || []) watchFile(toPosixSpecifier(h));
     if (success) {
       // #724: respawn the app child so the recompiled server bundle (and its whole
       // cross-file server graph) is re-evaluated in a fresh process. The parent's
@@ -2076,6 +2351,8 @@ export async function runDev(args) {
   for (const file of deriveWatchFiles(opts, gatheredOut.files)) {
     watchFile(file);
   }
+  // S440 item 16 — copied client helpers ride the same stat sweep.
+  for (const h of gatheredOut.helpers || []) watchFile(toPosixSpecifier(h));
 
   // Keep process alive (server already does this, but be explicit)
   await new Promise(() => {});

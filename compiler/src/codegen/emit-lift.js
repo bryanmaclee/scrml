@@ -1,15 +1,18 @@
 // s441 — §13.2 for per-element event handlers (see colorActiveHandler).
-import { colorActiveHandler } from "./js-async-analysis.ts";
+import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
+import { PHP_RENDER } from "../placeholder-nonce.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
-import { emitLogicNode, _iterDestructureBindNames } from "./emit-logic.js";
+import { emitLogicNode, _iterDestructureBindNames, emitHandlerStatementList } from "./emit-logic.js";
 import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
+import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import * as acorn from "acorn";
 
 /**
@@ -380,6 +383,21 @@ function currentLiftRequestIds() {
  * @param {object} [extra] — additional ctx fields to merge (rare).
  * @returns {object} the EmitExprContext.
  */
+/**
+ * SPEC §5.2 rule 1 (S456) — the DOM event a lifted `on…` attribute names, or null when the name is not
+ * an event-handler attribute. The name test is rule 1's (`isExecutableEventHandlerAttrName`: every `on…`
+ * name, any case, except the words `one` / `online` / `onboarding`), and the event name is the one
+ * `<each>` rows use (`on:x` → `x`; otherwise the rest of the name, lowercased — `onClick` / `ONCLICK`
+ * → `click`). S457: lift wired only `/^on[a-z]/` and WROTE every other `on…` value as handler TEXT
+ * (`lift <Btn onClick=it.code/>` ran the data on click); now no lift path writes an `on…` attribute's
+ * value, matching emit-html and `<each>`. Lowercase names give the same event name as before.
+ */
+function liftEventName(name) {
+  if (typeof name !== "string" || !isExecutableEventHandlerAttrName(name)) return null;
+  if (name.startsWith("on:")) return name.slice(3) || null;
+  return name.slice(2).toLowerCase();
+}
+
 function liftExprCtx(extra) {
   const requestIds = currentLiftRequestIds();
   const base = { mode: "client" };
@@ -824,8 +842,11 @@ function rewriteRenderCall(expr) {
  * @returns {string} — cleaned code
  */
 function cleanRenderPlaceholder(code) {
-  if (!code || typeof code !== 'string' || !code.includes('__scrml_render_')) return code;
-  return code.replace(/__scrml_render_([A-Za-z_$][A-Za-z0-9_$]*)__/g, '$1');
+  // Only the parser's unforgeable placeholder (placeholder-nonce.ts): an
+  // author-typed `__scrml_render_x__` is left alone (and refused by the
+  // §47.1.1 reservation / the §2.2.1 emit gate).
+  if (!code || typeof code !== 'string' || !code.includes(PHP_RENDER())) return code;
+  return code.replace(new RegExp(PHP_RENDER() + '([A-Za-z_$][A-Za-z0-9_$]*)__', 'g'), '$1');
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,9 +1214,12 @@ function splitTagSegments(s) {
  *
  * @param {string} elVar — the variable name of the element
  * @param {Array<{name: string, value: string|null}>} attrs
+ * @param {object|null} engineCtx
+ * @param {string} tag — the element's tag ("" when unknown: every URL-attribute name then counts
+ *   for the §5.2 rule 3 runtime guard — fail closed)
  * @returns {string[]}
  */
-function emitSetAttrs(elVar, attrs, engineCtx = null) {
+function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
   const lines = [];
   for (const attr of attrs) {
     if (attr.value === null) {
@@ -1288,10 +1312,10 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
           lines.push(`_scrml_effect(() => { ${_toggleStmt} });`);
         }
       }
-    } else if (/^on[a-z]/.test(attr.name)) {
+    } else if (liftEventName(attr.name) !== null) {
       // BUG-6 fix: event attributes like onclick, ondblclick, onsubmit
       // must use addEventListener, not setAttribute
-      const eventName = attr.name.replace(/^on/, "");
+      const eventName = liftEventName(attr.name);
       // Bug 65 (S157) — engine transition `@engine.advance(.X)` / `@engine = .X`
       // in a lifted handler: lower through the SHARED engine machinery (state /
       // message plane / direct-set) BEFORE the generic emitExprField path, which
@@ -1302,7 +1326,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       if (engineLoweredAttr !== null) {
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span)});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         continue;
       }
       // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
@@ -1356,17 +1380,24 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
         // the LIVE item; null → emit the arrow directly (byte-identical to pre-fix).
         const _shadowH = maybeWrapLiftCallableHandler(handlerExpr);
         if (_shadowH !== null) {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadowH}`, attr?.span)});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadowH}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         } else {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${handlerExpr}`, attr?.span)});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${handlerExpr}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         // Bug 73 — per-item handler live-keying. Re-resolve the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span)});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
       if (attr.value.includes('${') || /\$\s*\{/.test(attr.value)) {
+        // §5.2 (S457) — a srcdoc / an event attribute this path does not wire (`onClick=${…}`)
+        // is never written from data (backstop; VP-3 refuses the quoted forms first).
+        const _refused = refuseExecutableDataWrite(attr.name, tag, attr.span, attr);
+        if (_refused !== null) {
+          lines.push(_refused);
+          continue;
+        }
         // Rebuild as template literal with rewritten expressions
         const parts = [];
         parseLiftContentParts(attr.value, parts);
@@ -1379,6 +1410,12 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
           }
         }
         tpl += "`";
+        // §5.2 rule 3 (S457) — a URL attribute whose literal prefix commits to no scheme
+        // (`href="${it.url}"`, `href=${it.url}`): the data supplies the scheme; guard the write.
+        // S457 — an SVG animation value (`to="${it.url}"` animating `href`) likewise.
+        if (quotedUrlAttrNeedsGuard(tag, attr.name, attr.value, attrs)) {
+          tpl = wrapUrlGuard(elVar, attr.name, tpl, urlGuardTarget(tag, attr.name, attrs));
+        }
         pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${tpl});`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${JSON.stringify(attr.value)});`);
@@ -1644,6 +1681,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           }
         }
         tpl += "`";
+        // §5.2 rule 3 (S457) — guard a URL attribute whose literal prefix commits to no scheme.
+        // S457 — an SVG animation value (`to="${it.url}"` animating `href`) likewise.
+        if (quotedUrlAttrNeedsGuard(tag, name, sv, attrs)) tpl = wrapUrlGuard(elVar, name, tpl, urlGuardTarget(tag, name, attrs));
         const _setStmt = `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`;
         if (currentLiftReconcileCtx()) {
           for (const _l of maybeWrapLiftPerItemEffect([_setStmt])) lines.push(_l);
@@ -1660,14 +1700,28 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       // `@e.advance(.X)`), handled below. No engine path needed here.
       const varName = (val.name || "").replace(/^@/, "");
       const rewritten = emitExprField(val.exprNode, varName, liftExprCtx());
-      if (/^on[a-z]/.test(name)) {
-        const eventName = name.replace(/^on/, "");
+      if (liftEventName(name) !== null) {
+        const eventName = liftEventName(name);
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
         // does not read the item (the iter-scope scan gates it out → stays plain);
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} }`, attr?.span)});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       } else {
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
+        // §5.2 (S457) — a srcdoc / an event attribute this path does not wire (`onClick=it.f`)
+        // is never written from data.
+        // §5.2 (S457) — a srcdoc is never written from data, wherever the write is emitted (a declared
+        // component prop written onto an expanded root included). Every `on…` name is wired above.
+        const _refused = refuseExecutableDataWrite(name, tag, attr?.span ?? val?.span, attr);
+        if (_refused !== null) {
+          lines.push(_refused);
+        } else {
+          // §5.2 rule 3 (S457) — a URL attribute (or an SVG animation value writing one)
+          // bound to a value: guard the write.
+          const _v = dynamicUrlAttrNeedsGuard(tag, name, attrs)
+            ? wrapUrlGuard(elVar, name, rewritten, urlGuardTarget(tag, name, attrs))
+            : rewritten;
+          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_v});`);
+        }
       }
     } else if (val.kind === "call-ref") {
       // Function call in attribute — reconstruct full call with arguments.
@@ -1680,8 +1734,8 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
         : (val.args || []).map(a => emitExprField(null, a.trim(), liftExprCtx())).join(", ");
       const rewrittenName = emitExprField(null, val.name, liftExprCtx());
-      if (/^on[a-z]/.test(name)) {
-        const eventName = name.replace(/^on/, "");
+      if (liftEventName(name) !== null) {
+        const eventName = liftEventName(name);
         // Bug 65 (S157) — engine `.advance(.X)` parses as a call-ref
         // `{ name:"@engine.advance", args:[".X"] }`. Reconstruct the call text and
         // route it through the SHARED engine machinery (state / message plane);
@@ -1691,16 +1745,29 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredCall !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span)});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span)});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${callExpr} ?? ""));`);
+        const _cv = `String(${callExpr} ?? "")`;
+        // §5.2 (S457) — never write a srcdoc / an unwired event attribute from data.
+        // §5.2 (S457) — a srcdoc is never written from data, wherever the write is emitted (a declared
+        // component prop written onto an expanded root included). Every `on…` name is wired above.
+        const _refused = refuseExecutableDataWrite(name, tag, attr?.span ?? val?.span, attr);
+        if (_refused !== null) {
+          lines.push(_refused);
+        } else {
+          // §5.2 rule 3 (S457) — a URL attribute computed by a call: guard the write.
+          const _gv = dynamicUrlAttrNeedsGuard(tag, name, attrs)
+            ? wrapUrlGuard(elVar, name, _cv, urlGuardTarget(tag, name, attrs))
+            : _cv;
+          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_gv});`);
+        }
       }
     } else if (typeof val === "string") {
       // Raw string value
@@ -1709,8 +1776,29 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       // Inline expression from ${...} attribute (e.g. oninput=${@var = event.target.value})
       // or props-block. For event attrs, use addEventListener; otherwise setAttribute.
       const raw = val.raw ?? val.propsDecl ?? "";
-      if (/^on[a-z]/.test(name)) {
-        const eventName = name.replace(/^on/, "");
+      if (liftEventName(name) !== null) {
+        const eventName = liftEventName(name);
+        // S446 (S439 #4) — a §5.2.3 multi-statement handler (`${a; b}`) carries
+        // its PARSED statement list (`val.handlerBlock.stmts`, ast-builder
+        // parseLiftTag → attachHandlerStatementList). Lower the statement nodes
+        // as a function body through the shared emitHandlerStatementList — the
+        // same lowering top-level, engine-arm and `<each>` handlers use — so
+        // every statement runs (pre-S446 only the first did). The row binding
+        // is a plain JS closure variable here, so no iter-scope rewrite is
+        // needed; Bug-73 live-keying still wraps the body. A 1-statement value
+        // has no handlerBlock and takes the paths below, unchanged.
+        if (val.handlerBlock && Array.isArray(val.handlerBlock.stmts)) {
+          const _liftReqIds = currentLiftRequestIds();
+          const blockBody = emitHandlerStatementList(val.handlerBlock.stmts, {
+            ...(engineCtx?.engineExprCtxExtras ?? {}),
+            engineBindings: engineCtx?.engineRewriteCtx?.engineBindings ?? null,
+            ...(_liftReqIds ? { requestIds: _liftReqIds } : {}),
+          });
+          // S446 (S439 #4) — await a server-call cell write in place so the next
+          // statement sees the resolved value (js-async-analysis ColorOpts).
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` })});`);
+          continue;
+        }
         // Bug 65 (S157) — engine transition `${@engine.advance(.X)}` (CallExpr) /
         // `${@engine = .X}` (AssignExpr) in a lifted handler: lower through the
         // SHARED engine machinery (state / message plane / direct-set) BEFORE the
@@ -1722,7 +1810,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredExpr !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span)});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
           continue;
         }
         // S140 Bug 59 — when this onevent value is a synth arrow-string with
@@ -1775,17 +1863,31 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           // Returns null (→ emit the arrow directly, byte-identical) when no wrap applies.
           const _shadow = maybeWrapLiftCallableHandler(rewritten);
           if (_shadow !== null) {
-            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadow}`, attr?.span)});`);
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadow}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
           } else {
-            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${rewritten}`, attr?.span)});`);
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${rewritten}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
           }
         } else {
           // Bug 73 — function-body per-item handler: re-resolve the live item at fire time.
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span)});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);
+        const _ev = `String(${rewritten} ?? "")`;
+        // §5.2 (S457) — never write a srcdoc / an unwired event attribute (`ONCLICK=${…}`) from data.
+        // §5.2 (S457) — a srcdoc is never written from data, wherever the write is emitted (a declared
+        // component prop written onto an expanded root included). Every `on…` name is wired above.
+        const _refused = refuseExecutableDataWrite(name, tag, attr?.span ?? val?.span, attr);
+        if (_refused !== null) {
+          lines.push(_refused);
+        } else {
+          // §5.2 rule 3 (S457) — `href=${expr}`: the expression supplies the scheme; guard the write
+          // (and an SVG animation value writing a URL attribute).
+          const _gv = dynamicUrlAttrNeedsGuard(tag, name, attrs)
+            ? wrapUrlGuard(elVar, name, _ev, urlGuardTarget(tag, name, attrs))
+            : _ev;
+          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_gv});`);
+        }
       }
     } else if (val && val.kind) {
       // Exhaustiveness guard — surface unhandled attribute value kinds
@@ -2107,7 +2209,7 @@ function emitCreateElementFromExprString(expr) {
   // Parse and emit attributes
   if (attrsStr) {
     const attrs = parseAttrs(attrsStr);
-    const attrLines = emitSetAttrs(elVar, attrs);
+    const attrLines = emitSetAttrs(elVar, attrs, null, tag);
     for (const l of attrLines) lines.push(l);
   }
 
@@ -3068,6 +3170,9 @@ export function emitConsolidatedLift(body, opts = {}) {
     pendingAttrName = null;
     const elVar = genVar(`lift_el`);
     lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+    // S457 — kept on the element-stack entry so a BLOCK_REF-split value (`to = ${x}`) can ask
+    // whether it is an SVG animation value writing a URL attribute (`attributeName="href"`).
+    let elementAttrs = [];
     if (attrsStr) {
       // Detect and strip a trailing incomplete attribute (e.g. `checked =` or `data - id =`)
       // BEFORE calling parseAttrs. This happens when a BLOCK_REF splits the attribute value
@@ -3083,14 +3188,15 @@ export function emitConsolidatedLift(body, opts = {}) {
         pendingAttrName = trailingMatch[1].replace(/\s*-\s*/g, "-");
       }
       const attrs = parseAttrs(cleanAttrsStr);
-      const attrLines = emitSetAttrs(elVar, attrs, engineCtx);
+      elementAttrs = attrs;
+      const attrLines = emitSetAttrs(elVar, attrs, engineCtx, tag);
       for (const l of attrLines) lines.push(l);
     }
     const parent = currentParent();
     if (parent) {
       lines.push(`${parent}.appendChild(${elVar});`);
     }
-    elementStack.push({ varName: elVar, tag });
+    elementStack.push({ varName: elVar, tag, attrs: elementAttrs });
     return elVar;
   }
 
@@ -3228,12 +3334,27 @@ export function emitConsolidatedLift(body, opts = {}) {
                 const attrName = pendingAttrName;
                 pendingAttrName = null;
                 const rewritten = emitExprField(logicChild.exprNode, logicChild.expr ?? "", liftExprCtx());
-                if (/^on[a-z]/.test(attrName)) {
-                  const eventName = attrName.replace(/^on/, "");
+                if (liftEventName(attrName) !== null) {
+                  const eventName = liftEventName(attrName);
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
-                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span)});`);
+                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
                 } else {
-                  lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, String(${rewritten} ?? ""));`);
+                  const _bv = `String(${rewritten} ?? "")`;
+                  // §5.2 rule 3 (S457) — a BLOCK_REF-split `href=${expr}`: guard the URL write.
+                  const _bEl = currentElement();
+                  const _bt = _bEl ? _bEl.tag : "";
+                  // S457 — never write a srcdoc / an unwired event attribute from data; an SVG
+                  // animation value writing a URL attribute is guarded with that attribute as target.
+                  const _ba = _bEl && Array.isArray(_bEl.attrs) ? _bEl.attrs : [];
+                  const _refused = refuseExecutableDataWrite(attrName, _bt, logicChild.span, logicChild);
+                  if (_refused !== null) {
+                    lines.push(_refused);
+                  } else {
+                    const _gv = dynamicUrlAttrNeedsGuard(_bt, attrName, _ba)
+                      ? wrapUrlGuard(elVar, attrName, _bv, urlGuardTarget(_bt, attrName, _ba))
+                      : _bv;
+                    lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, ${_gv});`);
+                  }
                 }
               }
             } else {
@@ -3260,7 +3381,7 @@ export function emitConsolidatedLift(body, opts = {}) {
           const attrPart = firstTagIdx === -1 ? expr : expr.slice(0, firstTagIdx);
           const remainder = firstTagIdx === -1 ? "" : expr.slice(firstTagIdx);
           const attrs = parseAttrs(attrPart);
-          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx);
+          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
           for (const l of attrLines) lines.push(l);
           pendingAttrName = null;
           if (remainder.trim()) {
@@ -3302,7 +3423,7 @@ export function emitConsolidatedLift(body, opts = {}) {
           const attrPart = firstTagIdx === -1 ? expr : expr.slice(0, firstTagIdx);
           const remainder = firstTagIdx === -1 ? "" : expr.slice(firstTagIdx);
           const attrs = parseAttrs(attrPart);
-          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx);
+          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
           for (const l of attrLines) lines.push(l);
           pendingAttrName = null;
           if (remainder.trim()) {
@@ -3370,7 +3491,7 @@ export function emitConsolidatedLift(body, opts = {}) {
         // Apply the attribute to the current element using the existing attr/event emitter
         const syntheticAttrsStr = attrName + " = " + attrValue;
         const attrs = parseAttrs(syntheticAttrsStr);
-        const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx);
+        const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
         for (const l of attrLines) lines.push(l);
         pendingAttrName = null;
 

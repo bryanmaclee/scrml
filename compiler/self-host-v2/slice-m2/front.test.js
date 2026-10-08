@@ -22,6 +22,24 @@ const LIB = () => ({ path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdow
 const run = (files) => frontEnd(mods, files);
 const codes = (r) => r.diags.map((d) => d.code);
 
+// SPEC §6.15 (S449 item 3): a render expression may not write reactive state — a program whose render hole
+// calls a writer is now E-VALUE-WRITES-STATE. The S440 runtime guarantees below (a render-hole write loop
+// converges; a Commit outside a handler batch is atomic) are no longer reachable from SOURCE, but the runtime
+// still promises them, so they stay tested at the Core level: the test compiles the write-free TWIN (each
+// render-hole function `f` returns without writing; the writing body is declared as `fW`, called by nothing),
+// then grafts `fW`'s lowered body into `f` — the pattern slice-m4 effect.test.js uses for C11.
+const graftWriters = (core, names) => {
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const out = clone(core);
+  for (const n of names) {
+    const into = out.fns.find((f) => f.sym.hint === n);
+    const from = out.fns.find((f) => f.sym.hint === n + "W");
+    if (!into || !from) throw new Error(`graftWriters: no fn ${n} / ${n}W in the lowered Core`);
+    into.body = clone(from.body);
+  }
+  return out;
+};
+
 // ---------------------------------------------------------------------------
 // The SPEC's negative lines. Each `<!-- … → E-CODE … -->` line names the code
 // its uncommented form must produce; this table is how each is uncommented, and
@@ -76,7 +94,7 @@ describe("§66.19 negative lines — uncommented, each produces its diagnostic",
     expect(d1.message).toContain("declare it `let`");
     expect(d1.message).toContain("SEEDED");
     const d2 = run([{ path: "c.scrml", src: uncomment(readSlice("src/counter.scrml"), NEGATIVE[1].spec, NEGATIVE[1].as) }]).diags[0];
-    expect(d2.message).toContain("let step");
+    expect(d2.message).toContain("let <step");
   });
 });
 
@@ -113,7 +131,7 @@ describe("more §66.20 diagnostics the subset reaches", () => {
   });
 
   test("E-FIELD-PRIVATE-WRITE — a cross-file write to a field that is not exported (§66.14)", () => {
-    const lib = withLibLine("export let value:string=\"\"", "export let value:string=\"\" let note:string=\"\"");
+    const lib = withLibLine("export let <value:string=\"\"/>", "export let <value:string=\"\"/>\n    let <note:string=\"\"/>");
     const app = appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function f() { @country.note = \"x\" }");
     expect(codes(run([lib, app]))).toEqual(["E-FIELD-PRIVATE-WRITE"]);
     // the same write to the EXPORTED field is fine
@@ -157,7 +175,7 @@ function docProgram(fns) {
     src: `${DOC}
 <program>
     type P:struct = { let x: int, y: int }
-    <let p:P=({ x: 0, y: 0 })/>
+    let <p:P=({ x: 0, y: 0 })/>
 ${fns}
     <main>
         <doc as=d title="Spec"/>
@@ -226,7 +244,7 @@ describe("O58 (b) — `@x = { ...@x, f: v }` is the field edit `@x.f = v`; a gen
 // (review of #1109, F1: sequential per-override writes let a later value read
 // an earlier override's write — a swap yielded 2,2).
 // ---------------------------------------------------------------------------
-const PAIR = `<pair export let a:string="1" export let b:string="2">
+const PAIR = `<pair:struct> export let <a:string="1"/> export let <b:string="2"/>
 </>
 renders <p class="pair">\${a},\${b}</p>
 `;
@@ -237,7 +255,7 @@ function snapshotProgram(fns) {
     src: `${PAIR}
 <program>
     type P:struct = { let x: int, y: int }
-    <let p:P=({ x: 1, y: 2 })/>
+    let <p:P=({ x: 1, y: 2 })/>
 ${fns}
     <main>
         <pair as=pp/>
@@ -319,7 +337,7 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
 // against the one snapshot first; if any is refused, NOTHING is applied.
 // ---------------------------------------------------------------------------
 const GATES = `type Phase:enum = { Draft, Live, Gone }
-<gate title:string export let note:string="n0">
+<gate title:string> export let <note:string="n0"/>
     export <phase:Phase=.Draft>
         <Draft rule=.Live/>
         <Live rule=.Gone/>
@@ -340,7 +358,7 @@ function gateProgram(fns) {
     src: `${GATES}
 <program>
     type P:struct = { let x: int, y: int }
-    <let p:P=({ x: 1, y: 2 })/>
+    let <p:P=({ x: 1, y: 2 })/>
 ${fns}
     <main>
         <gate as=g title="G"/>
@@ -488,7 +506,7 @@ const TRIPLE = (fns) => ({
   path: "triple.scrml",
   src: `<program>
     type P:struct = { let x: int, let y: int, let z: int }
-    <let p:P=({ x: 1, y: 2, z: 3 })/>
+    let <p:P=({ x: 1, y: 2, z: 3 })/>
     function bump() -> int { @p.z = 99
  return 5 }
     function touch() -> int { @p.x = 99
@@ -562,28 +580,29 @@ describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override l
 // read was.
 // ---------------------------------------------------------------------------
 describe("S440 N1 — the spread snapshot reads only the fields the override values read (no widened subscriptions)", () => {
-  const BOX = `<box title:string export let a:int=0 export let b:int=0 export let c:int=0>
+  const BOX = `<box title:string> export let <a:int=0/> export let <b:int=0/> export let <c:int=0/>
 </>
 renders <p class="box">\${a},\${b},\${c}</p>
 `;
-  const loopProgram = (guard) => ({
+  // `twin`: e1 / e2 write nothing; their writing bodies are e1W / e2W (grafted in Core — see graftWriters)
+  const loopProgram = (guard, twin = false) => ({
     path: "n1.scrml",
     src: `${BOX}<program>
-    <let n:int=0/>
+    let <n:int=0/>
     <log:int[free, append]=([])/>
     function stamp() -> int {
         @log.push(1)
         return 1
     }
-    function e1() -> int {
+    function e1${twin ? "W" : ""}() -> int {
         if (@n > 0) { @h = { ...@h, a: stamp() + @h.b * 0 } }
         return 0
     }
-    function e2() -> int {
+    function e2${twin ? "W" : ""}() -> int {
         ${guard ? "if (@log.length < 40) { @h.c = @log.length }" : "@h.c = @log.length"}
         return 0
     }
-    function go() { @n = 1 }
+${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { return 0 }\n" : ""}    function go() { @n = 1 }
     <main>
         <box as=h title="B"/>
         <p class="e1">\${e1()}</p>
@@ -597,10 +616,13 @@ renders <p class="box">\${a},\${b},\${c}</p>
 
   for (const guard of [true, false]) {
     test(`a side-effecting override in a render hole beside a sibling writer converges (${guard ? "guarded" : "unguarded"}): box=1,0,1, log length 1`, async () => {
-      const r = run([loopProgram(guard)]);
+      // §6.15: the source program is now rejected — both render holes call a writer
+      expect(codes(run([loopProgram(guard)]))).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);
+      const r = run([loopProgram(guard, true)]);
       expect(codes(r)).toEqual([]);
-      expect(mods.check.checkCore(r.core)).toEqual([]);
-      await loadProgram(r.core, guard ? "n1-guarded" : "n1-unguarded");
+      const core = graftWriters(r.core, ["e1", "e2"]);
+      expect(mods.check.checkCore(core)).toEqual([]);
+      await loadProgram(core, guard ? "n1-guarded" : "n1-unguarded");
       click(document.querySelector("button.go"));
       expect(document.querySelector("p.box").textContent).toBe("1,0,1");
       expect(document.querySelector("p.len").textContent).toBe("1");
@@ -663,17 +685,18 @@ describe("RULED S440 — a duplicate override key is a compile error (E-STRUCT-D
 // act on) the half-applied value. The writes now run in one `rt.batch`.
 // ---------------------------------------------------------------------------
 describe("S440 F-A — a Commit outside a handler batch: no observer sees the half-applied value", () => {
-  const REACT = (spread) => `    <let n:int=0/>
-    function react() -> int {
+  // `twin`: react / watch write nothing; their writing bodies are reactW / watchW (grafted in Core)
+  const REACT = (spread, twin) => `    let <n:int=0/>
+    function react${twin ? "W" : ""}() -> int {
         if (@n > 0) { @g = { ...@g, ${spread} } }
         return @n
-    }`;
-  const prog = (spread, fns, view) => ({
+    }${twin ? "\n    function react() -> int { return @n }" : ""}`;
+  const prog = (spread, fns, view, twin = false) => ({
     path: "fa.scrml",
     src: `${GATES}
 <program>
-${REACT(spread)}
-${fns}
+${REACT(spread, twin)}
+${twin ? fns.replace("function watch()", "function watchW()") + (fns ? '\n    function watch() -> string { return "w" }' : "") : fns}
     <main>
         <gate as=g title="G"/>
         <p class="r">\${react()}</p>
@@ -685,10 +708,15 @@ ${view}
   });
 
   async function runFA(tag, spread, fns = "", view = "") {
-    const r = run([prog(spread, fns, view)]);
+    // §6.15: the source program is now rejected — `react()` (and `watch()`) write from a render hole
+    const src = codes(run([prog(spread, fns, view)]));
+    expect(src.length).toBeGreaterThan(0);
+    expect(src.every((c) => c === "E-VALUE-WRITES-STATE")).toBe(true);
+    const r = run([prog(spread, fns, view, true)]);
     expect(codes(r)).toEqual([]);
-    expect(mods.check.checkCore(r.core)).toEqual([]);
-    const { rt } = await loadProgram(r.core, tag);
+    const core = graftWriters(r.core, fns ? ["react", "watch"] : ["react"]);
+    expect(mods.check.checkCore(core)).toEqual([]);
+    const { rt } = await loadProgram(core, tag);
     const g = instancesOf(rt, "gate")[0];
     const pi = g.decl.fields.indexOf("phase"), si = g.decl.fields.indexOf("stage");
     const seen = [];
@@ -736,8 +764,8 @@ describe("O59 — construction runs in document order after the cells it reads",
       path: "app.scrml",
       src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
 <program>
-    <let startCountry:string="CA"/>
-    <let title:string="Country"/>
+    let <startCountry:string="CA"/>
+    let <title:string="Country"/>
     <main>
         <dropdown as=country label=(@title) options=(["US", "CA"]) value=(@startCountry)/>
         <p class="ship">\${@country.value}</p>
@@ -764,7 +792,7 @@ describe("O60 — a live use-site value to a LOCKED field that carries a grant S
     path: "app.scrml",
     src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
 <program>
-    <let startOpen:Openness=.Opened/>
+    let <startOpen:Openness=.Opened/>
     <main>
         <dropdown label="A" options=(["x", "y"]) open=(@startOpen)/>
         <button class="shut" onclick=(@startOpen = .Closed)>shut</button>
@@ -776,7 +804,7 @@ describe("O60 — a live use-site value to a LOCKED field that carries a grant S
   test("no E-DERIVED-WRITE: the library's own toggle stays a legal write", () => {
     const r = run([LIB(), app]);
     expect(codes(r)).toEqual([]);
-    const inst = r.core.decls[1].renders[0].data.kids[0];
+    const inst = r.core.decls[1].renders[0].data.kids.find((k) => k.variant !== "Text");   // dpa-045 fu4: whitespace Text kept
     expect(inst.variant).toBe("Instance");
     expect(inst.data.attrs.map((a) => a.field)).toEqual([0, 1, 3]);
   });
@@ -799,11 +827,11 @@ describe("O60 — a live use-site value to a LOCKED field that carries a grant S
 // F-B (review): `reset` restores THAT INSTANCE's initializer (L4 + L6 / §66.9).
 // ---------------------------------------------------------------------------
 describe("F-B — reset(@box.v) restores the instance's own initializer (D15 InitOf)", () => {
-  const src = `<box export let v:string="init"/>
+  const src = `<box:struct> export let <v:string="init"/> </>
 renders <p class="box"><span>\${v}</span><button class="set" onclick=(@box.v = "changed")>s</button><button class="reset" onclick=reset(@box.v)>r</button></p>
 
 <program>
-    <let src:string="live1"/>
+    let <src:string="live1"/>
     <main>
         <box v="start"/>
         <box/>
@@ -848,7 +876,7 @@ renders <p class="box"><span>\${v}</span><button class="set" onclick=(@box.v = "
 describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", () => {
   const cond = `<div if=@show><dropdown as=color label="C" options=(["red"])/></div>
         <dropdown as=country label="K" options=(["US"]) value="US"/>`;
-  const prog = (extraMarkup, fns = "") => appWith(`${cond}\n${extraMarkup}`, `    <let show:bool=false/>\n${fns}`);
+  const prog = (extraMarkup, fns = "") => appWith(`${cond}\n${extraMarkup}`, `    let <show:bool=false/>\n${fns}`);
 
   test("an un-narrowed read in markup is refused", () => {
     expect(codes(run([LIB(), prog("<p>${@color.value}</p>")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
@@ -861,7 +889,7 @@ describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", 
   });
 
   test("a narrowed read (`given c = @color :> { … c.value … }`) is accepted", () => {
-    const r = run([LIB(), prog("<p>x</p>", "    <let seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }")]);
+    const r = run([LIB(), prog("<p>x</p>", "    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }")]);
     expect(codes(r)).toEqual([]);
   });
 
@@ -884,7 +912,7 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
   const cond = `<div if=@show><dropdown as=color label="C" options=(["red", "blue"])/></div>
         <dropdown as=country label="K" options=(["US", "CA"]) value="US"/>`;
   const prog = (fns, show = "false", extra = "<p>x</p>") =>
-    appWith(`${cond}\n        ${extra}`, `    <let show:bool=${show}/>\n    <let seen:string=""/>\n${fns}`);
+    appWith(`${cond}\n        ${extra}`, `    let <show:bool=${show}/>\n    let <seen:string=""/>\n${fns}`);
   const fnStmts = (r, name) => r.core.fns.find((f) => f.sym.hint === name).body.stmts;
 
   test("a direct READ `@color.value` inside the block is accepted", () => {

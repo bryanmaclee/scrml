@@ -4,11 +4,11 @@
 < db src="./test.db" tables="posts">
 ${
   server function getPosts(category) {
-    return ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all()
+    return ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all() !{ _ :> [] }
   }
 }
 <div>
-  <button onclick=getPosts("tech")>Tech Posts</>
-  <button onclick=getPosts(not)>All Posts</>
+  <button onclick={ getPosts("tech") !{ .Transport(_) :> { return } } }>Tech Posts</>
+  <button onclick={ getPosts(not) !{ .Transport(_) :> { return } } }>All Posts</>
 </div>
 </>

@@ -1,0 +1,21 @@
+${
+    <trace> = ""
+    function note(v) { @trace = @trace + v + ";" }
+    type M:enum = { A(defer: string), B }
+    function go() { h(M.A("xy")) }
+    function h(m: M) {
+        match m {
+            .A(defer) :> {
+                defer [1].split("").forEach(note)
+                note("a")
+            }
+            .B :> {
+                note("b")
+            }
+        }
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

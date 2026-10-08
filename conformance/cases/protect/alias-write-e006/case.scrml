@@ -5,7 +5,7 @@
   <db src="app.db" protect="passwordHash" tables="users">
     ${
       function getUser(id) {
-        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         let h = u.passwordHash
         const o = {}
         const o2 = o
@@ -15,5 +15,5 @@
     }
   </db>
   <user> = not
-  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
 </program>

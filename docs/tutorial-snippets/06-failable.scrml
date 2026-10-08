@@ -50,9 +50,9 @@
       function save() {
         @phase = Phase.Saving
         persistUser(@form.name, @form.email) !{
-          | .EmptyName        :> { @phase = Phase.Errored("Name can't be empty.") ; return }
-          | .InvalidEmail(e)  :> { @phase = Phase.Errored("Not an email: " + e) ; return }
-          | .DuplicateEmail(e):> { @phase = Phase.Errored(e + " is already taken.") ; return }
+          .EmptyName        :> { @phase = Phase.Errored("Name can't be empty.") ; return }
+          .InvalidEmail(e)  :> { @phase = Phase.Errored("Not an email: " + e) ; return }
+          .DuplicateEmail(e):> { @phase = Phase.Errored(e + " is already taken.") ; return }
         }
         @phase = Phase.Saved
       }

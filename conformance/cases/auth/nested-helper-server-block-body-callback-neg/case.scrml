@@ -9,7 +9,7 @@ server function check(pw, hashes) {
   return r ? "accepted" : "rejected"
 }
 function go() {
-  @verdict = check("x", ["a"])
+  @verdict = check("x", ["a"]) !{ .Transport(_) :> { return } }
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>

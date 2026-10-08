@@ -45,9 +45,14 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
-import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
+import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
+import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw } from "../expression-parser.ts";
+import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { emitSqlQueryShape, emitNestedGuardExpr } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
@@ -131,31 +136,19 @@ export function setSessionShadowedInFile(on: boolean): void {
   _sessionShadowedInFile = !!on;
 }
 
-// §20.5 (B2.4, S266) — narrow module-level sink for session-builtin codegen
-// diagnostics raised during SERVER-mode expression emission. Carries two codes:
+// §20.5 (B2.4, S266) — session-builtin codegen refusals raised during SERVER-mode
+// expression emission. Two codes:
 //   • E-SESSION-VALUE — a bare `session` VALUE-use (`return session`, `let s =
 //     session`, `log(session)`, `session` as a call arg / assignment RHS): not a
 //     valid member/index/call of the builtin, would emit a bare `session` ref
 //     (ReferenceError at request time). Recorded by `emitIdent`.
 //   • E-SESSION-RESERVED-KEY (B5, S266) — a literal `session.set("csrfToken", …)`
 //     mass-assignment on the compiler-owned CSRF token. Recorded by `emitCall`.
-// Both have the precise `mode` + shadow context at the emission site; `generateServerJs`
-// drains them into the live `errors` array after emission (reset at the same start
-// seam), mirroring emit-server's `_foreignCrossingErrors` narrow-sink precedent.
-// Bounded to the server-emit window: reset-at-start + drain-at-end in emit-server.
-let _sessionValueUseErrors: CGError[] = [];
-
-/** Reset the E-SESSION-VALUE sink (called at the start of server emission). */
-export function resetSessionValueUseErrors(): void {
-  _sessionValueUseErrors = [];
-}
-
-/** Drain + clear the accumulated E-SESSION-VALUE diagnostics (post server emit). */
-export function drainSessionValueUseErrors(): CGError[] {
-  const out = _sessionValueUseErrors;
-  _sessionValueUseErrors = [];
-  return out;
-}
+// Both are recorded in the run-wide refused-lowering sink (refused-lowering-errors.ts,
+// drained by runCG). Until s456 they had their own sink, reset + drained only by
+// `generateServerJs` — so a refusal raised by the `kind="tool"` / library emitters
+// (server-mode too) was never drained: `const s = session` in a tool `main`
+// compiled exit 0 with only the placeholder in the artifact.
 
 // §32 / §47 (S397) — module-level sink for E-CG-TILDE-UNRESOLVED, the fail-closed
 // floor under the `~` accumulator.
@@ -167,14 +160,13 @@ export function drainSessionValueUseErrors(): CGError[] {
 // four — the `~` orphan arises deep inside client-mode expression emission, on
 // paths that build a context without one. Threading `errors` through every one of
 // those constructors is a far larger change than this arc's fence allows, and it
-// would be the wrong shape anyway: this is the same narrow-sink pattern
-// `_sessionValueUseErrors` (above) and emit-server's `_foreignCrossingErrors`
-// already establish for exactly this situation.
+// would be the wrong shape anyway: a module-level sink is the shape every refusal
+// that can be reached from an opts-less context needs (see also the run-wide
+// refused-lowering-errors.ts).
 //
-// LIFECYCLE, and it is WIDER than the session sink's deliberately: reset ONCE at
+// LIFECYCLE: reset ONCE at
 // the top of `runCG` and drained TWICE — in the per-file loop's `finally` and again
-// immediately before `runCG` returns. The session sink is bounded to the server-emit
-// window because `session` is a server builtin; a `~` orphan is mode-agnostic (every
+// immediately before `runCG` returns. A `~` orphan is mode-agnostic (every
 // measured occurrence is CLIENT-mode) and can arise in the tool, library and browser
 // emit paths, each of which leaves the per-file loop by a different `continue`. A
 // drain placed at any single one of those exits would silently lose the others.
@@ -189,6 +181,31 @@ export function resetTildeUnresolvedErrors(): void {
 export function drainTildeUnresolvedErrors(): CGError[] {
   const out = _tildeUnresolvedErrors;
   _tildeUnresolvedErrors = [];
+  return out;
+}
+
+// §19.4.3 (S454) — module-level sink for an expression-position `!{}` handler
+// that cannot be lowered (an arm that LEAVES from inside an expression; arms
+// that do not parse): E-CG-003. Same reason and lifecycle as the `~` sink above —
+// the handler is reached through expression contexts built without an error
+// channel (an `if` condition, a `match` scrutinee, a handler arrow), in every
+// emit path — so it is reset once at the top of `runCG` and drained beside it.
+let _exprGuardErrors: CGError[] = [];
+
+/** Record an unlowerable expression-position `!{}` handler (emit-logic emitNestedGuardExpr). */
+export function recordExprGuardError(err: CGError): void {
+  _exprGuardErrors.push(err);
+}
+
+/** Reset the expression-position `!{}` sink (called once at the start of `runCG`). */
+export function resetExprGuardErrors(): void {
+  _exprGuardErrors = [];
+}
+
+/** Drain + clear the accumulated expression-position `!{}` diagnostics. */
+export function drainExprGuardErrors(): CGError[] {
+  const out = _exprGuardErrors;
+  _exprGuardErrors = [];
   return out;
 }
 
@@ -328,6 +345,15 @@ export interface EmitExprContext {
   dbVar?: string;
   /** Error accumulator for diagnostics. */
   errors?: any[];
+  /**
+   * S454 — the statement-emitter options this context was made from
+   * (emit-logic `_makeExprCtx`). An expression-position `?{}` query and an
+   * expression-position `!{}` handler lower through the statement emitter with
+   * THESE options (the db handle, the peer-await sets, the error sinks), so the
+   * query is lowered exactly as the same query in statement position. Absent on
+   * contexts built elsewhere; the lowering then derives options from this context.
+   */
+  logicOpts?: unknown;
   /**
    * C13 (§51.0.G) — engine variable names in the file's scope. When set and
    * the call shape is `@<name>.advance(<arg>)` with `<name>` in this set,
@@ -1221,6 +1247,10 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
       // Gated on `_currentUserAmbientActive` (no user `<currentUser>` cell shadows
       // the name) so a corpus cell named `currentUser` keeps the request-body form.
       if (bare === "currentUser" && _currentUserAmbientActive) return `${_m}_scrml_currentUser`;
+      // §6.6.9 / §20.5 (S449) — fail-closed backstop: an ambient `@session` is
+      // never lowered to the request body (server-session-guard.ts). The front
+      // end refuses it first (E-SESSION-AMBIENT-SERVER).
+      if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr emitIdent", node.span)}`;
       return `${_m}_scrml_body["${bare}"]`;
     }
     // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
@@ -1406,7 +1436,7 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
     name === "session" &&
     !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
   ) {
-    _sessionValueUseErrors.push(new CGError(
+    recordRefusedLowering(new CGError(
       "E-SESSION-VALUE",
       "E-SESSION-VALUE: `session` is not a value — it is the request-scoped session " +
       "establishment builtin. Access a field (`session.userId` / `session.role` / " +
@@ -1414,9 +1444,9 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
       "`session.destroy()`. `session` cannot be returned, assigned, passed as an " +
       "argument, or otherwise used as a first-class value. (If you meant a local " +
       "variable, declare it under a different name — `session` is reserved.)",
-      node.span ?? { start: 0, end: 0 },
+      _tildeDiagSpan(node),
       "error",
-    ));
+    ), node);
     return "undefined /* E-SESSION-VALUE: `session` is not a value */";
   }
 
@@ -1649,6 +1679,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
       if (ctx.mode === "server") {
         // Server boundary: @x is `_scrml_body["x"]` (a plain assignment lvalue).
         // Postfix on a member expression IS valid JS, so emit as-is.
+        // §6.6.9 (S449 review F4) — never the request body for an ambient `@session`.
+        if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr update", node.span)}${node.op}`;
         return `${_m}_scrml_body["${bare}"]${node.op}`;
       }
       const sign = node.op === "++" ? "+" : "-";
@@ -1904,7 +1936,7 @@ function isTrivialIsLhs(left: ExprNode): boolean {
 //     so the same name reused across callsites does NOT collide.
 //   * Length is intentionally short to keep output compact while preserving
 //     the `__scrml_` prefix collision-shield.
-const IS_OP_IIFE_LOCAL = "__scrml_is_v";
+// (Defined in is-predicate-lowering.ts — `IS_OP_IIFE_LOCAL` — with the lowering itself.)
 
 // ---------------------------------------------------------------------------
 // g-paren-binary-group-dropped-before-method (ss3, S210) — receiver-paren guard.
@@ -2605,29 +2637,24 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
     // esized form. That path remains intact for the older code paths still
     // routing through string rewrites; this AST emit path now matches the
     // single-eval guarantee for the same shapes.
+    // The lowering itself is shared with the string path (rewrite.ts) so the
+    // two cannot drift — is-predicate-lowering.ts (#1333).
     case "is-not": {
       if (isTrivialIsLhs(node.left)) {
         const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-        return `(${lhs} === null || ${lhs} === undefined)`;
+        return lowerAbsenceCheck(lhs, true);
       }
       // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
-      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} === null || ${IS_OP_IIFE_LOCAL} === undefined)(${left})`;
+      return lowerAbsenceCheck(left, false);
     }
-    case "is-some": {
-      if (isTrivialIsLhs(node.left)) {
-        const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-        return `(${lhs} !== null && ${lhs} !== undefined)`;
-      }
-      // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
-      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} !== null && ${IS_OP_IIFE_LOCAL} !== undefined)(${left})`;
-    }
+    case "is-some":
     case "is-not-not": {
       if (isTrivialIsLhs(node.left)) {
         const lhs = needsIsLhsParenWrap(node.left) ? `(${left})` : left;
-        return `(${lhs} !== null && ${lhs} !== undefined)`;
+        return lowerPresenceCheck(lhs, true);
       }
       // Non-trivial LHS: single-eval IIFE wrap (SPEC §42.2.4 Phase B-2).
-      return `((${IS_OP_IIFE_LOCAL}) => ${IS_OP_IIFE_LOCAL} !== null && ${IS_OP_IIFE_LOCAL} !== undefined)(${left})`;
+      return lowerPresenceCheck(left, false);
     }
 
     // §43 enum membership: x is .Variant → x === "Variant" (unit variant) OR
@@ -2660,7 +2687,7 @@ function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
       // pattern matches `_scrml_engine_variant_tag` from the runtime template
       // but is inlined here so server boundary + escape-hatch contexts
       // don't depend on the runtime helper being in scope.
-      return `(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === ${rhs};})(${left})`;
+      return lowerVariantCheck(left, rhs);
     }
 
     default: {
@@ -2705,6 +2732,11 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   if (target.kind === "ident" && target.name.startsWith("@")) {
     const bare = target.name.slice(1);
     if (ctx.mode === "server") {
+      // §6.6.9 (S449 review F4) — `@session = …` / `@session ??= …` never touch
+      // the request body (fail-closed backstop, server-session-guard.ts).
+      if (isServerAmbientSession(bare)) {
+        return `${srcmapMark(node.span, bare)}${refuseServerAmbientSession("emit-expr assignment", node.span)} ${node.op} ${value}`;
+      }
       return `${srcmapMark(node.span, bare)}_scrml_body["${bare}"] ${node.op} ${value}`;
     }
     // §51.0.F (Option A comprehensive engine-routing) — when the LHS is an
@@ -3081,6 +3113,21 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
+  // §19.4.3 / §19.8.3 (S454) — an expression-position `!{ … }` handler
+  // (`<operand> .__scrml_guard__("!{ … }")`, expression-parser
+  // extractHandledOperands). Lowered by the statement emitter's guard machinery.
+  const guardRaw = guardCallArmsRaw(node);
+  if (guardRaw !== null && node.callee.kind === "member") {
+    return emitExpressionGuard(node.callee.object, guardRaw, ctx);
+  }
+  // §19.8.3 (S454) — an expression-position `?{}` query with its chain
+  // (`?{…}.get()`). Server boundary: lowered exactly as the same query in
+  // statement position. Client: unchanged placeholder (a query never ships
+  // to the client; route inference server-places the function).
+  if (ctx.mode === "server") {
+    const sqlShape = sqlQueryExprShape(node);
+    if (sqlShape !== null) return emitExpressionSqlQuery(sqlShape, ctx);
+  }
   // §14.12.6.3 (S131 — HU-2 hybrid) — `transition(<ident>)` is a compile-time-
   // only marker for lifecycle progression. The type-system walker consumes it
   // symbolically (per checkLifecycleBindingAccess); codegen emits ZERO runtime
@@ -3456,8 +3503,50 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       const { getVariantFieldSchemaFromRewriter } = require("./rewrite.ts") as {
         getVariantFieldSchemaFromRewriter: (variantName: string) => string[] | null;
       };
-      const fieldNames = getVariantFieldSchema(variantName)
-        ?? getVariantFieldSchemaFromRewriter(variantName);
+      // §14.10 / S438 review F2 — TS resolved this bare variant against its
+      // position's type (annotation, param, return, field) and stamped THAT
+      // enum's field list; it wins over the by-name registries, where a
+      // same-named variant of another enum can shadow it.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isShadowedVariantName } = require("./emit-control-flow.ts") as {
+        isShadowedVariantName: (variantName: string) => boolean;
+      };
+      const stamped = (ident as unknown as { __variantFields?: unknown }).__variantFields;
+      // S438 review N3 — a name BOTH a local enum and an imported enum declare
+      // with different fields, at a position TS did not type (a reassignment, a
+      // match-arm result, …): picking the local enum by name (pre-F11) is a
+      // silent guess the matching side now contradicts. Never guess: §14.10's
+      // E-VARIANT-AMBIGUOUS, the same resolution the typed positions apply.
+      if (!Array.isArray(stamped) && isShadowedVariantName(variantName)) {
+        _tildeUnresolvedErrors.push(new CGError(
+          "E-VARIANT-AMBIGUOUS",
+          `E-VARIANT-AMBIGUOUS: Bare variant \`.${variantName}\` is declared by a local enum AND by an ` +
+          `imported enum with different payload fields, and this position does not fix which one is ` +
+          `meant (§14.10). Qualify the constructor — write \`<Enum>.${variantName}(…)\` naming the enum ` +
+          `you mean.`,
+          _tildeDiagSpan(ident),
+          "error",
+        ));
+        return `undefined /* E-VARIANT-AMBIGUOUS: .${variantName} */`;
+      }
+      // S446 — an UNSTAMPED constructor: TS did not type its position (a call
+      // argument whose callee is in another file / untyped / a method, an
+      // untyped return, an untyped reassignment). A variant name only an
+      // IMPORTED enum declares is then a guess — the by-name hit need not be
+      // the enum the value flows into (`yOf(mk())` with `fn mk() { return
+      // .Neg(6) }`, `yOf(o: Other)` elsewhere, `Expr.Neg(x)` imported) — so it
+      // is left unlowered (the pre-F11 loud `"V"(…)`), never a silent wrong
+      // payload. Local enum names keep the pre-F11 by-name lookup.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isImportedOnlyVariantName } = require("./emit-control-flow.ts") as {
+        isImportedOnlyVariantName: (variantName: string) => boolean;
+      };
+      const byNameRefused = !Array.isArray(stamped) && isImportedOnlyVariantName(variantName);
+      const fieldNames = Array.isArray(stamped)
+        ? (stamped as string[])
+        : byNameRefused
+          ? null
+          : (getVariantFieldSchema(variantName) ?? getVariantFieldSchemaFromRewriter(variantName));
       if (fieldNames !== null) {
         // Emit `{ variant: "X", data: { field0: arg0, field1: arg1, ... } }`.
         // Truncate to min(args.length, fieldNames.length) so an over-long
@@ -3736,16 +3825,16 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       (node.args[0] as LitExpr).litType === "string" &&
       (node.args[0] as LitExpr).value === "csrfToken"
     ) {
-      _sessionValueUseErrors.push(new CGError(
+      recordRefusedLowering(new CGError(
         "E-SESSION-RESERVED-KEY",
         "E-SESSION-RESERVED-KEY: `csrfToken` is a compiler-owned session key (the " +
         "§40.2 server-authoritative CSRF synchronizer token) and cannot be set via " +
         "`session.set(\"csrfToken\", …)`. Writing it would let a caller pin the CSRF " +
         "token to a known value, defeating the double-submit check. Remove the write; " +
         "the compiler mints + persists the token. (`userId` / `role` remain writable.)",
-        node.span ?? { start: 0, end: 0 },
+        _tildeDiagSpan(node as unknown as IdentExpr),
         "error",
-      ));
+      ), node);
     }
     // Lowered unconditionally in server mode; emit-server's post-emission scan
     // (S239 FIX 6) fires E-SESSION-CONTEXT if this `_scrml_req._scrml_sess` ref
@@ -4494,7 +4583,31 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   return emitStructuredMatchExpr(bridgedNode, { errors: ctx.errors });
 }
 
+/**
+ * §19.8.3 (S454) — lower an expression-position `?{}` query through the
+ * statement emitter's `case "sql"` (the ONE query lowering: db handle, param
+ * rendering + peer awaits, §14.8.10 tenant floor, §14.8.9 protect tags, §39.4
+ * bool coercion). Server boundary only (callers check `ctx.mode`).
+ */
+function emitExpressionSqlQuery(shape: SqlQueryExprShape, ctx: EmitExprContext): string {
+  return emitSqlQueryShape(shape, ctx);
+}
+
+/**
+ * §19.4.3 / §19.8.3 (S454) — lower an expression-position `<operand> !{ … }`
+ * handler to an expression (emit-logic `emitNestedGuardExpr`).
+ */
+function emitExpressionGuard(operand: ExprNode, rawArms: string, ctx: EmitExprContext): string {
+  return emitNestedGuardExpr(operand, rawArms, ctx);
+}
+
 function emitSqlRef(node: SqlRefExpr, _ctx: EmitExprContext): string {
+  // §19.8.3 (S454) — a bare expression-position `?{…}` (no terminator) that
+  // carries its source: lower it like the same bare query in statement position.
+  if (_ctx.mode === "server") {
+    const sqlShape = sqlQueryExprShape(node);
+    if (sqlShape !== null) return emitExpressionSqlQuery(sqlShape, _ctx);
+  }
   // TODO(Phase 3 Slice 4): structured SQL ref emission
   // SqlRefExpr carries a nodeId referencing the SQLNode — codegen resolves this
   // at the file level. For now, return a placeholder that the outer emitter

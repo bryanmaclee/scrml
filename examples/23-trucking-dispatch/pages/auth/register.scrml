@@ -53,6 +53,11 @@
                 VALUES (${userRow.id}, ${nameArg}, ${emailArg}, ${contactPhoneArg}, ${billingAddressArg}, 'net_30', 'active')
             `}.run()
 
+            // The FRAMEWORK session (§20.5.1) — what `<program auth="required">` checks.
+            session.set("userId", userRow.id)
+            session.set("role", "customer")
+
+            // The app's own page-level token (each page's getCurrentUser reads it).
             const token = generateToken(32)
             const store = createSessionStore(SESSION_DB_PATH)
             store.set(token, userRow.id, SESSION_TTL_SECONDS)
@@ -60,7 +65,7 @@
             return {
                 token: token,
                 user: userRow,
-                redirectTo: "/customer"
+                redirectTo: "/customer/home"
             }
         }
 
@@ -140,7 +145,7 @@
 
         <p class="text-sm text-slate-600 text-center mt-6">
           Already registered?
-          <a href="/login" class="text-blue-600 hover:underline">Sign in</a>.
+          <a href="/auth/login" class="text-blue-600 hover:underline">Sign in</a>.
         </p>
       </div>
     </div>

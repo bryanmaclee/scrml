@@ -1,0 +1,11 @@
+<program>
+${
+  function take(n: number.min(0).max(100)) {
+    return n
+  }
+  function relay(v) {
+    return take(v)
+  }
+}
+<p>${relay(5)}</p>
+</program>

@@ -83,11 +83,11 @@ ${
     // ─── Server functions ──────────────────────────────────────────────────────
 
     server function fetchUsers() {
-        return ?{`SELECT id, name, email FROM users ORDER BY name`}.all()
+        return ?{`SELECT id, name, email FROM users ORDER BY name`}.all() !{ _ :> [] }
     }
 
     server function fetchOrders() {
-        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC`}.all()
+        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC`}.all() !{ _ :> [] }
     }
 
     server function fetchMetrics() {
@@ -97,31 +97,31 @@ ${
                 SUM(amount) as total_revenue,
                 AVG(amount) as avg_order
             FROM orders
-        `}.get()
+        `}.get() !{ _ :> not }
     }
 
     server function createOrder(item, amount) {
         ?{`INSERT INTO orders (item, amount) VALUES (${item}, ${amount})`}.run()
-        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 1`}.get()
+        return ?{`SELECT id, item, amount, created_at FROM orders ORDER BY created_at DESC LIMIT 1`}.get() !{ _ :> not }
     }
 
     // ─── Load functions — each transitions its own state machine ──────────────
 
     function loadUsers() {
         @usersState = UsersRemote.Loading
-        let result = fetchUsers()
+        let result = fetchUsers() !{ .Transport(_) :> { return } }
         @usersState = UsersRemote.Ready(result)
     }
 
     function loadOrders() {
         @ordersState = OrdersRemote.Loading
-        let result = fetchOrders()
+        let result = fetchOrders() !{ .Transport(_) :> { return } }
         @ordersState = OrdersRemote.Ready(result)
     }
 
     function loadMetrics() {
         @metricsState = MetricsRemote.Loading
-        let result = fetchMetrics()
+        let result = fetchMetrics() !{ .Transport(_) :> { return } }
         @metricsState = MetricsRemote.Ready(result)
     }
 
@@ -141,7 +141,7 @@ ${
         @newOrderItem   = ""
         @newOrderAmount = ""
 
-        let confirmed = createOrder(item, amount)
+        let confirmed = createOrder(item, amount) !{ .Transport(_) :> { return } }
 
         // Server returned the real row — transition to Committed
         // then immediately refresh the orders list so everything is consistent

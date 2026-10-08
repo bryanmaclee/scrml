@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // The bug shape: `<each in=@CELL>` over a SAME-PROGRAM cell, NO `<empty>` block.
 const NONEMPTY_SRC = `<program>
@@ -63,7 +64,7 @@ type Item:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-init-order");
+const tmpRoot = resolve(tmpdir(), "scrml-each-init-order");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -112,7 +113,7 @@ describe("each-render-before-cell-init §1 — emit ordering (cell-init before d
 
   test("the NO-<empty> render path carries an undefined guard (if (!_items))", () => {
     const { clientJs } = compileToOutputs(NONEMPTY_SRC, "no-empty");
-    expect(clientJs).toMatch(/if \(!_items\) \{\s*_scrml_each_clear\(_mount\);\s*return;\s*\}/);
+    expect(clientJs).toMatch(/if \(!_scrml_items\) \{\s*_scrml_each_clear\(_scrml_mount\);\s*return;\s*\}/);
   });
 });
 

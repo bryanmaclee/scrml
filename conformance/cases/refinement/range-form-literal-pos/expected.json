@@ -1,0 +1,12 @@
+{
+  "id": "refinement-range-form-literal-pos",
+  "description": "S458: the §53.2.1 range form `number(0 < value < 10)` is read (it used to resolve to an untyped annotation — no check and no diagnostic). The literal 20 fails `value < 10`, so the static zone fires E-CONTRACT-001.",
+  "language-version": "1.0",
+  "spec": "§53.2.1",
+  "rationale": "§53.2.1: `comparison-predicate = ... | numeric-literal comparison-op \"value\" comparison-op numeric-literal`; §53.11: E-CONTRACT-001 when a literal demonstrably fails the predicate.",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": ["E-CONTRACT-002"],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

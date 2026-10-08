@@ -1,0 +1,13 @@
+{
+  "id": "server-db-reserved-prefix-raw-driver-pos",
+  "description": "§47.1.1 (S439 #7 + S440 #9, security) — a server function calls the compiler's raw database handle `_scrml_sql` directly. Before the check this compiled clean and ran the query with no `?{}`-lowering floor (no §14.8.10 tenant filter, no §14.8.9 protect tagging, no transaction gate). A reference to a `_scrml_`-prefixed name is a compile error. (-pos: the code fires.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/reserved-prefix-e-name-collides.test.js",
+  "spec": "§47.1.1",
+  "rationale": "§47.1.1 S440 ruling (#9): a user-authored scrml program SHALL NOT reference a name that begins with `_scrml_` — the reservation covers references as well as declarations, under E-NAME-COLLIDES-RESERVED-PREFIX. The `_scrml_` prefix names compiler/runtime identifiers.",
+  "expect": {
+    "codes": ["E-NAME-COLLIDES-RESERVED-PREFIX"],
+    "codeCounts": { "E-NAME-COLLIDES-RESERVED-PREFIX": 1 },
+    "severity": { "E-NAME-COLLIDES-RESERVED-PREFIX": "error" }
+  }
+}

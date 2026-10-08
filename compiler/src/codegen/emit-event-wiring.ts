@@ -1,4 +1,5 @@
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
+import { wrapUrlGuard } from "./url-attr-guard.ts";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitHandlerStatementList } from "./emit-logic.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix } from "./emit-expr.ts";
@@ -20,7 +21,8 @@ import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncFunctionExpr, unanalyzableHandlerUses } from "./js-async-analysis.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, type ColorOpts } from "./js-async-analysis.ts";
+import { _clientSseFnNames } from "./scheduling.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
 
@@ -97,6 +99,8 @@ interface LogicBinding {
    * while only the first two were declared. Nothing caught it: no tsconfig
    * covers `compiler/`, so this interface is unchecked documentation. Keep it
    * complete by hand — it is the only description of the shape this file reads.
+   * (S454: `scripts/types-gate.ts`, now a BLOCKING CI step, does type-check this
+   * file — a read of an undeclared field is a NEW TS2339 there.)
    */
   isReactiveValueAttr?: boolean;
   valueAttrName?: string;
@@ -104,6 +108,10 @@ interface LogicBinding {
   valueAttrKey?: string;
   /** `value` on input/textarea/select → write the live `.value` PROPERTY. */
   valueAttrIsFormValue?: boolean;
+  /** §5.2 rule 3 (S457): a URL attribute on its element → the write goes through `_scrml_safe_url`. */
+  valueAttrUrlGuard?: boolean;
+  /** S457: an SVG animation value → the animated URL attribute, the guard's 4th argument. */
+  valueAttrUrlGuardTarget?: string;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -128,7 +136,10 @@ interface LogicBinding {
    * A1c C11: `errors-element` discriminates the `<errors of=expr/>` first-class
    * element binding (SPEC §55.8 / L13).
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "errors-element" | "render-element";
+  // The full discriminator set binding-registry.ts declares (this file branches on every one).
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content" | "lift-host";
+  /** `kind === "lift-host"` — the host-parameterised lift group fn name. See binding-registry.ts. */
+  liftMountFn?: string;
   chainId?: string;
   branchId?: string;
   branchIndex?: number;
@@ -432,18 +443,28 @@ function buildServerFnNames(fnNameMap: Map<string, string>): Set<string> {
  * @param el          the element variable (default `el`). The arm wire fn passes
  *   a `_scrml_`-prefixed spelling when an arm name is itself `el`
  *   (g-arm-directive-binding-reads-arm-name round 2).
+ * @param urlGuard    §5.2 rule 3 (S457) — the attribute is a URL on its element
+ *   (`binding.valueAttrUrlGuard`, stamped by emit-html): the written string goes
+ *   through `_scrml_safe_url`, which returns it unchanged when its scheme is
+ *   admitted and `"about:blank"` (plus a log report) when it is not. Absence still
+ *   removes the attribute.
+ * @param urlGuardTarget S457 — for an SVG animation value (`binding.valueAttrUrlGuardTarget`):
+ *   the animated URL attribute, passed to the guard as its 4th argument.
  */
 export function emitValueAttrApply(
   compiled: string,
   attrName: string,
   isFormValue: boolean,
-  el = "el",
+  el = "_scrml_el",
+  urlGuard = false,
+  urlGuardTarget: string | null = null,
 ): string {
+  const strValue = urlGuard ? wrapUrlGuard(el, attrName, "String(_scrml_x)", urlGuardTarget) : "String(_scrml_x)";
   const write = isFormValue
     ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : String(_scrml_x); ` +
       `if (${el}.value !== _scrml_s) { ${el}.value = _scrml_s; }`
     : `if (_scrml_x === null || _scrml_x === undefined) { ${el}.removeAttribute(${JSON.stringify(attrName)}); } ` +
-      `else { ${el}.setAttribute(${JSON.stringify(attrName)}, String(_scrml_x)); }`;
+      `else { ${el}.setAttribute(${JSON.stringify(attrName)}, ${strValue}); }`;
   return (
     `{ const _scrml_w = function(_scrml_x) { ${write} }; ` +
     `const _scrml_v = (${compiled}); ` +
@@ -475,11 +496,11 @@ function exprUsesServerFn(expr: string, serverFnNames: Set<string>): boolean {
  * is lifted to `_scrml_<m>Async`; everything the compiler cannot await, and every
  * async function used as a value, is reported. Unparseable text is left unchanged.
  */
-function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext): string {
+function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext, opts: ColorOpts = {}): string {
   if (!handlerExpr) return handlerExpr;
   const facts = clientAsyncFactsOf(ctx);
   const resolveFree = freeAsyncResolverFromFacts(facts);
-  const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree);
+  const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree, opts);
   if (!colored) {
     // s441 fix round — fail CLOSED on handler text the analysis cannot read.
     const u = unanalyzableHandlerUses(handlerExpr, resolveFree);
@@ -510,6 +531,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   //     event is non-delegable. Delegable events (click, submit) survive
   //     innerHTML replace via document-level delegation, so they stay in
   //     the global delegation registry regardless of arm tag.
+  // S446 — §36 SSE generator fns keep the arg1 skip in a statement-list handler.
+  const sseFnNames = ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null;
   const eventBindings = allEventBindings.filter((b) => {
     if (!b.engineArm) return true;
     const domEvent = (b.eventName || "").replace(/^on/, "");
@@ -1180,8 +1203,25 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
       }
     } else {
-      // call-ref path: resolve handler name and serialize arguments
-      // Resolve the handler: check fnNameMap first, fall back to original name
+      // call-ref path: serialize arguments and build the listener.
+      //
+      // S454 (bryan: "a yes, b yes, root fix") — the listener text is built
+      // with the AUTHOR name (`handlerName`), NOT the mangled
+      // `fnNameMap.get(handlerName)`. Async colouring (`colorHandlerAsync`
+      // below → `outerAsyncRootFromFacts`) resolves callees by author name, as
+      // every other handler form presents them; the emit-client
+      // `post-fn-name-mangle` pass rewrites the author name to its
+      // `_scrml_<name>_N` / `_scrml_fetch_<name>_N` form afterwards, exactly as
+      // it does for `onclick=${fn()}`. Substituting the mangled name HERE (the
+      // pre-S454 code) hid an async callee from the colouring, so
+      // `onclick=fn()` emitted a sync `function(event) { fn(); }` whose
+      // rejection escaped scrml's logging surface while `onclick=${fn()}`
+      // emitted the S453 A3 wrapper. Both forms now run one pipeline and emit
+      // the same listener. A sync callee is byte-identical (the post-pass
+      // produces the same name the substitution did).
+      //
+      // `resolvedHandler` is kept ONLY for the bare-ref form's direct
+      // reference below, which is a value position the colouring never sees.
       const resolvedHandler = fnNameMap.get(handlerName) || handlerName;
 
       // §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parens, no
@@ -1191,8 +1231,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // (that is the call-ref `fn()` form below). The wired listener receives
       // the DOM event as its argument. handlerArgs are always empty for this
       // form (a bare identifier has no parenthesized args).
+      //
+      // S454 — EXCEPT when `handler` is async-coloured: wired directly, its
+      // returned promise is discarded by the event dispatch and a rejection
+      // escapes scrml's logging surface (§19.6.8, every handler form). Then
+      // the listener is the coloured `function(event) { handler(event); }` —
+      // still handed the DOM event, so the form's meaning is unchanged — which
+      // carries the S453 rejection arm. A sync `handler` stays the direct
+      // reference, byte-identical.
       if (binding.bareRefHandler) {
-        handlerExpr = resolvedHandler;
+        const forwarded = `function(event) { ${handlerName}(event); }`;
+        const coloredRef = colorHandlerAsync(forwarded, binding.span, ctx, {
+          boundaryId: `${eventName} ${placeholderId}`,
+        });
+        handlerExpr = coloredRef !== forwarded ? coloredRef : resolvedHandler;
         if (!byEventType.has(eventName)) byEventType.set(eventName, []);
         byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
         continue;
@@ -1210,11 +1262,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       //   3. invoke the handler with the collected `values` — the compound cell
       //      value `_scrml_reactive_get("<cell>")` — so the server/client fn
       //      receives `values: StructType` per its declared signature.
-      // `resolvedHandler` already routes server fns through their `_scrml_fetch_*`
-      // wrapper (fnNameMap), which itself takes `(values)`. Emitted shape:
+      // The author name is routed through its `_scrml_fetch_*` wrapper (which
+      // itself takes `(values)`) by the post-fn-name-mangle pass. Shape BEFORE
+      // colouring (post-mangle):
       //   function(event) { event.preventDefault();
       //     _scrml_reactive_set("signup.submitted", true);
       //     _scrml_fetch_persistSignup_14(_scrml_reactive_get("signup")); }
+      // S454 — this listener now goes through `colorHandlerAsync` like every
+      // other call-ref (it used to `continue` past it), so a server-fn callee
+      // is awaited inside the S453 rejection arm instead of being fired
+      // unobserved. `preventDefault()` stays in the synchronous prefix, before
+      // the first `await`.
       if (binding.formForSubmitCell) {
         const ffCell = binding.formForSubmitCell;
         const encodedCell = encodingCtx && encodingCtx.enabled ? encodingCtx.encode(ffCell) : ffCell;
@@ -1223,11 +1281,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         handlerExpr =
           `function(event) { event.preventDefault(); ` +
           `_scrml_reactive_set(${JSON.stringify(submittedKey)}, true); ` +
-          `${resolvedHandler}(${valuesArg}); }`;
-        if (!byEventType.has(eventName)) byEventType.set(eventName, []);
-        byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
-        continue;
-      }
+          `${handlerName}(${valuesArg}); }`;
+      } else {
 
       // S97 — reactive-method-call shape detection.
       //
@@ -1309,12 +1364,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (cancelTimerLowered !== null) {
         handlerExpr = `function(event) { ${preventLine}${cancelTimerLowered}; }`;
       } else {
-        // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
-        // `function(event) { fn(); }` — `fn` is invoked with the user's
-        // declared args (none for bare-call zero-args). The wrapper STILL
-        // takes `event` as its parameter (so it satisfies the listener
-        // signature), but does NOT forward it into `fn`. The escape-hatch
-        // for "needs event" is `onclick=${(e) => fn(e)}` per §5.2.2 line 1123.
+        // SPEC §5.2.2 normative: `onclick=fn()` wires `fn` as the handler,
+        // invoked with the user's declared args (none for bare-call zero-args)
+        // when the event fires, not at render time. The wrapper takes `event`
+        // as its parameter (so it satisfies the listener signature), but does
+        // NOT forward it into `fn`. The escape-hatch for "needs event" is
+        // `onclick=${(e) => fn(e)}` per §5.2.2.
         //
         // S96 Bug 14 fix — pre-fix code at this site cited "tutorial §1.5:
         // passes the native event implicitly" + a locked test
@@ -1322,9 +1377,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // not normative (Rule 4); locked test was locking spec-divergent
         // behavior. User explicitly chose option-1-spec-wins. Tutorial §1.5
         // also needs alignment.
-        handlerExpr = `function(event) { ${preventLine}${resolvedHandler}(${argsStr}); }`;
+        //
+        // S454 — the AUTHOR name, so the colouring below sees the callee (see
+        // the note at the top of this call-ref path).
+        handlerExpr = `function(event) { ${preventLine}${handlerName}(${argsStr}); }`;
       }
       } // close S97 reactive-method-call else branch
+      } // close formFor-submit else branch
     }
 
     // s441 (g-server-call-in-inline-handler-condition-unawaited) — §13.2 in a
@@ -1332,7 +1391,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // becomes `async`), an async callback of a clean-family method is lifted to
     // its awaited combinator, and an async call that cannot be awaited — or an
     // async function used as a value (S440 F4) — fails closed.
-    handlerExpr = colorHandlerAsync(handlerExpr, binding.span, ctx);
+    // S446 (S439 #4) — a statement-list handler awaits a server-call cell write
+    // in place, so the next statement sees the resolved value (see ColorOpts).
+    // S453 (bryan S449 A3) — `boundaryId` names the event and the handler site,
+    // so a logged rejection points at one listener. This ONE call covers all
+    // three registrations: the delegated `document.addEventListener` registry,
+    // the non-delegable per-element `addEventListener`, and the arm/row-bound
+    // factory (`armFactoryLines` returns this same `handlerExpr`).
+    handlerExpr = colorHandlerAsync(
+      handlerExpr, binding.span, ctx,
+      {
+        ...handlerStatementListColor(binding.handlerBlock?.stmts, sseFnNames),
+        boundaryId: `${eventName} ${placeholderId}`,
+      },
+    );
 
     if (!byEventType.has(eventName)) {
       byEventType.set(eventName, []);
@@ -1452,7 +1524,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // would be shadowed by the element. The shared lowerings spell their element
   // reference `armEl()`, which is `el` everywhere except inside a capture.
   let armCapture: LogicBinding | null = null;
-  const armEl = (): string => (armCapture ? "_scrml_el" : "el");
+  const armEl = (): string => "_scrml_el";
   const armLogicFactoryLines: string[] = [];
   const emitArmLogicFactory = (b: LogicBinding, selector: string, body: string[]): void => {
     const params = ["_scrml_root", ...(b.armParams ?? [])].join(", ");
@@ -1469,13 +1541,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     if (armCapture) { emitArmLogicFactory(armCapture, selector, body); return; }
     const wrap = (scope: string, sink: string[], ind: string): void => {
       sink.push(`${ind}{`);
-      sink.push(`${ind}  const el = ${scope}.querySelector('${selector}');`);
-      sink.push(`${ind}  if (el) {`);
+      sink.push(`${ind}  const _scrml_el = ${scope}.querySelector('${selector}');`);
+      sink.push(`${ind}  if (_scrml_el) {`);
       for (const b of body) sink.push(`${ind}    ${b}`);
       sink.push(`${ind}  }`);
       sink.push(`${ind}}`);
     };
-    if (rebind) wrap("(root || document)", reactiveRewire, "    ");
+    if (rebind) wrap("(_scrml_root || document)", reactiveRewire, "    ");
     else wrap("document", lines, "  ");
   };
   const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void =>
@@ -1502,7 +1574,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       return;
     }
     for (const l of blk) {
-      reactiveRewire.push("  " + l.replace("const el = document.querySelector(", "const el = (root || document).querySelector("));
+      reactiveRewire.push("  " + l.replace("const _scrml_el = document.querySelector(", "const _scrml_el = (_scrml_root || document).querySelector("));
     }
   };
   // Wrap an effect/subscription-creating expression so its disposer is
@@ -1585,9 +1657,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // `_scrml_nav_rewire(document)` AND re-attaches scoped to the swapped
       // `root` on a soft nav (the swapped-in nodes are fresh; delegable
       // click/submit live on `document` and survive on their own).
-      nonDelegatedRewire.push(`    (root || document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(el) {`);
-      nonDelegatedRewire.push(`      const _scrml_id = el.getAttribute('data-scrml-bind-${eventName}');`);
-      nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
+      nonDelegatedRewire.push(`    (_scrml_root || document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(_scrml_el) {`);
+      nonDelegatedRewire.push(`      const _scrml_id = _scrml_el.getAttribute('data-scrml-bind-${eventName}');`);
+      nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) _scrml_el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
       nonDelegatedRewire.push(`    });`);
     }
   }
@@ -1634,7 +1706,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // -----------------------------------------------------------------
       if (binding.kind === "lift-host") {
         if (binding.liftMountFn && placeholderId) {
-          pushRebindableDisplay(placeholderId, [`_scrml_lift_mount_run(el, ${binding.liftMountFn});`], true);
+          pushRebindableDisplay(placeholderId, [`_scrml_lift_mount_run(_scrml_el, ${binding.liftMountFn});`], true);
         }
         continue;
       }
@@ -1821,8 +1893,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
         const blk: string[] = [];
         blk.push(`  {`);
-        blk.push(`    const el = document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
-        blk.push(`    if (el) {`);
+        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
+        blk.push(`    if (_scrml_el) {`);
         for (const l of rcdataInner) blk.push(`      ${l}`);
         blk.push(`    }`);
         blk.push(`  }`);
@@ -1872,8 +1944,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const blk: string[] = [];
         blk.push(`  // <errors of=...> element wiring (C11)`);
         blk.push(`  {`);
-        blk.push(`    const el = document.querySelector('[data-scrml-errors-anchor=${JSON.stringify(anchorId)}]');`);
-        blk.push(`    if (el) {`);
+        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-errors-anchor=${JSON.stringify(anchorId)}]');`);
+        blk.push(`    if (_scrml_el) {`);
         // Local messageFor — prefers a global C10 implementation, falls back
         // to a stub returning the tag string.
         blk.push(`      const messageForFn_${suffix} = (typeof _scrml_message_for === "function")`);
@@ -1909,7 +1981,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         blk.push(`        const src = _scrml_derived_get(${JSON.stringify(encodedSourceKey)});`);
         if (isRollup) {
           // Compound rollup: src is an object map {field: [tags]}.
-          blk.push(`        if (!src || typeof src !== "object") { el.innerHTML = ""; return; }`);
+          blk.push(`        if (!src || typeof src !== "object") { _scrml_el.innerHTML = ""; return; }`);
           blk.push(`        const entries = Object.entries(src);`);
           blk.push(`        const parts = [];`);
           blk.push(`        for (const [fieldKey, arr] of entries) {`);
@@ -1923,16 +1995,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             blk.push(`          parts.push(renderOne_${suffix}(arr[0], fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
           }
           blk.push(`        }`);
-          blk.push(`        el.innerHTML = parts.join("");`);
+          blk.push(`        _scrml_el.innerHTML = parts.join("");`);
         } else {
           // Per-field: src is an array of tags. `inlineCellName` IS the cell.
-          blk.push(`        if (!Array.isArray(src) || src.length === 0) { el.innerHTML = ""; return; }`);
+          blk.push(`        if (!Array.isArray(src) || src.length === 0) { _scrml_el.innerHTML = ""; return; }`);
           if (allFlag) {
             blk.push(`        const parts = [];`);
             blk.push(`        for (const tag of src) parts.push(renderOne_${suffix}(tag, ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)}));`);
-            blk.push(`        el.innerHTML = parts.join("");`);
+            blk.push(`        _scrml_el.innerHTML = parts.join("");`);
           } else {
-            blk.push(`        el.innerHTML = renderOne_${suffix}(src[0], ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)});`);
+            blk.push(`        _scrml_el.innerHTML = renderOne_${suffix}(src[0], ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)});`);
           }
         }
         blk.push(`      };`);
@@ -1986,14 +2058,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const blk: string[] = [];
         blk.push(`  // <render of=@cell/> element wiring (render-expr-primitive)`);
         blk.push(`  {`);
-        blk.push(`    const el = document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
-        blk.push(`    if (el) {`);
+        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
+        blk.push(`    if (_scrml_el) {`);
         blk.push(`      const render_${suffix} = function() {`);
         blk.push(`        const _hv = (${acc});`);
         blk.push(`        const _rt = (typeof _hv === "object" && _hv !== null && typeof _hv.variant === "string") ? _hv.variant : _hv;`);
         blk.push(`        switch (_rt) {`);
         for (const [vName, vExpr] of Object.entries(variantExprs)) {
-          blk.push(`          case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
+          blk.push(`          case ${JSON.stringify(vName)}: _scrml_el.innerHTML = (${vExpr}); break;`);
         }
         blk.push(`        }`);
         blk.push(`      };`);
@@ -2052,7 +2124,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // rehydrate), the whole controller is skipped so no dead effect stacks.
           reactiveRewire.push(`    {`);
           reactiveRewire.push(`      // if= mount/unmount controller — marker ${mid}, template ${tid}`);
-          reactiveRewire.push(`      var _scrml_ifm_${suffix} = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(mid)}, (root || document)) : null;`);
+          reactiveRewire.push(`      var _scrml_ifm_${suffix} = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(mid)}, (_scrml_root || document)) : null;`);
           reactiveRewire.push(`      if (_scrml_ifm_${suffix}) {`);
           reactiveRewire.push(`        var _scrml_ifa_${suffix} = _scrml_ifm_${suffix}.parentElement || null;`);
           reactiveRewire.push(`        let _scrml_mr_${suffix} = null;`);
@@ -2073,7 +2145,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             reactiveRewire.push(`          _scrml_if_endexit_${suffix}();`);
           }
           reactiveRewire.push(`          _scrml_ms_${suffix} = _scrml_create_scope();`);
-          reactiveRewire.push(`          _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)}, (root || document));`);
+          reactiveRewire.push(`          _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)}, (_scrml_root || document));`);
           // Bind the mounted subtree: its listeners, `${…}` effects, reactive
           // attrs, nested if= controllers and <each> renderers were emitted as
           // root-scoped blocks in _scrml_nav_rewire and matched nothing while the
@@ -2230,6 +2302,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             compiled,
             attrName,
             binding.valueAttrIsFormValue === true,
+            armEl(),
+            binding.valueAttrUrlGuard === true,
+            binding.valueAttrUrlGuardTarget ?? null,
           );
           // Rebindable — re-binds the attr effect scoped to a swapped region and
           // is region-tracked for teardown (same contract as the bool path).
@@ -2370,55 +2445,74 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const hasFallback = binding.boundaryHasFallback === true;
         const variantRenders = binding.boundaryVariantRenders ?? {};
         const isAsync = exprUsesServerFn(expr, serverFnNames);
-        const renderFn = `_eb_render_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+        const renderFn = `_scrml_eb_render_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
         const inTpl = binding.insideMountTemplate === true;
         const blk: string[] = [];
         blk.push(`  {`);
-        blk.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        blk.push(`    if (el) {`);
+        blk.push(`    const _scrml_el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+        blk.push(`    if (_scrml_el) {`);
         blk.push(`      ${isAsync ? "async " : ""}function ${renderFn}() {`);
-        blk.push(`        let _eb_result;`);
+        blk.push(`        let _scrml_eb_result;`);
         blk.push(`        try {`);
-        blk.push(`          _eb_result = ${isAsync ? "await " : ""}(${ebExpr});`);
+        blk.push(`          _scrml_eb_result = ${isAsync ? "await " : ""}(${ebExpr});`);
         blk.push(`        } catch (_eb_err) {`);
         blk.push(`          _scrml_error_boundary_log(${bId}, _eb_err);`);
         if (hasFallback) {
-          blk.push(`          el.innerHTML = (${fallbackExpr});`);
+          blk.push(`          _scrml_el.innerHTML = (${fallbackExpr});`);
           blk.push(`          return;`);
+        } else if (isAsync) {
+          // S454 (bryan: "a yes, b yes, root fix"; folds in
+          // g-errorboundary-async-render-rejection-unobserved-s453) — an ASYNC
+          // render's re-throw can reach no enclosing boundary: the render runs
+          // detached, so a throw here only rejected a promise nobody observed
+          // (a bare host `unhandledrejection`). The log on the line above IS
+          // the propagation to the host (§19.6.8 B3/B5), so return. Any OTHER
+          // rejection of this render is logged by the `.catch` arm at its call
+          // sites below — each error is logged exactly once. The sync path
+          // keeps its re-throw, byte-identical.
+          blk.push(`          return; // §19.6.8 B3 — async render: no enclosing catch can observe a re-throw; logged above`);
         } else {
           blk.push(`          throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
         }
         blk.push(`        }`);
         // Typed !-error dispatch (§19.6.3).
-        blk.push(`        if (_eb_result && typeof _eb_result === "object" && _eb_result.__scrml_error) {`);
-        blk.push(`          _scrml_error_boundary_log(${bId}, _eb_result);`);
+        blk.push(`        if (_scrml_eb_result && typeof _scrml_eb_result === "object" && _scrml_eb_result.__scrml_error) {`);
+        blk.push(`          _scrml_error_boundary_log(${bId}, _scrml_eb_result);`);
         const variantNames = Object.keys(variantRenders);
         if (variantNames.length > 0) {
-          blk.push(`          switch (_eb_result.variant) {`);
+          blk.push(`          switch (_scrml_eb_result.variant) {`);
           for (const vName of variantNames) {
-            blk.push(`            case ${JSON.stringify(vName)}: el.innerHTML = (${variantRenders[vName]}); return;`);
+            blk.push(`            case ${JSON.stringify(vName)}: _scrml_el.innerHTML = (${variantRenders[vName]}); return;`);
           }
           blk.push(`          }`);
         }
         if (hasFallback) {
-          blk.push(`          el.innerHTML = (${fallbackExpr}); // boundary fallback (§19.6.5)`);
+          blk.push(`          _scrml_el.innerHTML = (${fallbackExpr}); // boundary fallback (§19.6.5)`);
           blk.push(`          return;`);
+        } else if (isAsync) {
+          // S454 — as the host-throw arm above: logged on the previous line;
+          // an async render's re-throw reaches no enclosing boundary.
+          blk.push(`          return; // §19.6.8 B3 — async render: no enclosing catch can observe a re-throw; logged above`);
         } else {
-          blk.push(`          throw _scrml_error_boundary_uncaught(_eb_result); // §19.6.8 B3 — no renders/fallback; propagate`);
+          blk.push(`          throw _scrml_error_boundary_uncaught(_scrml_eb_result); // §19.6.8 B3 — no renders/fallback; propagate`);
         }
         blk.push(`        }`);
         // Success — plain text render.
-        blk.push(`        el.textContent = _eb_result;`);
+        blk.push(`        _scrml_el.textContent = _scrml_eb_result;`);
         blk.push(`      }`);
-        // Initial render. When async, the IIFE awaits; reactive re-run wraps in effect.
-        if (isAsync) {
-          blk.push(`      ${renderFn}();`);
-        } else {
-          blk.push(`      ${renderFn}();`);
-        }
+        // Initial render; a reactive re-run wraps the same call in an effect.
+        // S454 — an ASYNC render returns a promise; observe it so a rejection
+        // the body did not already log (a throw from a variant's `renders`
+        // markup or the DOM write after the catch) reaches the logging surface
+        // instead of escaping as an unhandled rejection. An async function
+        // always returns a native Promise, so `.catch` cannot throw here.
+        const renderCall = isAsync
+          ? `${renderFn}().catch(function(_eb_err) { _scrml_error_boundary_log(${bId}, _eb_err); })`
+          : `${renderFn}()`;
+        blk.push(`      ${renderCall};`);
         if (varRefs.length > 0) {
-          blk.push(`      ${anchorTrack(`_scrml_effect(function() { ${renderFn}(); })`, inTpl)};`);
+          blk.push(`      ${anchorTrack(`_scrml_effect(function() { ${renderCall}; })`, inTpl)};`);
         }
         blk.push(`    }`);
         blk.push(`  }`);
@@ -2438,9 +2532,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
         pushAnchorBlock([
           `  {`,
-          `    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`,
-          `    if (el) {`,
-          `      (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`,
+          `    const _scrml_el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`,
+          `    if (_scrml_el) {`,
+          `      (async () => { try { _scrml_el.textContent = await (${rewrittenExpr}); } catch (_e) { _scrml_el.textContent = ""; } })();`,
           `    }`,
           `  }`,
         ], binding.insideMountTemplate === true);
@@ -2512,7 +2606,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // away tears it down (finding #2).
         const dispBody: string[] = [];
         if (needsAsync) {
-          const asyncRun = `(async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
+          const asyncRun = `(async () => { try { _scrml_el.textContent = await (${rewrittenExpr}); } catch (_e) { _scrml_el.textContent = ""; } })();`;
           if (_guardCond) {
             dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
             dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; ${asyncRun}`));
@@ -2525,7 +2619,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // node-aware render inside an async IIFE (no OUTER await → no `await
           // await`). The outer sync effect still tracks @-deps and re-invokes the
           // IIFE on change, re-firing the async call.
-          const asyncRun = `(async () => { try { _scrml_render_value(el, ${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
+          const asyncRun = `(async () => { try { _scrml_render_value(_scrml_el, ${rewrittenExpr}); } catch (_e) { _scrml_el.textContent = ""; } })();`;
           if (_guardCond) {
             dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
             dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; ${asyncRun}`));
@@ -2539,11 +2633,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // keeps the byte-identical textContent path. _scrml_render_value
           // (core chunk) dispatches on `instanceof Node` at runtime.
           if (_guardCond) {
-            dispBody.push(`if (${_guardCond}) { _scrml_render_value(el, ${rewrittenExpr}); }`);
-            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; _scrml_render_value(el, ${rewrittenExpr});`));
+            dispBody.push(`if (${_guardCond}) { _scrml_render_value(_scrml_el, ${rewrittenExpr}); }`);
+            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; _scrml_render_value(_scrml_el, ${rewrittenExpr});`));
           } else {
-            dispBody.push(`_scrml_render_value(el, ${rewrittenExpr});`);
-            dispBody.push(...regionEffectLines(`_scrml_render_value(el, ${rewrittenExpr});`));
+            dispBody.push(`_scrml_render_value(_scrml_el, ${rewrittenExpr});`);
+            dispBody.push(...regionEffectLines(`_scrml_render_value(_scrml_el, ${rewrittenExpr});`));
           }
         }
         pushRebindableDisplay(placeholderId, dispBody);
@@ -2602,8 +2696,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const oneShotUsesClientAsync = clientAsyncFnNames.size > 0 &&
           rewrittenExpr !== emitExprField(binding.exprNode, expr, _oneShotCtxNoAsync);
         const oneShotRender = oneShotUsesClientAsync
-          ? `(async () => { try { _scrml_render_value(el, ${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`
-          : `_scrml_render_value(el, ${rewrittenExpr});`;
+          ? `(async () => { try { _scrml_render_value(_scrml_el, ${rewrittenExpr}); } catch (_e) { _scrml_el.textContent = ""; } })();`
+          : `_scrml_render_value(_scrml_el, ${rewrittenExpr});`;
         // g-call-expression-interpolation-in-if-chain-branch-renders-empty — a
         // STATIC (`binding.kind == null`, no-@ref, no-server-fn) one-shot is
         // normally document-scoped boot-only (rebind=false): a swapped region
@@ -2649,7 +2743,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // For each chain, the controller emits:
   //   - Per-branch state variables (mount-mode: root + scope handles; display-mode:
   //     wrapper element reference resolved via querySelector).
-  //   - A function `_update_chain_<id>()` that picks the active branchId by
+  //   - A function `_scrml_update_chain_<id>()` that picks the active branchId by
   //     evaluating positive branch conditions in source order, falls back to else
   //     if present, then dispatches mount/unmount or display-toggle per branch
   //     based on the compile-time `branchMode` field. Idempotent: if active
@@ -2694,22 +2788,22 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       for (const branch of allBranches) {
         const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
         if (branch.branchMode === "mount") {
-          reactiveRewire.push(`      var _scrml_chain_${branchSlug}_marker = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(branch.markerId)}, (root || document)) : null;`);
+          reactiveRewire.push(`      var _scrml_chain_${branchSlug}_marker = (typeof _scrml_find_if_marker === "function") ? _scrml_find_if_marker(${JSON.stringify(branch.markerId)}, (_scrml_root || document)) : null;`);
           reactiveRewire.push(`      if (_scrml_chain_${branchSlug}_marker) { _scrml_chain_${chainSlug}_present = true; if (!_scrml_chain_${chainSlug}_anchor) _scrml_chain_${chainSlug}_anchor = _scrml_chain_${branchSlug}_marker.parentElement || null; }`);
           reactiveRewire.push(`      let _scrml_chain_${branchSlug}_root = null;`);
           reactiveRewire.push(`      let _scrml_chain_${branchSlug}_scope = null;`);
         } else {
           // display-mode: resolve wrapper at startup (the emit-html-emitted
           // `<div data-scrml-chain-branch="<branchId>">`), scoped to root.
-          reactiveRewire.push(`      const _scrml_chain_${branchSlug}_wrapper = (root || document).querySelector('[data-scrml-chain-branch="${branch.branchId}"]');`);
+          reactiveRewire.push(`      const _scrml_chain_${branchSlug}_wrapper = (_scrml_root || document).querySelector('[data-scrml-chain-branch="${branch.branchId}"]');`);
           reactiveRewire.push(`      if (_scrml_chain_${branchSlug}_wrapper) { _scrml_chain_${chainSlug}_present = true; if (!_scrml_chain_${chainSlug}_anchor) _scrml_chain_${chainSlug}_anchor = _scrml_chain_${branchSlug}_wrapper; }`);
         }
       }
 
       reactiveRewire.push(`      if (_scrml_chain_${chainSlug}_present) {`);
       reactiveRewire.push(`        let _scrml_chain_${chainSlug}_active = null;`);
-      reactiveRewire.push(`        function _update_chain_${chainSlug}() {`);
-      reactiveRewire.push(`          let _next = null;`);
+      reactiveRewire.push(`        function _scrml_update_chain_${chainSlug}() {`);
+      reactiveRewire.push(`          let _scrml_next = null;`);
 
       // Condition cascade — same as pre-Phase-2g shape.
       //
@@ -2727,14 +2821,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // as before; sharing the helper keeps this `_next` cascade byte-
         // identical to the descendant-effect visibility gate (lockstep).
         const condCode = computeChainBranchCondition(branch.condition) ?? "true";
-        reactiveRewire.push(`          if (_next === null && (${condCode})) _next = "${branch.branchId}";`);
+        reactiveRewire.push(`          if (_scrml_next === null && (${condCode})) _scrml_next = "${branch.branchId}";`);
       }
       if (elseBranch) {
-        reactiveRewire.push(`          if (_next === null) _next = "${elseBranch.branchId}";`);
+        reactiveRewire.push(`          if (_scrml_next === null) _scrml_next = "${elseBranch.branchId}";`);
       }
 
       // Idempotency guard.
-      reactiveRewire.push(`          if (_next === _scrml_chain_${chainSlug}_active) return;`);
+      reactiveRewire.push(`          if (_scrml_next === _scrml_chain_${chainSlug}_active) return;`);
 
       // Deactivate previous active branch (if any).
       reactiveRewire.push(`          if (_scrml_chain_${chainSlug}_active !== null) {`);
@@ -2757,13 +2851,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       reactiveRewire.push(`          }`);
 
       // Activate next branch.
-      reactiveRewire.push(`          switch (_next) {`);
+      reactiveRewire.push(`          switch (_scrml_next) {`);
       for (const branch of allBranches) {
         const branchSlug = (branch.branchId ?? "").replace(/[^a-zA-Z0-9_]/g, "_");
         reactiveRewire.push(`            case ${JSON.stringify(branch.branchId)}:`);
         if (branch.branchMode === "mount") {
           reactiveRewire.push(`              _scrml_chain_${branchSlug}_scope = _scrml_create_scope();`);
-          reactiveRewire.push(`              _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)}, (root || document));`);
+          reactiveRewire.push(`              _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)}, (_scrml_root || document));`);
           // §17.1.1 Phase 2 — a chain branch may now carry wiring (events, `${…}`,
           // bind:, a nested if=, an `<each>`), so the branch needs the same
           // mount-time rebind + scoped teardown the standalone `if=` gets.
@@ -2775,12 +2869,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
       reactiveRewire.push(`          }`);
 
-      reactiveRewire.push(`          _scrml_chain_${chainSlug}_active = _next;`);
+      reactiveRewire.push(`          _scrml_chain_${chainSlug}_active = _scrml_next;`);
       reactiveRewire.push(`        }`);
 
       // Initial render + region-tracked reactive effect.
-      reactiveRewire.push(`        _update_chain_${chainSlug}();`);
-      reactiveRewire.push(`        var _scrml_chain_${chainSlug}_disp = _scrml_effect(_update_chain_${chainSlug});`);
+      reactiveRewire.push(`        _scrml_update_chain_${chainSlug}();`);
+      reactiveRewire.push(`        var _scrml_chain_${chainSlug}_disp = _scrml_effect(_scrml_update_chain_${chainSlug});`);
       // Region teardown — unmount active mount branches + dispose the effect.
       reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_chain_${chainSlug}_anchor, function() {`);
       for (const branch of allBranches) {
@@ -2811,7 +2905,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   if (nonDelegatedRewire.length > 0 || reactiveRewire.length > 0) {
     lines.push("");
     lines.push("  // --- element-scoped wiring (non-delegable handlers + reactive display); re-run on soft-nav ---");
-    lines.push("  function _scrml_nav_rewire(root) {");
+    lines.push("  function _scrml_nav_rewire(_scrml_root) {");
     for (const l of nonDelegatedRewire) lines.push(l);
     for (const l of reactiveRewire) lines.push(l);
     lines.push("  }");
@@ -2823,9 +2917,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // conditional controllers) and `_scrml_bind_rewire` (ref= / bind: / class:,
     // emitted upstream by emit-bindings and NOT a soft-nav rehydrator). The
     // `typeof` guard covers a file with no bind directives at all.
-    lines.push("  function _scrml_if_rewire(root) {");
-    lines.push("    _scrml_nav_rewire(root);");
-    lines.push('    if (typeof _scrml_bind_rewire === "function") _scrml_bind_rewire(root);');
+    lines.push("  function _scrml_if_rewire(_scrml_root) {");
+    lines.push("    _scrml_nav_rewire(_scrml_root);");
+    lines.push('    if (typeof _scrml_bind_rewire === "function") _scrml_bind_rewire(_scrml_root);');
     lines.push("  }");
   }
 

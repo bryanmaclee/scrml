@@ -1,0 +1,12 @@
+<program kind="tool" lang="js">
+function main(args: string[]): number {
+  const s = "it's"
+  const v = _={ in: { s } await /'/.exec(s) }=
+  const w = _={ in: { s }
+    await
+    /'/.exec(s)
+  }=
+  println("v=" + v + " w=" + w)
+  return 0
+}
+</program>

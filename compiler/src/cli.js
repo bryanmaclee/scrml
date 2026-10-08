@@ -7,6 +7,7 @@
  *   scrml dev <file.scrml|dir> [options]
  *   scrml build <dir> [options]
  *   scrml migrate <file|dir> [options]
+ *   scrml fix <file|dir> [options]
  *   scrml introspect <postgres-url> [options]
  *   scrml promote --match|--engine <file|dir> [options]
  *   scrml --help
@@ -44,6 +45,7 @@ Usage:
   scrml serve [options]                      Start persistent compiler server
   scrml generate <type> [options]            Scaffold adopter-owned source (e.g. \`scrml generate auth\`)
   scrml migrate <file|dir> [options]         Apply automated source rewrites for deprecated patterns
+  scrml fix <file|dir> [options]             §66.21 migration rewrites (§63.4); default keeps files compilable, --s66 previews the rest
   scrml db-migrate <project> --db <url>      Apply a project's <schema> (incl. db-authoritative RLS/role DDL) to a real DB
   scrml promote --match|--engine <file|dir>  Promote tier-1 if-else → <match> or <match> → <engine> (CLI surface; impl pending)
   scrml introspect <postgres-url> [options]  Read a live Postgres schema and emit scrml <schema> source
@@ -61,11 +63,12 @@ Options (compile / dev):
   --chunk-size-budget=N   Soft size budget (bytes) for W-CG-CHUNK-LARGE (default 100000)
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --debug-perf            Sub-stage timing for CG / RS / DG (PGO instrumentation)
-  --parser=scrml-native   M5.1 native-parser observability shadow (opt-in)
   --watch, -w             Watch for changes and recompile (compile command only)
 
 Options (dev):
   --port <n>            HTTP port for dev server (default: 3000)
+  --host [addr]         Listen address (default: 127.0.0.1 + ::1, this machine only);
+                        bare --host = every interface (0.0.0.0 + ::, LAN-reachable)
 
 Options (build):
   --output <dir>        Output directory (default: dist/ next to input)
@@ -74,6 +77,7 @@ Options (build):
 
 Options (serve):
   --port <n>            HTTP port for compiler server (default: 3100, or SCRML_PORT env)
+  --host [addr]         Listen address (default: 127.0.0.1 + ::1); bare --host = 0.0.0.0 + ::
   --verbose, -v         Log per-stage timing for each compilation
 
 Options (migrate):
@@ -82,6 +86,21 @@ Options (migrate):
   --include=<glob>      File pattern (default: '*.scrml')
   --exclude=<glob>      Additional exclude pattern (substring match)
   --no-default-excludes Disable built-in samples/ + tests/ exclusions
+
+Options (fix):
+  Default rules (pre-migrate, program-wrap, program-move, unwrap-logic) keep the file compilable
+  by today's compiler and are verified per file; --s66 previews the §66 declaration rules, whose
+  output today's compiler CANNOT compile.
+  --dry-run             Print a diff without writing
+  --check               Exit 1 if a file would change, 2 if a reported construct remains, else 0
+  --s66                 Add the §66 declaration rules (dry-run unless --write)
+  --write               With --s66: write the §66 rewrite
+  --entry               Treat every file as an application entry (wrap in <program>)
+  --no-program-wrap     Never wrap a file in <program>
+  --rules=<a,b,...>     Restrict to named rules (pre-migrate, program-wrap, program-move, unwrap-logic;
+                        with --s66 also rhs-decl, const-cell, engine-simple)
+  --json                Print a JSON report (applied rules + constructs left for a human)
+  A construct that is not mechanically rewritable is left untouched and reported.
 
 Options (promote):
   --match               Lift if-else over enum-typed cell into <match> block (Tier 1)
@@ -127,7 +146,7 @@ let subcommand = args[0];
 let subArgs = args.slice(1);
 
 // Fall through: if first arg is a .scrml file or a directory, treat as compile
-if (subcommand !== "compile" && subcommand !== "dev" && subcommand !== "build" && subcommand !== "serve" && subcommand !== "init" && subcommand !== "migrate" && subcommand !== "db-migrate" && subcommand !== "promote" && subcommand !== "generate" && subcommand !== "introspect" && subcommand !== "semdiff") {
+if (subcommand !== "compile" && subcommand !== "dev" && subcommand !== "build" && subcommand !== "serve" && subcommand !== "init" && subcommand !== "migrate" && subcommand !== "fix" && subcommand !== "db-migrate" && subcommand !== "promote" && subcommand !== "generate" && subcommand !== "introspect" && subcommand !== "semdiff") {
   // Check if it looks like a file or directory rather than a subcommand
   const looksLikeInput = subcommand.endsWith(".scrml") || (() => {
     try { return statSync(subcommand).isDirectory(); } catch { return false; }
@@ -162,6 +181,9 @@ if (subcommand === "init") {
 } else if (subcommand === "migrate") {
   const { runMigrate } = await import("./commands/migrate.js");
   await runMigrate(subArgs);
+} else if (subcommand === "fix") {
+  const { runFix } = await import("./commands/fix.js");
+  await runFix(subArgs);
 } else if (subcommand === "db-migrate") {
   const { runDbMigrate } = await import("./commands/db-migrate.js");
   await runDbMigrate(subArgs);

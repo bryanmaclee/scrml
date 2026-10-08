@@ -2,8 +2,8 @@
 //
 // change-id: native-blockstub-verbatim-body-2026-06-07
 //
-// THE BUG (S170 Wave 2 ROOT-1 + Bucket-1 SUB-SHAPE-B): under
-// `--parser=scrml-native`, a BLOCK-bodied match arm and a BLOCK-bodied
+// THE BUG (S170 Wave 2 ROOT-1 + Bucket-1 SUB-SHAPE-B): through the native
+// parser, a BLOCK-bodied match arm and a BLOCK-bodied
 // lambda callback SILENTLY DROPPED their statement body. The native bridge
 // emitted the literal placeholder `"{}"` for any BlockStub match-arm body
 // (translate-expr.js reconstructArmBody) and `{ kind:"block", stmts:[] }`
@@ -23,42 +23,47 @@
 // the callback verbatim. A render body (`{ lift <markup> }`) is GUARDED out
 // (it belongs to match-block routing — a separate native gap).
 //
-// VERIFIED HERE (Bug-73 lesson — assert the individual STATEMENTS survive in
-// the emit, NOT merely that the arms / lambdas exist; a naive "both arms exist"
-// emit-string test would FALSELY pass while the bodies were empty `{}`):
-//   1. a multi-statement `:>`-block match arm emits BOTH of its statements
-//   2. a block-bodied `.filter` callback emits its body statement
-//   3. native == default for the same source (byte-parity on the function)
+// S449 RE-POINT: this file used to compile under the retired full-pipeline
+// `--parser=scrml-native` flag and compare the emitted JS with the default
+// pipeline's. parseBlockStub / reconstructArmBody / translateArrow run in
+// production inside `nativeParseFile` (component / `^{}` / `<match>` re-parse),
+// so the fix is asserted on the native tree (Bug-73 lesson kept: assert the
+// individual STATEMENTS survive, not merely that the arms / lambdas exist):
+//   1. each `:>`-block match arm's raw body carries BOTH of its statements
+//   2. the block-bodied `.filter` callback's escape-hatch raw is the whole lambda
+// and the same two shapes compile through the default pipeline with every
+// statement present.
 
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { normalizeChunkToken } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
+import { nativeAst, findNodes, errorsOf } from "../helpers/native-ast.js";
 
-// compileWith — full-compile `source` under `parser` (null = default live
-// BS+TAB; "scrml-native" = native pipeline). Returns errors + client.js.
-function compileWith(source, parser, suffix) {
+function compileDefault(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-blockstub-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-blockstub-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(tmpInput, source);
   try {
-    const opts = { inputFiles: [tmpInput], write: true, outputDir: outDir };
-    if (parser) opts.parser = parser;
-    const result = compileScrml(opts);
+    const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const clientPath = resolve(outDir, `${name}.client.js`);
     return {
       errors: result.errors ?? [],
-      warnings: result.warnings ?? [],
       clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+function fnBody(result, name) {
+  const fn = findNodes(result.ast, (n) => n.kind === "function-decl" && n.name === name)[0];
+  return fn ? fn.body : null;
 }
 
 // A multi-statement `:>`-block match arm inside a function body — the exact
@@ -109,87 +114,52 @@ const LAMBDA_BLOCK_BODY = [
   "</program>",
 ].join("\n");
 
-describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
-  test("multi-statement :>-block match arm — BOTH arm-body statements survive (not {})", () => {
-    const nat = compileWith(MATCH_BLOCK_ARM, "scrml-native", "match-arm");
-    expect(nat.errors).toEqual([]);
-    // The .Mushroom arm has two writes: coins AND score. A dropped body would
-    // emit `{}` and these would be ABSENT. Assert BOTH statements present.
-    expect(nat.clientJs).toMatch(/_scrml_cs_reactive_set\("coins"/);
-    expect(nat.clientJs).toMatch(/_scrml_cs_reactive_set\("score"/);
-    // The score write proves the SECOND statement survived (a single-statement
-    // recovery would emit coins but not score). Both the +100 and +300 literals
-    // (the two distinct arms' score writes) must appear.
-    expect(nat.clientJs).toContain("100");
-    expect(nat.clientJs).toContain("300");
-    // The +100 score write must NOT have collapsed to an empty `{}` arm.
-    expect(nat.clientJs).not.toMatch(/=== "Mushroom"\)\s*\{\s*\}/);
+describe("native BlockStub verbatim-body recovery (S170 Wave 2) — native tree", () => {
+  test("multi-statement :>-block match arm — BOTH arm-body statements survive in each raw arm (not {})", () => {
+    const nat = nativeAst(MATCH_BLOCK_ARM);
+    expect(errorsOf(nat)).toEqual([]);
+    const match = findNodes(fnBody(nat, "eatPowerUp"), (n) => n.kind === "match-expr")[0];
+    expect(match).toBeDefined();
+    expect(match.rawArms).toHaveLength(2);
+    const [mushroom, flower] = match.rawArms;
+    expect(mushroom).toMatch(/^\.Mushroom\(n\)/);
+    expect(mushroom).toContain("@coins = @coins + n");
+    expect(mushroom).toContain("@score = @score + 100");
+    expect(flower).toMatch(/^\.Flower\(n\)/);
+    expect(flower).toContain("@coins = @coins + n");
+    expect(flower).toContain("@score = @score + 300");
+    for (const arm of match.rawArms) expect(arm).not.toMatch(/=>\s*\{\s*\}\s*$/);
   });
 
-  test("match-arm bodies are emitted under native (arm dispatch + body present)", () => {
-    const nat = compileWith(MATCH_BLOCK_ARM, "scrml-native", "match-arm-2");
-    // Both arms must dispatch on their variant tag.
-    expect(nat.clientJs).toMatch(/=== "Mushroom"/);
-    expect(nat.clientJs).toMatch(/=== "Flower"/);
-    // The payload binding `n` must be bound from the matched variant data.
-    expect(nat.clientJs).toMatch(/const n = /);
+  test("block-bodied .filter callback — the escape-hatch raw is the whole lambda (body not empty)", () => {
+    const nat = nativeAst(LAMBDA_BLOCK_BODY);
+    expect(errorsOf(nat)).toEqual([]);
+    const hatch = findNodes(fnBody(nat, "bigOnes"), (n) => n.kind === "escape-hatch" && n.nativeKind === "ArrowFunctionExpression")[0];
+    expect(hatch).toBeDefined();
+    expect(hatch.raw).toMatch(/^\(n\) => \{/);
+    expect(hatch.raw).toContain("let doubled = n * 2");
+    expect(hatch.raw).toContain("return doubled > 4");
+  });
+});
+
+describe("block-bodied match arm + lambda callback — default pipeline emit", () => {
+  test("both arms dispatch, bind n, and emit BOTH statements", () => {
+    const def = compileDefault(MATCH_BLOCK_ARM, "match-arm");
+    expect(def.errors).toEqual([]);
+    expect(def.clientJs).toMatch(/=== "Mushroom"/);
+    expect(def.clientJs).toMatch(/=== "Flower"/);
+    expect(def.clientJs).toMatch(/const n = /);
+    expect(def.clientJs).toMatch(/_scrml_cs_reactive_set\("coins"/);
+    expect(def.clientJs).toMatch(/_scrml_cs_reactive_set\("score"/);
+    expect(def.clientJs).toContain("100");
+    expect(def.clientJs).toContain("300");
+    expect(def.clientJs).not.toMatch(/=== "Mushroom"\)\s*\{\s*\}/);
   });
 
-  test("block-bodied .filter callback — the callback BODY statement survives (not empty)", () => {
-    const nat = compileWith(LAMBDA_BLOCK_BODY, "scrml-native", "lambda");
-    expect(nat.errors).toEqual([]);
-    // The arrow body has `let doubled = n * 2` + `return doubled > 4`. A dropped
-    // body would emit `() => {}` (or no callback at all). Assert the inner
-    // statement survived.
-    expect(nat.clientJs).toMatch(/\.filter\(/);
-    expect(nat.clientJs).toContain("doubled");
-    expect(nat.clientJs).toMatch(/return doubled > 4/);
-  });
-
-  test("match-arm-block emit is statement-identical native == default (modulo terminators)", () => {
-    const nat = compileWith(MATCH_BLOCK_ARM, "scrml-native", "match-parity-n");
-    const def = compileWith(MATCH_BLOCK_ARM, null, "match-parity-d");
-    // Normalize: (a) the per-compile counter suffixes (_scrml_match_NN /
-    // _scrml_tag_NN / function-name suffixes) + runtime hash — these differ
-    // because native allocates node ids in a different order, NOT a semantic
-    // drift; (b) statement-TERMINATOR cosmetics — the verbatim re-parse path
-    // and the default both emit semantically-identical arm bodies but differ on
-    // doubled `;;` and a trailing `;` before `}` / after `})()`, all JS-valid
-    // no-ops. Collapse `;;`->`;`, strip whitespace, and drop a `;` immediately
-    // before `}`. The statement-survival assertions above are the load-bearing
-    // checks; this guards STRUCTURE while tolerating the terminator cosmetics.
-    const norm = (js) =>
-      js
-        .replace(/_scrml_\w+_\d+/g, "_scrml_X")
-        .replace(/scrml-runtime\.\w+\.js/g, "scrml-runtime.X.js")
-        .replace(/;+/g, ";")
-        .replace(/\s+/g, " ")
-        .replace(/;\s*}/g, " }")
-        .replace(/}\)\(\);/g, "})()")
-        .trim();
-    expect(norm(normalizeChunkToken(nat.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
-  });
-
-  test("lambda-callback emit is structurally-identical native == default (modulo escape-hatch param spacing)", () => {
-    // The block-bodied arrow lowers through the escape-hatch string-rewrite
-    // path on BOTH front-ends (live: expression-parser.ts esTreeToExprNode;
-    // native: translateArrow -> EscapeHatchExpr). The native verbatim raw is
-    // byte-exact (`(n) => {...}`), but the rewrite pipeline reflows the arrow
-    // PARAM-LIST spacing differently between the two raw inputs (`( n )` vs
-    // `(n)`) — a known, pre-existing escape-hatch cosmetic, not a semantic
-    // drift. Compare after collapsing ALL whitespace AND stripping spaces
-    // immediately inside the arrow param parens, so the comparison is sensitive
-    // to STATEMENTS + STRUCTURE but tolerant of that cosmetic reflow.
-    const nat = compileWith(LAMBDA_BLOCK_BODY, "scrml-native", "lambda-parity-n");
-    const def = compileWith(LAMBDA_BLOCK_BODY, null, "lambda-parity-d");
-    const norm = (js) =>
-      js
-        .replace(/_scrml_\w+_\d+/g, "_scrml_X")
-        .replace(/scrml-runtime\.\w+\.js/g, "scrml-runtime.X.js")
-        .replace(/\(\s+/g, "(")
-        .replace(/\s+\)/g, ")")
-        .replace(/\s+/g, " ")
-        .trim();
-    expect(norm(normalizeChunkToken(nat.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
+  test("the .filter callback body statement survives", () => {
+    const def = compileDefault(LAMBDA_BLOCK_BODY, "lambda");
+    expect(def.errors).toEqual([]);
+    expect(def.clientJs).toMatch(/\.filter\(/);
+    expect(def.clientJs).toMatch(/return doubled > 4/);
   });
 });

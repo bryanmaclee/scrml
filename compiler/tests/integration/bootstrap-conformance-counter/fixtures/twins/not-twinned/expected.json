@@ -1,0 +1,8 @@
+{
+  "id": "fixture-twins-not-twinned",
+  "description": "KNOWN NOT-TWINNED: a legacy Shape 2 declaration (`<who req> = <input/>`) has no mechanical §66 rewrite (→ `renders`, ⚑ O25), so the case is not graded at all.",
+  "language-version": "1.0",
+  "spec": "§66.21",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": { "codes": [] }
+}

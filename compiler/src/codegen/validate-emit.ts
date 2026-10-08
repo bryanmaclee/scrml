@@ -27,6 +27,7 @@
 // elsewhere (expression-parser.ts:16) for the same reason.
 import * as acorn from "acorn";
 import { CGError } from "./errors.ts";
+import { scrubPlaceholderToken } from "../placeholder-nonce.ts";
 
 /**
  * An emitted artifact to validate. `sourceType` selects the Acorn parse goal:
@@ -61,6 +62,15 @@ export interface EmitArtifact {
 const PARSE_OPTIONS = { ecmaVersion: 2022 as const, sourceType: "module" as const };
 
 /**
+ * The shape of every compiler-internal placeholder identifier: `__scrml_` +
+ * name + `__` (trailing double underscore). Compiler-generated LOCALS share the
+ * `__scrml_` prefix but never the trailing `__` (`__scrml_is_v`,
+ * `__scrml_error`), so they do not match. Fail-closed by SHAPE, not by a list
+ * of known placeholder names: a placeholder added tomorrow is refused too.
+ */
+const INTERNAL_PLACEHOLDER = /^__scrml_[A-Za-z0-9_]*[A-Za-z0-9]__$/;
+
+/**
  * Parse one emitted artifact. Returns a `CGError` with code
  * `E-CODEGEN-INVALID-LOGIC` if it does not parse, or `null` if it is valid JS.
  *
@@ -69,10 +79,77 @@ const PARSE_OPTIONS = { ecmaVersion: 2022 as const, sourceType: "module" as cons
  * position), and frames the failure as a COMPILER DEFECT — the adopter cannot
  * fix the emitted JS, so "please report it" is the correct audience message.
  */
-export function validateEmittedArtifact(art: EmitArtifact): CGError | null {
+export function validateEmittedArtifact(
+  art: EmitArtifact,
+  opts: {
+    checkPlaceholders?: boolean;
+    /**
+     * Does `name` appear anywhere in the author's source text? Used for the
+     * diagnostic WORDING only — never to exempt anything. A placeholder-shaped
+     * name the author wrote (for instance inside opaque `_{}` foreign code,
+     * which the §47.1.1 check does not read) is the author's to rename, not a
+     * compiler defect to report.
+     */
+    authorSourceMentions?: (name: string) => boolean;
+  } = {},
+): CGError | null {
   try {
-    acorn.parse(art.contents, PARSE_OPTIONS);
-    return null;
+    // #1333 — the same parse also reads every IDENTIFIER token, and refuses an
+    // artifact that names a compiler-internal `__scrml_<name>__` placeholder.
+    // The expression parser writes those (`__scrml_is_some__(x)`,
+    // `__scrml_match__(…)`, `__scrml_render_<name>__(…)`, `__scrml_tilde__`, …)
+    // so acorn can parse scrml operators; each must be lowered before emission,
+    // and none is defined at run time. One that survives is a construct the
+    // compiler did not lower — the artifact parses, then throws ReferenceError
+    // where it runs (or, behind a `.catch`, silently never runs). Judged on the
+    // emitted bytes, so it holds for every position and every lowering path,
+    // including ones not yet written. Tokens, not text: a placeholder-shaped
+    // word inside a string or a comment is not a reference and does not fire.
+    //
+    // A PURE SHAPE TEST, no exemptions (S457 ruling "a for __scrml_"). Two
+    // kinds of `__scrml_<name>__` can reach an artifact, and both are refused:
+    //   - the compiler's own placeholder that was not lowered — it carries the
+    //     per-process nonce (placeholder-nonce.ts); the message reports it as a
+    //     compiler defect;
+    //   - an author-written `__scrml_<name>__` (reserved by §47.1.1) in a
+    //     position the reservation check does not inspect (an object key, an
+    //     opaque `_{}` body). The compiler recognises ONLY the nonce'd form, so
+    //     the author's spelling was lowered by nothing; the message names it as
+    //     the author's when the name occurs in the source text.
+    // Every identifier token counts — a reference, a binding, a property name
+    // (`o.__scrml_x__`) or an object key alike: nothing the compiler emits on
+    // purpose has that shape (its locals are `__scrml_<name>` without the
+    // trailing `__`, e.g. `__scrml_is_v`), so any occurrence is a leak.
+    let placeholder: { name: string; pos: number; line: number; col: number } | null = null;
+    acorn.parse(art.contents, {
+      ...PARSE_OPTIONS,
+      locations: true,
+      onToken: (tok: any) => {
+        if (opts.checkPlaceholders === false) return;
+        if (placeholder !== null || tok.type.label !== "name" || typeof tok.value !== "string") return;
+        if (!INTERNAL_PLACEHOLDER.test(tok.value)) return;
+        placeholder = { name: tok.value, pos: tok.start, line: tok.loc?.start.line ?? 1, col: tok.loc?.start.column ?? 0 };
+      },
+    });
+    if (placeholder === null) return null;
+    const ph = placeholder as { name: string; pos: number; line: number; col: number };
+    const authorWrote = opts.authorSourceMentions?.(ph.name) === true;
+    // A compiler placeholder carries the per-process nonce (placeholder-nonce.ts);
+    // show its stable spelling so the diagnostic is the same on every run.
+    const shown = scrubPlaceholderToken(ph.name);
+    const message =
+      `E-CODEGEN-INVALID-LOGIC: an un-lowered compiler placeholder reached the output.\n` +
+      `  artifact: ${art.artifact} (byte ${ph.pos}, line ${ph.line}, column ${ph.col})\n` +
+      `  the artifact contains \`${shown}\`, a name in the compiler's reserved \`__scrml_\` placeholder ` +
+      `namespace (SPEC §47.1.1) that is defined nowhere at run time (it would throw ReferenceError when it runs)\n` +
+      `    ${extractSnippet(art.contents, ph.pos)}\n` +
+      (authorWrote
+        ? `  \`${shown}\` also appears in your source — for example inside \`_{}\` foreign code, which is ` +
+          `emitted as written. Names beginning \`__scrml_\` are reserved for the compiler; rename it. `
+        : `  This is a compiler defect (a construct was not lowered). Please report it. `) +
+      `No codegen output artifacts were written (vendored stdlib shims may already be staged).`;
+    // Defence in depth: the snippet is raw artifact text — never print a token.
+    return new CGError("E-CODEGEN-INVALID-LOGIC", scrubPlaceholderToken(message), { file: art.sourceFile }, "error");
   } catch (e) {
     // Acorn's SyntaxError carries { pos, loc: { line, column }, message }.
     const err = e as { pos?: number; loc?: { line: number; column: number }; message?: string };
@@ -118,10 +195,13 @@ export function validateEmittedArtifact(art: EmitArtifact): CGError | null {
  * pushes these into the standard CG error stream so the compile aborts (exit 1,
  * no files written) per the §2.2.1 invariant.
  */
-export function validateEmittedArtifacts(artifacts: EmitArtifact[]): CGError[] {
+export function validateEmittedArtifacts(
+  artifacts: EmitArtifact[],
+  authorSourceMentions?: (name: string) => boolean,
+): CGError[] {
   const errors: CGError[] = [];
   for (const art of artifacts) {
-    const err = validateEmittedArtifact(art);
+    const err = validateEmittedArtifact(art, { authorSourceMentions });
     if (err) errors.push(err);
   }
   return errors;

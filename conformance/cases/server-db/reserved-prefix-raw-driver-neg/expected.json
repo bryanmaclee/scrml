@@ -1,0 +1,12 @@
+{
+  "id": "server-db-reserved-prefix-raw-driver-neg",
+  "description": "§47.1.1 — the clean control for server-db/reserved-prefix-raw-driver-pos: the same read written as a `?{}` query, with `_scrml_` appearing only in a comment, a string literal and markup prose. None of those is a name, so E-NAME-COLLIDES-RESERVED-PREFIX does not fire — and the compiler's own emitted `_scrml_` names (the lowered `?{}`, the handler wiring) never trip it. (-neg: the code does not fire.)",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/reserved-prefix-e-name-collides.test.js",
+  "spec": "§47.1.1",
+  "rationale": "§47.1.1 S439 (#7) + S440 (#9): the reservation is on DECLARING or REFERENCING a name that begins with `_scrml_`. A comment, a string literal and markup text are not names; the compiler's own lowered output is not author source.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-NAME-COLLIDES-RESERVED-PREFIX"]
+  }
+}

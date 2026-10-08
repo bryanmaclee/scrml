@@ -4,10 +4,10 @@
 < db src="./test.db" tables="users">
 ${
   server function getUsers() {
-    return ?{`SELECT id, name FROM users`}.all()
+    return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
   }
 }
 <div>
-  <button onclick=getUsers()>Load</>
+  <button onclick={ getUsers() !{ .Transport(_) :> { return } } }>Load</>
 </div>
 </>

@@ -1,0 +1,1 @@
+{ "expect": { "codes": [], "notCodes": ["E-SCOPE-001"] }, "reason": "fixture: the legacy code has no §66 analogue" }

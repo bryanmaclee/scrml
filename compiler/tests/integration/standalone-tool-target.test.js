@@ -62,7 +62,7 @@ const CLI_TOOL = `<program kind="tool" lang="ts" db="./fleet.db">
         const cmd = args[0]
         if cmd == "fail" { return 7 }
         const n = loadCount()
-        _={ console.log(banner(n)) }=
+        _={ in: { banner, n } console.log(banner(n)) }=
         return 0
     }
 </program>`;
@@ -102,7 +102,9 @@ describe("§64 tool target — emit shape", () => {
   test("db composition — Bun.SQL handle header + lowered ?{}", () => {
     const { out } = compileSource(CLI_TOOL);
     expect(out.toolJs).toMatch(/import \{ SQL \} from "bun";/);
-    expect(out.toolJs).toMatch(/const _scrml_sql = new SQL\("sqlite:\.\/fleet\.db"\);/);
+    // s445 — a SQLite file opens through the helper: resolved against the declaring
+    // file's directory, never created.
+    expect(out.toolJs).toMatch(/const _scrml_sql = _scrml_sqlite_referenced\("[^"]*fleet\.db", "\.\/fleet\.db", "[^"]*"\);/);
     expect(out.toolJs).toMatch(/await _scrml_sql`SELECT id FROM tasks`/);
   });
 
@@ -117,7 +119,7 @@ describe("§64 tool target — emit shape", () => {
       type Cmd:enum = { List, Add }
       function main(args: string[]): number {
         const c = Cmd.List
-        _={ console.log(c) }=
+        _={ in: { c } console.log(c) }=
         return 0
       }
     </program>`);
@@ -243,13 +245,15 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
     const fleetJs = join(dist, "fleet.js");
     expect(existsSync(fleetJs)).toBe(true);
 
-    // seed the db (relative to dist, the runtime cwd)
-    const db = new Database(join(dist, "fleet.db"));
+    // seed the db where `db="./fleet.db"` names it: beside fleet.scrml (s445 — the
+    // declaring file's directory, the same file the compile-time schema read opens).
+    const db = new Database(join(dir, "fleet.db"));
     db.run("CREATE TABLE tasks (id INTEGER PRIMARY KEY, name TEXT)");
     db.run("INSERT INTO tasks (name) VALUES ('a'),('b'),('c')");
     db.close();
 
-    const run = (args) => Bun.spawnSync({ cmd: ["bun", "fleet.js", ...args], cwd: dist, stdout: "pipe", stderr: "pipe" });
+    // Run from an UNRELATED working directory: which database opens must not depend on it.
+    const run = (args) => Bun.spawnSync({ cmd: ["bun", fleetJs, ...args], cwd: tmpdir(), stdout: "pipe", stderr: "pipe" });
     expect(run([]).exitCode).toBe(2);            // no args → return 2
     expect(run(["fail"]).exitCode).toBe(7);      // == "fail" → return 7 (structural_eq)
     const ok = run(["count"]);
@@ -505,7 +509,7 @@ function main(args: string[]): number {
     const src = `<program kind="tool" lang="ts">
 import { clamp } from "scrml:math"
 function main(args: string[]): number {
-  _={ in: {} console.log("clamped=" + clamp(15, 0, 10)) }=
+  _={ in: { clamp } console.log("clamped=" + clamp(15, 0, 10)) }=
   return 0
 }
 </program>`;
@@ -535,9 +539,12 @@ function main(args: string[]): number {
 </program>`;
     const { out } = compileSource(src, { name: "toolni" });
     expect(out.toolJs).toBeTruthy();
-    // no leading `import` line — the header is empty for a no-import tool.
+    // no leading `import` line — the header is empty for a no-import tool. (The
+    // slice's §23.2.4a seal helper is an inlined runtime helper, which the tool emit
+    // places ahead of the banner like every other one — not an import.)
     expect(out.toolJs.trimStart().startsWith("import ")).toBe(false);
-    expect(out.toolJs.startsWith("// Generated standalone tool")).toBe(true);
+    expect(out.toolJs).not.toMatch(/^import /m);
+    expect(out.toolJs).toContain("// Generated standalone tool");
   });
 
   test("#1 co-resident tool + browser <page> share a pure-fn helper (additive)", () => {
@@ -550,7 +557,7 @@ import { addup } from "./helper.scrml"
       tool: `<program kind="tool" lang="ts">
 import { addup } from "./helper.scrml"
 function main(args: string[]): number {
-  _={ in: {} console.log("sum=" + addup(2, 3)) }=
+  _={ in: { addup } console.log("sum=" + addup(2, 3)) }=
   return 0
 }
 </program>`,
@@ -619,7 +626,7 @@ describe("§64 tool imports — fix-round hardening (#3/#4/#5/#6-7)", () => {
       tool: `<program kind="tool" lang="ts">
 import { addup } from "./pagehelper.scrml"
 function main(args: string[]): number {
-  _={ in: {} console.log("s=" + addup(1, 2)) }=
+  _={ in: { addup } console.log("s=" + addup(1, 2)) }=
   return 0
 }
 </program>`,

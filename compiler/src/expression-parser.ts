@@ -12,11 +12,17 @@
  * @module expression-parser
  */
 
+import {
+  PH_IS_SOME, PH_IS_NOT, PH_IS_NOT_NOT, PH_IS_VARIANT, PH_MATCH, PH_MAP_LIT, PH_TILDE,
+  PH_SQL_PLACEHOLDER, PH_SQL_REF, PH_GUARD,
+  PHP_BARE_VARIANT, PHP_RENDER, PHP_INPUT, PHP_WORKER, placeholderParam,
+} from "./placeholder-nonce.ts";
 // @ts-ignore — acorn ships its own types but the plugin API is untyped
 import * as acorn from "acorn";
 // @ts-ignore — astring ships its own types
 import { generate as astringGenerate } from "astring";
 import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
+import { ScrmlParser } from "./scrml-acorn.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -24,6 +30,7 @@ import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 // (ECMA preceding-token rule), reused by rewriteIsPredicates (S252, #1) to skip
 // the word `is` inside regex-literal interiors without fragmenting its LHS scan.
 import { rewriteCodeSegments, regexAllowedAfter } from "./codegen/code-segments.ts";
+import { isServerAmbientSession, refuseServerAmbientSession } from "./codegen/server-session-guard.ts";
 
 import type {
   ExprNode, ExprSpan,
@@ -89,119 +96,10 @@ export interface RewriteResult {
   ok: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Acorn plugin: handle @ sigil as part of identifiers
-// ---------------------------------------------------------------------------
-
-/**
- * Acorn plugin that makes `@` a valid identifier-start character.
- * `@count` parses as Identifier { name: "@count" }.
- */
-// @ts-ignore — acorn plugin API uses dynamic class extension not captured in types
-function scrmlAtPlugin(Parser: typeof acorn.Parser) {
-  // @ts-ignore
-  return class extends Parser {
-    readToken(code: number) {
-      // 64 = '@'
-      if (code === 64) {
-        // Peek ahead: only consume @ as identifier if followed by a valid
-        // identifier start char (letter, _, $). Otherwise let acorn handle it
-        // (it will likely error, which is correct for bare @ or @123).
-        // @ts-ignore
-        const next = this.input.charCodeAt(this.pos + 1);
-        // §17.7.3 — the `@.` contextual iteration sigil ("the current iteration
-        // value"). `@` followed by `.` is NOT an identifier-start, so the bare
-        // peek below would let acorn choke on it (escape-hatch ParseError for
-        // `@.` / `@.field` fed to parseExprToNode — the ExprNode layer could not
-        // structure the sigil; the each-body markup path lowers `@.` via a
-        // separate string-rewrite in emit-lift, and E-SYNTAX-064 is enforced by
-        // the type-system token scan — both independent of this parse). Consume
-        // `@.` plus an optional immediately-following field name as ONE name
-        // token: `@.` → "@.", `@.field` → "@.field", chained `@.a.b` → "@.a"
-        // here then acorn handles `.b` as member access, `@.items[0]` → "@.items"
-        // then computed member. Whether `@.` is legal at this locus (inside an
-        // `<each>` body) is decided downstream by E-SYNTAX-064 — this layer's job
-        // is only to STRUCTURE the valid-scrml sigil instead of escape-hatching.
-        //
-        // INLINE-WS-tolerant: the block-splitter join path emits expression text
-        // with whitespace around tokens, so a source `@.name` reaches here as
-        // `@ . name`. Non-destructive lookahead from just after `@` skips inline
-        // ws (space/tab only — never a newline) to find the `.`; if present this
-        // is the sigil and `this.pos` is advanced past the `.` + trailing ws to
-        // the field. (readToken never fires inside string/comment interiors —
-        // acorn handles those separately — so this absorbs only real code ws.)
-        // @ts-ignore
-        let _look = this.pos + 1;
-        // @ts-ignore
-        while (this.input.charCodeAt(_look) === 32 || this.input.charCodeAt(_look) === 9) _look++;
-        // @ts-ignore
-        if (this.input.charCodeAt(_look) === 46) { // '.'
-          _look++; // past '.'
-          // @ts-ignore
-          while (this.input.charCodeAt(_look) === 32 || this.input.charCodeAt(_look) === 9) _look++;
-          // @ts-ignore
-          this.pos = _look;
-          // @ts-ignore
-          const after = this.input.charCodeAt(this.pos);
-          const fieldStart = (after >= 65 && after <= 90)   // A-Z
-            || (after >= 97 && after <= 122)                 // a-z
-            || after === 95 || after === 36;                 // _ or $
-          let field = "";
-          if (fieldStart) {
-            // @ts-ignore
-            field = this.readWord1();
-          }
-          // @ts-ignore
-          return this.finishToken(acorn.tokTypes.name, "@." + field);
-        }
-        const isIdentStart = (next >= 65 && next <= 90)  // A-Z
-          || (next >= 97 && next <= 122)                   // a-z
-          || next === 95 || next === 36;                   // _ or $
-        if (isIdentStart) {
-          // @ts-ignore
-          this.pos++;
-          // @ts-ignore
-          const word = this.readWord1();
-          // @ts-ignore
-          return this.finishToken(acorn.tokTypes.name, "@" + word);
-        }
-      }
-      // @ts-ignore
-      return super.readToken(code);
-    }
-  };
-}
-
-/**
- * Acorn plugin that handles `::` enum variant access.
- * Transforms `Type::Variant` by reading it as a single string token.
- * Without this, acorn would choke on `::` which is not valid JS.
- */
-// @ts-ignore — acorn plugin API uses dynamic class extension not captured in types
-function scrmlEnumPlugin(Parser: typeof acorn.Parser) {
-  // @ts-ignore
-  return class extends Parser {
-    readToken(code: number) {
-      // 58 = ':'
-      // @ts-ignore
-      if (code === 58 && this.input.charCodeAt(this.pos + 1) === 58) {
-        // Read Type::Variant as a special identifier
-        // @ts-ignore
-        this.pos += 2; // skip ::
-        // @ts-ignore
-        const variant = this.readWord1();
-        // Emit as a string literal containing the variant name
-        // @ts-ignore
-        return this.finishToken(acorn.tokTypes.string, variant);
-      }
-      // @ts-ignore
-      return super.readToken(code);
-    }
-  };
-}
-
-// @ts-ignore
-const ScrmlParser = acorn.Parser.extend(scrmlAtPlugin, scrmlEnumPlugin);
+// The acorn plugins for the `@` sigil and `Type::Variant` (and the extended
+// `ScrmlParser`) live in the leaf module `scrml-acorn.ts` (S457), shared with the
+// SQL slot reader `codegen/sql-lex.ts` so both read scrml expression text with
+// ONE parser.
 
 // ---------------------------------------------------------------------------
 // SQL placeholder scanner (F-SQL-001)
@@ -322,7 +220,7 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
           };
         }
       }
-      out += "__scrml_sql_placeholder__";
+      out += PH_SQL_PLACEHOLDER();
       continue;
     }
     out += ch;
@@ -330,6 +228,243 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
   }
 
   return unbalanced ? { result: out, unbalanced } : { result: out };
+}
+
+// ---------------------------------------------------------------------------
+// Handled operands in expression position (§19.8.3 / §19.4.3, S454)
+// ---------------------------------------------------------------------------
+//
+// A `?{}` query is a failable expression everywhere (§19.8.3), and a `!{}`
+// handler may follow a failable expression in ANY value position (§19.4.3,
+// "Handling in a value position"): a declaration initializer, an assignment's
+// right-hand side, an argument, a `return` operand, an operand of an operator,
+// a condition. The statement parser only builds these as structured nodes when
+// they are the whole right-hand side of a declaration / assignment / return; a
+// `?{}` or a `!{}` anywhere else (a `match` scrutinee, an `if` condition, inside
+// parentheses) reaches this parser as raw text. Before this, the `?{}` became an
+// opaque placeholder codegen could not resolve (`null /* sql-ref unresolved */`)
+// and the `!{` made the whole expression a parse error emitted verbatim.
+//
+// `extractHandledOperands` runs on the raw expression text BEFORE any other
+// preprocessing, and replaces
+//   - each `?{ … }`         with  `__scrml_sql_ref__("<source>")`
+//   - each postfix `!{ … }` with  ` .__scrml_guard__("<source>")`
+// Both carry their exact source as a string literal, so nothing is lost to the
+// operator preprocessing (`not`, `is`, `::`, …), and acorn decides what the
+// handler applies to: a member-call binds to the whole postfix chain on its
+// left, exactly as `!{}` does (`f(x).y !{ … }` handles `f(x).y`).
+// `__scrml_sql_ref__(…)` converts to a `sql-ref` carrying `raw`; the guard stays
+// a member call whose callee property is GUARD_MARKER (guardCallArmsRaw reads
+// it back). A `!{` is only a handler when it FOLLOWS an operand — `!{…}` at the
+// start of an operand is logical-not of an object literal and is left alone.
+// An unbalanced block leaves the text untouched, so the existing unbalanced-`?{`
+// diagnostic (E-SQL-008) still fires from replaceSqlBlockPlaceholder.
+
+/** Placeholder callee for an expression-position `?{…}` query. */
+/** The current compilation's `?{}` operand marker (unforgeable — placeholder-nonce.ts). */
+export const SQL_REF_MARKER = (): string => PH_SQL_REF();
+/** Placeholder member-call name for an expression-position `!{…}` handler. */
+/** The current compilation's `!{}` handler marker (unforgeable — placeholder-nonce.ts). */
+export const GUARD_MARKER = (): string => PH_GUARD();
+
+/**
+ * Scan a `{ … }` block whose `{` is at `openIdx`. Template-literal / string
+ * aware (an embedded `${ … }` nests). Returns the index just past the matching
+ * `}`, or -1 when the block is unbalanced.
+ */
+function scanBalancedBraceBlock(input: string, openIdx: number): number {
+  type Frame = { kind: "js"; depth: number } | { kind: "template" } | { kind: "single" } | { kind: "double" };
+  const stack: Frame[] = [{ kind: "js", depth: 1 }];
+  let i = openIdx + 1;
+  const n = input.length;
+  while (i < n) {
+    const top = stack[stack.length - 1];
+    const c = input[i];
+    if (top.kind === "single" || top.kind === "double") {
+      if (c === "\\") { i += 2; continue; }
+      if ((top.kind === "single" && c === "'") || (top.kind === "double" && c === "\"")) stack.pop();
+      i++;
+      continue;
+    }
+    if (top.kind === "template") {
+      if (c === "\\") { i += 2; continue; }
+      if (c === "`") { stack.pop(); i++; continue; }
+      if (c === "$" && input[i + 1] === "{") { stack.push({ kind: "js", depth: 1 }); i += 2; continue; }
+      i++;
+      continue;
+    }
+    if (c === "`") { stack.push({ kind: "template" }); i++; continue; }
+    if (c === "'") { stack.push({ kind: "single" }); i++; continue; }
+    if (c === "\"") { stack.push({ kind: "double" }); i++; continue; }
+    const skipTo = opaqueSlashSpanEnd(input, i);
+    if (skipTo > i) { i = skipTo; continue; }
+    if (c === "{") { top.depth++; i++; continue; }
+    if (c === "}") {
+      top.depth--;
+      i++;
+      if (top.depth === 0) {
+        stack.pop();
+        if (stack.length === 0) return i;
+      }
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * When `input[i]` opens a comment (`//`, `/*`) or a REGEX literal, the index
+ * just past it; otherwise `i`. Regex-vs-division is `regexAllowedAfter` — the
+ * same preceding-token decision the shared code-segment fence and
+ * rewriteIsPredicates use — and the literal's end is `scanRegexLiteralEnd`.
+ */
+function opaqueSlashSpanEnd(input: string, i: number): number {
+  if (input[i] !== "/") return i;
+  if (input[i + 1] === "/") {
+    let j = i + 2;
+    while (j < input.length && input[j] !== "\n") j++;
+    return j;
+  }
+  if (input[i + 1] === "*") {
+    const end = input.indexOf("*/", i + 2);
+    return end === -1 ? input.length : end + 2;
+  }
+  if (regexAllowedAfter(input.slice(0, i))) {
+    const end = scanRegexLiteralEnd(input, i);
+    if (end !== -1) return end;
+  }
+  return i;
+}
+
+/**
+ * A JS string literal holding `s`. `?{` and `<` are written as `\u` escapes so
+ * the later text passes that are not string-aware (the `?{` placeholder scan and
+ * the `<#id>` ref rewrite in parseExpression) cannot match inside the literal;
+ * the literal's VALUE is still exactly `s`.
+ */
+function markerLiteral(s: string): string {
+  return JSON.stringify(s).replace(/\?\{/g, "\\u003f{").replace(/</g, "\\u003c");
+}
+
+/** The last non-whitespace character of `s`, or "" when there is none. */
+function lastNonWs(s: string): string {
+  for (let k = s.length - 1; k >= 0; k--) {
+    if (!/\s/.test(s[k])) return s[k];
+  }
+  return "";
+}
+
+/**
+ * Replace expression-position `?{…}` queries and postfix `!{…}` handlers with
+ * placeholder calls carrying their source text (see the section comment above).
+ * Returns `input` unchanged when it holds neither, or when a block is unbalanced.
+ */
+export function extractHandledOperands(input: string): string {
+  if (!input || (input.indexOf("?{") === -1 && input.indexOf("!{") === -1)) return input;
+  type Frame = { kind: "js"; depth: number } | { kind: "template" } | { kind: "single" } | { kind: "double" };
+  const stack: Frame[] = [{ kind: "js", depth: 0 }];
+  let out = "";
+  let i = 0;
+  const n = input.length;
+  let changed = false;
+  while (i < n) {
+    const top = stack[stack.length - 1];
+    const c = input[i];
+    if (top.kind === "single" || top.kind === "double") {
+      if (c === "\\") { out += input.slice(i, i + 2); i += 2; continue; }
+      if ((top.kind === "single" && c === "'") || (top.kind === "double" && c === "\"")) stack.pop();
+      out += c; i++;
+      continue;
+    }
+    if (top.kind === "template") {
+      if (c === "\\") { out += input.slice(i, i + 2); i += 2; continue; }
+      if (c === "`") { stack.pop(); out += c; i++; continue; }
+      if (c === "$" && input[i + 1] === "{") { stack.push({ kind: "js", depth: 1 }); out += "${"; i += 2; continue; }
+      out += c; i++;
+      continue;
+    }
+    // js context
+    if (c === "`") { stack.push({ kind: "template" }); out += c; i++; continue; }
+    if (c === "'") { stack.push({ kind: "single" }); out += c; i++; continue; }
+    if (c === "\"") { stack.push({ kind: "double" }); out += c; i++; continue; }
+    // S454 fix round (F2) — a regex literal / comment interior is opaque:
+    // `/a!{2}/` is a quantifier, not a handler. The regex-vs-division decision is
+    // the shared fence's own (`regexAllowedAfter`, the GITI-017 / S252 twin).
+    const skipTo = opaqueSlashSpanEnd(input, i);
+    if (skipTo > i) { out += input.slice(i, skipTo); i = skipTo; continue; }
+    if (c === "?" && input[i + 1] === "{") {
+      const end = scanBalancedBraceBlock(input, i + 1);
+      if (end < 0) return input;
+      out += `${SQL_REF_MARKER()}(${markerLiteral(input.slice(i, end))})`;
+      i = end;
+      changed = true;
+      continue;
+    }
+    if (c === "!" && input[i + 1] === "{" && /[A-Za-z0-9_$)\]}`'"]/.test(lastNonWs(out))) {
+      const end = scanBalancedBraceBlock(input, i + 1);
+      if (end < 0) return input;
+      out += ` .${GUARD_MARKER()}(${markerLiteral(input.slice(i, end))})`;
+      i = end;
+      changed = true;
+      continue;
+    }
+    if (c === "{") { top.depth++; out += c; i++; continue; }
+    if (c === "}") {
+      top.depth--;
+      out += c; i++;
+      if (top.depth === 0 && stack.length > 1) stack.pop(); // close of a template `${ … }`
+      continue;
+    }
+    out += c; i++;
+  }
+  return changed ? out : input;
+}
+
+/**
+ * The inverse of extractHandledOperands: rewrite every placeholder in `text`
+ * back to its source (`__scrml_sql_ref__("?{…}")` → `?{…}`,
+ * ` .__scrml_guard__("!{…}")` → ` !{…}`). Used for every escape-hatch raw and
+ * template-literal raw sliced out of the preprocessed text, so an opaque
+ * region (an arrow's block body, a function expression) carries the author's
+ * source — which the escape-hatch consumers (the E-SQL-009 arrow-body scan, the
+ * text rewriters) were written against — never a placeholder.
+ */
+export function restoreHandledOperands(text: string): string {
+  if (!text || (text.indexOf(SQL_REF_MARKER()) === -1 && text.indexOf(GUARD_MARKER()) === -1)) return text;
+  const re = new RegExp(`(\\s*\\.\\s*${GUARD_MARKER()}|${SQL_REF_MARKER()})\\s*\\(\\s*"`, "g");
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const litStart = m.index + m[0].length - 1; // the opening `"`
+    let j = litStart + 1;
+    while (j < text.length && text[j] !== "\"") j += text[j] === "\\" ? 2 : 1;
+    let close = j + 1;
+    while (close < text.length && /\s/.test(text[close])) close++;
+    if (j >= text.length || text[close] !== ")") continue;
+    let value: string;
+    try { value = JSON.parse(text.slice(litStart, j + 1)); } catch { continue; }
+    out += text.slice(last, m.index) + (m[1] === SQL_REF_MARKER() ? value : ` ${value}`);
+    last = close + 1;
+    re.lastIndex = last;
+  }
+  return out + text.slice(last);
+}
+
+/**
+ * When `node` is an expression-position handler placeholder
+ * (`<operand> .__scrml_guard__("!{ … }")`), return the handler's source text
+ * (`"!{ … }"`); otherwise null. The operand is `node.callee.object`.
+ */
+export function guardCallArmsRaw(node: ExprNode | null | undefined): string | null {
+  if (!node || node.kind !== "call") return null;
+  const callee = node.callee;
+  if (!callee || callee.kind !== "member" || callee.property !== GUARD_MARKER() || callee.optional) return null;
+  if (node.args.length !== 1) return null;
+  const arg = node.args[0] as ExprNode;
+  if (!arg || arg.kind !== "lit" || typeof arg.value !== "string") return null;
+  return arg.value.startsWith("!{") ? arg.value : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,9 +633,9 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
   processed = sqlScan.result;
 
   // Handle <#id>.send() worker refs — replace with placeholder before input state refs
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, "__scrml_worker_$1__.send(");
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
   // Handle <#id> input state refs — replace with placeholder
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, "__scrml_input_$1__");
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
 
   // F-SQL-001: if the SQL scanner found an unbalanced `?{` opener, surface
   // it as a hard error (E-SQL-008). Callers (parseExprToNode, ast-builder)
@@ -549,8 +684,8 @@ export function parseStatements(raw: string, opts: { tolerant?: boolean } = {}):
   const sqlScan = replaceSqlBlockPlaceholder(processed);
   processed = sqlScan.result;
   // Handle <#id>.send() worker refs — replace with placeholder before input state refs
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, "__scrml_worker_$1__.send(");
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, "__scrml_input_$1__");
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
 
   const sqlDiag = sqlScan.unbalanced
     ? { code: "E-SQL-008", message: sqlScan.unbalanced.message, offset: sqlScan.unbalanced.offset }
@@ -1073,6 +1208,15 @@ export function rewriteServerReactiveRefsAST(expr: string): RewriteResult {
       return;
     }
 
+    // §6.6.9 / §20.5 (S449) — an ambient `@session` is never lowered to the
+    // request body (fail-closed backstop, codegen/server-session-guard.ts).
+    if (isServerAmbientSession(varName)) {
+      node.type = "Identifier";
+      node.name = refuseServerAmbientSession("expression-parser rewriteServerReactiveRefsAST");
+      modified = true;
+      return;
+    }
+
     // Replace with _scrml_body["varName"] — a MemberExpression
     node.type = "MemberExpression";
     node.object = { type: "Identifier", name: "_scrml_body" };
@@ -1144,7 +1288,6 @@ function spanFromEstree(node: ESNode, filePath: string, baseOffset: number): Exp
 // where each arm is a quoted string. The arm content is preserved verbatim.
 // ---------------------------------------------------------------------------
 
-const SCRML_PLACEHOLDER_PREFIX = "__scrml_";
 
 // ---------------------------------------------------------------------------
 // rewriteIsPredicates — structural scanner for `is some|given|not|not not|.V|T.V`
@@ -1227,6 +1370,33 @@ function matchInputStateSigilLeft(s: string, end: number): number {
  * verbatim in the output (so `a || b is some` becomes
  * `a || __scrml_is_some__(b)`).
  */
+/**
+ * Words that stop the leftward operand scan: a `(…)` group directly right of
+ * one is a GROUPING paren, never a call (`return (f(n)) is not`).
+ *
+ * The set is deliberately ONLY words that are reserved in every JS mode AND
+ * that can never be a callee or a value, so reading them as a stop cannot
+ * change the meaning of any program that parsed before (#1333 review R1-R3):
+ *   - `of` and `await` are LEGAL identifiers in some modes — a user function
+ *     `of` is a callee (`of(x) is some`), so they are NOT here (`yield` is:
+ *     see below);
+ *   - `new`, `typeof`, `void`, `delete` are unary operators whose precedence
+ *     against `is` is unruled — treating them as stops changed what
+ *     `typeof (v) is some` / `new Object(v) is some` mean, so they keep the
+ *     pre-#1333 reading (operator inside the operand) and are NOT here;
+ *   - `not` / `and` / `or` are scrml words with their own lowering (§42.10,
+ *     §45.7) and are left to it.
+ * Each word below is reserved everywhere and introduces a statement, a clause
+ * or a binary operator — the word is never the callee of the group after it.
+ */
+const IS_LHS_STOP_KEYWORDS = new Set<string>([
+  "return", "throw", "case", "else", "do", "in", "instanceof",
+  // `yield` (review N1): emitted artifacts are ES modules, where `yield` is
+  // reserved and can never be a callee — inside a generator `yield (v) is some`
+  // yields the TEST, not `v`.
+  "yield",
+]);
+
 function scanLhsLeft(s: string, isStart: number): number {
   // 1. Skip whitespace immediately before `is`
   let i = isStart - 1;
@@ -1289,8 +1459,22 @@ function scanLhsLeft(s: string, isStart: number): number {
       // Ident segment. This may be:
       //   - the BASE of the chain (no `.` left of it) — terminate after,
       //   - or a member-tail-name (a `.` left of it) — continue chain.
+      const identEnd = pos;
       while (pos >= 0 && /[A-Za-z0-9_$]/.test(s[pos])) pos--;
       const identStart = pos + 1;
+
+      // #1333 — a KEYWORD left of a `(…)` group is not its callee: in
+      // `return (f(n)) is not` the `(f(n))` is a GROUPING paren and the LHS is
+      // that group. Consuming `return` produced `__scrml_is_not__(return (f(n)))`,
+      // an acorn ParseError that dropped the whole enclosing expression onto the
+      // string fallback. A keyword that is a MEMBER name (`m.delete(k)`) is
+      // preceded by `.` and stays part of the chain (checked below).
+      {
+        let dotScan = pos;
+        while (dotScan >= 0 && /\s/.test(s[dotScan])) dotScan--;
+        const isMember = dotScan >= 0 && s[dotScan] === ".";
+        if (!isMember && IS_LHS_STOP_KEYWORDS.has(s.slice(identStart, identEnd + 1))) break;
+      }
       chainStart = identStart;
 
       // Look for `.` (whitespace-tolerant) to the left — that makes the ident
@@ -1334,6 +1518,21 @@ function scanLhsLeft(s: string, isStart: number): number {
 
   // If we never consumed anything, the LHS is empty/invalid.
   if (chainStart > i) return -1;
+
+  // `new Callee(args)` binds tighter than any operator (it is a member-level
+  // primary), so the `new` belongs INSIDE the operand: `new Object(v) is some`
+  // tests the constructed value. Without this the operand stopped at
+  // `Object(v)` and the placeholder landed between `new` and its callee —
+  // `new __scrml_is_some__(Object(v))`, a ReferenceError before #1333 and a
+  // `new` applied to the lowering's arrow (TypeError) after it (review R2).
+  // Repeats for `new new X()()`. `new` is reserved, so it is never a callee.
+  for (;;) {
+    let k = chainStart - 1;
+    while (k >= 0 && /\s/.test(s[k])) k--;
+    if (k < 2 || s.slice(k - 2, k + 1) !== "new") break;
+    if (k - 3 >= 0 && /[A-Za-z0-9_$.@]/.test(s[k - 3])) break;
+    chainStart = k - 2;
+  }
   return chainStart;
 }
 
@@ -1402,10 +1601,10 @@ function matchIsPredicateSuffix(s: string, start: number): IsPredicateSuffix | n
 /** Format a placeholder call for the matched predicate. */
 function formatIsPredicate(lhs: string, suffix: IsPredicateSuffix): string {
   switch (suffix.kind) {
-    case "is-not-not": return `__scrml_is_not_not__(${lhs})`;
-    case "is-not":     return `__scrml_is_not__(${lhs})`;
-    case "is-some":    return `__scrml_is_some__(${lhs})`;
-    case "is-variant": return `__scrml_is_variant__(${lhs}, "${suffix.variant}")`;
+    case "is-not-not": return `${PH_IS_NOT_NOT()}(${lhs})`;
+    case "is-not":     return `${PH_IS_NOT()}(${lhs})`;
+    case "is-some":    return `${PH_IS_SOME()}(${lhs})`;
+    case "is-variant": return `${PH_IS_VARIANT()}(${lhs}, "${suffix.variant}")`;
   }
 }
 
@@ -1766,7 +1965,7 @@ function preprocessForAcorn(
   s = rewriteCodeSegments(s, (code) =>
     code.replace(
       /(?<![A-Za-z0-9_$\)\]"'`|]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
-      '__scrml_bare_variant_$1__'
+      `${PHP_BARE_VARIANT()}$1__`
     )
   );
 
@@ -1891,7 +2090,7 @@ function preprocessForAcorn(
   s = rewriteCodeSegments(s, (code) =>
     code.replace(
       /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
-      '__scrml_render_$1__('
+      `${PHP_RENDER()}$1__(`
     )
   );
 
@@ -1929,7 +2128,7 @@ function preprocessForAcorn(
   // fires only on an acorn Identifier node — so a user string literal that
   // contains the text `__scrml_tilde__` is never turned into `~`.
   s = rewriteCodeSegments(s, (code) =>
-    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__")
+    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, PH_TILDE())
   );
 
   return s;
@@ -2123,7 +2322,7 @@ function preprocessMapLiterals(s: string): string {
 
     // Empty-map literal `[:]` (exactly a single colon, possibly padded).
     if (innerTrim === ":") {
-      rewrites.push({ start: i, end: closeIdx + 1, replacement: `__scrml_map_lit__(${JSON.stringify(JSON.stringify([]))})` });
+      rewrites.push({ start: i, end: closeIdx + 1, replacement: `${PH_MAP_LIT()}(${JSON.stringify(JSON.stringify([]))})` });
       i = closeIdx;                                       // skip past — no nested re-scan of this bracket
       continue;
     }
@@ -2190,7 +2389,7 @@ function preprocessMapLiterals(s: string): string {
 
     const diagArg = JSON.stringify(JSON.stringify(diags));
     const allArgs = [diagArg, ...pairArgs].join(", ");
-    rewrites.push({ start: i, end: closeIdx + 1, replacement: `__scrml_map_lit__(${allArgs})` });
+    rewrites.push({ start: i, end: closeIdx + 1, replacement: `${PH_MAP_LIT()}(${allArgs})` });
     i = closeIdx;
   }
 
@@ -2302,7 +2501,7 @@ function preprocessMatchExprs(s: string): string {
     const armStrings = splitMatchArms(armsContent);
     const armsQuoted = armStrings.map(a => JSON.stringify(a.trim())).join(", ");
 
-    const replacement = `__scrml_match__(${subject}, ${armsQuoted})`;
+    const replacement = `${PH_MATCH()}(${subject}, ${armsQuoted})`;
     result = result.slice(0, index) + replacement + result.slice(end);
   }
 
@@ -2456,16 +2655,16 @@ export function esTreeToExprNode(
     case "Identifier": {
       const name = node.name as string;
       // Handle __scrml_input_<id>__ placeholders back to input-state-ref
-      if (name.startsWith("__scrml_input_") && name.endsWith("__")) {
-        const inputName = name.slice("__scrml_input_".length, -2);
+      const inputName = placeholderParam(name, "input");
+      if (inputName !== null) {
         return { kind: "input-state-ref", span, name: inputName } satisfies InputStateRefExpr;
       }
       // Handle __scrml_sql_placeholder__
-      if (name === "__scrml_sql_placeholder__") {
+      if (name === PH_SQL_PLACEHOLDER()) {
         return { kind: "sql-ref", span, nodeId: -1 } satisfies SqlRefExpr;
       }
       // Handle worker refs __scrml_worker_<id>__
-      if (name.startsWith("__scrml_worker_") && name.endsWith("__")) {
+      if (placeholderParam(name, "worker") !== null) {
         // Worker refs are handled at a higher level; emit as ident for now
         return { kind: "ident", span, name } satisfies IdentExpr;
       }
@@ -2476,12 +2675,13 @@ export function esTreeToExprNode(
       // `__scrml_is_variant__` consumer (which also produces IdentExpr with
       // name `.Variant`). Downstream M9 bare-variant inference resolves the
       // type from context (LHS annotation, parameter type, match for=, etc.).
-      if (name.startsWith("__scrml_bare_variant_") && name.endsWith("__")) {
-        const variantName = "." + name.slice("__scrml_bare_variant_".length, -2);
+      const bareVariant = placeholderParam(name, "bare_variant");
+      if (bareVariant !== null) {
+        const variantName = "." + bareVariant;
         return { kind: "ident", span, name: variantName } satisfies IdentExpr;
       }
       // §32 tilde accumulator: convert placeholder back to ~ ident
-      if (name === "__scrml_tilde__") {
+      if (name === PH_TILDE()) {
         return { kind: "ident", span, name: "~" } satisfies IdentExpr;
       }
       // §42 absence value: `not` keyword → null literal
@@ -2576,7 +2776,7 @@ export function esTreeToExprNode(
       let templateRaw = "";
       if (typeof tplStart === "number" && typeof tplEnd === "number"
           && rawSource && tplStart >= 0 && tplEnd <= rawSource.length && tplStart < tplEnd) {
-        templateRaw = rawSource.slice(tplStart, tplEnd);
+        templateRaw = restoreHandledOperands(rawSource.slice(tplStart, tplEnd));
       }
       // Defensive fallback: if we couldn't slice the source, reconstruct from
       // quasis + expressions via astring (best-effort) so `raw` is at least
@@ -2770,29 +2970,34 @@ export function esTreeToExprNode(
         // `raw: "not"`. The gauntlet-phase3 walker already suppresses direct
         // operands of these absence operators (isAbsenceOp check), so the
         // synthetic RHS is never inspected as a forbidden-source-token.
-        if (calleeName === "__scrml_is_not_not__") {
+        // §19.8.3 — an expression-position `?{…}` (extractHandledOperands). The
+        // sql-ref keeps its source text so codegen can lower it to a real query.
+        if (calleeName === SQL_REF_MARKER() && rawArgs.length === 1 && (rawArgs[0] as ESNode).type === "Literal" && typeof (rawArgs[0] as ESNode).value === "string") {
+          return { kind: "sql-ref", span, nodeId: -1, raw: (rawArgs[0] as ESNode).value as string } satisfies SqlRefExpr;
+        }
+        if (calleeName === PH_IS_NOT_NOT()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
           return { kind: "binary", span, op: "is-not-not", left, right: absentNode } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_is_not__") {
+        if (calleeName === PH_IS_NOT()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
           return { kind: "binary", span, op: "is-not", left, right: absentNode } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_is_some__") {
+        if (calleeName === PH_IS_SOME()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
           return { kind: "binary", span, op: "is-some", left, right: absentNode } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_is_variant__") {
+        if (calleeName === PH_IS_VARIANT()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const variantLit = rawArgs[1] as ESNode;
           const variantName = variantLit.value as string ?? "";
           const right: IdentExpr = { kind: "ident", span, name: variantName };
           return { kind: "binary", span, op: "is", left, right } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_match__") {
+        if (calleeName === PH_MATCH()) {
           // First arg is subject, rest are arm strings
           const arg0 = rawArgs[0] as ESNode;
           const rawArmNodes = rawArgs.slice(1) as ESNode[];
@@ -2819,7 +3024,7 @@ export function esTreeToExprNode(
         // slices, each re-parsed through the full pipeline (so nested map
         // literals, bare variants, etc. inside a key/value are handled). An
         // empty `[:]` map carries only the diag arg → zero entries.
-        if (calleeName === "__scrml_map_lit__") {
+        if (calleeName === PH_MAP_LIT()) {
           const diagRaw = (rawArgs[0] as ESNode | undefined)?.value as string ?? "[]";
           let diagnostics: { code: string; message: string }[] = [];
           try {
@@ -3001,12 +3206,9 @@ export function esTreeToExprNode(
         let rawKeyName = computed
           ? null
           : ((keyNode.name as string) ?? (keyNode.value != null ? String(keyNode.value) : ""));
-        if (
-          typeof rawKeyName === "string" &&
-          rawKeyName.startsWith("__scrml_bare_variant_") &&
-          rawKeyName.endsWith("__")
-        ) {
-          rawKeyName = rawKeyName.slice("__scrml_bare_variant_".length, -2);
+        const maskedKey = placeholderParam(rawKeyName, "bare_variant");
+        if (maskedKey !== null) {
+          rawKeyName = maskedKey;
         }
         const key: string | ExprNode = computed
           ? esTreeToExprNode(keyNode, filePath, baseOffset, rawSource)
@@ -3104,7 +3306,9 @@ function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): Escap
     kind: "escape-hatch",
     span,
     nativeKind: node.type,
-    raw: rawSource,
+    // S454 — an opaque region carries the author's `?{}` / `!{}` source, not
+    // the extractHandledOperands placeholders.
+    raw: restoreHandledOperands(rawSource),
   } satisfies EscapeHatchExpr;
 }
 
@@ -3162,6 +3366,20 @@ export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; war
   }
 }
 
+/**
+ * S441 — the body-top strictness oracle (SPEC §40.8 S441 bullet, §4.18.7).
+ * A `<program>` / `<page>` / `<channel>` body-top run is a statement sequence;
+ * an expression the lenient statement collector handed over that acorn can only
+ * parse by DROPPING trailing content (`parseExpressionAt` stops early —
+ * `Welcome to the dashboard.` keeps `Welcome`) is not valid code. The returned
+ * ExprNode then carries a NON-enumerable `_s441Trailing` flag (invisible to
+ * serialization and structural equality); ast-builder's body-top check reads it
+ * through `hasLostTrailingContent`.
+ */
+export function hasLostTrailingContent(node: unknown): boolean {
+  return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
+}
+
 export function parseExprToNode(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }): ExprNode {
   // §42.10 ENFORCEMENT (S188 g-not-negation-enforce): a detector object captures
   // whether preprocessForAcorn lowered a prefix-`not`-as-negation (bare `not @x`
@@ -3176,8 +3394,17 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   // sanctioned absence/presence keyword nor a `.Variant` pattern. When it fires
   // we stamp `_isValueRhsOnIs`; the gauntlet-phase3 §45 harvest fires E-EQ-005
   // (once per stamped node) BEFORE codegen, steering the author to `==`.
-  const _detector = { notPrefixNegation: false, valueRhsOnIs: false };
+  const _detector: { notPrefixNegation: boolean; valueRhsOnIs: boolean; lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number } = { notPrefixNegation: false, valueRhsOnIs: false };
   const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _detector);
+  if (_node && typeof _node === "object" && _detector.lostTrailing) {
+    Object.defineProperty(_node, "_s441Trailing", { value: true, enumerable: false, configurable: true, writable: true });
+    // S441 round 4 — WHAT was lost and on which line of the expression it
+    // starts (0 = the expression's first line), so the body-top check can
+    // keep the valid prefix and re-parse / report the lost tail at its own
+    // position instead of dropping it.
+    Object.defineProperty(_node, "_s441TrailingText", { value: _detector.lostTrailingText ?? "", enumerable: false, configurable: true, writable: true });
+    Object.defineProperty(_node, "_s441TrailingLine", { value: _detector.lostTrailingLine ?? 0, enumerable: false, configurable: true, writable: true });
+  }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
     if (_detector.valueRhsOnIs) (_node as Record<string, unknown>)._isValueRhsOnIs = true;
@@ -3200,6 +3427,11 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
 
   // Apply scrml-specific preprocessing to convert `is`/`match` etc.
   let processed = trimmed;
+
+  // §19.8.3 / §19.4.3 — a `?{}` query and a postfix `!{}` handler written
+  // INSIDE an expression become placeholder calls carrying their source text,
+  // BEFORE the scrml operator preprocessing can rewrite their contents.
+  processed = extractHandledOperands(processed);
 
   // Preprocessing for scrml-specific operators
   processed = preprocessForAcorn(processed, { tildeActive: opts?.tildeActive }, _notDetector);
@@ -3250,6 +3482,33 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   // followed by code — this is the signature of the ASI merge bug.
   // Single-line trailing content (e.g., tokenizer-spaced "header ( )") is typically
   // from the space-separated token stream, not from merged statements.
+  if (estree && trailingContent && _notDetector) {
+    // acorn reports a parenthesized expression's node WITHOUT its wrapping
+    // parens, so `(1)` "trails" `)`. Discount one `)` per `(` that precedes
+    // the node's start; anything left over was genuinely dropped.
+    let wrap = 0;
+    const lead = processed.slice(0, (estree as { start?: number }).start ?? 0);
+    for (const ch of lead) if (ch === "(") wrap++;
+    // Untrimmed tail, so the line the lost content starts on is known.
+    const endAt = (estree as { end?: number }).end ?? 0;
+    let rest = processed.slice(endAt);
+    let consumed = 0;
+    while (wrap > 0) {
+      const m = /^\s*\)/.exec(rest);
+      if (!m) break;
+      consumed += m[0].length;
+      rest = rest.slice(m[0].length);
+      wrap--;
+    }
+    if (rest.trim() !== "") {
+      const det = _notDetector as { lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number };
+      det.lostTrailing = true;
+      det.lostTrailingText = rest.trim();
+      // 0-based line (within the trimmed expression text) of the first lost char.
+      const leadWs = (/^\s*/.exec(rest) || [""])[0];
+      det.lostTrailingLine = (processed.slice(0, endAt + consumed) + leadWs).split("\n").length - 1;
+    }
+  }
   if (estree && trailingContent && trailingContent.includes("\n") && /[a-zA-Z_$@]/.test(trailingContent)) {
     const preview = trailingContent.length > 60 ? trailingContent.slice(0, 60) + "..." : trailingContent;
     const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;
@@ -3496,6 +3755,13 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "call": {
+      // §19.8.3 / §19.4.3 — a handled operand `X !{ … }` in an expression
+      // position (see extractHandledOperands) round-trips to its source form,
+      // so a re-parse of this text yields the same guard.
+      const guardRaw = guardCallArmsRaw(node);
+      if (guardRaw !== null && node.callee.kind === "member") {
+        return `${emitReceiverRT(node.callee.object)} ${guardRaw}`;
+      }
       const callee = emitReceiverRT(node.callee);
       const args = node.args.map(a => emitStringFromTree(a as ExprNode)).join(", ");
       const sep = node.optional ? "?." : "";
@@ -3548,7 +3814,9 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "sql-ref":
-      return `?{ /* sql */ }`;
+      // A sql-ref built from an expression-position `?{…}` carries its source
+      // text (extractHandledOperands); round-trip it so a re-parse keeps the query.
+      return typeof node.raw === "string" && node.raw.length > 0 ? node.raw : `?{ /* sql */ }`;
 
     case "input-state-ref":
       return `<#${node.name}>`;
@@ -3579,6 +3847,129 @@ export function emitStringFromTree(node: ExprNode): string {
       return "";
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// emitCodeOnlyStringFromTree — the CODE surface of an expression, with every
+// literal's TEXT blanked (SPEC §12.4, s451-ri-string-literal).
+// ---------------------------------------------------------------------------
+//
+// §12.4: route inference "SHALL NOT classify a function based on the names of
+// identifiers that appear inside string-literal contents of its body." The
+// route-inference Trigger-1 table (`SERVER_ONLY_PATTERNS`: `?{`, `new Database(`,
+// `new SQL(`, `fs.*(`, `readFileSync(`, `env(`, bare `session`) is matched against
+// the expression's rendered text, and `emitStringFromTree` renders a string
+// literal's QUOTED CONTENT — so `"your session ended: " + x` read as a `session`
+// reference and server-placed a pure client function.
+//
+// This renders the same text as `emitStringFromTree` EXCEPT that literal text is
+// blanked, so a text-shaped pattern only ever sees code:
+//   - a string literal renders as `""`; a static template as ``` `` ```;
+//   - an interpolated template keeps its `${ … }` CODE (itself blanked
+//     recursively) and blanks its quasi text;
+//   - an opaque raw-text slot the tree did not structure (an `escape-hatch`
+//     node's `raw` — e.g. a block-body callback — and a `match-expr`'s
+//     `rawArms`) is lexed with the SAME acorn tokenizer the parser uses
+//     (`blankLiteralTextInSource`) and has its string / template-quasi /
+//     comment content blanked.
+//
+// FAIL-CLOSED: where the raw-text lexer cannot lex a slot it returns the slot
+// UNCHANGED (a possible over-fire — a function placed on the server that need
+// not be — never an under-fire that places a server-only resource on the
+// client). Only text inside a token the lexer positively identified as a
+// string / template quasi / comment is ever blanked.
+
+/** Blank the interior of [start, end) in `chars` (replace each char with a space, keep newlines). */
+function blankRange(chars: string[], start: number, end: number): void {
+  for (let k = start; k < end && k < chars.length; k++) {
+    if (chars[k] !== "\n") chars[k] = " ";
+  }
+}
+
+/**
+ * Lex `raw` (scrml/JS expression or statement text) with the parser's acorn
+ * tokenizer and return it with the CONTENT of every string literal, every
+ * template-literal quasi, and every comment replaced by spaces. Code (incl. a
+ * template's `${ … }` interpolations) is preserved. A `?{ … }` SQL block is
+ * preserved as `?{}` (its presence is itself a server signal). Returns `raw`
+ * unchanged when it cannot be lexed (fail-closed — see the section header).
+ */
+export function blankLiteralTextInSource(raw: string): string {
+  if (!raw || typeof raw !== "string") return raw;
+  // Fast path: no quote / backtick / comment opener → nothing to blank.
+  if (!/["'`]|\/\/|\/\*/.test(raw)) return raw;
+  const sqlScan = replaceSqlBlockPlaceholder(raw);
+  if (sqlScan.unbalanced) return raw;
+  const processed = sqlScan.result;
+  const chars = processed.split("");
+  try {
+    // @ts-ignore — the extended parser class inherits acorn's static tokenizer.
+    const tokenizer = ScrmlParser.tokenizer(processed, {
+      ecmaVersion: 2025,
+      sourceType: "module",
+      allowAwaitOutsideFunction: true,
+      allowReturnOutsideFunction: true,
+      onComment: (_block: boolean, _text: string, start: number, end: number) => {
+        blankRange(chars, start, end);
+      },
+    });
+    for (const tok of tokenizer as Iterable<{ type: acorn.TokenType; start: number; end: number }>) {
+      if (tok.type === acorn.tokTypes.string) {
+        // The `::` enum plugin also emits `string` tokens (`Type::Variant`);
+        // only a QUOTED literal is literal text.
+        const q = processed[tok.start];
+        if ((q === "\"" || q === "'") && tok.end - tok.start >= 2) {
+          blankRange(chars, tok.start + 1, tok.end - 1);
+        }
+      } else if (tok.type === acorn.tokTypes.template || tok.type === acorn.tokTypes.invalidTemplate) {
+        blankRange(chars, tok.start, tok.end);
+      }
+    }
+  } catch {
+    return raw;
+  }
+  return chars.join("").split(PH_SQL_PLACEHOLDER()).join("?{}");
+}
+
+/** Deep-copy an ExprNode with every literal's text blanked (see section header). */
+function blankLiteralTextInTree(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(blankLiteralTextInTree);
+  if (!node || typeof node !== "object") return node;
+  const n = node as Record<string, unknown>;
+  if (n.kind === "lit") {
+    if (n.litType === "string") return { ...n, raw: "\"\"", value: "" };
+    if (n.litType === "template") {
+      return typeof n.raw === "string" && n.raw.includes("${")
+        ? { ...n, raw: blankLiteralTextInSource(n.raw) }
+        : { ...n, raw: "``", value: "" };
+    }
+    return n;
+  }
+  if (n.kind === "escape-hatch" && typeof n.raw === "string") {
+    return { ...n, raw: blankLiteralTextInSource(n.raw) };
+  }
+  const out: Record<string, unknown> = {};
+  for (const k in n) {
+    const v = n[k];
+    if (k === "span") { out[k] = v; continue; }
+    if (n.kind === "match-expr" && k === "rawArms" && Array.isArray(v)) {
+      out[k] = v.map((a) => (typeof a === "string" ? blankLiteralTextInSource(a) : a));
+      continue;
+    }
+    // A markup-value's `node` / a block lambda's `stmts` are AST, not ExprNode,
+    // and `emitStringFromTree` does not render them — copy by reference.
+    if ((n.kind === "markup-value" && k === "node") || k === "stmts") { out[k] = v; continue; }
+    out[k] = v && typeof v === "object" ? blankLiteralTextInTree(v) : v;
+  }
+  return out;
+}
+
+/**
+ * `emitStringFromTree`, with all literal TEXT blanked — the code-only surface a
+ * text-shaped route-inference pattern may be matched against (§12.4).
+ */
+export function emitCodeOnlyStringFromTree(node: ExprNode): string {
+  return emitStringFromTree(blankLiteralTextInTree(node) as ExprNode);
 }
 
 /**
@@ -3852,7 +4243,7 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
  *   surrounding `${` and `}`); `exprOffset` is the offset of the FIRST
  *   character of the expression text within the full `raw` string.
  */
-interface TemplateSegment {
+export interface TemplateSegment {
   kind: "quasi" | "expr";
   text: string;
   /** Offset of `text[0]` within the original `raw` string. */
@@ -3878,7 +4269,7 @@ interface TemplateSegment {
  *            If the input does not look like a backtick template, returns
  *            a single quasi covering the whole string.
  */
-function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
+export function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
   const segments: TemplateSegment[] = [];
   if (!raw || typeof raw !== "string") return segments;
 

@@ -3,12 +3,12 @@ ${
     <items> : Task[] = []
     <mode> : string = "all"
     function loadTasks() : Task[] {
-        rows = ?{`SELECT id, text FROM tasks`}
+        rows = ?{`SELECT id, text FROM tasks`} !{ _ :> [] }
         return rows
     }
     function refresh() {
         if (@mode == "all") {
-            @items = loadTasks()
+            @items = loadTasks() !{ .Transport(_) :> { return } }
         }
     }
 }

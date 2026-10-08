@@ -1,8 +1,8 @@
 <program>
 ${
     function getUsers() {
-        return ?{`SELECT id, name FROM users`}.all()
+        return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
     }
 }
-<button id="load" onclick=getUsers()>Load users</>
+<button id="load" onclick={ getUsers() !{ .Transport(_) :> { return } } }>Load users</>
 </program>

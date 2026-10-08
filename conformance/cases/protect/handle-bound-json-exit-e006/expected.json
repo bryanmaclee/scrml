@@ -1,0 +1,16 @@
+{
+  "id": "protect-handle-bound-json-exit-e006",
+  "description": "§14.8.9 S456 — a BOUND `Response.json` — a call no Response recognizer names; caught by the handle() exit sink (the value handle() returns is a client egress), through the fail-closed unknown-callee rule. The protected column leaves the server outside its row: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-handle-response-egress.test.js",
+  "rationale": "MEASURED at base 2dd6d35d9 (S456, g-handle-globalthis-response-ships-protected-columns): compiled at exit 0 and the emitted server answered HTTP 200 with the passwordHash in the body. §14.8.9 closed-world precondition: an author-constructed Response (§40) that carries a protected-origin column SHALL fail closed; Sinks: every argument of an author-built Response, Response.json, Response.redirect; the S447 r8 rule that a value read from the global heap resolves to its named path whether spelled or aliased.",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

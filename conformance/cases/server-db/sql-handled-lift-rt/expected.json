@@ -1,0 +1,31 @@
+{
+  "id": "server-db-sql-handled-lift-rt",
+  "description": "§19.8.3 handling form 1 (S451 R11) on a `lift` in a server function body (RUNTIME, sqlEngine:\"real\"): `lift ?{…}.all() !{ _ :> [] }`. In a server function body `lift` is the function's result, so the caller receives the rows on success (`notes` → 1 row; `empties` → `[]`, no row is not a failure) and the arm's `[]` when the query fails to run (`gone` is declared but never created). Pre-S455 (g-impl1-handled-sql-lowering-defects-s455 item 1) the guarded `lift` lowered with its value DROPPED — no return was emitted, every caller received null (the `.length` read then threw, so all three cells stayed \"init\") — and the query was not attempt-wrapped, so a failure still threw.",
+  "language-version": "1.0",
+  "spec": "§19.8.3, §19.8.4",
+  "rationale": "§19.8.3: \"**A `!{}` handler on the query** — written after the terminator (`.get()`, `.all()`, `.run()`), its arms match `SqlError` variants\". §19.8.3: \"**\"No row\" is not a failure.** A query that runs and matches nothing succeeds: `.get()` on zero rows returns `not`, and `.all()` on zero rows returns `[]`, in every context\". The handler adds the failure path only; the success value is the unhandled query's.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "notes": [
+        { "id": 7, "body": "hello" }
+      ],
+      "empties": []
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "hit": "rows:1",
+      "miss": "rows:0",
+      "failed": "rows:0"
+    },
+    "domAnchored": [
+      { "selector": "#hit", "text": "rows:1" },
+      { "selector": "#failed", "text": "rows:0" }
+    ]
+  }
+}

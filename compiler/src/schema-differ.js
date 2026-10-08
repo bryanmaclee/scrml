@@ -8,6 +8,7 @@
  */
 
 import { quoteIdent } from "./codegen/sql-ident.ts";
+import { liveSqlInterpolations, jsInterpolationEnd } from "./codegen/sql-lex.ts";
 
 /**
  * Parse a < schema> AST node into structured table declarations.
@@ -28,26 +29,65 @@ import { quoteIdent } from "./codegen/sql-ident.ts";
  * @param {object} schemaBody — AST node with body text, or the raw body string
  * @returns {{ tables: TableDecl[], fns: SecdefFnDecl[] }}
  */
+// Sticky (`y`) head regexes for `parseSchemaBlock` — matched AT an offset, no slicing.
+const FN_HEAD_RE = /fn\s+([A-Za-z_]\w*)\s*\(/y;
+const TBL_HEAD_RE = /([A-Za-z_]\w*)\s*\{/y;
+
 export function parseSchemaBlock(schemaBody) {
   const tables = [];
   const fns = [];
+  const gluedHeads = [];
+  const fnBodySpans = [];
+  // Offset of each `tables[k]` head in `text` (parallel array, additive — read by
+  // `findTenantDeclarationDisagreements` to locate a declaration for E-SCHEMA-015;
+  // the table objects themselves are unchanged).
+  const tableOffsets = [];
+  let maskedForGlue = null;
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
   const n = text.length;
   let i = 0;
+  // S456 — every `{` / `(` match and next-`{` lookup of this body, answered in amortized
+  // linear time (an unbalanced body re-scanned to its end per head: `"a{"`×40k ≈ 13 s).
+  const finders = {
+    blockEnd: makeSchemaBlockEndFinder(text),
+    parenEnd: makeMatchingParenFinder(text),
+    nextBrace: makeNextCharFinder(text, "{"),
+    inRange: makeRangeMatcher(text),
+  };
 
   while (i < n) {
     // Skip whitespace between top-level entries.
     while (i < n && /\s/.test(text[i])) i++;
     if (i >= n) break;
 
-    const rest = text.slice(i);
+    // LINEAR SCAN (S455 review round 2b — measured: a 40 KB string literal in a `<schema>`
+    // cost ~1 s here, 80 KB ~4 s). The scan used to `text.slice(i)` and re-run both
+    // head regexes at EVERY offset, and inside a long word run each attempt re-scanned
+    // the run's tail. Same matches, same order, without that: the heads are sticky
+    // regexes at `i`, and an offset inside a word run is skipped when no head can start
+    // there — a table head needs the run to be followed by `\s*{` (then the first
+    // letter of the run matches, exactly as before, including the glued-tail cases
+    // E-SCHEMA-012/013 rely on), and an `fn` head inside a run can only be its final
+    // two characters.
+    if (/\w/.test(text[i])) {
+      let e = i + 1;
+      while (e < n && /\w/.test(text[e])) e++;
+      let w = e;
+      while (w < n && /\s/.test(text[w])) w++;
+      if (text[w] !== "{" && e - i > 2) {
+        const fnAt = text.slice(e - 2, e) === "fn" ? e - 2 : e;
+        if (fnAt > i) { i = fnAt; continue; }
+      }
+    }
 
     // §14.8.11.2 S4 — a SECURITY-DEFINER `fn` decl: `fn NAME(args) …modifiers… { body }`.
-    const fnHead = /^fn\s+([A-Za-z_]\w*)\s*\(/.exec(rest);
+    FN_HEAD_RE.lastIndex = i;
+    const fnHead = FN_HEAD_RE.exec(text);
     if (fnHead) {
-      const parsed = parseFnDecl(text, i, fnHead);
+      const parsed = parseFnDecl(text, i, fnHead, finders);
       if (parsed) {
         fns.push(parsed.fn);
+        if (parsed.bodySpan) fnBodySpans.push({ fnAt: i, ...parsed.bodySpan });
         i = parsed.next;
         continue;
       }
@@ -57,11 +97,13 @@ export function parseSchemaBlock(schemaBody) {
     }
 
     // A plain table: `tableName { … }` optionally followed by the `db-authoritative` marker.
-    const tblHead = /^([A-Za-z_]\w*)\s*\{/.exec(rest);
+    TBL_HEAD_RE.lastIndex = i;
+    const tblHead = TBL_HEAD_RE.exec(text);
     if (tblHead) {
       const tableName = tblHead[1];
+      const tblStart = i;
       const braceOpen = i + tblHead[0].length - 1; // index of the `{`
-      const braceClose = findSchemaBlockEnd(text, braceOpen);
+      const braceClose = finders.blockEnd(braceOpen);
       if (braceClose === -1) {
         // Unbalanced braces — bail on this entry (mirrors the old regex silently
         // not matching an unterminated block).
@@ -70,6 +112,18 @@ export function parseSchemaBlock(schemaBody) {
       }
       const columnsText = text.slice(braceOpen + 1, braceClose);
       const table = { name: tableName, columns: parseColumns(columnsText) };
+      // §39.2 — a DSL head is `table-name '{'`. The one-char recovery below can
+      // slide INTO a longer token and match only its tail (`mydb.public.assets {`
+      // → `assets`, `données {` → `es`), silently renaming the table — and two
+      // qualified heads then collapse onto one key, first-wins (gap
+      // g-schema-dsl-qualified-table-head-silently-stripped). The table is still
+      // declared exactly as before (the floors never lose it); the glued prefix is
+      // RECORDED so GCP1 rejects the program (E-SCHEMA-012 / E-SCHEMA-013).
+      // S446 fix round: the backward scan reads the comment/literal-BLANKED text, so a
+      // `--` comment ending in `.` (`-- The assets table.`) is not a qualifier.
+      if (maskedForGlue === null) maskedForGlue = blankLiteralBodies(text, { comments: true, backtick: false });
+      const glue = dslHeadGluePrefix(text, maskedForGlue, i);
+      if (glue) gluedHeads.push({ name: tableName, ...glue, offset: i });
       i = braceClose + 1;
 
       // §14.8.11 opt-in DB-authoritative marker — a bareword `db-authoritative`
@@ -83,6 +137,7 @@ export function parseSchemaBlock(schemaBody) {
       }
 
       tables.push(table);
+      tableOffsets.push(tblStart);
       continue;
     }
 
@@ -91,7 +146,59 @@ export function parseSchemaBlock(schemaBody) {
     i++;
   }
 
-  return { tables, fns };
+  return { tables, fns, gluedHeads, fnBodySpans, tableOffsets };
+}
+
+/**
+ * Is the DSL table head that `parseSchemaBlock` matched at `i` really the TAIL of
+ * a longer token? Returns null for a clean head, else
+ *   · `{ kind: "qualified", prefix }`  — a `.` precedes the name (whitespace, and
+ *     comments, allowed around it): `mydb.public.assets {`;
+ *   · `{ kind: "unreadable", prefix }` — an identifier-ish character is glued to
+ *     the name (`données {` matched as `es`, `my-assets {` as `assets`,
+ *     `app$v2 {` as `v2`, `1assets {` as `assets`).
+ * The scan reads `masked` — `text` with `--` / closed `/* *\/` comments and one-line
+ * literals blanked (`blankLiteralBodies`, comment mode), length-preserving — so a
+ * `.` or a letter inside a comment or a string is never a glued prefix (S446 fix
+ * round: `-- The assets table.` before `assets {` was a false E-SCHEMA-012).
+ * `prefix` is the glued text from `text`, for the message.
+ */
+function dslHeadGluePrefix(text, masked, i) {
+  const GLUE = /[\p{L}\p{N}_$\-]/u;
+  let j = i - 1;
+  if (j >= 0 && GLUE.test(masked[j])) {
+    let s = j;
+    while (s > 0 && /[\p{L}\p{N}_$\-.]/u.test(masked[s - 1])) s--;
+    return { kind: "unreadable", prefix: text.slice(s, i) };
+  }
+  // Back over whitespace (blanked comments are whitespace in `masked`) to find a `.`.
+  while (j >= 0 && /\s/.test(masked[j])) j--;
+  if (j >= 0 && masked[j] === ".") {
+    let s = j;
+    while (s > 0 && /[\p{L}\p{N}_$\-."`[\]\s]/u.test(text[s - 1]) && text[s - 1] !== "\n") s--;
+    return { kind: "qualified", prefix: text.slice(s, i).trim() };
+  }
+  return null;
+}
+
+/**
+ * The DSL table heads of a `< schema>` body that `parseSchemaBlock` read as the
+ * TAIL of a longer token (see `dslHeadGluePrefix`) and that are LIVE — not inside
+ * a `--` / closed `/* *\/` comment or a one-line string / `pattern(/…/)` regex,
+ * the same exemption E-SCHEMA-012 uses. GCP1 reports "qualified" as E-SCHEMA-012
+ * and "unreadable" as E-SCHEMA-013.
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{kind: "qualified"|"unreadable", name: string, prefix: string, offset: number}>}
+ */
+export function findGluedDslTableHeads(text) {
+  if (typeof text !== "string") return [];
+  let parsed;
+  try { parsed = parseSchemaBlock(text); } catch { return []; }
+  const glued = parsed.gluedHeads ?? [];
+  if (glued.length === 0) return [];
+  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  return glued.filter((g) => masked.slice(g.offset, g.offset + g.name.length) === g.name);
 }
 
 /**
@@ -107,6 +214,145 @@ export function parseSchemaBlock(schemaBody) {
  * "matching" quote would swallow the closing brace). A P2 `fn` block is `{ """…""" }`
  * — its plpgsql quotes live inside the triple-quoted region this DOES skip.
  */
+/**
+ * `findSchemaBlockEnd` for many `{` offsets of ONE text, in amortized linear time
+ * (S456, g-tenant-small-residuals-s455 (c): `parseSchemaBlock` re-scanned to the end of
+ * the body for EVERY head of an unbalanced block — `"a{"`×40k took ~13 s).
+ *
+ * Why one scan answers later queries exactly: the scan is a pure function of its
+ * position (brace depth aside), so the scan from a `{` that an EARLIER scan visited as an
+ * ordinary character (not inside a `"""…"""` region it skipped) is that earlier scan's
+ * suffix. Its answer is the `}` that brings the depth back below that `{` — the `}` a
+ * stack pairs with it. So a query scans once, from its offset to the END, pairing every
+ * `{` it visits (unpaired → -1), and records them all; a later query on a recorded `{`
+ * is a lookup. A `{` no earlier scan visited (it sat inside one of their `"""` regions)
+ * starts a scan of its own — one per triple-quote alignment, not one per head.
+ * Results are identical to `findSchemaBlockEnd` (the S456 unit test asserts it).
+ */
+function makeSchemaBlockEndFinder(text) {
+  const known = new Map();
+  const n = text.length;
+  return (openIdx) => {
+    if (text[openIdx] !== "{") return -1;
+    const hit = known.get(openIdx);
+    if (hit !== undefined) return hit;
+    const open = [];
+    let i = openIdx;
+    while (i < n) {
+      if (text.startsWith('"""', i)) {
+        const close = text.indexOf('"""', i + 3);
+        i = close === -1 ? n : close + 3;
+        continue;
+      }
+      const ch = text[i];
+      if (ch === "{") open.push(i);
+      else if (ch === "}" && open.length > 0) known.set(open.pop(), i);
+      i++;
+    }
+    for (const o of open) known.set(o, -1);
+    return known.get(openIdx);
+  };
+}
+
+/**
+ * `findMatchingParen` for many `(` offsets of ONE text, in amortized linear time (the
+ * `fn` head of `parseSchemaBlock`: `"fn f("`×40k re-scanned to the end per head, ~18 s).
+ * Same suffix argument as `makeSchemaBlockEndFinder`, per pass (quote-aware, then
+ * quote-blind): a scan records, for each `)` it visits, the paren / bracket depth after
+ * it, and for each `(` the depth after it. The scan from a recorded `(` (paren depth `d`
+ * after it, bracket depth `b`) returns the first later `)` whose recorded state is
+ * (`d - 1`, `b`) — exactly where its own relative depths are both 0.
+ */
+function makeMatchingParenFinder(text) {
+  const passes = [true, false].map((quoteAware) => {
+    const known = new Map();     // `(` offset → { scan, d, b }
+    const scan = (from) => {
+      const closes = new Map();  // "d,b" → increasing `)` offsets
+      let depth = 0, bracketDepth = 0, quote = null;
+      const rec = { closes };
+      for (let i = from; i < text.length; i++) {
+        const ch = text[i];
+        if (quoteAware) {
+          if (quote) {
+            if (ch === "\\") { i++; continue; }
+            if (ch === quote) quote = null;
+            continue;
+          }
+          if (ch === '"' || ch === "'") { quote = ch; continue; }
+        }
+        if (ch === "(") { depth++; if (!known.has(i)) known.set(i, { rec, d: depth, b: bracketDepth }); }
+        else if (ch === ")") {
+          depth--;
+          const key = depth + "," + bracketDepth;
+          let list = closes.get(key);
+          if (list === undefined) closes.set(key, (list = []));
+          list.push(i);
+        } else if (ch === "[") bracketDepth++;
+        else if (ch === "]") bracketDepth--;
+      }
+    };
+    return (openIdx) => {
+      if (text[openIdx] !== "(") return -1;
+      if (!known.has(openIdx)) scan(openIdx);
+      const { rec, d, b } = known.get(openIdx);
+      const list = rec.closes.get((d - 1) + "," + b);
+      if (list === undefined) return -1;
+      let lo = 0, hi = list.length;               // first entry > openIdx
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid] > openIdx) hi = mid; else lo = mid + 1; }
+      return lo < list.length ? list[lo] : -1;
+    };
+  });
+  return (openIdx) => {
+    const hit = passes[0](openIdx);
+    return hit !== -1 ? hit : passes[1](openIdx);
+  };
+}
+
+// The `fn` modifier-run patterns (`parseFnDecl`). Global (`g`) so `makeRangeMatcher` can
+// run them over the whole body from an offset; every slice `exec` resets `lastIndex` to 0
+// first (a global pattern starts where its last match ended otherwise).
+const FN_OWNER_RE = /\bowner\s*\(\s*([A-Za-z_]\w*)\s*\)/g;
+const FN_RETURNS_RE = /\breturns\s+([A-Za-z_]\w*)/gi;
+const FN_CAP_RE = /\brequires\s+cap\s*\(\s*["']([^"']*)["']\s*\)/gi;
+const FN_SECDEF_RE = /\bsecurity\s+definer\b/gi;
+
+/**
+ * The first match of a modifier pattern in `text[from, to)` — what `re.exec(text.slice(from,
+ * to))` returns, without re-scanning the shared tail for every `fn` head (S456: many
+ * malformed heads before one `{` share one modifier run — quadratic). The first match in
+ * the WHOLE text at or after `from` is memoized per pattern; `from` only grows, so the
+ * scans total linear. Equivalence with the slice: `from` follows a `)` and `to` is a `{`
+ * (both non-word, so `\b` reads the same), and a match that starts in range but runs past
+ * `to` (only the cap pattern's `[^"']*` can cross a `{`) falls back to the slice.
+ */
+function makeRangeMatcher(text) {
+  const memo = new Map();   // pattern → { lo, m }: m = first match at or after lo (null: none)
+  return (re, from, to, slice) => {
+    let c = memo.get(re);
+    if (c === undefined || from < c.lo || (c.m !== null && c.m.index < from)) {
+      re.lastIndex = from;
+      c = { lo: from, m: re.exec(text) };
+      memo.set(re, c);
+    }
+    const m = c.m;
+    if (m === null || m.index >= to) return null;
+    if (m.index + m[0].length > to) { re.lastIndex = 0; const r = re.exec(slice); re.lastIndex = 0; return r; }
+    return m;
+  };
+}
+
+/** `text.indexOf(ch, from)`, memoized for one text: a lookup inside an earlier answered span is O(1). */
+function makeNextCharFinder(text, ch) {
+  let lo = -1, hi = -1, ans = -1;   // every `from` in [lo, hi] answers `ans`
+  return (from) => {
+    if (from >= lo && from <= hi && lo !== -1) return ans;
+    ans = text.indexOf(ch, from);
+    lo = from;
+    hi = ans === -1 ? text.length : ans;
+    return ans;
+  };
+}
+
 function findSchemaBlockEnd(text, openIdx) {
   if (text[openIdx] !== "{") return -1;
   const n = text.length;
@@ -244,10 +490,28 @@ function legacyScanCreateTables(text) {
     const statement = m[1]
       ? statementRaw.replace(/(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)["`'[]?\w+["`'\]]?\s*\.\s*/i, "$1")
       : statementRaw;
-    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd) });
+    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd), offset: m.index, end: bodyEnd + 1 });
     re.lastIndex = bodyEnd + 1;
   }
   return found;
+}
+
+/**
+ * Where a SQL `--` line comment starting at `i` ends (S456 review F1): the FIRST `\r` or
+ * `\n` — Postgres's extent (scan.l `newline [\n\r]`); SQLite and MySQL end it at `\n`
+ * only. Every reader here takes the shorter extent, so text after a lone `\r` is read as
+ * live SQL; a statement that holds a lone `\r` is also an unmodelled form
+ * (`UNMODELED_SQL_FORM`), and the tenant `<schema>` checker charges it, since a `/*`
+ * after it can hide text from either database.
+ *
+ * @param {string} text
+ * @param {number} i offset of the `--`
+ * @param {number} [to] scan limit
+ * @returns {number} offset of the terminator, or `to`
+ */
+export function sqlLineCommentEnd(text, i, to = text.length) {
+  for (let k = i; k < to; k++) if (text[k] === "\n" || text[k] === "\r") return k;
+  return to;
 }
 
 /** Skip whitespace and SQL `--` / `/* *\/` comments from `i` (inside a head only). */
@@ -255,8 +519,8 @@ function skipSqlTrivia(src, i) {
   for (;;) {
     while (i < src.length && /\s/.test(src[i])) i++;
     if (src.startsWith("--", i)) {
-      const nl = src.indexOf("\n", i);
-      i = nl === -1 ? src.length : nl + 1;
+      const nl = sqlLineCommentEnd(src, i);
+      i = nl === src.length ? src.length : nl + 1;
       continue;
     }
     if (src.startsWith("/*", i)) {
@@ -349,8 +613,9 @@ const CREATE_TABLE_MODIFIER_WORDS = new Set([
  * `WITH` (storage parameters), `ON` (ON COMMIT), `TABLESPACE`, `PARTITION` — ONLY
  * as `PARTITION OF parent` (checked at the use site) — `OF` (typed table `OF
  * type`), `INHERITS`. A name followed by anything else was not read as a name
- * (E-SCHEMA-013). A readable head with no column list declares no columns — gap
- * g-schema-no-column-list-heads-declare-nothing.
+ * (E-SCHEMA-013). A readable head with no column list declares no columns, so in a
+ * `< schema>` it is rejected as E-SCHEMA-014 (S446; was gap
+ * g-schema-no-column-list-heads-declare-nothing).
  */
 const CREATE_TABLE_NAME_FOLLOWERS = ["AS", "USING", "WITH", "ON", "TABLESPACE", "PARTITION", "OF", "INHERITS"];
 
@@ -471,6 +736,8 @@ function structuredScanCreateTables(text) {
       modifiers: h.modifiers,
       statement,
       body: text.slice(h.parenAt + 1, h.bodyEnd),
+      offset: h.start,
+      end: h.bodyEnd + 1,
     });
   }
   return found;
@@ -502,8 +769,13 @@ function isLiveHead(masked, h) {
  *     `""`, a fullwidth dot, an unterminated comment) — kind "unreadable",
  *     E-SCHEMA-013. Fail-closed: such a head is an error, never "not a head".
  *
+ *   · is readable and unqualified but NOT a plain table declaration — a
+ *     table-kind modifier, no column list, an unclosed column list, or a trailing
+ *     `INHERITS` — kind "not-a-declaration", E-SCHEMA-014 (bryan RULED S440 #15);
+ *     see `notADeclarationReason`.
+ *
  * @param {string} text a `< schema>` body
- * @returns {Array<{kind: "qualified"|"unreadable", name: string|null, qualifiers: string[], headText: string, offset: number}>}
+ * @returns {Array<{kind: "qualified"|"unreadable"|"not-a-declaration", reason?: string, name: string|null, qualifiers: string[], headText: string, offset: number}>}
  */
 export function findRejectedCreateTableHeads(text) {
   const out = [];
@@ -517,6 +789,31 @@ export function findRejectedCreateTableHeads(text) {
   // fail-closed: a qualified/unreadable head inside a real `fn` `"""` body is now
   // reported — the documented false positive, gap
   // g-secdef-fn-body-ddl-false-positive (which records the repair).
+  //
+  // E-SCHEMA-014 ALONE takes that recorded repair, narrowly (S446), and ONLY for a
+  // TEMP / TEMPORARY head (fix round): a `CREATE TEMP TABLE staging … AS SELECT …`
+  // inside a SECURITY-DEFINER `fn` body is ordinary runtime plpgsql, and rejecting
+  // it would refuse a valid schema.
+  // The span exempted is ONLY the `"""…"""` body of a `fn` the `< schema>` parser
+  // itself ACCEPTED (`parseFnDecl` — owner(), balanced block) whose `fn` keyword
+  // is LIVE (not in a `--` / `/* */` comment or a string) and starts a word. A
+  // commented `-- fn f() owner(r) {` forges nothing (the S438 escape), and a head
+  // outside the `"""` pair — in the modifier run of a braceless `fn`, or beside
+  // the body inside its braces — is still reported. An escape here can only
+  // return a head to its pre-S446 behaviour: neither harvest reads a modified or
+  // column-list-less head, so no floor is lost relative to base. E-SCHEMA-012 /
+  // E-SCHEMA-013 are deliberately NOT exempted (unchanged).
+  let secdefSpans = null;
+  const inLiveSecdefBody = (at) => {
+    if (secdefSpans === null) {
+      let spans = [];
+      try { spans = parseSchemaBlock(text).fnBodySpans ?? []; } catch { spans = []; }
+      secdefSpans = spans.filter((s) =>
+        masked.slice(s.fnAt, s.fnAt + 2) === "fn" &&
+        (s.fnAt === 0 || !/[\p{L}\p{N}_$]/u.test(text[s.fnAt - 1])));
+    }
+    return secdefSpans.some((s) => at > s.start && at < s.end);
+  };
   for (const h of scanCreateTableHeads(text)) {
     if (!isLiveHead(masked, h)) continue;
     // An unknown modifier word (prose: `create the table for tenants`) counts as a
@@ -543,9 +840,92 @@ export function findRejectedCreateTableHeads(text) {
         headText: headText + (tail ? ` ⟨${tail}⟩` : ""),
         offset: h.start,
       });
+    } else {
+      // E-SCHEMA-014 (S446, bryan RULED S440 #15 "fix in TS, fail closed") — a
+      // readable, unqualified head that is NOT a plain table declaration. Each of
+      // these compiled clean and declared NO columns to the §14.8.9 / §14.8.10
+      // floors (neither harvest reads a modified head or a head with no column
+      // list), so a `tenant_id` table spelled this way was silently not
+      // tenant-scoped — beside a second table, with no diagnostic at all.
+      const reason = notADeclarationReason(text, h);
+      // S446 fix round: the fn-body exemption covers a TEMP / TEMPORARY staging
+      // table ONLY — `UNLOGGED`, `GLOBAL TEMPORARY`, a non-temp `AS SELECT` /
+      // `PARTITION OF` … inside a fn body are still reported.
+      const tempOnly = h.modifiers.length > 0 && h.modifiers.every((w) => w === "TEMP" || w === "TEMPORARY");
+      if (reason && !(tempOnly && inLiveSecdefBody(h.start))) {
+        out.push({
+          kind: "not-a-declaration",
+          reason,
+          name: h.parts[0].name,
+          qualifiers: [],
+          headText,
+          offset: h.start,
+        });
+      }
     }
   }
   return out;
+}
+
+/**
+ * Why a readable, unqualified `CREATE … TABLE` head is not a plain table
+ * declaration (E-SCHEMA-014), or null when it is one. The ONLY accepted shape is
+ * `CREATE TABLE [IF NOT EXISTS] <name> ( <column list> ) [<trailing clauses>]`:
+ *   · "modifier"   — any word between `CREATE` and `TABLE` (`TEMP`, `TEMPORARY`,
+ *                    `GLOBAL`/`LOCAL TEMPORARY`, `UNLOGGED`, `VIRTUAL`, …). Neither
+ *                    harvest has ever read a modified head (gap
+ *                    g-schema-create-temp-table-silently-not-a-declaration), and a
+ *                    session-scoped / non-durable table has no schema-as-code meaning.
+ *   · "no-columns" — the name is followed by a clause keyword instead of a column
+ *                    list (`AS query`, `OF type`, `PARTITION OF parent`, `USING`,
+ *                    `WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS`): the columns
+ *                    live elsewhere and the floors cannot see them (gap
+ *                    g-schema-no-column-list-heads-declare-nothing).
+ *   · "unclosed"   — the column list `(` is never closed, so nothing is read.
+ *   · "inherits"   — a column list followed by `INHERITS (parent)`: the parent's
+ *                    columns (a `tenant_id`) are not declared on this table.
+ * Not a recognizer change: the head itself is read by the same `readCreateTableHead`
+ * every other `< schema>` check uses; this only refuses what that read reports.
+ */
+function notADeclarationReason(text, h) {
+  if (h.modifiers.length > 0) return "modifier";
+  if (h.parenAt === -1) return "no-columns";
+  if (h.bodyEnd === -1) return "unclosed";
+  if (readSqlKeyword(text, skipSqlTrivia(text, h.bodyEnd + 1), "INHERITS") !== -1) return "inherits";
+  if (findLikeTemplateReference(text.slice(h.parenAt + 1, h.bodyEnd)) !== null) return "like";
+  return null;
+}
+
+/**
+ * A `LIKE <template>` item inside a CREATE TABLE column list (bryan RULED S447
+ * "stamp all" (ii), gap g-schema-create-table-like-template-columns-not-declared).
+ * `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tmpl`'s columns — a
+ * `tenant_id` among them — in Postgres, but the floors read no column from it, so
+ * the table was silently not tenant-scoped. The item is a TEMPLATE REFERENCE when
+ * an unquoted `LIKE` is followed by ONE name chain (bare / quoted parts, `.`-joined)
+ * and then `INCLUDING` | `EXCLUDING` | the end of the item (the `,` or `)` that
+ * closes it). A column NAMED `like` keeps working when it is quoted (`"like" TEXT`)
+ * or when its type is followed by anything other than the end of the item
+ * (`like TEXT NOT NULL`, `like VARCHAR(50)`); a bare `like TEXT` is the same token
+ * shape as `LIKE tmpl` and is, by the ruling, the template reference (base already
+ * read it as one: `isTableLevelConstraint` skipped it, so no column was declared).
+ *
+ * @param {string} body the text between a column list's `(` and its closing `)`
+ * @returns {string|null} the item text, or null when the list has none
+ */
+const LIKE_TEMPLATE_ITEM_RE = new RegExp(
+  "^LIKE\\s+" +
+  "(?:[\\p{L}\\p{N}_$]+|\"[^\"]*\"|`[^`]*`|\\[[^\\]]*\\])" +
+  "(?:\\s*\\.\\s*(?:[\\p{L}\\p{N}_$]+|\"[^\"]*\"|`[^`]*`|\\[[^\\]]*\\]))*" +
+  "\\s*(?:$|(?:INCLUDING|EXCLUDING)(?![\\p{L}\\p{N}_$]))",
+  "iu",
+);
+function findLikeTemplateReference(body) {
+  for (const item of splitTopLevelCommas(body)) {
+    const trimmed = item.trim();
+    if (LIKE_TEMPLATE_ITEM_RE.test(trimmed)) return trimmed;
+  }
+  return null;
 }
 
 /**
@@ -575,7 +955,8 @@ function harvestInto(records, out, overwrite) {
  * The `< schema>` harvest set — legacy ∪ structured, legacy winning per key (see
  * the superset note above). The structured side contributes only keys the legacy
  * side does not have, and only unmodified heads (`TEMP` / `UNLOGGED` / … were
- * never harvested — g-schema-create-temp-table-silently-not-a-declaration). A
+ * never harvested; since S446 such a head is rejected as E-SCHEMA-014 instead of
+ * silently declaring nothing — was g-schema-create-temp-table-silently-not-a-declaration). A
  * qualified head is harvested, qualifiers stripped, although E-SCHEMA-012 rejects
  * the program: the rejected program reports that one error rather than a cascade,
  * and the tenant floor stays ENGAGED on the table.
@@ -630,6 +1011,332 @@ export function harvestRawCreateTableDecls(text) {
  */
 export function harvestRawCreateTables(text, out) {
   harvestInto(schemaCreateTables(text), out, false);
+}
+
+/**
+ * EVERY raw `CREATE TABLE … (…)` statement in a `< schema>` body — the legacy read
+ * UNION the structured read, de-duplicated by SOURCE SPAN, not by key (S450 fix
+ * round, S239 F1). `schemaCreateTables` drops a structured hit whose KEY the
+ * legacy read already has — right for first-wins, wrong for an all-declarations
+ * list: a live head with a comment inside it (`CREATE TABLE assets /* live *\/ (…)`,
+ * `CREATE /*x*\/ TABLE …`, `assets -- v2⏎(…)`) is read ONLY by the structured
+ * reader, so keying it away hid the live table behind a same-name commented copy
+ * and turned the tenant floor OFF at exit 0. A structured hit is the same
+ * statement as a legacy one only when it starts inside that legacy statement's
+ * raw source span. Modified heads stay out (neither harvest reads them; E-SCHEMA-014).
+ * Used ONLY by `schemaTableDeclarations`; the harvest and first-wins are untouched.
+ */
+function allSchemaCreateTableDecls(text) {
+  const legacy = legacyScanCreateTables(text);
+  const spans = legacy.map((t) => [t.offset, t.end]);
+  const extra = [];
+  for (const t of structuredScanCreateTables(text)) {
+    if (t.modifiers.length !== 0) continue;
+    if (spans.some(([a, b]) => t.offset >= a && t.offset < b)) continue;
+    extra.push(t);
+  }
+  return [...legacy, ...extra];
+}
+
+/**
+ * `ALTER TABLE` statements in a `< schema>` body that give a table a `tenant_id`
+ * column (§14.8.10, S455 — gap g-tenant-floor-alter-add-tenant-column-not-scoped-s455).
+ *
+ * SPEC §14.8.10: *"A table whose `< schema>` carries a `tenant_id` column IS
+ * tenant-scoped; the column's presence is the declaration."* A schema that says
+ * `CREATE TABLE notes (id …, body …)` and then `ALTER TABLE notes ADD COLUMN
+ * tenant_id TEXT` carries one. Until S455 only CREATE TABLE column lists and DSL
+ * heads were read, so `notes` was NOT scoped — its reads served every tenant's rows
+ * (executed) and a view over it passed the E-TENANT-SCHEMA-HAZARD checker.
+ *
+ * FAIL-CLOSED READING (deliberately wide, like every recognizer here — over-
+ * declaring only ADDS floor): an `ALTER TABLE [IF EXISTS] [ONLY] <name>` statement
+ * whose text names `tenant_id` as a whole word ANYWHERE — `ADD [COLUMN] tenant_id`,
+ * `RENAME [COLUMN] x TO tenant_id`, MySQL `CHANGE … tenant_id`, several actions in
+ * one statement, a quoted `"tenant_id"`, and also a comment, a string or a `DROP
+ * COLUMN tenant_id` — makes `<name>` tenant-scoped. Strings and comments are NOT
+ * skipped because skipping them is where a reader goes wrong (a `;` or `'` inside a
+ * comment, dialect comment rules); the cost of a false read is a tenant-scoped table
+ * with no `tenant_id` column, whose reads then fail at run time (closed, visible),
+ * never a leak. The statement runs to the next `ALTER TABLE` head or `?{` / `` `} ``
+ * wrapper edge found outside the quote / comment forms the reader models — NOT to a
+ * `;`, a `CREATE` or a brace, any of which can sit inside a string, an identifier or a
+ * comment. When the statement holds a form the reader does NOT model exactly (SQLite
+ * `[ident]`, Postgres `$$…$$` / `E'…\'…'`, a MySQL `\'` escape or `#` comment, a
+ * backtick, a `${…}`), it is read to its wrapper edge instead (S455 review F1: a
+ * `CREATE` inside `[org create]` cut the statement short and left `notes` unscoped —
+ * executed). COMMENT-AGNOSTIC like
+ * the CREATE reads: a commented-out ALTER counts (`commented` records it).
+ * `ALTER TABLE ONLY <x>` is read both ways (a table may be NAMED `only`).
+ *
+ * @param {string} text a `< schema>` body
+ * @param {string} masked `blankLiteralBodies(text, { comments: true, backtick: false })`
+ * @returns {Array<{name: string, key: string, form: "alter", offset: number, tenant: true, commented: boolean, columns: Array<{name: string}>}>}
+ */
+function alterTableTenantDecls(text, masked) {
+  const out = [];
+  if (typeof text !== "string" || !/\balter\b/i.test(text)) return out;
+  const re = /alter/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const i = m.index;
+    if (i > 0 && SQL_IDENT_CHAR.test(text[i - 1])) continue;
+    const afterAlter = readSqlKeyword(text, i, "ALTER");
+    if (afterAlter === -1) continue;
+    const afterTable = readSqlKeyword(text, skipSqlTrivia(text, afterAlter), "TABLE");
+    if (afterTable === -1) continue;
+    let j = skipSqlTrivia(text, afterTable);
+    {
+      const a = readSqlKeyword(text, j, "IF");
+      if (a !== -1) {
+        const b = readSqlKeyword(text, skipSqlTrivia(text, a), "EXISTS");
+        if (b !== -1) j = skipSqlTrivia(text, b);
+      }
+    }
+    // The name chain at `at`: its last part, and where the chain ends.
+    const readChain = (at) => {
+      const first = readSqlIdentPart(text, at);
+      if (!first) return null;
+      let last = first;
+      let k = skipSqlTrivia(text, first.end);
+      while (text[k] === ".") {
+        const p = readSqlIdentPart(text, skipSqlTrivia(text, k + 1));
+        if (!p) break;
+        last = p;
+        k = skipSqlTrivia(text, p.end);
+      }
+      return { name: last.name, end: last.end };
+    };
+    const names = [];
+    const direct = readChain(j);
+    if (direct) names.push(direct);
+    const afterOnly = readSqlKeyword(text, j, "ONLY");
+    if (afterOnly !== -1) {
+      const viaOnly = readChain(skipSqlTrivia(text, afterOnly));
+      if (viaOnly) names.push(viaOnly);
+    }
+    if (names.length === 0) continue;
+    const from = Math.max(...names.map((n) => n.end));
+    // The statement as modelled; when it holds a quote / comment form the reader does not
+    // model exactly, the statement is read to its wrapper edge instead (fail-closed).
+    let stop = alterStatementEnd(text, from);
+    if (UNMODELED_SQL_FORM.test(text.slice(i, stop))) stop = Math.max(stop, sqlWrapperEdge(text, from));
+    const stmt = text.slice(from, stop);
+    if (!namesTenantId(stmt)) continue;
+    const commented = masked.slice(i, i + 5).toUpperCase() !== "ALTER";
+    for (const n of names) {
+      out.push({ name: n.name, key: n.name.toLowerCase(), form: "alter", offset: i, tenant: true, commented, columns: [{ name: "tenant_id" }] });
+    }
+  }
+  return out;
+}
+
+/**
+ * A quote or comment form the tenant readers here do not model exactly — SQLite
+ * `[ident]`, Postgres `$tag$…$tag$` / `E'…'` (its `\'` escape), a MySQL `\` escape or
+ * `#` comment, a backtick identifier, a `${…}` interpolation. A statement holding one
+ * is read to its wrapper edge (`sqlWrapperEdge`), never to a modelled stop that the
+ * form may have hidden or faked (S455 review F1).
+ */
+const UNMODELED_SQL_FORM = /[[$\\#`]|\r(?!\n)/;   // S456 F1: a lone `\r` (a `--` comment's extent differs by database)
+
+/** Whether `s` names `tenant_id` as a whole word (anywhere — literals and comments included). */
+function namesTenantId(s) {
+  return /(?:^|[^\p{L}\p{N}_$])tenant_id(?![\p{L}\p{N}_$])/iu.test(s);
+}
+
+/**
+ * The end of the `?{ … }` wrapper text from `from` lies in: the next `` `} `` close or
+ * `?{` open, or the end of the body. Inside a template literal a backtick cannot occur
+ * unescaped, so `` `} `` is the wrapper's own close.
+ */
+function sqlWrapperEdge(text, from) {
+  for (let k = from; k < text.length; k++) {
+    if (text[k] === "?" && text[k + 1] === "{") return k;
+    if (text[k] === "`" && /^`\s*\}/.test(text.slice(k, k + 64))) return k;
+  }
+  return text.length;
+}
+
+/**
+ * Where an `ALTER TABLE` statement read from `from` ends as MODELLED (see
+ * `alterTableTenantDecls`): at the next `ALTER TABLE` head or `?{` / `` `} `` wrapper
+ * edge found outside `'…'` / `"…"` literals and `--` / `/* *\/` comments (nesting model).
+ * Not at a `CREATE`, a brace or a `;` — each can sit inside an identifier, a string or a
+ * comment form this reader does not model (S455 review F1: `[org create]`). The caller
+ * reads to the wrapper edge instead when the statement holds an unmodelled form
+ * (`UNMODELED_SQL_FORM`), so a stop this function finds inside such a form cannot cut
+ * the statement short. `ALTER COLUMN` (an action of this same statement) is not a stop.
+ */
+function alterStatementEnd(text, from) {
+  for (let k = from; k < text.length; k++) {
+    const c = text[k];
+    if (c === "'" || c === '"') {
+      let j = k + 1;
+      while (j < text.length && !(text[j] === c && text[j + 1] !== c)) j += text[j] === c ? 2 : 1;
+      k = j;
+      continue;
+    }
+    if (c === "-" && text[k + 1] === "-") {
+      k = sqlLineCommentEnd(text, k);
+      continue;
+    }
+    if (c === "/" && text[k + 1] === "*") {
+      let depth = 1;
+      let j = k + 2;
+      while (j < text.length && depth > 0) {
+        if (text[j] === "/" && text[j + 1] === "*") { depth++; j += 2; continue; }
+        if (text[j] === "*" && text[j + 1] === "/") { depth--; j += 2; continue; }
+        j++;
+      }
+      k = j - 1;
+      continue;
+    }
+    if (c === "?" && text[k + 1] === "{") return k;
+    if (c === "`" && /^`\s*\}/.test(text.slice(k, k + 64))) return k;
+    if ((c === "a" || c === "A") && !SQL_IDENT_CHAR.test(text[k - 1] ?? " ")) {
+      const afterAlter = readSqlKeyword(text, k, "ALTER");
+      if (afterAlter !== -1 && readSqlKeyword(text, skipSqlTrivia(text, afterAlter), "TABLE") !== -1) return k;
+    }
+  }
+  return text.length;
+}
+
+/**
+ * EVERY table declaration in one `< schema>` body that the §14.8.10 tenant floor
+ * reads — duplicates INCLUDED, in source order — with whether it carries a
+ * `tenant_id` column. The two forms are read by the same recognizers the floor
+ * uses: `parseSchemaBlock` for the DSL (`name { … }`) and the raw reads
+ * (`allSchemaCreateTableDecls` — legacy ∪ structured, de-duplicated by span) for `CREATE TABLE … (…)`,
+ * minus a raw declaration with no readable column (which `extractDesiredSchema`
+ * skips too). Both recognizers are COMMENT-AGNOSTIC (the ⊇-base guarantee above),
+ * so a commented-out copy is a declaration here exactly as it is to the floor;
+ * `commented` records that it sits inside a `--` / closed `/* *\/` comment or a
+ * one-line literal, for the E-SCHEMA-015 message only. An `ALTER TABLE` that names
+ * `tenant_id` (`alterTableTenantDecls`, S455) is a third form, `"alter"`: it adds
+ * `tenant_id` to every declaration of its table in the body and is listed itself.
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{name: string, key: string, form: "declarative"|"raw"|"alter", offset: number, tenant: boolean, commented: boolean, columns: Array<{name: string}>}>}
+ */
+export function schemaTableDeclarations(text) {
+  const out = [];
+  if (typeof text !== "string" || text.length === 0) return out;
+  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  const carriesTenant = (cols) =>
+    cols.some((c) => typeof c?.name === "string" && c.name.toLowerCase() === "tenant_id");
+  let parsed = { tables: [], tableOffsets: [] };
+  try { parsed = parseSchemaBlock(text); } catch { /* graceful — no DSL tables */ }
+  (parsed.tables ?? []).forEach((t, k) => {
+    if (!t || typeof t.name !== "string") return;
+    const offset = parsed.tableOffsets?.[k] ?? -1;
+    const columns = Array.isArray(t.columns) ? t.columns : [];
+    out.push({
+      name: t.name,
+      key: t.name.toLowerCase(),
+      form: "declarative",
+      offset,
+      tenant: carriesTenant(columns),
+      commented: offset >= 0 && masked.slice(offset, offset + t.name.length) !== t.name,
+      columns,
+    });
+  });
+  for (const t of allSchemaCreateTableDecls(text)) {
+    let columns = columnsFromDdlBody(t.body);
+    if (columns.length === 0) continue;
+    // S455 review F1 — the column-list read models `'…'` / `"…"` / backtick literals and
+    // `--` / `/* */` comments only. A statement holding a form it does not model
+    // (`$$)$$`, `[ident]`, an `E'\''` / MySQL `\'` escape, `#`) may have closed the list
+    // early and dropped a `tenant_id` after it: the statement is then read to its wrapper
+    // edge, and naming `tenant_id` anywhere there scopes the table (fail-closed).
+    if (!carriesTenant(columns) && typeof t.end === "number") {
+      const own = text.slice(t.offset, t.end);
+      if (UNMODELED_SQL_FORM.test(own) && namesTenantId(text.slice(t.offset, Math.max(t.end, sqlWrapperEdge(text, t.offset))))) {
+        columns = [...columns, { name: "tenant_id" }];
+      }
+    }
+    out.push({
+      name: t.name,
+      key: t.key,
+      form: "raw",
+      offset: t.offset,
+      tenant: carriesTenant(columns),
+      commented: masked.slice(t.offset, t.offset + 6).toUpperCase() !== "CREATE",
+      columns,
+    });
+  }
+  // …and a head whose column list never closes as modelled (`DEFAULT $$($$`) is no
+  // declaration to the readers above at all: when its statement names `tenant_id`, it
+  // declares a tenant-scoped table here.
+  for (const h of scanCreateTableHeads(text)) {
+    if (h.parenAt === -1 || h.bodyEnd !== -1 || h.modifiers.length !== 0 || h.parts.length === 0) continue;
+    if (!namesTenantId(text.slice(h.parenAt, sqlWrapperEdge(text, h.parenAt)))) continue;
+    const name = h.parts[h.parts.length - 1].name;
+    out.push({
+      name,
+      key: name.toLowerCase(),
+      form: "raw",
+      offset: h.start,
+      tenant: true,
+      commented: masked.slice(h.start, h.start + 6).toUpperCase() !== "CREATE",
+      columns: [{ name: "tenant_id" }],
+    });
+  }
+  // S455 — an `ALTER TABLE <t> … tenant_id …` gives `<t>` the column: every
+  // declaration of `<t>` in this body then carries it (so the floor's union, the
+  // E-TENANT-SCHEMA-HAZARD set and E-SCHEMA-015 move together — a CREATE without
+  // `tenant_id` plus the ALTER that adds it AGREE, they do not disagree), and the
+  // ALTER is itself a declaration of `<t>` (for a `<t>` created in another body or
+  // file — the compilation set unions it).
+  for (const a of alterTableTenantDecls(text, masked)) {
+    for (const d of out) {
+      if (d.key === a.key && !d.tenant) {
+        d.tenant = true;
+        d.columns = [...d.columns, { name: "tenant_id" }];
+      }
+    }
+    out.push(a);
+  }
+  out.sort((a, b) => a.offset - b.offset);
+  return out;
+}
+
+/**
+ * Same-name `< schema>` declarations that DISAGREE on `tenant_id` — E-SCHEMA-015
+ * (bryan RULED S447 "stamp all" (i), gap
+ * g-schema-commented-out-declaration-shadows-live-table).
+ *
+ * The tenant floor reads the UNION of every same-name declaration (a table is
+ * tenant-scoped when ANY declaration of it carries `tenant_id` —
+ * `extractDesiredSchema` `tenantTables`). The union alone is not safe: a stale
+ * commented-out copy WITH `tenant_id` beside a live table WITHOUT it over-scopes
+ * the live table (`SELECT *` silently returns `[]`, S446 review of #1209), and
+ * first-wins — the pre-ruling read — lets a stale copy WITHOUT `tenant_id` shadow
+ * a live table WITH it. So when the declarations of one table (names compared
+ * case-insensitively, as the floor keys them) do not all agree on whether the
+ * table carries `tenant_id`, the program is rejected and neither direction is
+ * silent. Declarations that agree — including a commented-out copy — are quiet.
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{name: string, withTenant: object[], withoutTenant: object[]}>}
+ *   one entry per disagreeing table, in order of first declaration; each list holds
+ *   `schemaTableDeclarations` records.
+ */
+export function findTenantDeclarationDisagreements(text) {
+  const groups = new Map();
+  for (const d of schemaTableDeclarations(text)) {
+    if (!groups.has(d.key)) groups.set(d.key, []);
+    groups.get(d.key).push(d);
+  }
+  const out = [];
+  for (const decls of groups.values()) {
+    const withTenant = decls.filter((d) => d.tenant);
+    const withoutTenant = decls.filter((d) => !d.tenant);
+    if (withTenant.length > 0 && withoutTenant.length > 0) {
+      out.push({ name: decls[0].name, withTenant, withoutTenant });
+    }
+  }
+  return out;
 }
 
 /**
@@ -803,8 +1510,8 @@ function findRawDdlBodyEnd(src, from) {
   while (i < src.length) {
     const c = src[i];
     if (c === "-" && src[i + 1] === "-") {
-      const nl = src.indexOf("\n", i);
-      i = nl === -1 ? src.length : nl + 1;
+      const nl = sqlLineCommentEnd(src, i);
+      i = nl === src.length ? src.length : nl + 1;
       continue;
     }
     if (c === "/" && src[i + 1] === "*") {
@@ -842,8 +1549,8 @@ function splitTopLevelCommas(body) {
   while (i < body.length) {
     const c = body[i];
     if (c === "-" && body[i + 1] === "-") {
-      const nl = body.indexOf("\n", i);
-      i = nl === -1 ? body.length : nl + 1;
+      const nl = sqlLineCommentEnd(body, i);
+      i = nl === body.length ? body.length : nl + 1;
       continue;
     }
     if (c === "/" && body[i + 1] === "*") {
@@ -883,10 +1590,10 @@ function splitTopLevelCommas(body) {
  *
  * @returns {{ fn: SecdefFnDecl, next: number } | null} null on a malformed decl.
  */
-function parseFnDecl(text, startIdx, fnHead) {
+function parseFnDecl(text, startIdx, fnHead, finders = null) {
   const name = fnHead[1];
   const parenOpen = startIdx + fnHead[0].length - 1; // index of `(`
-  const parenClose = findMatchingParen(text, parenOpen);
+  const parenClose = finders ? finders.parenEnd(parenOpen) : findMatchingParen(text, parenOpen);
   if (parenClose === -1) return null;
 
   const argText = text.slice(parenOpen + 1, parenClose).trim();
@@ -894,30 +1601,37 @@ function parseFnDecl(text, startIdx, fnHead) {
   if (args === null) return null;
 
   // The modifier run is everything between `)` and the body-opening `{`.
-  const braceOpen = text.indexOf("{", parenClose + 1);
+  const braceOpen = finders ? finders.nextBrace(parenClose + 1) : text.indexOf("{", parenClose + 1);
   if (braceOpen === -1) return null;
   const modifiers = text.slice(parenClose + 1, braceOpen);
 
   // owner(<role>) — MANDATORY (the SECDEF runs as this bounded NOLOGIN role, NOT
   // scrml_app). Strict identifier capture.
-  const ownerMatch = /\bowner\s*\(\s*([A-Za-z_]\w*)\s*\)/.exec(modifiers);
+  const modMatch = (re) => {
+    if (finders) return finders.inRange(re, parenClose + 1, braceOpen, modifiers);
+    re.lastIndex = 0;
+    const m = re.exec(modifiers);
+    re.lastIndex = 0;
+    return m;
+  };
+  const ownerMatch = modMatch(FN_OWNER_RE);
   if (!ownerMatch) return null;
   const owner = ownerMatch[1];
 
   // returns <type> — optional; defaults to `void`.
-  const returnsMatch = /\breturns\s+([A-Za-z_]\w*)/i.exec(modifiers);
+  const returnsMatch = modMatch(FN_RETURNS_RE);
   const returns = returnsMatch ? returnsMatch[1] : "void";
 
   // requires cap("x") — optional in-body capability gate (extracted, NOT trusted
   // verbatim; the quotes bound the value so no `'` can enter, and we still escape).
-  const capMatch = /\brequires\s+cap\s*\(\s*["']([^"']*)["']\s*\)/i.exec(modifiers);
+  const capMatch = modMatch(FN_CAP_RE);
   const cap = capMatch ? capMatch[1] : null;
 
   // `security definer` is the only supported mode in P2; its presence is advisory
   // here (every P2 `fn` emits SECURITY DEFINER). We record it for future modes.
-  const isSecurityDefiner = /\bsecurity\s+definer\b/i.test(modifiers);
+  const isSecurityDefiner = modMatch(FN_SECDEF_RE) !== null;
 
-  const braceClose = findSchemaBlockEnd(text, braceOpen);
+  const braceClose = finders ? finders.blockEnd(braceOpen) : findSchemaBlockEnd(text, braceOpen);
   if (braceClose === -1) return null;
   const blockText = text.slice(braceOpen + 1, braceClose);
 
@@ -928,6 +1642,11 @@ function parseFnDecl(text, startIdx, fnHead) {
   return {
     fn: { name, args, owner, returns, cap, isSecurityDefiner, body },
     next: braceClose + 1,
+    // The `"""…"""` span (delimiters included) in `text`, or null when the block
+    // has none — read by `findRejectedCreateTableHeads` (E-SCHEMA-014 only).
+    bodySpan: bodyMatch
+      ? { start: braceOpen + 1 + bodyMatch.index, end: braceOpen + 1 + bodyMatch.index + bodyMatch[0].length }
+      : null,
   };
 }
 
@@ -1004,8 +1723,7 @@ function blankLiteralBodies(s, opts = {}) {
     // either is an accepted fail-closed false positive
     // (g-secdef-fn-body-ddl-false-positive for the fn body).
     if (comments && ch === "-" && s[i + 1] === "-") {
-      let j = i;
-      while (j < s.length && s[j] !== "\n") j++;
+      const j = sqlLineCommentEnd(s, i);
       out += " ".repeat(j - i);
       i = j;
       continue;
@@ -3198,4 +3916,449 @@ export function emitScrmlSchemaSource(actual, opts = {}) {
 
   const emittedTables = model.filter((t) => t.columns.length > 0).map((t) => t.name);
   return { source, warnings, emittedTables, droppedCount };
+}
+
+/**
+ * §14.8.10 (S456 — rulings user-voice-scrml.md S456 "a, fix F7/F9 too" and "your recs, go") —
+ * program-body SQL in a database compilation is a CLOSED ALLOW-LIST.
+ *
+ * ⚑ ALLOW-LIST, NOT CLASSIFY. Three review rounds patched a reader that classified what a
+ * statement creates (CREATE / ALTER → `SELECT … INTO` → "known columns"); each round an S239
+ * reviewer executed a shape on PG16 that created a `tenant_id` relation and compiled clean
+ * (short view / CTAS column lists, `ALTER VIEW … RENAME COLUMN`, `EXPLAIN ANALYZE CREATE TABLE
+ * … AS`, `CREATE SCHEMA … CREATE TABLE`, comment and dollar-tag disagreements between
+ * databases, fts4 `languageid=`). The S452 durable, applied at the DDL layer: a program-body
+ * `?{}` statement is ADMITTED only when it is one of the forms below, read token by token;
+ * everything else is refused, whatever it would create.
+ *
+ * Admitted (each `;`-separated statement of the `?{}`):
+ *   1. DML — led by `SELECT` / `WITH` / `INSERT` / `UPDATE` / `DELETE` / `REPLACE`, with no
+ *      top-level `INTO` other than an `INSERT` / `REPLACE` target (a `SELECT … INTO` creates a
+ *      table on Postgres, and writes variables / files on MySQL).
+ *   2. `CREATE [TEMP | TEMPORARY] TABLE [IF NOT EXISTS] name (col type …, …)` — one name part,
+ *      a spelled column list whose every item is a column or a table constraint, optionally
+ *      followed by SQLite's `WITHOUT ROWID` / `STRICT`. A column named `tenant_id` (any case
+ *      or quoting) on a table outside the tenant set → `tenant`.
+ *   3. `ALTER TABLE name ADD [COLUMN] [IF NOT EXISTS] col type …` — one action. `col` =
+ *      `tenant_id` on a table outside the tenant set → `tenant`.
+ *   4. `CREATE VIRTUAL TABLE [IF NOT EXISTS] name USING fts5(col [UNINDEXED], …, opt = val …)`
+ *      with every option on `FTS5_OPTIONS` (none adds a column — SQLite fts5.html §4; executed:
+ *      `pragma_table_xinfo` shows only the declared columns plus fts5's own hidden table-name
+ *      and `rank` columns for each). `content = <table>` naming a tenant-scoped table, or a
+ *      column `tenant_id`, outside the tenant set → `tenant`.
+ *   5. Transaction control (ruling "your recs, go"; S451 R6 sanctions an author `?{BEGIN}`):
+ *      `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT` / `RELEASE` followed only by words.
+ *   6. `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (col [COLLATE c] [ASC | DESC], …)
+ *      [WHERE …]` — an index adds no column and is not a readable relation.
+ *   7. `PRAGMA name`, `PRAGMA name = value`, `PRAGMA name(arg)` for `name` on `ADMITTED_PRAGMAS`.
+ *
+ * UNREADABLE → refused: a statement the databases do not all read the same way — a `/*`
+ * inside a block comment (Postgres nests block comments; SQLite and MySQL do not), a `--`
+ * comment holding a lone CR (Postgres ends it there; SQLite and MySQL at LF), a `$tag$` whose
+ * tag is not ASCII (Postgres accepts it; the reader does not), and — unless the compilation's
+ * database is SQLite — a `'…'` literal holding a backslash (an `E'…'` / MySQL escape), a `#`
+ * (a MySQL comment), a `--` not followed by whitespace (not a comment on MySQL) and a `[…]`
+ * identifier (SQLite's; an array subscript on Postgres).
+ *
+ * @param {string} text the SQL text of one `?{}` (statement or expression position)
+ * @param {{ dialect?: string, isTenant?: (name: string) => boolean }} [opts]
+ * @returns {Array<{verdict: "admitted"|"tenant"|"not-admitted"|"unreadable", lead: string, name: string|null, why: string|null, offset: number}>}
+ */
+export function programStatementVerdicts(text, opts = {}) {
+  const out = [];
+  if (typeof text !== "string" || text.trim().length === 0) return out;
+  const isTenant = opts.isTenant ?? (() => false);
+  const { toks, unreadable } = programSqlTokens(text);
+  if (unreadable !== null) {
+    out.push({ verdict: "unreadable", lead: "", name: null, why: unreadable, offset: 0 });
+    return out;
+  }
+  // A body of `${…}` slots alone is a runtime-assembled SQL string — E-SQL-003's, not this rule's.
+  if (toks.length > 0 && toks.every((t) => t.k === "param")) return out;
+  let start = 0;
+  for (let i = 0; i <= toks.length; i++) {
+    if (i < toks.length && !(toks[i].k === "p" && toks[i].t === ";" && toks[i].depth === 0)) continue;
+    if (i > start) out.push(statementVerdict(text, toks.slice(start, i), isTenant));
+    start = i + 1;
+  }
+  return out;
+}
+
+/**
+ * §8.1.2 (S456 — ruling user-voice-scrml.md S456 "one statement per seams reasonable. push") —
+ * ONE SQL statement per program-body `?{}`.
+ *
+ * Read with the same closed-lexical-subset token walk as `programStatementVerdicts`
+ * (`programSqlTokens`): every `;` outside a literal, a quoted identifier, a comment or a `${…}`
+ * slot that is FOLLOWED by any further token (a word, a literal, a slot, punctuation — another
+ * `;` included) separates a second statement. A single trailing `;`, followed only by whitespace
+ * and comments, does not. A `;` inside parentheses counts too: no admitted statement holds one,
+ * and a database splits or rejects there, never reads it as part of the first statement.
+ *
+ * WHY. A parameterless body reaches the driver as one string (`unsafe("…")`), and both drivers
+ * run every statement of it: Postgres' simple-query protocol executes each (executed on PG16 —
+ * `SELECT set_config('scrml.tenant','B',true); select … from invoices` re-pinned the tenant
+ * inside the §14.8.11 tier transaction and returned tenant B's rows to a tenant-A request), and
+ * Bun.SQL's SQLite adapter runs the following statements when the first returns no rows.
+ *
+ * @param {string} text the SQL text of one `?{}`
+ * @returns {{ statements: number, extra: number[], unreadable: string|null }}
+ *   `statements` — how many statements the body holds (0 for an empty body); `extra` — the
+ *   offset of each separating `;`; `unreadable` — set when the body is outside the lexical
+ *   subset (the count is then not known; `programStatementVerdicts` refuses such a body).
+ */
+export function programStatementCount(text) {
+  if (typeof text !== "string" || text.trim().length === 0) return { statements: 0, extra: [], unreadable: null };
+  const { toks, unreadable } = programSqlTokens(text);
+  if (unreadable !== null) return { statements: 0, extra: [], unreadable };
+  const extra = [];
+  for (let i = 0; i < toks.length - 1; i++) {
+    if (toks[i].k === "p" && toks[i].t === ";") extra.push(toks[i].at);
+  }
+  const statements = toks.length === 0 || (toks.length === 1 && toks[0].k === "p" && toks[0].t === ";") ? 0 : extra.length + 1;
+  return { statements, extra, unreadable: null };
+}
+
+/** The fts5 options that add no column (SQLite fts5.html §4; each executed — see above). */
+const FTS5_OPTIONS = new Set([
+  "CONTENT", "CONTENT_ROWID", "TOKENIZE", "PREFIX", "COLUMNSIZE", "DETAIL",
+  "CONTENTLESS_DELETE", "CONTENTLESS_UNINDEXED", "LOCALE", "TOKENDATA",
+]);
+
+/** The PRAGMAs a program body may run (ruling S456 "your recs, go"). */
+const ADMITTED_PRAGMAS = new Set([
+  "TABLE_INFO", "TABLE_XINFO", "INDEX_LIST", "INDEX_INFO", "FOREIGN_KEY_LIST", "BUSY_TIMEOUT", "JOURNAL_MODE",
+]);
+
+const TRANSACTION_LEADS = new Set(["BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE"]);
+const DML_LEADS = new Set(["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "REPLACE"]);
+
+/**
+ * THE CLOSED LEXICAL SUBSET (S456 round 4 — the ruled "a statement the databases read
+ * differently is refused" clause made exact; the S452 tenant SQL subset's idea at the
+ * lexical layer). Outside a literal or comment a program-body statement may hold ONLY:
+ *   - whitespace: space, tab, LF, CR LF;
+ *   - ASCII identifiers `[A-Za-z_][A-Za-z0-9_]*`;
+ *   - double-quoted identifiers of printable ASCII with no escape but `""`;
+ *   - standard single-quoted strings: `''` the only escape, no backslash, any other character
+ *     (non-ASCII included — it is data), no prefix (`E'`, `B'`, `X'`, `N'`, `U&'` are refused);
+ *   - unsigned numbers `[0-9]+(.[0-9]+)?`;
+ *   - `-- ` comments (`--` then space, tab or a line end; ending at LF, no lone CR inside);
+ *   - `/* … *\/` comments that close, do not nest and are not executable (`/*!`, `/*M!`);
+ *   - `${…}` interpolation slots (bound parameters);
+ *   - the punctuation `( ) , ; . * + - / % = < > ! | & ~ ^` and the cast `::`.
+ * Anything else — a `$` that does not open `${`, any non-ASCII character, `U&`, a backslash,
+ * `#`, a backtick, `[` / `]`, `@`, `?`, a lone `:`, `{` / `}`, a lone CR, another whitespace
+ * character — makes the statement UNREADABLE (refused). Executed on PG16 and Bun.SQL sqlite by
+ * the S239 r4 review: `w·$z$` is ONE identifier to both databases but a dollar quote to a
+ * reader that admits `$`; the subset admits neither the `·` nor the `$`.
+ */
+function programSqlTokens(text) {
+  const toks = [];
+  const n = text.length;
+  let depth = 0;
+  let i = 0;
+  const bad = (why) => ({ toks, unreadable: why });
+  // The bound parameters, as the emitter splits them (codegen/sql-lex.ts — the one reader).
+  const slots = new Map(liveSqlInterpolations(text).map((s) => [s.start, s]));
+  const used = new Set();
+  const done = () => {
+    // Every slot the emitter binds must be one this walk read as a slot — a `${` the emitter
+    // binds inside what this walk read as a literal or comment would send SQL unseen.
+    for (const at of slots.keys()) if (!used.has(at)) return bad("a `${…}` the SQL emitter binds where this reader saw a literal or a comment");
+    return { toks, unreadable: null };
+  };
+  while (i < n) {
+    const c = text[i];
+    if (c === " " || c === "\t" || c === "\n") { i++; continue; }
+    if (c === "\r") {
+      if (text[i + 1] === "\n") { i += 2; continue; }
+      return bad("a lone carriage return (databases end lines and `--` comments differently at it)");
+    }
+    if (c === "-" && text[i + 1] === "-") {
+      const after = text[i + 2];
+      if (after !== undefined && after !== " " && after !== "\t" && after !== "\n" && after !== "\r") {
+        return bad("a `--` not followed by whitespace (not a comment on MySQL)");
+      }
+      let j = i + 2;
+      while (j < n && text[j] !== "\n") {
+        if (text[j] === "\r" && text[j + 1] !== "\n") return bad("a `--` comment holds a lone carriage return (Postgres ends the comment there, SQLite and MySQL do not)");
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      if (text[i + 2] === "!" || (text[i + 2] === "M" && text[i + 3] === "!")) return bad("an executable comment (`/*!` / `/*M!` — MySQL and MariaDB run its contents)");
+      const close = text.indexOf("*/", i + 2);
+      if (close === -1) return bad("an unclosed block comment");
+      if (text.slice(i + 2, close).includes("/*")) return bad("a `/*` inside a block comment (Postgres nests block comments, SQLite and MySQL do not)");
+      i = close + 2;
+      continue;
+    }
+    if (c === "'") {
+      let j = i + 1;
+      while (j < n && !(text[j] === "'" && text[j + 1] !== "'")) j += text[j] === "'" ? 2 : 1;
+      if (j >= n) return bad("an unclosed string literal");
+      if (text.slice(i, j).includes("\\")) return bad("a string literal holds a backslash (an escape on MySQL and in a Postgres `E'…'` string)");
+      toks.push({ k: "str", at: i, depth });
+      i = j + 1;
+      continue;
+    }
+    if (c === '"') {
+      let j = i + 1;
+      let name = "";
+      while (j < n) {
+        if (text[j] === '"') {
+          if (text[j + 1] === '"') { name += '"'; j += 2; continue; }
+          break;
+        }
+        if (!/[\x20-\x7e]/.test(text[j])) return bad("a double-quoted identifier holds a character that is not printable ASCII");
+        name += text[j];
+        j++;
+      }
+      if (j >= n) return bad("an unclosed double-quoted identifier");
+      // `""` (empty) is SQLite's empty string; any other is an identifier
+      toks.push(name.length === 0 ? { k: "str", at: i, depth } : { k: "id", t: name, up: name.toUpperCase(), quoted: true, at: i, depth });
+      i = j + 1;
+      continue;
+    }
+    if (c === "$") {
+      if (text[i + 1] !== "{") return bad("a `$` that does not open a `${…}` slot (a dollar quote or a `$n` parameter — databases read it differently)");
+      // S456 fix round F1 — the slot's extent is the EMITTER's (`liveSqlInterpolations`,
+      // read the way JavaScript reads the emitted template's `${…}`), never re-derived
+      // here: a brace count ended `${ x + '{' }` at a later `}`, so this walk saw one slot
+      // while JS bound `x + '{'` and sent `); CREATE TABLE … /*` as SQL (executed).
+      const slot = slots.get(i);
+      if (slot === undefined) return bad("a `${` the SQL emitter does not read as a bound parameter");
+      if (jsInterpolationEnd(text, i) !== slot.end) return bad("an unclosed `${…}` slot");
+      used.add(i);
+      toks.push({ k: "param", at: i, depth });
+      i = slot.end;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i + 1;
+      while (j < n && /[A-Za-z0-9_]/.test(text[j])) j++;
+      const t = text.slice(i, j);
+      if (text[j] === "'" || (text[j] === "&" && (text[j + 1] === "'" || text[j + 1] === '"'))) {
+        return bad(`a prefixed literal (\`${t}${text[j]}…\` — \`E'…'\`, \`B'…'\`, \`X'…'\`, \`N'…'\`, \`U&…\` read differently by each database)`);
+      }
+      toks.push({ k: "id", t, up: t.toUpperCase(), quoted: false, at: i, depth });
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(c)) {
+      let j = i + 1;
+      while (j < n && /[0-9]/.test(text[j])) j++;
+      if (text[j] === "." && /[0-9]/.test(text[j + 1] ?? "")) { j++; while (j < n && /[0-9]/.test(text[j])) j++; }
+      toks.push({ k: "num", at: i, depth });
+      i = j;
+      continue;
+    }
+    if (c === ":" && text[i + 1] === ":") { toks.push({ k: "p", t: "::", at: i, depth }); i += 2; continue; }
+    if (c === "(") { toks.push({ k: "p", t: "(", at: i, depth }); depth++; i++; continue; }
+    if (c === ")") { depth = Math.max(0, depth - 1); toks.push({ k: "p", t: ")", at: i, depth }); i++; continue; }
+    if ("),;.*+-/%=<>!|&~^".includes(c)) { toks.push({ k: "p", t: c, at: i, depth }); i++; continue; }
+    const shown = /[\x21-\x7e]/.test(c) ? `\`${c}\`` : `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
+    return bad(`the character ${shown} is outside the program-body SQL subset`);
+  }
+  return done();
+}
+
+const isWord = (tok, w) => tok !== undefined && tok.k === "id" && !tok.quoted && tok.up === w;
+const isPunct = (tok, p) => tok !== undefined && tok.k === "p" && tok.t === p;
+const isName = (tok) => tok !== undefined && tok.k === "id";
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function closingParen(toks, open) {
+  for (let j = open + 1; j < toks.length; j++) {
+    if (isPunct(toks[j], ")") && toks[j].depth === toks[open].depth) return j;
+  }
+  return -1;
+}
+
+/** Split toks[from..to) at depth-`d` commas. */
+function splitAtCommas(toks, from, to, d) {
+  const items = [];
+  let s = from;
+  for (let j = from; j < to; j++) {
+    if (isPunct(toks[j], ",") && toks[j].depth === d) { items.push(toks.slice(s, j)); s = j + 1; }
+  }
+  items.push(toks.slice(s, to));
+  return items;
+}
+
+const isTenantColumn = (name) => typeof name === "string" && name.toLowerCase() === "tenant_id";
+const TABLE_CONSTRAINT_LEADS = new Set(["CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "EXCLUDE"]);
+
+/** The verdict for one `;`-separated statement. */
+function statementVerdict(text, toks, isTenant) {
+  const lead = toks[0];
+  const at = lead.at;
+  const leadWord = lead.k === "id" && !lead.quoted ? lead.up : "";
+  const V = (verdict, name, why) => ({ verdict, lead: leadWord || text.slice(at, at + 12).trim(), name, why, offset: at });
+  const admitted = () => V("admitted", null, null);
+  const notAdmitted = (why) => V("not-admitted", null, why);
+  if (lead.k !== "id" || lead.quoted) return notAdmitted("it does not begin with a SQL keyword");
+
+  if (DML_LEADS.has(leadWord)) {
+    // S456 round 4: an `INTO` at ANY depth is refused unless it is the target of THE
+    // statement's own INSERT / REPLACE — the main keyword (the first token, or, after a
+    // `WITH` list, the first depth-0 token after its last CTE), followed only by modifier
+    // words (`OR REPLACE`, `OR IGNORE`, MySQL `IGNORE` / `LOW_PRIORITY` / `DELAYED`, …).
+    // A `SELECT … INTO` creates a table on Postgres and writes variables or a file on MySQL;
+    // `INSERT` / `REPLACE` are not reserved words everywhere (`SELECT replace INTO t` names a
+    // column), so position decides, not spelling.
+    let main = 0;
+    if (leadWord === "WITH") {
+      main = -1;
+      for (let j = 1; j < toks.length; j++) {
+        if (toks[j].depth === 0 && isPunct(toks[j], ")") && !isPunct(toks[j + 1], ",") && !isWord(toks[j + 1], "AS")) { main = j + 1; break; }
+      }
+    }
+    const INTO_MODIFIERS = new Set(["OR", "REPLACE", "IGNORE", "ABORT", "FAIL", "ROLLBACK", "LOW_PRIORITY", "HIGH_PRIORITY", "DELAYED"]);
+    // The INSERT / REPLACE heads whose `INTO` is a write target: the statement's main keyword,
+    // and — in a `WITH` statement — a data-modifying CTE body (`name AS ( INSERT INTO …`).
+    const heads = [];
+    if (main >= 0) heads.push(main);
+    if (leadWord === "WITH") {
+      for (let j = 2; j < toks.length; j++) {
+        if (isPunct(toks[j - 1], "(") && (isWord(toks[j - 2], "AS") || isWord(toks[j - 2], "MATERIALIZED"))) heads.push(j);
+      }
+    }
+    const admittedInto = new Set();
+    for (const h of heads) {
+      if (!isWord(toks[h], "INSERT") && !isWord(toks[h], "REPLACE")) continue;
+      let j = h + 1;
+      while (j < toks.length && toks[j].k === "id" && !toks[j].quoted && INTO_MODIFIERS.has(toks[j].up)) j++;
+      if (isWord(toks[j], "INTO")) admittedInto.add(j);
+    }
+    for (let j = 0; j < toks.length; j++) {
+      if (!admittedInto.has(j) && isWord(toks[j], "INTO")) {
+        return notAdmitted("an `INTO` that is not the target of the statement's own `INSERT` / `REPLACE` (a `SELECT … INTO` creates a table on Postgres and writes variables or a file on MySQL)");
+      }
+    }
+    return admitted();
+  }
+
+  if (TRANSACTION_LEADS.has(leadWord)) {
+    return toks.every((tok) => tok.k === "id") ? admitted() : notAdmitted("transaction control takes only keywords and a savepoint name");
+  }
+
+  if (leadWord === "PRAGMA") {
+    const nm = toks[1];
+    if (!isName(nm) || nm.quoted || !ADMITTED_PRAGMAS.has(nm.up)) return notAdmitted(`\`PRAGMA ${nm?.t ?? ""}\` is not on the admitted list`);
+    const rest = toks.slice(2);
+    if (rest.length === 0) return admitted();
+    if (isPunct(rest[0], "=") && rest.length === 2 && rest[1].k !== "p") return admitted();
+    if (isPunct(rest[0], "(") && rest.length === 3 && rest[1].k !== "p" && isPunct(rest[2], ")")) return admitted();
+    return notAdmitted("a PRAGMA takes `= value` or `(argument)` only");
+  }
+
+  if (leadWord === "ALTER") {
+    // ALTER TABLE name ADD [COLUMN] [IF NOT EXISTS] col type …
+    if (!isWord(toks[1], "TABLE") || !isName(toks[2]) || !isWord(toks[3], "ADD")) {
+      return notAdmitted("the only admitted `ALTER` is `ALTER TABLE name ADD [COLUMN] col type`");
+    }
+    let k = 4;
+    const columnWord = isWord(toks[k], "COLUMN");
+    if (columnWord) k++;
+    if (isWord(toks[k], "IF") && isWord(toks[k + 1], "NOT") && isWord(toks[k + 2], "EXISTS")) k += 3;
+    const col = toks[k];
+    // After `ADD COLUMN` the next name IS the column (`ADD COLUMN key TEXT`); after a bare
+    // `ADD`, a constraint keyword starts a constraint (`ADD KEY …`, `ADD CONSTRAINT …`).
+    const constraintWord = !columnWord && !col?.quoted && ["CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "INDEX", "KEY", "EXCLUDE"].includes(col?.up);
+    if (!isName(col) || constraintWord || !isName(toks[k + 1])) {
+      return notAdmitted("the only admitted `ALTER` is `ALTER TABLE name ADD [COLUMN] col type`");
+    }
+    if (toks.some((tok) => isPunct(tok, ",") && tok.depth === 0)) return notAdmitted("an admitted `ALTER TABLE … ADD COLUMN` adds one column");
+    if (isTenantColumn(col.t) && !isTenant(toks[2].t)) return V("tenant", toks[2].t, "it adds a `tenant_id` column");
+    return admitted();
+  }
+
+  if (leadWord === "CREATE") {
+    let k = 1;
+    let unique = false;
+    if (isWord(toks[k], "UNIQUE")) { unique = true; k++; }
+    if (isWord(toks[k], "INDEX")) {
+      k++;
+      if (isWord(toks[k], "IF") && isWord(toks[k + 1], "NOT") && isWord(toks[k + 2], "EXISTS")) k += 3;
+      if (!isName(toks[k]) || !isWord(toks[k + 1], "ON") || !isName(toks[k + 2]) || !isPunct(toks[k + 3], "(")) {
+        return notAdmitted("the admitted index form is `CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (cols) [WHERE …]`");
+      }
+      const close = closingParen(toks, k + 3);
+      if (close === -1) return notAdmitted("its column list does not close");
+      for (const item of splitAtCommas(toks, k + 4, close, toks[k + 3].depth + 1)) {
+        let x = 0;
+        if (!isName(item[x])) return notAdmitted("an index item is not a column name");
+        x++;
+        if (isWord(item[x], "COLLATE") && isName(item[x + 1])) x += 2;
+        if (isWord(item[x], "ASC") || isWord(item[x], "DESC")) x++;
+        if (x !== item.length) return notAdmitted("an index item is not `col [COLLATE c] [ASC | DESC]`");
+      }
+      if (close + 1 < toks.length && !isWord(toks[close + 1], "WHERE")) return notAdmitted("only a `WHERE` may follow an index's column list");
+      return admitted();
+    }
+    if (unique) return notAdmitted("`CREATE UNIQUE` is admitted only for an index");
+    let temp = false;
+    if (isWord(toks[k], "TEMP") || isWord(toks[k], "TEMPORARY")) { temp = true; k++; }
+    const virtual = !temp && isWord(toks[k], "VIRTUAL");
+    if (virtual) k++;
+    if (!isWord(toks[k], "TABLE")) {
+      return notAdmitted(`\`CREATE ${toks[1]?.t ?? ""}\` is not admitted in a program body`);
+    }
+    k++;
+    if (isWord(toks[k], "IF") && isWord(toks[k + 1], "NOT") && isWord(toks[k + 2], "EXISTS")) k += 3;
+    const name = toks[k];
+    if (!isName(name) || isPunct(toks[k + 1], ".")) return notAdmitted("the table is not named by one plain name");
+    k++;
+    if (virtual) {
+      if (!isWord(toks[k], "USING") || !isWord(toks[k + 1], "FTS5") || !isPunct(toks[k + 2], "(")) {
+        return notAdmitted("the only admitted virtual table is `USING fts5(…)`");
+      }
+      const close = closingParen(toks, k + 2);
+      if (close === -1 || close !== toks.length - 1) return notAdmitted("its argument list does not close the statement");
+      let carries = false;
+      for (const arg of splitAtCommas(toks, k + 3, close, toks[k + 2].depth + 1)) {
+        if (arg.length >= 3 && isPunct(arg[1], "=")) {
+          if (!isName(arg[0]) || arg[0].quoted || !FTS5_OPTIONS.has(arg[0].up)) return notAdmitted(`the fts5 option \`${arg[0]?.t ?? "?"}\` is not on the admitted list`);
+          if (arg.length !== 3 || arg[2].k === "p" || arg[2].k === "param") return notAdmitted("an fts5 option takes one plain value");
+          if (arg[0].up === "CONTENT") {
+            const v = arg[2].k === "id" ? arg[2].t : text.slice(arg[2].at + 1, text.indexOf("'", arg[2].at + 1));
+            if (v && isTenant(v)) carries = true;
+          }
+          continue;
+        }
+        if (!isName(arg[0]) || !(arg.length === 1 || (arg.length === 2 && isWord(arg[1], "UNINDEXED")))) {
+          return notAdmitted("an fts5 argument is not `col [UNINDEXED]` or `option = value`");
+        }
+        if (isTenantColumn(arg[0].t)) carries = true;
+      }
+      if (carries && !isTenant(name.t)) return V("tenant", name.t, "its rows carry or index tenant data (a `tenant_id` column, or `content =` a tenant-scoped table)");
+      return admitted();
+    }
+    if (!isPunct(toks[k], "(")) return notAdmitted("an admitted `CREATE TABLE` spells its column list");
+    const close = closingParen(toks, k);
+    if (close === -1) return notAdmitted("its column list does not close");
+    const after = toks.slice(close + 1).filter((tok) => !isPunct(tok, ","));
+    const sqliteOptions = after.every((tok) => isWord(tok, "WITHOUT") || isWord(tok, "ROWID") || isWord(tok, "STRICT"));
+    if (!sqliteOptions) return notAdmitted("only SQLite's `WITHOUT ROWID` / `STRICT` may follow the column list");
+    let carries = false;
+    for (const item of splitAtCommas(toks, k + 1, close, toks[k].depth + 1)) {
+      if (item.length === 0) return notAdmitted("an empty column-list item");
+      const first = item[0];
+      if (!isName(first)) return notAdmitted("a column-list item does not begin with a name");
+      // A table constraint (`PRIMARY KEY (…)`, `UNIQUE (…)`, `CHECK (…)`, `CONSTRAINT n …`) names
+      // no new column; a column NAMED `unique` / `check` is followed by its type, not `(` / `KEY`.
+      if (!first.quoted && TABLE_CONSTRAINT_LEADS.has(first.up) &&
+        (first.up === "CONSTRAINT" || isPunct(item[1], "(") || isWord(item[1], "KEY") || isWord(item[1], "USING"))) continue;
+      if (!first.quoted && first.up === "LIKE") return notAdmitted("a `LIKE` copy is not a spelled column list");
+      if (isTenantColumn(first.t)) carries = true;
+    }
+    if (carries && !isTenant(name.t)) return V("tenant", name.t, `it creates ${temp ? "a temporary table" : "a table"} with a \`tenant_id\` column`);
+    return admitted();
+  }
+
+  return notAdmitted(`a statement led by \`${lead.t}\` is not admitted in a program body`);
 }

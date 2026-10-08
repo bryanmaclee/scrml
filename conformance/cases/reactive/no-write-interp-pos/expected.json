@@ -1,0 +1,24 @@
+{
+  "id": "reactive-no-write-interp-pos",
+  "description": "§6.15 (S449 item 3): a markup interpolation calls a function that writes a cell (the render self-write) — E-VALUE-WRITES-STATE at the source position (the interpolation), naming the call chain.",
+  "language-version": "1.0",
+  "spec": "§6.15",
+  "rationale": "§6.15: \"Evaluating an initializer (own value, field or attribute default, use-site construction value, `default=`), a derived formula, or a render expression SHALL NOT write any reactive cell, directly or through a called function (E-VALUE-WRITES-STATE).\" ruling:user-voice-scrml.md S449 \"⭐⭐ RULED — \\\"your recs.\\\" on the S449 eight-question queue\" — item 3: \"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function\".",
+  "expect": {
+    "codes": [
+      "E-VALUE-WRITES-STATE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-VALUE-WRITES-STATE"
+        ]
+      }
+    }
+  }
+}

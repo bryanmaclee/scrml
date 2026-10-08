@@ -1,0 +1,16 @@
+{
+  "id": "tenant-floor-alter-add-tenant-column-neg",
+  "description": "§14.8.10 (S455) — a `<schema>` VIEW over `notes`, which is tenant-scoped through `ALTER TABLE notes ADD COLUMN tenant_id`. Before S455 the ALTER-added column was not read, `notes` was not in the tenant set, and the view passed the E-TENANT-SCHEMA-HAZARD checker (compiled clean, executed on e014f20ce). Now the view is refused at the declaration.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/tenant-floor-project-set.test.js",
+  "spec": "§14.8.10",
+  "rationale": "§14.8.10: a `<schema>` declaring a view whose definition reads a tenant-scoped table SHALL be E-TENANT-SCHEMA-HAZARD; a table is tenant-scoped when its `<schema>` carries a `tenant_id` column — S455: an `ALTER TABLE` that names `tenant_id` included.",
+  "expect": {
+    "codes": [
+      "E-TENANT-SCHEMA-HAZARD"
+    ],
+    "codeCounts": {
+      "E-TENANT-SCHEMA-HAZARD": 1
+    }
+  }
+}

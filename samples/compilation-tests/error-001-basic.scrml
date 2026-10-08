@@ -3,8 +3,8 @@
 
 <div>
     !{
-        | ::NetworkError e -> let msg = "Network failed"
-        | _ e -> let msg = "Unknown error"
+        ::NetworkError(e) -> let msg = "Network failed"
+        _ e -> let msg = "Unknown error"
     }
     <p>Error handler</>
 </div>

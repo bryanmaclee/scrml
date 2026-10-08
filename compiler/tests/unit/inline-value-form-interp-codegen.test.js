@@ -23,11 +23,12 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 function compileToOutputs(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -56,7 +57,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     // A render slot is allocated in the HTML.
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
     // The value is rendered via the node-aware display helper + a reactive effect.
-    expect(clientJs).toContain("_scrml_render_value(el,");
+    expect(clientJs).toContain("_scrml_render_value(_scrml_el,");
     expect(clientJs).toContain("_scrml_effect(");
     // The match value is captured (the IIFE returns the arm value).
     expect(clientJs).toContain('if (_scrml_match_');
@@ -75,7 +76,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
     // The if lowers to a readable conditional-expression cascade (a ternary).
     expect(clientJs).toContain('(_scrml_cs_reactive_get("n") > 3 ? "big" : "small")');
-    expect(clientJs).toContain("_scrml_render_value(el,");
+    expect(clientJs).toContain("_scrml_render_value(_scrml_el,");
     expect(clientJs).toContain("_scrml_effect(");
     // Pre-fix the branch values were discarded as a bare file-scope `if(){…}else{…}`
     // with no return — that statement form is GONE.
@@ -100,11 +101,11 @@ describe("inline-value-form-interp — codegen shape", () => {
 <p>\${ if LIMIT > 3 { "big" } else { "small" } }</p>`;
     const { errors, clientJs } = compileToOutputs(src, "ivf-static");
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
-    expect(clientJs).toContain("_scrml_render_value(el,");
+    expect(clientJs).toContain("_scrml_render_value(_scrml_el,");
     // No reactive cell read → no _scrml_effect wrapper for this slot.
     // (The whole client.js may still use _scrml_effect elsewhere, but here the
     // value-control-flow render is one-shot; assert the effect-less render line.)
-    const renderLines = clientJs.split("\n").filter(l => l.includes("_scrml_render_value(el,"));
+    const renderLines = clientJs.split("\n").filter(l => l.includes("_scrml_render_value(_scrml_el,"));
     expect(renderLines.length).toBe(1);
   });
 
@@ -122,9 +123,9 @@ describe("inline-value-form-interp — codegen shape", () => {
   // S391 §17.6.10 amendment (ruling: user-voice-scrml.md S371 "value-form b").
   // This test PREVIOUSLY asserted the inverse — that an else-less `${ if c { x } }`
   // is NOT a value-form. That assertion was INERT: it matched
-  //   /_scrml_render_value\(el, \(_scrml_reactive_get\("n"\) > 3 \?/
+  //   /_scrml_render_value\(_scrml_el, \(_scrml_reactive_get\("n"\) > 3 \?/
   // which is unsatisfiable for the value-form shape, because (a) the value always
-  // routes through a `_scrml_cf__scrml_logic_N()` thunk so `_scrml_render_value(el, (`
+  // routes through a `_scrml_cf__scrml_logic_N()` thunk so `_scrml_render_value(_scrml_el, (`
   // never occurs, and (b) the emit uses the chunk-scoped `_scrml_cs_reactive_get`.
   // It therefore pinned nothing. Replaced with the amendment's rule + a BITING
   // assertion on the actual emitted ternary.
@@ -138,7 +139,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     expect(clientJs).toContain('(_scrml_cs_reactive_get("shown") ? "YES" : "")');
     // A render slot IS allocated, and the value is wired through it reactively.
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
-    expect(clientJs).toMatch(/_scrml_render_value\(el, _scrml_cf__scrml_logic_\d+\(\)\)/);
+    expect(clientJs).toMatch(/_scrml_render_value\(_scrml_el, _scrml_cf__scrml_logic_\d+\(\)\)/);
     // The value must NOT survive as a bare dangling expression statement.
     expect(clientJs).not.toMatch(/^\s*"YES";\s*$/m);
   });
@@ -156,9 +157,9 @@ describe("inline-value-form-interp — codegen shape", () => {
     const src = `<count>: int = 5
 <p>\${@count}</p>`;
     const { clientJs } = compileToOutputs(src, "ivf-plain");
-    expect(clientJs).toContain("_scrml_render_value(el,");
+    expect(clientJs).toContain("_scrml_render_value(_scrml_el,");
     // The plain-cell read lowers to the bare cell get, not a control-flow IIFE/ternary.
-    expect(clientJs).toContain('_scrml_render_value(el, _scrml_cs_reactive_get("count"))');
+    expect(clientJs).toContain('_scrml_render_value(_scrml_el, _scrml_cs_reactive_get("count"))');
     expect(clientJs).not.toContain("_scrml_match_");
   });
 

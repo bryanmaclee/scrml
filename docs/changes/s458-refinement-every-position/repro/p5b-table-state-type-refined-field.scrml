@@ -1,0 +1,10 @@
+<program db="sqlite:./test.db">
+${
+  < Link authority="server" table="links">
+    id: number
+    url: string(url)
+  </>
+  <Link> @links
+}
+<ul><each in=@links key=@.id><li>${@.url}</li></each></ul>
+</program>

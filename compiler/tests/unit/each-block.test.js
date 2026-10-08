@@ -29,6 +29,7 @@ import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // compile helper — mirrors engine-body-render.test.js pattern.
@@ -37,7 +38,7 @@ import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 function compileToOutputs(source, suffix = "each") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -230,11 +231,11 @@ describe("each-block §5 — <empty> sub-element fallback", () => {
 </program>`;
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "empty"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
-    // Empty-state path checks _items.length === 0 then renders the
+    // Empty-state path checks _scrml_items.length === 0 then renders the
     // <empty> body content.
-    expect(clientJs).toMatch(/if \(!_items \|\| _items\.length === 0\)/);
+    expect(clientJs).toMatch(/if \(!_scrml_items \|\| _scrml_items\.length === 0\)/);
     expect(clientJs).toContain("nothing here");
-    expect(clientJs).toMatch(/_scrml_each_append\(_mount, _emptyFrag\)/);
+    expect(clientJs).toMatch(/_scrml_each_append\(_scrml_mount, _emptyFrag\)/);
   });
 
   test("no <empty> sub-element → no empty-state guard emitted", () => {
@@ -248,11 +249,11 @@ describe("each-block §5 — <empty> sub-element fallback", () => {
 </program>`;
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "no-empty"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
-    // The if (!_items || _items.length === 0) early-return guard is
+    // The if (!_scrml_items || _scrml_items.length === 0) early-return guard is
     // ONLY emitted when an <empty> sub-element is present. When absent,
     // _scrml_reconcile_list handles the empty case natively via its
     // fast-path (children.length === 0 → replaceChildren()).
-    expect(clientJs).not.toMatch(/if \(!_items \|\| _items\.length === 0\)/);
+    expect(clientJs).not.toMatch(/if \(!_scrml_items \|\| _scrml_items\.length === 0\)/);
   });
 });
 
@@ -330,7 +331,7 @@ describe("each-block §8 — nested iteration", () => {
   test("inner each over an outer-alias member resolves in the outer factory scope (each-in-enclosing-scope, S153)", () => {
     // The inner each iterates `group.items` — `group` is the OUTER each's `as`
     // alias, bound ONLY inside the outer per-item factory. Pre-fix the inner each
-    // was lifted to a MODULE-SCOPE render fn reading `const _items = group.items;`
+    // was lifted to a MODULE-SCOPE render fn reading `const _scrml_items = group.items;`
     // (group undefined → runtime ReferenceError) AND was dropped from the outer
     // factory (unhandled-kind comment). Post-fix the inner each is emitted INLINE
     // inside the outer factory (item-local mount + inline reconcile, source valid).
@@ -695,8 +696,9 @@ function handle(id) {
     expect(errors).toEqual([]);
     // No false E-SCOPE-001 on the bare @. in attribute position (Locus 1).
     expect(errors).toEqual([]);
-    // href=@.email lowers to the value, not a literal.
-    expect(clientJs).toContain('.setAttribute("href", String(_scrml_each_item.email));');
+    // href=@.email lowers to the value, not a literal — through the §5.2 rule 3 (S457)
+    // runtime URL guard, since the row data supplies the scheme.
+    expect(clientJs).toMatch(/\.setAttribute\("href", _scrml_safe_url\([A-Za-z_0-9]+, "href", String\(_scrml_each_item\.email\)\)\);/);
   });
 
   test("class:/onclick/${} compose on a single per-item opener (the reproducer)", () => {
@@ -758,7 +760,7 @@ function clk(i) {
     // null-guard) before reading the iter var, so a same-key reconcile fires the
     // handler with live data, not the create-time snapshot. The iter-var read in
     // the handler arg is preserved (it now resolves to the re-bound `let`).
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
     expect(clientJs).toContain('.setAttribute("data-i", String(_scrml_each_item));');
   });
 });

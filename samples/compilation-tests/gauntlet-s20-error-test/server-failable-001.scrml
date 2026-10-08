@@ -17,8 +17,8 @@ ${
   // every handler form, S440); a non-failable wrapper catches it with !{}.
   function load() {
     getUser(1) !{
-      | .NotFound :> @status = "not found"
-      | .Forbidden :> @status = "forbidden"
+      .NotFound :> @status = "not found"
+      .Forbidden :> @status = "forbidden"
     }
   }
 

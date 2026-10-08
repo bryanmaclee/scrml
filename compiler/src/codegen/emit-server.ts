@@ -1,4 +1,5 @@
 import { CGError } from "./errors.ts";
+import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
@@ -10,10 +11,13 @@ import type { AsyncRoot, AsyncEscapeSite } from "./local-async-fns.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
+import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
-import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
+import { setShadowedVariantNames } from "./emit-control-flow.ts";
+import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
+import { emitExpr, emitExprField, setServerAsyncClassifier, type EmitExprContext } from "./emit-expr.ts";
 import {
   readRawUnitSessionAttr,
   resolveUnitSessionAttr,
@@ -21,14 +25,25 @@ import {
   type SessionAttrName,
 } from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
-import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
+import { emitServerParamCheck, refinementOf, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
+import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
+import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRENT_TRANSACTIONS_VALUE } from "./sql-tx-guard.ts";
+import { tenantStartupCheckLines, type TenantCheckHandle } from "./tenant-startup-check.ts";
+
+/** §19.10.6 (S449 review F1) — the SSE stream's `finally` backstop call. Emitted with
+ *  every SSE route; dropped again when the module declares no `?{}` handle (and so
+ *  carries no transaction runtime to call). */
+const SSE_STREAM_END_LINE = "        if (await _scrml_db_stream_end()) { try { _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\ndata: ' + JSON.stringify({ error: { kind: \"TransactionLeftOpen\", message: \"the stream ended with its database transaction still open; its writes were rolled back (SPEC §19.10.6)\" } }) + '\\n\\n')); } catch (_scrml_enqErr) { /* the client is already gone */ } }";
+import { dbAttrValue, resolveDbScopes, dbHandlesWithin, type DbScopeResolution, type DbHandle } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
+import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE, DEFAULT_SQL_HANDLE, setFileSqlFallback, fallbackSqlHandle } from "./sql-handle-name.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
-import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./log-loc.ts";
+import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
@@ -39,17 +54,19 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
-import { registerProtectModule } from "./protect-flow.ts";
+import { registerProtectModule, HANDLE_RESULT_BINDING } from "./protect-flow.ts";
+import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
-  resolveTenantScoping,
-  classifyTenantWrite,
+  compilationTenantOf,
   detectTenantRawEgress,
   SERVER_TENANT_HELPER,
+  tenantRequestScopeLines,
+  wrapWithTenantScope,
   type TenantContext,
 } from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
-import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
+import { buildSsrEachRenderers, SSR_RENDER_HELPER, SSR_URL_GUARD_HELPER } from "./emit-ssr-render.ts";
 // g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,
 // sliced from the SINGLE client-runtime source, inlined into a standalone
 // `.server.js` that references `_scrml_map_*` (reachability-gated below). Without
@@ -771,77 +788,57 @@ function batchNeedsIdempotencyDedup(monotonicity: string | undefined): boolean {
  *   - SPEC §44.2 (driver resolution), §40.2 (program db= attr)
  *   - `docs/changes/v0.3-bug-3a-sql-emission/progress.md` — dispatch notes
  */
+/**
+ * One declared database handle. `transactions` is the declaring element's
+ * `transactions=` value (§19.10.6 — `"concurrent"` opts a Postgres / MySQL handle into
+ * one reserved connection per transaction; null = the default, serialized).
+ */
+export interface DbScope {
+  connectionString: string;
+  driver: "sqlite" | "postgres" | "mysql";
+  transactions?: string | null;
+  /** Where `transactions=` is written (for E-SQL-010), or null. */
+  transactionsSpan?: unknown;
+}
+
+/** The span of a named attribute on a node, or null. */
+function attrSpanOf(node: any, name: string): unknown {
+  const attrs: any[] = node?.attrs ?? node?.attributes ?? [];
+  const a = attrs.find((x: any) => x && x.name === name);
+  return a?.span ?? node?.span ?? null;
+}
+
 export function collectDbScopes(
   fileAST: any,
-): Map<string, { connectionString: string; driver: "sqlite" | "postgres" | "mysql" }> {
-  const scopes = new Map<string, { connectionString: string; driver: "sqlite" | "postgres" | "mysql" }>();
-  const nodes: any[] = getNodes(fileAST);
-
-  function walk(children: any[]): void {
-    if (!Array.isArray(children)) return;
-    for (const node of children) {
-      if (!node || typeof node !== "object") continue;
-
-      // Form 1: `<program db=>` with `_dbScope` annotation from index.ts.
-      if (node.kind === "markup" && node.tag === "program" && (node as any)._dbScope) {
-        const ds = (node as any)._dbScope;
-        if (typeof ds.dbVar === "string" && typeof ds.connectionString === "string") {
-          scopes.set(ds.dbVar, {
-            connectionString: ds.connectionString,
-            driver: ds.driver ?? "sqlite",
-          });
-        }
-      }
-
-      // Form 2: `<db src=>` state-block. AST: { kind:"state", stateType:"db", attrs:[...] }.
-      if (node.kind === "state" && node.stateType === "db") {
-        const attrs: any[] = node.attrs ?? node.attributes ?? [];
-        const srcAttr = attrs.find((a: any) => a && a.name === "src");
-        const srcVal: string =
-          srcAttr?.value?.kind === "string-literal"
-            ? srcAttr.value.value
-            : srcAttr?.value?.value ?? srcAttr?.value?.name ?? "";
-        if (typeof srcVal === "string" && srcVal.length > 0) {
-          const driverResult = resolveDbDriver(srcVal);
-          const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok
-            ? driverResult.info.driver
-            : "sqlite";
-          // The default unscoped identifier matches `context.ts:99` and
-          // `rewrite.ts:251` defaults — i.e. what the rewriter already
-          // emitted into the body.
-          if (!scopes.has("_scrml_sql")) {
-            scopes.set("_scrml_sql", { connectionString: srcVal, driver });
-          }
-        }
-      }
-
-      // Recurse into markup children + state children.
-      if (Array.isArray(node.children) && node.children.length > 0) {
-        walk(node.children);
-      }
-    }
-  }
-
-  walk(nodes);
-
-  // Fallback aliasing: if the unscoped `_scrml_sql` identifier is referenced
-  // in the body but no `<db src=>` block contributed it, alias it to the
-  // first `<program db=>` scope (the upstream index.ts annotation tags
-  // descendants with the scoped name, but emit-server.ts does not currently
-  // thread that scoped name into per-handler emit-logic opts — so SQL bodies
-  // continue to use the default `_scrml_sql` identifier even when only
-  // `<program db=>` is in scope). Without this aliasing the default
-  // identifier would fall through to the :memory: WARNING fallback even
-  // though a valid program-scoped connection string is available.
-  if (!scopes.has("_scrml_sql")) {
-    for (const [dbVar, info] of scopes) {
-      if (dbVar.startsWith("_scrml_sql_")) {
-        scopes.set("_scrml_sql", info);
-        break;
-      }
-    }
+): Map<string, DbScope> {
+  // §8.1.1 (S451) — one handle per DATABASE a scope in this file names; each `?{}` is
+  // lowered onto the handle of its NEAREST enclosing scope (`db-ownership.ts
+  // resolveDbScopes` — the one rule, shared with the ownership decision and with the
+  // per-node `_dbVar` tags codegen/index.ts sets from it). `_scrml_sql` stays the
+  // file's default database (`fileDefaultDbDecl`: first `<db src=>`, else first
+  // `<program db=>`), so a single-database file emits exactly what it always did.
+  // Replaces the per-file single handle (g-impl1-db-resolution-not-nearest-s451).
+  const scopes = new Map<string, DbScope>();
+  for (const h of dbScopeResolutionFor(fileAST).handles) {
+    const driverResult = resolveDbDriver(h.value);
+    const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok ? driverResult.info.driver : "sqlite";
+    scopes.set(h.ident, {
+      connectionString: h.value,
+      driver,
+      transactions: dbAttrValue(h.node, "transactions"),
+      transactionsSpan: attrSpanOf(h.node, "transactions"),
+    });
   }
   return scopes;
+}
+
+/**
+ * The §8.1.1 resolution over this file's CURRENT node tree (recomputed per call — the
+ * walk is cheap, and a cached answer could outlive a tree edit).
+ */
+export function dbScopeResolutionFor(fileAST: any): DbScopeResolution {
+  const filePath = typeof fileAST?.filePath === "string" && fileAST.filePath ? fileAST.filePath : null;
+  return resolveDbScopes(getNodes(fileAST), filePath);
 }
 
 /**
@@ -951,6 +948,50 @@ function isBodyOnlyEscalation(route: any, fnNode: any): boolean {
  * log / SQL) so a `_scrml_structural_eq(` introduced ONLY by an exported helper
  * still triggers the helper's top-of-file inlining.
  */
+/**
+ * s457 (§21.4) — this module's re-exports of other `.scrml` modules, as native ESM
+ * re-exports of their `.server.js`: `export { w as helper } from "./c.server.js";`.
+ * §21.4: "Re-export follows standard ES module `export { name } from 'source'`
+ * syntax" — before this the value-export block skipped every re-export, so a server
+ * bundle importing a re-exported name failed to LINK (`Export named 'helper' not
+ * found`), or found no `.server.js` at all when re-exports were the module's only
+ * server-relevant content.
+ *
+ * The edges come from codegen/index.ts (`_serverReExportEdges`): local `.scrml`
+ * sources only, `export *` already expanded to names (so a source's `routes` /
+ * `fetch` / `__ri_route_*` are never re-exported by accident), type / channel /
+ * engine names dropped. The specifier is re-based into dist space exactly like an
+ * import (`distRelativeServerSpecifier`). A name this module already exports is
+ * skipped (a duplicate export is a SyntaxError). Whether the source `.server.js`
+ * exports each name is decided after every module is emitted, in api.js — a
+ * re-export of a missing name would fail the whole module's link, not just that name.
+ */
+function serverReExportLines(fileAST: any, filePath: string, assembledBody: string): string[] {
+  const edges = (fileAST as any)?._serverReExportEdges as
+    | Array<{ specifier: string; names: Array<{ exported: string; imported: string }> }>
+    | undefined;
+  if (!Array.isArray(edges) || edges.length === 0) return [];
+  const alreadyExported = (name: string): boolean => {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^\\s*export\\s+(?:async\\s+)?(?:function\\*?|const|let|var|class)\\s+${esc}\\b`, "m").test(assembledBody) ||
+      new RegExp(`^\\s*export\\s*\\{[^}]*\\b${esc}\\s*[,}]`, "m").test(assembledBody);
+  };
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const edge of edges) {
+    const specs: string[] = [];
+    for (const { exported, imported } of edge.names) {
+      if (seen.has(exported) || alreadyExported(exported)) continue;
+      seen.add(exported);
+      specs.push(imported === exported ? exported : `${imported} as ${exported}`);
+    }
+    if (specs.length === 0) continue;
+    const spec = distRelativeServerSpecifier(edge.specifier, filePath, (fileAST as any)?._outputBaseDir);
+    out.push(`export { ${specs.join(", ")} } from ${JSON.stringify(spec)};`);
+  }
+  return out;
+}
+
 function emitModuleValueExportLines(
   fileAST: any,
   filePath: string,
@@ -969,7 +1010,8 @@ function emitModuleValueExportLines(
     }
   };
   collectLogic(getNodes(fileAST));
-  if (logicBlocks.length === 0) return [];
+  const reExportLines = serverReExportLines(fileAST, filePath, assembledBody);
+  if (logicBlocks.length === 0 && reExportLines.length === 0) return [];
 
   // Already-declared guard: skip a binding whose name is already declared at
   // top level in the assembled body (avoids double-decl).
@@ -1065,15 +1107,9 @@ function emitModuleValueExportLines(
     };
     for (const _vfn of fnDeclByName.values()) annotateNestedAsyncHelpers(_vfn, _veNestedFacts, /*sqlIsAsync*/ true, _veEscapes);
   }
-  // W5b (S239) — E-FOREIGN-006 crossing-shadow diagnostics from lowering an
-  // async ss1 fn body surface via this sink (parity with the tool path — the
-  // pre-consolidation server path dropped them silently). Drained into `errors`
-  // after the loop.
-  const foreignCrossingErrors: unknown[] = [];
-  // E-SQL-006 (§44.3) — a `.prepare()` on a `?{}` SQL result inside an async ss1
-  // fn body surfaces via this dedicated narrow sink (mirror of
-  // `foreignCrossingErrors`). Drained into `errors` after the loop.
-  const preparedStmtErrors: unknown[] = [];
+  // E-FOREIGN-006/007 and E-SQL-006 raised while lowering an async ss1 fn body go
+  // to the run-wide refused-lowering sink (refused-lowering-errors.ts, drained by
+  // runCG, one diagnostic per construct) — s456.
 
   for (const logic of logicBlocks) {
     for (const stmt of (logic.body ?? [])) {
@@ -1152,52 +1188,13 @@ function emitModuleValueExportLines(
         // null-out its resource access or carry an un-awaitable body).
         if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
         // Shared per-fn emitter (emit-library-shared) — same async-coloring +
-        // boundary rule as the tool-dep `generateToolLibraryJs`, incl. the
-        // foreign-crossing sink (S239 parity fix).
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, foreignCrossingErrors, preparedStmtErrors }));
+        // boundary rule as the tool-dep `generateToolLibraryJs`.
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames }));
         continue;
       }
 
       // All other export kinds (type / re-export / re-export-all / rename /
       // local / channel) have NO runtime VALUE export here — skip.
-    }
-  }
-
-  // Drain any E-FOREIGN-006 crossing-shadow diagnostics collected while lowering
-  // the async ss1 fn bodies into the live error stream (parity with emit-tool) —
-  // DEDUPED: a fn emitted on BOTH the route-handler path (which already drained
-  // its OWN foreign sink earlier in this same generateServerJs) and this ss1
-  // value-export path would otherwise report the SAME crossing twice. Push an ss1
-  // diagnostic only when no identical one (code + span + message) is already
-  // present — a purely ss1-exported foreign fn (no route handler) still surfaces.
-  if (errors && foreignCrossingErrors.length > 0) {
-    for (const e of foreignCrossingErrors) {
-      const ec = e as CGError;
-      const es = ec.span as { start?: number; end?: number };
-      const dup = errors.some((x) => {
-        const xs = x.span as { start?: number; end?: number };
-        return x.code === ec.code && x.message === ec.message
-          && (xs?.start ?? -1) === (es?.start ?? -1)
-          && (xs?.end ?? -1) === (es?.end ?? -1);
-      });
-      if (!dup) errors.push(ec);
-    }
-  }
-  // Drain E-SQL-006 (.prepare()) diagnostics collected while lowering the async
-  // ss1 fn bodies — DEDUPED against errors already reported on the route-handler
-  // path (a fn emitted on BOTH paths would otherwise report the same prepare
-  // twice), mirroring the foreign-crossing drain above.
-  if (errors && preparedStmtErrors.length > 0) {
-    for (const e of preparedStmtErrors) {
-      const ec = e as CGError;
-      const es = ec.span as { start?: number; end?: number };
-      const dup = errors.some((x) => {
-        const xs = x.span as { start?: number; end?: number };
-        return x.code === ec.code && x.message === ec.message
-          && (xs?.start ?? -1) === (es?.start ?? -1)
-          && (xs?.end ?? -1) === (es?.end ?? -1);
-      });
-      if (!dup) errors.push(ec);
     }
   }
 
@@ -1230,11 +1227,14 @@ function emitModuleValueExportLines(
     for (const err of asyncEscapeErrors(_veEscapes, filePath)) _pushVeDeduped(err);
   }
 
-  if (constLines.length === 0 && fnBlocks.length === 0) return [];
+  if (constLines.length === 0 && fnBlocks.length === 0 && reExportLines.length === 0) return [];
 
   const out: string[] = [];
   out.push("");
   out.push("// --- ss1: module value exports (constants + pure fns) for cross-file server imports ---");
+  // s457 (§21.4) — re-exports first: they bind nothing locally, so order is free.
+  for (const l of reExportLines) out.push(l);
+  if (reExportLines.length > 0 && (constLines.length > 0 || fnBlocks.length > 0)) out.push("");
   // Consts first (dependency order / readability — a referencing fn reads them
   // at call time, but emitting consts first keeps the file readable).
   for (const l of constLines) out.push(l);
@@ -1407,6 +1407,7 @@ function emitEndpointServerHelperLines(
     const start = (fnNode?.span as any)?.start;
     if (typeof start !== "number") continue;
     if (!helperIds.has(`${filePath}::${start}`)) continue;
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name;
     if (!name || !Array.isArray(fnNode.body)) continue;
     if (isAlreadyDeclared(name)) continue;
@@ -1486,6 +1487,22 @@ function emitEndpointServerHelperLines(
  * in OTHER files don't shift (mirrors the route-handler call site).
  */
 export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
+  // ⛑ THIS ENTRY RUNS OUTSIDE `runCG` — api.js calls it AFTER runCG has drained the run-wide
+  // refused-lowering sink (refused-lowering-errors.ts). A refusal recorded while lowering a
+  // value export here (a `.prepare()` in an exported async fn: E-SQL-006, an unbuildable `_{}`
+  // slice: E-FOREIGN-006/007) would otherwise sit in the sink until the next runCG reset wiped
+  // it. Drain it into this call's `errors` on every exit (s456 review F3). The sink's
+  // de-duplication memory is still the run's, so a construct runCG already reported is not
+  // reported twice.
+  try {
+    return _generateValueOnlyServerJs(fileAST, errors);
+  } finally {
+    // With no `errors` channel the refusals stay in the sink for the next drain.
+    if (errors) for (const e of drainRefusedLowerings()) errors.push(e);
+  }
+}
+
+function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   const filePath: string = fileAST.filePath;
 
   // Build the minimal file header (mirrors generateServerJs's first lines so
@@ -1499,14 +1516,9 @@ export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): str
   // Collect the value-export lines (consts + pure fns) via the shared collector.
   // The var-counter is snapshotted/restored so no other file's mangling shifts.
   const _veSnapshot = getVarCounter();
-  // E-SQL-006 (§44.3, g-esql006) — thread `errors` so emitModuleValueExportLines'
-  // `.prepare()` sink is actually DRAINED here. An EXPORTED async `?{}`-using fn is
-  // NOT skipped by the module-value-export server-only guard (that guard only skips
-  // NON-async server-only bodies; a `?{}` fn is async-colored), so a `.prepare()` in
-  // such an exported fn pushes E-SQL-006 into the sink. Before this arg was threaded
-  // the drain was guarded `if (errors && …)` with `errors` undefined on this path,
-  // silently discarding the diagnostic when a module reached this value-only pass
-  // (a sibling server bundle dangling-imports its `.server.js`).
+  // `errors` is threaded so the value-export pass's diagnostics reach the live stream —
+  // its own, and (via the drain in `generateValueOnlyServerJs`) the run-wide refused-lowering
+  // sink's, e.g. E-SQL-006 for a `.prepare()` in an exported async fn (g-esql006, s456 F3).
   const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
   setVarCounter(_veSnapshot);
   if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.
@@ -1535,6 +1547,15 @@ export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): str
   // fn that calls print writes the server process's stdout).
   if (emitted.includes("_scrml_print(")) {
     emitted = injectAfterHeader(emitted, SERVER_PRINT_HELPER);
+  }
+  // §23.2.4a — a server-importable fn's `_={ }=` slice is built in its sealed
+  // scope by `_scrml_foreign_seal` (foreign-seal.ts).
+  if (emitted.includes(`${FOREIGN_SEAL_FN}(`)) {
+    emitted = injectAfterHeader(emitted, SERVER_FOREIGN_SEAL_HELPER);
+  }
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check in a value-export fn.
+  if (needsUrlShapeHelper(emitted)) {
+    emitted = injectAfterHeader(emitted, SERVER_URL_SHAPE_HELPER);
   }
 
   return emitted;
@@ -1621,6 +1642,7 @@ function parseArmBindings(raw: string | undefined | null): EndpointArmBinding[] 
   return out;
 }
 
+
 /**
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
@@ -1683,10 +1705,6 @@ export function generateServerJs(
     middlewareConfig = middlewareConfigLegacy ?? null;
   }
   const filePath: string = fileAST.filePath;
-  // §20.5 (B2.4, S266) — reset the emit-expr E-SESSION-VALUE sink at the START of
-  // this file's server emission so a bare `session` value-use recorded during body
-  // emission is scoped to THIS file; drained into `errors` after emission below.
-  resetSessionValueUseErrors();
   const fnNodes: any[] = ctxForCache?.analysis?.fnNodes ?? collectFunctions(fileAST);
 
   // g-value-native-map-set-server-runtime (Part A — server-side map/set method
@@ -1754,19 +1772,133 @@ export function generateServerJs(
   // emitted and raise E-ASYNC-STDLIB-IN-SYNC-CALLBACK (mirrors the peer-server-fn
   // `_syncPeerCalls` → E-SERVER-FN-IN-SYNC-CALLBACK fail-closed path).
   const _syncStdlibAsyncCalls: Array<{ name: string; span: unknown }> = [];
-  // E-SQL-006 (§44.3, g-esql006) — ONE function-scoped narrow sink for a
-  // `.prepare()` on a `?{}` result, threaded into EVERY server-body / direct-
-  // sqlNode `emitLogicNode` opts below (route handlers CSRF + non-CSRF, their
-  // CPS-return sub-branch, SSE generator bodies, in-process peer callables, WS
-  // `onserver:*` handlers, §52.6.5 Pattern-C cell-load routes + their SSR seed).
-  // emit-logic `case "sql"` (method==="prepare") pushes here via
-  // `(opts as any).preparedStmtErrors`; the broad `opts.errors` sink is NOT wired
-  // on the server-fn path (it would surface OTHER swallowed errors), so this
-  // narrow collector is drained — DEDUPED — into the live `errors` stream ONCE at
-  // the function's tail (with drainSessionValueUseErrors). A single collector +
-  // single drain makes a create-without-drain (silent partial fix) impossible and
-  // auto-dedupes a fn emitted on BOTH the route and in-process-peer paths.
-  const _sqlPrepareErrors: CGError[] = [];
+  // E-SQL-006 (§44.3) — a `.prepare()` on a `?{}` result is refused by emit-logic
+  // `case "sql"` into the run-wide refused-lowering sink (refused-lowering-errors.ts,
+  // drained by runCG, one diagnostic per construct), so no emit site below threads a
+  // channel for it (s456 — a channel threaded through opts was lost one block deep).
+
+  // §8.1.1 (S451) — "A `?{}` context resolves its database by walking up the ancestor
+  // tree from the `?{}` block's position to the closest database scope … The NEAREST
+  // one wins." `_dbRes` is that resolution for this file's tree (db-ownership.ts
+  // `resolveDbScopes`); codegen/index.ts tagged every node under a scope with its
+  // handle (`_dbVar`). A server function's handle is the handle of the `?{}` sites it
+  // contains, threaded explicitly as `opts.dbVar` so no lowering path can fall back to
+  // the file default; the §8.9.2 implicit envelope opens on that same handle.
+  const _dbRes: DbScopeResolution = dbScopeResolutionFor(fileAST);
+  // S451 review — a lowering with no threaded handle defaults to `_scrml_sql` only in a
+  // single-database file; with two or more it gets UNRESOLVED (a compile error).
+  setFileSqlFallback(_dbRes.handles.length);
+  const _dbScopesForFile = collectDbScopes(fileAST);
+  const _DB_SITE_KINDS = new Set(["sql", "sql-ref", "transaction-block"]);
+  /** The handle idents of the `?{}` / `<transaction>` sites inside `node`. */
+  const _dbIdentsWithin = (node: unknown): Set<string | null> => {
+    const out = new Set<string | null>();
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (v === null || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+      const n = v as any;
+      if (typeof n.kind === "string" && _DB_SITE_KINDS.has(n.kind)) {
+        const h = _dbRes.scopeOf.get(n);
+        // A node the resolution walk never reached (rebuilt after it ran) keeps the
+        // tag codegen/index.ts put on the original.
+        out.add(h ? h.ident : h === null ? null : (typeof n._dbVar === "string" ? n._dbVar : null));
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span" || key.startsWith("_")) continue;
+        visit(n[key]);
+      }
+    };
+    visit(node);
+    return out;
+  };
+  /** The handle ident a node's POSITION resolves to (its nearest scope), or null. */
+  const _dbIdentAt = (node: any): string | null => {
+    if (!node || typeof node !== "object") return null;
+    const h = _dbRes.scopeOf.get(node);
+    if (h) return h.ident;
+    if (h === null) return null;
+    return typeof node._dbVar === "string" ? node._dbVar : null;
+  };
+  const _fnDbVarMemo = new Map<any, string | undefined>();
+  const _fnDbVarErrored = new Set<any>();
+  /**
+   * The handle a server function's `?{}` sites run on (undefined = none resolved —
+   * the lowering then uses the node tags / file default, and E-SQL-004 covers a site
+   * with no scope). A function whose sites resolve to TWO different databases cannot
+   * be one handler on one handle: refused (E-SQL-011), never silently split or merged.
+   */
+  const _fnDbVar = (fnNode: any): string | undefined => {
+    if (_fnDbVarMemo.has(fnNode)) return _fnDbVarMemo.get(fnNode);
+    const idents = [..._dbIdentsWithin(fnNode)].filter((x): x is string => x !== null);
+    const distinct = [...new Set(idents)];
+    let v: string | undefined;
+    if (distinct.length > 1) {
+      v = undefined;
+      if (!_fnDbVarErrored.has(fnNode)) {
+        _fnDbVarErrored.add(fnNode);
+        const names = distinct.map((id) => `\`${_dbScopesForFile.get(id)?.connectionString ?? id}\``).join(" and ");
+        const sp = fnNode?.span ?? {};
+        errors.push(new CGError(
+          "E-SQL-011",
+          `E-SQL-011: function \`${fnNode?.name ?? "anon"}\` contains \`?{}\` blocks that run on different ` +
+          `databases (${names}). Each \`?{}\` runs on its nearest enclosing \`<program db=>\` / \`<db src=>\` ` +
+          "(§8.1.1), and one server function runs its queries — and its transaction — on one database. " +
+          "Split the function so each part sits inside the one database scope it queries.",
+          { file: filePath, start: sp.start ?? 0, end: sp.end ?? 0, line: sp.line ?? 1, col: sp.col ?? 1 },
+          "error",
+        ));
+      }
+    } else if (distinct.length === 1) {
+      v = distinct[0];
+    } else {
+      // No `?{}` inside: the function's own position decides (an envelope / helper
+      // query it carries runs on the database it sits in).
+      v = _dbIdentAt(fnNode) ?? undefined;
+    }
+    _fnDbVarMemo.set(fnNode, v);
+    return v;
+  };
+  /** `{ dbVar }` to spread into a server-function's emit opts (nothing when unresolved). */
+  const _fnDbOpts = (fnNode: any): { dbVar?: string } => {
+    const v = _fnDbVar(fnNode);
+    return v ? { dbVar: v } : {};
+  };
+  // §8.1.1 / §44.7 — a `?{}` with NO database scope above it, in a file that declares
+  // MORE THAN ONE database, used to run silently on the file's first one — which of
+  // them it meant is exactly what the file cannot say. It is E-SQL-004. The §44.7.1
+  // module-with-db-context fallback ("the file's top-level `<db src=>` applies") names
+  // ONE database — §44.7.1 allows "at most one top-level `<db src="...">` block" — so
+  // a library-shaped file with two databases has no fallback either: E-SQL-004 too.
+  // (A file with no scope at all keeps the declaration-time E-SQL-004 below.)
+  // ⚑ SCOPE OF THIS FIX, STATED: with exactly ONE database in the file an unscoped
+  // `?{}` (the file-top `${ … }` beside `<program db=>` shape) still runs on that one
+  // database, as before. §8.1.1 makes that E-SQL-004 too, but the divergence predates
+  // S451 (the pre-S451 "closest ancestor `<program>`" text said the same) and carries
+  // no wrong-database hazard; refusing it is a separate acceptance change (11
+  // conformance cases measured at S451) left to a ruling — see
+  // docs/changes/s451-impl1-db-nearest/progress.md.
+  if (_dbRes.handles.length > 1) {
+    const _libShaped = isLibraryShapedFile(fileAST);
+    for (const site of _dbRes.sites) {
+      if (site.handle !== null || site.node.kind === "transaction-block") continue;
+      const sp: any = (site.node as any).span ?? {};
+      errors.push(new CGError(
+        "E-SQL-004",
+        "E-SQL-004: this `?{}` SQL block has no database scope above it. A `?{}` runs on its nearest " +
+        "enclosing `<program db=>` or `<db src=>` (§8.1.1); this one sits outside every database scope " +
+        "this file declares, so it would have no database of its own. Move it inside the `<program db=>` " +
+        "or `<db src=>` whose database it queries." +
+        (_libShaped
+          ? " (A module-with-db-context falls back to its top-level `<db src=>` only when it has exactly " +
+            "one — §44.7.1; this file declares more than one database.)"
+          : ""),
+        { file: filePath, start: sp.start ?? 0, end: sp.end ?? 0, line: sp.line ?? 1, col: sp.col ?? 1 },
+        "error",
+      ));
+    }
+  }
   // Install the file-scoped stdlib async classifier so emit-expr's SERVER-mode
   // auto-await reaches EVERY structured-emit boundary (if/while/for/match
   // conditions, SQL `?{}` interpolation, nested lambdas) — not just the direct
@@ -1801,6 +1933,29 @@ export function generateServerJs(
     (ctxForCache as { protectAnalysis?: unknown } | null)?.protectAnalysis ?? protectAnalysisLegacy ?? null;
   const _protectCtx: ProtectContext = buildProtectContext(_protectAnalysis);
   const _protectActive: boolean = _protectCtx.protectedByTable.size > 0;
+  // §14.8.9 × §19.9.5 (S443 round 6, P3) — the CPS error envelope's
+  // `ServerError.message`. It was `String(err.message)` of whatever the body
+  // threw, and a thrown message can carry a protected VALUE: SQLite's
+  // `json_extract('{}', passwordHash)` fails with "bad JSON path: '<the hash>'",
+  // a `JSON.parse(u.passwordHash)` SyntaxError quotes its input — measured, the
+  // hash crossed the wire in an error. The provenance flow cannot see into an
+  // exception a host API constructs, so under `protect=` the message is a fixed
+  // string (fail closed) and the real error is logged SERVER-side. §19.9.5 types
+  // the variant as `ServerError(message: string, fn: string)` and leaves the
+  // message text to the implementation; `fn` is unchanged, and a typed scrml
+  // failure (`__scrml_error`) still passes through — the flow analyses those.
+  const _cpsErrorPrologue = (fnName: string): string[] => _protectActive
+    ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
+    : [];
+  // …and the envelope itself is a client egress: a typed scrml failure thrown
+  // with a row in its payload goes through the same snapshot + strip as a
+  // return value (S443 round 6d — the sink owns serialization everywhere).
+  const _cpsErrorPayloadExpr: string = _protectActive
+    ? "_scrml_protect_redact(_scrml_error_payload)"
+    : "_scrml_error_payload";
+  const _cpsErrorMessage: string = _protectActive
+    ? `"the server could not complete this call (details are in the server log)"`
+    : `String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
 
   // §14.8.10 — tenant-row isolation floor context. Built from BOTH the §14.8.9
   // `<db>`-derived schema registry AND the app's own `<schema>` declarations —
@@ -1811,14 +1966,22 @@ export function generateServerJs(
   // `buildTenantContext` for the full account. `_tenantActive` remains the master
   // gate: an app with no tenant-scoped table in EITHER registry emits
   // byte-identically (every redaction site below is a no-op / absent).
+  // `tenantTables` = the UNION over every same-name `<schema>` declaration (S447
+  // "stamp all" (i)); disagreeing declarations are rejected at GCP1 (E-SCHEMA-015).
+  // S455 — plus the COMPILATION's one tenant set (`compilationTenantOf`, attached by
+  // runCG from the api.js TENANT-SCHEMA stage): a table tenant-scoped by ANY file
+  // compiled together is scoped here, exactly as if this file declared it.
+  const _desiredForTenant = extractDesiredSchema(fileAST);
   const _tenantCtx: TenantContext = buildTenantContext(
     _protectCtx,
-    extractDesiredSchema(fileAST).tables,
+    _desiredForTenant.tenantTables,
+    _desiredForTenant.schemaText,
+    // §14.8.10 (S452 r4) — the dialect of the handle a query runs on: an injected
+    // SQLite write carries `OR ABORT` (it overrides a table-level ON CONFLICT REPLACE).
+    (ident: string) => _dbScopesForFile.get(ident)?.driver,
+    compilationTenantOf(fileAST),
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
-  // Cross-tenant writes/aggregates found by the hard-fail scan below that carry a
-  // `.acrossTenants()` opt-out — merged into the I-TENANT-ACROSS audit drain.
-  const _tenantAcrossFromScan: string[] = [];
   // Tier-1 `SELECT * FROM <tenant table>` + SSR seed reads are hand-emitted (not
   // via the rewriter), so their I-TENANT-STRIP records are collected here.
   const _tenantStripsFromHandEmit: string[] = [];
@@ -2050,7 +2213,7 @@ export function generateServerJs(
   // E-PROTECT-005 twice for the same source. Keyed on the fn's SPAN START rather
   // than its name: the span is the author's actual site, and two same-named
   // things in different scopes are two defects. Same reason — and the same shape
-  // — as the adjacent `preparedStmtErrors` sink, whose own comment says it
+  // — as the run-wide refused-lowering sink (refused-lowering-errors.ts), which
   // dedupes precisely because a fn emitted on both paths would report twice.
   //
   // ⚑ AND THE KEY IS `span.start` + THE REPORTED NAME, NOT THE SPAN ALONE.
@@ -2183,72 +2346,15 @@ export function generateServerJs(
     }
   }
 
-  // §14.8.10 hard-fail gates — a whole-source scan over every `?{...}` for the
-  // classes redaction cannot cover (inject-or-hard-fail): E-TENANT-WRITE (an
-  // UPDATE/DELETE, or an un-injectable INSERT, against a tenant-scoped table),
-  // E-TENANT-AGG (an aggregate/scalar over a tenant-scoped table with no output
-  // tenant discriminator), and E-TENANT-RAW-EGRESS (a tenant-scoped read reaching
-  // a `_{}` / manual `Response` / `asIs` egress the compiler cannot redact). Each
-  // is suppressed by an explicit `.acrossTenants()` on the query (which fires the
-  // I-TENANT-ACROSS audit info instead). Gated on `_tenantActive`.
+  // §14.8.10 E-TENANT-RAW-EGRESS gate — a tenant-scoped read reaching a `_{}` /
+  // manual `Response` / `asIs` egress the compiler cannot redact, suppressed by an
+  // explicit `.acrossTenants()`. (E-TENANT-AGG / E-TENANT-WRITE are decided at the
+  // lowering choke, `_lowerTenantForQuery`, for every SQL spelling — a source scan
+  // over the backtick spelling alone let `?{ update assets … }` through — and are
+  // drained into `errors` after the server body emits.) Gated on `_tenantActive`.
   if (_tenantActive) {
     const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
     if (_src) {
-      const _sqlRe = /\?\{`([^`]*)`\}/g;
-      let _tm: RegExpExecArray | null;
-      const _seenTenant = new Set<string>();
-      while ((_tm = _sqlRe.exec(_src)) !== null) {
-        const _q = _tm[1];
-        const _matchEnd = _tm.index + _tm[0].length;
-        // The method chain immediately following the `?{}` — an `.acrossTenants()`
-        // within it is the loud opt-out (suppress the hard-fail, audit instead).
-        const _chainAhead = /^((?:\s*\.\w+\(\s*\))*)/.exec(_src.slice(_matchEnd))?.[1] ?? "";
-        const _isAcross = /\.\s*acrossTenants\s*\(/.test(_chainAhead);
-        const _dispQ = _q.trim().replace(/\s+/g, " ").slice(0, 60);
-
-        const _write = classifyTenantWrite(_q, _tenantCtx);
-        const _scoping = resolveTenantScoping(_q, _tenantCtx);
-        const _isViolation = (_write && _write.kind === "hard-fail") || (_scoping && _scoping.kind === "agg");
-        if (_isAcross) {
-          // A cross-tenant write / aggregate is the audited legitimate case.
-          if (_isViolation && !_seenTenant.has("across::" + _dispQ)) {
-            _seenTenant.add("across::" + _dispQ);
-            _tenantAcrossFromScan.push(_dispQ);
-          }
-          continue;
-        }
-        if (_write && _write.kind === "hard-fail") {
-          const _key = "write::" + _dispQ;
-          if (_seenTenant.has(_key)) continue;
-          _seenTenant.add(_key);
-          errors.push(new CGError(
-            "E-TENANT-WRITE",
-            `E-TENANT-WRITE: a ${_write.op} against the tenant-scoped table \`${_write.table}\` in \`${_dispQ}\` ` +
-            `cannot be tenant-constrained by the V1 floor (no egress sink can redact a durable write; a committed ` +
-            `cross-tenant write is durable before any redaction). ${_write.op === "UPDATE" || _write.op === "DELETE" ? "An UPDATE/DELETE needs a WHERE constraint the V1 floor does not parse" : "This INSERT is not safely tenant-injectable (it already sets tenant_id, is multi-row, or is INSERT ... SELECT)"} (§14.8.10). ` +
-            `Resolution: for a per-tenant INSERT, omit \`tenant_id\` (the floor injects @currentUser.tenantId); for a ` +
-            `deliberate cross-tenant write, mark the query \`.acrossTenants()\`.`,
-            { start: _tm.index, end: _matchEnd } as any,
-            "error",
-          ));
-          continue;
-        }
-        if (_scoping && _scoping.kind === "agg") {
-          const _key = "agg::" + _dispQ;
-          if (_seenTenant.has(_key)) continue;
-          _seenTenant.add(_key);
-          errors.push(new CGError(
-            "E-TENANT-AGG",
-            `E-TENANT-AGG: an aggregate/scalar read over the tenant-scoped table \`${_scoping.table}\` in \`${_dispQ}\` ` +
-            `has no per-tenant output discriminator, so the row-redaction floor has no row to key on (a bare COUNT/SUM ` +
-            `folds every tenant into one scalar) (§14.8.10). Resolution: add \`GROUP BY tenant_id\` (and project it) so ` +
-            `each output row carries its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant aggregate.`,
-            { start: _tm.index, end: _matchEnd } as any,
-            "error",
-          ));
-          continue;
-        }
-      }
 
       // E-TENANT-RAW-EGRESS — per server-fn body co-occurrence (mirror of the
       // §14.8.9 E-PROTECT-004 loop): a tenant-scoped read + a raw/unanalyzable
@@ -2305,9 +2411,13 @@ export function generateServerJs(
   // (event-handler / escape-hatch paths) lower to the canonical
   // `{ variant, data }` tagged-object literal. Mirrors the client setup in
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
-  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions } =
+  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly } =
     buildVariantFieldsRegistry(fileAST);
-  setVariantFieldsForRewriter(_scrmlVariantFields, _scrmlVariantCollisions);
+  setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed, ..._scrmlImportedOnly]));
+  // S438 review N1/N3 — the local-shadowed names keep pre-F11 behaviour on the
+  // server pass too (match binding + bare-dot constructors). S446 — imported-only
+  // names are refused by the (untypeable) string-rewrite constructor path too.
+  setShadowedVariantNames(_scrmlShadowed, _scrmlImportedOnly);
 
   // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`
   // SELECT results with the `_scrml_protect_tag(...)` descriptor. Released
@@ -2321,10 +2431,11 @@ export function generateServerJs(
   // byte-identical output.
   setBoolColumnsForRewriter(buildBoolColumnsFromFileAST(fileAST));
 
-  // §14.8.10 — arm the SERVER SQL-lowering pass to (a) add `tenant_id` to a
-  // tenant-scoped read's projection when absent and (b) tag its rows with the
-  // `_scrml_tenant_tag(...)` descriptor. `null` when tenant is inactive (a true
-  // no-op — byte-identical output). Released alongside the protect ctx below.
+  // §14.8.10 — arm the SERVER SQL-lowering pass to (a) add a tenant-scoped read's
+  // key column(s) to its projection when absent and (b) filter its rows to the
+  // request's tenant at the source (`_scrml_tenant_scope(...)`). `null` when
+  // tenant is inactive (a true no-op — byte-identical output). Released alongside
+  // the protect ctx below.
   setTenantContextForRewriter(_tenantActive ? _tenantCtx : null);
 
   // §8.9.2 / §19.10.5: determine whether a handler receives an implicit
@@ -2332,6 +2443,17 @@ export function generateServerJs(
   //   - the Batch Planner (Stage 7.5) recorded ≥ 1 CoalescingGroup with
   //     envelopeKind === "implicit-handler-tx" for this handler, AND
   //   - no E-BATCH-001 composition error fired for this handler.
+  // §8.9.2 — the implicit envelope's opening statement, in the dialect of the
+  // database `_scrml_sql` is bound to. `BEGIN DEFERRED` is SQLite's; Postgres has no
+  // DEFERRED mode and REJECTS it (MEASURED, Bun 1.4.2 / PG16: `ERR_POSTGRES_SYNTAX_ERROR
+  // syntax error at or near "DEFERRED"`), and MySQL's BEGIN takes no mode either —
+  // there a plain `BEGIN` is the same deferred-lock transaction. Before S449 every
+  // implicit envelope on Postgres failed at this statement (and, on a pooled handle,
+  // one step earlier: §19.10.6).
+  // §8.1.1 (S451) — per HANDLE: the envelope opens on the handler's own database
+  // (`_fnDbVar`), in that database's dialect.
+  const _implicitEnvelopeBeginFor = (ident: string): string =>
+    (_dbScopesForFile.get(ident)?.driver ?? "sqlite") === "sqlite" ? "BEGIN DEFERRED" : "BEGIN";
   function needsImplicitEnvelope(funcName: string): boolean {
     if (!batchPlan || !(batchPlan as any).coalescedHandlers) return false;
     const groups = (batchPlan as any).coalescedHandlers.get(funcName);
@@ -2355,6 +2477,7 @@ export function generateServerJs(
     const fnNodeId = `${filePath}::${fnNode.span.start}`;
     const route = routeMap.functions.get(fnNodeId);
     if (!route || route.boundary !== "server") continue;
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
 
     // Bug 2b: divert onserver:* WS attribute handlers to the plain-function
     // emit path BEFORE the no-route E-CG-002 check (they legitimately have no
@@ -2920,31 +3043,14 @@ export function generateServerJs(
         `(import.meta && import.meta.dir) ? import.meta.dir : ".", ` +
         `${JSON.stringify(_sessionStoreDistAscent)}, ".scrml-sessions.db");`,
       );
-      lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
-      lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
-      lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
-      lines.push('  const _ns = "session";');
-      lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
-      lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push("  return {");
-      lines.push("    get(key) {");
-      lines.push("      const row = _stmtGet.get(_ns, key);");
-      lines.push("      if (!row) return null;");
-      lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
-      lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
-      lines.push("    },");
-      lines.push("    set(key, value, ttl) {");
-      lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
-      lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
-      lines.push("    },");
-      lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
-      lines.push("  };");
-      lines.push("})());");
+      // The store declaration is ONE shared constant: the §14.8.9 provenance flow
+      // recognizes it by its exact text and models it by summary (session-store-emit.ts).
+      // It carries the #1234 WAL + busy_timeout pragmas (rationale beside the lines there).
+      for (const l of SESSION_STORE_SQLITE_LINES) lines.push(l);
     } else {
       // S239 FIX 8 — no `session.set`/`.destroy` in this app: keep the prior
       // in-memory read-only store (byte-identical to the pre-i29e read-side infra).
-      lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+      lines.push(SESSION_STORE_MEMORY_LINE);
     }
     lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
     lines.push("");
@@ -3353,6 +3459,29 @@ export function generateServerJs(
     lines.push(`  path: "/_scrml/session/destroy",`);
     lines.push(`  method: "POST",`);
     lines.push("  handler: async function(_scrml_req) {");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — destroying
+    // a session is a state-mutating POST, so under `csrf="auto"` (the default under
+    // `auth=`) it gets the SAME session-synchronizer check every mutating server-fn
+    // route gets: §39.2.3 "A server-side validator that checks the `X-CSRF-Token`
+    // header on state-mutating routes and returns `403 Forbidden` if the token is
+    // missing or invalid". Before S449 a cross-site POST carrying the cookie logged
+    // the viewer out. Gated only when a session RECORD exists (`csrfToken` is minted
+    // for every record by the middleware): with no record there is nothing to
+    // destroy, and the stale-cookie clear below stays reachable. The 403 plants the
+    // session's token in the readable `scrml_csrf` cookie, exactly as the server-fn
+    // gate does, so the client's `session.destroy()` retries once and succeeds.
+    if (csrf === "auto") {
+      lines.push("    const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);");
+      lines.push("    if (_scrml_sessionForCsrf.csrfToken && !_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {");
+      lines.push("      return new Response(JSON.stringify({ error: \"CSRF validation failed\" }), {");
+      lines.push("        status: 403,");
+      lines.push("        headers: {");
+      lines.push("          \"Content-Type\": \"application/json\",");
+      lines.push("          \"Set-Cookie\": `scrml_csrf=${_scrml_sessionForCsrf.csrfToken}; Path=/; SameSite=Strict`,");
+      lines.push("        },");
+      lines.push("      });");
+      lines.push("    }");
+    }
     // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
     // cookie, so a planted/leaked sid is not resurrectable after logout.
     // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name.
@@ -3703,7 +3832,8 @@ export function generateServerJs(
       }
 
       lines.push("    // handle() escape hatch body (§39.3) — wrapped in IIFE for return capture");
-      lines.push("    const _scrml_mw_result = await (async () => {");
+      // S456 — the binding protect-flow reads as the handle() egress sink.
+      lines.push(`    const ${HANDLE_RESULT_BINDING} = await (async () => {`);
 
       // §40.3.2 — "resolve(request) invokes the rest of the pipeline and returns
       // a Bun Response". TOTAL by construction: a host dispatcher that signals
@@ -3732,11 +3862,7 @@ export function generateServerJs(
       }
 
       for (const stmt of handleBody) {
-        // E-SQL-006 (§44.3) — the §39.3 `handle()` escape-hatch body runs server-
-        // side and may hold a `?{...}.prepare()`; thread the shared sink (drained
-        // deduped at the tail). The resolve-index PRE-SCAN loop above stays sink-
-        // less on purpose (it is throwaway + partial, so it must not push).
-        const code = emitLogicNode(stmt, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors });
+        const code = emitLogicNode(stmt, { boundary: "server" });
         if (code) {
           // g-handle-request-formdata-emitted-unawaited — the handle body runs inside
           // the async IIFE above, so `await` is legal; inject it before the async
@@ -4246,6 +4372,7 @@ export function generateServerJs(
   }
 
   for (const { fnNode, route } of serverFns) {
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name ?? "anon";
     const routeName: string = route.generatedRouteName;
     const path: string = route.explicitRoute ? route.explicitRoute : routePath(routeName);
@@ -4320,14 +4447,13 @@ export function generateServerJs(
       // null here.
       const _serverFnOptsSSE = {
         boundary: "server" as const,
+        ..._fnDbOpts(fnNode), // §8.1.1 — the nearest-scope handle of its `?{}` sites
         declaredNames: new Set<string>(fnParamNames),
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
-        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
-        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -4426,6 +4552,16 @@ export function generateServerJs(
         lines.push(`        }`);
       }
       lines.push(`      } finally {`);
+      // §19.10.6 (S449 review F1) — the stream's request scope may still own a
+      // transaction: a client that disconnects while the generator is mid-transaction
+      // ends the `for await` at the next frame (the enqueue throws), so the generator's
+      // own COMMIT / ROLLBACK never runs. Roll it back and free the connection here —
+      // otherwise every later statement on that handle waits forever. Not in `cancel()`:
+      // the generator is still running then, and rolling back under it would let its
+      // remaining statements autocommit. A module with no `?{}` handle carries no
+      // transaction runtime: the line is removed again where the handles are declared
+      // (SSE_STREAM_END_LINE).
+      lines.push(SSE_STREAM_END_LINE);
       lines.push(`        _scrml_ctrl.close();`);
       lines.push(`      }`);
       lines.push(`    },`);
@@ -4516,7 +4652,8 @@ export function generateServerJs(
       if (isLast) return _cpsSplit?.returnVarName ?? null;
       if (serverIndices.length === 0) return null;
       const _bodyForRet: any[] = fnNode.body ?? [];
-      const _last = _bodyForRet[serverIndices[serverIndices.length - 1]];
+      const _lastRaw = _bodyForRet[serverIndices[serverIndices.length - 1]];
+      const _last = handledSqlGuardInner(_lastRaw) ?? _lastRaw; // S455 — `@c = ?{…} !{…}`
       return (_last && _last.kind === "state-decl" && typeof _last.name === "string")
         ? _last.name
         : null;
@@ -4583,7 +4720,8 @@ export function generateServerJs(
           if (_isLastBatch) {
             _batchReturnVar = _cpsSplit.returnVarName ?? null;
           } else if (_bIdx.length > 0) {
-            const _lastStmt = _batchBody[_bIdx[_bIdx.length - 1]];
+            const _lastStmtRaw = _batchBody[_bIdx[_bIdx.length - 1]];
+            const _lastStmt = handledSqlGuardInner(_lastStmtRaw) ?? _lastStmtRaw; // S455
             if (_lastStmt && _lastStmt.kind === "state-decl" && typeof _lastStmt.name === "string") {
               _batchReturnVar = _lastStmt.name;
             }
@@ -4675,6 +4813,9 @@ export function generateServerJs(
       // §44.6: transactions deferred to SPEC-ISSUE-018 — use sql.unsafe()
       // for BEGIN/COMMIT/ROLLBACK on the same Bun.SQL connection.
       const _envelope = needsImplicitEnvelope(name);
+      // §8.1.1 (S451) — the envelope's BEGIN / COMMIT / ROLLBACK go to the handle the
+      // body's `?{}` sites run on, so the transaction wraps the queries it is for.
+      const _envDb: string = _fnDbVar(fnNode) ?? fallbackSqlHandle();
       // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS server endpoints.
       // For CPS-split functions, wrap the body in an outer try/catch that
       // serializes any thrown exception as a tagged scrml-error variant
@@ -4708,24 +4849,31 @@ export function generateServerJs(
         lines.push(`  // A9-Ext-4 D1: CPS server-side error envelope`);
         lines.push(`  try {`);
       }
-      if (_envelope) {
-        lines.push(`  // §8.9.2 implicit per-handler transaction`);
-        lines.push(`  await _scrml_sql.unsafe("BEGIN DEFERRED");`);
-        lines.push(`  try {`);
-      }
-
-      lines.push(`  const _scrml_result = await (async () => {`);
-
       // A no-argument server function does not require a request body: tolerate an
       // empty/absent one (an external, non-scrml-client caller POSTing with no body
       // would otherwise hit an uncaught `await req.json()` throw → 500). `_scrml_body`
       // stays defined for any server-mode `@cell` reads. The arg-bearing path keeps
       // the strict read — a missing body for a call that carries args IS an error.
-      lines.push(
-        paramNames.length === 0
-          ? `    const _scrml_body = await _scrml_req.json().catch(() => ({}));`
-          : `    const _scrml_body = await _scrml_req.json();`,
-      );
+      const _bodyRead = paramNames.length === 0
+        ? `const _scrml_body = await _scrml_req.json().catch(() => ({}));`
+        : `const _scrml_body = await _scrml_req.json();`;
+      if (_envelope) {
+        // §19.10.6 (S449) — read the request body BEFORE the transaction opens. A
+        // transaction now holds its connection until it ends (other requests wait), so
+        // a BEGIN issued ahead of `await _scrml_req.json()` would let one slow or
+        // stalled upload hold the database for every request for as long as the client
+        // chose. Same failure semantics: a body that does not parse still throws into
+        // the same handler (and, for a CPS route, the same error envelope), now with
+        // no transaction to roll back.
+        lines.push(`  ${_bodyRead}`);
+        lines.push(`  // §8.9.2 implicit per-handler transaction`);
+        lines.push(`  await ${_envDb}.unsafe(${JSON.stringify(_implicitEnvelopeBeginFor(_envDb))});`);
+        lines.push(`  try {`);
+      }
+
+      lines.push(`  const _scrml_result = await (async () => {`);
+
+      if (!_envelope) lines.push(`    ${_bodyRead}`);
 
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(`    const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
@@ -4736,9 +4884,9 @@ export function generateServerJs(
         const _pParam = params[i];
         const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
         if (_pAnnotation) {
-          const _pParsed = parsePredicateAnnotation(_pAnnotation);
+          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
-            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ");
+            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ", _pParsed);
             // ⚑ GATED ON `_protectActive`. The mark only means anything to the
             // §14.8.9 guard, which only exists on a protect path — but emitting
             // it unconditionally referenced `_scrml_protect_mediated`, which
@@ -4784,16 +4932,9 @@ export function generateServerJs(
       // emit-functions.ts) so nested `@cell =` reassignments don't leak a
       // `_scrml_init_set` sidecar. `boundary` + `channelOwnedCells` thread the
       // GITI-020 broadcast-wire lowering through nested blocks.
-      // A DEDICATED, narrow sink for emit-logic's pre-emit crossing-shadow guard
-      // (E-FOREIGN-006, `case "foreign"`). Drained into the live `errors` array
-      // after this function's body emits. Scoped ON PURPOSE: threading the broad
-      // live `errors` array into emit-logic opts would also surface OTHER arms'
-      // previously-swallowed errors (e.g. E-CG-003 match-lowering) that this
-      // server-fn path never wired a sink for — a regression. This collector only
-      // ever receives E-FOREIGN-006.
-      const _foreignCrossingErrors: CGError[] = [];
       const _serverFnOpts = {
         boundary: "server" as const,
+        ..._fnDbOpts(fnNode), // §8.1.1 — the nearest-scope handle of its `?{}` sites
         channelOwnedCells: _channelOwnedCells,
         declaredNames: new Set<string>(paramNames),
         insideFunctionBody: true,
@@ -4801,9 +4942,6 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
-        foreignCrossingErrors: _foreignCrossingErrors,
-        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
-        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -4833,8 +4971,25 @@ export function generateServerJs(
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
-            const stmt = body[idx];
+            const _rawStmt = body[idx];
+            // S455 (§19.8.3) — `@c = ?{…} !{…}`: the guard wraps the cell write.
+            const _handledInner = handledSqlGuardInner(_rawStmt);
+            const stmt = _handledInner ?? _rawStmt;
             if (stmt && stmt.kind === "state-decl" && cpsSplit.returnVarName === stmt.name) {
+              if (_handledInner) {
+                // The server runs the handled query and its (value) arms; the
+                // guarded value is the batch's return, written into the cell by
+                // the client continuation exactly as the unhandled form's is.
+                // Route inference splits only a guard whose arms are values.
+                const _guardCode = serverRewriteEmitted(emitLogicNode({
+                  ..._rawStmt,
+                  guardedNode: { kind: "const-decl", name: "_scrml_cps_return", init: stmt.init ?? "", initExpr: stmt.initExpr, sqlNode: stmt.sqlNode, span: stmt.span },
+                }, _serverFnOpts));
+                if (_guardCode) {
+                  for (const line of indentBodyLines(_guardCode, "    ")) lines.push(line);
+                }
+                continue;
+              }
               // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
               // continuation is `@x = ?{...}.method()`, the AST builder attached
               // a structured `sqlNode` so we can route through emit-logic case
@@ -4842,7 +4997,7 @@ export function generateServerJs(
               // would otherwise produce `/_* sql-ref:N *_/` from the SQL-placeholder
               // ExprNode that safeParseExprToNode preprocesses `?{}` into.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls, preparedStmtErrors: _sqlPrepareErrors })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", ..._fnDbOpts(fnNode), channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -4855,7 +5010,7 @@ export function generateServerJs(
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
+            const code = serverRewriteEmitted(emitLogicNode(_rawStmt, _serverFnOpts));
             if (code) {
               for (const line of indentBodyLines(code, "    ")) {
                 lines.push(line);
@@ -4866,10 +5021,11 @@ export function generateServerJs(
         if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
-          if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
+          const _lastDecl = handledSqlGuardInner(lastStmt) ?? lastStmt; // S455 — a handled `?{}` declaration
+          if (_lastDecl && _lastDecl.kind === "state-decl" && _lastDecl.name === cpsSplit.returnVarName) {
             lines.push(`    return _scrml_cps_return;`);
-          } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
-            lines.push(`    return ${lastStmt.name};`);
+          } else if (_lastDecl && (_lastDecl.kind === "let-decl" || _lastDecl.kind === "const-decl")) {
+            lines.push(`    return ${_lastDecl.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
             const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOpts));
             if (emitted) {
@@ -4889,17 +5045,25 @@ export function generateServerJs(
         }
       }
 
-      // Drain the crossing-shadow guard's narrow sink into the live error stream.
-      // (The .prepare() E-SQL-006 sink `_sqlPrepareErrors` is function-scoped and
-      // drained once at the tail — see its declaration.)
-      for (const e of _foreignCrossingErrors) errors.push(e);
 
       // §14.8.9 / E-PROTECT-005 — scan THIS author body (protect-active only).
       _protectResponseGate(name, lines.slice(_authorBodyStartCsrf).join("\n"), fnNode.span, "statements");
 
       lines.push(`  })();`);
       if (_envelope) {
-        lines.push(`  await _scrml_sql.unsafe("COMMIT");`);
+        // §8.9.2 (S449 ruling D) — the envelope ROLLs BACK on a `fail` exit as well as
+        // on an exception; only a successful completion commits. A `fail` (and a `?`
+        // propagating a callee's failure — §19.5.2: `?` IS a `fail`) does not throw: it
+        // RETURNS the error envelope, so the handler's result is the one place every
+        // fail exit, at any depth, is observable. Before S449 this always committed,
+        // and a handler that failed after two UPDATEs persisted both
+        // (g-implicit-handler-tx-commits-on-fail). The error value still goes to the
+        // caller unchanged (the response below).
+        lines.push(`  if (_scrml_result !== null && typeof _scrml_result === "object" && _scrml_result.__scrml_error === true) {`);
+        lines.push(`    await ${_envDb}.unsafe("ROLLBACK"); // §8.9.2: a \`fail\` exit rolls the implicit transaction back`);
+        lines.push(`  } else {`);
+        lines.push(`    await ${_envDb}.unsafe("COMMIT");`);
+        lines.push(`  }`);
       }
       // §12.5 — the OPAQUE-RESULT guard. THIS ARM HAD NONE UNTIL S405: an author
       // `Response` fell straight into `JSON.stringify` below, and a deliberate 403
@@ -4965,7 +5129,7 @@ export function generateServerJs(
         // no transaction there is nothing to roll back, and if there is one and
         // the rollback genuinely failed, the original error is still the one the
         // operator needs to see first.
-        lines.push(`    try { await _scrml_sql.unsafe("ROLLBACK"); } catch (_scrml_rb_err) { /* already committed, or the connection is gone — never mask _scrml_batch_err */ }`);
+        lines.push(`    try { await ${_envDb}.unsafe("ROLLBACK"); } catch (_scrml_rb_err) { /* already committed, or the connection is gone — never mask _scrml_batch_err */ }`);
         lines.push(`    throw _scrml_batch_err;`);
         lines.push(`  }`);
       }
@@ -4973,10 +5137,11 @@ export function generateServerJs(
       // serialize as a tagged scrml-error variant (per §19.9.1).
       if (_ext4Wrap) {
         lines.push(`  } catch (_scrml_cps_err) {`);
+        for (const l of _cpsErrorPrologue(name)) lines.push(l);
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
-        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
+        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: {`);
         lines.push(`        "Content-Type": "application/json",`);
@@ -5004,9 +5169,9 @@ export function generateServerJs(
         const _pParam = params[i];
         const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
         if (_pAnnotation) {
-          const _pParsed = parsePredicateAnnotation(_pAnnotation);
+          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
-            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "  ");
+            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "  ", _pParsed);
             for (const l of _pLines) lines.push(l);
           }
         }
@@ -5026,10 +5191,9 @@ export function generateServerJs(
 
       // S144 (GITI-021 + GITI-022): per-function shared emit-logic opts —
       // mirror of the CSRF path above (see comment there).
-      // Dedicated narrow E-FOREIGN-006 sink — see the CSRF-path comment.
-      const _foreignCrossingErrorsNonCsrf: CGError[] = [];
       const _serverFnOptsNonCsrf = {
         boundary: "server" as const,
+        ..._fnDbOpts(fnNode), // §8.1.1 — the nearest-scope handle of its `?{}` sites
         channelOwnedCells: _channelOwnedCellsNonCsrf,
         declaredNames: new Set<string>(paramNames),
         insideFunctionBody: true,
@@ -5037,9 +5201,6 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
-        foreignCrossingErrors: _foreignCrossingErrorsNonCsrf,
-        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
-        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -5135,13 +5296,30 @@ export function generateServerJs(
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
-            const stmt = body[idx];
+            const _rawStmt = body[idx];
+            // S455 (§19.8.3) — `@c = ?{…} !{…}`: the guard wraps the cell write.
+            const _handledInner = handledSqlGuardInner(_rawStmt);
+            const stmt = _handledInner ?? _rawStmt;
             if (stmt && stmt.kind === "state-decl" && cpsSplit.returnVarName === stmt.name) {
+              if (_handledInner) {
+                // The server runs the handled query and its (value) arms; the
+                // guarded value is the batch's return, written into the cell by
+                // the client continuation exactly as the unhandled form's is.
+                // Route inference splits only a guard whose arms are values.
+                const _guardCode = serverRewriteEmitted(emitLogicNode({
+                  ..._rawStmt,
+                  guardedNode: { kind: "const-decl", name: "_scrml_cps_return", init: stmt.init ?? "", initExpr: stmt.initExpr, sqlNode: stmt.sqlNode, span: stmt.span },
+                }, _serverFnOptsNonCsrf));
+                if (_guardCode) {
+                  for (const line of indentBodyLines(_guardCode, _bodyIndentNonCsrf)) lines.push(line);
+                }
+                continue;
+              }
               // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): mirror of
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls, preparedStmtErrors: _sqlPrepareErrors })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", ..._fnDbOpts(fnNode), channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`${_bodyIndentNonCsrf}const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -5154,7 +5332,7 @@ export function generateServerJs(
               lines.push(`${_bodyIndentNonCsrf}const _scrml_cps_return = ${initExpr};`);
               continue;
             }
-            const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
+            const code = serverRewriteEmitted(emitLogicNode(_rawStmt, _serverFnOptsNonCsrf));
             if (code) {
               for (const line of indentBodyLines(code, _bodyIndentNonCsrf)) {
                 lines.push(line);
@@ -5165,10 +5343,11 @@ export function generateServerJs(
         if (cpsSplit.returnVarName && cpsSplit.serverStmtIndices.length > 0) {
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
-          if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
+          const _lastDecl = handledSqlGuardInner(lastStmt) ?? lastStmt; // S455 — a handled `?{}` declaration
+          if (_lastDecl && _lastDecl.kind === "state-decl" && _lastDecl.name === cpsSplit.returnVarName) {
             lines.push(`${_bodyIndentNonCsrf}return _scrml_cps_return;`);
-          } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
-            lines.push(`${_bodyIndentNonCsrf}return ${lastStmt.name};`);
+          } else if (_lastDecl && (_lastDecl.kind === "let-decl" || _lastDecl.kind === "const-decl")) {
+            lines.push(`${_bodyIndentNonCsrf}return ${_lastDecl.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
             const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOptsNonCsrf));
             if (emitted) {
@@ -5191,10 +5370,6 @@ export function generateServerJs(
         }
       }
 
-      // Drain the crossing-shadow guard's narrow sink into the live error stream.
-      // (The .prepare() E-SQL-006 sink `_sqlPrepareErrors` is function-scoped and
-      // drained once at the tail — see its declaration.)
-      for (const e of _foreignCrossingErrorsNonCsrf) errors.push(e);
 
       // §14.8.9 / E-PROTECT-005 — scan THIS author body (protect-active only).
       _protectResponseGate(name, lines.slice(_authorBodyStartNonCsrf).join("\n"), fnNode.span, "statements");
@@ -5275,10 +5450,11 @@ export function generateServerJs(
       // shape so the client CPS wrapper observes a consistent §19.9.1 envelope.
       if (_ext4WrapNonCsrf) {
         lines.push(`  } catch (_scrml_cps_err) {`);
+        for (const l of _cpsErrorPrologue(name)) lines.push(l);
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
-        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
+        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: { "Content-Type": "application/json" },`);
         lines.push(`    });`);
@@ -5692,16 +5868,13 @@ export function generateServerJs(
       }
       const _peerOpts = {
         boundary: "server" as const,
+        ..._fnDbOpts(_peerInfo.fnNode), // §8.1.1 — the nearest-scope handle of its `?{}` sites
         channelOwnedCells: null,
         declaredNames: new Set<string>(_peerInfo.paramNames),
         insideFunctionBody: true,
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(_peerInfo.fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(_peerInfo.fnNode),
         syncPeerCalls: _syncPeerCalls,
-        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink. The tail drain
-        // DEDUPES, so a fn emitted on BOTH the route handler and this in-process
-        // peer callable reports E-SQL-006 exactly once.
-        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -5938,19 +6111,20 @@ export function generateServerJs(
     // This `SELECT * FROM <table>` is hand-emitted (not via rewriteSqlRefs), so
     // tag `_scrml_rows` inline with the table's protected columns, then redact.
     // §14.8.10 — a `SELECT * FROM <tenant-scoped table>` already carries
-    // `tenant_id` (star includes it → no floor-add); tag the rows so the sink
-    // drops other tenants' rows, then redact. Composes with the protect tag.
+    // `tenant_id` (star includes it → no floor-add); the rows are filtered to the
+    // request's tenant at the source (innermost), then protect-tagged, then
+    // redacted at the sink (defense in depth).
     const _slProtCols = _protectActive ? _protectCtx.protectedByTable.get(table) : undefined;
     const _slTenant = _tenantActive && _tenantCtx.tenantScopedTables.has(table);
     if (_slTenant) _tenantStripsFromHandEmit.push(`SELECT * FROM ${table}`);
     if ((_slProtCols && _slProtCols.size > 0) || _slTenant) {
-      let _rowsExpr = `await _scrml_sql\`SELECT * FROM ${table}\``;
+      let _rowsExpr = `await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${table}\``;
+      if (_slTenant) _rowsExpr = wrapWithTenantScope(_rowsExpr, { kind: "read", table, keys: [{ col: "tenant_id", add: null }] });
       if (_slProtCols && _slProtCols.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._slProtCols])})`;
-      if (_slTenant) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
       lines.push(`  const _scrml_rows = ${_rowsExpr};`);
       lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_rows")}), {`);
     } else {
-      lines.push(`  const _scrml_rows = await _scrml_sql\`SELECT * FROM ${table}\`;`);
+      lines.push(`  const _scrml_rows = await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${table}\`;`);
       lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
     }
     lines.push(`    status: 200,`);
@@ -5985,10 +6159,7 @@ export function generateServerJs(
     // Lower the cell's `?{}` to its server-side form (e.g.
     // `(await _scrml_sql`SELECT …`)[0] ?? null;` for `.get()`).
     const sqlExpr = (serverRewriteEmitted(
-      // E-SQL-006 (§44.3) — a `<var server> = ?{...}.prepare()` cell decl lowers
-      // through case "sql" here; thread the shared sink so it is not silently
-      // dropped (drained deduped at the function tail).
-      emitLogicNode(sqlNode, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors }),
+      emitLogicNode(sqlNode, { boundary: "server", ...(_dbIdentAt(sqlNode) ? { dbVar: _dbIdentAt(sqlNode)! } : {}) }),
     ) ?? "").replace(/;\s*$/, "");
     // §52 (S233) Fork-3 — the lowered query references the @currentUser ambient
     // (`_scrml_currentUser`) iff it carries a `${@currentUser.…}` row-scope filter.
@@ -6156,6 +6327,10 @@ export function generateServerJs(
       const _ssrRenderers = buildSsrEachRenderers(fileAST, _ssrSeededVarNames, errors, filePath);
       if (_ssrRenderers.length > 0) {
         for (const _hl of SSR_RENDER_HELPER.split("\n")) lines.push(_hl);
+        // §5.2 rule 3 (S457) — a row attribute that writes a data-supplied URL calls the guard.
+        if (_ssrRenderers.some((_r) => _r.fnLines.some((_fl) => _fl.includes("_scrml_safe_url(")))) {
+          for (const _hl of SSR_URL_GUARD_HELPER.split("\n")) lines.push(_hl);
+        }
         for (const _r of _ssrRenderers) {
           for (const _fl of _r.fnLines) lines.push(_fl);
           lines.push("");
@@ -6196,7 +6371,7 @@ export function generateServerJs(
         lines.push(`  const _scrml_currentUser = _scrml_current_user(_scrml_req);`);
       }
       // Tier-1 instances — SELECT * FROM <table> (+ §14.8.9 protect tag/redact and
-      // §14.8.10 tenant tag/redact when applicable; both compose at the sink).
+      // the §14.8.10 tenant source filter + sink re-check when applicable).
       for (const inst of _ssrSeedTier1) {
         const _vn = inst.name as string;
         const _tbl = (inst as any).serverAuthorityTable as string;
@@ -6204,13 +6379,13 @@ export function generateServerJs(
         const _tenTbl = _tenantActive && _tenantCtx.tenantScopedTables.has(_tbl);
         if (_tenTbl) _tenantStripsFromHandEmit.push(`SELECT * FROM ${_tbl}`);
         if ((_prot && _prot.size > 0) || _tenTbl) {
-          let _rowsExpr = `await _scrml_sql\`SELECT * FROM ${_tbl}\``;
+          let _rowsExpr = `await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${_tbl}\``;
+          if (_tenTbl) _rowsExpr = wrapWithTenantScope(_rowsExpr, { kind: "read", table: _tbl, keys: [{ col: "tenant_id", add: null }] });
           if (_prot && _prot.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._prot])})`;
-          if (_tenTbl) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
           lines.push(`  { const _scrml_rows = ${_rowsExpr};`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_rows")}; }`);
         } else {
-          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await _scrml_sql\`SELECT * FROM ${_tbl}\`;`);
+          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${_tbl}\`;`);
         }
       }
       // Tier-2 Pattern-C — the cell's actual inline ?{} (same §44 lowering the
@@ -6218,7 +6393,7 @@ export function generateServerJs(
       for (const decl of _ssrSeedPatternC) {
         const _vn = decl.name as string;
         const _sqlNode = (decl as any).sqlNode;
-        const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors })) ?? "").replace(/;\s*$/, "");
+        const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server", ...(_dbIdentAt(_sqlNode) ? { dbVar: _dbIdentAt(_sqlNode)! } : {}) })) ?? "").replace(/;\s*$/, "");
         if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_result = ${_sqlExpr};`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_result")}; }`);
@@ -6320,6 +6495,7 @@ export function generateServerJs(
   // function syncs to subscribers exactly as a channel publisher does.
   if (channelWsHandlerFns.length > 0) {
     for (const { fnNode, route } of channelWsHandlerFns) {
+      setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
       const name: string = fnNode.name ?? "anon";
       const params: any[] = fnNode.params ?? [];
       const wsParamNames: string[] = params.map((p: any, i: number) =>
@@ -6335,6 +6511,7 @@ export function generateServerJs(
       const _wsChannelOwnedCells = _wsOwnerChannel ? channelCellMap.get(_wsOwnerChannel) ?? null : null;
       const _wsFnOpts = {
         boundary: "server" as const,
+        ..._fnDbOpts(fnNode), // §8.1.1 — the nearest-scope handle of its `?{}` sites
         channelOwnedCells: _wsChannelOwnedCells,
         declaredNames: new Set<string>(wsParamNames),
         insideFunctionBody: true,
@@ -6342,8 +6519,6 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
-        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
-        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -6434,9 +6609,34 @@ export function generateServerJs(
     // Emits the trigger install + per-feed LISTEN bridge ONLY for a postgres
     // program with >=1 PK-resolved watches= channel; byte-identical (empty) for
     // a SQLite / no-db build or a non-watches channel set.
-    const _pgScope = Array.from(collectDbScopes(fileAST).values()).find(
-      (s) => s.driver === "postgres",
-    );
+    // §8.1.1 (S451) — the feed's database is the nearest scope of its `watches=`
+    // channels. All the feeds in a file share one change-capture block (one
+    // connection), so feeds in two different database scopes are refused rather than
+    // captured from one of them.
+    const _feedNodes = channelNodes.filter((n: any) => n && n._rowChangeSynth && n._rowChangeSynth.pkColumn);
+    const _feedIdents = [...new Set(_feedNodes.map((n: any) => _dbIdentAt(n)).filter((x: string | null): x is string => x !== null))];
+    let _watchesHandle = DEFAULT_SQL_HANDLE;
+    let _pgScope: DbScope | undefined;
+    if (_feedIdents.length > 1) {
+      const names = _feedIdents.map((id) => `\`${_dbScopesForFile.get(id)?.connectionString ?? id}\``).join(" and ");
+      errors.push(new CGError(
+        "E-SQL-011",
+        `E-SQL-011: this file's \`watches=\` channels sit in different database scopes (${names}). ` +
+        "Their change capture runs on one database connection per file; put the watched channels " +
+        "inside the one `<program db=>` / `<db src=>` whose tables they watch (§8.1.1, §38.13.7).",
+        { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        "error",
+      ));
+    } else if (_feedIdents.length === 1) {
+      const sc = _dbScopesForFile.get(_feedIdents[0]);
+      if (sc && sc.driver === "postgres") { _watchesHandle = _feedIdents[0]; _pgScope = sc; }
+    } else {
+      // No feed sits under a database scope: the file default database, when it is
+      // Postgres — in a single-database file only. With two or more databases the
+      // feed's database is unknown: fail closed (UNRESOLVED → internal error).
+      const sc = _dbScopesForFile.get(DEFAULT_SQL_HANDLE);
+      if (sc && sc.driver === "postgres") { _pgScope = sc; _watchesHandle = fallbackSqlHandle(); }
+    }
     // §14.8.9 — the watches re-SELECT + publish is a NEW compiler-emitted client
     // egress; pass the protected-column map so the LISTEN bridge tag-then-redacts
     // the published row (mirror of the SSR /__serverLoad Tier-1 hand-emitted SELECT).
@@ -6446,6 +6646,8 @@ export function generateServerJs(
       errors,
       filePath ?? "",
       _protectActive ? _protectCtx.protectedByTable : null,
+      null,
+      _watchesHandle,
     );
     for (const l of _watchesBootLines) lines.push(l);
   }
@@ -6720,6 +6922,13 @@ export function generateServerJs(
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_BOOL_COERCE_HELPER);
   }
 
+  // §19.8.3 (S451 R11) — inject the handled-query helper IFF a `?{}` handled by
+  // `!{}` / `match` was lowered (sql-attempt.ts). Gated purely on the emitted
+  // call; a module with no handled query is byte-unchanged.
+  if (finalEmitted.includes(`${SQL_ATTEMPT_FN}(`)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_SQL_ATTEMPT_HELPER);
+  }
+
   // §14.8.11 — A1/S2 DB-authoritative principal transaction wrapper (CONDITIONAL
   // ENGAGEMENT). Runs ONLY when the app declares ≥1 `db-authoritative` table; a
   // non-db-authoritative app skips this entirely and the server bundle is
@@ -6730,7 +6939,8 @@ export function generateServerJs(
   // MUST run BEFORE the §14.8.10 tenant-helper injection below so the wrapper's
   // `_scrml_active_tenant(_scrml_req)` reference triggers that helper's emission.
   if (appDeclaresDbAuthoritative(fileAST)) {
-    finalEmitted = wrapPrincipalTxn(finalEmitted);
+    // Every declared handle, structurally (S451 HIGH-1: `_scrml_sql_<n>` used to go unwrapped).
+    finalEmitted = wrapPrincipalTxn(finalEmitted, new Set(_dbScopesForFile.keys()));
   }
 
   // §14.8.10 — inject the tenant-row isolation floor helper (tag/redact +
@@ -6768,6 +6978,22 @@ export function generateServerJs(
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_PRINT_HELPER + finalEmitted.slice(headerEndIdx);
     }
+  }
+
+  // §23.2.4a — every `_={ }=` slice in a server function is built in its SEALED
+  // scope (only its in:{} crossings + host globals; no module or scrml binding)
+  // by `_scrml_foreign_seal` (foreign-seal.ts). Gated purely on the emitted call;
+  // inlined at the post-header boundary like the helpers above.
+  if (finalEmitted.includes(`${FOREIGN_SEAL_FN}(`)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_FOREIGN_SEAL_HELPER);
+  }
+
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check (a server-function parameter, a
+  // boundary-zone decl in a server body) calls `_scrml_url_shape_ok(`, defined in
+  // runtime-url-guard.js. Inlined once; skipped when the SSR first-paint URL guard copy (the same
+  // source) is already in the bundle.
+  if (needsUrlShapeHelper(finalEmitted)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_URL_SHAPE_HELPER);
   }
 
   // Phase-2 colorless-async — inject any collection-combinator helper
@@ -6810,13 +7036,29 @@ export function generateServerJs(
   // already start with `sqlite:`, prepend `sqlite:` before passing to
   // `new SQL(...)`. Postgres / MySQL strings have explicit `postgres://` /
   // `mysql://` prefixes (per `db-driver.ts`) and pass through verbatim.
-  // For SQLite relative paths (e.g. `./contacts.db`) resolution is
-  // relative to CWD at runtime; this matches typical Bun.SQL usage.
-  const sqlIdentRe = /\b_scrml_sql(?:_\d+)?\b/g;
+  // A SQLite FILE (e.g. `./contacts.db`) does NOT go through a `sqlite:` literal:
+  // it is resolved against the declaring source file's directory — never the
+  // runtime CWD — and created only by a program that owns it (§8.1.1; codegen/sqlite-file-target.ts).
+  const sqlIdentRe = sqlHandleRegExp();
   const usedIdents = new Set<string>();
   let _m: RegExpExecArray | null;
   while ((_m = sqlIdentRe.exec(finalEmitted)) !== null) {
     usedIdents.add(_m[0]);
+  }
+  // FAIL CLOSED (S451 review): in a file with two or more databases a lowering that
+  // was told no handle gets `UNRESOLVED_SQL_HANDLE`, never the file's first database.
+  // It is never declared; reaching it is a compiler defect, reported as one.
+  if (usedIdents.delete(UNRESOLVED_SQL_HANDLE)) {
+    errors.push(new CGError(
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED",
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED: this file declares more than one database, and a database " +
+      "query in it was lowered without knowing which database it runs on (§8.1.1: each `?{}` runs on " +
+      "its nearest `<program db=>` / `<db src=>`). The compiler refuses rather than run it on the " +
+      "file's first database. This is a compiler defect; any other error reported for the same query " +
+      "(e.g. E-SQL-004) names the cause.",
+      { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
   }
   if (usedIdents.size > 0) {
     const dbScopes = collectDbScopes(fileAST);
@@ -6837,17 +7079,42 @@ export function generateServerJs(
     declLines.push("");
     declLines.push("// --- Bug 3a (§44.2): Bun.SQL handle declarations (compiler-generated) ---");
     declLines.push("import { SQL } from \"bun\";");
+    // s445 — where the SQLite-file helper (and its `node:fs` import) is spliced in,
+    // once the loop below has seen a file-backed handle that needs it.
+    // §19.10.6 (S449 C) — the per-handle transaction mutex + request scope runtime
+    // (codegen/sql-tx-guard.ts). BEFORE the declarations: each one calls
+    // `_scrml_db_guard` at module init.
+    declLines.push("");
+    declLines.push(...SQL_TX_GUARD_HELPER_LINES);
+    declLines.push("");
+    const sqliteFileHelperAt = declLines.length;
+    let sqliteFileProjectRoot: string | null = null;
     // Emit declarations in stable order: default `_scrml_sql` first, then
     // scoped `_scrml_sql_<n>` ascending. The declaration order must precede
     // any code that references the handle (the idempotency / structural-eq
     // helpers above + every server-fn route below).
-    const sortedIdents = Array.from(usedIdents).sort((a, b) => {
-      if (a === "_scrml_sql") return -1;
-      if (b === "_scrml_sql") return 1;
-      const an = parseInt(a.replace("_scrml_sql_", ""), 10);
-      const bn = parseInt(b.replace("_scrml_sql_", ""), 10);
-      return an - bn;
-    });
+    const sortedIdents = Array.from(usedIdents).sort(compareSqlHandles);
+    // §19.10.6 (S449 C, opt-in (b)) — `transactions="concurrent"` on a Postgres / MySQL
+    // database runs each transaction on its own reserved pool connection instead of
+    // serializing them behind the handle's mutex. SQLite is ONE connection: there is
+    // nothing to run a second transaction on, so the opt-in is a compile error there
+    // rather than a silently ignored promise of concurrency. Fired once per handle.
+    const concurrentTransactionsFor = (ident: string, scope: DbScope): boolean => {
+      if (scope.transactions !== CONCURRENT_TRANSACTIONS_VALUE) return false;
+      if (scope.driver === "sqlite") {
+        errors.push(new CGError(
+          "E-SQL-010",
+          `E-SQL-010: \`transactions="concurrent"\` is declared for the SQLite database \`${scope.connectionString}\`. ` +
+          "It runs each transaction on its own connection from a Postgres / MySQL connection pool; a SQLite " +
+          "database is one connection, so its transactions always run one at a time (§19.10.6). " +
+          "Remove the attribute, or use a `postgres://` / `mysql://` database.",
+          (scope.transactionsSpan as any) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          "error",
+        ));
+        return false;
+      }
+      return true;
+    };
     for (const ident of sortedIdents) {
       const scope = dbScopes.get(ident);
       if (!scope) {
@@ -6893,47 +7160,45 @@ export function generateServerJs(
           `// WARNING: ${ident} referenced but no matching <program db=> / <db src=> found ` +
           `(E-SQL-004 fired above); defensive :memory: stub follows.`,
         );
-        declLines.push(`const ${ident} = new SQL(":memory:");`);
+        declLines.push(`const ${ident} = ${guardHandleExpr(`new SQL(":memory:")`, "sqlite", false)};`);
         continue;
       }
-      // SQLite paths require `sqlite:` prefix or Bun.SQL defaults to
-      // postgres at module init (see comment block above).
+      // s445-dev-db-side-file — a SQLite FILE opens through the helpers in
+      // codegen/sqlite-file-target.ts: the file the compile-time schema read resolved
+      // (the declaring file's directory — §8.1.1), recorded relative to the project
+      // root and resolved at runtime against SCRML_DATA_DIR ?? that root (§47.14).
+      // A file that declares the database's schema OWNS it — its handle opens at load
+      // and may create the file; any other handle is REFERENCING — it opens lazily on
+      // first use and never creates (ruling S445: per-file ownership). Replaces the
+      // ss19 #9 literal, which was re-relativized to the compile unit's output base and
+      // opened CWD-relative. Every file-backed handle gets the §44 WAL/busy-timeout
+      // defaults — an owning one at load (below), a referencing one when it opens.
+      const sqliteFile = scope.driver === "sqlite" && typeof filePath === "string"
+        ? sqliteFileHandle(
+            scope.connectionString,
+            filePath,
+            (fileAST as any)._outputBaseDir,
+            ownedDbFilesFor(getNodes(fileAST), filePath),
+          )
+        : null;
+      if (sqliteFile !== null) {
+        sqliteFileProjectRoot = sqliteFile.projectRoot;
+        noteSqliteHandle(fileAST, sqliteFile.record, "server");
+        declLines.push(`const ${ident} = ${guardHandleExpr(sqliteFile.expr, "sqlite", concurrentTransactionsFor(ident, scope))};`);
+        if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
+        continue;
+      }
+      // `:memory:` and the network drivers. SQLite needs the `sqlite:` prefix or
+      // Bun.SQL defaults to postgres at module init (see comment block above).
       let connStr = scope.connectionString;
       if (
         scope.driver === "sqlite" &&
         !connStr.startsWith("sqlite:") &&
         connStr !== ":memory:"
       ) {
-        // ss19 #9 (g-db-src-compile-vs-runtime-path) — express the emitted path
-        // relative to the project root (the runtime cwd) so every source file
-        // that references the SAME physical db emits the SAME runtime path. The
-        // compiler resolves `src=` file-relative (protect-analyzer), but the
-        // emitted `sqlite:` literal is opened CWD-relative at runtime — so a
-        // <page> in a subdir (`src="../m.db"`) opened a DIFFERENT file than the
-        // root entry (`src="./m.db"`) when both run from the project root →
-        // "no such table". We re-relativize ONLY for files NOT at the project
-        // root; a root-level file keeps its verbatim src (the common single-dir
-        // case stays byte-identical). `relative(root, absDb)` always yields a
-        // path that, from cwd=root, resolves to absDb (a leading `..` for an
-        // out-of-root db is correct, matching the file-relative resolution).
-        const _baseDir = (fileAST as any)._outputBaseDir;
-        if (
-          typeof _baseDir === "string" && _baseDir.length > 0 &&
-          typeof filePath === "string" && filePath.length > 0
-        ) {
-          const _resolvedBase = _pathResolve(_baseDir);
-          const _sourceDir = _pathDirname(_pathResolve(filePath));
-          if (_sourceDir !== _resolvedBase) {
-            const _absDb = _pathResolve(_sourceDir, connStr);
-            const _relToRoot = _pathRelative(_resolvedBase, _absDb);
-            if (_relToRoot.length > 0) {
-              connStr = _relToRoot.replace(/\\/g, "/");
-            }
-          }
-        }
         connStr = "sqlite:" + connStr;
       }
-      declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
+      declLines.push(`const ${ident} = ${guardHandleExpr(`new SQL(${JSON.stringify(connStr)})`, scope.driver, concurrentTransactionsFor(ident, scope))};`);
       // §44 (S433, g-native-sqlite-connection-lacks-wal-and-busy-timeout-config;
       // operator ruling S385 A1 = "(c) BOTH … WAL + 5s busy-timeout as the safe
       // default", grounded in what the adopter's own `db.js` already does) — a
@@ -6944,12 +7209,16 @@ export function generateServerJs(
         sqliteConfiguredIdents.push(ident);
       }
     }
+    if (sqliteFileProjectRoot !== null) {
+      declLines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...sqliteFileHelperLines(sqliteFileProjectRoot), "");
+    }
     // §44 (S433) — SQLITE DURABILITY / CONCURRENCY DEFAULTS. The full rationale, the
     // measurements, and the three traps (constructor options are ignored; the `await` is
     // load-bearing; top-level await is forbidden) live in `codegen/sqlite-defaults.ts`,
     // which is SHARED with `emit-tool.ts` — the tool path was missed on the first pass
-    // and left the gap's own symptom reachable for a `kind="tool"` program.
-    if (sqliteConfiguredIdents.length > 0) {
+    // and left the gap's own symptom reachable for a `kind="tool"` program. A
+    // referencing sqlite-file handle calls the helper itself when it opens.
+    if (sqliteConfiguredIdents.length > 0 || sqliteFileProjectRoot !== null) {
       declLines.push("");
       declLines.push(...SQLITE_CONFIGURE_HELPER_LINES);
       for (const ident of sqliteConfiguredIdents) {
@@ -6969,6 +7238,39 @@ export function generateServerJs(
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + declBlock + finalEmitted.slice(headerEndIdx);
     }
+    // §19.10.6 (S449 C) — every route handler (and WebSocket callback) runs in its
+    // own request scope: the OWNER of any transaction it opens on a guarded handle.
+    // Appended LAST, after every route export it names.
+    const _scopeLines = requestScopeLines(collected, /^export const _scrml_ws_handlers = /m.test(finalEmitted));
+    if (_scopeLines.length > 0) {
+      finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _scopeLines.join("\n") + "\n";
+    }
+    // §14.8.10 (S452) — the tenant SOURCE filter reads the request from a store
+    // opened around every route handler (a server function called in-process has
+    // no request parameter). Appended LAST, after every route export it names.
+    if (/_scrml_tenant_scope(?:_none)?\(await\b|\$\{_scrml_tenant_write_key\(\)\}/.test(finalEmitted)) {
+      const _tenantScopeLines = tenantRequestScopeLines(collected);
+      if (_tenantScopeLines.length > 0) {
+        finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _tenantScopeLines.join("\n") + "\n";
+      }
+    }
+    // §14.8.10 (S456, ruling "b, startup check lands with it") — every database this
+    // module opens is checked when the built server starts: a relation carrying
+    // `tenant_id` outside the compilation's tenant set (`_tenantCtx` holds it) would be
+    // read unscoped, so `_server.js` refuses to serve while one exists
+    // (codegen/tenant-startup-check.ts; commands/build.js `generateServerEntry`).
+    const _tenantCheckHandles: TenantCheckHandle[] = [];
+    for (const ident of sortedIdents) {
+      const scope = dbScopes.get(ident);
+      if (scope) _tenantCheckHandles.push({ ident, driver: scope.driver, connection: scope.connectionString });
+    }
+    const _tenantCheckLines = tenantStartupCheckLines(_tenantCheckHandles, _tenantCtx.tenantScopedTables);
+    if (_tenantCheckLines.length > 0) {
+      finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _tenantCheckLines.join("\n") + "\n";
+    }
+  } else {
+    // No `?{}` handle → no transaction runtime → no stream backstop to call.
+    finalEmitted = finalEmitted.split(SSE_STREAM_END_LINE + "\n").join("");
   }
 
   // §14.8.9 — the protected-column PROVENANCE FLOW (S441, `protect-flow.ts`)
@@ -6997,6 +7299,18 @@ export function generateServerJs(
   // `I-TENANT-ACROSS` (Info) per opt-out — the redaction / cross-tenant read is
   // never silent (the audit surface). Routed into `errors` with severity "info".
   if (_tenantActive) {
+    // E-TENANT-AGG / E-TENANT-WRITE — decided at the lowering choke for every SQL
+    // spelling; located at the query's first occurrence in the source when found.
+    const _violSrc: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
+    for (const _v of drainTenantViolationsFromRewriter()) {
+      const _at = _violSrc ? _violSrc.indexOf(_v.sql) : -1;
+      errors.push(new CGError(
+        _v.code,
+        _v.message,
+        (_at >= 0 ? { file: filePath, start: _at, end: _at + _v.sql.length } : { file: filePath, start: 0, end: 0 }) as any,
+        "error",
+      ));
+    }
     const _seenStripDrain = new Set<string>();
     const _allStrips = [...drainTenantStripsFromRewriter().map((s) => s.sql), ..._tenantStripsFromHandEmit];
     for (const _sql of _allStrips) {
@@ -7004,15 +7318,16 @@ export function generateServerJs(
       _seenStripDrain.add(_sql);
       errors.push(new CGError(
         "I-TENANT-STRIP",
-        `I-TENANT-STRIP: the egress floor scopes the client response of \`${_sql}\` to the request's ambient ` +
-        `\`@currentUser.tenantId\` — any row of another tenant is dropped, and an unpinned request sees zero rows ` +
-        `(§14.8.10, the row-level twin of the §14.8.9 protect floor). For a deliberate cross-tenant read use \`.acrossTenants()\`.`,
+        `I-TENANT-STRIP: the rows of \`${_sql}\` are filtered to the request's ambient \`@currentUser.tenantId\` ` +
+        `as soon as the query returns, before any server code sees them — every row of another tenant is dropped, ` +
+        `so values derived from the rows (fields, counts, joins) are this tenant's alone; an unpinned request, or code ` +
+        `running outside a request, sees zero rows (§14.8.10). For a deliberate cross-tenant read use \`.acrossTenants()\`.`,
         { file: filePath, start: 0, end: 0 } as any,
         "info",
       ));
     }
     const _seenAcrossDrain = new Set<string>();
-    const _allAcross = [...drainTenantAcrossesFromRewriter().map((a) => a.sql), ..._tenantAcrossFromScan];
+    const _allAcross = drainTenantAcrossesFromRewriter().map((a) => a.sql);
     for (const _sql of _allAcross) {
       if (_seenAcrossDrain.has(_sql)) continue;
       _seenAcrossDrain.add(_sql);
@@ -7034,6 +7349,7 @@ export function generateServerJs(
   // will re-populate for its own pass; clearing here keeps state from leaking
   // when only the server emit runs (e.g. dry-run / partial pipelines).
   setVariantFieldsForRewriter(null, null);
+  setShadowedVariantNames(null);
 
   // g-pure-module-server-emit (S207): server-import tree-shaking — prune pass.
   // Now that the full server body is assembled, decide which deferred local-
@@ -7321,46 +7637,12 @@ export function generateServerJs(
     }
   }
 
-  // §20.5 (B2.4, S266) — drain any E-SESSION-VALUE diagnostics emit-expr recorded
-  // during this file's server-body emission (a bare `session` VALUE-use — a bare
-  // ident that is NOT the object of a member/index/call). Stamps each with the
-  // file path so it reports against the right source, then clears the sink for the
-  // next file. Build-blocking (severity "error"), restoring the invariant that no
-  // bare `session` identifier ever reaches emitted JS.
-  for (const _svErr of drainSessionValueUseErrors()) {
-    const _span = (_svErr.span && typeof _svErr.span === "object") ? _svErr.span as Record<string, unknown> : {};
-    errors.push(new CGError(
-      _svErr.code,
-      _svErr.message,
-      { file: filePath, start: (_span.start as number) ?? 0, end: (_span.end as number) ?? 0, line: (_span.line as number) ?? 1, col: (_span.col as number) ?? 1 },
-      "error",
-    ));
-  }
+  // §6.6.9 / §20.5 (S449) — drain the server-session-guard backstop (a server
+  // `@session` lowering that was refused instead of reading the request body).
+  setServerSessionContextSpan(null);
+  for (const _e of drainServerAmbientSessionRefusalErrors(filePath, resolveSpanLineCol)) errors.push(_e);
 
-  // E-SQL-006 (§44.3, g-esql006) — drain the ONE function-scoped `.prepare()` sink
-  // collected across EVERY server-body / direct-sqlNode emit site above (CSRF +
-  // non-CSRF handlers and their CPS-return sub-branch, SSE generators, in-process
-  // peer callables, WS `onserver:*` handlers, §39.3 `handle()` bodies, §52.6.5
-  // Pattern-C cell-load routes + their SSR seed). DEDUPED by span (code + message
-  // are fixed constants for E-SQL-006, so SPAN is the only discriminator) so a fn
-  // emitted on multiple paths (route + in-process peer, or a Pattern-C cell seeded
-  // on both the /__serverLoad route and the SSR seed) reports once — that pair
-  // carries the SAME real source span. A span-less entry ({0,0}: a synthesized
-  // `?{}` node that carried no source span, emit-logic:`node.span ?? {start:0,end:0}`)
-  // is NEVER deduped against another {0,0} — two genuinely-distinct span-less
-  // `.prepare()` calls would otherwise collapse to a single reported error. Only a
-  // real (non-{0,0}) span participates in the collapse.
-  for (const _pe of _sqlPrepareErrors) {
-    const _pes = _pe.span as { start?: number; end?: number };
-    const _spanLess = ((_pes?.start ?? 0) === 0) && ((_pes?.end ?? 0) === 0);
-    const dup = !_spanLess && errors.some((x) => {
-      const xs = x.span as { start?: number; end?: number };
-      return x.code === _pe.code && x.message === _pe.message
-        && (xs?.start ?? -1) === (_pes?.start ?? -1)
-        && (xs?.end ?? -1) === (_pes?.end ?? -1);
-    });
-    if (!dup) errors.push(_pe);
-  }
+
 
   return finalEmitted;
 }

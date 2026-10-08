@@ -1,0 +1,12 @@
+<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        if (args.length == 0) {
+            const plan = _={ in: { args }
+                const n = args.length +;
+                return n;
+            }=
+            println(plan)
+        }
+        return 0
+    }
+</program>

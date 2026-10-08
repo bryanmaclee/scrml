@@ -2,11 +2,11 @@ ${
     type Task:struct = { id: number, text: string }
     <items> : Task[] = []
     function loadTasks() : Task[] {
-        result = ?{`SELECT id, text FROM tasks`}
+        result = ?{`SELECT id, text FROM tasks`} !{ _ :> [] }
         return result
     }
 }
-<button id="load" onclick=@items = loadTasks()>Load</>
+<button id="load" onclick={ @items = loadTasks() !{ .Transport(_) :> { return } } }>Load</>
 <ul id="list">
     <each in=@items key=@.id as t>
         <li class="row">${t.text}</li>

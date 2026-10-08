@@ -48,6 +48,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro-1: pre-populated @todos; button transitions Loading -> Browsing. Exercises
 // Mode 2 (entry render) and Mode 3 (chunk shipping). The each is inside the
@@ -89,7 +90,7 @@ type Todo:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-engine-gated-each");
+const tmpRoot = resolve(tmpdir(), "scrml-engine-gated-each");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -126,8 +127,8 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
 
   test("each render fn reads the source cell BEFORE the mount guard (Mode 1 fix)", () => {
     const clientJs = foldChunkNamespacing(compileToOutputs(BUTTON_SRC, "button").clientJs);
-    const getIdx = clientJs.indexOf('const _items = _scrml_reactive_get("todos");');
-    const mountIdx = clientJs.indexOf("const _mount = _scrml_find_each_anchor(document,");
+    const getIdx = clientJs.indexOf('const _scrml_items = _scrml_reactive_get("todos");');
+    const mountIdx = clientJs.indexOf("const _scrml_mount = _scrml_find_each_anchor(document,");
     expect(getIdx).toBeGreaterThan(-1);
     expect(mountIdx).toBeGreaterThan(-1);
     expect(getIdx).toBeLessThan(mountIdx);
@@ -136,7 +137,7 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
   test("the engine dispatcher invokes _scrml_remount_each after writing the Browsing arm (Mode 2 fix)", () => {
     const clientJs = foldChunkNamespacing(compileToOutputs(BUTTON_SRC, "button").clientJs);
     // The Browsing arm writes innerHTML then calls _scrml_remount_each(_mount).
-    expect(clientJs).toMatch(/_mount\.innerHTML = _scrml_engine_phase_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_mount\);/);
+    expect(clientJs).toMatch(/_scrml_arm_mount\.innerHTML = _scrml_engine_phase_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_scrml_arm_mount\);/);
   });
 
   test("the each renderer registers itself in _scrml_each_renderers", () => {

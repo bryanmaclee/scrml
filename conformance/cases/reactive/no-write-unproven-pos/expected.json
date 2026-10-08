@@ -1,0 +1,24 @@
+{
+  "id": "reactive-no-write-unproven-pos",
+  "description": "§6.15: a markup interpolation reaches `k(1)` through a local holding a function value — the analysis cannot prove it writes no cell, so it fails closed: E-VALUE-WRITE-UNPROVEN.",
+  "language-version": "1.0",
+  "spec": "§6.15",
+  "rationale": "§6.15: \"A value position the write-summary analysis (§6.7.4) cannot prove write-free SHALL be rejected (E-VALUE-WRITE-UNPROVEN).\" ruling:user-voice-scrml.md S449 \"⭐⭐ RULED — \\\"your recs.\\\" on the S449 eight-question queue\" — item 3: \"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function\".",
+  "expect": {
+    "codes": [
+      "E-VALUE-WRITE-UNPROVEN"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "missing:E-VALUE-WRITE-UNPROVEN"
+        ]
+      }
+    }
+  }
+}

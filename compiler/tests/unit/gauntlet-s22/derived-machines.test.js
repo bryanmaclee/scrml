@@ -494,9 +494,9 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     expect(clientJs).toContain(`_scrml_derived_declare("ui"`);
     // The reactive display effect for ${@ui} MUST be emitted — the whole fix.
     // markup-value-in-expression-2026-06-17: the display routes through the
-    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
-    expect(clientJs).toContain("_scrml_render_value(el, _scrml_reactive_get(\"ui\"))");
-    expect(clientJs).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("ui"\)\)/);
+    // node-aware `_scrml_render_value(_scrml_el, expr)` helper (was `el.textContent =`).
+    expect(clientJs).toContain("_scrml_render_value(_scrml_el, _scrml_reactive_get(\"ui\"))");
+    expect(clientJs).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(_scrml_el,\s*_scrml_reactive_get\("ui"\)\)/);
     // No false-positive E-DG-002 on @order. (S307: this source is now the
     // §51.0.J `derived=match` form, so the registration artifact is
     // `_scrml_derived_declare("ui", …)` rather than §51.9's `_scrml_derived_fns`
@@ -622,4 +622,11 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     window._scrml_reactive_set("order", "Draft");
     expect(p.textContent).toContain("Editable");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

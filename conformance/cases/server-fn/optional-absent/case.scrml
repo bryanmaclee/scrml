@@ -3,9 +3,9 @@ ${
     <user> : User | not = not
     const <userLabel> = @user is some ? @user.name : "anonymous"
     function loadUser() : User | not {
-        rows = ?{`SELECT id, name FROM users LIMIT 1`}
+        rows = ?{`SELECT id, name FROM users LIMIT 1`} !{ _ :> [] }
         return rows[0]
     }
 }
-<button id="load" onclick=@user = loadUser()>Load</>
+<button id="load" onclick={ @user = loadUser() !{ .Transport(_) :> { return } } }>Load</>
 <p id="who">Current: ${@userLabel}</>

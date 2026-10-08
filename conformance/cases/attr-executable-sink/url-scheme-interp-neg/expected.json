@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-url-scheme-interp-neg",
+  "description": "§5.2 executable-sink rule (S456): `${…}` in a URL-valued attribute whose literal value begins with a non-safe scheme (`JaVaScRiPt:` on `href`, `javascript:` on `action`, `data:` on iframe `src`) is refused.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 executable-sink rule: interpolation into a URL-valued attribute whose literal text begins with a scheme other than `http:`, `https:`, `mailto:` or `tel:` SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE); the scheme is compared case-insensitively. Before S456 each compiled to `setAttribute(<attr>, `javascript:go('${…}')`)`.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

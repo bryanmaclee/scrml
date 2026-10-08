@@ -56,6 +56,9 @@
 // whether a brace inside a brace-delimited context is string-literal content
 // (braceIsQuotedStringContent). The block tree is still built by this scan.
 import { tokenizeLogic } from "./tokenizer.ts";
+// S441 — the body-top display-text literal scanner predicates, shared with the
+// native markup trampoline (see the `bodyTopLiteralEnd` state below).
+import { bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose } from "../native-parser/body-top-prose.js";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -997,6 +1000,22 @@ export function splitBlocks(filePath, source) {
   // like `type X:enum = { A, B, C }` where `{...}` is structural text, not a context.
   let orphanBraceDepth = 0;
 
+  // S441 (SPEC §40.8 S441 bullet, §4.18.3) — a `<program>` / `<page>` /
+  // `<channel>` body is code-default, so a `"` that STARTS A STATEMENT there
+  // opens a display-text literal whose content is TEXT: a `<`, `//` or `<!--`
+  // inside it is literal content, not a tag or a comment (§4.18.6 escapes
+  // `<`/`>`/`&` on emit). `bodyTopLiteralEnd` is the offset just past the
+  // closing `"` of the literal being scanned (0 = none); `${…}` inside it
+  // still opens a logic context (§4.18.4 interpolation). The literal/code
+  // split itself is the TAB-stage pass (ast-builder.js
+  // splitBodyTopDisplayLiterals); this only stops the scanner from cutting
+  // the literal apart first.
+  let bodyTopLiteralEnd = 0;
+  // S441 review #8 — a CODE template literal at a body-top: the whole
+  // template, `${…}` included, is one text run (offset just past its closing
+  // backtick; 0 = none). See scanBodyTopTemplateClose.
+  let bodyTopTemplateEnd = 0;
+
   // End offset of the last comment the splitter consumed (a
   // braceIsQuotedStringContent segment never starts inside comment text).
   let _lastCommentEnd = 0;
@@ -1125,6 +1144,13 @@ export function splitBlocks(filePath, source) {
   // ---------------------------------------------------------------------------
 
   /** Begin accumulating a text run at the current position (if not already started). */
+  // S441 — is the innermost open frame a `<program>` / `<page>` / `<channel>`
+  // markup body?
+  function topIsProgramFamilyBody() {
+    const tf = topFrame();
+    return !!tf && tf.type === "markup" && (tf.name === "program" || tf.name === "page" || tf.name === "channel");
+  }
+
   function beginText() {
     if (textStart === -1) {
       textStart = pos;
@@ -2503,6 +2529,44 @@ export function splitBlocks(filePath, source) {
     const curCol = col;
     const c = source[pos];
 
+    // S441 — inside a body-top display-text literal every character is text
+    // except a `${` interpolation (handled by the normal logic-context path).
+    if (bodyTopTemplateEnd > pos && !topIsBraceContext()) {
+      beginText();
+      step();
+      continue;
+    } else if (
+      c === "`" && bodyTopLiteralEnd <= pos && orphanBraceDepth === 0 &&
+      !topIsBraceContext() && topIsProgramFamilyBody()
+    ) {
+      const tclose = scanBodyTopTemplateClose(source, curPos);
+      if (tclose > curPos) {
+        bodyTopTemplateEnd = tclose + 1;
+        beginText();
+        step();
+        continue;
+      }
+    }
+    if (bodyTopLiteralEnd > pos && !topIsBraceContext()) {
+      if (!(c === "$" && source[pos + 1] === "{")) {
+        beginText();
+        step();
+        continue;
+      }
+    } else if (
+      c === "\"" && orphanBraceDepth === 0 && !topIsBraceContext() &&
+      topIsProgramFamilyBody() &&
+      bodyTopQuoteStartsStatement(source, curPos, textStart !== -1 ? textStart : curPos)
+    ) {
+      const close = scanBodyTopLiteralClose(source, curPos);
+      if (close > curPos) {
+        bodyTopLiteralEnd = close + 1;
+        beginText();
+        step();
+        continue;
+      }
+    }
+
     // -----------------------------------------------------------------------
     // Section 4.7: '//' comment suppression (applies at most context levels)
     //
@@ -3418,7 +3482,27 @@ export function splitBlocks(filePath, source) {
       // A `reference` block type cannot be used here because TAB has no handler
       // for it and would emit E-PARSE-001 on any `<#name>` in markup context.
       if (next === "#") {
-        flushText();
+        // g-request-refetch-statement-dropped (S444): the ref CONTINUES the
+        // current text run — it does not start a new one. This used to
+        // `flushText()` first, splitting `function again() {\n  <#hunt>.refetch()\n}`
+        // at the `<#` into two sibling text blocks. At a <program>/<page>/<channel>
+        // default-logic body the §40.8 lift gates on each block's LEADING content,
+        // so the first half lifted as a function with an EMPTY body and the second
+        // half (`<#hunt>.refetch()\n}` plus every declaration after it) matched no
+        // lift gate and shipped into <body> as page text. One run keeps the
+        // statement inside its function. In markup prose the two blocks were
+        // adjacent text, so joining them changes nothing there.
+        //
+        // NARROWED to the REFERENCE form only — `<#ident>` immediately followed
+        // by `.` (`<#hunt>.refetch()`, `<#r>.loading`). Every other `<#…` (the
+        // `<#name when … />` element form, a bare `<#name>`) keeps the original
+        // flush, so its AST is unchanged (S444: continuing the run for the
+        // element form moved the live AST away from the native parser —
+        // parser-conformance-within-node, phase3-is-in-when-guard-093).
+        let look = pos + 2;
+        while (look < len && /[A-Za-z0-9_\-]/.test(source[look])) look++;
+        const isRefMember = look > pos + 2 && source[look] === ">" && source[look + 1] === ".";
+        if (!isRefMember) flushText();
         const refStart = curPos;
         const refStartLine = curLine;
         const refStartCol = curCol;
@@ -3427,10 +3511,13 @@ export function splitBlocks(filePath, source) {
         // Scan to closing '>'
         while (pos < len && source[pos] !== ">" && source[pos] !== "\n") step();
         if (pos < len && source[pos] === ">") step();
-        // Keep <#name> as text — reset textStart so next flushText() includes it.
-        textStart = refStart;
-        textStartLine = refStartLine;
-        textStartCol = refStartCol;
+        // Keep <#name> as text. The reference form continues an open run; any
+        // other form starts a new run at the ref (the pre-S444 behaviour).
+        if (!isRefMember || textStart === -1) {
+          textStart = refStart;
+          textStartLine = refStartLine;
+          textStartCol = refStartCol;
+        }
         continue;
       }
 

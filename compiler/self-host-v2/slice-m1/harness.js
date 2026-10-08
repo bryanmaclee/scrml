@@ -11,7 +11,7 @@
 // `_scrml_structural_eq` (emitted for `==`), supplied here.
 
 import { compileScrml } from "../../src/api.js";
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -21,7 +21,9 @@ export const MODULES = [
   "core.scrml",
   "walk.scrml",
   "js.scrml",
+  "codec.scrml",
   "html.scrml",
+  "css.scrml",
   "names.scrml",
   "print.scrml",
   "check.scrml",
@@ -58,6 +60,30 @@ function listClientJs(dir, out = []) {
 const cache = new Map();
 
 /**
+ * s452-effect-summary — the DIAGNOSTIC DIFFERENTIAL hook. With
+ * SCRML_BOOT_DIAG_LOG=<file> set, every `analyze` call (every slice test and
+ * every conformance-counter case — they all load through here) appends one
+ * JSON line: a hash of its input ASTs, and every diagnostic / info it reported
+ * (code, file, span, message, in order). Two runs (before / after a refactor)
+ * are compared by `slice-m4/diag-diff.js`. Off unless the variable is set.
+ */
+function logAnalyze(analyzeMod, file) {
+  const inner = analyzeMod.analyze;
+  const line = (d) => ({ code: d.code, file: d.file, start: d.span.start, end: d.span.end, message: d.message });
+  return {
+    ...analyzeMod,
+    analyze(files, entry) {
+      const tp = inner(files, entry);
+      const key = Bun.hash(JSON.stringify(files)).toString(16) + ":" + entry;
+      // while a dpa-066 migration step keeps a walker beside the summary, its disagreements too
+      const shadow = analyzeMod.effectsShadow ? analyzeMod.effectsShadow(files, entry) : [];
+      appendFileSync(file, JSON.stringify({ key, diags: tp.diags.map(line), infos: (tp.infos ?? []).map(line), shadow }) + "\n");
+      return tp;
+    },
+  };
+}
+
+/**
  * Compile + load every module. Returns { mods, warnings } where `mods` maps a
  * module base name (e.g. "print") to its export object.
  */
@@ -79,7 +105,8 @@ export function loadBundle(bundle, modules) {
   if (errs.length > 0) {
     throw new Error("bootstrap bundle failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
   }
-  const chunks = listClientJs(outDir).map((file) => {
+  // sorted: readdir order is the filesystem's; the chunks load in one order everywhere
+  const chunks = listClientJs(outDir).sort().map((file) => {
     const src = readFileSync(file, "utf8");
     const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
     const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);
@@ -95,6 +122,7 @@ export function loadBundle(bundle, modules) {
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;
+  if (process.env.SCRML_BOOT_DIAG_LOG && mods.analyze) mods.analyze = logAnalyze(mods.analyze, process.env.SCRML_BOOT_DIAG_LOG);
   const loaded = { mods, warnings: result.warnings ?? [] };
   cache.set(bundle, loaded);
   return loaded;

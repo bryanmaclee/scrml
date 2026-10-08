@@ -8,7 +8,7 @@
 
 **Word of caution:** if this primer disagrees with `compiler/SPEC.md` or `docs/articles/llm-kickstarter-v2-2026-05-04.md`, the SPEC + kickstarter are authoritative. Surface the contradiction.
 
-> **⚑ SPEC §66 — Declarations, Instances, and Value Contracts (S430 + S435; Nominal / spec-ahead).** §66 is NORMATIVE: it is what the language IS. **impl#1 (the TS compiler) does not implement it** — the native bootstrap compiler will, and every impl#1 divergence from §66 is CARRIED (S430 P6/P7). What §66 changes, in one breath: a declaration is a **state kind in the tree** with typed attributes, a `renders`, and instances; declarations are written in the opener with `/>` / `</>` termination (`<let count:int=0/>`); **locked is the default** and `let` is the writable (`replace`) grant; a derived cell is a locked declaration with a reactive initializer, so **`const <x>` retires**; the right-hand-side form `<x> = v` (incl. Shape 2 `<x req> = <input/>`) retires; render-by-tag `<x/>` becomes `<*x/>` for the existing instance; **components** (`const X = <… props={…}>`) retire into declarations; **engines** are re-expressed as `single` declarations whose fields carry transition graphs (Move 20 reversed); Tier-3 positional struct construction is RETIRED; `<theme>` tokens become declarations (T3); data is immutable unless a contract on its TYPE grants the write.
+> **⚑ SPEC §66 — Declarations, Instances, and Value Contracts (S430 + S435 + S447; Nominal / spec-ahead).** §66 is NORMATIVE: it is what the language IS. **impl#1 (the TS compiler) does not implement it** — the native bootstrap compiler will, and every impl#1 divergence from §66 is CARRIED (S430 P6/P7). What §66 changes, in one breath: a declaration is a **state kind in the tree** with typed attributes, a `renders`, and instances; declarations are written in the opener with `/>` / `</>` termination (`let <count:int=0/>`); **locked is the default** and `let` is the writable (`replace`) grant; **keywords go OUTSIDE the opener (S447)** — `export` / `let` before the `<` in JS order (`export let <checked:bool=false/>`), only name / type / value / typed attributes / presence-flags (`req`, `single`, `server`, `pinned`) inside, `renders` after the closer; writable or exported attributes become child declarations (§66.2.5, §66.4 rule 6); a derived cell is a locked declaration with a reactive initializer, so **`const <x>` retires**; the right-hand-side form `<x> = v` (incl. Shape 2 `<x req> = <input/>`) retires; render-by-tag `<x/>` becomes `<*x/>` for the existing instance; **components** (`const X = <… props={…}>`) retire into declarations; **engines** are re-expressed as `single` declarations whose fields carry transition graphs (Move 20 reversed); Tier-3 positional struct construction is RETIRED; `<theme>` tokens become declarations (T3); data is immutable unless a contract on its TYPE grants the write.
 >
 > **How to read this primer against it:** every example here is written in the forms impl#1 compiles TODAY, because the primer teaches what compiles — do not rewrite them into §66 forms (they would not compile). But **new language-design reasoning must start from §66, not from these examples.** Sections whose teaching §66 changes carry a `→ §66` note. The legacy forms go through the §63 deprecation lifecycle — see **§66.21** (the retired-form table: W-lint, reserved E-code, `scrml fix` rule); the still-unruled interactions are consolidated in **§66.22** (OPEN items). Status line in `compiler/SPEC-INDEX.md` §66.
 
@@ -42,7 +42,7 @@ But — apps don't START at the north star; they EVOLVE toward it. Booleans-as-l
 4. **One file type.** `.scrml` is the only source format. Logic, markup, style intermingle; the compiler decomposes them.
 5. **All scrml should be scrml.** No bespoke per-state-type mini-DSLs. Every body that accepts content accepts the universal scrml grammar. Per-kind extensions (transitions, DDL, `@shared`) ride ON TOP of the universal base, not INSTEAD of it.
 5b. **Reach discipline (S98 ratification).** When a problem has a finite condition set with a transition contract, REACH FOR state primitives (`<engine>` / typed structs / refinement-typed cells / validators) FIRST; reach for `fn` / `function` only when the problem is calculation, or when a state shape has been authored and demonstrably loses on a NAMED axis (ergonomics / spec-clarity / runtime-cost). The default for any new design is state-shape; logic is the explicit escape. Operationalized via a two-table YES/NO test: ask whether the locus has named conditions + a transition contract + a sensible "what condition is this in?" question — if YES, it is a state problem. The corrected S95 state-vs-logic axiom is the meta: state should describe its own transitions; logic should do pure compute. Pillar 5b is the procedural form. (Companion to Pillar 5 — Pillar 5 says scrml has one grammar; Pillar 5b says state-shape is its default expressive surface. Full charter + operational test + canonical state/calculation examples: `scrml-support/docs/deep-dives/scrml-native-parser-design-2026-05-17.md` §D1.)
-> **→ §66.** Pillar 2's `<x> = value` spelling is the impl#1 form; under §66 a declaration is a state kind in the tree written in its opener (`<let x:int=0/>`, §66.1–§66.3), locked by default (§66.9). The "five declarative doors" (§4 below) shift with it: the Component door becomes a declaration with a `renders` (§66.15), the Bindable / Derived doors are re-spelled (§66.5 / §66.9).
+> **→ §66.** Pillar 2's `<x> = value` spelling is the impl#1 form; under §66 a declaration is a state kind in the tree written in its opener (`let <x:int=0/>` — `let` before the `<`, S447; §66.1–§66.3, §66.2.5), locked by default (§66.9). The "five declarative doors" (§4 below) shift with it: the Component door becomes a declaration with a `renders` (§66.15), the Bindable / Derived doors are re-spelled (§66.5 / §66.9).
 
 6. **Goal: bullet-proof apps.** A shipped scrml app should be essentially bullet-proof — every reachable state has UI, every transition is intentional, every effect runs at the right moment. **And** the developer should (almost) not realize they're making the app exhaustively provable. Provability falls out of the language's natural shape, not from separate proof ceremony.
 
@@ -96,7 +96,7 @@ const <badge>       = <span class="badge">${@userName}</span>   // markup-typed
 
 **Shape 1 is the non-markup value door.** Display-only markup on a Shape-1 (writable) RHS — `<thing> = <span>hi</span>` — is **`E-CELL-RENDER-SPEC-NOT-BINDABLE`**: use `const` (Shape 3) for display-only markup, Shape 2 for input-bound. A markup value reaches a cell by **derivation / binding / state-keying — never imperative reassignment** (the reactive-first grain). The **five declarative doors** markup enters through (§1.4, S279 ruling — an exhaustive, non-overlapping partition): **Component** (`<Foo>` reuse), **Bindable cell** (Shape 2, input value), **Derived cell** (Shape 3, recomputed), **Enum `renders`** (state-keyed, exhaustive — the home for "swap between a fixed set of markups"), **Iteration** (`<each>`, per-item). A writable markup cell is a redundant sixth door → deliberately rejected.
 
-> **→ §66.** All three RHS shapes are impl#1 forms that §66 retires through the §63 lifecycle (§66.21): `<x> = v` / `<x>: T = v` → the opener form `<let x:T=v/>` (`W-DECL-LEGACY-RHS`); **`const <x> = expr` → a locked declaration with a reactive initializer, `<x:T=(expr)/>`, which is derived exactly when `expr` reads cells** (`W-CONST-CELL-DEPRECATED`, §66.9); Shape 2's render-spec coupling → a `renders` clause (§66.5). None of that compiles on impl#1 yet — keep writing the shapes above.
+> **→ §66.** All three RHS shapes are impl#1 forms that §66 retires through the §63 lifecycle (§66.21): `<x> = v` / `<x>: T = v` → the opener form `let <x:T=v/>` (`W-DECL-LEGACY-RHS`); **`const <x> = expr` → a locked declaration with a reactive initializer, `<x:T=(expr)/>`, which is derived exactly when `expr` reads cells** (`W-CONST-CELL-DEPRECATED`, §66.9); Shape 2's render-spec coupling → a `renders` clause (§66.5). None of that compiles on impl#1 yet — keep writing the shapes above.
 
 **Optional `default=` attribute** — any cell may declare an explicit reset target: `<startTime default=not> = Date.now()`.
 
@@ -109,6 +109,8 @@ const <badge>       = <span class="badge">${@userName}</span>   // markup-typed
 ```
 
 DURATION accepts the same form set as `<onTimeout after=>` (literal `Nms`/`Ns`/`Nm`/`Nh` OR computed `${expr}<unit>` — reuses `parseAfterDuration`). Forbidden on `const`-derived cells (`E-DEBOUNCED-WITH-DERIVED`); both attributes on the same cell forbidden (`E-REACTIVITY-ATTR-CONFLICT`); on `<x server>` cells forbidden (`E-DEBOUNCED-WITH-SERVER` — server timing semantics deferred). `reset(@cell)` on a cell with a pending timer cancels the timer before applying the reset value (§6.8 amendment). The pre-v0.next `@debounced(N) name = expr` keyword-form was retired at S79 (clean-cut, no deprecation cycle).
+
+**Browser persistence — `persist="local"|"session"` + required `key=` (S444 dpa-061; SPEC §6.14 — NOMINAL, impl#1 rejects it today, the bootstrap builds it)** — a lifetime attribute on a client-owned cell, NOT a §52 authority value: `<recent persist="local" key="myapp.recent">: string[] = []`. The compiler restores at construction (decoded against the CURRENT type + full contract; any failure → the default, never coerced), writes on change (§57/§59.10 codec), and syncs `"local"` across tabs. Errors: no `key=`, `reveal`-provenance values, `lin` cells, server cells. First paint shows the default, except a `<theme for=@cell>` mode cell, which gets an automatic pre-paint restore. IndexedDB is a planned stdlib addition, not a `persist=` value. **Until it lands, do NOT copy the old §6.7.4 recipe `localStorage.setItem(key, @var)` for a non-string cell**: Web Storage stores `String(v)` (`["a","b"]` → `"a,b"`). Encode (`JSON.stringify`) in a named function an `<effect deps=[@x]>` body calls (a `localStorage` write is a host call, legal in an effect; impl#1 today: the `when @x changes` body), and decode + shape-check on load (`!{}` cannot sit directly in a `when` body — `g-bang-brace-in-when-changes-body-invalid-logic`).
 
 ---
 
@@ -162,8 +164,8 @@ function fetchItems()! -> LoadError {
 
 function load() {
     const rows = fetchItems() !{
-        | ::Network msg :> { @phase = .Error(msg); return }
-        | ::Empty       :> { @phase = .Empty;       return }
+        .Network(msg) :> { @phase = .Error(msg); return }
+        .Empty        :> { @phase = .Empty;       return }
     }
     @phase = .Success(rows.length)
 }
@@ -172,7 +174,7 @@ function load() {
 Pattern:
 - `function name(args) ! ErrorType { ... }` declares failable
 - `fail .Variant(args)` surfaces the error
-- `let x = call() !{ | ::Variant arg :> { ... } }` exhaustive call-site handler
+- `let x = call() !{ | .Variant(arg) :> { ... } }` exhaustive call-site handler
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
@@ -721,6 +723,25 @@ The hybrid mechanism specifies the binary case. Multi-variant chains — `(.Draf
 
 ---
 
+## §6.6 Reactive effects — `<effect deps=[…]>` and `reset-on=` (S447; SPEC §6.7.4, §6.8.4 — Nominal)
+
+**Ruled S447:** a reactive effect drives the OUTSIDE world only. It may not write any reactive cell, directly or through a called function — compile error `E-EFFECT-WRITES-STATE` (an unprovable body, e.g. one reaching `^{}`, is `E-EFFECT-WRITE-UNPROVEN`). So effects can never trigger each other: no cascades, no runtime runaway limit.
+
+```scrml
+let <query:string=""/>
+let <category:string="all"/>
+let <page:int=1 reset-on=[@query, @category]/>      // resets to its initializer (or default=) when either changes
+
+<request id="search" deps=[@query, @category, @page]>${ @results = searchProducts(@query, @category, @page) }</>
+<effect deps=[@category]>${ track("filter", { category: @category, query: @query }) }</>   // reads @query, triggers only on @category
+<effect deps=[@messages]>${ scrollToBottom(@logEl) }</>
+```
+
+- `<effect>` does NOT run on mount; `deps=[…]` is required and exhaustive (no auto-tracking; reading other cells is fine, no annotation). Scoped by tree position like `<request>` — torn down with its `if=` element, one per `<each>` row. Server calls inside are fine (newest run wins on re-trigger).
+- Where the old `when` jobs went: fetch → `<request>`; persist → `persist=`; derive → derived cell; reset → `reset-on=`; reset on a transition → `<onTransition>`; autosave with status → a write `<request>` (S447 3c = (d), §6.7.7.3: a request that provably writes does NOT run on mount unless `deps=[]`, fires only on the user's own edits — a load / poll / channel push / cross-tab sync re-baselines it — and skips a save equal to its baseline; server-origin writes bypass `debounced=`. impl#1 still saves the default on load and can WIPE the record — `g-impl1-autosave-request-mount-save-wipes-record`; on impl#1 save from the input's handler); polling → `<poll>`; accumulate (undo) → the writing functions.
+- `reset-on=` is a modifier inside the opener (`let` goes before the `<`). Acyclic (`E-RESET-ON-CYCLE`), writable cells only (`E-RESET-ON-NOT-WRITABLE`). **On an engine cell it is legal**, but every state must admit the reset target in its `rule=` (`E-RESET-ON-ENGINE-REFUSED` names the refusing state); the reset is a real transition, so `<onTransition>` fires. It is `reset(@x)`, so it clears §55 `touched`/`submitted` and cancels a pending debounced write.
+- **impl#1 (frozen for semantics, S447):** compiles only the keyword form `when @x changes { … }` / `when (@a, @b) changes { … }`, with writes allowed, and knows neither `<effect>` nor `reset-on=`. The keyword form is soft-deprecated (`W-WHEN-EFFECT-DEPRECATED`, Nominal); `reads` never parsed — drop it. Known impl#1 traps: a `when` inside an `<each>` row is silently dropped, and one inside an `if=` element keeps firing after it closes (`g-impl1-when-effect-divergence-s447`).
+
 ## §7 Engines (Tier 2) — the centerpiece (§51)
 
 Engines are the v0.next centerpiece. Singleton-by-design (one declaration mounts the singleton; cross-file mount via `<EngineName/>`). Components are the multi-instance vehicle (Move 20 — components and engines are distinct, do not collapse).
@@ -735,8 +756,8 @@ type Phase:enum = { Idle, Loading, Error(msg: string), Empty, Success(count: int
 function load() {
     @phase = .Loading
     const result = fetchItems() !{
-        | ::Network msg :> { @phase = .Error(msg); return }
-        | ::Empty       :> { @phase = .Empty;       return }
+        .Network(msg) :> { @phase = .Error(msg); return }
+        .Empty        :> { @phase = .Empty;       return }
     }
     @phase = .Success(result.length)
 }
@@ -858,6 +879,8 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 
 **Validators on derived cells** are forbidden (`E-DERIVED-WITH-VALIDATORS`); use refinement-type predicates at the type level instead.
 
+**S447 rulings (SPEC §55.5.1–§55.5.3, §55.7, §55.17 — Nominal on BOTH implementations).** Edge A is reversed: a **top-level value that carries validators** has `isValid` / `errors` (an array) / `touched` / `submitted`, bound or not; a top-level value with **no** validators has none (`@count.isValid` stays E-VALIDITY-NO-SURFACE). `submitted` flips on the first submit of a **form that binds the value** (compounds too), not any submit in the document. Validators' HTML-native subset lands on every bound native control (S442 (2)); the compiler adds `novalidate` to every form carrying those attributes (S442 (3)), and **gates the submit of every form that binds a validated value** (G2 — with or without `novalidate`): touch every bound validated value, set `submitted`, and if any is invalid cancel the submit and skip `onsubmit`; `formnovalidate` on the submitter bypasses the block but still sets `submitted`; formFor's default button is no longer `disabled=!isValid`; scope is forms only (author-gate `onclick` / an `<effect>` with `isValid`). Each gated form gets `I-FORM-SUBMIT-GATED` (Info, names the gating values) and an emitted `data-scrml-gated="…"`. E-VALIDATOR-DEAD = nothing can ever change the value (no bind, locked, not server, no use-site seed, no `persist=`). `isValid` / `errors` / `touched` / `submitted` are reserved field / attribute names (`E-VALIDITY-RESERVED-NAME`). Today impl#1 compiles a top-level Shape-2 validated cell with native `required` and **no** `novalidate` (the browser blocks), and `@x.isValid` on it is a silent `undefined`; the bootstrap emits `novalidate` with no surface and no gate (fail-open, HIGH gap).
+
 ---
 
 ## §9 Channels, schema, predicates, `not` keyword (Stage 0b D3 — LANDED S58)
@@ -959,7 +982,7 @@ Both are zero in current corpus. If adopters report friction, extend lookbehind 
 D4 (S58 close) threaded the locks/moves across the smaller spec sections. Highlights worth knowing:
 
 - **Cross-file engine import** (§21.8, M18). `import { MarioMachine } from './engines.scrml'` then mount via `<MarioMachine/>` at use-sites. Singleton semantics across all use-sites in the importer's file. `pinned` legal on imports: `import { MarioMachine pinned } from './engines.scrml'`.
-- **`import:host` — the self-host bootstrap bridge** (§21.3.1, S114; manifest-gated by §22.13). `import:host { runCG as _runCG } from "../../compiler/src/codegen/index.ts"` binds named exports of a TS/JS host module at compile time. It is NOT an adopter feature: the `scrml.toml` `[capabilities] host-import` entry defaults to `"disabled"` (every use is `E-IMPORT-008`); the bootstrap stdlib's `"self-host-only"` admits only `stdlib/compiler/**`. File top level only; host-tag must be `host` (`E-IMPORT-009`). It replaces the old `^{ await import(...) }` bridge, which is now `E-DYNAMIC-IMPORT-NOT-IN-SCRML` (§21.3.2) — the remaining `^{ await import }` sites in `stdlib/compiler/**` / `compiler/self-host/` are `import:host` migration backlog. Adopter code uses a plain `import` from scrml modules.
+- **`import:host` — the self-host bootstrap bridge** (§21.3.1, S114; manifest-gated by §22.13). `import:host { runCG as _runCG } from "../../compiler/src/codegen/index.ts"` binds named exports of a TS/JS host module at compile time. It is NOT an adopter feature: the `scrml.toml` `[capabilities] host-import` entry defaults to `"disabled"` (every use is `E-IMPORT-008`); the bootstrap stdlib's `"self-host-only"` admits only `stdlib/compiler/**`. File top level only; host-tag must be `host` (`E-IMPORT-009`). It replaces the old `^{ await import(...) }` bridge, which is now `E-DYNAMIC-IMPORT-NOT-IN-SCRML` (§21.3.2) — the remaining `^{ await import }` sites in `stdlib/compiler/**` are `import:host` migration backlog (the v1 `compiler/self-host/` tree that also carried them was retired S447). Adopter code uses a plain `import` from scrml modules.
 - **Components vs engines** (§15.13.5, M20). Singleton-by-design (`<engine>`) ≠ multi-instance (component). Component bodies cannot instantiate an engine — `E-COMPONENT-ENGINE-SCOPE`. **→ §66.13 / §66.15:** §66 supersedes §15.13.5 — components retire into declarations and engines into `single` declarations (Move 20 reversed); `E-COMPONENT-ENGINE-SCOPE` survives as the invariant. impl#1 still compiles the M20 model.
 - **Structural elements registry** (§4 + §24). `<engine>`, `<match>`, `<errors>`, `<onTransition>`, `<onTimeout>` (§51.0.M, S77), `<onIdle>` (§51.0.R, S77), `<channel>` (§38), `<page>` (§4.15, S85), `<auth>` (§40.1, S91) are scrml-defined structural elements (NOT HTML). `E-STRUCTURAL-ELEMENT-MISPLACED` if used in unsupported contexts.
 - **Bare-variant inference** (§14.10, M9). When LHS or parameter type is statically known, the variant qualifier may be omitted: `<phase>: Phase = .Idle` not `Phase.Idle`. Union-typed contexts → ambiguous → require qualification.
@@ -1127,8 +1150,8 @@ What LLMs reflexively reach for + the scrml form:
 | Reflex | Why wrong | scrml form |
 |---|---|---|
 | `useState`, `ref`, `signal()` | scrml has no hook calls | `<x> = 0` declares; `@x` reads |
-| `useEffect`, `watchEffect` | no effect hooks | Reactive `${...}` blocks; `<onTransition>` for engine effects |
-| `try { ... } catch (e) { ... }` | not in scrml | `function f()! -> Err { fail Err::V(...) }` + `let x = f() !{ \| ::V → ... }` |
+| `useEffect`, `watchEffect` (incl. setting state in one) | no effect hooks; an effect that writes state is how cascades happen | Fetch → `<request deps=[…]>`; derive → a derived cell; reset a cell when others change → `let <page:int=1 reset-on=[@query]/>`; state change on a transition → `<onTransition>`; outside world only (analytics, scroll, focus, title, a widget) → `<effect deps=[@a, @b]>${ … }</>`, which may NOT write any reactive cell (E-EFFECT-WRITES-STATE) and does not run on mount. **S447, SPEC §6.7.4 / §6.8.4 — Nominal:** the bootstrap builds `<effect>` / `reset-on=`; impl#1 is frozen and still compiles only the retiring keyword form `when @x changes { }` (writes allowed there, divergence filed) |
+| `try { ... } catch (e) { ... }` | not in scrml | `function f()! -> Err { fail Err::V(...) }` + `let x = f() !{ \| .V(x) :> ... }` |
 | `if (errors.length > 0)` | manual error checking | `@form.isValid` (auto-synth); `<errors of=@form.field/>` |
 | `bcrypt.hash(pwd, 10)` | npm import | `import { hashPassword } from 'scrml:auth'` |
 | `===`, `!==` | scrml is strict-by-default | `==`, `!=` (E-EQ-004) |
@@ -1156,7 +1179,7 @@ What LLMs reflexively reach for + the scrml form:
 - **Cherry-pick + push protocol** — see pa.md §"Cross-machine sync hygiene" + §"wrap" definition.
 - **Worktree path discipline** — agent dispatches with `isolation: "worktree"` may construct main-rooted paths from intake docs by mistake; brief must paste the absolute worktree path explicitly; agents must run `pwd` at startup.
 - **Agent-file edits don't propagate mid-session** — if you edit `~/.claude/agents/<name>.md`, the change takes effect at the NEXT PA session, not the current one. Plan accordingly.
-- **`scrml-js-codegen-engineer` tool set** (post S57; agent renamed from `scrml-dev-pipeline` per S133 DD — see pa.md "Code editing rules" canonical-dev-agent line): `Agent, Read, Write, Edit, Glob, Grep, Bash`. Default model `opus`. Edits to this file took effect S58+; before that, the agent's tools were limited and dispatches needed careful brief design.
+- **`scrml-js-codegen-engineer` tool set** (post S57; agent renamed from `scrml-dev-pipeline` per S133 DD — see pa.md "Code editing rules" canonical-dev-agent line): `Read, Write, Edit, Glob, Grep, Bash` (S454 correction: NO `Agent` — verified against both the live `~/.claude/agents/` file and the staged `scrml-support/agents/` copy, which are identical). Default model `opus`. Edits to this file took effect S58+; before that, the agent's tools were limited and dispatches needed careful brief design.
 - **SPEC.md size** (post-D4): **~24,382 lines / ~410k tokens**. Past the size where Read+Write full-file-overwrite is feasible; Edit's diff-form scales fine. Per-section split queued as v0.3.0+ candidate (see IMPLEMENTATION-ROADMAP.md §8.5).
 - **PIPELINE.md size** (post-D4): ~2,380 lines (1,941 → 2,380; 22.6% rewrite). Per-stage v0.next addenda landed: TAB / NR / MOD / UVB / TS / DG / CG. Integration Failure Mode Catalog +11 v0.next entries. **Follow-up prose pass deferred** (IMPLEMENTATION-ROADMAP.md §8.6 #2) — addenda are stitched, not re-flowed; engineering content complete.
 - **`const @x` → `const <x>` sweep DONE (S58)**. Two-phase cleanup: (a) §6 sweep (62 edits) replaced declarations within §6 itself; (b) follow-up cleanup across §11/§12/§22/§23/§34/§52 (13 more edits). SPEC.md now has zero `const @x` declarations. Canonical form `const <x> = expr` is universal. Read sites still use `@x` (canonical access).
@@ -1164,7 +1187,7 @@ What LLMs reflexively reach for + the scrml form:
 - **`bun run pretest` required in fresh worktrees** (S59 rev-1 finding): browser tests load from `samples/compilation-tests/dist/` which is gitignored. Without `bun run pretest`, full `bun test` produces ~130 ECONNREFUSED-shaped failures in happy-dom. Use `bun run test` (chains pretest) NOT `bun test` directly for baseline checks. Documented in pa.md F4 step 5.
 - **SPEC.md Read-budget reality (S64 amendment).** SPEC.md is ~410k tokens. Primer + SPEC-INDEX.md + targeted-section Read is the only sustainable pattern. Never attempt full-file Read (will overflow). For lookups: `grep -n "^### " compiler/SPEC.md` for top-level headings, then targeted Read with `offset:` + `limit:`. SPEC-INDEX.md (~288 lines) is the navigation map. Per-section split queued as v0.3.0+ candidate.
 - **Adding a new scrml-special structural element (S64 amendment)** — e.g., a new structural element added at SPEC §4/§24 — REQUIRES updating `compiler/src/attribute-registry.js` (~233 LOC, defines per-element attribute schemas) for VP-1 (attribute-allowlist.ts) and VP-3 (attribute-interpolation.ts) validation. Otherwise unknown attributes are silently forwarded as HTML. PIPELINE.md 0.7.0 §3.3 calls this out at the stage-contract level; the dispatch checklist must enforce it.
-- **Self-host integration shim (S64 amendment).** `compiler/src/codegen/compat/parser-workarounds.js` exposes `setBPPOverrides(mod)` — runtime override hook that swaps in self-hosted BPP module implementations when available. Live in self-host integration. Without context, the shim looks like dead-code-with-getter; it isn't.
+- **BPP override hook (S64 amendment; re-scoped S447).** `compiler/src/codegen/compat/parser-workarounds.js` exposes `setBPPOverrides(mod)` / `getBPPOverrides()` — a runtime hook that swaps in replacement implementations of its four legacy helpers. It was built for the v1 self-hosted BPP module; that tree (`compiler/self-host/`) was retired S447, so no compiled module supplies one any more. It stays live for two callers: `compileScrml`'s `selfHostModules.bpp` option (installed for one compile, restored after) and the spy harness in `tests/integration/m6-5-parser-workarounds-noop-under-native.test.js`. Without context it looks like dead-code-with-getter; it isn't — its retirement is M6.8 (delete the whole file with the live BS+TAB path).
 - **Open SPEC-ISSUE registry (S64 amendment, scattered in SPEC prose).** Discoverable via `grep -ohE 'SPEC-ISSUE-[0-9]+' compiler/SPEC.md | sort -u`. As of 2026-05-06: **005** (HTML version target), **010-COMPONENT** (component overloading; pinned for queued debate-03), **012** (Tailwind variants/theming), **018** (SQL transactions), **025-027** (server `@var` initial-load semantics), §53.13.1-4 (named-shape registry, constraint arithmetic, type-alias for predicates, boolean predicates). 010-FUNCTION closed-without-resolution (debate-02 verdict). 013 closed 2026-03-27.
 - **Pipeline has TWO bookends the named-stage list doesn't show (S64 audit finding):**
   - **Pre-Stage-2 lint pass** — `compiler/src/lint-ghost-patterns.js` (~492 LOC) runs BEFORE Stage 2 BS. Scans for React/Vue/Svelte syntax and emits "did you mean?" warnings. The §11 anti-patterns table above is enforced at *both* doc-level AND lint-level by this pass. Catalog source: `scrml-support/docs/ghost-error-mitigation-plan.md`.

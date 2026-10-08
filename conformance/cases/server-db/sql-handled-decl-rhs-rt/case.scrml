@@ -1,0 +1,77 @@
+<program db="./app.db">
+    <schema>
+        notes {
+            id: integer primary key
+            body: text
+        }
+        empties {
+            id: integer primary key
+            body: text
+        }
+        gone {
+            id: integer primary key
+            body: text
+        }
+    </schema>
+    <hit> = "init"
+    <miss> = "init"
+    <failed> = "init"
+    <allHit> = -1
+    <allFailed> = -1
+    <reassigned> = "init"
+    <paren> = "init"
+    // §19.8.3 example 1's shape: a handled `?{}` as a declaration's right-hand side.
+    function getHit() {
+        const row = ?{`SELECT id, body FROM notes`}.get() !{
+            .QueryFailed(m) :> { return "failed:" + m }
+            _               :> not
+        }
+        return row is not ? "none" : row.body
+    }
+    function getMiss() {
+        const row = ?{`SELECT id, body FROM empties`}.get() !{
+            .QueryFailed(m) :> { return "failed:" + m }
+            _               :> not
+        }
+        return row is not ? "none" : row.body
+    }
+    function getFailed() {
+        const row = ?{`SELECT id, body FROM gone`}.get() !{
+            .QueryFailed(m) :> { return "failed" }
+            _               :> not
+        }
+        return row is not ? "none" : row.body
+    }
+    function countHit() {
+        const rows = ?{`SELECT id FROM notes`}.all() !{ _ :> [] }
+        return rows.length
+    }
+    function countFailed() {
+        const rows = ?{`SELECT id FROM gone`}.all() !{ _ :> [] }
+        return rows.length
+    }
+    function reassign() {
+        let row = not
+        row = ?{`SELECT id, body FROM notes`}.get() !{ _ :> not }
+        return row is not ? "none" : row.body
+    }
+    function parenthesized() {
+        const row = (?{`SELECT id, body FROM gone`}.get() !{ _ :> not })
+        return row is not ? "none" : row.body
+    }
+    function go() {
+        @hit = getHit() !{ .Transport(_) :> { return } }
+        @miss = getMiss() !{ .Transport(_) :> { return } }
+        @failed = getFailed() !{ .Transport(_) :> { return } }
+        @allHit = countHit() !{ .Transport(_) :> { return } }
+        @allFailed = countFailed() !{ .Transport(_) :> { return } }
+        @reassigned = reassign() !{ .Transport(_) :> { return } }
+        @paren = parenthesized() !{ .Transport(_) :> { return } }
+    }
+    <button id="go" onclick=go()>go</button>
+    <p id="hit">${@hit}</p>
+    <p id="miss">${@miss}</p>
+    <p id="failed">${@failed}</p>
+    <p id="all">${@allHit} ${@allFailed}</p>
+    <p id="re">${@reassigned} ${@paren}</p>
+</program>

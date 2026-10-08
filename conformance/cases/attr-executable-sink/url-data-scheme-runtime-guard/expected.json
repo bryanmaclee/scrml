@@ -1,0 +1,23 @@
+{
+  "id": "attr-executable-sink-url-data-scheme-runtime-guard",
+  "description": "§5.2 rule 3 (S457): a URL attribute whose scheme comes from data is judged at runtime on every write — a non-admitted scheme writes about:blank; relative URLs, safe schemes and a raster data:image on an image source are written unchanged; a literal relative prefix is not re-judged.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 3: every covered write \"whose value the compiler cannot prove safe\" — a quoted value whose literal prefix commits to no scheme, and every non-literal value, in every position incl. <each> rows, judged \"on every reactive re-write\". Admitted: no scheme, http/https/ftp/mailto/tel/sms, and a raster data:image only on an image-source attribute; \"Any other value SHALL be written as `about:blank`\". A literal relative prefix is admitted by rule 2 and \"is not re-judged\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "input": [{ "click": "#flip" }, { "wait": "settle" }],
+    "domAnchored": [
+      { "selector": "#q", "attr": { "href": "about:blank" } },
+      { "selector": "#e", "attr": { "href": "about:blank" } },
+      { "selector": "#g", "attr": { "href": "/ok?a=1" } },
+      { "selector": "#i", "attr": { "src": "data:image/png;base64,AAAA" } },
+      { "selector": "#h", "attr": { "href": "about:blank" } },
+      { "selector": "#r", "attr": { "href": "/rel/javascript:alert(1)" } },
+      { "selector": "#d", "attr": { "href": "about:blank" } },
+      { "selector": "#row-1", "attr": { "href": "about:blank" } },
+      { "selector": "#row-2", "attr": { "href": "https://example.com/" } }
+    ]
+  }
+}

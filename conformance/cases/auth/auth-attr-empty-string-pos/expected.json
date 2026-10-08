@@ -1,0 +1,22 @@
+{
+  "id": "auth-attr-empty-string-pos",
+  "description": "§52.13.2 (S449 ruling item 4; g-auth-attr-empty-string-is-silent-and-public) — `<program auth=\"\">` is E-AUTH-ATTR-INVALID. Before S449 the empty string was skipped as a 'boolean attribute' and compiled SILENTLY to a public app — the one literal with no diagnostic at all.",
+  "language-version": "1.0",
+  "spec": "§52.13.2",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "The ruling names `\"\"` explicitly. Ruling: user-voice-scrml.md S449 \"RULED — 'your recs.'\" item 4 — 'Unrecognized / non-literal `auth=` (incl. `\"\"`) = (a): compile error; amend §52.13.2 (supersedes its W-ATTR-002 + \"no auth gate\" SHALL).'",
+  "expect": {
+    "codes": [
+      "E-AUTH-ATTR-INVALID"
+    ],
+    "notCodes": [
+      "W-ATTR-002"
+    ],
+    "severity": {
+      "E-AUTH-ATTR-INVALID": "error"
+    },
+    "codeCounts": {
+      "E-AUTH-ATTR-INVALID": 1
+    }
+  }
+}

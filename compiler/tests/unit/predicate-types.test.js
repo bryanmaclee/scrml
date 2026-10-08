@@ -593,17 +593,19 @@ describe("§18 checkPredicateLiteral — named shapes are statically evaluated (
     expect(errors).toHaveLength(0);
   });
 
-  test("named shape against a NON-string value stays deferred (returns null, no double-fire)", () => {
-    // A base-type mismatch (number vs string-shape) is owned by the assignment
-    // type-check, not the predicate — the shape evaluator must not double-fire.
+  test("named shape against a NON-string literal is refused on its BASE type (E-CONTRACT-001, once)", () => {
+    // S458 (re-review R2-2): no other check owns this — E-TYPE-031 (§7.5.1) fires
+    // only for UNrefined annotations, so `let e: string(email) = 42` compiled
+    // with no error and (static zone) no runtime check. The literal evaluator now
+    // applies the same base-type test as the runtime judge.
     const predType = resolveTypeExpr("string(email)", emptyRegistry());
     expect(predType.kind).toBe("predicated");
     if (predType.kind !== "predicated") return;
 
     const errors = [];
     const result = checkPredicateLiteral(predType, 42, span(), errors);
-    expect(result).toBeNull();
-    expect(errors.some(e => e.code === "E-CONTRACT-001")).toBe(false);
+    expect(result).toBe(false);
+    expect(errors.filter(e => e.code === "E-CONTRACT-001")).toHaveLength(1);
   });
 });
 

@@ -1,0 +1,12 @@
+{
+  "id": "fn-sql-access-handled-reject",
+  "description": "§48.3.1 + §19.8.3 — a HANDLED `?{}` (`!{}` after the terminator) inside a pure `fn` body SHALL fire E-FN-001 exactly as the unhandled one does (`fn/sql-access-reject`): a bare statement `?{…}.get() !{…}`, a declaration `let row = ?{…}.get() !{…}`, and a `return ?{…}.all() !{…}` — one E-FN-001 per `fn`. The handler adds a failure path; it does not make the access pure. Pre-S455 (g-impl1-handled-sql-lowering-defects-s455 item 5) the `!{}` wrapped the statement in a `guarded-expr` the `fn` body walk never descended into, so all three compiled with NO E-FN-001 (fail-open).",
+  "language-version": "1.0",
+  "spec": "§48.3.1, §19.8.3",
+  "source-test": "compiler/tests/unit/s455-handled-sql-guard-consumers.test.js",
+  "rationale": "§48.3.1: a `fn` is a pure, deterministic value function and may not perform database operations; a `?{}` block in a `fn` body is E-FN-001 ('fires regardless of the execution context', §33.3). §19.8.3: a `!{}` handler on the query — written after the terminator — handles its failure; nothing in §19.8.3 exempts the query from any other rule.",
+  "expect": {
+    "codes": ["E-FN-001"],
+    "codeCounts": { "E-FN-001": 3 }
+  }
+}

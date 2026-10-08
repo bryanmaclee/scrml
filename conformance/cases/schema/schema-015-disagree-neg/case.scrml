@@ -1,0 +1,6 @@
+<program db="./app.db">
+    <schema>
+        -- old: CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)
+        CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)
+    </>
+</program>

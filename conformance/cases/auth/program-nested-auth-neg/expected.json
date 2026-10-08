@@ -1,0 +1,11 @@
+{
+  "id": "program-nested-auth-neg",
+  "description": "§4.12.2 (S443) — the remedy E-PROGRAM-NESTED-AUTH names: `auth=\"required\"` on the TOP-LEVEL `<program>`, none on the nested one. The top-level `<program>`'s `auth=` is valid and the nested `<program>` carries no `auth=`, so the error does NOT fire.",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §52.13",
+  "rationale": "§4.12.2 (S443): the error fires only for `auth=` on a nested `<program>`; `auth=` on the top-level `<program>` is the application-wide auth scope (§52.13).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROGRAM-NESTED-AUTH"]
+  }
+}

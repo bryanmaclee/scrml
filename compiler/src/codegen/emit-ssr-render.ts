@@ -45,6 +45,8 @@ import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
 import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 import { nsId } from "./chunk-namespace.ts";
+import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
+import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
 
 /**
  * The server-bundle runtime helper block for the SSR markup renderer. Injected
@@ -84,6 +86,21 @@ export const SSR_RENDER_HELPER: string = [
   "  return html.replace(_start, () => _start + rowsHtml);",
   "}",
   "",
+].join("\n");
+
+/**
+ * §5.2 rule 3 (S457) — the server copy of the runtime URL-attribute guard, for a server-rendered row
+ * attribute such as `<a href="${@.url}">`: the first paint is real HTML the browser acts on before
+ * the client bundle loads, so a `javascript:` URL from the row data must be blocked here too. It is
+ * the SAME source the client runtime's 'urlguard' chunk inlines (`runtime-url-guard.js`), injected by
+ * emit-server.ts after `SSR_RENDER_HELPER` only when a renderer emitted a `_scrml_safe_url(` call.
+ * Server-side there is no `_scrml_error_boundary_log`; the guard's report falls back to
+ * `console.error` (the server log).
+ */
+export const SSR_URL_GUARD_HELPER: string = [
+  "",
+  "// --- §5.2 URL-attribute scheme guard (server copy, first-paint rows; source: runtime-url-guard.js) ---",
+  URL_GUARD_RUNTIME_SOURCE,
 ].join("\n");
 
 /**
@@ -169,7 +186,7 @@ function interpText(logicNode: any): string {
  * `string-literal` values are supported — a `variable-ref`/`expr` attr value is a
  * reactive binding the renderer cannot evaluate.
  */
-function attrValueParts(valNode: any, iterVarName: string | null): string[] {
+function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name = "", attrs: any[] = []): string[] {
   if (valNode == null) return [JSON.stringify("")];
   if (typeof valNode !== "object" || valNode.kind !== "string-literal" || typeof valNode.value !== "string") {
     throw new SsrUnsupported("non-literal attribute value");
@@ -178,6 +195,27 @@ function attrValueParts(valNode: any, iterVarName: string | null): string[] {
   if (!raw.includes("${")) {
     // Static — compile-time escape once.
     return [JSON.stringify(escapeHtmlAttr(raw))];
+  }
+  // §5.2 rule 3 (S457) — a URL attribute whose literal prefix commits to no scheme
+  // (`href="${@.url}"`): the row data supplies the scheme, so the WHOLE value is built raw,
+  // passed through the guard, and escaped once — the guard must read the URL the browser
+  // will parse, not its escaped spelling.
+  // S457 — an SVG animation value (`to="${@.url}"` on `<set attributeName="href">`) likewise.
+  if (name && quotedUrlAttrNeedsGuard(tag, name, raw, attrs)) {
+    const segs: string[] = [];
+    let j = 0;
+    while (j < raw.length) {
+      const open = raw.indexOf("${", j);
+      if (open === -1) { segs.push(JSON.stringify(raw.slice(j))); break; }
+      if (open > j) segs.push(JSON.stringify(raw.slice(j, open)));
+      const close = raw.indexOf("}", open + 2);
+      if (close === -1) throw new SsrUnsupported("unterminated interpolation in attribute");
+      const inner = raw.slice(open + 2, close);
+      if (inner.includes("${")) throw new SsrUnsupported("nested interpolation in attribute");
+      segs.push(`String(${resolveRowRead(inner, iterVarName)})`);
+      j = close + 1;
+    }
+    return [`_scrml_esc_attr(${wrapUrlGuard("null", name, segs.join(" + "), urlGuardTarget(tag, name, attrs))})`];
   }
   // Split `${...}` interpolations out of the literal.
   const parts: string[] = [];
@@ -208,7 +246,7 @@ function isDroppableAttr(name: string): boolean {
  * Serialize one markup element's opening-tag attributes to JS string parts. A
  * conditional-visibility / directive / reactive attribute throws `SsrUnsupported`.
  */
-function attrsToParts(attrs: any[], iterVarName: string | null): string[] {
+function attrsToParts(attrs: any[], iterVarName: string | null, tag = ""): string[] {
   const parts: string[] = [];
   for (const attr of Array.isArray(attrs) ? attrs : []) {
     const name = attr && typeof attr.name === "string" ? attr.name : "";
@@ -223,7 +261,7 @@ function attrsToParts(attrs: any[], iterVarName: string | null): string[] {
       throw new SsrUnsupported(`unsupported attribute: ${name}`);
     }
     parts.push(JSON.stringify(` ${name}="`));
-    for (const p of attrValueParts(attr.value, iterVarName)) parts.push(p);
+    for (const p of attrValueParts(attr.value, iterVarName, tag, name, attrs)) parts.push(p);
     parts.push(JSON.stringify(`"`));
   }
   return parts;
@@ -285,7 +323,7 @@ function nodeToParts(
       parts.push(`_scrml_esc_attr(String(${keyReadExpr}))`);
       parts.push(JSON.stringify(`"`));
     }
-    for (const p of attrsToParts(node.attrs ?? node.attributes ?? [], iterVarName)) parts.push(p);
+    for (const p of attrsToParts(node.attrs ?? node.attributes ?? [], iterVarName, tag)) parts.push(p);
     parts.push(JSON.stringify(`>`));
 
     if (VOID_ELEMENTS.has(tag.toLowerCase())) {

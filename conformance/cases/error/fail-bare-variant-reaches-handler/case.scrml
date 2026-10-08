@@ -23,8 +23,8 @@ ${
 ${
     function handleMissing() {
         let r = load("missing") !{
-            | .NotFound(mid) :> @phase = Phase.Missing(mid)
-            | .Timeout :> @phase = Phase.TimedOut
+            .NotFound(mid) :> @phase = Phase.Missing(mid)
+            .Timeout :> @phase = Phase.TimedOut
         }
     }
 }

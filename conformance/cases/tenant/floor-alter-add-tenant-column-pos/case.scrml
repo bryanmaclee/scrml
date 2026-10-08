@@ -1,0 +1,13 @@
+<program db="./app.db">
+    <schema>
+        ?{`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`}
+        ?{`ALTER TABLE notes ADD COLUMN tenant_id TEXT`}
+    </>
+    // The ALTER gives `notes` its tenant_id column, so `notes` IS tenant-scoped.
+    ${
+        function mine() {
+            return ?{`SELECT body FROM notes`}.all()
+        }
+    }
+    <button onclick=${ mine() }>mine</button>
+</program>
