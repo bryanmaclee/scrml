@@ -30,11 +30,73 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 244 | 6 |
-| MED | 535 | 4 |
-| LOW | 303 | 0 |
+| HIGH | 245 | 6 |
+| MED | 545 | 4 |
+| LOW | 307 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
+
+<!-- @gap id=g-component-block-lambda-emits-empty-body-s458 sev=HIGH status=open locus=compiler/src/codegen/emit-expr.ts(structured lambda block body printed as a comment)+compiler/native-parser re-parse of component bodies prov=review:s458-d1-r3 -->
+
+`[1].forEach(x => { if (x < k) { acc = 5 } })` in a component body leaves `acc` 0 (want 5); outside a component it is 5. Same on main. Found by the S458 D1 reviews; not caused by D1.
+
+### g-component-cstyle-for-init-dropped-native-reparse-s458 — a declaration-form `for (let n = 0; …)` in a component-body function loses its initializer (`makeForStmtCStyle` turns the VarDecl into an escape hatch with empty raw) → E-SCOPE-001 on the loop variable — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-component-cstyle-for-init-dropped-native-reparse-s458 sev=MED status=open locus=compiler/native-parser/translate-stmt.js(makeForStmtCStyle) prov=empirical:s458-d1-r3 -->
+
+### g-component-body-const-not-per-instance-s458 — a component whose body declares `const`s cannot be instantiated twice (module-scope redeclaration → SyntaxError at load) nor used in `<each>` (E-EACH-BODY-DECL-UNSUPPORTED) — the §66.15.1 per-instance-state divergence — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-component-body-const-not-per-instance-s458 sev=MED status=open locus=compiler/src/component-expander.ts(body decl hoisting) prov=empirical:s458-d1-r2 -->
+
+### g-component-body-expr-attr-dropped-s458 — non-handler expression attributes in component bodies (`title=(…)`, `title=${…}`, `title=fmt(1).trim()`) emit nothing, silently — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-component-body-expr-attr-dropped-s458 sev=MED status=open locus=searched:compiler/src/component-expander.ts,compiler/src/codegen/emit-html.ts(W-CG-VALUE-ATTR-COMPONENT-PROP path) prov=review:s457-unquoted-values-r2 -->
+
+### g-onclient-inline-block-handler-dropped-s458 — `onclient:close={ … }` (and open/error) inline-block channel handlers are dropped silently (`channelAttrToCall` returns null for `expr` values) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-onclient-inline-block-handler-dropped-s458 sev=MED status=open locus=compiler/src/codegen/emit-channel.ts(channelAttrToCall) prov=review:s457-unquoted-values-r2 -->
+
+### g-recursive-component-stack-overflow-s458 — a recursive component crashes the compiler with "Maximum call stack size exceeded" (`samples/compilation-tests/gauntlet-s19-phase4/nested-comments.scrml`) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-recursive-component-stack-overflow-s458 sev=MED status=open locus=compiler/src/component-expander.ts(expansion recursion, no cycle guard) prov=empirical:s457-unquoted-values-r2 -->
+
+### g-meta-eval-serializer-drops-unknown-statements-s458 — in a compile-time `^{}`, `serializeNode`'s default branch returns "" for statement kinds it does not handle — a `while` loop is silently dropped (the checker admits it; the evaluator never runs it) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-meta-eval-serializer-drops-unknown-statements-s458 sev=MED status=open locus=compiler/src/meta-eval.ts(serializeNode default branch) prov=empirical:s458-meta-allow-list-land -->
+
+### g-meta-emit-reparse-single-quoted-attr-misread-s458 — `emit("<p class='a b'>")` re-parses as attributes `class`, `a`, `b` and produces broken HTML silently; source code gets E-ATTR-001 for the same text (the emit re-parse uses a different reader) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-meta-emit-reparse-single-quoted-attr-misread-s458 sev=MED status=open locus=compiler/src/meta-eval.ts(emit output re-parse via nativeParseFile) prov=empirical:s458-meta-allow-list-land -->
+
+### g-runtime-registries-plain-object-keys-s458 — the runtime keeps cells / subscribers / the type registry in plain `{}` objects keyed by author-controlled names: a cell named `constructor` breaks subscription (`push is not a function`), and `meta.get("constructor")` returns the page's `Object` (a prototype walk then reaches `Function` from a runtime `^{}` body) — `NEW S458; MED; open (fix in flight on the meta allow-list branch)`
+
+<!-- @gap id=g-runtime-registries-plain-object-keys-s458 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_state, _scrml_subscribers, type registry) prov=review:s458-meta-r4(executed) -->
+
+### g-client-fn-param-reassign-emits-const-s458 — reassigning an unrefined client function parameter (`function f(p) { p = v }`) emits `const p = v` → E-CODEGEN-INVALID-LOGIC (the client emitter's declaredNames is not seeded with params) — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-client-fn-param-reassign-emits-const-s458 sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(declaredNames seeding) prov=empirical:s458-refinement-slice2a -->
+
+### g-attr-cell-ref-emits-static-value-s458 — `title=@s`, `hidden=@ok`, `title=@s.length` emit a STATIC value, contrary to §5.2 ("`attr=name` SHALL pass the runtime value"); `title=@list[0]` / `title=f(1).n` are reactive — `NEW S458; MED; open (pre-existing)`
+
+<!-- @gap id=g-attr-cell-ref-emits-static-value-s458 sev=MED status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/codegen/emit-html.ts(variable-ref attr lowering) prov=review:s457-unquoted-values-r1 -->
+
+### g-event-free-reference-in-logic-allowlisted-s458 — `event` is in the type system's global allowlist, so a free `event` in a function body / engine timer / poll or request body is never E-SCOPE-001 and resolves to the deprecated `window.event` (e.g. SPEC §19's `submitForm()` sample) — `NEW S458; LOW; open (removing it is newly-rejecting)`
+
+<!-- @gap id=g-event-free-reference-in-logic-allowlisted-s458 sev=LOW status=open locus=compiler/src/type-system.ts(global allowlist) prov=empirical:s457-unquoted-values-r3 -->
+
+### g-value-only-module-drops-local-enum-s458 — a value-only server module drops a module-local enum an exported const references (`export const DEFAULT_TIER = Tier.Gold` → ReferenceError at import) — `NEW S458; LOW; open (pre-existing)`
+
+<!-- @gap id=g-value-only-module-drops-local-enum-s458 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(generateValueOnlyServerJs) prov=review:s457-host-global-alias-r1 -->
+
+### g-imported-host-name-collides-with-generated-export-s458 — `import { fetch } from './helpers.scrml'` beside server functions → E-CODEGEN-INVALID-LOGIC "compiler defect" (collides with the bundle's `export async function fetch`); E-CG-016 covers declared names, not imported ones — `NEW S458; LOW; open (pre-existing)`
+
+<!-- @gap id=g-imported-host-name-collides-with-generated-export-s458 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(E-CG-016 peer check) prov=review:s457-host-global-alias-r1 -->
+
+### g-user-binding-named-eval-refused-as-compiler-defect-s458 — `server function eval` / top-level `const eval` reach only the emitted-artifact gate (E-CODEGEN-INVALID-LOGIC "compiler defect", strict-mode `Binding eval`); needs a front-end diagnostic naming the cause — `NEW S458; LOW; open (pre-existing)`
+
+<!-- @gap id=g-user-binding-named-eval-refused-as-compiler-defect-s458 sev=LOW status=open locus=searched:compiler/src/type-system.ts,compiler/src/codegen/validate-emit.ts prov=empirical:s457-host-global-alias -->
 
 ### g-refinement-union-member-unchecked-s458 — a refinement inside a union other than `T | not` (`number(>0) | string`) gets no check — `NEW S458; MED; open (slice 2)`
 

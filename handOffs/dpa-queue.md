@@ -3948,3 +3948,9 @@ boundary — newline vs `|` legacy); one grammar for `!{}` arms, `match` arms, e
 language-wide"); the `scrml fix` impact (the `{ return }` the F8 rule writes would simplify — or stay valid); widen-vs-limit is
 fork-rule row 1, so show worked adopter code for both and the reversibility (newly-accepting = one-way door). Must read §18.2,
 §18.3, §19.4.3 (value vs statement position), §19.4.5, §19.9.10, §51.0.S message arms IN FULL. R2; bryan rules.
+
+## [dpa-069] deep-dive — O18: what an attribute on a plain use of a component / declaration IS (markup attribute vs construction data)
+`status:    banked`
+banked:     S458 2026-10-08 (PA, from the D1 build — bryan ruled D1 "declared props never reach the root"; this is the UNDECLARED half D1 left)
+
+The question: §66.6.7 leaves OPEN (O18) whether `class=` / `style=` / `key=` on a plain use are markup attributes or construction data, and O18 does not even name `id=`. Today impl#1 falls UNDECLARED call-site attributes through to the expanded root (the S457 sinks pins depend on it), §15.5 and §15.10 contradict each other on `id=`, the bootstrap refuses `class=` on a use (`E-DECL-USE-ATTR`, no §34 row) while §66.15.1 says "class merging carries over". Decide one rule for undeclared use-site attributes: fall through (which ones? merge semantics for class/style?), refuse (E-DECL-USE-ATTR, newly-rejecting — measure), or construction data. Show worked adopter code (a Card used with `class="wide"`, `id="main"`, `style=…`, `aria-*`, `data-*`, an `on…` handler) under each pole; fork-rule rows 1–4 (limit vs widen; fail-closed; reversibility; root vs position); the sink interaction (S456/S457 executable-sink checks on fallthrough attributes); the impl#1 vs bootstrap divergence. Must read §15.5, §15.10, §66.6, §66.14, §66.15, §66.22 O18, the D1 progress (`docs/changes/s458-declared-props-d1/progress.md` on the D1 branch), the sinks conformance cases `conformance/cases/attr-executable-sink/undeclared-attr-*`.

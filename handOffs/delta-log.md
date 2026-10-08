@@ -4317,3 +4317,12 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3779] land · s457-no-artifacts-on-error (1a) — any Error → no artifact, every entry point; differential review LAND-WITH-NITS (no writing path found; successes byte-identical); PA fixed 2 nits · @adv:g-impl1-artifacts-written-on-error-s451
 [3780] land · #1348 s457-no-artifacts-on-error (1a) · @adv:g-impl1-artifacts-written-on-error-s451
 [3781] state · S457 WRAP — 8 PRs (#1340–#1344, #1346–#1348) + #1333 closed; in flight: #1345 (CI pins), sinks branch, re-export/dev-tenant branch, meta allow-list (held on bryan (a)/(b)); briefs 2a / 3a+4a queued; 11 rulings + 2 PA readings · → hand-off §S457
+[3930] ruling · S458 "1a, D1, refinement next. go" — ^{} allow-list migrates meta-cleanup-001 to meta.interval; D1 declared props never reach the root; refinement checks next · @adv:g-meta-code-runs-unsandboxed-in-the-compiler-process-s457,g-declared-prop-reaches-expanded-root-s457,g-refinement-checks-absent-in-n-positions-s457
+[3931] land · #1345 scope-aware user-fn rename + _scrml_ compiler locals + unquoted handler call chains read whole (S457) · @adv:g-user-fn-id-kills-click-dispatch-s457
+[3932] land · #1350 maps refresh (S457)
+[3933] land · #1351 srcdoc / SVG animation / event-text executable sinks (S457, 3 review rounds) · @adv:g-srcdoc-unquoted-expression-not-refused-s457,g-svg-animation-and-meta-refresh-url-sinks-s456
+[3934] ruling · S458 "your recs on R1-R5, go" — refinement R1 base column + boundary + CHECK + whole-load failure; R2 500 no echo; R3 throw + keep prior; R4 space-separated + in-paren shared-core are refinements, dot-chain refused, no cross-field; R5 renumber · @adv:g-refinement-checks-absent-in-n-positions-s457
+[3935] land · #1352 .scrml re-exports reach server/client/page; scrml dev tenant gate; re-export cycles/missing names/files refused · @adv:g-server-reexport-of-scrml-module-fails-to-link-s456,g-tenant-startup-check-built-server-only-s456
+[3936] land · #1353 Windows EBUSY in dev tenant-gate test cleanup (main windows red after #1352 auto-merged at its previous head)
+[3937] land · #1354 §53 refinement slice 1 — one reader, base-type-first judge fails closed, annotations read whole · @adv:g-refinement-checks-absent-in-n-positions-s457
+[3938] state · S458 WRAP — 6 PRs (#1345 #1350–#1354); weekly API limit stopped every agent (resets 2026-10-11 23:00 MT); parked branches + salvage patches in hand-off §S458

@@ -785,6 +785,22 @@ bathwater go out?*
 
 **12 PRs landed.** Full session stream in `handOffs/delta-log.md`.
 
+### 2026-10-08 — S458: the S457 in-flight branches landed, the §53 refinement arc opened (slice 1 landed), six review-gated branches parked at the weekly API limit
+
+Rulings (user-voice §S458): "1a, D1, refinement next. go" · "your recs on R1-R5, go". Every code landing took ≥1 S239 differential review; the sinks, re-export and refinement branches each took 2–3 rounds. Ended early: a network outage killed all six live agents once (resumed, nothing lost), then the weekly API limit stopped every agent (resets 2026-10-11 23:00 MT).
+
+**Landed (6 PRs):**
+- **#1345** scope-aware user-function rename; compiler locals in the `_scrml_` namespace; unquoted handler call chains read whole (S457) — plus 9 browser-tier spelling pins.
+- **#1350** maps refresh (S457).
+- **#1351** srcdoc / SVG animation / event-text executable sinks refused or guarded (S457, three review rounds) — landed onto #1345 by 3-way apply.
+- **#1352** `.scrml` re-exports reach server bundle / client registry / page order; `scrml dev` runs the undeclared-tenant-table startup gate; re-export cycles E-IMPORT-002, missing name/file E-IMPORT-004/006, memoised `export *` (77.9 s → 0.25 s on a depth-16 lattice); stdlib `TableSort` exported.
+- **#1353** Windows EBUSY in the dev tenant-gate test cleanup (main's `windows` job went red when #1352 auto-merged at its previous head).
+- **#1354** §53 refinement slice 1: one reader (the codegen regex mirror deleted), a base-type-first judge that fails closed (no `if (!(true))`), every annotation read whole, §55.3 in-paren shared-core words judged, E-CONTRACT-002 also = malformed predicate. The README flagship `createTask(text: string(.length >= 1))` was never enforced on main (`""` → 200).
+
+**Parked at the API limit (branches + salvage patches, see hand-off):** `^{}` allow-list (1a) — 4 review rounds, boundary moved to a capture object + emitted-text check; host-global alias (S457 2a) — `data:`-module import, CI gate `scripts/host-global-scan.ts`; unquoted values + `event` (S457 3a/4a) — one shared reader, E-EVENT-UNBOUND on emitted text; D1 declared props — round 4 (one scope model); refinement slice 2a fix round (judge at the runtime cell setter, hoisted judges).
+
+**Durable:** the same lesson six times — wherever a check and the emitter read the same thing through different readers (two attribute readers, two scope models, a text fallback beside a tree substituter, a deny-list beside an allow-list, a per-site judge beside a setter), the review found the gap between them. Every fix that held moved the boundary to ONE reader on the text/tree the runtime executes.
+
 ### 2026-10-07 — S457: injection sinks and SQL checks moved to the text the runtime executes; `__scrml_` reserved; failed compiles write nothing
 
 Security-heavy session. Every landing was the S456 "two readers of one text" class, closed by moving the check to where the runtime reads (or refusing at the source). Eleven rulings (user-voice §S457). Eight PRs, each with ≥1 differential S239 review (several 2–6 rounds); adopter issue #1333 closed.
