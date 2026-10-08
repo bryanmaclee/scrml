@@ -82,7 +82,7 @@ describe("S453 — an async-coloured event listener logs its rejection", () => {
   test("delegated (click) — the registry entry carries the catch arm", () => {
     const r = emit(`<button id="b" onclick=\${${ASYNC_H}}>b</button>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toContain("async function(event)");
+    expect(r.js).toContain("async function(_scrml_event)");
     const arms = catchArms(r.js);
     expect(arms.length).toBe(1);
     expect(arms[0]).toMatch(/^onclick /);
@@ -91,7 +91,7 @@ describe("S453 — an async-coloured event listener logs its rejection", () => {
   test("non-delegable (input) — the element-scoped dispatch map carries it", () => {
     const r = emit(`<input id="b" oninput=\${${ASYNC_H}} />`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toContain("async function(event)");
+    expect(r.js).toContain("async function(_scrml_event)");
     const arms = catchArms(r.js);
     expect(arms.length).toBe(1);
     expect(arms[0]).toMatch(/^oninput /);
@@ -109,7 +109,7 @@ describe("S453 — an async-coloured event listener logs its rejection", () => {
     );
     expect(r.errs).toEqual([]);
     // The factory exists AND what it returns is the async listener.
-    expect(r.js).toMatch(/function _scrml_armh_\w+\([^)]*\) \{ return async function\(event\)/);
+    expect(r.js).toMatch(/function _scrml_armh_\w+\([^)]*\) \{ return async function\(_scrml_event\)/);
     const arms = catchArms(r.js);
     expect(arms.length).toBe(1);
     expect(arms[0]).toMatch(/^onclick /);
@@ -118,14 +118,14 @@ describe("S453 — an async-coloured event listener logs its rejection", () => {
   test("<each> row listener (emit-each colorActiveHandler) carries it", () => {
     const r = emit(`<ul><each in=@rows key=@.id as r><li><button id="b" onclick=\${${ASYNC_H}}>b</button></li></each></ul>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toContain("async function(event)");
+    expect(r.js).toContain("async function(_scrml_event)");
     expect(catchArms(r.js)).toEqual([expect.stringMatching(/^onclick <each> row$/)]);
   });
 
   test("for … lift row listener (emit-lift colorActiveHandler) carries it", () => {
     const r = emit(`<ul>\${ for (r of @rows) { lift <li><button id="b" onclick=\${${ASYNC_H}}>b</button></li>; } }</ul>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toContain("async function(event)");
+    expect(r.js).toContain("async function(_scrml_event)");
     expect(catchArms(r.js)).toEqual([expect.stringMatching(/^onclick lift row$/)]);
   });
 
@@ -174,18 +174,18 @@ describe("S453 — an async-coloured event listener logs its rejection", () => {
     // listener itself must stay the `async` function — a sync listener firing an
     // async IIFE would push preventDefault past a microtask boundary, by which
     // time the browser has already committed the submit.
-    const r = emit(`<form id="f" onsubmit=\${event.preventDefault(); if (@c) { @x = save(); @y = @x + 1 }}><button>go</button></form>`);
+    const r = emit(`<form id="f" onsubmit=\${(event) => { event.preventDefault(); if (@c) { @x = save(); @y = @x + 1 } }}><button>go</button></form>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/async function\(event\) \{ try \{\s*event\.preventDefault\(\);/);
+    expect(r.js).toMatch(/async \(?event\)? => \{ try \{\s*event\.preventDefault\(\);/);
     expect(r.js).toMatch(/await _scrml_fetch_save_/);
     // and NOT the IIFE shape, which would push preventDefault past a microtask
-    expect(r.js).not.toMatch(/function\(event\) \{ \(async \(\) =>/);
+    expect(r.js).not.toMatch(/=> \{ \(async \(\) =>/);
     expect(catchArms(r.js)).toEqual(["onsubmit _scrml_attr_onsubmit_2"]);
   });
 
   test("the try opens immediately inside the async listener body", () => {
     const r = emit(`<button id="b" onclick=\${${ASYNC_H}}>b</button>`);
-    expect(r.js).toMatch(/async function\(event\) \{ try \{/);
+    expect(r.js).toMatch(/async function\(_scrml_event\) \{ try \{/);
   });
 
   test("the log is reached through exactly ONE arm per listener (no double-log)", () => {
@@ -214,7 +214,7 @@ describe("S453 — a listener that is NOT coloured async is untouched", () => {
     const r = emit(`<button id="b" onclick=\${${SYNC_H}}>b</button>`);
     expect(r.errs).toEqual([]);
     expect(r.js).not.toContain("_scrml_error_boundary_log");
-    expect(r.js).not.toContain("async function(event)");
+    expect(r.js).not.toContain("async function(_scrml_event)");
   });
 
   test("a sole-root server-call write keeps the §13.2 fire-and-forget skip", () => {
@@ -223,7 +223,7 @@ describe("S453 — a listener that is NOT coloured async is untouched", () => {
     // own `.catch` arm. S453 must not add a second one, nor colour it async.
     const r = emit(`<button id="b" onclick=\${@x = save()}>b</button>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).not.toContain("async function(event)");
+    expect(r.js).not.toContain("async function(_scrml_event)");
     expect(catchArms(r.js)).toEqual([]);
     // the pre-existing detached arm is still there, unchanged
     expect(r.js).toMatch(/\)\(\)\.catch\(_scrml_async_err => _scrml_error_boundary_log\(/);
@@ -239,7 +239,7 @@ describe("S453 — a listener that is NOT coloured async is untouched", () => {
 // ---------------------------------------------------------------------------
 // BODY SHAPES — exercised directly against the seam, because THE CORPUS CANNOT
 // PRODUCE THEM. The wide emit differential covers 57 async-coloured listener
-// sites and every one of them is a block-bodied `function(event) { … }`: a
+// sites and every one of them is a block-bodied `function(_scrml_event) { … }`: a
 // parenthesized concise arrow body appears nowhere in it. One of those shapes
 // DID break during this arc — `(e) => ({ a: save() })` emitted
 // `=> ({ try { … } })`, an object literal with a property named `try`, i.e. a
@@ -253,7 +253,7 @@ describe("S453 — the wrap is correct for every function-body shape", () => {
   const facts = (n) => (n === "save" ? { root: { kind: "server", via: "save" }, local: false } : null);
 
   const SHAPES = [
-    ["block body, function expression", `function(event) { save(); }`],
+    ["block body, function expression", `function(_scrml_event) { save(); }`],
     ["block body, arrow", `(event) => { save(); }`],
     ["concise arrow body", `(event) => save()`],
     ["concise arrow body, parenthesized call", `(event) => (save())`],
@@ -291,13 +291,13 @@ describe("S453 — the wrap is correct for every function-body shape", () => {
   ];
   for (const [prologue, label] of PROLOGUES) {
     test(`a directive prologue (${label}) keeps the arm AND stays a directive`, () => {
-      const r = colorAsyncFunctionExpr(`function(event) { ${prologue}; save(); }`, facts, { boundaryId: "onclick X" });
+      const r = colorAsyncFunctionExpr(`function(_scrml_event) { ${prologue}; save(); }`, facts, { boundaryId: "onclick X" });
       expect(r).not.toBeNull();
       expect(r.rootAsync).toBe(true);
       // THE BITE: the arm exists at all (0 before the fix round).
       expect(r.code).toContain('_scrml_error_boundary_log("onclick X"');
       // and the prologue is still in DIRECTIVE POSITION — before the `try`, not inside it
-      expect(r.code).toMatch(new RegExp(`^async function\\(event\\) \\{\\s*${prologue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")};\\s*try \\{`));
+      expect(r.code).toMatch(new RegExp(`^async function\\(_scrml_event\\) \\{\\s*${prologue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")};\\s*try \\{`));
       expect(r.code).not.toMatch(/try \{\s*"use strict"/);
       expect(() => new Function(`return (${r.code});`)).not.toThrow();
     });
@@ -310,7 +310,7 @@ describe("S453 — the wrap is correct for every function-body shape", () => {
     // does NOT throw: an error-based probe would be circular here, since the
     // rejection arm is exactly what catches it.
     const r = colorAsyncFunctionExpr(
-      `function(event) { "use strict"; save(); probe(); }`, facts, { boundaryId: "onclick X" },
+      `function(_scrml_event) { "use strict"; save(); probe(); }`, facts, { boundaryId: "onclick X" },
     );
     expect(r.code).toContain('_scrml_error_boundary_log("onclick X"');
     let seenThis = "not-run";
@@ -328,7 +328,7 @@ describe("S453 — the wrap is correct for every function-body shape", () => {
     // body, so the default name can genuinely collide. Shadowing would still
     // compile, but would read as if the outer arm bound the inner error.
     const r = colorAsyncFunctionExpr(
-      `function(event) { p.catch(_scrml_async_err => 0); save(); }`, facts, { boundaryId: "onclick X" },
+      `function(_scrml_event) { p.catch(_scrml_async_err => 0); save(); }`, facts, { boundaryId: "onclick X" },
     );
     expect(r.code).toContain("catch (_scrml_async_err_2)");
     expect(r.code).toContain('_scrml_error_boundary_log("onclick X", _scrml_async_err_2)');
@@ -336,14 +336,14 @@ describe("S453 — the wrap is correct for every function-body shape", () => {
   });
 
   test("a body the analysis does not colour async is returned verbatim", () => {
-    const src = `function(event) { notAsync(); }`;
+    const src = `function(_scrml_event) { notAsync(); }`;
     const r = colorAsyncFunctionExpr(src, facts);
     expect(r.rootAsync).toBe(false);
     expect(r.code).toBe(src);
   });
 
   test("the default boundary id is used when a site passes none", () => {
-    const r = colorAsyncFunctionExpr(`function(event) { save(); }`, facts);
+    const r = colorAsyncFunctionExpr(`function(_scrml_event) { save(); }`, facts);
     expect(r.code).toContain('_scrml_error_boundary_log("event handler"');
   });
 });

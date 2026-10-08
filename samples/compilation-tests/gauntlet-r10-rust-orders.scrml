@@ -165,12 +165,12 @@ ${
             <input
                 type="text"
                 placeholder="Customer name"
-                oninput=${ @newCustomer = event.target.value }
+                oninput=${(e) => @newCustomer = e.target.value}
             />
             <input
                 type="text"
                 placeholder="Item description"
-                oninput=${ @newItem = event.target.value }
+                oninput=${(e) => @newItem = e.target.value}
             />
             <button onclick=addOrder()>Create Order</>
         </div>

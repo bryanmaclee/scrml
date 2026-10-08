@@ -63,7 +63,7 @@ describe("§A Inline worker round-trip (§4.12.4)", () => {
     const { cgOut } = fullPipeline(src);
     const workerJs = getOutput(cgOut).workerBundles.get("doubler");
     expect(workerJs).toContain("self.postMessage({ replyTo: replyTo, data: data })");
-    expect(workerJs).toContain("const _scrml_reply_to = event.data.id;");
+    expect(workerJs).toContain("const _scrml_reply_to = _scrml_event.data.id;");
     expect(workerJs).toContain("_scrml_reply(_scrml_reply_to, ");
     expect(workerJs).not.toMatch(/(?<![\w$.])send\s*\(/);
   });

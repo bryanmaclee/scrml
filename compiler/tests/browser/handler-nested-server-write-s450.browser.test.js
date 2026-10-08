@@ -247,8 +247,8 @@ describe("S450 — emit pins", () => {
     test(`${pos}: \`\${@x = save()}\` keeps the fire-and-forget emit`, () => {
       const app = mount(program(pos, "@x = save()"));
       expect(app.errs).toEqual([]);
-      expect(app.clientJs).not.toMatch(/async function\(event\)/);
-      expect(app.clientJs).toMatch(/function\(event\) \{ (?:[^\n]*; )?\(async \(\) => _scrml_cs_reactive_set\("x", await _scrml_fetch_save_/);
+      expect(app.clientJs).not.toMatch(/async function\(_scrml_event\)/);
+      expect(app.clientJs).toMatch(/function\(_scrml_event\) \{ (?:[^\n]*; )?\(async \(\) => _scrml_cs_reactive_set\("x", await _scrml_fetch_save_/);
       expect(app.clientJs).toContain('.catch(_scrml_async_err => _scrml_error_boundary_log("x", _scrml_async_err))');
     });
   }
@@ -258,7 +258,7 @@ describe("S450 — emit pins", () => {
     expect(app.errs).toEqual([]);
     const line = lineOf(app.clientJs);
     expect(line).toBeDefined();
-    expect(line).toContain(': function(event) { (async () => _scrml_cs_reactive_set("x", await _scrml_fetch_save_');
+    expect(line).toContain(': function(_scrml_event) { (async () => _scrml_cs_reactive_set("x", await _scrml_fetch_save_');
   });
   test("top level: a write nested in an `if` is awaited in place in an `async` listener", () => {
     const app = mount(program("top level", "if (@c) { @x = save(); @y = @x + 1 }"));
@@ -267,7 +267,7 @@ describe("S450 — emit pins", () => {
     // the rejection log). What this pin is FOR is the await-in-place, which is
     // unchanged; the `try {` is threaded through so the pin still bites on the
     // thing it pins.
-    expect(app.clientJs).toMatch(/: async function\(event\) \{ try \{ if \(/);
+    expect(app.clientJs).toMatch(/: async function\(_scrml_event\) \{ try \{ if \(/);
     expect(app.clientJs).toContain('_scrml_cs_reactive_set("x", await _scrml_fetch_save_');
     expect(app.clientJs).not.toContain('(async () => _scrml_cs_reactive_set("x"');
   });
@@ -275,7 +275,7 @@ describe("S450 — emit pins", () => {
     const app = mount(program("top level", "match (@cur) { .Note(t) => { @x = save(); @y = @x + 1 } .Empty => { @y = 0 } }"));
     expect(app.errs).toEqual([]);
     // S453 — `try {` as above; the arm IIFE being async + awaited is the pin.
-    expect(app.clientJs).toMatch(/: async function\(event\) \{ try \{ await \(async function\(\) \{/);
+    expect(app.clientJs).toMatch(/: async function\(_scrml_event\) \{ try \{ await \(async function\(\) \{/);
   });
   test("a write inside a callback handed to a scheduler is not in the handler's sequence — unchanged", () => {
     const app = mount(program("top level", "setTimeout(() => { @x = save() }, 0)"));
@@ -352,8 +352,9 @@ describe("S453 — a rejecting nested write is logged, not escaped (bryan S449 r
 // the nested write is now awaited, so an event-control call after it in the handler
 // runs after the first await. Corpus exposure: 0.
 describe("S450 — event control after a nested awaited write is E-EVENT-CONTROL-AFTER-AWAIT", () => {
-  test("`${ if (@c) { @x = save(); event.preventDefault() } }`", () => {
-    const app = mount(program("top level", "if (@c) { @x = save(); event.preventDefault() }"));
+  // s457 3a — a handler that uses the event takes it as a parameter (E-EVENT-UNBOUND otherwise).
+  test("`${(event) => { if (@c) { @x = save(); event.preventDefault() } }}`", () => {
+    const app = mount(program("top level", "(event) => { if (@c) { @x = save(); event.preventDefault() } }"));
     expect(app.errs).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("closure form `${(e) => { if (@c) { @x = save(); e.preventDefault() } }}`", () => {
@@ -361,7 +362,7 @@ describe("S450 — event control after a nested awaited write is E-EVENT-CONTROL
     expect(app.errs).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("control BEFORE the write stays legal", () => {
-    const app = mount(program("top level", "if (@c) { event.preventDefault(); @x = save(); @y = @x + 1 }"));
+    const app = mount(program("top level", "(event) => { if (@c) { event.preventDefault(); @x = save(); @y = @x + 1 } }"));
     expect(app.errs).toEqual([]);
   });
 });

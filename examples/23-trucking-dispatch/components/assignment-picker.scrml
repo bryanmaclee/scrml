@@ -15,7 +15,7 @@ ${
         currentTractorId?: number,
         currentTrailerId?: number,
         onAssign: asIs,
-    } onsubmit=onAssign(event)>
+    } onsubmit=${(e) => onAssign(e)}>
         <h3 class="text-sm font-semibold text-slate-900 mb-3">
             Assign equipment
         </h3>

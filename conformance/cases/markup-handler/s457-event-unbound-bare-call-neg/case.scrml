@@ -1,0 +1,4 @@
+<v> = ""
+${ function setV(x) { @v = x } }
+
+<input oninput=setV(event.target.value)>

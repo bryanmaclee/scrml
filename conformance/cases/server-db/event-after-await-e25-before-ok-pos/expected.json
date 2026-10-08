@@ -1,6 +1,6 @@
 {
   "id": "server-db-event-after-await-e25-before-ok-pos",
-  "description": "s441 round 4 control. A handler with an awaited server call and `event.preventDefault()` BEFORE the first await compiles: the event poisoning follows the handler's event BINDING (scope-resolved), not the name, and applies only after the first await.",
+  "description": "s441 round 4 control. A handler with an awaited server call and `event.preventDefault()` BEFORE the first await compiles: the event poisoning follows the handler's event BINDING (scope-resolved), not the name, and applies only after the first await. (s457 3a: the handler takes the event as the parameter of a `${(event) => { … }}` listener — a compiler-wrapped handler does not bind `event`, SPEC §5.2.)",
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
   "spec": "\u00a713.2",

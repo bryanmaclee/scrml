@@ -1,0 +1,3 @@
+<v> = ""
+
+<button onclick={ @v = event.type }>go</>

@@ -1,6 +1,6 @@
 {
   "id": "server-db-event-control-after-await-bracket-neg",
-  "description": "s441 fix round 3 (review N2). A handler that awaits a server call calls preventDefault through string-literal bracket access (`event[\"preventDefault\"]()`) after that await. The browser has already submitted the form by then (reviewer-executed: defaultPrevented false on the branch, true on main before the handler became async). Round 2 matched only a direct `event.preventDefault()`; the event is now followed by binding through aliases, bracket access and closures, and the build fails closed.",
+  "description": "s441 fix round 3 (review N2). A handler that awaits a server call calls preventDefault through string-literal bracket access (`event[\"preventDefault\"]()`) after that await. The browser has already submitted the form by then (reviewer-executed: defaultPrevented false on the branch, true on main before the handler became async). Round 2 matched only a direct `event.preventDefault()`; the event is now followed by binding through aliases, bracket access and closures, and the build fails closed. (s457 3a: the handler takes the event as the parameter of a `${(event) => { … }}` listener — a compiler-wrapped handler does not bind `event`, SPEC §5.2.)",
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
   "spec": "\u00a713.2",

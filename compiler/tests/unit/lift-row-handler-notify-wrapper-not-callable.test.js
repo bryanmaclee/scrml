@@ -54,7 +54,7 @@ const PUSH_ROW = `<program>
 `;
 
 describe("lift-row handler: the §6.5.1 notify wrapper is a call, not a callable", () => {
-  test("a mutating-method handler in a lift row is wrapped in function(event){…}", () => {
+  test("a mutating-method handler in a lift row is wrapped in function(_scrml_event){…}", () => {
     const { errors, clientJs } = compileClient(PUSH_ROW, "push");
     expect(errors).toEqual([]);
     const lines = clickListenerLines(clientJs);
@@ -62,7 +62,7 @@ describe("lift-row handler: the §6.5.1 notify wrapper is a call, not a callable
     for (const l of lines) {
       // The listener must be a function whose BODY performs the push — never the
       // push's (render-time) result.
-      expect(l).toMatch(/addEventListener\("click", function\(event\) \{/);
+      expect(l).toMatch(/addEventListener\("click", function\(_scrml_event\) \{/);
       expect(l).not.toMatch(/addEventListener\("click", \(\(_scrml_m\) =>/);
     }
   });
@@ -104,6 +104,6 @@ describe("lift-row handler: the §6.5.1 notify wrapper is a call, not a callable
     const lines = clickListenerLines(clientJs);
     expect(lines.length).toBeGreaterThan(0);
     // The arrow is INVOKED inside the Bug-73 live-resolving wrapper, not dead-wrapped.
-    expect(lines.some((l) => /\(\(\) => _scrml_cs_reactive_set\("last", y\)\)\(event\)/.test(l))).toBe(true);
+    expect(lines.some((l) => /\(\(\) => _scrml_cs_reactive_set\("last", y\)\)\(_scrml_event\)/.test(l))).toBe(true);
   });
 });

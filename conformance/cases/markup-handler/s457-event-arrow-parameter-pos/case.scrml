@@ -1,0 +1,4 @@
+<last> = ""
+
+<button id="b" onclick=${(e) => @last = e.type}>go</>
+<p id="out">${@last}</p>

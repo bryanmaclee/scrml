@@ -39,11 +39,14 @@
  * local, a user's own local or parameter, a destructured binding — is that
  * binding, and is left alone, along with every use that resolves to it.
  *
- * The SYNTACTIC positions the regex renamed are kept exactly (an identifier
- * followed by `(`, `;`, `,`, `}`, `]`, `)`, a line break, a comment, a literal,
- * or the end of the text); this pass only removes the scope-bound ones from that
- * set. So it never renames anything the regex did not, and the change of
- * direction is one way: a locally-bound name stops being renamed.
+ * A free reference is renamed in EVERY syntactic position — a call, a member
+ * root (`event.x`), a bare value (`cb = event`). The legacy regex renamed only
+ * call-like positions (an identifier followed by `(`, `;`, `,`, `}`, `]`, `)`,
+ * a line break, a comment, a literal, or the end of the text) and left the rest
+ * as written — a dangling reference to a name the bundle no longer declares
+ * (s457 3a, S458 review (c)). That position rule existed to keep compiler-emitted
+ * host-global member roots (`document.…`) away from a same-named user function;
+ * the host-global alias below made it unnecessary.
  *
  * ## Why Acorn
  *
@@ -85,8 +88,8 @@ interface Edit {
  * Each method returns the replacement text, or `null` to leave the site alone.
  */
 interface FreeRefRewrite {
-  /** An identifier in reference position. `end` is its end offset in the code. */
-  ref(name: string, end: number): string | null;
+  /** An identifier in reference position. */
+  ref(name: string): string | null;
   /** A shorthand property `{ name }` (object literal or assignment pattern). */
   shorthand(name: string): string | null;
   /** The local name of an `export { name }` (aliased=false) / `export { name as x }` specifier. */
@@ -94,8 +97,8 @@ interface FreeRefRewrite {
 }
 
 /**
- * Rename every free reference to a user function in `code`, in the positions
- * the legacy regex renamed. Returns `null` when `code` does not parse.
+ * Rename every free reference to a user function in `code`, in every position.
+ * Returns `null` when `code` does not parse.
  */
 export function renameUserFnRefsScoped(
   code: string,
@@ -109,32 +112,15 @@ export function renameUserFnRefsScoped(
   }
   if (!any) return code;
 
-  /** The text after a reference ends in a position the legacy regex renamed. */
-  const inRenamedPosition = (end: number): boolean => {
-    let i = end;
-    let sawNewline = false;
-    while (i < code.length) {
-      const c = code[i];
-      if (c === "\n") { sawNewline = true; i++; continue; }
-      if (c === " " || c === "\t" || c === "\r" || c === "\f" || c === "\v" || c === " ") { i++; continue; }
-      break;
-    }
-    if (sawNewline) return true;
-    if (i >= code.length) return true;
-    const c = code[i];
-    if (c === "(" || c === ";" || c === "," || c === "}" || c === "]" || c === ")") return true;
-    // The regex ran on code segments only: a comment or a string / template
-    // literal starting here ended the segment, which its `$` alternative matched.
-    if (c === "/" && (code[i + 1] === "/" || code[i + 1] === "*")) return true;
-    if (c === '"' || c === "'" || c === "`") return true;
-    return false;
-  };
-
   return rewriteFreeRefs(code, {
-    ref: (name, end) => {
-      const mangled = fnNameMap.get(name);
-      return mangled !== undefined && inRenamedPosition(end) ? mangled : null;
-    },
+    // A free reference to the user's function is renamed in EVERY position — a
+    // call, a member root (`event.x`), a bare value (`cb = event`) — host-global
+    // names included: compiler-emitted code reaches every host global through the
+    // alias (`_scrml_g.document`, S457 2a), a member access this pass never sees
+    // as a reference, so a free `document` here is the user's own binding.
+    // (s457 3a / S458 review (c); the legacy call-position rule and its
+    // host-global exception are gone with the alias.)
+    ref: (name) => fnNameMap.get(name) ?? null,
     shorthand: (name) => {
       const mangled = fnNameMap.get(name);
       if (mangled === undefined) return null;
@@ -187,7 +173,7 @@ function rewriteFreeRefs(code: string, rw: FreeRefRewrite): string | null {
   const ref = (id: AnyNode, scope: Scope) => {
     const name = id.name as string;
     if (isBound(scope, name)) return;
-    const text = rw.ref(name, id.end);
+    const text = rw.ref(name);
     if (text === null) return;
     edits.push({ start: id.start, end: id.end, text });
   };

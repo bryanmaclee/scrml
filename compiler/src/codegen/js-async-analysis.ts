@@ -1383,6 +1383,43 @@ export interface ActiveClientAsync {
 
 let _activeClientAsync: ActiveClientAsync | null = null;
 
+// ---------------------------------------------------------------------------
+// s457 3a — the source attribute of each compiler-written listener
+// ---------------------------------------------------------------------------
+//
+// Every event listener the compiler writes around a handler value passes
+// through one of the two colouring entry points (`colorActiveHandler` here,
+// `colorHandlerAsync` in emit-event-wiring.ts). Each records its FINAL listener
+// text with the handler attribute's source span, so the post-assembly
+// E-EVENT-UNBOUND check (codegen/listener-event-check.ts), which finds a free
+// `event` in the text the runtime executes, can report it at the attribute.
+
+export interface ListenerSource { span: unknown; attrName: string | null }
+const _listenerSources = new Map<string, ListenerSource>();
+
+/** Forget the previous file's listeners (start of a client emission). */
+export function resetListenerSources(): void { _listenerSources.clear(); }
+
+/** Record one emitted listener's source attribute (first record of a text wins). */
+export function recordListenerSource(listenerText: string, span: unknown, attrName: string | null): void {
+  if (!listenerText || _listenerSources.has(listenerText)) return;
+  _listenerSources.set(listenerText, { span, attrName });
+}
+
+/** The recorded source of an emitted listener text, if any. */
+export function listenerSourceOf(listenerText: string): ListenerSource | undefined {
+  return _listenerSources.get(listenerText);
+}
+
+/**
+ * Every identifier REFERENCE in `program` (an Acorn Program) with its lexical
+ * binding resolved; `undefined` = free in the whole text. The same scope model
+ * the §13.2 analysis uses.
+ */
+export function resolveProgramReferences(program: N): Map<N, unknown> {
+  return resolveScopes(program, newScope(null)).refs;
+}
+
 /** Install (or clear, with null) the active client emission; returns the previous one. */
 export function setActiveClientAsync(next: ActiveClientAsync | null): ActiveClientAsync | null {
   const prev = _activeClientAsync;
@@ -1402,12 +1439,15 @@ export function colorActiveHandler(fnText: string, span?: unknown, opts: ColorOp
   // handlerStatementListColor), whatever opts its site passes.
   const colored = colorAsyncFunctionExpr(fnText, active.resolveFree,
     opts.reactiveArg1SkipKeep === undefined ? { ...opts, reactiveArg1SkipKeep: active.sseFnNames ?? null } : opts);
+  const attrName = typeof opts.boundaryId === "string" ? (opts.boundaryId.split(/\s+/)[0] || null) : null;
   if (!colored) {
     const u = unanalyzableHandlerUses(fnText, active.resolveFree);
     if (u) active.report(u, span);
+    recordListenerSource(fnText, span, attrName);
     return fnText;
   }
   active.report(colored, span);
+  recordListenerSource(colored.code, span, attrName);
   return colored.code;
 }
 

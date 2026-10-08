@@ -125,10 +125,10 @@ describe("Worker JS generation", () => {
     const js = generateWorkerJs("calc", [], whenMsg);
 
     expect(js).toContain("// Generated worker: calc");
-    expect(js).toContain("self.onmessage = function(event)");
+    expect(js).toContain("self.onmessage = function(_scrml_event)");
     // Parent -> worker messages are `{ id, data }` (dpa-056 D2 wire format).
-    expect(js).toContain("const _scrml_reply_to = event.data.id;");
-    expect(js).toContain("var data = event.data.data;");
+    expect(js).toContain("const _scrml_reply_to = _scrml_event.data.id;");
+    expect(js).toContain("var data = _scrml_event.data.data;");
     expect(js).toContain("console.log(data)");
   });
 
@@ -252,7 +252,7 @@ describe("workerBundles in CG output", () => {
 
     const workerJs = output.workerBundles.get("uppercaser");
     expect(workerJs).toContain("self.onmessage");
-    expect(workerJs).toContain("var payload = event.data.data");
+    expect(workerJs).toContain("var payload = _scrml_event.data.data");
     expect(workerJs).toContain("_scrml_reply(_scrml_reply_to, payload.toUpperCase())");
   });
 

@@ -1,6 +1,6 @@
 <program>
 <verdict> = "unset"
 server function isOk(n) { return n > 100 }
-<form id="f" onsubmit=${ @verdict = isOk(1) ? "a" : "r"; (0, event.preventDefault).call(event) }><button>s</button></form>
+<form id="f" onsubmit=${(event) => { @verdict = isOk(1) ? "a" : "r"; (0, event.preventDefault).call(event) }}><button>s</button></form>
 <p id="out">${@verdict}</p>
 </program>

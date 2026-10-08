@@ -328,7 +328,7 @@ ${
             // inputs manually. So this is not friction from a Zig perspective,
             // but it IS friction from the scrml promise perspective: the spec
             // says "bind:value=@newDepInput" should work but doesn't yet.
-            <input type="text" placeholder="Add dependency" oninput=updateNewDepInput(event.target.value)/>
+            <input type="text" placeholder="Add dependency" oninput=${(e) => updateNewDepInput(e.target.value)}/>
             <button onclick=addDependency()>Add</button>
         </div>
     </section>
