@@ -100,9 +100,12 @@ export function generateWorkerJs(
     lines.push(`function _scrml_reply(replyTo, data) {`);
     lines.push(`  _scrml_g.self.postMessage({ replyTo: replyTo, data: data });`);
     lines.push(`}`);
-    lines.push(`_scrml_g.self.onmessage = function(event) {`);
-    lines.push(`  const _scrml_reply_to = event.data.id;`);
-    lines.push(`  var ${binding} = event.data.data;`);
+    // s457 3a — the listener's own parameter is `_scrml_event` (outside the
+    // user namespace): the `when message (binding)` body gets its data through
+    // `binding`, and a free `event` in it is E-EVENT-UNBOUND (listener-event-check).
+    lines.push(`_scrml_g.self.onmessage = function(_scrml_event) {`);
+    lines.push(`  const _scrml_reply_to = _scrml_event.data.id;`);
+    lines.push(`  var ${binding} = _scrml_event.data.data;`);
 
     // Indent body lines
     for (const bodyLine of body.split("\n")) {

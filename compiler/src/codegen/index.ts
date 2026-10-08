@@ -28,6 +28,7 @@ import { toEsmRuntime } from "./runtime-esm.ts";
 import { toEsmClientChunk } from "./emit-client-esm.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
 import { CGError } from "./errors.ts";
+import { shipText, shipStripFallbackWarning } from "./ship-strip.ts";
 
 /**
  * v0.3.x SPA tree-shake Phase B 3.1 + 3.3 — runtime-filename placeholder.
@@ -80,6 +81,7 @@ import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
 import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
+import { eventUnboundErrors } from "./listener-event-check.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
@@ -207,6 +209,16 @@ export interface CgInput {
    * `compileScrml` in api.js.
    */
   moduleFormat?: "classic" | "esm";
+  /**
+   * S459 (§47.9.9) — strip comments + non-required whitespace from the browser JS this
+   * function finalizes and hashes itself: the shared runtime (before its FNV filename hash),
+   * every per-route chunk (before `finalizeChunkHash`) and the chunk-activation script (before
+   * its FNV). Page bundles and worker bundles are stripped by `compileScrml` at their own
+   * final-bytes point (after the import rewrites). Behaviour-neutral by construction and
+   * proven token-identical (`codegen/ship-strip.ts`). Default false (dev / plain compile keep
+   * the readable text); `scrml build` turns it on.
+   */
+  stripShippedJs?: boolean;
   /**
    * §51.13 — When true, generate auto-property-tests for every non-derived
    * machine declaration. Independent of testMode. Output lands on
@@ -1278,6 +1290,8 @@ export function runCG(input: CgInput): CgOutput {
     // the shared runtime byte-identical to pre-arc output; "esm" transforms the
     // assembled runtime into an ES module (see the `!embedRuntime` path below).
     moduleFormat = "classic",
+    // S459 (§47.9.9) — production strip of the shipped runtime / chunks / chunk boot script.
+    stripShippedJs = false,
     log = console.log,
     // s440 — the CSS sub-seam's pick (identity when nothing is swapped).
     generateCss: userStylesheet = generateCss,
@@ -1368,6 +1382,14 @@ export function runCG(input: CgInput): CgOutput {
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];
+  // S459 (§47.9.9) — the one strip entry for the artifacts runCG hashes itself (runtime,
+  // per-route chunks, chunk boot script). Identity unless `stripShippedJs`; a strip that could
+  // not be proven token-identical ships the less-stripped proven form and warns.
+  const shipStripped = (text: string, artifact: string): string =>
+    shipText(text, stripShippedJs, artifact, (a, mode, reason) => {
+      const w = shipStripFallbackWarning(a, mode, reason);
+      errors.push(new CGError(w.code, w.message, { file: a, start: 0, end: 0 }, "warning"));
+    });
   // §32 / §47 (S397) — arm the fail-closed `~` floor's sink for THIS run.
   // `emitIdent` cannot reach a live `errors` array (`EmitExprContext.errors` is
   // measured undefined at every site the orphan reaches), so E-CG-TILDE-UNRESOLVED
@@ -1886,9 +1908,17 @@ export function runCG(input: CgInput): CgOutput {
     if (workerDefs.size > 0) {
       const bundles = new Map<string, string>();
       for (const [name, def] of workerDefs) {
-        bundles.set(name, codegenStage("emit-worker", () =>
+        const workerJs = codegenStage("emit-worker", () =>
           generateWorkerJs(name, def.children, def.whenMessage, errors, filePath)
-        ));
+        );
+        bundles.set(name, workerJs);
+        // s457 3a — the worker's `when message` listener is compiler-written
+        // around user text too: a free `event` in it is E-EVENT-UNBOUND.
+        for (const e of eventUnboundErrors(workerJs, filePath, null, "when message")) {
+          const wmSpan = (def.whenMessage as { span?: unknown } | null | undefined)?.span;
+          if (wmSpan && typeof wmSpan === "object") e.span = wmSpan as typeof e.span;
+          errors.push(e);
+        }
       }
       workerBundlesPerFile.set(filePath, bundles);
     }
@@ -4094,6 +4124,14 @@ export function runCG(input: CgInput): CgOutput {
       runtimeJs = toEsmRuntime(runtimeJs);
     }
 
+    // S459 (§47.9.9) — the production strip, at the runtime's final-bytes point: AFTER
+    // `assembleRuntime` (whose chunk boundaries are marker COMMENTS — stripping earlier would
+    // erase them) and the esm transform, BEFORE the content hash, so the hash names the bytes
+    // that ship and every later reader (the §2.2.1 emit gate, the write) sees those bytes.
+    // `classicRuntimeSliceForChunks` keeps the unstripped slice: it is read only for its
+    // top-level declaration names, which the strip cannot change (token-identical).
+    runtimeJs = shipStripped(runtimeJs, RUNTIME_FILENAME);
+
     // Phase B 3.3 — content-hash the assembled runtime. FNV-1a 32-bit
     // (the same primitive used for §47 type-encoding and §47.5 per-chunk
     // content-addressing per A-4.6). 8-char base36 entropy; collision
@@ -4173,6 +4211,8 @@ export function runCG(input: CgInput): CgOutput {
       // Q-OPEN-5 — forward the CLI-supplied `--chunk-size-budget`
       // value (or `undefined` for "use default" / "flag absent").
       chunkSizeBudgetBytes,
+      // S459 (§47.9.9) — chunk payloads are stripped inside `finalizeChunkHash`, before hashing.
+      ...(stripShippedJs ? { shipPayload: shipStripped } : {}),
     });
     chunks = splitterResult.chunks;
     chunksManifest = splitterResult.manifest;
@@ -4319,7 +4359,11 @@ export function runCG(input: CgInput): CgOutput {
       // inline `<script>`: `headers="strict"` pins `default-src 'self'`, which
       // refuses inline script). Every page references it by root-absolute URL
       // — the manifest's own chunk URLs are root-absolute already.
-      chunksBootJs = buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat });
+      // S459 (§47.9.9) — stripped before its content hash, so the name covers the shipped bytes.
+      chunksBootJs = shipStripped(
+        buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat }),
+        `${CHUNKS_BOOT_BASENAME}.js`,
+      );
       chunksBootFilename = `${CHUNKS_BOOT_BASENAME}.${fnv1aHash(chunksBootJs)}.js`;
       const chunksBootSrc = `/${chunksBootFilename}`;
 

@@ -253,6 +253,13 @@ export interface EmitPerRouteInput {
    * Non-positive or non-finite values are ignored (default applies).
    */
   chunkSizeBudgetBytes?: number;
+  /**
+   * S459 (§47.9.9) — the production strip, applied to every chunk payload inside
+   * `finalizeChunkHash`, immediately BEFORE the content hash: the filename then names the bytes
+   * that ship, a tier-1 URL baked into its initial chunk names the stripped tier-1 file, and the
+   * `W-CG-CHUNK-LARGE` lint measures shipped bytes. Absent = identity (dev / plain compile).
+   */
+  shipPayload?: (payloadJs: string, chunkKey: string) => string;
 }
 
 /**
@@ -496,7 +503,7 @@ export function emitPerRouteChunks(
       // initial-chunk IIFE tail references the content-addressed
       // filename, not the placeholder one. See SPEC §47.5 + §40.9.8 +
       // SCOPING §3.6 for the normative contract.
-      finalizeChunkHash(tier1Chunk);
+      finalizeChunkHash(tier1Chunk, input.shipPayload);
 
       // The IIFE-tail prefetch URL is the tier-1 chunk's filename
       // resolved relative to the per-app dist root. We emit it as an
@@ -534,7 +541,7 @@ export function emitPerRouteChunks(
       // (which is the right behavior — a tier-1 hash flip means the
       // initial chunk's prefetch URL changed, so the initial chunk's
       // observable behavior changed too).
-      finalizeChunkHash(initialChunk);
+      finalizeChunkHash(initialChunk, input.shipPayload);
 
       chunks.set(initialChunk.key, initialChunk);
       entry.initial = initialChunk.key;
@@ -563,7 +570,7 @@ export function emitPerRouteChunks(
       if (epCtx && tier2NonEmpty) {
         tier2Chunk.payloadJs = composeTier2Chunk(plan.prefetchTier2, epCtx, epId, role);
       }
-      finalizeChunkHash(tier2Chunk);
+      finalizeChunkHash(tier2Chunk, input.shipPayload);
       chunks.set(tier2Chunk.key, tier2Chunk);
       entry.tier2 = tier2Chunk.key;
 
@@ -575,7 +582,7 @@ export function emitPerRouteChunks(
           const nLabel = `tierN${i + 3}` as ChunkTier;
           const tierNChunk = makeChunkOutput(epId, role, nLabel, plan.prefetchTierN[i]);
           // -- A-4.6 -- Same empty-payload hash treatment as tier-2.
-          finalizeChunkHash(tierNChunk);
+          finalizeChunkHash(tierNChunk, input.shipPayload);
           chunks.set(tierNChunk.key, tierNChunk);
           entry.tierN.push(tierNChunk.key);
         }
@@ -1682,7 +1689,13 @@ function makeChunkOutput(
  * Mutates the input. Returns nothing — the chunk descriptor is updated
  * in-place so the caller can continue using the same reference.
  */
-function finalizeChunkHash(chunk: ChunkOutput): void {
+function finalizeChunkHash(
+  chunk: ChunkOutput,
+  shipPayload?: (payloadJs: string, chunkKey: string) => string,
+): void {
+  // S459 (§47.9.9) — strip BEFORE hashing (identity when no strip is requested). An empty
+  // payload is left as is: it is never written, and its hash is the canonical empty one.
+  if (shipPayload && chunk.payloadJs) chunk.payloadJs = shipPayload(chunk.payloadJs, String(chunk.key));
   const contents: ChunkContents = {
     componentNodeIds: chunk.componentNodeIds,
     reactiveCellNodeIds: chunk.reactiveCellNodeIds,

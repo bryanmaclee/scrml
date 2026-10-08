@@ -72,7 +72,7 @@
     @positions = [...@positions.filter(p =&gt; p.uid != @user.id), &#123; uid: @user.id, x, y &#125;]
   &#125;
 
-  &lt;svg onmousemove=moveCursor(event.clientX, event.clientY)&gt;
+  &lt;svg onmousemove=${(e) =&gt; moveCursor(e.clientX, e.clientY)}&gt;
     ${ for (p of @positions) &#123; lift &lt;circle cx=${p.x} cy=${p.y} r="5"/&gt; &#125; }
   &lt;/svg&gt;
 

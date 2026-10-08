@@ -131,8 +131,8 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     ));
     expect(errors).toEqual([]);
     // the handler bodies come from emit-event-wiring's lowering (fnNameMap-resolved)
-    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(g\) \{ return function\(event\) \{ _scrml_pick_\d+\(g\.name\); \}; \}/);
-    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(g\) \{ return function\(event\) \{ _scrml_pick_\d+\("static"\); \}; \}/);
+    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(g\) \{ return function\(_scrml_event\) \{ _scrml_pick_\d+\(g\.name\); \}; \}/);
+    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(g\) \{ return function\(_scrml_event\) \{ _scrml_pick_\d+\("static"\); \}; \}/);
     // hoisted at chunk scope, ahead of the boot IIFE (the row's arm wires at module init)
     expect(js.indexOf("function _scrml_armh_")).toBeLessThan(js.indexOf("function _scrml_boot()"));
     const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
@@ -155,7 +155,7 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     const table = /const _scrml_click = \{([\s\S]*?)\n  \};/.exec(js)?.[1] ?? "";
     expect(table).toMatch(/_scrml_lg_\d+\("note"\)/);
     // `lg(note)` is an arm-bound factory, stored on the element by the wire fn
-    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(note\) \{ return function\(event\) \{ _scrml_lg_\d+\(note\); \}; \}/);
+    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(note\) \{ return function\(_scrml_event\) \{ _scrml_lg_\d+\(note\); \}; \}/);
     const wire = fnSource(js, /_scrml_match_match_\w+_wire_Busy/);
     // the element property is chunk- and binding-owned (round 3: one walker per chunk)
     expect(wire.body).toMatch(/el\["__scrml_arm_onclick_[0-9a-z]+__scrml_attr_onclick_(\d+)"\] = _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\1\(note\);/);

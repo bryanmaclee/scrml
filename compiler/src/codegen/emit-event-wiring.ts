@@ -21,7 +21,7 @@ import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, type ColorOpts } from "./js-async-analysis.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, recordListenerSource, type ColorOpts } from "./js-async-analysis.ts";
 import { _clientSseFnNames } from "./scheduling.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
@@ -501,13 +501,18 @@ function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileConte
   const facts = clientAsyncFactsOf(ctx);
   const resolveFree = freeAsyncResolverFromFacts(facts);
   const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree, opts);
+  // s457 3a — the listener's source attribute, for the E-EVENT-UNBOUND check
+  // over the assembled client text (codegen/listener-event-check.ts).
+  const attrName = typeof opts.boundaryId === "string" ? (opts.boundaryId.split(/\s+/)[0] || null) : null;
   if (!colored) {
     // s441 fix round — fail CLOSED on handler text the analysis cannot read.
     const u = unanalyzableHandlerUses(handlerExpr, resolveFree);
     if (u) for (const err of jsAsyncUsesErrors(u, span, ctx.filePath)) ctx.errors.push(err);
+    recordListenerSource(handlerExpr, span, attrName);
     return handlerExpr;
   }
   for (const err of jsAsyncUsesErrors(colored, span, ctx.filePath)) ctx.errors.push(err);
+  recordListenerSource(colored.code, span, attrName);
   return colored.code;
 }
 
@@ -1089,7 +1094,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         : null;
       const fnParsed = blockBody === null ? parseFnExpression(binding.handlerExpr) : null;
       if (blockBody !== null) {
-        handlerExpr = `function(event) { ${blockBody} }`;
+        handlerExpr = `function(_scrml_event) { ${blockBody} }`;
       } else if (fnParsed !== null) {
         // Case A: fn(params) { body } — rewrite the body, construct function directly.
         // Bug #6 (s83-a7): thread engineCtx so `@engineVar = .X` + `.advance(.X)`
@@ -1191,7 +1196,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             mode: "client",
             ...engineExprCtxExtras,
           });
-          handlerExpr = `function(event) { ${body}; }`;
+          handlerExpr = `function(_scrml_event) { ${body}; }`;
         } else {
           const rewritten = rewriteBlockBody(binding.handlerExpr, null, engineRewriteCtx);
           // If the expression is a bare identifier (function reference without call parens),
@@ -1199,7 +1204,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // just reference it as a dead expression statement.
           const isBareRef = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(rewritten.trim());
           const body = isBareRef ? `${rewritten}()` : rewritten;
-          handlerExpr = `function(event) { ${body}; }`;
+          handlerExpr = `function(_scrml_event) { ${body}; }`;
         }
       }
     } else {
@@ -1240,7 +1245,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // carries the S453 rejection arm. A sync `handler` stays the direct
       // reference, byte-identical.
       if (binding.bareRefHandler) {
-        const forwarded = `function(event) { ${handlerName}(event); }`;
+        const forwarded = `function(_scrml_event) { ${handlerName}(_scrml_event); }`;
         const coloredRef = colorHandlerAsync(forwarded, binding.span, ctx, {
           boundaryId: `${eventName} ${placeholderId}`,
         });
@@ -1279,7 +1284,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const submittedKey = `${encodedCell}.submitted`;
         const valuesArg = `_scrml_reactive_get(${JSON.stringify(encodedCell)})`;
         handlerExpr =
-          `function(event) { event.preventDefault(); ` +
+          `function(_scrml_event) { _scrml_event.preventDefault(); ` +
           `_scrml_reactive_set(${JSON.stringify(submittedKey)}, true); ` +
           `${handlerName}(${valuesArg}); }`;
       } else {
@@ -1326,12 +1331,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           args: _argNodes as ExprNode[],
           optional: false,
         };
-        const preventLine = domEvent === "submit" ? "event.preventDefault(); " : "";
+        const preventLine = domEvent === "submit" ? "_scrml_event.preventDefault(); " : "";
         const body = emitExprField(synthCall, "", {
           mode: "client",
           ...engineExprCtxExtras,
         });
-        handlerExpr = `function(event) { ${preventLine}${body}; }`;
+        handlerExpr = `function(_scrml_event) { ${preventLine}${body}; }`;
       } else {
 
       // Serialize the arguments from the call-ref attribute value.
@@ -1348,7 +1353,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }).join(", ");
 
       // For submit events on forms, auto-inject event.preventDefault()
-      const preventLine = domEvent === "submit" ? "event.preventDefault(); " : "";
+      const preventLine = domEvent === "submit" ? "_scrml_event.preventDefault(); " : "";
       // A5-6 Feature 1 (§51.0.M name= extension, S79). When the call-ref is
       // `cancelTimer("X")` AND this binding is arm-tagged (`engineArm` set
       // by Phase A10's `pushArmContext` during arm-body codegen), lower it
@@ -1362,7 +1367,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         handlerName, handlerArgs ?? [], binding.engineArm,
       );
       if (cancelTimerLowered !== null) {
-        handlerExpr = `function(event) { ${preventLine}${cancelTimerLowered}; }`;
+        handlerExpr = `function(_scrml_event) { ${preventLine}${cancelTimerLowered}; }`;
       } else {
         // SPEC §5.2.2 normative: `onclick=fn()` wires `fn` as the handler,
         // invoked with the user's declared args (none for bare-call zero-args)
@@ -1380,7 +1385,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         //
         // S454 — the AUTHOR name, so the colouring below sees the callee (see
         // the note at the top of this call-ref path).
-        handlerExpr = `function(event) { ${preventLine}${handlerName}(${argsStr}); }`;
+        handlerExpr = `function(_scrml_event) { ${preventLine}${handlerName}(${argsStr}); }`;
       }
       } // close S97 reactive-method-call else branch
       } // close formFor-submit else branch

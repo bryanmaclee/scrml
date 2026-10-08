@@ -126,7 +126,7 @@ beforeAll(() => {
   \${
     for (let item of @items) {
       lift <li data-id=\${item.id}>
-        <span if=@editingId == item.id>editing</span>
+        <span if=(@editingId == item.id)>editing</span>
       </li>
     }
   }
@@ -279,11 +279,11 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
     expect(result.errors).toEqual([]);
     const js = foldChunkNamespacing(result.outputs.get(liftOnKeydownFx).clientJs);
     // S96 Bug 14 — SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
-    // `function(event) { fn(); }`. The wrapper takes `event` (for the
+    // `function(_scrml_event) { fn(); }`. The wrapper takes `event` (for the
     // listener signature) but does NOT forward it into `fn`. The pre-S96
     // LIFT-4 fix auto-threaded `event` per tutorial §1.5; tutorials are not
     // normative (pa.md Rule 4). Reverted to spec shape.
-    expect(js).toMatch(/function\(event\)\s*\{\s*_scrml_handleKey_\d+\s*\(\s*\)/);
+    expect(js).toMatch(/function\(_scrml_event\)\s*\{\s*_scrml_handleKey_\d+\s*\(\s*\)/);
     // The pre-S96 spec-divergent form (event auto-threaded) must not reappear.
     expect(js).not.toMatch(/_scrml_handleKey_\d+\s*\(\s*event\s*\)/);
   });

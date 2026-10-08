@@ -16,7 +16,8 @@ import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments
 import { renameUserFnRefsScoped } from "./fn-name-rename.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
-import { setActiveClientAsync } from "./js-async-analysis.ts";
+import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.ts";
+import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
@@ -2038,6 +2039,8 @@ export function generateClientJs(ctx: CompileContext): string {
   const csrfEnabled = ctx.csrfEnabled;
   const filePath: string = fileAST.filePath;
   const lines: string[] = [];
+  // s457 3a — this file's listener → source-attribute registry (E-EVENT-UNBOUND).
+  resetListenerSources();
 
   // S22 §1a slice 2: publish the file's variant→payload-field lookup so that
   // emitMatchExpr can resolve positional bindings `.Circle(r)` to field names.
@@ -3238,6 +3241,14 @@ export function generateClientJs(ctx: CompileContext): string {
   // reserved at the top of generateClientJs. By this point all emit-* walks
   // have run and tagged their AST-shape-derived chunks; the chunk set is now
   // final.
+  // s457 3a — E-EVENT-UNBOUND on the listeners of the FINAL text, run right
+  // after the user-fn rename (below): a reference to a user `function event`
+  // has been rewritten to its encoded name by then, in every position, so a
+  // free `event` that remains is unbound by definition — no file-wide
+  // stand-down (S458 review (c)). See codegen/listener-event-check.ts.
+  const runEventUnboundCheck = (code: string) => clientStage(ctx, "event-unbound-check", () => {
+    for (const e of eventUnboundErrors(code, filePath, fnNameMap)) errors.push(e);
+  });
   const runtimeSource = clientStage(ctx, "assemble-runtime", () => assembleRuntime(ctx.usedRuntimeChunks));
   let clientCode: string;
   if (fnNameMap && fnNameMap.size > 0) {
@@ -3393,6 +3404,7 @@ export function generateClientJs(ctx: CompileContext): string {
       // the identical assembled buffer it saw before.
       return joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, mangle);
     });
+    runEventUnboundCheck(clientCode);
 
     // GITI-001 (giti inbound 2026-04-20): `@data = serverFn(args)` emits
     // `_scrml_reactive_set("data", _scrml_fetch_serverFn_N(args));` — storing
@@ -3973,6 +3985,7 @@ export function generateClientJs(ctx: CompileContext): string {
     clientCode = clientStage(ctx, "lines-join", () =>
       joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, (s) => s),
     );
+    runEventUnboundCheck(clientCode);
   }
 
   // GITI-003 (giti inbound 2026-04-20): prune imports that are only used by

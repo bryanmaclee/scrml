@@ -106,7 +106,7 @@ describe("engine-event-handler-writes §1 — direct assignment routing", () => 
     // entries explicitly (they appear in `__scrml_handlers_onclick` /
     // `_scrml_attr_onclick_<N>` shape) and ensure no bare set inside them
     // for "appMode".
-    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(event\)\s*\{[\s\S]*?\}/g;
+    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(_scrml_event\)\s*\{[\s\S]*?\}/g;
     const handlerBodies = clientJs.match(onclickHandlerRe) || [];
     for (const body of handlerBodies) {
       if (body.includes("appMode")) {
@@ -169,7 +169,7 @@ describe("engine-event-handler-writes §2 — .advance() routing", () => {
     );
     // Anti-regression: the onclick handler must NOT have called .advance as
     // a property method on the reactive-get result.
-    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(event\)\s*\{[\s\S]*?\}/g;
+    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(_scrml_event\)\s*\{[\s\S]*?\}/g;
     const handlerBodies = clientJs.match(onclickHandlerRe) || [];
     for (const body of handlerBodies) {
       if (body.includes("appMode")) {
@@ -209,7 +209,7 @@ describe("engine-event-handler-writes §3 — hooks wrap in event handlers", () 
     // Counter-resilient: match any _scrml_attr_onclick_N handler header.
     // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
     // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
-    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(_scrml_event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     // Inside the handler body, the wrap pattern must appear before the
@@ -256,7 +256,7 @@ describe("engine-event-handler-writes §4 — internal:rule= threading", () => {
     // The onclick handler that writes appMode must pass the internal-table
     // identifier as the trailing positional arg of _scrml_engine_direct_set.
     // Position-padding: timers=null, idle=null, then internal-table.
-    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(event\)\s*\{[\s\S]*?\}/g;
+    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(_scrml_event\)\s*\{[\s\S]*?\}/g;
     const handlerBodies = clientJs.match(onclickHandlerRe) || [];
     const writingHandler = handlerBodies.find((b) => b.includes("appMode"));
     expect(writingHandler).toBeDefined();
@@ -300,7 +300,7 @@ describe("engine-event-handler-writes §5 — history-map threading", () => {
     // Counter-resilient: match any _scrml_attr_onclick_N handler header.
     // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
     // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
-    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(_scrml_event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     // Find _scrml_engine_direct_set call inside the handler slice and
@@ -343,7 +343,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     // Counter-resilient: match any _scrml_attr_onclick_N handler header.
     // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
     // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
-    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(_scrml_event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     const callStart = slice.indexOf('_scrml_cs_engine_advance("appMode",');
@@ -398,7 +398,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     // Counter-resilient: match any _scrml_attr_onclick_N handler header.
     // (Bug 5 Phase 2 removed phantom placeholders for declaration-only logic
     // bodies, shifting the genVar counter — tests SHALL NOT depend on exact N.)
-    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
+    const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(_scrml_event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
     const callStart = slice.indexOf('_scrml_cs_engine_direct_set("appMode",');
@@ -437,7 +437,7 @@ describe("engine-event-handler-writes §7 — non-engine writes regression", () 
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The handler must use the plain reactive-set (no engine guard, no advance).
-    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(event\)\s*\{[\s\S]*?\}/g;
+    const onclickHandlerRe = /"_scrml_attr_onclick_\d+":\s*function\(_scrml_event\)\s*\{[\s\S]*?\}/g;
     const handlerBodies = clientJs.match(onclickHandlerRe) || [];
     const writingHandler = handlerBodies.find((b) => b.includes("count"));
     expect(writingHandler).toBeDefined();

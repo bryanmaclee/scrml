@@ -62,7 +62,7 @@ function pick(nm) { @items = @items }
     // The per-item handler re-resolves the live item by its create-time key,
     // bails on canonical absence (null), THEN calls the handler with the live field.
     expect(clientJs).toMatch(
-      /\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_pick_\d+\(_scrml_each_item\.name\); \}\)/,
+      /\.addEventListener\("click", function\(_scrml_event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_pick_\d+\(_scrml_each_item\.name\); \}\)/,
     );
   });
 
@@ -84,7 +84,7 @@ function reorder() { @items = @items }
     // a per-item addEventListener too (NOT delegated), so it MUST stay plain — no
     // resolve-prelude (the iter-scope token scan gates it out).
     expect(clientJs).toMatch(
-      /\.addEventListener\("click", function\(event\) \{ _scrml_reorder_\d+\(\); \}\)/,
+      /\.addEventListener\("click", function\(_scrml_event\) \{ _scrml_reorder_\d+\(\); \}\)/,
     );
     expect(clientJs).not.toMatch(
       /_scrml_resolve_item\([^)]*\); if \(_scrml_each_item === null\) return; _scrml_reorder_\d+\(\)/,
@@ -107,7 +107,7 @@ function pick(nm) { @items = @items }
     const { errors, clientJs } = compileClient(src, "t0-iter");
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
     expect(clientJs).toMatch(
-      /\.addEventListener\("click", function\(event\) \{ let it = _scrml_resolve_item\(_scrml_list_wrapper_\d+, _scrml_item_key_\d+\); if \(it === null\) return; _scrml_pick_\d+\(it\.name\); \}\)/,
+      /\.addEventListener\("click", function\(_scrml_event\) \{ let it = _scrml_resolve_item\(_scrml_list_wrapper_\d+, _scrml_item_key_\d+\); if \(it === null\) return; _scrml_pick_\d+\(it\.name\); \}\)/,
     );
   });
 
@@ -126,7 +126,7 @@ function swap() { @items = @items }
     expect(errors.filter((e) => String(e.code || "").includes("CODEGEN-INVALID-JS"))).toEqual([]);
     // The swap() handler reads no item — its listener stays a plain call with no
     // resolve-prelude (the iter-scope token scan gates it out).
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ _scrml_swap_\d+\(\); \}\)/);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ _scrml_swap_\d+\(\); \}\)/);
     expect(clientJs).not.toMatch(/_scrml_resolve_item\([^)]*\); if \(it === null\) return; _scrml_swap_/);
   });
 });

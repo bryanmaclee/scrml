@@ -193,20 +193,21 @@ describe("§19.4.3 — handler positions", () => {
     expect(handler).toMatch(/_reactive_set\("r", 9\)/);
   });
 
-  // N4 — inside a handler, `event` is the DOM event in BOTH lowering paths.
+  // N4, REVERSED by s457 3a — a handler the compiler wraps does not bind `event`
+  // (SPEC §5.2 / §5.2.3), so a prop named `event` is the prop in BOTH lowering paths.
   for (const [label, handler] of [
     ["one statement", `onclick={ @msg = event }`],
     ["two statements", `onclick={ @msg = event; @r = 1 }`],
   ]) {
-    test(`a prop named \`event\` is shadowed by the DOM event — ${label}`, () => {
+    test(`a prop named \`event\` is substituted inside the handler — ${label}`, () => {
       const { errors, clientJs } = compileBody(
         `<msg> = ""\n\${ const B = <button props={ event: string } ${handler}>go</> }\n<B event="hi"/>`,
         { emit: true },
       );
       expect(errors).toEqual([]);
       const h = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'), clientJs.indexOf('"_scrml_attr_onclick_') + 160);
-      expect(h).toMatch(/_reactive_set\("msg", event\)/);
-      expect(h).not.toMatch(/"hi"/);
+      expect(h).toMatch(/_reactive_set\("msg", "hi"\)/);
+      expect(h).not.toMatch(/"msg", event\b/);
     });
   }
 
@@ -506,7 +507,7 @@ describe("arrow-valued handlers — S440 ruling: checked like `{ … }`, guard e
     const { errors, clientJs } = compileBody(`<button onclick=\${(e) => risky() !{ | .Empty :> @r = 7 }}>x</>`, { emit: true });
     expect(errors).toEqual([]);
     const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'));
-    expect(handler).toMatch(/const e = event;/);
+    expect(handler).toMatch(/const e = _scrml_event;/);
     expect(handler).toMatch(/\.variant === "Empty"/);
     expect(handler).toMatch(/_reactive_set\("r", 7\)/);
   });

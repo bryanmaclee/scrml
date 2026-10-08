@@ -14,7 +14,7 @@
  * WIRE (fix-to-wire), not emit a literal attribute. The bare-ref form wires the
  * RESOLVED reference DIRECTLY (the listener receives the DOM event as its arg);
  * this is DISTINCT from the call form `fn()` (which auto-wraps
- * `function(event){ fn(); }`) and the expr form `${(e) => fn(e)}`.
+ * `function(_scrml_event){ fn(); }`) and the expr form `${(e) => fn(e)}`.
  *
  * Root: the event-binding collector in emit-html.ts recognized the call form
  * (`val.kind === "call-ref"`) and the `${}` expr form (`val.kind === "expr"`)
@@ -91,19 +91,19 @@ describe("g-bare-ref-event-handler §1 — emitted shape (was literal attr, now 
     expect(/data-scrml-bind-onmousedown=/.test(html)).toBe(true);
   });
 
-  test("the bare-ref handler is wired DIRECTLY (no function(event){fn();} wrap)", () => {
+  test("the bare-ref handler is wired DIRECTLY (no function(_scrml_event){fn();} wrap)", () => {
     const { clientJs } = compileCase();
     // Direct reference: `"<id>": _scrml_bump_N,` — the resolved encoded name as
-    // a bare reference (NO `function(event)` wrapper around the bare-ref form).
+    // a bare reference (NO `function(_scrml_event)` wrapper around the bare-ref form).
     expect(/:\s*_scrml_bump_\d+\s*,/.test(clientJs)).toBe(true);
     // The non-delegable bare-ref (onmousedown=startPan) wires the resolved name directly too.
     expect(/:\s*_scrml_startPan_\d+\s*,/.test(clientJs)).toBe(true);
   });
 
-  test("the call form STILL auto-wraps function(event){ fn(); } (no regression)", () => {
+  test("the call form STILL auto-wraps function(_scrml_event){ fn(); } (no regression)", () => {
     const { clientJs } = compileCase();
-    // onclick=bump() → `function(event) { _scrml_bump_N(); }`
-    expect(/function\(event\)\s*\{\s*_scrml_bump_\d+\(\);\s*\}/.test(clientJs)).toBe(true);
+    // onclick=bump() → `function(_scrml_event) { _scrml_bump_N(); }`
+    expect(/function\(_scrml_event\)\s*\{\s*_scrml_bump_\d+\(\);\s*\}/.test(clientJs)).toBe(true);
   });
 
   test("the expr form STILL wires its arrow (no regression)", () => {

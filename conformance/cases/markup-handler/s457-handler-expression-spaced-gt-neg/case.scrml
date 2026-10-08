@@ -1,0 +1,4 @@
+<n> = 2
+<big> = false
+
+<button onclick=@big = @n > 1>go</>

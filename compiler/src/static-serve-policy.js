@@ -86,8 +86,11 @@ export function readClientAssetManifest(outputDir) {
 
 // Relative-module specifiers in a JS file: static `import … from`, `export … from`,
 // side-effect `import "x"`, and dynamic `import("x")`.
+// `\b` (not `\s`) after the keyword: a production build strips whitespace from the shipped
+// bundles (S459, §47.9.9), so an import clause can read `import{a}from"./x.js"` or
+// `import*as m from"./x.js"`.
 const IMPORT_SPECIFIER_RES = [
-  /\b(?:import|export)\s[^;'"`]*?\bfrom\s*["']([^"']+)["']/g,
+  /\b(?:import|export)\b[^;'"`]*?\bfrom\s*["']([^"']+)["']/g,
   /\bimport\s*["']([^"']+)["']/g,
   /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
 ];

@@ -6,7 +6,7 @@
  * produces ATTR_CALL with `name = "@outer.advance"`, `args = [".X"]`.
  * Pre-fix the event-handler call-ref emitter spliced these verbatim into
  * the wrapper:
- *   `function(event) { @outer.advance("Playing".history); }`
+ *   `function(_scrml_event) { @outer.advance("Playing".history); }`
  * Invalid JS (`@` not a legal identifier char; `"Playing".history` is
  * meaningless string member access).
  *
@@ -59,8 +59,8 @@ describe("§1 — reactive method call on array cell", () => {
 </program>`;
     const client = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    // Pre-fix symptom: `function(event){ @items.push("c"); }` (invalid JS)
-    expect(client).not.toMatch(/function\(event\)\s*\{\s*@/);
+    // Pre-fix symptom: `function(_scrml_event){ @items.push("c"); }` (invalid JS)
+    expect(client).not.toMatch(/function\(_scrml_event\)\s*\{\s*@/);
     expect(client).toMatch(/_scrml_cs_reactive_get\("items"\)\.push\("c"\)/);
     expect(() => new Function(client)).not.toThrow();
   });
@@ -72,7 +72,7 @@ describe("§1 — reactive method call on array cell", () => {
 </program>`;
     const client = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).not.toMatch(/function\(event\)\s*\{\s*@/);
+    expect(client).not.toMatch(/function\(_scrml_event\)\s*\{\s*@/);
     expect(client).toMatch(/_scrml_cs_reactive_get\("items"\)\.sort\(\)/);
     expect(() => new Function(client)).not.toThrow();
   });
@@ -135,7 +135,7 @@ describe("§3 — regression: bare-call without @ unchanged", () => {
     const client = compileSrcToTmp(src);
     expect(client).not.toBeNull();
     // No reactive-get/set on the handler invocation itself; just the function call
-    expect(client).toMatch(/function\(event\)\s*\{\s*_scrml_doIt[^(]*\(\)/);
+    expect(client).toMatch(/function\(_scrml_event\)\s*\{\s*_scrml_doIt[^(]*\(\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 
