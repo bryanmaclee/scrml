@@ -257,6 +257,15 @@ describe("ownership — what is in the cell is exactly what its current value ho
     expect(rt.plain("ls")).toEqual([1, 3]);
   });
 
+  test("a path write into a Map inside a refined value is refused as for any cell (not written onto the Map object)", () => {
+    const rt = load(page(`type C:struct = { n: number(>0), m: asIs }\n  <c>: C = { n: 1, m: 0 }`), "mapPath");
+    const k = rt.key("c");
+    rt.set(k, { n: 2, m: new Map([["a", 1]]) });
+    expect(() => rt.set(k, rt.deepSet(rt.state[k], ["m", "a"], 5))).toThrow(TypeError);
+    expect(rt.state[k].m.get("a")).toBe(1);
+    expect(Object.prototype.hasOwnProperty.call(rt.state[k].m, "a")).toBe(false);
+  });
+
   test("a removed nested array is the caller's; its old parent's cell no longer judges it", () => {
     const rt = load(page(`<nn>: number(>0)[][] = [[1], [2]]`), "nested");
     const k = rt.key("nn");

@@ -6795,6 +6795,14 @@ function _scrml_refine_fields(d) {
   if (fm === undefined) _scrml_refine_fieldmaps.set(d.fields, fm = d.fields());
   return fm;
 }
+// An array or a plain object — a value a path write may write into (a Map, a Set or
+// any other object is not: _scrml_deep_set refuses it, as for an unrefined cell).
+function _scrml_refine_is_record(r) {
+  if (r === null || typeof r !== "object") return false;
+  if (Array.isArray(r)) return true;
+  const proto = Object.getPrototypeOf(r);
+  return proto === null || Object.getPrototypeOf(proto) === null;
+}
 // An array index ("0", "1", …).
 function _scrml_refine_is_index(prop) {
   return typeof prop === "string" && /^(0|[1-9][0-9]*)$/.test(prop) && Number(prop) < 4294967295;
@@ -6930,7 +6938,7 @@ if (typeof _scrml_deep_set === "function") {
   const _scrml_deep_set_unjudged = _scrml_deep_set;
   _scrml_deep_set = function (obj, path, value) {
     const raw = _scrml_refine_raw(obj);
-    const p = raw !== null && typeof raw === "object" && path && path.length > 0 ? _scrml_refine_live(raw) : undefined;
+    const p = _scrml_refine_is_record(raw) && path && path.length > 0 ? _scrml_refine_live(raw) : undefined;
     if (p === undefined || p.parent !== null || _scrml_refine_shared_roots.has(raw) || typeof _scrml_deep_reactive !== "function" ||
         (typeof _scrml_reactivity_rules === "object" && _scrml_reactivity_rules[p.key])) {
       return _scrml_deep_set_unjudged(obj, path, value);
@@ -6940,7 +6948,8 @@ if (typeof _scrml_deep_set === "function") {
       let c = _scrml_deep_reactive(raw);
       for (let i = 0; i < path.length - 1; i++) {
         const next = c[path[i]];
-        if (next === null || typeof next !== "object" || !_scrml_refine_place.has(_scrml_refine_raw(next))) return null;
+        const nr = _scrml_refine_raw(next);
+        if (!_scrml_refine_is_record(nr) || !_scrml_refine_place.has(nr)) return null;
         c = next;
       }
       return c;
