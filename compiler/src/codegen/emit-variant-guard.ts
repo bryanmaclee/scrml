@@ -922,7 +922,9 @@ function emitArmWireFunction(
       // §5.2 rule 3 (S457): a URL attribute whose literal prefix commits to no scheme
       // (`directiveUrlGuard`, stamped by emit-html) writes through `_scrml_safe_url`.
       const attrName = binding.attrName as string;
-      const valueJs = binding.directiveUrlGuard === true ? wrapUrlGuard(EL, attrName, jsExpr) : jsExpr;
+      const valueJs = binding.directiveUrlGuard === true
+        ? wrapUrlGuard(EL, attrName, jsExpr, binding.directiveUrlGuardTarget ?? null)
+        : jsExpr;
       lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
       if (refs.length > 0 || readsRow(jsExpr)) {
         lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
@@ -984,6 +986,7 @@ function emitArmWireFunction(
       binding.valueAttrIsFormValue === true,
       EL,
       binding.valueAttrUrlGuard === true,
+      binding.valueAttrUrlGuardTarget ?? null,
     );
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);

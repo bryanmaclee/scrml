@@ -948,6 +948,50 @@ function isBodyOnlyEscalation(route: any, fnNode: any): boolean {
  * log / SQL) so a `_scrml_structural_eq(` introduced ONLY by an exported helper
  * still triggers the helper's top-of-file inlining.
  */
+/**
+ * s457 (§21.4) — this module's re-exports of other `.scrml` modules, as native ESM
+ * re-exports of their `.server.js`: `export { w as helper } from "./c.server.js";`.
+ * §21.4: "Re-export follows standard ES module `export { name } from 'source'`
+ * syntax" — before this the value-export block skipped every re-export, so a server
+ * bundle importing a re-exported name failed to LINK (`Export named 'helper' not
+ * found`), or found no `.server.js` at all when re-exports were the module's only
+ * server-relevant content.
+ *
+ * The edges come from codegen/index.ts (`_serverReExportEdges`): local `.scrml`
+ * sources only, `export *` already expanded to names (so a source's `routes` /
+ * `fetch` / `__ri_route_*` are never re-exported by accident), type / channel /
+ * engine names dropped. The specifier is re-based into dist space exactly like an
+ * import (`distRelativeServerSpecifier`). A name this module already exports is
+ * skipped (a duplicate export is a SyntaxError). Whether the source `.server.js`
+ * exports each name is decided after every module is emitted, in api.js — a
+ * re-export of a missing name would fail the whole module's link, not just that name.
+ */
+function serverReExportLines(fileAST: any, filePath: string, assembledBody: string): string[] {
+  const edges = (fileAST as any)?._serverReExportEdges as
+    | Array<{ specifier: string; names: Array<{ exported: string; imported: string }> }>
+    | undefined;
+  if (!Array.isArray(edges) || edges.length === 0) return [];
+  const alreadyExported = (name: string): boolean => {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^\\s*export\\s+(?:async\\s+)?(?:function\\*?|const|let|var|class)\\s+${esc}\\b`, "m").test(assembledBody) ||
+      new RegExp(`^\\s*export\\s*\\{[^}]*\\b${esc}\\s*[,}]`, "m").test(assembledBody);
+  };
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const edge of edges) {
+    const specs: string[] = [];
+    for (const { exported, imported } of edge.names) {
+      if (seen.has(exported) || alreadyExported(exported)) continue;
+      seen.add(exported);
+      specs.push(imported === exported ? exported : `${imported} as ${exported}`);
+    }
+    if (specs.length === 0) continue;
+    const spec = distRelativeServerSpecifier(edge.specifier, filePath, (fileAST as any)?._outputBaseDir);
+    out.push(`export { ${specs.join(", ")} } from ${JSON.stringify(spec)};`);
+  }
+  return out;
+}
+
 function emitModuleValueExportLines(
   fileAST: any,
   filePath: string,
@@ -966,7 +1010,8 @@ function emitModuleValueExportLines(
     }
   };
   collectLogic(getNodes(fileAST));
-  if (logicBlocks.length === 0) return [];
+  const reExportLines = serverReExportLines(fileAST, filePath, assembledBody);
+  if (logicBlocks.length === 0 && reExportLines.length === 0) return [];
 
   // Already-declared guard: skip a binding whose name is already declared at
   // top level in the assembled body (avoids double-decl).
@@ -1182,11 +1227,14 @@ function emitModuleValueExportLines(
     for (const err of asyncEscapeErrors(_veEscapes, filePath)) _pushVeDeduped(err);
   }
 
-  if (constLines.length === 0 && fnBlocks.length === 0) return [];
+  if (constLines.length === 0 && fnBlocks.length === 0 && reExportLines.length === 0) return [];
 
   const out: string[] = [];
   out.push("");
   out.push("// --- ss1: module value exports (constants + pure fns) for cross-file server imports ---");
+  // s457 (§21.4) — re-exports first: they bind nothing locally, so order is free.
+  for (const l of reExportLines) out.push(l);
+  if (reExportLines.length > 0 && (constLines.length > 0 || fnBlocks.length > 0)) out.push("");
   // Consts first (dependency order / readability — a referencing fn reads them
   // at call time, but emitting consts first keeps the file readable).
   for (const l of constLines) out.push(l);

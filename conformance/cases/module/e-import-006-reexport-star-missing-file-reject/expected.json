@@ -1,0 +1,8 @@
+{
+  "id": "e-import-006-reexport-star-missing-file-reject",
+  "description": "§21.3 / §21.4 — m.scrml has `export * from './missing2.scrml'`, which does not exist: E-IMPORT-006 at the star re-export, naming the missing file. The importer's `import { M2 } from './m.scrml'` (a name only the missing module could supply) is not reported as E-IMPORT-004.",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: a relative import must resolve to a real module (E-IMPORT-006). `export * from` links its source like an import (§21.4). Before S458 the missing star source surfaced only as an E-IMPORT-004 at the importer, which named the wrong file and the wrong cause (S458 re-review N1).",
+  "expect": { "codes": ["E-IMPORT-006"], "notCodes": ["E-IMPORT-004"] }
+}

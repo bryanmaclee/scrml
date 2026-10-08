@@ -1564,6 +1564,15 @@ function _compileScrmlImpl(options = {}) {
           const attrKey = e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
+          // S457 — a codegen backstop that re-lowers markup from a COPY (a `<match>` arm body is
+          // re-parsed in codegen, with its own span file) cannot share the attribute's identity.
+          // Its refusal is dropped when an EARLIER stage (VP-3 / CE) already refused the same-named
+          // attribute in the same file: the compile fails either way. Only those stages record the
+          // name — codegen refusals never shadow each other, so two distinct `<button ONCLICK=${…}>`
+          // the backstop alone refuses are two reports (identity = their own spans, `attrKey`).
+          const nameKey = e.attrSinkName ? `${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
+          if (stageName === "CG" && nameKey !== null && _attrInterpExecutableSeen.has(nameKey)) continue;
+          if (stageName !== "CG" && nameKey !== null) _attrInterpExecutableSeen.add(nameKey);
           _attrInterpExecutableSeen.add(attrKey);
           _attrInterpExecutableSeen.add(fullKey);
         }
@@ -3462,30 +3471,33 @@ function _compileScrmlImpl(options = {}) {
   // D-4 note above for why that made this very guard blind to the class it
   // exists to catch.
   // ---------------------------------------------------------------------------
+  // Exported names declared in an emitted .server.js (ESM forms; errs toward
+  // "exported" — an unmodeled form just means no false warning). Shared by the
+  // invariant check and (s457) the re-export reconciliation.
+  function serverExportedNamesOf(js) {
+    const names = new Set();
+    let m;
+    const declRe = /\bexport\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)/g;
+    while ((m = declRe.exec(js))) names.add(m[1]);
+    const braceRe = /\bexport\s*\{([^}]*)\}/g;
+    while ((m = braceRe.exec(js))) {
+      for (const part of m[1].split(",")) {
+        const t = part.trim();
+        if (!t) continue;
+        const as = t.split(/\s+as\s+/); // `X as Y` exports Y; bare `X` exports X
+        names.add((as[1] ?? as[0]).trim());
+      }
+    }
+    if (/\bexport\s+default\b/.test(js)) names.add("default");
+    return names;
+  }
+
   function checkServerImportInvariant() {
     if (!cgResult.outputs) return;
     const outputByAbsSource = new Map();
     for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
 
-    // Exported names declared in an emitted .server.js (ESM forms; errs toward
-    // "exported" — an unmodeled form just means no false warning).
-    const exportedNamesOf = (js) => {
-      const names = new Set();
-      let m;
-      const declRe = /\bexport\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)/g;
-      while ((m = declRe.exec(js))) names.add(m[1]);
-      const braceRe = /\bexport\s*\{([^}]*)\}/g;
-      while ((m = braceRe.exec(js))) {
-        for (const part of m[1].split(",")) {
-          const t = part.trim();
-          if (!t) continue;
-          const as = t.split(/\s+as\s+/); // `X as Y` exports Y; bare `X` exports X
-          names.add((as[1] ?? as[0]).trim());
-        }
-      }
-      if (/\bexport\s+default\b/.test(js)) names.add("default");
-      return names;
-    };
+    const exportedNamesOf = serverExportedNamesOf;
 
     // `import D, { a, b as c } from "./X.server.js"` — default + named clause +
     // the relative .server.js path. Namespace `import * as X` is not matched.
@@ -3496,6 +3508,34 @@ function _compileScrmlImpl(options = {}) {
     // kind + missing-name set), so a route-mis-inferred helper imported by many
     // per-route server bundles fires once, not once per bundle.
     const seen = new Set();
+    // S458 (review F4) — an import of a name two `export *` bind differently is already
+    // E-IMPORT-004 ("ambiguous", module-resolver.js). Its importer/target pair emits no
+    // server link for that name; a "has no server content" / "missing export" warning on
+    // the same pair would only misdirect, so that pair stays silent here.
+    // S458 (re-review N2b) — the same for a MISSING name: an import of a name its
+    // target does not export (pair `importer -> target`, name), and a re-export of a
+    // missing name (the re-exporter emits no binding for it, so any importer reading
+    // it through the re-exporter is covered). The E-IMPORT-004 is the report.
+    const ambiguousPairs = new Set();
+    const missingByPair = new Map(); // "importer\ntarget" -> Set<name>
+    const missingReExported = new Map(); // re-exporter abs path -> Set<exported name>
+    for (const e of allErrors) {
+      if (!e || e.code !== "E-IMPORT-004" || !e.importerFile || !e.targetFile) continue;
+      if (e.ambiguousStarName) {
+        ambiguousPairs.add(resolve(e.importerFile) + "\n" + resolve(e.targetFile));
+      } else if (e.missingName) {
+        const k = resolve(e.importerFile) + "\n" + resolve(e.targetFile);
+        if (!missingByPair.has(k)) missingByPair.set(k, new Set());
+        missingByPair.get(k).add(e.missingName);
+      } else if (e.reExportedMissingName) {
+        const k = resolve(e.importerFile);
+        if (!missingReExported.has(k)) missingReExported.set(k, new Set());
+        missingReExported.get(k).add(e.reExportedMissingName);
+      }
+    }
+    const reportedMissing = (importer, target, name) =>
+      (missingByPair.get(resolve(importer) + "\n" + resolve(target))?.has(name) ?? false) ||
+      (missingReExported.get(resolve(target))?.has(name) ?? false);
     for (const [filePath, output] of cgResult.outputs) {
       if (!output.serverJs) continue;
       const importerBase = basename(filePath, ".scrml");
@@ -3508,7 +3548,18 @@ function _compileScrmlImpl(options = {}) {
         const targetAbs = serverImportTargetSource(filePath, relServer);
         const target = outputByAbsSource.get(targetAbs);
         if (!target) continue; // external / cross-unit / vendor — not our invariant
+        if (ambiguousPairs.has(resolve(filePath) + "\n" + resolve(targetAbs))) continue; // S458 F4
         const targetBase = basename(targetAbs, ".scrml");
+        const wanted = [];
+        if (defaultName) wanted.push("default");
+        if (namedClause) {
+          for (const part of namedClause.split(",")) {
+            const t = part.trim();
+            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
+          }
+        }
+        // S458 N2b — every name this import reads is already an E-IMPORT-004.
+        if (wanted.length > 0 && wanted.every((n) => reportedMissing(filePath, targetAbs, n))) continue;
 
         if (!target.serverJs) {
           // (a) MISSING-FILE — target emits no .server.js at all.
@@ -3528,15 +3579,7 @@ function _compileScrmlImpl(options = {}) {
         }
         // (b) MISSING-EXPORT — target emits .server.js but not all imported names.
         const exported = exportedNamesOf(target.serverJs);
-        const wanted = [];
-        if (defaultName) wanted.push("default");
-        if (namedClause) {
-          for (const part of namedClause.split(",")) {
-            const t = part.trim();
-            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
-          }
-        }
-        const missing = wanted.filter((n) => n && !exported.has(n));
+        const missing = wanted.filter((n) => n && !exported.has(n) && !reportedMissing(filePath, targetAbs, n));
         if (missing.length > 0) {
           const dk = "E|" + targetAbs + "|" + missing.slice().sort().join(",");
           if (seen.has(dk)) continue;
@@ -3590,45 +3633,99 @@ function _compileScrmlImpl(options = {}) {
     const outputByAbsSource = new Map();
     for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
     // `import D, { a, b as c } from "./X.server.js"` — same shape the invariant
-    // check matches. We only need the relative `.server.js` path here.
+    // check matches — and (s457, §21.4) a re-export `export { a as b } from
+    // "./X.server.js"`, which links X exactly like an import does. We only need the
+    // relative `.server.js` path here.
     const importRe =
-      /\bimport\s+(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\})?\s*from\s*["'](\.\.?\/[^"']+\.server\.js)["']/g;
+      /\b(?:import\s+(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\})?|export\s*\{[^}]*\})\s*from\s*["'](\.\.?\/[^"']+\.server\.js)["']/g;
     // Dedup so a target imported by many bundles is emitted once.
     const emittedFor = new Set();
-    for (const [filePath, output] of cgResult.outputs) {
-      if (!output.serverJs) continue;
-      importRe.lastIndex = 0;
-      let m;
-      while ((m = importRe.exec(output.serverJs))) {
-        const relServer = m[1];
-        // D-4: same DIST-space reversal the invariant check uses — a source-space
-        // reversal here silently fails to materialize the value-only
-        // `.server.js` for any importer under `pages/`, and the guard then never
-        // sees the dangling target either.
-        const targetAbs = serverImportTargetSource(filePath, relServer);
-        if (emittedFor.has(targetAbs)) continue;
-        const target = outputByAbsSource.get(targetAbs);
-        if (!target) continue; // external / cross-unit / vendor — not ours.
-        if (target.serverJs) continue; // already has server content — fine.
-        const targetAst = astByAbsSource.get(targetAbs);
-        if (!targetAst) continue; // no AST for the target (shouldn't happen).
-        // E-SQL-006 (§44.3, g-esql006) — the value-only emit can surface a compile
-        // diagnostic (a `.prepare()` on a `?{}` in an EXPORTED async fn body that the
-        // module-value-export path emits). Thread a local sink through and fold it
-        // into the compile's error stream via collectErrors (same conversion the main
-        // CG errors take), so the diagnostic is not silently discarded on this pass.
-        const valueOnlyErrors = [];
-        const valueOnly = generateValueOnlyServerJs(targetAst, valueOnlyErrors);
-        if (valueOnlyErrors.length > 0) collectErrors("CG", valueOnlyErrors, targetAbs);
-        emittedFor.add(targetAbs);
-        if (!valueOnly) continue; // no server-importable value export → leave dangling (warning fires).
-        // Attach the minimal value-only .server.js to the target output so the
-        // parse-gate + write phase pick it up and the invariant check resolves.
-        target.serverJs = valueOnly;
+    // s457 — to a FIXPOINT: a value-only `.server.js` materialized below may itself
+    // re-export from a module with no server content (b re-exports c's const), and
+    // that module's file is only needed once b's exists.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const [filePath, output] of cgResult.outputs) {
+        if (!output.serverJs) continue;
+        importRe.lastIndex = 0;
+        let m;
+        while ((m = importRe.exec(output.serverJs))) {
+          const relServer = m[1];
+          // D-4: same DIST-space reversal the invariant check uses — a source-space
+          // reversal here silently fails to materialize the value-only
+          // `.server.js` for any importer under `pages/`, and the guard then never
+          // sees the dangling target either.
+          const targetAbs = serverImportTargetSource(filePath, relServer);
+          if (emittedFor.has(targetAbs)) continue;
+          const target = outputByAbsSource.get(targetAbs);
+          if (!target) continue; // external / cross-unit / vendor — not ours.
+          if (target.serverJs) continue; // already has server content — fine.
+          const targetAst = astByAbsSource.get(targetAbs);
+          if (!targetAst) continue; // no AST for the target (shouldn't happen).
+          // E-SQL-006 (§44.3, g-esql006) — the value-only emit can surface a compile
+          // diagnostic (a `.prepare()` on a `?{}` in an EXPORTED async fn body that the
+          // module-value-export path emits). Thread a local sink through and fold it
+          // into the compile's error stream via collectErrors (same conversion the main
+          // CG errors take), so the diagnostic is not silently discarded on this pass.
+          const valueOnlyErrors = [];
+          const valueOnly = generateValueOnlyServerJs(targetAst, valueOnlyErrors);
+          if (valueOnlyErrors.length > 0) collectErrors("CG", valueOnlyErrors, targetAbs);
+          emittedFor.add(targetAbs);
+          if (!valueOnly) continue; // no server-importable value export → leave dangling (warning fires).
+          // Attach the minimal value-only .server.js to the target output so the
+          // parse-gate + write phase pick it up and the invariant check resolves.
+          target.serverJs = valueOnly;
+          grew = true;
+        }
       }
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // s457 (§21.4) — RE-EXPORTS ARE DECIDED OFF THE EMITTED OUTPUT. emit-server writes
+  // `export { w as helper } from "./c.server.js"` for each local `.scrml` re-export
+  // of a runtime value, but only c's own emission knows whether c.server.js really
+  // exports `w` (an exported server OPERATION that is not async, a component const,
+  // a local `export { a as b }`, or a module with no server file at all, emit none).
+  // ESM does not degrade per name: one missing re-exported name makes the WHOLE
+  // re-exporting module fail to link — every route in it, for every importer. So,
+  // after every `.server.js` exists, each re-export line keeps only the names its
+  // target exports (a line left empty is removed), to a fixpoint so a chain
+  // (b re-exports c re-exports d) settles from the far end. A name dropped here
+  // that a server bundle does import is then reported by
+  // `checkServerImportInvariant` as W-SERVER-IMPORT-UNEMITTED (missing export),
+  // exactly as for a direct import of a name the module does not export.
+  // ---------------------------------------------------------------------------
+  function reconcileServerReExports() {
+    if (!cgResult.outputs) return;
+    const outputByAbsSource = new Map();
+    for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
+    const reExportRe = /^export\s*\{([^}]*)\}\s*from\s*(["'])(\.\.?\/[^"']+\.server\.js)\2;?[ \t]*$/gm;
+    let changed = true;
+    for (let pass = 0; changed && pass < outputByAbsSource.size + 2; pass++) {
+      changed = false;
+      for (const [filePath, output] of cgResult.outputs) {
+        if (!output.serverJs || !output.serverJs.includes("export {")) continue;
+        const next = output.serverJs.replace(reExportRe, (line, clause, _q, relServer) => {
+          const target = outputByAbsSource.get(serverImportTargetSource(filePath, relServer));
+          if (!target) return line; // outside this compile — not ours to judge
+          const exported = target.serverJs ? serverExportedNamesOf(target.serverJs) : new Set();
+          const kept = clause.split(",").map((p) => p.trim()).filter(Boolean)
+            .filter((p) => exported.has(p.split(/\s+as\s+/)[0].trim()));
+          if (kept.length === 0) return "";
+          return `export { ${kept.join(", ")} } from ${JSON.stringify(relServer)};`;
+        });
+        if (next !== output.serverJs) {
+          output.serverJs = next;
+          changed = true;
+        }
+      }
+    }
+  }
+
   emitValueOnlyServerJsForDanglingImports();
+  reconcileServerReExports();
   checkServerImportInvariant();
   runProtectFlow();
 
