@@ -191,3 +191,6 @@
   (callback-prop-bare-call-form, callback-prop-optional-guarded: an omitted optional prop now lowers as `(null)()` /
   `if((null))` — the `not` grouping, same behaviour). ZERO corpus files outside the new cases changed — including
   no E-TYPE-046 change anywhere in the corpus from the widened narrowing.
+- Gates (on 42859836a): core suite 32821 pass / 0 fail (pre-commit); conformance/run.ts 1414/1464 + 50 xfail, 0 fail;
+  browser-baseline --check PASS (48 asserted); e2e-render-map 259/0; compiler/tests/*.test.js 2239/0; types-gate OK;
+  bootstrap-conformance / FACTS / SPEC-INDEX current; s34-census --check-new PASS.
