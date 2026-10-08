@@ -534,7 +534,7 @@ export function emitEngineTimersTable(meta: EngineMetadata): string[] {
   const lines: string[] = [];
 
   lines.push(`// §51.0.M onTimeout timer-config table for engine ${meta.varName}: ${meta.forType}`);
-  lines.push(`const ${tableName} = Object.freeze({`);
+  lines.push(`const ${tableName} = _scrml_g.Object.freeze({`);
 
   const stateEntryLines: string[] = [];
   for (const child of sc) {
@@ -619,11 +619,11 @@ export function emitEngineIdleWatchdog(meta: EngineMetadata): string[] {
   const lines: string[] = [];
   lines.push(`// §51.0.R onIdle watchdog config for engine ${meta.varName}: ${meta.forType}`);
   if (parsed.kind === "literal") {
-    lines.push(`const ${constName} = Object.freeze({ ms: ${parsed.ms}, target: ${targetLit} });`);
+    lines.push(`const ${constName} = _scrml_g.Object.freeze({ ms: ${parsed.ms}, target: ${targetLit} });`);
   } else if (parsed.kind === "computed") {
     const rewritten = rewriteExpr(parsed.exprText);
     lines.push(
-      `const ${constName} = Object.freeze({ msExpr: function(){ return (${rewritten}) * ${parsed.unitMultiplier}; }, target: ${targetLit} });`,
+      `const ${constName} = _scrml_g.Object.freeze({ msExpr: function(){ return (${rewritten}) * ${parsed.unitMultiplier}; }, target: ${targetLit} });`,
     );
   } else {
     // parsed.kind === "invalid" — defensive: emit a null-watchdog so call
@@ -738,7 +738,7 @@ export function emitEngineTransitionTable(meta: EngineMetadata): string[] {
   const lines: string[] = [];
 
   lines.push(`// §51.0.F transition table for engine ${meta.varName}: ${meta.forType}`);
-  lines.push(`const ${tableName} = Object.freeze({`);
+  lines.push(`const ${tableName} = _scrml_g.Object.freeze({`);
 
   const entries: string[] = [];
   for (const child of sc) {
@@ -1121,7 +1121,7 @@ export function emitEngineMessageArmTable(
   };
 
   lines.push(`// §51.0.S message-arm dispatch table for engine ${meta.varName}: ${meta.forType} × ${meta.acceptsType ?? "?"}`);
-  lines.push(`const ${tableName} = Object.freeze({`);
+  lines.push(`const ${tableName} = _scrml_g.Object.freeze({`);
 
   const stateEntries: string[] = [];
   for (const child of sc) {
@@ -1255,7 +1255,7 @@ export function emitEngineInternalTransitionTable(meta: EngineMetadata): string[
   const lines: string[] = [];
 
   lines.push(`// §51.0.O internal transition table for engine ${meta.varName}: ${meta.forType}`);
-  lines.push(`const ${tableName} = Object.freeze({`);
+  lines.push(`const ${tableName} = _scrml_g.Object.freeze({`);
 
   const entries: string[] = [];
   for (const child of sc) {
@@ -1490,7 +1490,7 @@ export function emitEngineHistoryMap(meta: EngineMetadata, decl: EngineDeclLike)
   const constName = engineHistoryMapName(meta.varName);
   const lines: string[] = [];
   lines.push(`// §51.0.N history map for engine ${meta.varName}: ${meta.forType}`);
-  lines.push(`const ${constName} = Object.freeze({`);
+  lines.push(`const ${constName} = _scrml_g.Object.freeze({`);
   lines.push(entries.join(",\n"));
   lines.push(`});`);
   return lines;
@@ -2166,7 +2166,7 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
           `// §51.11 audit target for engine ${meta.varName}: ${meta.forType}`,
           `_scrml_engine_audit_register(${JSON.stringify(meta.varName)}, function (__f, __t) {`,
           `  _scrml_reactive_set(${JSON.stringify((meta as any).auditTarget)}, (_scrml_reactive_get(${JSON.stringify((meta as any).auditTarget)}) || []).concat([`,
-          `    Object.freeze({ from: __f, to: __t, at: Date.now(), rule: __f + ":" + __t, label: null }),`,
+          `    _scrml_g.Object.freeze({ from: __f, to: __t, at: _scrml_g.Date.now(), rule: __f + ":" + __t, label: null }),`,
           `  ]));`,
           `});`,
         ]
@@ -3583,7 +3583,7 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
         // note — runtime-emission rename is scaffold-internal, separate
         // dispatch territory.)
         `if (__scrml_derived_v == null) {`,
-        `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
+        `  throw new _scrml_g.Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(upstream '${upstream}' is undefined). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
         `    "Add a default arm or a wildcard arm in the derivation.");`,
@@ -3616,7 +3616,7 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
         // See §51.0.J leak-mitigation note above — `== null` covers both
         // canonical absence (JS null) and not-registered (JS undefined).
         `if (__scrml_derived_v == null) {`,
-        `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
+        `  throw new _scrml_g.Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(no match arm fired for upstream '${upstream}'). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
         `    "Add a default arm or a wildcard arm in the derivation.");`,
@@ -3638,7 +3638,7 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
         `const __scrml_derived_v = (${lowered});`,
         // `== null` covers canonical absence (JS null) + not-registered (undefined).
         `if (__scrml_derived_v == null) {`,
-        `  throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
+        `  throw new _scrml_g.Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' yielded no value " +`,
         `    "(the derived= expression produced no defined variant). " +`,
         `    "Per §51.0.J + §34: derived=expr must produce a defined variant for the source's initial state. " +`,
         `    "Add a default arm or a wildcard arm in the derivation.");`,
@@ -3651,7 +3651,7 @@ function buildDerivedEngineClosureBody(derivedExpr: unknown, varName: string): s
   // failure is loud at engine-init time. B16 should have rejected
   // unrecognized shapes earlier.
   return [
-    `throw new Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' has an unrecognized derivedExpr shape. " +`,
+    `throw new _scrml_g.Error("E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT: derived engine '${varName}' has an unrecognized derivedExpr shape. " +`,
     `  "This is a compiler internal error — B16 should have rejected this earlier.");`,
   ].join("\n  ");
 }

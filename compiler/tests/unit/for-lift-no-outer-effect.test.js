@@ -113,7 +113,7 @@ describe("for-lift no outer _scrml_effect (Bug 5)", () => {
     const { clientJs } = compileSource(src, "lift-target-once");
     const wrapperIdx = clientJs.indexOf("_scrml_list_wrapper_");
     const prefix = clientJs.slice(0, wrapperIdx);
-    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = document.querySelector");
+    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = _scrml_g.document.querySelector");
     expect(lastTargetAssign).toBeGreaterThan(-1);
     const between = prefix.slice(lastTargetAssign);
     const opens = (between.match(/_scrml_effect\(function\(\)/g) || []).length;
@@ -179,7 +179,7 @@ describe("for-lift no outer _scrml_effect (Bug 5)", () => {
     // Check that no _scrml_effect wraps the final wrapper creation
     const lastWrapperIdx = clientJs.lastIndexOf("_scrml_list_wrapper_");
     const prefix = clientJs.slice(0, lastWrapperIdx);
-    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = document.querySelector");
+    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = _scrml_g.document.querySelector");
     expect(lastTargetAssign).toBeGreaterThan(-1);
     const between = prefix.slice(lastTargetAssign);
     const opens = (between.match(/_scrml_effect\(function\(\)/g) || []).length;
@@ -204,7 +204,7 @@ describe("for-lift no outer _scrml_effect (Bug 5)", () => {
     const wrapperIdx = clientJs.indexOf("_scrml_list_wrapper_");
     expect(wrapperIdx).toBeGreaterThan(-1);
     const prefix = clientJs.slice(0, wrapperIdx);
-    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = document.querySelector");
+    const lastTargetAssign = prefix.lastIndexOf("_scrml_lift_target = _scrml_g.document.querySelector");
     expect(lastTargetAssign).toBeGreaterThan(-1);
     const between = prefix.slice(lastTargetAssign);
     const opens = (between.match(/_scrml_effect\(function\(\)/g) || []).length;

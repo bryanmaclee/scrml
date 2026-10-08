@@ -1612,7 +1612,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       }
 
       if (callExprs.length > 1) {
-        lines.push(`const [${varNames.join(", ")}] = await Promise.all([`);
+        lines.push(`const [${varNames.join(", ")}] = await _scrml_g.Promise.all([`);
         for (let k = 0; k < callExprs.length; k++) {
           const comma = k < callExprs.length - 1 ? "," : "";
           lines.push(`  ${callExprs[k]}${comma}`);

@@ -108,7 +108,7 @@ describe("GITI-019 §1: lift-loop interpolation with || emits valid JS", () => {
     // the interpolation drives a stable text node's textContent inside an
     // _scrml_effect (not a one-shot createTextNode). The GITI-019 invariant is
     // unchanged: the source expr is parenthesized before the `?? ""` coalesce.
-    expect(client).toContain('textContent = String((e.description || "(no message)") ?? "")');
+    expect(client).toContain('textContent = _scrml_g.String((e.description || "(no message)") ?? "")');
     // Guard against regression to the illegal unparenthesized `||` + `??` mix.
     expect(client).not.toContain('String(e.description || "(no message)" ?? "")');
   });
@@ -140,7 +140,7 @@ describe("GITI-019 §2: lift-loop interpolation with && also parenthesizes", () 
     expect(isValidEsm(client).ok).toBe(true);
     // Bug 64 (S159): live-keyed per-item text — same parenthesized invariant,
     // now on a textContent assignment inside the per-item effect.
-    expect(client).toContain('textContent = String((e.description && "has-value") ?? "")');
+    expect(client).toContain('textContent = _scrml_g.String((e.description && "has-value") ?? "")');
   });
 });
 

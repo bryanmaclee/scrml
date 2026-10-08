@@ -135,7 +135,8 @@ describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped hel
   // Eval the SHIPPED helper block (the EXACT runtime the emitted server carries),
   // with a stub session resolver: a request is `{ tenantId }`.
   const H = new Function(
-    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    // `_scrml_g`: the bundle's host-global alias (S457 2a) the helper reads through.
+    "const _scrml_g = globalThis;\nfunction _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
     "\nreturn { _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
   )();
@@ -216,7 +217,7 @@ describe("§14.8.10 non-tenant apps carry zero tenant-floor overhead", () => {
     // machinery; everything else below still must be absent.
     const STARTUP_CHECK = /\n\/\/ §14\.8\.10 \(S456\) — which relations[\s\S]*?\nexport const _scrml_tenant_startup_check = \{[\s\S]*?\n\};\n?/;
     expect(out.serverJs).toMatch(STARTUP_CHECK);
-    expect(out.serverJs).toContain("const _SCRML_TENANT_DECLARED = new Set([]);");
+    expect(out.serverJs).toContain("const _SCRML_TENANT_DECLARED = new _scrml_g.Set([]);");
     const floorOnly = out.serverJs.replace(STARTUP_CHECK, "\n");
     expect(floorOnly).not.toContain("_scrml_tenant_");
     expect(floorOnly).not.toContain("_scrml_active_tenant");

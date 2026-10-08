@@ -148,7 +148,7 @@ describe("server-load-authority (a): Fork-4 route gate closes the anon /__server
 
   test("the session middleware resolves userId + role from the session store (impl-gap #2)", () => {
     const { serverJs } = compileFull(ROW_SCOPED);
-    expect(serverJs).toContain("const _scrml_session_store = (globalThis.__scrml_session_store");
+    expect(serverJs).toContain("const _scrml_session_store = (_scrml_g.__scrml_session_store");
     expect(serverJs).toContain("userId: _rec ? (_rec.userId ?? null) : null,");
     // B3 (S266) — `role` is gated on a real authenticated identity (`userId != null`)
     // so an authless-but-role-bearing record cannot read a role (invariant
@@ -407,7 +407,7 @@ describe("server-load-authority (j): callable /__mountHydrate per-cell gate (rou
     const { serverJs } = compileFull(MIXED_ROLE);
     const gi = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     expect(gi).toBeGreaterThan(-1);
-    const handler = serverJs.slice(gi, serverJs.indexOf("}", serverJs.indexOf("return new Response", gi)));
+    const handler = serverJs.slice(gi, serverJs.indexOf("}", serverJs.indexOf("return new _scrml_g.Response", gi)));
     // Each cell gated by its OWN role — both roles present, never collapsed.
     expect(handler).toContain('_scrml_cu.role === "admin"');
     expect(handler).toContain('_scrml_cu.role === "editor"');
@@ -435,7 +435,7 @@ describe("server-load-authority (j): callable /__mountHydrate per-cell gate (rou
   test("defect 4 — the /__mountHydrate handler serves the public cell to ANY request (incl. anon)", () => {
     const { serverJs } = compileFull(PUBLIC_GATED);
     const gi = serverJs.indexOf("async function _scrml_mountHydrate_handler");
-    const handler = serverJs.slice(gi, serverJs.indexOf("return new Response", gi));
+    const handler = serverJs.slice(gi, serverJs.indexOf("return new _scrml_g.Response", gi));
     // publicCell is assigned unconditionally; secretCell only when authenticated.
     expect(handler).toContain('_scrml_mh_out["publicCell"] = ');
     expect(handler).toContain('if (_scrml_cu.isAuth) _scrml_mh_out["secretCell"]');

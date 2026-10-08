@@ -936,7 +936,7 @@ function emitCapturedBindings(node: any): string {
   // bindings: `meta.bindings.varName` SHALL return the value that was current when the
   // effect function was invoked for this run." An object literal evaluated once at the
   // `^{}` site froze the FIRST run's values for every later run (S458 review F4).
-  return ["() => Object.freeze({", props.join(",\n"), "})"].join("\n");
+  return ["() => _scrml_g.Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
 /**
@@ -952,7 +952,7 @@ function emitCapturedBindings(node: any): string {
  */
 function emitInternalCaptureObject(names: ReadonlySet<string>): string {
   const props = [...names].map((name) => `  get ${name}() { return ${name}; }`);
-  return ["Object.freeze({", props.join(",\n"), "})"].join("\n");
+  return ["_scrml_g.Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
 /**
@@ -2044,7 +2044,7 @@ function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogi
         for (const r of computedTemporalRules) {
           const labelLit = (r as any).label ? JSON.stringify((r as any).label) : "null";
           const rewritten = rewriteExpr((r as any).afterExpr);
-          const durationExpr = `(function(){ var v = ${rewritten}; return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0; })()`;
+          const durationExpr = `(function(){ var v = ${rewritten}; return (typeof v === "number" && _scrml_g.isFinite(v) && v >= 0) ? _scrml_g.Math.round(v) : 0; })()`;
           out.push(`  if (__scrml_init_variant === ${JSON.stringify((r as any).from)}) {`);
           out.push(`    _scrml_machine_arm_timer(${JSON.stringify(encodedName)}, ${durationExpr}, ${JSON.stringify((r as any).to)}, { fromVariant: ${JSON.stringify((r as any).from)}, label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
           out.push(`  }`);
@@ -3897,7 +3897,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           // STILL emit the runtime-throwing IIFE (defense-in-depth — PINNED by
           // sql-params / sql-write-ops §5): the JS parses and any runtime execution
           // surfaces the issue immediately.
-          return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
+          return `(()=>{throw new _scrml_g.Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
         }
 
         // The terminator's value shape over the driver's row array `rowsExpr`:
@@ -4804,7 +4804,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // transaction open (autocommit) and persisted. The guard only stops a
       // COMMIT past a rollback (on Postgres a COMMIT with no open transaction
       // merely WARNS) if some other nested-function lowering reaches here.
-      lines.push(`  if (!${open}) throw new Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
+      lines.push(`  if (!${open}) throw new _scrml_g.Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
       lines.push(`  await ${db}.unsafe("COMMIT");`);
       lines.push(`  ${open} = false;`);
       lines.push(`} catch (_scrml_txn_err) {`);

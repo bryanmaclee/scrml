@@ -36,6 +36,7 @@ import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../src/codegen/sqlite-defaults.ts";
+import { standInHostAlias } from "../helpers/host-view.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Unique per RUN: the teardown below can legitimately fail with EBUSY on Windows
@@ -192,7 +193,7 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
 
     // Mirror the conformance adapter's own preprocessing, then parse exactly as it
     // does. This fails loudly the moment anything reintroduces top-level await.
-    const runnable = serverJs
+    const runnable = standInHostAlias(serverJs)
       .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
       .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
       .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")

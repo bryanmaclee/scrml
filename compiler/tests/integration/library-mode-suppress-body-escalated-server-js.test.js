@@ -100,7 +100,7 @@ describe("§12.6 Library-mode Emission — body-escalated .server.js suppression
     expect(r.libraryJs).toContain("export function readLines");
     // The §12.3 handler boilerplate must NOT be present anywhere.
     expect(r.libraryJs).not.toContain("_scrml_handler_readLines");
-    expect(r.libraryJs).not.toContain("new Response");
+    expect(r.libraryJs).not.toMatch(/new (?:_scrml_g\.)?Response/);
   });
 
   // (b) Explicit `export server function` → wrapper RETAINED.

@@ -91,7 +91,7 @@ describe("§A serve-harness: Bun.serve mounting <endpoint> + SSE routes (no html
     // It iterates the mounted routes with (request, server) — WS routes get server.
     expect(toolJs).toContain("for (const _scrml_route of routes) {");
     expect(toolJs).toContain("_scrml_route.isWebSocket ? _scrml_route.handler(request, server) : _scrml_route.handler(request)");
-    expect(toolJs).toContain('return new Response("Not Found", { status: 404 });');
+    expect(toolJs).toContain('return new _scrml_g.Response("Not Found", { status: 404 });');
 
     // The mounted routes: the §61 endpoint POST /fsp + the §37 SSE GET /fsp/deltas.
     expect(toolJs).toContain('path: "/fsp"');
@@ -139,7 +139,7 @@ describe("§B main-optional (§64.2 relaxed for serve=)", () => {
     const { codes, toolJs } = compileTool(src);
     expect(codes).toEqual([]);
     expect(toolJs).toContain("function main(args) {");
-    expect(toolJs).toContain("await main(process.argv.slice(2));");
+    expect(toolJs).toContain("await main(_scrml_g.process.argv.slice(2));");
     // The await precedes the serve-harness listener.
     expect(toolJs.indexOf("await main(")).toBeLessThan(toolJs.indexOf("_scrml_bind.listen({"));
     expect(() => parsesAsModule(toolJs)).not.toThrow();

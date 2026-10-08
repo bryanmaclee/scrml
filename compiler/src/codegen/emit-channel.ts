@@ -753,11 +753,11 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
     // JSON-serialize to a string (undefined / function / symbol → JSON.stringify
     // returns undefined; or a throw) maps to a sentinel, so the dedup still applies
     // and such a cell cannot re-open the echo storm.
-    lines.push(`  const _scrml_lk = (v) => { let s; try { s = JSON.stringify(v); } catch (_e) { return "\\u0000e"; } return s === void 0 ? "\\u0000u" : s; };`);
+    lines.push(`  const _scrml_lk = (v) => { let s; try { s = _scrml_g.JSON.stringify(v); } catch (_e) { return "\\u0000e"; } return s === void 0 ? "\\u0000u" : s; };`);
   }
   lines.push(`  function ${connectFn}() {`);
   // Bug 3 fix: use protocol-relative WebSocket URL (ws:// on HTTP, wss:// on HTTPS).
-  lines.push(`    ${wsVar} = new WebSocket(\`\${location.protocol === 'https:' ? 'wss' : 'ws'}://\${location.host}/_scrml_ws/${safeName}\`);`);
+  lines.push(`    ${wsVar} = new _scrml_g.WebSocket(\`\${_scrml_g.location.protocol === 'https:' ? 'wss' : 'ws'}://\${_scrml_g.location.host}/_scrml_ws/${safeName}\`);`);
 
   if (clientOpenHandler) {
     lines.push(`    ${wsVar}.onopen = () => { ${clientOpenHandler}; };`);
@@ -767,7 +767,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
 
   lines.push(`    ${wsVar}.onmessage = (e) => {`);
   lines.push(`      try {`);
-  lines.push(`        const _d = JSON.parse(e.data);`);
+  lines.push(`        const _d = _scrml_g.JSON.parse(e.data);`);
 
   // §38.13.3 — a `watches=` realtime feed dispatches the server-published
   // `__change` frame into the typed `<onchange>` arms. Emitted UNCONDITIONALLY
@@ -793,7 +793,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
 
   // §53 (S458) — a sync frame whose value a refined cell refuses (E-CONTRACT-001-RT
   // from the setter) is not applied; report it rather than swallow it.
-  lines.push(`      } catch (_e) { if (_e && String(_e.message).startsWith("E-CONTRACT-")) console.error("scrml channel sync:", _e); }`);
+  lines.push(`      } catch (_e) { if (_e && _scrml_g.String(_e.message).startsWith("E-CONTRACT-")) _scrml_g.console.error("scrml channel sync:", _e); }`);
   lines.push(`    };`);
 
   if (clientErrorHandler) {
@@ -802,9 +802,9 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
 
   if (reconnectMs > 0) {
     if (clientCloseHandler) {
-      lines.push(`    ${wsVar}.onclose = () => { ${clientCloseHandler}; ${reconnVar} = setTimeout(${connectFn}, ${reconnectMs}); };`);
+      lines.push(`    ${wsVar}.onclose = () => { ${clientCloseHandler}; ${reconnVar} = _scrml_g.setTimeout(${connectFn}, ${reconnectMs}); };`);
     } else {
-      lines.push(`    ${wsVar}.onclose = () => { ${reconnVar} = setTimeout(${connectFn}, ${reconnectMs}); };`);
+      lines.push(`    ${wsVar}.onclose = () => { ${reconnVar} = _scrml_g.setTimeout(${connectFn}, ${reconnectMs}); };`);
     }
   } else {
     if (clientCloseHandler) {
@@ -816,16 +816,16 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
 
   lines.push(`  }`);
   lines.push(`  ${connectFn}();`);
-  lines.push(`  _scrml_register_cleanup(() => { ${wsVar}?.close(); clearTimeout(${reconnVar}); });`);
+  lines.push(`  _scrml_register_cleanup(() => { ${wsVar}?.close(); _scrml_g.clearTimeout(${reconnVar}); });`);
   lines.push(`  return {`);
-  lines.push(`    send: (d) => ${wsVar}?.readyState === 1 && ${wsVar}.send(JSON.stringify(d)),`);
+  lines.push(`    send: (d) => ${wsVar}?.readyState === 1 && ${wsVar}.send(_scrml_g.JSON.stringify(d)),`);
   lines.push(`    close: () => ${wsVar}?.close(),`);
 
   if (sharedVars.length > 0) {
     // Returns TRUE only when the frame was actually put on the wire (socket OPEN),
     // so the dedup can record last-synced only on a real send (WebSocket.send itself
     // returns undefined — the old `&&` form could not distinguish sent from dropped).
-    lines.push(`    syncShared: (key, val) => { if (${wsVar}?.readyState === 1) { ${wsVar}.send(JSON.stringify({ __type: "__sync", __key: key, __val: val })); return true; } return false; },`);
+    lines.push(`    syncShared: (key, val) => { if (${wsVar}?.readyState === 1) { ${wsVar}.send(_scrml_g.JSON.stringify({ __type: "__sync", __key: key, __val: val })); return true; } return false; },`);
     lines.push(`    _ls: _scrml_ls,`);
     lines.push(`    _lk: _scrml_lk,`);
   }
@@ -883,7 +883,7 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   // emit-server.ts, under the same `webAppShape` condition as this call.
   if (webAppShape) {
     lines.push(`    // Cross-origin upgrade refused (§40.2 — cross-site WebSocket hijacking)`);
-    lines.push(`    if (!_scrml_ws_origin_ok(req)) return new Response("Cross-origin WebSocket upgrade refused", { status: 403 });`);
+    lines.push(`    if (!_scrml_ws_origin_ok(req)) return new _scrml_g.Response("Cross-origin WebSocket upgrade refused", { status: 403 });`);
   }
 
   // Fork 2A — the cookie-session WS upgrade auth guard is WEB-APP-ONLY. `_scrml_auth_check`
@@ -902,7 +902,7 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   // signal "the request was upgraded; do not return a response." `void 0`
   // evaluates to the JS undefined value without using the keyword literal
   // (W-CG-UNDEFINED-INTERPOLATION-safe; standards-conforming idiom).
-  lines.push(`    return ok ? void 0 : new Response("WebSocket upgrade failed", { status: 400 });`);
+  lines.push(`    return ok ? void 0 : new _scrml_g.Response("WebSocket upgrade failed", { status: 400 });`);
   lines.push(`  },`);
   lines.push(`};`);
 
@@ -1039,7 +1039,7 @@ export function emitChannelWatchesServerBoot(
     lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.createTrigDDL)});`);
   }
   lines.push("  } catch (_e) {");
-  lines.push('    console.error("[scrml] watches= trigger install failed:", _e && _e.message);');
+  lines.push('    _scrml_g.console.error("[scrml] watches= trigger install failed:", _e && _e.message);');
   lines.push("  }");
   lines.push("}");
   lines.push("");
@@ -1059,15 +1059,15 @@ export function emitChannelWatchesServerBoot(
     lines.push(`  import("pg").then((_pgMod) => {`);
     lines.push(`    const _PgClient = (_pgMod.default && _pgMod.default.Client) || _pgMod.Client;`);
     lines.push(`    const _client = new _PgClient({ connectionString: _SCRML_WATCHES_CONN });`);
-    lines.push(`    const _retry = () => { try { _client.removeAllListeners && _client.removeAllListeners(); } catch (_e) {} setTimeout(${listenFn}, _SCRML_WATCHES_RECONNECT_MS); };`);
+    lines.push(`    const _retry = () => { try { _client.removeAllListeners && _client.removeAllListeners(); } catch (_e) {} _scrml_g.setTimeout(${listenFn}, _SCRML_WATCHES_RECONNECT_MS); };`);
     lines.push(`    _client.on("error", _retry);`);
     lines.push(`    _client.on("end", _retry);`);
     lines.push(`    _client.on("notification", async (_msg) => {`);
-    lines.push(`      let _p; try { _p = JSON.parse(_msg.payload); } catch (_e) { return; }`);
-    lines.push(`      const _server = globalThis._scrml_active_server;`);
+    lines.push(`      let _p; try { _p = _scrml_g.JSON.parse(_msg.payload); } catch (_e) { return; }`);
+    lines.push(`      const _server = _scrml_g._scrml_active_server;`);
     lines.push(`      if (!_server) return;`);
     lines.push(`      if (_p.op === "DELETE") {`);
-    lines.push(`        _server.publish(${JSON.stringify(topic)}, JSON.stringify({ __type: "__change", op: "Deleted", key: _p.key }));`);
+    lines.push(`        _server.publish(${JSON.stringify(topic)}, _scrml_g.JSON.stringify({ __type: "__change", op: "Deleted", key: _p.key }));`);
     lines.push(`        return;`);
     lines.push(`      }`);
     lines.push(`      try {`);
@@ -1089,7 +1089,7 @@ export function emitChannelWatchesServerBoot(
     lines.push(`        if (!_row) return;`);
     lines.push(`        const _variant = _p.op === "INSERT" ? "Inserted" : "Updated";`);
     const _rowExpr = _hasProt ? "_scrml_protect_redact(_row)" : "_row";
-    lines.push(`        _server.publish(${JSON.stringify(topic)}, JSON.stringify({ __type: "__change", op: _variant, row: ${_rowExpr} }));`);
+    lines.push(`        _server.publish(${JSON.stringify(topic)}, _scrml_g.JSON.stringify({ __type: "__change", op: _variant, row: ${_rowExpr} }));`);
     lines.push(`      } catch (_e) {}`);
     lines.push(`    });`);
     // The channel name MUST be double-quoted here. `pg_notify('scrml_ordersFeed')`
@@ -1103,7 +1103,7 @@ export function emitChannelWatchesServerBoot(
     // old bare form, so no deployed lowercase feed changes behaviour.
     lines.push(`    _client.connect().then(() => _client.query(${JSON.stringify(`LISTEN ${pgQuoteIdent(notifyChannel)}`)})).catch(_retry);`);
     lines.push(`  }).catch((_e) => {`);
-    lines.push(`    console.error("[scrml] realtime watches= feed needs the 'pg' package (Bun.SQL has no LISTEN API):", _e && _e.message);`);
+    lines.push(`    _scrml_g.console.error("[scrml] realtime watches= feed needs the 'pg' package (Bun.SQL has no LISTEN API):", _e && _e.message);`);
     lines.push(`  });`);
     lines.push(`}`);
     lines.push("");
@@ -1112,7 +1112,7 @@ export function emitChannelWatchesServerBoot(
   // (3) Boot — install triggers, then start every LISTEN loop.
   lines.push("_scrml_watches_install_triggers().then(() => {");
   for (const fn of listenFnNames) lines.push(`  ${fn}();`);
-  lines.push('}).catch((_e) => { console.error("[scrml] watches= boot failed:", _e && _e.message); });');
+  lines.push('}).catch((_e) => { _scrml_g.console.error("[scrml] watches= boot failed:", _e && _e.message); });');
   lines.push("");
 
   return lines;
@@ -1159,7 +1159,7 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
   // A malformed client frame is ignored silently, as before — and ONLY that: the parse
   // has its own `try`, so a handler's own SyntaxError is not mistaken for one.
   lines.push(`    let d;`);
-  lines.push(`    try { d = JSON.parse(raw); } catch (_e) { return; }`);
+  lines.push(`    try { d = _scrml_g.JSON.parse(raw); } catch (_e) { return; }`);
   lines.push(`    try {`);
   lines.push(`      const __ch = ws.data.__ch;`);
   for (const node of channelNodes) {
@@ -1193,7 +1193,7 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
   // A FAILING handler — reachable now that it is awaited, previously an unhandled
   // rejection — is logged.
   lines.push(`    } catch (_e) {`);
-  lines.push(`      console.error("[scrml] WebSocket onserver:message handler failed:", _e);`);
+  lines.push(`      _scrml_g.console.error("[scrml] WebSocket onserver:message handler failed:", _e);`);
   lines.push(`    }`);
   lines.push(`  },`);
 

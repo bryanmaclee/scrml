@@ -1,0 +1,15 @@
+// today-operators.scrml — the "today" half of a README "Where the language is going"
+// pair. All three lines below compile on the shipping compiler. The S440 rulings
+// make each one an error (operators take numbers; conditions take booleans).
+<program>
+
+<count> = 0
+<label> = "items: "
+
+const <shown> = @label + @count
+const <total> = @count + "1"
+
+<p if=@count>${@shown} ${@total}</p>
+<button onclick=${@count = @count + 1}>+1</button>
+
+</program>

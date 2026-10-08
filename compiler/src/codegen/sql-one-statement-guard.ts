@@ -347,7 +347,7 @@ export function refusedDriverCallExpr(verdict: Exclude<DriverCallVerdict, "ok">,
         "not declared tenant-scoped (§14.8.10) — it was refused at compile and was not sent to the database."
       : `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED: this ?{} statement${refusal?.lead ? ` (${refusal.lead} …)` : ""} is not ` +
         "admitted in a program body (§14.8.10 item (1)) — it was refused at compile and was not sent to the database.";
-    return `(()=>{throw new Error(${JSON.stringify(msg)})})()`;
+    return `(()=>{throw new _scrml_g.Error(${JSON.stringify(msg)})})()`;
   }
   const msg = verdict === "multiple-statements"
     ? "E-SQL-MULTIPLE-STATEMENTS: a ?{} holds exactly one SQL statement (§8.1.2) — this query holds more " +
@@ -355,7 +355,7 @@ export function refusedDriverCallExpr(verdict: Exclude<DriverCallVerdict, "ok">,
       "block keeps them atomic)."
     : "E-SQL-001: the emitted query would send SQL text the compiler did not read (a bound parameter's " +
       "extent differs between the compiler and the JavaScript template) — it was not sent (§8.6).";
-  return `(()=>{throw new Error(${JSON.stringify(msg)})})()`;
+  return `(()=>{throw new _scrml_g.Error(${JSON.stringify(msg)})})()`;
 }
 
 /**

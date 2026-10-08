@@ -97,7 +97,7 @@ function extractInlinedEq(serverJs) {
   const endIdx = tail.indexOf("\n}\n");
   if (endIdx === -1) return null;
   const body = tail.slice(0, endIdx + 2);
-  return new Function(`${body}\nreturn _scrml_structural_eq;`)();
+  return new Function(`const _scrml_g = globalThis;\n${body}\nreturn _scrml_structural_eq;`)();
 }
 
 // ---------------------------------------------------------------------------

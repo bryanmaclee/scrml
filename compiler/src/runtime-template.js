@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { aliasHostGlobalsInRuntimeText } from "./codegen/host-global-alias.ts";
 
 /**
  * Phase A1c Step C7 — pull the validator predicate runtime catalog into
@@ -555,11 +556,18 @@ const _STDLIB_TIME_CHUNK     = _loadStdlibChunk("time");
  *     Infinite loop guard: MAX_RUNS = 100. Scope cleanup registered with _scrml_register_cleanup.
  */
 
+// The runtime's first binding, `var _scrml_g = globalThis;`, is the host-global
+// alias (S457 2a, codegen/host-global-alias.ts): compiler-emitted code outside the
+// runtime spells every host global through it (`_scrml_g.document`,
+// `_scrml_g.fetch(…)`), so a user binding named after a host global cannot capture
+// a compiler reference. `var`, like `_scrml_modules`: chunk scripts read it across
+// script boundaries. The explanation lives here, not in the shipped text: the
+// client runtime's gzip size is gated (runtime-size-ratchet, the SPA-counter <16 KB).
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
+var _scrml_g = globalThis;
 const _scrml_state = Object.create(null);
 const _scrml_subscribers = Object.create(null);
-// S103 Phase 3 select-row chip-away (Candidate A) — value-indexed sub-registry
-// parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
+// Value-indexed sub-registry (S103) parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
 // register here under their static valueKey (the constant they compare the cell
 // to). At write time _scrml_reactive_set fires only the OLD-value bucket and
 // the NEW-value bucket — O(2) per write instead of O(N) over all rows.
@@ -7153,9 +7161,12 @@ export const SERVER_VALUE_NATIVE_MAP_HELPER = (() => {
   // carried into the server bundle.
   const bodyStart = SCRML_RUNTIME.indexOf("\n", s + startTag.length);
   const body = SCRML_RUNTIME.slice(bodyStart, e);
+  // S457 2a — the server copy shares its module scope with user bindings (a server
+  // function called by another is a module-scope `async function <name>`), so its
+  // host-global references go through the `_scrml_g` alias (codegen/host-global-alias.ts).
   return (
     "\n// --- §59 value-native map/set runtime (inlined for server, no client runtime here) ---\n" +
-    body.trim() +
+    aliasHostGlobalsInRuntimeText(body.trim()) +
     "\n\n"
   );
 })();
@@ -7189,7 +7200,8 @@ export const SERVER_STRUCTURAL_EQ_SOURCE = (() => {
   }
   // Skip the START marker's line and the note under it; begin at the function.
   const fnStart = SCRML_RUNTIME.indexOf("function _scrml_structural_eq(", s);
-  return SCRML_RUNTIME.slice(fnStart, e).trim();
+  // S457 2a — host globals through the `_scrml_g` alias, as for the map helper above.
+  return aliasHostGlobalsInRuntimeText(SCRML_RUNTIME.slice(fnStart, e).trim());
 })();
 
 /**

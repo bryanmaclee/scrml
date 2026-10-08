@@ -280,7 +280,9 @@ describe("§23.2.4a — crossings, host globals, both slice shapes, the boundary
     const at = serverJs.indexOf("function _scrml_foreign_seal(site, source) {");
     expect(at).toBeGreaterThanOrEqual(0);
     const helperSrc = serverJs.slice(at, serverJs.indexOf("\n}\n", at) + 2);
-    const seal = new Function(helperSrc + "\nreturn _scrml_foreign_seal;")();
+    // No module context under `new Function`: `import.meta` reads a plain object here (as the
+    // conformance adapter does), so no host name is bound — what this test asserts on.
+    const seal = new Function("const _scrml_g = globalThis;\n" + helperSrc.replace(/import\.meta\b/g, "({})") + "\nreturn _scrml_foreign_seal;")();
     const src = "async function (n) {\nreturn (n * 2\n);\n}";
     const first = seal("t.scrml:1", src);
     for (let i = 0; i < 4; i++) expect(seal("t.scrml:1", src)).toBe(first); // same built function
@@ -333,6 +335,27 @@ describe("§23.2.4a — tool host I/O form (executed with bun)", () => {
     expect(stdout).toContain("free=undefined/undefined");
     expect(stdout).toContain("n=5");
     expect(stdout).toContain("dyn=.md");
+  });
+
+  // S458 (s458-alias-r3) — under Node an ES module has no `import.meta.require`; the seal
+  // builds the module's require with `module.createRequire(import.meta.url)`.
+  test.skipIf(!Bun.which("node"))("under Node the slice gets a working require too", () => {
+    const { result, dist } = runTool("hostctx_node", `<program kind="tool" lang="js">
+    function main(args: string[]): number {
+        _={
+            const path = require("node:path");
+            console.log("req=" + path.basename("/a/b.txt"));
+            console.log("dir=" + (typeof __dirname) + "/" + (typeof __filename));
+        }=
+        return 0
+    }
+</program>`);
+    expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
+    const run = Bun.spawnSync({ cmd: ["node", join(dist, "hostctx_node.js")], stdout: "pipe", stderr: "pipe" });
+    expect(run.stderr.toString()).toBe("");
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout.toString()).toContain("req=b.txt");
+    expect(run.stdout.toString()).toContain("dir=string/string");
   });
 
   test("the slice text survives being carried as source: backticks, ${}, backslashes, regex", () => {

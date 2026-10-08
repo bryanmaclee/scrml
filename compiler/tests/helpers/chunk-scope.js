@@ -159,11 +159,15 @@ export function unNamespaceCellKeys(js) {
  * what hides that declaration from them, and the prologue's `_scrml_cell_scope`
  * call has no runtime to resolve against.
  *
+ * `{ hostAlias: true }` — for a harness with NO runtime: also declare the
+ * runtime's host-global alias (`const _scrml_g = globalThis;`, S457 2a) that the
+ * emitted code reads every host global through.
+ *
  * This does NOT weaken what those tests assert: they pin the SHAPE of the
  * emitted lowering, and the wrap is not part of that shape. Chunk isolation has
  * its own dedicated coverage in `compiler/tests/unit/chunk-namespacing.test.js`.
  */
-export function unwrapChunkScope(js) {
+export function unwrapChunkScope(js, { hostAlias = false } = {}) {
   let out = String(js ?? "");
   // Drop the prologue (banner comment block through its end-marker).
   out = out.replace(
@@ -181,6 +185,11 @@ export function unwrapChunkScope(js) {
   // resolve. The prologue that DEFINED the wrappers is already gone above; the
   // only `_scrml_cs_*` left are body call sites.
   out = out.replace(/(?<![$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
+  // S457 2a: emitted code reaches host globals through `_scrml_g` (the global
+  // object), which the RUNTIME declares. A harness that runs the chunk WITHOUT the
+  // runtime asks for a stand-in (`{ hostAlias: true }`); one that prepends the
+  // runtime must not (the runtime already declares it).
+  if (hostAlias && /(?<![$\w.])_scrml_g\b/.test(out)) out = "const _scrml_g = globalThis;\n" + out;
   return out;
 }
 

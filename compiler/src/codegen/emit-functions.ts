@@ -450,7 +450,7 @@ function emitMultiBatchWrapper(opts: {
       lines.push(`        __scrml_error: true,`);
       lines.push(`        type: "CpsError",`);
       lines.push(`        variant: "NetworkError",`);
-      lines.push(`        data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)}, batch: ${owningBatch} },`);
+      lines.push(`        data: { message: _scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)}, batch: ${owningBatch} },`);
       lines.push(`      };`);
       lines.push(`    }`);
       // If the batch produces a scrml cell, publish it reactively and bind it
@@ -522,7 +522,7 @@ function emitMultiBatchWrapper(opts: {
   lines.push(`      __scrml_error: true,`);
   lines.push(`      type: "CpsError",`);
   lines.push(`      variant: "NetworkError",`);
-  lines.push(`      data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
+  lines.push(`      data: { message: _scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
   lines.push(`    };`);
   lines.push(`  }`);
 }
@@ -860,21 +860,21 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // Build the query string from the bound params. Skip `undefined` args so
         // an unsupplied optional param doesn't serialize as the string
         // "undefined" on the server side.
-        lines.push(`  const _scrml_qs = new URLSearchParams();`);
+        lines.push(`  const _scrml_qs = new _scrml_g.URLSearchParams();`);
         for (const _pn of sseParamNames) {
           // Skip absent args (paired null/undefined check — the lint-exempt form
         // per §42.5/§42.8) so an unsupplied optional param isn't serialized as
         // the string "undefined"/"null" on the wire.
-        lines.push(`  if (${_pn} !== null && ${_pn} !== undefined) _scrml_qs.set(${JSON.stringify(_pn)}, String(${_pn}));`);
+        lines.push(`  if (${_pn} !== null && ${_pn} !== undefined) _scrml_qs.set(${JSON.stringify(_pn)}, _scrml_g.String(${_pn}));`);
         }
         lines.push(`  const _scrml_q = _scrml_qs.toString();`);
-        lines.push(`  const _scrml_es = new EventSource(${JSON.stringify(path)} + (_scrml_q ? '?' + _scrml_q : ''));`);
+        lines.push(`  const _scrml_es = new _scrml_g.EventSource(${JSON.stringify(path)} + (_scrml_q ? '?' + _scrml_q : ''));`);
       } else {
-        lines.push(`  const _scrml_es = new EventSource(${JSON.stringify(path)});`);
+        lines.push(`  const _scrml_es = new _scrml_g.EventSource(${JSON.stringify(path)});`);
       }
       lines.push(`  _scrml_es.onmessage = function(_scrml_e) {`);
       lines.push(`    try {`);
-      lines.push(`      const _scrml_data = JSON.parse(_scrml_e.data);`);
+      lines.push(`      const _scrml_data = _scrml_g.JSON.parse(_scrml_e.data);`);
       lines.push(`      if (typeof _scrml_onMessage === 'function') _scrml_onMessage(_scrml_data);`);
       lines.push(`    } catch (_scrml_err) { /* malformed SSE data */ }`);
       lines.push(`  };`);
@@ -885,7 +885,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       for (const _evName of sseEventNames) {
         lines.push(`  _scrml_es.addEventListener(${JSON.stringify(_evName)}, function(_scrml_e) {`);
         lines.push(`    try {`);
-        lines.push(`      const _scrml_data = JSON.parse(_scrml_e.data);`);
+        lines.push(`      const _scrml_data = _scrml_g.JSON.parse(_scrml_e.data);`);
         lines.push(`      if (typeof _scrml_onMessage === 'function') _scrml_onMessage(_scrml_data);`);
         lines.push(`    } catch (_scrml_err) { /* malformed SSE data */ }`);
         lines.push(`  });`);
@@ -1015,13 +1015,13 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       : cpsNeedsIdempotencyKey(route.cpsSplit);
     if (emitIdempotencyKey) {
       lines.push(`  // A9 Ext 5: idempotency key (non-monotone CPS batch)`);
-      lines.push(`  const _scrml_idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2) + '-' + Date.now();`);
+      lines.push(`  const _scrml_idempotency_key = (typeof _scrml_g.crypto !== 'undefined' && _scrml_g.crypto.randomUUID) ? _scrml_g.crypto.randomUUID() : _scrml_g.Math.random().toString(36).slice(2) + '-' + _scrml_g.Date.now();`);
     }
     if (usesCsrfRetry) {
       // GITI-010: route through _scrml_fetch_with_csrf_retry so a cookie-less
       // first POST receives a Set-Cookie 403, then automatically retries with
       // the freshly-planted token.
-      lines.push(`  const _scrml_body = JSON.stringify({`);
+      lines.push(`  const _scrml_body = _scrml_g.JSON.stringify({`);
       for (const p of paramNames) {
         lines.push(`    ${JSON.stringify(p)}: ${p},`);
       }
@@ -1051,7 +1051,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // never-emitted `meta[name="csrf-token"]` tag and always 403'd twice.
         const _csrfTokenExpr = `_scrml_get_csrf_token()`;
         lines.push(`  const _scrml_csrf_token = ${_csrfTokenExpr};`);
-        lines.push(`  const _scrml_resp_initial = await fetch(${JSON.stringify(batchPath)}, {`);
+        lines.push(`  const _scrml_resp_initial = await _scrml_g.fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`    method: ${JSON.stringify(httpMethod)},`);
         lines.push(`    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_token, "Idempotency-Key": _scrml_idempotency_key },`);
         lines.push(`    body: _scrml_body,`);
@@ -1062,7 +1062,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // S441 review F3 — a stale §39.2.3 meta token would otherwise win the re-read.
         if ((ctx as any).authMiddleware?.csrf === "auto") lines.push(`    _scrml_csrf_sync_meta_from_cookie();`);
         lines.push(`    const _scrml_csrf_retry_token = ${_csrfTokenExpr};`);
-        lines.push(`    _scrml_resp = await fetch(${JSON.stringify(batchPath)}, {`);
+        lines.push(`    _scrml_resp = await _scrml_g.fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`      method: ${JSON.stringify(httpMethod)},`);
         lines.push(`      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_csrf_retry_token, "Idempotency-Key": _scrml_idempotency_key },`);
         lines.push(`      body: _scrml_body,`);
@@ -1074,14 +1074,14 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`  const _scrml_resp = await _scrml_fetch_with_csrf_retry(${JSON.stringify(batchPath)}, ${JSON.stringify(httpMethod)}, _scrml_body);`);
       }
     } else {
-      lines.push(`  const _scrml_resp = await fetch(${JSON.stringify(batchPath)}, {`);
+      lines.push(`  const _scrml_resp = await _scrml_g.fetch(${JSON.stringify(batchPath)}, {`);
       lines.push(`    method: ${JSON.stringify(httpMethod)},`);
       if (emitIdempotencyKey) {
         lines.push(`    headers: { "Content-Type": "application/json", "Idempotency-Key": _scrml_idempotency_key },`);
       } else {
         lines.push(`    headers: { "Content-Type": "application/json" },`);
       }
-      lines.push(`    body: JSON.stringify({`);
+      lines.push(`    body: _scrml_g.JSON.stringify({`);
       for (const p of paramNames) {
         lines.push(`      ${JSON.stringify(p)}: ${p},`);
       }
@@ -1124,7 +1124,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // 500 per §19.9.2) is a RETURNED value the match / `?` / `!{}` / errorBoundary
     // dispatch consumes via `.__scrml_error` — it is NEVER thrown here.
     lines.push(`  if (!_scrml_resp.ok && !(_scrml_body_json !== null && typeof _scrml_body_json === "object" && _scrml_body_json.__scrml_error === true)) {`);
-    lines.push(`    throw new Error("HTTP " + _scrml_resp.status);`);
+    lines.push(`    throw new _scrml_g.Error("HTTP " + _scrml_resp.status);`);
     lines.push(`  }`);
     lines.push(`  return _scrml_body_json;`);
     lines.push(`}`);
@@ -1348,7 +1348,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     lines.push(`      __scrml_error: true,`);
     lines.push(`      type: "CpsError",`);
     lines.push(`      variant: "NetworkError",`);
-    lines.push(`      data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
+    lines.push(`      data: { message: _scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
     lines.push(`    };`);
     lines.push(`  }`);
 

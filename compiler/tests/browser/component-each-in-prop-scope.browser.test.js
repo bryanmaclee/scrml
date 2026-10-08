@@ -107,7 +107,7 @@ describe("component-each §1 — emit shape (each survives expansion, prop + @. 
     expect(clientJs).not.toContain("@.id");
     // FIX 1: the body renders the iter var member, not a leaked bare `.name`.
     expect(clientJs).toContain("_scrml_each_item.name");
-    expect(clientJs).not.toMatch(/textContent\(String\(\.name\)/);
+    expect(clientJs).not.toMatch(/textContent\((?:_scrml_g\.)?String\(\.name\)/);
   });
 
   test("an each render fn IS emitted (the each-block survived expansion)", () => {

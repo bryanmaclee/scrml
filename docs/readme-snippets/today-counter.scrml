@@ -1,0 +1,18 @@
+// today-counter.scrml — the "today" half of a README "Where the language is going"
+// pair. This is the shipping form; SPEC §66.19.1 is the same counter in the §66 form.
+<program>
+
+<count> = 0
+<step> = 1
+const <doubled> = @count * 2
+
+function bump()    { @count = @count + @step }
+function restart() { reset(@count) }
+
+<main>
+    <p>Count ${@count} (doubled ${@doubled})</p>
+    <button onclick=bump()>+${@step}</button>
+    <button onclick=restart()>Reset</button>
+</main>
+
+</program>

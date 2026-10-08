@@ -285,7 +285,7 @@ describe("§51.9 slice 2 — emitProjectionFunction", () => {
     // INTERPOLATION leak in compiled output).
     expect(code).toContain("return null;");
     // Execute the function and check runtime behavior.
-    const project = new Function(code + "\nreturn _scrml_project_UI;")();
+    const project = new Function("const _scrml_g = globalThis;\n" + code + "\nreturn _scrml_project_UI;")();
     expect(project("Draft")).toBe("Editable");
     expect(project("Paid")).toBe("ReadOnly");
     expect(project("Refunded")).toBe("Terminal");
@@ -356,7 +356,7 @@ describe("§51.9 slice 2 — emitDerivedDeclaration", () => {
       var c = _scrml_reactive_get("ui");
       return [a, b, c];
     `;
-    const result = new Function(harness)();
+    const result = new Function("const _scrml_g = globalThis;\n" + harness)();
     expect(result).toEqual(["Editable", "ReadOnly", "Terminal"]);
   });
 });

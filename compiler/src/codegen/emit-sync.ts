@@ -111,7 +111,7 @@ export function emitServerAuthorityLoad(varName: string, table: string): string[
     // already seeded this cell from window.__scrml_ssr_state (graceful no-op
     // when the page was served without SSR — the fetch then runs unchanged).
     `  if (_scrml_ssr_seeded(${varJs})) return;`,
-    `  const _scrml_sa_res = await fetch(${routeJs}, {`,
+    `  const _scrml_sa_res = await _scrml_g.fetch(${routeJs}, {`,
     `    method: "POST",`,
     `    headers: { "Content-Type": "application/json" },`,
     `    body: "{}",`,
@@ -162,7 +162,7 @@ export function emitDeclRhsSqlLoad(varName: string): string[] {
     // §52.8 (ssr-b-substrate) — skip the fetch RTT when the SSR pre-render
     // already seeded this cell from window.__scrml_ssr_state.
     `  if (_scrml_ssr_seeded(${varJs})) return;`,
-    `  const _scrml_sl_res = await fetch(${routeJs}, {`,
+    `  const _scrml_sl_res = await _scrml_g.fetch(${routeJs}, {`,
     `    method: "POST",`,
     `    headers: { "Content-Type": "application/json" },`,
     `    body: "{}",`,
@@ -220,7 +220,7 @@ export function emitUnifiedMountHydrate(varNames: string[]): string[] {
   // means "no gated cell" and the fetch is unnecessary; otherwise the fetch runs.
   const _ssrGuard = varNames.map((n) => `_scrml_ssr_seeded(${JSON.stringify(n)})`).join(" && ");
   lines.push(`  if (${_ssrGuard}) return;`);
-  lines.push(`  const _scrml_mh_res = await fetch("/__mountHydrate", {`);
+  lines.push(`  const _scrml_mh_res = await _scrml_g.fetch("/__mountHydrate", {`);
   lines.push(`    method: "POST",`);
   lines.push(`    headers: { "Content-Type": "application/json" },`);
   lines.push(`    body: "{}",`);

@@ -122,7 +122,7 @@ beforeAll(() => {
   // The chunk is wrapped in its own scope (chunk-namespacing N3), which makes
   // `_scrml_lex_N` chunk-local and hides it from the `return`. This harness runs
   // the chunk with NO runtime to exercise pure lowering, so unwrap it.
-  const factory = new Function("_scrml_structural_eq", unwrapChunkScope(client) + `\nreturn ${m[1]};`);
+  const factory = new Function("_scrml_structural_eq", unwrapChunkScope(client, { hostAlias: true }) + `\nreturn ${m[1]};`);
   lex2 = factory(_scrml_structural_eq);
 });
 

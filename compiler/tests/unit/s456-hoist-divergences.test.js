@@ -345,7 +345,9 @@ describe("(3) failure + a changed key — the pre-fetch never raises; a key it d
     expect(c.hoists).toBe(1);
     const start = c.serverJs.indexOf("const _scrml_result = await (async () => {");
     expect(start).toBeGreaterThan(-1);
-    const run = new Function("_scrml_req", "_scrml_sql", `return (async () => { ${balanced(c.serverJs, start)})(); return _scrml_result; })();`);
+    // `_scrml_g`: the bundle's host-global alias (S457 2a).
+    const run0 = new Function("_scrml_req", "_scrml_sql", "_scrml_g", `return (async () => { ${balanced(c.serverJs, start)})(); return _scrml_result; })();`);
+    const run = (req, sql) => run0(req, sql, globalThis);
     const items = [{ id: 7 }, { id: { a: 1 } }, { id: 9 }];
     const queries = [];
     const sql = {

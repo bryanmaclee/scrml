@@ -60,7 +60,7 @@ function clientFn(js, name) {
   if (!head) throw new Error(`no ${name} in client.js`);
   let i = head.index + head[0].length, depth = 1;
   for (; i < js.length && depth > 0; i++) { if (js[i] === "{") depth++; else if (js[i] === "}") depth--; }
-  return new Function("_scrml_url_shape_ok", `${hoistedJudges(js)}\n${js.slice(head.index, i)}; return ${head[1]};`)(_scrml_url_shape_ok);
+  return new Function("_scrml_url_shape_ok", `const _scrml_g = globalThis;\n${hoistedJudges(js)}\n${js.slice(head.index, i)}; return ${head[1]};`)(_scrml_url_shape_ok);
 }
 
 /** The hoisted §53 judge functions (`function _scrml_judge_…`) appended to `js`. */
@@ -149,10 +149,10 @@ describe("B — the reader reads the whole annotation", () => {
   test("range form `0 < value < 10` is the conjunction of two value comparisons", () => {
     const t = resolveTypeExpr("number(0 < value < 10)", new Map());
     expect(t.kind).toBe("predicated");
-    const f = new Function("v", `return ${predicateToJsExpr(t.predicate, "v")};`);
+    const f = new Function("v", `const _scrml_g = globalThis; return ${predicateToJsExpr(t.predicate, "v")};`);
     expect([f(0), f(1), f(9), f(10)]).toEqual([false, true, true, false]);
     const t2 = resolveTypeExpr("number(10 >= value > -1)", new Map());
-    const g = new Function("v", `return ${predicateToJsExpr(t2.predicate, "v")};`);
+    const g = new Function("v", `const _scrml_g = globalThis; return ${predicateToJsExpr(t2.predicate, "v")};`);
     expect([g(-1), g(0), g(10), g(11)]).toEqual([false, true, true, false]);
   });
 
@@ -169,7 +169,7 @@ describe("B — the reader reads the whole annotation", () => {
     const judge = (a) => {
       const t = resolveTypeExpr(a, new Map());
       expect([a, t.kind]).toEqual([a, "predicated"]);
-      return new Function("v", `return ${predicateToJsExpr(t.predicate, "v")};`);
+      return new Function("v", `const _scrml_g = globalThis; return ${predicateToJsExpr(t.predicate, "v")};`);
     };
     const neg = judge("number ( >= - 1 )"); // source `number(>= -1)` — before S458 this read as `>= 1`
     expect([neg(-1), neg(-2), neg(0)]).toEqual([true, false, true]);
@@ -323,7 +323,7 @@ describe("C — one reader", () => {
 describe("D — the judge fails closed", () => {
   test("unknown shape / error / unknown kind → a check that refuses everything", () => {
     for (const p of [{ kind: "named-shape", name: "ssn" }, { kind: "error", message: "x" }, { kind: "bogus" }]) {
-      const f = new Function("v", `return ${predicateToJsExpr(p, "v")};`);
+      const f = new Function("v", `const _scrml_g = globalThis; return ${predicateToJsExpr(p, "v")};`);
       expect(f("anything")).toBe(false);
     }
   });

@@ -182,7 +182,7 @@ describe("§i81.1 — the issue's own reproducer: class= is no longer dropped", 
     const r = compile(src);
     const client = emittedClient(r);
     expect(client).toMatch(/\.querySelector\('\[data-scrml-bind-attr-class="[^"]+"\]'\)/);
-    expect(client).toContain('setAttribute("class", String(');
+    expect(client).toContain('setAttribute("class", _scrml_g.String(');
     expect(client).toContain("_scrml_effect");
     // Reactive dependency is actually subscribed, not a one-shot literal.
     expect(client).toContain('_scrml_cs_reactive_get("mode")');
@@ -196,7 +196,7 @@ describe("§i81.1 — the issue's own reproducer: class= is no longer dropped", 
     const r = compile(src);
     expect(r.errors).toEqual([]);
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
-    expect(emittedClient(r)).toContain('setAttribute("class", String(');
+    expect(emittedClient(r)).toContain('setAttribute("class", _scrml_g.String(');
   });
 });
 
@@ -209,7 +209,7 @@ describe("§i81.2 — the other dropped value attrs: style=, title=, data-*", ()
     const r = compile(src);
     expect(r.errors).toEqual([]);
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-style="[^"]+"/);
-    expect(emittedClient(r)).toContain('setAttribute("style", String(');
+    expect(emittedClient(r)).toContain('setAttribute("style", _scrml_g.String(');
   });
 
   test("title= wires", () => {
@@ -220,7 +220,7 @@ describe("§i81.2 — the other dropped value attrs: style=, title=, data-*", ()
     const r = compile(src);
     expect(r.errors).toEqual([]);
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-title="[^"]+"/);
-    expect(emittedClient(r)).toContain('setAttribute("title", String(');
+    expect(emittedClient(r)).toContain('setAttribute("title", _scrml_g.String(');
   });
 
   test("data-* wires and keeps its hyphenated name intact", () => {
@@ -231,7 +231,7 @@ describe("§i81.2 — the other dropped value attrs: style=, title=, data-*", ()
     const r = compile(src);
     expect(r.errors).toEqual([]);
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-data-mode="[^"]+"/);
-    expect(emittedClient(r)).toContain('setAttribute("data-mode", String(');
+    expect(emittedClient(r)).toContain('setAttribute("data-mode", _scrml_g.String(');
   });
 
   test("id= and alt= wire (the emitter is general, not an allowlist)", () => {
@@ -265,7 +265,7 @@ describe("§i81.3 — coexistence: multiple placeholders on ONE element", () => 
     expect(button).toMatch(/data-scrml-bind-onclick="[^"]+"/);
     // Both wired, not merely both present in the markup.
     const client = emittedClient(r);
-    expect(client).toContain('setAttribute("class", String(');
+    expect(client).toContain('setAttribute("class", _scrml_g.String(');
     expect(client).toContain("addEventListener");
   });
 
@@ -342,7 +342,7 @@ describe("§i81.4 — absence vs defined values (SPEC §42.1.1 / §42.9)", () =>
     const client = emittedClient(r);
     // String("") === "" -> setAttribute("class", "") on the else branch.
     // The guard must not short-circuit on falsiness, or "" would be removed.
-    expect(client).toContain('setAttribute("class", String(');
+    expect(client).toContain('setAttribute("class", _scrml_g.String(');
     expect(client).toMatch(/=== null \|\| \w+ === undefined/);
   });
 
@@ -357,8 +357,8 @@ describe("§i81.4 — absence vs defined values (SPEC §42.1.1 / §42.9)", () =>
     const client = emittedClient(r);
     // Both stringify (String(0)==="0", String(false)==="false"); the absence
     // guard lets them through. A truthiness guard would have dropped both.
-    expect(client).toContain('setAttribute("data-count", String(');
-    expect(client).toContain('setAttribute("data-open", String(');
+    expect(client).toContain('setAttribute("data-count", _scrml_g.String(');
+    expect(client).toContain('setAttribute("data-open", _scrml_g.String(');
   });
 
   test("the value is stringified via String(), not concatenated blindly", () => {
@@ -366,7 +366,7 @@ describe("§i81.4 — absence vs defined values (SPEC §42.1.1 / §42.9)", () =>
       <m> = "a"
       <div title=(@m)>x</div>
     </program>`;
-    expect(emittedClient(compile(src))).toContain('setAttribute("title", String(');
+    expect(emittedClient(compile(src))).toContain('setAttribute("title", _scrml_g.String(');
   });
 });
 
@@ -578,7 +578,7 @@ describe("§i81.6 — <match> arm scoping (S239 findings 1 + 4)", () => {
     expect(client).toMatch(/_root\.querySelector\(.*data-scrml-bind-attr-class/);
     // Must NOT also be wired from the global pass (double-wiring a node that the
     // arm swap replaces).
-    expect(client).not.toMatch(/\(_scrml_root \|\| document\)\.querySelector\('\[data-scrml-bind-attr-class/);
+    expect(client).not.toMatch(/\(_scrml_root \|\| _scrml_g\.document\)\.querySelector\('\[data-scrml-bind-attr-class/);
   });
 
   test("a value attr in a match arm emits no dead data-scrml-logic wire", () => {
@@ -687,7 +687,7 @@ describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () =
       <div value=(@lbl)>x</div>
     </program>`;
     const client = emittedClient(compile(src));
-    expect(client).toContain('setAttribute("value", String(_scrml_x))');
+    expect(client).toContain('setAttribute("value", _scrml_g.String(_scrml_x))');
   });
 
   // i174 — the TEMPLATE-STRING form `value="${@cell}"` (the adopter's exact
@@ -916,10 +916,10 @@ describe("§i81.7 — CSS-safe placeholder keys (crash regression)", () => {
   test("the ORIGINAL attr name still reaches setAttribute (SVG correctness)", () => {
     const client = emittedClient(compile(svgSrc));
     // Sanitization must NOT leak into the DOM write: xlink:href, not xlink_href.
-    expect(client).toContain('setAttribute("xml:lang", String(');
+    expect(client).toContain('setAttribute("xml:lang", _scrml_g.String(');
     expect(client).not.toContain('setAttribute("xml_lang"');
     // Case must survive too — SVG attribute names are case-sensitive.
-    expect(client).toContain('setAttribute("viewBox", String(');
+    expect(client).toContain('setAttribute("viewBox", _scrml_g.String(');
   });
 
   test("every emitted value-attr selector uses only CSS-identifier-safe chars", () => {
@@ -1081,7 +1081,7 @@ describe("§i81.12 — Axiom ① writer-ownership conflict (E-ATTR-WRITER-CONFLI
     const r = compile(src);
     expect(r.errors).toEqual([]);
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
-    expect(emittedClient(r)).toContain('setAttribute("class", String(');
+    expect(emittedClient(r)).toContain('setAttribute("class", _scrml_g.String(');
     expectParses(emittedClient(r));
   });
 

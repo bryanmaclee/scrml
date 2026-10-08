@@ -294,14 +294,14 @@ export function emitServerFnStubAtom(
   const lines: string[] = [];
   lines.push(`async function ${stubFnName}(${paramNames.join(", ")}) {`);
   if (isBodyless) {
-    lines.push(`  const _scrml_resp = await fetch(${pathLit}, { method: ${methodLit} });`);
+    lines.push(`  const _scrml_resp = await _scrml_g.fetch(${pathLit}, { method: ${methodLit} });`);
   } else {
-    lines.push(`  const _scrml_body = JSON.stringify({`);
+    lines.push(`  const _scrml_body = _scrml_g.JSON.stringify({`);
     for (const p of paramNames) {
       lines.push(`    ${JSON.stringify(p)}: ${p},`);
     }
     lines.push(`  });`);
-    lines.push(`  const _scrml_resp = await fetch(${pathLit}, {`);
+    lines.push(`  const _scrml_resp = await _scrml_g.fetch(${pathLit}, {`);
     lines.push(`    method: ${methodLit},`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
     lines.push(`    body: _scrml_body,`);

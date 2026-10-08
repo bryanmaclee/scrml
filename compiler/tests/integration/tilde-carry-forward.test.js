@@ -93,7 +93,7 @@ function runClientJs(clientJs, finalExpression) {
     const _scrml_init_set = () => {};
     const _scrml_logic_1 = {};
   `;
-  const fn = new Function(shims + "\n" + unwrapChunkScope(clientJs) + "\n" + `return (${finalExpression});`);
+  const fn = new Function(shims + "\n" + unwrapChunkScope(clientJs, { hostAlias: true }) + "\n" + `return (${finalExpression});`);
   return fn();
 }
 

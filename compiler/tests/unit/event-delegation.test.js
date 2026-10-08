@@ -582,7 +582,7 @@ describe("§15: ancestor walk in delegated listener", () => {
     const out = run([
       makeBinding("_scrml_attr_onclick_10", "onclick", "handleClick"),
     ]);
-    expect(out).toContain("while (t && t !== document)");
+    expect(out).toContain("while (t && t !== _scrml_g.document)");
   });
 
   test("click listener walks parentElement", () => {
@@ -596,7 +596,7 @@ describe("§15: ancestor walk in delegated listener", () => {
     const out = run([
       makeBinding("_scrml_attr_onsubmit_20", "onsubmit", "handleSubmit"),
     ]);
-    expect(out).toContain("while (t && t !== document)");
+    expect(out).toContain("while (t && t !== _scrml_g.document)");
     expect(out).toContain("t = t.parentElement");
   });
 

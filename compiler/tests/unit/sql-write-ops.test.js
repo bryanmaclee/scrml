@@ -132,7 +132,7 @@ describe("§5 .prepare() — E-SQL-006 compile error (§44.3)", () => {
     const input = "?{`INSERT INTO users (n, e) VALUES (${n}, ${e})`}.prepare()";
     const output = rewriteSqlRefs(input);
     expect(output).toContain("E-SQL-006");
-    expect(output).toContain("throw new Error");
+    expect(output).toContain("throw new _scrml_g.Error");
     // Defense in depth: no _scrml_sql.prepare() leaks into the output
     expect(output).not.toContain("_scrml_sql.prepare(");
     expect(output).not.toContain("_scrml_db.prepare(");
@@ -243,7 +243,7 @@ describe("§10 emitLogicNode — sql node with .prepare() chained call emits E-S
     };
     const output = emitLogicNode(node);
     expect(output).toContain("E-SQL-006");
-    expect(output).toContain("throw new Error");
+    expect(output).toContain("throw new _scrml_g.Error");
     expect(output).not.toContain("_scrml_sql.prepare(");
     expect(output).not.toContain("_scrml_db.prepare(");
   });

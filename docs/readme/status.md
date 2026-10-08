@@ -1,0 +1,3 @@
+# Status
+
+scrml is open source under the [MIT License](../../LICENSE). The compiler is at version 0.8.0: pre-1.0, usable, not stable. It runs on [Bun](https://bun.sh), and compiled output is plain JavaScript that runs in any browser or JavaScript runtime. The language's contract is a conformance suite that the current compiler passes, apart from known defects, each pinned to a tracked gap; the figures are in [`docs/FACTS.md`](../../docs/FACTS.md). A second compiler, written in scrml itself, is being built to implement the language as specified. See [`docs/changelog.md`](../../docs/changelog.md) for what just landed.

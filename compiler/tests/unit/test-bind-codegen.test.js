@@ -254,7 +254,7 @@ describe("test-bind codegen §6: E-TEST-006 thrower stubs", () => {
       group({ testBinds: [] }),
     ];
     const out = generateTestJs("/src/app.scrml", groups, [], ["sendEmail"]);
-    expect(out).toContain("const sendEmail = (...args) => { throw new Error(");
+    expect(out).toContain("const sendEmail = (...args) => { throw new _scrml_g.Error(");
     expect(out).toContain("E-TEST-006");
     expect(out).toContain("sendEmail");
   });
@@ -270,9 +270,9 @@ describe("test-bind codegen §6: E-TEST-006 thrower stubs", () => {
   test("multiple unbound server-fns emit independent thrower stubs", () => {
     const groups = [group({ testBinds: [] })];
     const out = generateTestJs("/src/app.scrml", groups, [], ["a", "b", "c"]);
-    expect(out).toContain("const a = (...args) => { throw new Error(");
-    expect(out).toContain("const b = (...args) => { throw new Error(");
-    expect(out).toContain("const c = (...args) => { throw new Error(");
+    expect(out).toContain("const a = (...args) => { throw new _scrml_g.Error(");
+    expect(out).toContain("const b = (...args) => { throw new _scrml_g.Error(");
+    expect(out).toContain("const c = (...args) => { throw new _scrml_g.Error(");
   });
 });
 
@@ -291,7 +291,7 @@ describe("test-bind codegen §7: bound server-fns suppress thrower stubs", () =>
     // fetchUser appears as a bound dispatch, not a thrower:
     expect(out).toContain("const fetchUser = (id) => ({ id });");
     // sendEmail still gets a thrower:
-    expect(out).toContain("const sendEmail = (...args) => { throw new Error(");
+    expect(out).toContain("const sendEmail = (...args) => { throw new _scrml_g.Error(");
     // fetchUser does NOT appear as a thrower (no double-declaration):
     const throwerCount = (out.match(/const fetchUser = \(\.\.\.args\)/g) ?? []).length;
     expect(throwerCount).toBe(0);
@@ -318,7 +318,7 @@ describe("test-bind codegen §7: bound server-fns suppress thrower stubs", () =>
     expect(allDecls).not.toBeNull();
     expect(allDecls.length).toBe(2);
     expect(out).toContain("const svc = () => 1;");
-    expect(out).toContain("const svc = (...args) => { throw new Error(");
+    expect(out).toContain("const svc = (...args) => { throw new _scrml_g.Error(");
   });
 });
 
@@ -378,8 +378,8 @@ describe("test-bind codegen §10: serverFnNames without testBinds", () => {
   test("all serverFnNames get thrower stubs", () => {
     const groups = [group({ testBinds: [] })];
     const out = generateTestJs("/src/app.scrml", groups, [], ["a", "b"]);
-    expect(out).toContain("const a = (...args) => { throw new Error(");
-    expect(out).toContain("const b = (...args) => { throw new Error(");
+    expect(out).toContain("const a = (...args) => { throw new _scrml_g.Error(");
+    expect(out).toContain("const b = (...args) => { throw new _scrml_g.Error(");
   });
 });
 
@@ -464,7 +464,7 @@ describe("test-bind codegen §12: end-to-end runCG produces test JS with dispatc
     const { cg } = runCompilePipeline("/src/app.scrml", src, { testMode: true });
     const out = cg.outputs.get("/src/app.scrml");
     expect(out.testJs).toBeTruthy();
-    expect(out.testJs).toContain("const sendEmail = (...args) => { throw new Error(");
+    expect(out.testJs).toContain("const sendEmail = (...args) => { throw new _scrml_g.Error(");
     expect(out.testJs).toContain("E-TEST-006");
   });
 
@@ -483,7 +483,7 @@ describe("test-bind codegen §12: end-to-end runCG produces test JS with dispatc
     // fetchUser → handler-form binding (whitespace tolerant)
     expect(out.testJs).toMatch(/const fetchUser = \( id \) => \( \{ id \} \)/);
     // sendEmail → E-TEST-006 thrower stub
-    expect(out.testJs).toContain("const sendEmail = (...args) => { throw new Error(");
+    expect(out.testJs).toContain("const sendEmail = (...args) => { throw new _scrml_g.Error(");
   });
 });
 

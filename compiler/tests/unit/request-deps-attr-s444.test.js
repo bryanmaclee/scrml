@@ -37,6 +37,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { readRequestDepsAttr, analyzeRequestDepsAttr } from "../../src/codegen/reactive-deps.ts";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-request-deps-s444");
 
@@ -219,13 +220,15 @@ function mount(src, baseName, stateVar) {
       return { ok: true, status: 200, json: async () => ({ id: calls.length, name: "n" + calls.length }) };
     };
     const exec = new Function(
-      "window", "document", "fetch",
-      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
+      "window", "document", "fetch", "__scrml_host__",
+      `${rebindHostAlias(runtimeJs)}\n` + captureInsideChunkScope(clientJs, `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
       `globalThis.__req__ = ${stateVar};\n` +
       `globalThis.__get__ = _scrml_reactive_get;\n` +
       `globalThis.__set__ = _scrml_reactive_set;\n`),
     );
-    exec(window, document, fetchStub);
+    // The emitted code reaches host globals through the alias `_scrml_g` (S457 2a): the
+    // stubs reach it through a view of the global object, not by shadowing.
+    exec(window, document, fetchStub, hostView({ window, document, fetch: fetchStub }));
     return { errors: result.errors ?? [], req: globalThis.__req__, get: globalThis.__get__, set: globalThis.__set__, calls };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

@@ -70,8 +70,8 @@ describe("MED-1 — a refined collection write judges only what it changes", () 
   test("the registration carries a descriptor built from the judge (element, struct fields by a hoisted parts function)", () => {
     const { js, errors } = compile(page(`<ls>: L[] = []\n  function g() {\n    const r = { u: "a", n: 1 }\n    @ls.push(r)\n  }`), "desc");
     expect(errors).toEqual([]);
-    expect(js).toMatch(/_scrml_cs_refine_register\("ls", \{ ok: \(v\) => \(Array\.isArray\(v\) && _scrml_judge_each\(v, \(_scrml_el0\) => _scrml_judge_L_[a-z0-9]+\(_scrml_el0\)\)\), el: \{ ok: _scrml_judge_L_[a-z0-9]+, fields: _scrml_judge_parts_L_[a-z0-9]+ \} \}, "L\[\]", "ls"\);/);
-    expect(js).toMatch(/function _scrml_judge_parts_L_[a-z0-9]+\(\) \{\n  return \{\n    n: \{ ok: \(v\) => \(typeof v === "number" && !Number\.isNaN\(v\) && \(v > 0\)\) \},\n  \};\n\}/);
+    expect(js).toMatch(/_scrml_cs_refine_register\("ls", \{ ok: \(v\) => \(_scrml_g\.Array\.isArray\(v\) && _scrml_judge_each\(v, \(_scrml_el0\) => _scrml_judge_L_[a-z0-9]+\(_scrml_el0\)\)\), el: \{ ok: _scrml_judge_L_[a-z0-9]+, fields: _scrml_judge_parts_L_[a-z0-9]+ \} \}, "L\[\]", "ls"\);/);
+    expect(js).toMatch(/function _scrml_judge_parts_L_[a-z0-9]+\(\) \{\n  return \{\n    n: \{ ok: \(v\) => \(typeof v === "number" && !_scrml_g\.Number\.isNaN\(v\) && \(v > 0\)\) \},\n  \};\n\}/);
     expect((js.match(/function _scrml_judge_parts_L_/g) ?? []).length).toBe(1);
   });
 

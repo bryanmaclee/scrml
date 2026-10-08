@@ -25,6 +25,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { spawnSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 import { _scrml_url_shape_ok } from "../../src/runtime-url-guard.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 import { validateEmittedArtifact } from "../../src/codegen/validate-emit.ts";
 
 const BAD = "javascript:alert(1)";
@@ -69,7 +70,7 @@ function clientFn(js, name) {
     defs.push(js.slice(m.index, j));
   }
   const f = new Function("_scrml_url_shape_ok", "_scrml_cs_reactive_set", "_scrml_cs_reactive_get",
-    `${defs.join("\n")}\n${js.slice(head.index, i)}; return ${head[1]};`)(
+    `const _scrml_g = globalThis;\n${defs.join("\n")}\n${js.slice(head.index, i)}; return ${head[1]};`)(
     _scrml_url_shape_ok, (k, v) => cells.set(k, v), (k) => cells.get(k));
   f.cells = cells;
   return f;
@@ -318,7 +319,7 @@ describe("(9) nested worker <program> function parameter + worker helpers (F3)",
       expect(out.errors).toHaveLength(0);
       const posted = [];
       const self = { postMessage: (m) => posted.push(m), onmessage: null };
-      new Function("self", out.workerJs)(self);
+      new Function("__scrml_host__", rebindHostAlias(out.workerJs))(hostView({ self }));
       self.onmessage({ data: { id: 1, data: GOOD } });
       expect(posted).toEqual([{ replyTo: 1, data: true }]);
       expect(() => self.onmessage({ data: { id: 2, data: BAD } })).toThrow("E-CONTRACT-001-RT");

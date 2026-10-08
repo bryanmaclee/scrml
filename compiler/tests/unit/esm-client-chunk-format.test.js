@@ -48,6 +48,7 @@ afterAll(() => {
 
 // A tiny synthetic runtime slice — its top-level decls are the import universe.
 const RUNTIME_SLICE = [
+  `var _scrml_g = globalThis;`,
   `function _scrml_reactive_get(n) { return n; }`,
   `function _scrml_reactive_set(n, v) {}`,
   `function _scrml_lift(f) {}`,
@@ -128,17 +129,20 @@ describe("§1 toEsmClientChunk — the pure transform", () => {
     expect(out).not.toContain("document } from");
   });
 
-  test("`_scrml_lift_target` is routed through globalThis, never imported (R2 bridge)", () => {
+  test("`_scrml_lift_target` is routed through the global object (via the `_scrml_g` alias), never imported (R2 bridge)", () => {
     const body =
       `// Requires: __RT__\n` +
       `_scrml_lift_target = document.querySelector("#x");\n` +
       `_scrml_lift(() => document.createElement("li"));\n` +
       `_scrml_lift_target = null;\n`;
     const out = esm(body);
-    expect(out).toContain(`globalThis._scrml_lift_target = document.querySelector("#x");`);
-    expect(out).toContain(`globalThis._scrml_lift_target = null;`);
-    // _scrml_lift (a normal fn) IS imported; _scrml_lift_target is NOT.
-    expect(out).toContain(`import { _scrml_lift } from "./__RT__";`);
+    // S457 2a: through the runtime's host-global alias, never a bare `globalThis` (a
+    // chunk-level user binding of that name would capture it).
+    expect(out).toContain(`_scrml_g._scrml_lift_target = document.querySelector("#x");`);
+    expect(out).toContain(`_scrml_g._scrml_lift_target = null;`);
+    expect(out).not.toMatch(/(?<![\w$.])globalThis\._scrml_lift_target/);
+    // _scrml_lift (a normal fn) and the alias ARE imported; _scrml_lift_target is NOT.
+    expect(out).toContain(`import { _scrml_g, _scrml_lift } from "./__RT__";`);
     expect(out).not.toMatch(/import \{[^}]*_scrml_lift_target/);
   });
 

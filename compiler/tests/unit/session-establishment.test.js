@@ -87,9 +87,9 @@ describe("§20.5 session.set — lowering + write infra", () => {
     expect(res.serverJs).toContain("new _ScrmlSessionDatabase(_scrml_session_db_path)");
     // S239 FIX 9 — deterministic path beside the bundle, keyed cache (no bleed).
     expect(res.serverJs).toContain("import.meta.dir");
-    expect(res.serverJs).toContain("globalThis.__scrml_session_stores");
+    expect(res.serverJs).toContain("_scrml_g.__scrml_session_stores");
     // a session-WRITE app must NOT use the read-only in-memory Map
-    expect(res.serverJs).not.toContain("globalThis.__scrml_session_store ??= new Map()");
+    expect(res.serverJs).not.toContain("_scrml_g.__scrml_session_store ??= new _scrml_g.Map()");
   });
 
   test("U4 commit emits the establishment cookie with HttpOnly; SameSite=Lax; Max-Age; Secure", () => {
@@ -134,8 +134,8 @@ describe("§20.5 session.set — lowering + write infra", () => {
       res.serverJs.indexOf("function _scrml_session_cookie_wrap"),
     );
     // an identity write mints a fresh uuid; NEVER reuse the incoming `sess.sid`.
-    expect(commit).toContain("const _newSid = crypto.randomUUID();");
-    expect(commit).not.toContain("sess.sid || crypto.randomUUID()");
+    expect(commit).toContain("const _newSid = _scrml_g.crypto.randomUUID();");
+    expect(commit).not.toContain("sess.sid || _scrml_g.crypto.randomUUID()");
     // the old (incoming) record is deleted so a planted sid is not resurrectable.
     expect(commit).toContain("if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid)");
   });
@@ -286,7 +286,7 @@ describe("§20.5 session — context gate (FIX 6, default-deny) + no-regression"
     </program>`);
     expect(res.serverJs).toContain("_scrml_session_middleware");
     // FIX 8 — Map store, NOT the durable bun:sqlite one.
-    expect(res.serverJs).toContain("globalThis.__scrml_session_store ??= new Map()");
+    expect(res.serverJs).toContain("_scrml_g.__scrml_session_store ??= new _scrml_g.Map()");
     expect(res.serverJs).not.toContain(".scrml-sessions.db");
     expect(res.serverJs).not.toContain('from "bun:sqlite"');
     // and no write helpers (no session builtin used)
@@ -339,7 +339,7 @@ describe("§20.5 session — S239-2 destroy-clear + identity-vs-preference commi
     // reuse the incoming sid only when a live record exists (never write under a
     // recordless attacker-suppliable sid); merge preserves userId/role/csrf.
     expect(commit).toContain("const _existing = sess.sid ? _scrml_session_store.get(sess.sid) : null;");
-    expect(commit).toContain("const _sid = _existing ? sess.sid : crypto.randomUUID();");
+    expect(commit).toContain("const _sid = _existing ? sess.sid : _scrml_g.crypto.randomUUID();");
     expect(commit).toContain("const _merged = { ...(_existing || {}), ...sess._changes };");
     expect(commit).toContain("_scrml_session_store.set(_sid, _merged, _scrml_session_max_age)");
     // the preference path returns the SAME sid — it must NOT delete the old record
@@ -380,7 +380,8 @@ describe("§20.5 session.get — own-property read (S325 Unit 2)", () => {
     const modPath = join(dir, "harness.mjs");
     writeFileSync(
       modPath,
-      `${begin}\n${bind}\n` +
+      // `_scrml_g`: the bundle's host-global alias (S457 2a) the copied functions read through.
+      `const _scrml_g = globalThis;\n${begin}\n${bind}\n` +
         `const _sess = _scrml_session_begin({ headers: { get: () => '' } });\n` +
         `export const sess = _sess;\n` +
         `export const proxied = _scrml_session_bind(_sess);\n`,
@@ -400,7 +401,7 @@ describe("§20.5 session.get — own-property read (S325 Unit 2)", () => {
   test("the emitted accessor is an own-property read", () => {
     const { serverJs } = compile(LOGIN);
     expect(serverJs).toContain(
-      "get(key) { return Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null; },",
+      "get(key) { return _scrml_g.Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null; },",
     );
     // `Object.hasOwn`, NOT `this._rec.hasOwnProperty(key)` — a session record is
     // built from `session.set` writes, so `_rec` can carry an OWN key named

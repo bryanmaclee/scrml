@@ -21,6 +21,7 @@
  * parent side lives in emit-client.ts ("worker instantiation").
  */
 
+import { HOST_GLOBAL_ALIAS_SCRIPT_DECL } from "./host-global-alias.ts";
 import { basename } from "path";
 import * as acorn from "acorn";
 import { emitLogicNode } from "./emit-logic.ts";
@@ -97,9 +98,9 @@ export function generateWorkerJs(
 
     lines.push(`// Reply to the parent. \`replyTo\` names the parent's \`.send()\` being answered.`);
     lines.push(`function _scrml_reply(replyTo, data) {`);
-    lines.push(`  self.postMessage({ replyTo: replyTo, data: data });`);
+    lines.push(`  _scrml_g.self.postMessage({ replyTo: replyTo, data: data });`);
     lines.push(`}`);
-    lines.push(`self.onmessage = function(event) {`);
+    lines.push(`_scrml_g.self.onmessage = function(event) {`);
     lines.push(`  const _scrml_reply_to = event.data.id;`);
     lines.push(`  var ${binding} = event.data.data;`);
 
@@ -111,26 +112,37 @@ export function generateWorkerJs(
     lines.push(`};`);
   }
 
+  // A worker bundle is a CLASSIC script: a top-level declaration in it becomes a property of the
+  // worker's global object, so a worker function named `postMessage` / `self` / `onmessage`
+  // would replace the host's own and the worker would never reply. The worker's code therefore
+  // runs inside a function scope (as a client chunk's does), and everything the compiler needs
+  // from the host is captured OUTSIDE that scope, first: the host-global alias (S457 2a), which
+  // every compiler reference reads through. A classic IIFE rather than a module worker
+  // (`new Worker(url, { type: "module" })`): the page constructs it as a classic worker today,
+  // and the IIFE needs no change to the page, the bundle's MIME or the browsers it runs on.
+  //
   // A worker has NO scrml runtime: every `_scrml_*` helper its functions call has to
   // ride in the bundle itself (S458 F3, gap g-worker-bundle-runtime-helpers-not-inlined-s457).
-  //   - §53.6.1 (S457 "6a") — the `url` shape judge (runtime-url-guard.js) as a HEADER,
-  //     right after the banner: the source declares `const` sets the judge reads.
-  //   - the shared helper table (structural `==`, the §59 map/set family) as a footer —
-  //     every entry is a function declaration, which hoists.
+  //   - §53.6.1 (S457 "6a") — the `url` shape judge (runtime-url-guard.js) ahead of the
+  //     worker's code, outside the IIFE: compiler text (it declares `const` sets the judge reads).
+  //   - the hoisted §53 judges + the shared helper table (structural `==`, the §59 map/set
+  //     family) inside the IIFE, after the worker's code — every entry is a function
+  //     declaration, which hoists.
   // Then FAIL CLOSED: a `_scrml_*(` call the bundle neither defines nor inlines is a
   // compile error, not a ReferenceError on the first message.
-  let body = lines.join("\n");
-  body = appendJudgeDefinitions(body); // S458 2a-fix F3 — the hoisted §53 judges the worker calls
+  const [banner, ...rest] = lines;
+  let inner = rest.join("\n");
+  inner = appendJudgeDefinitions(inner); // S458 2a-fix F3 — the hoisted §53 judges the worker calls
   const footer: string[] = [];
   for (const { sig, src } of WORKER_RUNTIME_HELPERS) {
-    if (body.includes(sig) && !body.includes(`function ${sig}`)) footer.push(src);
+    if (inner.includes(sig) && !inner.includes(`function ${sig}`)) footer.push(src);
   }
-  if (MAP_HELPER_REFERENCED.test(body) && !/function _scrml_map_/.test(body)) footer.push(SERVER_VALUE_NATIVE_MAP_HELPER);
-  if (footer.length) body = body + "\n" + footer.join("\n");
-  if (needsUrlShapeHelper(body)) {
-    const [banner, ...rest] = body.split("\n");
-    body = [banner, SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "", ...rest].join("\n");
-  }
+  if (MAP_HELPER_REFERENCED.test(inner) && !/function _scrml_map_/.test(inner)) footer.push(SERVER_VALUE_NATIVE_MAP_HELPER);
+  if (footer.length) inner = inner + "\n" + footer.join("\n");
+  const out: string[] = [banner, HOST_GLOBAL_ALIAS_SCRIPT_DECL];
+  if (needsUrlShapeHelper(inner)) out.push(SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "");
+  out.push("(function () {", inner, "})();");
+  const body = out.join("\n");
   if (errors) {
     for (const name of unmetWorkerHelperRefs(body)) {
       errors.push(new CGError(

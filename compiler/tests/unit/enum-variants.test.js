@@ -140,7 +140,7 @@ describe("Enum variant construction", () => {
     const lines = emitEnumVariantObjects(fileAST);
     // Build a sandbox scope by eval'ing the emitted `const Shape = ...` line.
     const code = lines[0] + "; (Shape.Circle(42))";
-    const constructed = new Function(code.replace("const Shape", "var Shape") + "; return Shape.Circle(42);")();
+    const constructed = new Function("const _scrml_g = globalThis;\n" + code.replace("const Shape", "var Shape") + "; return Shape.Circle(42);")();
     expect(constructed).toEqual({ variant: "Circle", data: { r: 42 } });
   });
 
@@ -159,7 +159,7 @@ describe("Enum variant construction", () => {
       ],
     };
     const lines = emitEnumVariantObjects(fileAST);
-    const getUnit = new Function(lines[0].replace("const Status", "var Status") + "; return Status.Loading;");
+    const getUnit = new Function("const _scrml_g = globalThis;\n" + lines[0].replace("const Status", "var Status") + "; return Status.Loading;");
     expect(getUnit()).toBe("Loading");
   });
 });

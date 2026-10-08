@@ -77,7 +77,7 @@ function runF(clientJs, ...args) {
   const m = /function (_scrml_f\w*)\(/.exec(clientJs);
   if (!m) throw new Error("no emitted user function in clientJs");
   const text = balanced(clientJs, m.index);
-  return new Function(`${text}; return ${m[1]};`)()(...args);
+  return new Function(`const _scrml_g = globalThis;\n${text}; return ${m[1]};`)()(...args);
 }
 
 function assign004(fatal) {
@@ -248,8 +248,9 @@ describe("(a) a non-rendering loop's `let` binder write is an ASSIGNMENT — com
     const start = js.indexOf("const _scrml_result = await (async () => {");
     expect(start).toBeGreaterThan(-1);
     const iife = balanced(js, start);
+    // `_scrml_g`: the bundle's host-global alias (S457 2a).
     const run = new Function(
-      "_scrml_req", "_scrml_sql",
+      "_scrml_req", "_scrml_sql", "_scrml_g",
       `return (async () => { ${iife})(); return _scrml_result; })();`,
     );
     const req = { json: async () => ({ ids: [{ id: 1 }, { id: 2 }] }) };
@@ -263,7 +264,7 @@ describe("(a) a non-rendering loop's `let` binder write is an ASSIGNMENT — com
         return keys.map((id, slot) => ({ id, name: "n" + id, __scrml_batch_key: slot }));
       },
     };
-    expect(await run(req, sql)).toEqual([{ id: 1, name: "n1" }, { id: 2, name: "n2" }]);
+    expect(await run(req, sql, globalThis)).toEqual([{ id: 1, name: "n1" }, { id: 2, name: "n2" }]);
   });
 
   test("control: a `let` binder the body does NOT write keeps a `const` head (byte-identical)", () => {

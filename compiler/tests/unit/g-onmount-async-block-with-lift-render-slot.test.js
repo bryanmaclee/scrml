@@ -92,7 +92,7 @@ describe("g-onmount-async — on-mount-in-${}-with-lift is an effect, not a disp
   test("the lift sibling KEEPS its placeholder + lift-target wiring (over-fix guard)", () => {
     const { clientJs } = compileClientJs(NON_REACTIVE, "non-reactive-lift");
     expect(clientJs).toBeTruthy();
-    expect(clientJs).toContain("_scrml_lift_target = document.querySelector(");
+    expect(clientJs).toContain("_scrml_lift_target = _scrml_g.document.querySelector(");
     expect(clientJs).toContain("_scrml_lift(");
   });
 
