@@ -50,7 +50,7 @@ function makeBareExpr(expr) {
 
 describe("meta-type-registry-emission TR-1: no typeRegistrySnapshot → null", () => {
   test("meta node with no typeRegistrySnapshot emits null for typeRegistry", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 1, undefined);
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 1, undefined);
     const output = emitLogicNode(node);
     // Both capturedBindings and typeRegistry are null when not annotated
     expect(output).toContain("}, null, null);");
@@ -63,7 +63,7 @@ describe("meta-type-registry-emission TR-1: no typeRegistrySnapshot → null", (
 
 describe("meta-type-registry-emission TR-2: enum type emission", () => {
   test("enum type emits kind, variants array", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 2, [
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 2, [
       {
         name: "Color",
         kind: "enum",
@@ -80,7 +80,7 @@ describe("meta-type-registry-emission TR-2: enum type emission", () => {
   });
 
   test("enum variants are emitted as bare name strings (§14.4.2)", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 2, [
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 2, [
       {
         name: "Status",
         kind: "enum",
@@ -100,7 +100,7 @@ describe("meta-type-registry-emission TR-2: enum type emission", () => {
 
 describe("meta-type-registry-emission TR-3: struct type emission", () => {
   test("struct type emits kind, fields array", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 3, [
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 3, [
       {
         name: "Point",
         kind: "struct",
@@ -119,7 +119,7 @@ describe("meta-type-registry-emission TR-3: struct type emission", () => {
   });
 
   test("struct fields include name and type", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 3, [
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 3, [
       {
         name: "User",
         kind: "struct",
@@ -141,7 +141,7 @@ describe("meta-type-registry-emission TR-3: struct type emission", () => {
 
 describe("meta-type-registry-emission TR-4: multiple types", () => {
   test("multiple types emit as separate object properties", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 4, [
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 4, [
       {
         name: "Color",
         kind: "enum",
@@ -167,7 +167,7 @@ describe("meta-type-registry-emission TR-4: multiple types", () => {
 
 describe("meta-type-registry-emission TR-5: type name as quoted key", () => {
   test("type name appears as quoted key in emitted object", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 5, [
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 5, [
       {
         name: "MyType",
         kind: "enum",
@@ -186,7 +186,7 @@ describe("meta-type-registry-emission TR-5: type name as quoted key", () => {
 
 describe("meta-type-registry-emission TR-6: empty snapshot → null", () => {
   test("empty typeRegistrySnapshot array emits null", () => {
-    const node = makeMetaNodeWithTypes([makeBareExpr("x()")], 6, []);
+    const node = makeMetaNodeWithTypes([makeBareExpr('meta.emit("x")')], 6, []);
     const output = emitLogicNode(node);
     // Empty registry falls back to null (same as no registry)
     expect(output).toContain("}, null, null);");

@@ -14,7 +14,7 @@
     ]
 
     for (const item of navItems) {
-        emit("<p class=nav-" + item.href + ">" + item.label + "</p>\n")
+        emit("<p class=\"nav-" + item.href + "\">" + item.label + "</p>\n")
     }
 }
 

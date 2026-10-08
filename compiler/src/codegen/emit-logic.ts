@@ -20,6 +20,7 @@ import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
 import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax, scanForeignSliceShape, scanForeignSliceTopLevelBindings } from "./foreign-seal.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
@@ -937,6 +938,26 @@ function emitCapturedBindings(node: any): string {
   }
 
   if (props.length === 0) return "null";
+  // A thunk, called by the runtime at the start of EVERY run: §22.5.2 "For non-`@var`
+  // bindings: `meta.bindings.varName` SHALL return the value that was current when the
+  // effect function was invoked for this run." An object literal evaluated once at the
+  // `^{}` site froze the FIRST run's values for every later run (S458 review F4).
+  return ["() => _scrml_g.Object.freeze({", props.join(",\n"), "})"].join("\n");
+}
+
+/**
+ * The INTERNAL capture object a rewritten runtime `^{}` body reads its captured bindings
+ * through (S458 review round 3, HIGH-2; codegen/meta-capture-rewrite.ts). It is NOT
+ * `meta.bindings`: §22.5.2 fixes `meta.bindings` as the author-visible frozen object whose
+ * non-reactive entries are plain values ("Non-reactive bindings are captured as plain
+ * values"), and that object is emitted unchanged by `emitCapturedBindings`. This one holds
+ * a GETTER per name the body reads — keyed by the AUTHOR name, returning the real (possibly
+ * renamed, by the fn-name pass) binding — so the body's rewritten `_scrml_cap.<name>` reads
+ * behave exactly as the bare closure reads they replace (live), and a user function named
+ * after a host global is reached as that function, never the global.
+ */
+function emitInternalCaptureObject(names: ReadonlySet<string>): string {
+  const props = [...names].map((name) => `  get ${name}() { return ${name}; }`);
   return ["_scrml_g.Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
@@ -4793,6 +4814,11 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     case "meta": {
       const metaBody: any[] | undefined = node.body;
       if (!Array.isArray(metaBody) || metaBody.length === 0) return "";
+      // A compile-time `^{}` (meta-checker classification) is never a runtime effect: it
+      // was evaluated and spliced away, or its evaluation failed and that is already an
+      // error. Emitting it as `_scrml_meta_effect` shipped a body calling an undefined
+      // `emit` (S458 review round 3, HIGH-1 side bug).
+      if (node._metaCompileTime === true) return "";
 
       const metaScopeId = node.id != null
         ? `"_scrml_meta_${nsId(node.id)}"`
@@ -4813,10 +4839,6 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
 
       if (bodyLines.length === 0) return "";
 
-      // §22.5: emit 4-argument form with capturedBindings and typeRegistry
-      const capturedBindings = emitCapturedBindings(node);
-      const typeRegistryLiteral = emitTypeRegistryLiteral(node);
-
       // The meta-effect body may contain `await` (e.g. `await import(...)` for
       // dynamic stdlib loading at meta-eval time). A bare `function(meta)`
       // wrapper would make `await` a SyntaxError ("await outside async"); emit
@@ -4826,10 +4848,59 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       );
       const _metaFnKw = _metaBodyHasAwait ? "async function(meta)" : "function(meta)";
 
-      return [
+      // §22.12 (S458 review round 3, HIGH-2) — route every captured binding through the
+      // capture object and verify the EXACT emitted text (codegen/meta-capture-rewrite.ts).
+      const capturedNames = new Set<string>(Array.isArray(node.capturedNames) ? node.capturedNames : []);
+      const capture = rewriteMetaBodyCaptures(bodyLines.join("\n"), capturedNames, _metaBodyHasAwait);
+      if (!capture.ok) {
+        const parseFail = capture.refused.length === 1 && capture.refused[0].startsWith("[parse: ");
+        const assigned = capture.assigned ?? [];
+        const parts: string[] = [];
+        if (capture.refused.length > 0) {
+          parts.push(`reads ${capture.refused.map((n) => `'${n}'`).join(", ")} ` +
+            `— not a body-local, a meta primitive, or a binding captured at the ^{} site. A runtime ^{} body ` +
+            `reaches an enclosing binding only through the capture object, and a cell only as @name / meta.get`);
+        }
+        if (assigned.length > 0) {
+          parts.push(`assigns to the captured binding${assigned.length > 1 ? "s" : ""} ` +
+            `${assigned.map((n) => `\`${n}\``).join(", ")} — a runtime ^{} body reads the bindings captured at ` +
+            `its site but cannot reassign them; write a cell with @name = … / meta.set(…), or declare a ` +
+            `body-local`);
+        }
+        recordRefusedLowering(new CGError(
+          "E-META-001",
+          parseFail
+            ? `E-META-001: the runtime ^{} body does not parse as JavaScript once lowered ` +
+              `(${capture.refused[0].slice(8, -1)}), so its free names cannot be checked — refused (§22.12).`
+            : `E-META-001: the runtime ^{} body, as emitted, ${parts.join("; and ")} (§22.5.2, §22.12).`,
+          node.span ?? { start: 0, end: 0 },
+        ), node);
+        return `/* E-META-001: runtime ^{} body refused */`;
+      }
+      const effectLines = capture.text.split("\n");
+
+      // §22.5: emit 4-argument form with capturedBindings and typeRegistry. The third
+      // argument is `meta.bindings` (§22.5.2) — emitted exactly as before S458.
+      const capturedBindings = emitCapturedBindings(node);
+      const typeRegistryLiteral = emitTypeRegistryLiteral(node);
+
+      const call = [
         `_scrml_meta_effect(${metaScopeId}, ${_metaFnKw} {`,
-        ...bodyLines,
+        // Strict mode for the effect body (S458 final F2): no sloppy-mode `.caller` /
+        // `.arguments` reach, no implicit globals. A function-level directive — the shared
+        // runtime is unchanged.
+        `  "use strict";`,
+        ...effectLines,
         `}, ${capturedBindings}, ${typeRegistryLiteral});`
+      ];
+      if (capture.used.size === 0) return call.join("\n");
+      // The body reads captured bindings through the internal capture object, declared
+      // in a block at the `^{}` site (where every captured binding is in JS scope).
+      return [
+        `{`,
+        `const ${META_CAPTURE_VAR} = ${emitInternalCaptureObject(capture.used)};`,
+        ...call,
+        `}`,
       ].join("\n");
     }
 

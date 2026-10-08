@@ -1,0 +1,11 @@
+{
+  "id": "meta-allow-list-clean-pos",
+  "description": "§22.12 closed allow-list (S457) positive — a compile-time `^{}` body using only its own locals, a lambda, a `for … of` loop, methods on values (`map`, `toLowerCase`, `join`, `length`) and the primitives `reflect` / `emit` / `emit.raw` fires nothing: every free identifier is a local, a declared type or a primitive.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"]
+  }
+}
