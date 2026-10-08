@@ -411,13 +411,13 @@ A short brief on each feature that works today. Each links to the full mechanics
 
 **Foreign code:** when you need TS/JS, a value-returning `_={ … }=` block inside a server function drops into it. → [deep dive](./NERDME.md#known-limitations-and-gaps)
 
-**Tooling:** a CLI with [11 verbs](docs/FACTS.md) (`init`, `dev`, `compile`, `build`, `db-migrate`, …), a language server, and editor support for Neovim and VS Code. One file type, `.scrml`.
+**Tooling:** a CLI with [12 verbs](docs/FACTS.md) (`init`, `dev`, `compile`, `build`, `db-migrate`, …), a language server, and editor support for Neovim and VS Code. One file type, `.scrml`.
 
 **Inline tests:** `~{ test "…" { assert … } }` blocks sit next to the code they check and are compiled out of the output. The shipping CLI has no command that runs them yet.
 
 **The Build Story (Nominal):** compilation pinned to a content-addressed, reproducible "what the compiler is" closure; per-`<program>` build identity. → [deep dive](./NERDME.md#the-build-story-nominal)
 
-> Known gaps and partial implementations are tracked in [`docs/known-gaps.md`](./docs/known-gaps.md) and [NERDME → Known limitations](./NERDME.md#known-limitations-and-gaps). One to know now: `class` and `async` are rejected inside logic, but at the top level of a `<program>` body they currently come out as page text. The fix (a `<program>` body carries no loose text) is ruled and in progress.
+> Known gaps and partial implementations are tracked in [`docs/known-gaps.md`](./docs/known-gaps.md) and [NERDME → Known limitations](./NERDME.md#known-limitations-and-gaps).
 
 ---
 
@@ -547,4 +547,4 @@ MIT, see [LICENSE](./LICENSE).
 
 ## Status
 
-scrml is open source under the [MIT License](./LICENSE). The compiler is at version 0.8.0: pre-1.0, usable, not stable. It runs on [Bun](https://bun.sh), and compiled output is plain JavaScript that runs in any browser or JavaScript runtime. The language's contract is a conformance suite that the current compiler passes, apart from a handful of known, pinned defects; the figures are in [`docs/FACTS.md`](docs/FACTS.md). A second compiler, written in scrml itself, is being built to implement the language as specified. See [`docs/changelog.md`](./docs/changelog.md) for what just landed.
+scrml is open source under the [MIT License](./LICENSE). The compiler is at version 0.8.0: pre-1.0, usable, not stable. It runs on [Bun](https://bun.sh), and compiled output is plain JavaScript that runs in any browser or JavaScript runtime. The language's contract is a conformance suite that the current compiler passes, apart from known defects, each pinned to a tracked gap; the figures are in [`docs/FACTS.md`](docs/FACTS.md). A second compiler, written in scrml itself, is being built to implement the language as specified. See [`docs/changelog.md`](./docs/changelog.md) for what just landed.
