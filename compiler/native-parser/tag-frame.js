@@ -716,6 +716,7 @@ export function tokenizeOpener(cursor, ltAnchor) {
         // own descriptor fields here).
         attrs: attrPass.attrs,
         tokenizedAttrs: attrPass.tokens,
+        attrDiagnostics: attrPass.diagnostics,
         // M6.6.b.1 — `:`-SHORTHAND BODY DISCRIMINATOR (SPEC §4.14 /
         // §51.0.I). When the opener carries a `:`-shorthand body
         // (`<Tag attrs : single-expression>`), this is the verbatim
@@ -1022,6 +1023,9 @@ export function splitCallArgs(raw) {
 export function tokenizeAttributeRegion(source, start, end, line, col, isStateOpener) {
     const tokens = [];
     const attrs = [];
+    // S459 L2 — attribute-level refusals ({ code, message, span }); the caller
+    // (parse-markup.js) pushes them onto the parse diagnostics.
+    const diagnostics = [];
     let p = start;
 
     // skipWs — advance `p` past inter-attribute whitespace.
@@ -1107,6 +1111,34 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
             const valStart = p;
             let valTok = null;
             let value = null;
+
+            if (vc === "'") {
+                // S459 L2 — `'` is NOT an attribute-string delimiter (SPEC §5, the
+                // S111 quoted-text model: "The attribute quoted-string form is `"`-only
+                // (double-quote; single-quote is not an attribute-string delimiter)").
+                // The live pipeline refuses it (E-ATTR-001, ast-builder.js); this reader
+                // refuses it too, with the same code, instead of shredding the value into
+                // valueless attributes. The quoted run is skipped as one unit (the opener
+                // scan above already did) and the attribute recovers as `absent`.
+                const valEnd = skipQuotedAttrValue(source, p, end);
+                const shown = source.slice(p, valEnd);
+                const inner = shown.length > 1 && shown.endsWith("'") ? shown.slice(1, -1) : shown.slice(1);
+                p = valEnd;
+                diagnostics.push({
+                    code: "E-ATTR-001",
+                    message: "E-ATTR-001: The value `" + shown + "` is not valid for attribute `"
+                        + name + "`. A single quote is not an attribute-string delimiter: "
+                        + "scrml uses one string delimiter, `\"`. Write `" + name + "=\""
+                        + inner + "\"`.",
+                    span: makeSpan(valStart, p, line, col),
+                });
+                attrs.push({
+                    name,
+                    value: { kind: "absent" },
+                    span: makeSpan(nameStart, p, line, col),
+                });
+                continue;
+            }
 
             if (vc === "\"") {
                 // Quoted string value. For `if=` the quoted text is a
@@ -1546,7 +1578,7 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
         p = p + 1;
     }
 
-    return { tokens, attrs };
+    return { tokens, attrs, diagnostics };
 }
 
 // attrBareExprContinuation — calculation (predicate). Mirrors the live

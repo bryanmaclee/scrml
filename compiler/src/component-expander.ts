@@ -1321,7 +1321,20 @@ function parseComponentDef(
   const { name, raw, span, defChildren } = def;
   if (!name || !raw) return null;
 
-  const { nodes, errors: parseErrors, bodyEngines } = parseComponentBody(raw, name, filePath);
+  const { nodes, errors: allParseErrors, bodyEngines } = parseComponentBody(raw, name, filePath);
+
+  // S459 L2 — an attribute-level refusal (E-ATTR-001: a single-quoted value, which is not
+  // an attribute-string delimiter) is reported under its OWN code, exactly as outside a
+  // component; the attribute recovered as `absent`, so the body is not "malformed".
+  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001");
+  for (const e of allParseErrors) {
+    if (e.code !== "E-ATTR-001") continue;
+    ceErrors.push(makeCEError(
+      "E-ATTR-001",
+      `${e.message.replace(/^E-ATTR-001:\s*/, "E-ATTR-001: ")} (in component \`${name}\`)`,
+      span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
 
   // §15.13.5 / §51.0.K — a component body SHALL NOT instantiate an engine. Fire
   // E-COMPONENT-ENGINE-SCOPE per body engine (structural + lift forms), for both
@@ -3412,12 +3425,22 @@ function expandComponentNode(
           } else if (attr.value.kind === "expr" || attr.value.kind === "call-ref") {
             // S458 — `bind:n=${@w + 1}` / `bind:n=f()`: an expression has no cell to write.
             const shown = attr.value.kind === "expr" ? String(attr.value.raw ?? "") : `${attr.value.name}(…)`;
+            // S459 L4 — `bind:n=${@v}`: the value IS a whole cell, only wrapped in an
+            // interpolation; the grammar (§15.11.1 `'bind:' identifier '=' '@' identifier`)
+            // takes the bare cell. Say so, rather than calling the cell an expression.
+            const ev = attr.value.kind === "expr" ? (attr.value as { exprNode?: ExprNode }).exprNode : undefined;
+            const wrappedCell = ev && ev.kind === "ident" && /^@[A-Za-z_$][\w$]*$/.test((ev as IdentExpr).name)
+              ? (ev as IdentExpr).name
+              : (/^\s*@[A-Za-z_$][\w$]*\s*$/.test(shown) ? shown.trim() : "");
             ceErrors.push(makeCEError(
               "E-ATTR-010",
-              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
-              `\`bind:${propName}=@cell\`). \`${shown}\` is an expression, not a cell — a \`bind:\` ` +
-              `prop is written back, and an expression cannot be. Bind a cell, or pass the value ` +
-              `without \`bind:\`.`,
+              wrappedCell
+                ? `E-ATTR-010: \`${attr.name}\` takes the bare cell (§15.11.1: \`bind:${propName}=@cell\`), ` +
+                  `not an interpolation. Write \`bind:${propName}=${wrappedCell}\`.`
+                : `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
+                  `\`bind:${propName}=@cell\`). \`${shown}\` is an expression, not a cell — a \`bind:\` ` +
+                  `prop is written back, and an expression cannot be. Bind a cell, or pass the value ` +
+                  `without \`bind:\`.`,
               attrSpan,
             ));
           } else if (attr.value.kind === "string-literal") {
@@ -3680,18 +3703,23 @@ function expandComponentNode(
   _propWriteCtx = prevWriteCtx;
   for (const name of writeCtx.written) {
     const decl = ((def.propsDecl ?? []) as PropDecl[]).find((p: PropDecl) => p.name === name);
+    // S459 L4 — the message names what THIS call site did (passed by value, or omitted)
+    // and the one fix that applies (a `bind` prop only needs binding at the call site).
+    const passed = callerAttrs.some((a: AttrNode) => a && a.name === name);
+    const how = passed ? "which this call site passes by value" : "which this call site does not bind (it omits the prop)";
     const why = decl && decl.bindable
-      ? `\`${name}\` is declared \`bind ${name}\`, but this call site does not bind it ` +
-        `(\`bind:${name}=@cell\`), so there is no cell to write: impl#1 has no per-instance ` +
-        `cell for an unbound bindable prop (§66.15.1 carried divergence).`
+      ? `\`${name}\` is declared \`bind ${name}\`, but without \`bind:${name}=@cell\` at the call ` +
+        `site there is no cell to write: impl#1 has no per-instance cell for an unbound bindable ` +
+        `prop (§66.15.1 carried divergence). Bind it at the call site ` +
+        `(\`<${componentName} bind:${name}=@cell/>\`), or copy the prop into a cell the component owns.`
       : `\`${name}\` is a by-value prop — captured once at mount (§15.13.2) — and only a ` +
-        `\`bind\` prop the caller binds may be written (§15.11.1).`;
+        `\`bind\` prop the caller binds may be written (§15.11.1). Declare \`bind ${name}: T\` and ` +
+        `bind it at the call site (\`<${componentName} bind:${name}=@cell/>\`), or copy the prop ` +
+        `into a cell the component owns.`;
     ceErrors.push(makeCEError(
       "E-COMPONENT-PROP-WRITE",
       `E-COMPONENT-PROP-WRITE: the body of \`<${componentName}>\` writes its prop \`${name}\`, ` +
-      `which is passed by value — bind it with \`bind:\` at the call site to write back. ${why} ` +
-      `Declare \`bind ${name}: T\` and bind it at the call site (\`<${componentName} ` +
-      `bind:${name}=@cell/>\`), or copy the prop into a cell the component owns.`,
+      `${how}. ${why}`,
       node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
     ));
   }
