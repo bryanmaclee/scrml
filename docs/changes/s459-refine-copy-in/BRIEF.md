@@ -1,0 +1,35 @@
+# s459-refine-copy-in — refined cells store their OWN copy (bryan S459 "a, go"); delete the holder machinery
+
+## RULING (verbatim, user-voice-scrml.md S459)
+> a, go
+Answering: "(a) Copy on the way in — a refined cell stores its own copy of everything it admits (the pushed element on push, the whole value on assignment). Nothing outside the cell can reach the stored object, so N1/N2/N3 can't happen by construction and the counting/holder machinery gets deleted. N4 closes by freezing the stored copy or adding a defineProperty trap. Aligned with SPEC §66.10 'aliases snapshot'. Cost: semantics-changed for refined cells only — after `@rows.push(@draft)`, editing `@draft` no longer changes the row. Measure the corpus migration before landing."
+
+## STARTUP (stop and report if any fails)
+1. `pwd` starts with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-` (=WT); toplevel == WT; clean tree; `bun install`; `bun run pretest` PLAINLY from WT; confirm `samples/compilation-tests/dist/` exists.
+2. Absolute WT paths only; never `cd` into the main checkout; never `git stash`; no pattern `pkill`. Scratch under $HOME/.cache/scrml-agent-tmp/s459-refine-copy-in.
+3. Copy this brief to `$WT/docs/changes/s459-refine-copy-in/BRIEF.md` (second commit); progress.md beside it; commit after EVERY meaningful change (the branch is your crash anchor); pre-commit hook always (never --no-verify, never touch core.hooksPath). CONTEXT BUDGET: two agents on this arc ran out — at ~600k tokens, commit, write progress.md with exact next steps, and report.
+4. MAPS: `$WT/.claude/maps/primary.map.md` (stamp `8ce6d61b5`; main since: #1359 ^{} allow-list, #1176, #1360, #1361 host-global alias `_scrml_g`). Verify against source; report whether load-bearing.
+
+## Base + merge
+`git -C "$WT" fetch origin` → `git -C "$WT" checkout -B s459-refine-copy-in s459-ref2a-r2` (local branch, tip f1db67dcc — §53 slice 2a round 3). READ FIRST: `docs/changes/s458-refinement-every-position/{PLAN,progress}.md`, `docs/changes/s458-refinement-2a-fix/{BRIEF,progress}.md`, `docs/changes/s459-refinement-2a-fix-r2/{BRIEF,progress}.md` (rounds 2–3: descriptors, delta judging, holder counts, epochs, debounce/throttle, SSR seed). Then `git merge origin/main` FIRST (6fcde7f7e; S459 reviewer found 7 conflicts: emit-bindings.ts, emit-predicates.ts, emit-tool.ts, emit-worker.ts, two unit tests, FACTS.md). Rule for the merge: every host global the judge/descriptor/runtime refine code references from EMITTED code goes through `_scrml_g` (`_scrml_g.Array.isArray`, `_scrml_g.Number.isNaN`, …) — else a user-named `Array`/`Number` hijacks the judge; run `bun scripts/host-global-scan.ts --check` (exit 0). Regenerate generated docs by script. Commit the merge alone.
+
+## The design (root fix)
+1. **Copy-in at admission.** Every value admitted into a REFINED cell is structurally copied (deep, for arrays/plain objects/structs/maps per the cell's type) at the point it is judged: whole assignment copies the whole value; push/unshift/splice-insert/element write copies the inserted value; a path write copies the written leaf; `bind:` input, SSR seed, server-call result, channel sync, `<request>` result, reset/default, engine payload — every admission path. After admission the cell's stored object is reachable ONLY through the cell. Reads may hand out the cell's (proxied) object as today — what changes is that no EXTERNAL object becomes the stored one.
+2. **Delete** the holder-count / owner-map / epoch / delta-proof machinery that existed only to track sharing (rounds 2–3). Keep: per-type descriptors + hoisted judges (MED-1 linear cost), delta judging for in-place mutation THROUGH THE CELL'S OWN PROXY (push judges the copied new element; field write judges the leaf), whole judge where the delta cannot be identified (fail closed), SSR-seed refusal = keep initial + log, debounce/throttle judged-at-schedule / recorded-at-commit, union judges (round 2), E-CONTRACT-002 for unjudgeable members.
+3. **N4:** in-place mutation of the stored value is possible only via the cell's proxy; add a `defineProperty` / `deleteProperty` / `setPrototypeOf` trap (judge or refuse), or deep-freeze the stored value and route ALL writes through copy-on-write — pick ONE model and state why. `Object.defineProperty(@x, …)` with an invalid value → refused + E-CONTRACT-001-RT.
+4. **N1** (bookkeeping before a throwing write) disappears with the machinery; still: any trap must apply its effect only after the underlying operation succeeds (validate `length` as ToUint32 first).
+5. **Copy cost:** a push copies one element; a whole write copies the value (already judged whole). Measure — the benches below.
+6. **Governing-sentence gate (Rule 4) — produce it in progress.md BEFORE coding:** quote §53.3.3 ("The variable retains its prior value" / "applied if and only if the predicate evaluates to `true`"), §66.10 (aliases snapshot — note §66 is Nominal/spec-ahead on impl#1), and search §6.5 (reactive arrays), §6.3, §14 for any sentence that requires a cell to share identity with the value assigned to it. If one exists and contradicts copy-in, STOP and report it (ruling needed). Add a SPEC note under §53.3.3 stating the impl#1 copy-in behaviour with `> **Provenance:** ruling:user-voice-scrml.md S459 "a, go" · analogy:§66.10`.
+
+## Must hold (reviewer probes — read-only, copy what you need)
+- `/home/bryan-maclee/.cache/scrml-agent-tmp/s459-rev-ref2c/repro/` (r3a–r3e.mjs, fuzz.mjs, mem.mjs, bench.sh; harness `g.mjs`: `TMPDIR=<scratch> TAGN=x SC=$PWD/<file>.mjs bun g.mjs <tree>`) — EVERY N1/N2/N3/N4 row refused; every legitimate twin admitted.
+- `/home/bryan-maclee/.cache/scrml-agent-tmp/s459-rev-ref2b/repro/` (lp2, lastpath, mine, deb, seed, union*, prior) and `.../s459-rev-ref2a/repro/` — all prior findings stay closed.
+- Benches (3×): push 16k number/struct, 500 path writes on 5000 rows, immutable append 2000 — report vs main and vs f1db67dcc; must stay linear.
+- Memory flat (mem.mjs).
+- Conformance cases: N3 draft (push then edit draft → row unchanged, no -5), N2 raw-ref, N4 defineProperty, copy-in semantics positive (edit after push does not reach the row).
+
+## Measured migration (semantics-changed — required before landing)
+Corpus (samples, examples, conformance/cases, stdlib): find every program with a refined cell that is assigned/pushed a value which is LATER mutated through another reference (the behaviour that changes). Report the count + files. If non-zero, list each and STOP for the PA before landing (do not migrate unilaterally).
+
+## Gates + report
+Core suite 0 fail; browser tier as ci.yml; `bun conformance/run.ts` no regressions; host-global-scan --check exit 0; types gate (`bun run types:check`) — `--write` the baseline ONLY for diagnostics you removed; corpus differential vs origin/main (0 compile-outcome changes expected; classify artifact changes). Final report: WT, SHA, branch, governing-sentence findings, what was deleted (LOC), probe table, benches, memory, migration count, gates. Do NOT push.
