@@ -556,8 +556,8 @@ const _STDLIB_TIME_CHUNK     = _loadStdlibChunk("time");
  */
 
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
-const _scrml_state = {};
-const _scrml_subscribers = {};
+const _scrml_state = Object.create(null);
+const _scrml_subscribers = Object.create(null);
 // S103 Phase 3 select-row chip-away (Candidate A) — value-indexed sub-registry
 // parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
 // register here under their static valueKey (the constant they compare the cell
@@ -566,11 +566,11 @@ const _scrml_subscribers = {};
 // Shape: { [name]: { [valueKey]: [fn, ...] } }
 // TDZ-safe: declared next to _scrml_subscribers since state-decl substrates
 // may write to cells during module-init before the helper functions resolve.
-const _scrml_value_indexed_subscribers = {};
+const _scrml_value_indexed_subscribers = Object.create(null);
 // scrml: stdlib registry — populated by per-stdlib chunks (see end of runtime).
 // Client-emitted code rewrites \`import { x } from "scrml:NAME"\` to
 // \`const { x } = _scrml_stdlib.NAME;\` (browser cannot resolve bare specifiers).
-const _scrml_stdlib = {};
+const _scrml_stdlib = Object.create(null);
 
 // ---------------------------------------------------------------------------
 // P1.B — Per-op runtime instrumentation (SCOPING §2.2, S103).
@@ -660,10 +660,10 @@ const _scrml_throttle_state = Object.create(null);
 // _scrml_derived_cache: name → cached value
 // _scrml_derived_dirty: name → boolean  (true = needs re-evaluation on next read)
 // _scrml_derived_downstreams: upstream_name → Set of derived names  (dirty propagation edges)
-const _scrml_derived_fns = {};
-const _scrml_derived_cache = {};
-const _scrml_derived_dirty = {};
-const _scrml_derived_downstreams = {};
+const _scrml_derived_fns = Object.create(null);
+const _scrml_derived_cache = Object.create(null);
+const _scrml_derived_dirty = Object.create(null);
+const _scrml_derived_downstreams = Object.create(null);
 
 // --- default= storage (§6.8) ---
 // _scrml_default_fns: name → () => default-value
@@ -678,7 +678,7 @@ const _scrml_derived_downstreams = {};
 // NOTE: this declaration LIVES in the 'core' chunk (no marker) so file-init
 // _scrml_default_set(...) calls always resolve. The runtime helper that
 // USES this map (_scrml_reset) lives in the 'reset' chunk further down.
-const _scrml_default_fns = {};
+const _scrml_default_fns = Object.create(null);
 function _scrml_default_set(name, fn) {
   _scrml_default_fns[name] = fn;
 }
@@ -692,7 +692,7 @@ function _scrml_default_set(name, fn) {
 // file-init _scrml_init_set(...) calls always resolve. The using helper
 // (_scrml_reset) lives in 'reset' and is tree-shaken when no reset(@cell)
 // occurs in the source.
-const _scrml_init_fns = {};
+const _scrml_init_fns = Object.create(null);
 function _scrml_init_set(name, fn) {
   _scrml_init_fns[name] = fn;
 }
@@ -703,7 +703,7 @@ function _scrml_init_set(name, fn) {
 // state commit and arms a new one if the destination variant has outgoing
 // temporal rules. Re-entering the same variant clears and re-arms (reset
 // semantics per the deep-dive default).
-const _scrml_machine_timers = {};
+const _scrml_machine_timers = Object.create(null);
 function _scrml_machine_clear_timer(name) {
   const id = _scrml_machine_timers[name];
   if (id !== undefined) {
@@ -1612,7 +1612,7 @@ function _scrml_self_scope(el) {
  * down and rebuilds rather than layering, so no handler double-attaches and no
  * per-dispatch wiring leaks.
  */
-const _scrml_dispatch_remounts = {};
+const _scrml_dispatch_remounts = Object.create(null);
 
 function _scrml_register_dispatch_remount(mountId, fn) {
   if (mountId) _scrml_dispatch_remounts[mountId] = fn;
@@ -2476,7 +2476,7 @@ function _scrml_lis(arr) {
 // The SHOW_COMMENT walk in _scrml_remount_each finds each fence anchor at any
 // depth inside the arm body (top-level each within the arm). Reusable by any
 // dynamic-HTML insertion site (engine arm-entry today; match-block dispatch too).
-const _scrml_each_renderers = {};
+const _scrml_each_renderers = Object.create(null);
 
 function _scrml_remount_each(root) {
   if (!root) return;
@@ -3782,6 +3782,9 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
         reflect: function(name) {
           if (!name || typeof name !== "string") return null;
           if (typeRegistry == null) return null;
+          // Own-property only (S458 F-A): a type name is an author string; a plain-object
+          // typeRegistry would return Object/Function off the prototype for reflect("constructor").
+          if (!Object.prototype.hasOwnProperty.call(typeRegistry, name)) return null;
           const entry = typeRegistry[name];
           return entry != null ? entry : null;
         }
@@ -4912,11 +4915,11 @@ function _scrml_computed(fn) {
 
 // Level-1 storage: keys are "<cellName>::<validatorName>"; values are
 // override strings. \`::\` is collision-safe (cell names cannot contain it).
-const _scrml_messages_inline = {};
+const _scrml_messages_inline = Object.create(null);
 
 // Level-2 storage: keys are ValidationError enum tags ("Required",
 // "MinFailed", "Custom", etc.); values are (fieldName, ...payload) => string.
-const _scrml_messages_registered = {};
+const _scrml_messages_registered = Object.create(null);
 
 // Tag → validator name mapping for Level-1 inline override lookup. Mirrors
 // the validator-catalog at compile time but lives here so Level-1 lookup
@@ -5116,7 +5119,7 @@ function _scrml_message_for(error, fieldName, cellName) {
 // 4-level chain consultation will share the formFor / errors emission paths
 // that already pull \`messages\`. Tree-shaken with \`messages\`.
 
-const _scrml_labels_registered = {};
+const _scrml_labels_registered = Object.create(null);
 
 /**
  * Level-2 label registration — public facade for \`registerLabels\` (stdlib re-export).
@@ -5261,7 +5264,7 @@ function _scrml_engine_variant_tag(value) {
 // the codegen-emitted 8th arg (isHistoryRestore) is true. The flag is CLEARED
 // by the dispatcher (postMountJs) immediately after consumption so subsequent
 // non-history-form writes don't accidentally restore.
-const _scrml_engine_pending_history_restore = {};
+const _scrml_engine_pending_history_restore = Object.create(null);
 
 // §51.11 audit — S307 port to the modern <engine>.
 //
@@ -5276,7 +5279,7 @@ const _scrml_engine_pending_history_restore = {};
 //
 // Tree-shaken by construction: codegen emits a registration ONLY for an engine
 // that declares an audit clause, so an app without one carries an empty object.
-const _scrml_engine_audit_targets = {};
+const _scrml_engine_audit_targets = Object.create(null);
 
 // Registration takes a CLOSURE, not a cell name. The recorder is built inside
 // the chunk scope, so its reactive get/set are the chunk-namespaced wrappers and
