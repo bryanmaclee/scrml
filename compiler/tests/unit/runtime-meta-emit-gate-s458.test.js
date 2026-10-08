@@ -77,6 +77,22 @@ const REFUSED = [
   // PA-ruled S459 consequence: bare `data-scrml` is the component CSS scope root.
   ["bare data-scrml", '<div data-scrml="Card"><p>SECRETX</p></div>', "SECRETX"],
   ["bare DATA-SCRML, no value", "<div DATA-SCRML>SECRETX</div>", "SECRETX"],
+  // S459 round 3 — the attribute test is CLOSED (markup-attr-allow-list.js): a name not on the list is
+  // refused, whatever it is.
+  ["unknown attribute", '<p online="SECRETX">p</p>', "SECRETX"],
+  ["custom element's own attribute", '<my-widget a="SECRETX">c</my-widget>', "SECRETX"],
+  ["near-miss x-data-scrml-y", '<p x-data-scrml-y="SECRETX">p</p>', "SECRETX"],
+  ["entity in a NAME (literal name, not on the list)", '<p data&#45;scrml-x="SECRETX">p</p>', "SECRETX"],
+  ["is= (customized built-in)", '<p is="x-SECRETX">p</p>', "SECRETX"],
+  ["form= retargets a page form", '<button form="SECRETX">b</button>', "SECRETX"],
+  ["https formaction", '<button formaction="https://SECRETX.example/">b</button>', "SECRETX"],
+  ["form action https", '<form action="https://SECRETX.example/"><input></form>', "SECRETX"],
+  ["ping", '<a href="/x" ping="https://SECRETX.example/">a</a>', "SECRETX"],
+  ["xml:base", '<svg xml:base="https://SECRETX.example/"><a href="x"><text>t</text></a></svg>', "SECRETX"],
+  ["popovertarget", '<button popovertarget="SECRETX">b</button>', "SECRETX"],
+  ["img name= (document named property)", '<img src="/a.png" name="SECRETX">', "SECRETX"],
+  ["id in the reserved _scrml namespace", '<p id="_scrml_error_boundary_log">SECRETX</p>', "SECRETX"],
+  ["name naming a form member (belt and braces)", '<form><input name="action" value="SECRETX"></form>', "SECRETX"],
 ];
 
 describe("S458 'a' — runtime meta.emit refuses, writes nothing, logs once", () => {
@@ -109,8 +125,16 @@ const ADMITTED = [
   '<a href="https://example.com/a?b=1">abs</a><a href="/users/1">rel</a><a href="page">rel2</a><a href="#top">frag</a>',
   '<a href="mailto:a@b.c">m</a><a href="tel:+1">t</a>',
   '<img src="data:image/png;base64,AAAA" alt="x">',
-  '<p style="color: red" title="t" online="x">s</p>',
-  "<my-widget a=\"1\">c</my-widget>",
+  '<p style="color: red" title="t" aria-label="l" role="note" lang="en" dir="ltr" tabindex="0">s</p>',
+  "<my-widget class=\"w\" data-a=\"1\">c</my-widget>",
+  '<form><label for="q">Q</label><input id="q" name="q" type="text" placeholder="p" required>' +
+    '<select name="s"><option value="1" selected>1</option></select><textarea name="t" rows="2"></textarea>' +
+    '<button type="submit" name="go" value="1">go</button></form>',
+  '<table><tr><th scope="col" colspan="2">h</th></tr><tr><td rowspan="1">d</td></tr></table>',
+  '<img src="/a.png" srcset="/a.png 1x, /b.png 2x" alt="a" width="10" height="10" loading="lazy">',
+  '<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><path d="M0 0L10 10" stroke="red" stroke-width="2" fill="none"></path><use href="#x"></use></svg>',
+  // (MathML attributes are pinned in Chromium, not here: happy-dom parses <math> children in the HTML namespace.)
+  '<details open><summary>s</summary>d</details><ol start="3" reversed><li value="3">x</li></ol>',
   '<svg viewBox="0 0 1 1"><circle r="1"></circle><foreignObject><p>x</p></foreignObject></svg>',
   "<math><mi>x</mi></math>",
   "<!-- note --><p>after</p>",
@@ -124,11 +148,8 @@ const ADMITTED = [
   "<title>t</title><p>y</p>",
   "<p>unclosed <b>bold",
   "a &amp; b &lt;c&gt;",
-  // Ordinary data-* and near-miss names are not in the compiler-owned data-scrml- namespace. A
-  // character reference in an attribute NAME is not decoded by the tokenizer, so
-  // `data&#45;scrml-x` is that literal name, not data-scrml-x.
-  '<p data-x="1" data-scrmlx="2" x-data-scrml-y="4">ok</p>',
-  '<p data&#45;scrml-x="1">ok</p>',
+  // Ordinary data-* (data-scrmlx is not in the compiler-owned data-scrml namespace) and aria-*.
+  '<p data-x="1" data-scrmlx="2" aria-label="l">ok</p>',
 ];
 
 describe("S458 'a' — admitted markup is inserted exactly as the ungated path inserted it", () => {

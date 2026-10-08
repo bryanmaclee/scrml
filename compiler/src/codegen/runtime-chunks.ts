@@ -101,8 +101,8 @@
  *   urlguard      _scrml_safe_url + the shared URL scheme reader (§5.2 rule 3, S457), inlined
  *                 verbatim from compiler/src/runtime-url-guard.js. Activated by the post-emit
  *                 `_scrml_safe_url(` scan in emit-client.ts.
- *   metaemit      _scrml_meta_emit_checked — the runtime meta.emit() gate (§22.4.1, S458 "a"),
- *                 inlined from compiler/src/runtime-meta-emit-gate.js. Pulled with 'meta'
+ *   metaemit      _scrml_meta_emit_insert — the runtime meta.emit() gate (§22.4.1, S458 "a", S459),
+ *                 inlined from markup-attr-allow-list.js + runtime-meta-emit-gate.js. Pulled with 'meta'
  *                 (CHUNK_DEPENDENCIES meta → metaemit → urlguard): `_scrml_meta_emit` calls it.
  *   mount         _scrml_chunk_mount(id, tag) + _SCRML_MOUNTS registry
  *                 (§40.9.7, A-4.7). Chunk-side record-keeping for
@@ -523,7 +523,7 @@ export const RUNTIME_CHUNKS: Record<RuntimeChunkName, string> = buildRuntimeChun
 
 export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkName[]>> = {
   scope: ['timers', 'animation'],
-  // §22.4.1 (S458 "a"): `_scrml_meta_emit` (meta) calls `_scrml_meta_emit_checked` (metaemit), which
+  // §22.4.1 (S458 "a"): `_scrml_meta_emit` (meta) calls `_scrml_meta_emit_insert` (metaemit), which
   // judges URL attributes with `_scrml_is_url_attr` / `_scrml_url_value_admitted` (urlguard).
   meta: ['metaemit'],
   metaemit: ['urlguard'],

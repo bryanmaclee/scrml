@@ -1,6 +1,6 @@
 {
   "id": "meta-emit-data-attr-pos",
-  "description": "§22.4.1 / §22.12 (S458 \"your recs on all four\", item 3) positive — only `data-scrml` itself and the `data-scrml-` prefix are compiler-owned. Ordinary `data-*` attributes and near-miss names pass in compile-time `emit()` output (`data-x`, `data-scrmlx`, `x-data-scrml-y`) and in runtime `meta.emit` output (`data-k`), and both reach the rendered DOM.",
+  "description": "§22.4.1 / §22.12 (S458 \"your recs on all four\", item 3) positive — only `data-scrml` itself and the `data-scrml-` prefix are compiler-owned. Ordinary `data-*` attributes, including the near-miss `data-scrmlx`, pass in compile-time `emit()` output (`data-x`, `data-scrmlx`) and in runtime `meta.emit` output (`data-k`), and both reach the rendered DOM.",
   "language-version": "1.0",
   "source-test": "compiler/SPEC.md §22.4.1",
   "spec": "§22.4.1",
@@ -10,7 +10,7 @@
     "notCodes": [],
     "notCodePrefixes": ["E-META-"],
     "domAnchored": [
-      { "selector": "#ct", "text": "ct", "attr": { "data-x": "1", "data-scrmlx": "2", "x-data-scrml-y": "3" } },
+      { "selector": "#ct", "text": "ct", "attr": { "data-x": "1", "data-scrmlx": "2" } },
       { "selector": "#rt", "text": "hi", "attr": { "data-k": "v" } }
     ]
   }

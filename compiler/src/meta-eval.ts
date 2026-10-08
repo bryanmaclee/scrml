@@ -43,6 +43,11 @@ import * as acorn from "acorn";
 import { checkExecutedMetaJs } from "./meta-allow-list.ts";
 import { isStandardMarkupElementName } from "./html-elements.js";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
+// The ONE attribute judge for emitted markup — also inlined into the runtime meta.emit gate (S459).
+import {
+  _scrml_emit_attr_name_verdict, _scrml_emit_attr_value_verdict, _scrml_emit_child_ns,
+  _scrml_emit_fold_name, _scrml_emit_reserved_attr_name, _SCRML_EMIT_NS_HTML,
+} from "./markup-attr-allow-list.js";
 // The ONE reader of `match` arm syntax (§18) — shared with the runtime lowering, so a compile-time
 // `match` is read exactly as the same arms are read everywhere else.
 import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockBinding, type MatchArm } from "./codegen/emit-control-flow.ts";
@@ -914,23 +919,13 @@ function runInMetaRealm(
 const EMIT_ATTR_VALUE_KINDS = new Set(["string-literal", "absent"]);
 
 /**
- * SPEC §22.4.1 (ruling S458 "your recs on all four", item 3; PA-ruled S459 consequence): the
- * `data-scrml` attribute namespace is compiler-owned — the runtime's own markers
- * (`data-scrml-meta`, `data-scrml-outlet`, `data-scrml-each-mount`, `data-scrml-gated`, …) and
- * the bare `data-scrml` component CSS scope root (emit-css.ts `@scope ([data-scrml="Name"])`)
- * live there — so an attribute in emit() output whose name IS `data-scrml` or begins with
- * `data-scrml-` is refused. A namespace rule, never a list of marker names. The name is read the
- * way the HTML tokenizer reads the attribute name the compiler writes out for it: ASCII
- * upper-case letters folded to lower case (and nothing else — the tokenizer does not decode
- * character references in an attribute name). The runtime `meta.emit` gate applies the same
- * rule to the names its parse produced (runtime-meta-emit-gate.js
- * `_scrml_meta_emit_reserved_attr_name`).
+ * SPEC §22.4.1 / §22.12 (S459 round 3): emit() output attribute NAMES are judged by the ONE closed
+ * attribute judge both phases use — markup-attr-allow-list.js `_scrml_emit_attr_name_verdict`
+ * (inlined verbatim into the runtime meta.emit gate). A name not on its list is refused; the
+ * compiler-owned `data-scrml` / `data-scrml-*` namespace is refused there too. The element's
+ * namespace (HTML / SVG / MathML) is tracked down the tree with the tree builder's rule
+ * (`_scrml_emit_child_ns`), since no HTML parser built this tree.
  */
-const COMPILER_OWNED_ATTR_NAME = "data-scrml";
-function isCompilerOwnedAttrName(name: string): boolean {
-  const folded = name.replace(/[A-Z]/g, (c) => c.toLowerCase());
-  return folded === COMPILER_OWNED_ATTR_NAME || folded.startsWith(COMPILER_OWNED_ATTR_NAME + "-");
-}
 
 /**
  * `emit()` output re-enters the pipeline AFTER the type system, route inference and
@@ -953,7 +948,7 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
     reported.add(message);
     errors.push(new MetaEvalError(code, message, site));
   };
-  const visit = (list: unknown[]): void => {
+  const visit = (list: unknown[], parentNs: string = _SCRML_EMIT_NS_HTML, parentTag: string = ""): void => {
     for (const n0 of list) {
       if (!n0 || typeof n0 !== "object") continue;
       const n = n0 as Record<string, unknown>;
@@ -977,16 +972,32 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
             `that expand and check it in source.`);
           continue;
         }
+        const lowerTag = tag.toLowerCase();
+        const ns = _scrml_emit_child_ns(parentNs, parentTag, lowerTag);
         for (const a of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
-          if (isCompilerOwnedAttrName(String(a?.name ?? ""))) {
+          const nameVerdict = _scrml_emit_attr_name_verdict(ns, lowerTag, String(a?.name ?? ""));
+          if (nameVerdict !== "") {
+            const reserved = _scrml_emit_reserved_attr_name(_scrml_emit_fold_name(String(a?.name ?? "")));
             refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` the attribute ` +
-              `'${String(a.name)}'. The \`data-scrml\` attribute namespace (\`data-scrml\` itself and every ` +
-              `\`data-scrml-*\` name) is reserved for the compiler's own markers (the component CSS scope root ` +
-              `\`data-scrml\`, \`data-scrml-meta\`, \`data-scrml-outlet\`, …), like the \`_scrml_\` name prefix, so ` +
-              `emit() output may not carry it (§22.4.1) — use another \`data-\` name.`);
+              `'${String(a.name)}' — ${nameVerdict}. ` + (reserved
+                ? `The \`data-scrml\` attribute namespace (\`data-scrml\` itself and every \`data-scrml-*\` name) ` +
+                  `is reserved for the compiler's own markers (the component CSS scope root \`data-scrml\`, ` +
+                  `\`data-scrml-meta\`, \`data-scrml-outlet\`, …), like the \`_scrml_\` name prefix — use another ` +
+                  `\`data-\` name (§22.4.1).`
+                : `emit() output admits a closed list of attributes — global and per-element presentation, ` +
+                  `structure, accessibility and form-value attributes, \`data-*\` and \`aria-*\` — and refuses ` +
+                  `every other name (§22.4.1, §22.12).`));
             continue;
           }
           const v = a?.value as { kind?: string } | undefined;
+          if (v && typeof v === "object" && v.kind === "string-literal") {
+            const valueVerdict = _scrml_emit_attr_value_verdict(String(a.name), String((v as { value?: unknown }).value ?? ""));
+            if (valueVerdict !== "") {
+              refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` ${valueVerdict} ` +
+                `(§22.4.1, §47.1.1).`);
+              continue;
+            }
+          }
           const interpolated = v && typeof v === "object" && v.kind === "string-literal"
             && typeof (v as { value?: unknown }).value === "string" && ((v as { value: string }).value).includes("${");
           if (v && typeof v === "object" && (!EMIT_ATTR_VALUE_KINDS.has(String(v.kind)) || interpolated)) {
@@ -1000,7 +1011,7 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
               `attribute values — a literal string or no value — in emit() output (§22.4.1).`);
           }
         }
-        if (Array.isArray(n.children)) visit(n.children);
+        if (Array.isArray(n.children)) visit(n.children, ns, lowerTag);
         continue;
       }
       refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output contains a '${String(n.kind)}' construct. impl#1 ` +

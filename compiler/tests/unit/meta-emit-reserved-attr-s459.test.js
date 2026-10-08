@@ -68,12 +68,12 @@ describe("S458 item 3 — data-scrml-* in compile-time emit() output is E-META-E
 });
 
 describe("S458 item 3 — ordinary data-* attributes still pass", () => {
-  test("data-x / data-scrmlx / x-data-scrml-y compile clean and reach the HTML", () => {
-    const r = compile(emitOf('<p data-x="1" data-scrmlx="3" x-data-scrml-y="4">ok</p>'));
+  test("data-x / data-scrmlx / aria-label compile clean and reach the HTML", () => {
+    const r = compile(emitOf('<p data-x="1" data-scrmlx="3" aria-label="4">ok</p>'));
     expect(r.codes).toEqual([]);
     expect(r.html).toContain('data-x="1"');
     expect(r.html).toContain('data-scrmlx="3"');
-    expect(r.html).toContain('x-data-scrml-y="4"');
+    expect(r.html).toContain('aria-label="4"');
   });
 
   test("a compiler marker in the SAME page is not the author's (the runtime-meta placeholder is unaffected)", () => {

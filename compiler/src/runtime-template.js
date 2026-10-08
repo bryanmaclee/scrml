@@ -48,6 +48,8 @@ export const META_EMIT_GATE_RUNTIME_SOURCE =
   "const _SCRML_META_EMIT_KNOWN_ELEMENTS = new Set(" +
   JSON.stringify(standardMarkupElementNamesLowercase()) + ");\n" +
   "const _SCRML_CUSTOM_ELEMENT_NAME = " + String(CUSTOM_ELEMENT_NAME_PATTERN) + ";\n" +
+  // S459 round 3 — the ONE attribute judge, shared with compile-time emit() (meta-eval.ts imports it).
+  readFileSync(join(__runtime_template_dir, "markup-attr-allow-list.js"), "utf8").replace(/^export /gm, "") +
   readFileSync(join(__runtime_template_dir, "runtime-meta-emit-gate.js"), "utf8").replace(/^export /gm, "");
 
 /**
@@ -3595,20 +3597,11 @@ var _scrml_modules = (typeof _scrml_modules !== "undefined")
  */
 function _scrml_meta_emit(scopeId, htmlString) {
   if (typeof document === "undefined") return;
-  // §22.4.1 (S458 "a"): the string is parsed once, inertly, and judged by the 'metaemit' gate; a
-  // refused string writes nothing (the gate reports it). The nodes inserted are the nodes judged.
-  let placeholder = document.querySelector('[data-scrml-meta="' + scopeId + '"]');
-  const judged = _scrml_meta_emit_checked(scopeId, htmlString, placeholder ? placeholder.localName : "span");
-  if (judged === null) return;
-  if (!placeholder) {
-    // Fallback: if no placeholder found (e.g. meta block not in markup context),
-    // append a new element to the document body with the scopeId marker.
-    placeholder = document.createElement("span");
-    placeholder.setAttribute("data-scrml-meta", scopeId);
-    document.body.appendChild(placeholder);
-  }
-  while (placeholder.firstChild) placeholder.removeChild(placeholder.firstChild);
-  while (judged.firstChild) placeholder.appendChild(judged.firstChild);
+  // §22.4.1 / §22.12 (S458 "a", S459 round 3): the 'metaemit' gate parses the string once, inertly,
+  // judges it, and moves the judged nodes to the placeholder — reading the DOM only through accessors
+  // captured from the prototypes, so neither the data nor a page element can shadow what it reads.
+  // A refused string writes nothing (the gate reports it).
+  _scrml_meta_emit_insert(scopeId, htmlString);
 }
 
 // ---------------------------------------------------------------------------
@@ -6719,11 +6712,13 @@ function _scrml_log(side, loc) {
 ${URL_GUARD_RUNTIME_SOURCE}
 // §22.4.1 runtime meta.emit gate (chunk: 'metaemit')
 //
-// _scrml_meta_emit_checked(scopeId, html, tag) — parses runtime meta.emit() output inertly (a document
-// with no browsing context),
-// judges the parsed tree (elements, event-handler attributes, srcdoc, URL schemes via the 'urlguard'
-// reader above) and returns the SAME nodes for insertion, or null + one §19.6.8 report. Inlined from
-// compiler/src/runtime-meta-emit-gate.js. Pulled with the 'meta' chunk (CHUNK_DEPENDENCIES).
+// _scrml_meta_emit_insert(scopeId, html) — parses runtime meta.emit() output inertly (a document
+// with no browsing context), judges the parsed tree through prototype-captured accessors only
+// (elements; attribute names by the closed list of markup-attr-allow-list.js, the judge compile-time
+// emit() shares; URL schemes via the 'urlguard' reader above) and moves the SAME nodes into the
+// block's placeholder, or writes nothing + one §19.6.8 report. Inlined from
+// compiler/src/markup-attr-allow-list.js + compiler/src/runtime-meta-emit-gate.js. Pulled with the
+// 'meta' chunk (CHUNK_DEPENDENCIES).
 ${META_EMIT_GATE_RUNTIME_SOURCE}
 ${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
