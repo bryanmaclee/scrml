@@ -51,3 +51,24 @@ Out of scope (carried, do NOT fix): destructured-param / param defaults dropped 
 
 ## Final report
 WT · final SHA · branch · per finding: held/refined/wrong + what you did + executed evidence · differential summary · anything not done. Do NOT push.
+
+## S459 round 6 addendum
+
+PA: S459 re-review of your round 5 (a793e24e5) = LAND-WITH-NITS; H1/M1/M2/L1/L2/L4 all CLOSED. Round 6, same branch s459-d1-r5, same rules as your brief (commit after each change, progress.md under "Round 6", no push). Append this message verbatim to your BRIEF.md under "S459 round 6 addendum". Reviewer probes: /home/bryan-maclee/.cache/scrml-agent-tmp/s459-rev-d1r5/ (p4/liftnested, p5/liftnestedread, f/metasq.scrml, f/sqspan.scrml, cbomit*, run.sh) — read-only. Reproduce each first.
+
+1. F1 MED (H1 class, silent parent write): a `${}` nested INSIDE lifted markup starts a fresh empty scope.
+```scrml
+<v> = 7
+const C = <div class="c" props={ bind n: number }>
+    ${ lift <div class="in">${ let n = 0 }<button class="w" onclick=${() => n = 9}>w</button></div> }
+</>
+<C bind:n=@v/>
+<p id="o">${@v}</p>
+```
+Click → #o = 9 (should stay 7). Read side: `${ lift <div>${ const label = "S" }<p class="t">${label}</p></div> }` with label="L" renders L (should be S). Reviewer cause: `substitutePropsInMarkupFromStmt` (~1604) calls `substituteProps(node, scoped.props, scoped.propExprMap)` with no `bodyScope`. Fix: thread a scope (a fresh copy seeded from the enclosing shadowed set) so declarations inside lifted markup carry forward to later siblings within it, exactly like the body scope. Hunt for any OTHER `substituteProps` call site that drops the scope the same way — make "every entry passes a scope" true (e.g. make the parameter required). Conformance cases for both.
+2. F4 LOW but SPEC-SHALL, newly reachable through your M2: `props={ onGo?: () => void }` + `<button onclick=onGo()>` + `<C/>` emits `function(event) { null(); }` with no diagnostic. §15.11.4: "an unguarded call to a potentially-absent function-typed prop SHALL be a compile error (E-TYPE-031 …)". Fire E-TYPE-031 for the bare call-ref form (and check the `${() => onGo()}` lambda form — base already emitted `null()` there). Passing a non-function (`onGo="x"`) emits `"x"()` with no type error — refuse with the existing type-mismatch code if the prop's declared type is a function type. Measure corpus impact; if non-zero, list and stop for the PA.
+3. F2 LOW: your L2 change also affects compile-time meta emit (`meta-eval.ts` re-parses emitted markup with the shared native reader): `^{ emit("<p class='x' id=\"m\">hi</p>") }` → now E-META-EVAL-002 (base emitted garbage `<p class x id="m">`). Intended — add a conformance case pinning it (and note it in your progress.md as a language-wide consequence).
+4. F3 LOW: the component-body E-ATTR-001 is reported at the component def span, which resolves to an unrelated earlier line (f/sqspan.scrml → 2:12, attribute is on line 6). Report at the attribute's own source position.
+5. L4 nit: E-COMPONENT-010 for an omitted required `bind` prop still says "Declare it as `n="value"`" — say to bind it at the call site (`<C bind:n=@cell/>`).
+Out of scope: two instances of a component with a body-level `let` crash ("Cannot declare a let variable twice") — pre-existing on base; note it as carried.
+Final report: SHA, per item held/refined/wrong + evidence, full gates (core, browser tier, conformance), corpus differential vs a793e24e5.
