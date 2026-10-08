@@ -53,3 +53,23 @@ Append-only. Times local (2026-10-07/08).
 - NEW test compiler/tests/unit/s457-host-global-alias.test.js — 437 pass after the server-copy fix.
 - Pre-existing, NOT changed: `server function eval` / top-level `const eval` are refused only by the
   emitted-artifact gate (E-CODEGEN-INVALID-LOGIC "compiler defect", strict-mode binding) — base too.
+
+## test triage (22:40-01:00)
+- First full gate after the codemod: 459 fail / 7 errors. Classes: (a) emitted-shape pins
+  (spelling), (b) no-runtime harnesses that evaluate emitted code (needed a `_scrml_g`
+  stand-in), (c) harnesses that stubbed host globals by SHADOWING them (`new Function("fetch", …)`)
+  -> now a view of the global object (NEW compiler/tests/helpers/host-view.js), (d) real
+  compiler follow-ups the tests caught: serve-target tool TDZ (embedded server bundle's alias
+  line after the bind helper -> strip + re-declare once), protect-flow's egress analysis on
+  `_scrml_g.Promise.resolve` (E-PROTECT-006 false positive on mounthydrate-redacts -> protect-flow
+  de-aliases), conformance adapter's `new WebSocket` / `new EventSource` detection, the
+  serve-target bind helpers (listen.js toString -> aliased), `new EventSource` missed by the
+  codemod (not in the probe's global list).
+- (a) fixed by a failure-driven fixer (.tmp/tfix.ts: rewrite a failing pin only when the
+  RECEIVED text contains the aliased spelling); (b)-(c) by hand per harness.
+- Vacuous negatives: `not.toContain("new Response")` etc. would now pass for the wrong reason;
+  swept (tcodemod dry-run over every test + a negative-assertion filter) and re-pinned 27 sites.
+- Runtime size: the client runtime gzip gates are knife-edge (SPA counter < 16384 B). The
+  explanatory comment moved out of the shipped runtime text into runtime-template.js source;
+  the shipped cost is the one line `const _scrml_g = globalThis;`.
+- Gate at this point: 30426 pass / 0 fail / 0 errors (unit+integration+conformance).

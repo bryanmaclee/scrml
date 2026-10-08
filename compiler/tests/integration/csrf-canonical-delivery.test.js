@@ -34,6 +34,7 @@ import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
+import { hostView } from "../helpers/host-view.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js. Recurrence-proof isolation
@@ -181,7 +182,9 @@ describe("D3 — client reads the meta token first", () => {
   test("eval: returns the meta token over the cookie; falls back to cookie when no meta", () => {
     const { clientJs } = compile(AUTH_CSRF_SRC, "d3-eval");
     const fn = clientJs.match(/function _scrml_get_csrf_token\(\) \{[\s\S]+?\n\}/)[0];
-    const getToken = new Function("document", `${fn}; return _scrml_get_csrf_token();`);
+    // The helper reaches host globals through the alias `_scrml_g` (S457 2a).
+    const run = new Function("_scrml_g", `${fn}; return _scrml_get_csrf_token();`);
+    const getToken = (document) => run(hostView({ document }));
     const withMeta = { querySelector: () => ({ getAttribute: () => "META-TOK" }), cookie: "scrml_csrf=COOKIE-TOK" };
     expect(getToken(withMeta)).toBe("META-TOK");
     const noMeta = { querySelector: () => null, cookie: "scrml_csrf=COOKIE-TOK" };

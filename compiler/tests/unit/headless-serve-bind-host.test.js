@@ -28,6 +28,7 @@ import { join } from "path";
 import * as acorn from "acorn";
 import { compileScrml } from "../../src/api.js";
 import { generateServerEntry } from "../../src/commands/build.js";
+import { aliasHostGlobalsInRuntimeText } from "../../src/codegen/host-global-alias.ts";
 import {
   isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners,
   lanIPv4Addresses, DEFAULT_HOST,
@@ -70,14 +71,14 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
   });
 
   test("the host is resolved from SCRML_HOST and passed to _scrml_bind.listen", () => {
-    expect(toolJs).toContain("const _scrml_serve_host = _scrml_bind.host(process.env.SCRML_HOST);");
+    expect(toolJs).toContain("const _scrml_serve_host = _scrml_bind.host(_scrml_g.process.env.SCRML_HOST);");
     expect(toolJs).toContain("const _scrml_server = _scrml_bind.listen({");
     expect(toolJs).toContain("}, _scrml_serve_host);");
     expect(toolJs).toContain("port: _scrml_serve_port,");
   });
 
   test("the IPv6-twin collision warning is re-prefixed `scrml serve-target:` like the module's other lines", () => {
-    expect(toolJs).toContain('(m) => console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:"))');
+    expect(toolJs).toContain('(m) => _scrml_g.console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:"))');
     const warn = (m) => m.replace(/^\[scrml\]/, "scrml serve-target:");
     expect(warn("[scrml] listening on 127.0.0.1:1 only")).toBe("scrml serve-target: listening on 127.0.0.1:1 only");
   });
@@ -92,8 +93,10 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     const calls = [];
     (function visit(n) {
       if (!n || typeof n.type !== "string") return;
-      if (n.type === "CallExpression" && n.callee.type === "MemberExpression"
-        && n.callee.object.name === "Bun" && n.callee.property.name === "serve") calls.push(n);
+      // `Bun.serve(…)`, spelled through the host-global alias (S457 2a): `_scrml_g.Bun.serve(…)`.
+      const o = n.type === "CallExpression" && n.callee.type === "MemberExpression" ? n.callee.object : null;
+      const isBun = o && (o.name === "Bun" || (o.type === "MemberExpression" && o.object.name === "_scrml_g" && o.property.name === "Bun"));
+      if (isBun && n.callee.property.name === "serve") calls.push(n);
       for (const v of Object.values(n)) {
         if (Array.isArray(v)) v.forEach(visit);
         else if (v && typeof v === "object") visit(v);
@@ -102,7 +105,7 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     // The only direct Bun.serve is `serve = (c) => Bun.serve(c)`, whose configs all
     // come from bindListeners / probeIPv6 — each of which sets `hostname`.
     expect(calls.length).toBe(1);
-    expect(toolJs).toContain("const serve = (c) => Bun.serve(c);");
+    expect(toolJs).toContain("const serve = (c) => _scrml_g.Bun.serve(c);");
     expect(bindListeners.toString()).toMatch(/hostname: plan\.primary/);
     expect(bindListeners.toString()).toMatch(/hostname: twin\.host/);
     expect(probeIPv6.toString()).toMatch(/hostname: "::1"/);
@@ -112,8 +115,11 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     // This pins HOW the copy is made (Function.prototype.toString, i.e. Bun's
     // re-print — not listen.js's source text). That the copies BEHAVE like the
     // originals, with no module-scope reference, is §2.
+    // S457 2a: the copy's host globals are spelled through the module's alias
+    // (`_scrml_g.String(…)`, `new _scrml_g.Response(…)`), since it shares the module
+    // scope with the program's own bindings; that respelling is the only change.
     for (const [name, fn] of Object.entries(SERIALIZED)) {
-      expect({ name, present: toolJs.includes(fn.toString()) }).toEqual({ name, present: true });
+      expect({ name, present: toolJs.includes(aliasHostGlobalsInRuntimeText(fn.toString())) }).toEqual({ name, present: true });
     }
   });
 
@@ -126,10 +132,11 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     expect(hostAt).toBeGreaterThan(-1);
     expect(hostAt).toBeLessThan(js.indexOf("TOPLEVEL-RAN"));
     expect(hostAt).toBeLessThan(js.indexOf("await main("));
-    // Nothing but comments, the static imports and the _scrml_bind helper precede it.
+    // Nothing but comments, the static imports, the host-global alias (S457 2a) and the
+    // _scrml_bind helper precede it.
     const ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "module" });
     const before = ast.body.filter((n) => n.start < hostAt && n.type !== "ImportDeclaration");
-    expect(before.map((n) => n.declarations?.[0]?.id?.name ?? n.type)).toEqual(["_scrml_bind"]);
+    expect(before.map((n) => n.declarations?.[0]?.id?.name ?? n.type)).toEqual(["_scrml_g", "_scrml_bind"]);
   });
 });
 

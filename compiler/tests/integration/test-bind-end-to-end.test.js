@@ -181,7 +181,7 @@ describe("test-bind A6-5 §2: E-TEST-006 — unbound server-fn call fails the te
 
     // Generated test JS should contain the thrower stub
     const testJs = readFileSync(testJsPath, "utf8");
-    expect(testJs).toContain("const sendEmail = (...args) => { throw new Error(");
+    expect(testJs).toContain("const sendEmail = (...args) => { throw new _scrml_g.Error(");
     expect(testJs).toContain("E-TEST-006");
 
     // Run under bun:test — MUST fail (non-zero exit; throw is caught

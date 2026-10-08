@@ -287,7 +287,7 @@ function _scrml_log_render(v, depth, seen) {
   if (v === null || typeof v === "undefined") return "not";
   var t = typeof v;
   if (t === "string") return v;
-  if (t === "number" || t === "boolean") return String(v);
+  if (t === "number" || t === "boolean") return _scrml_g.String(v);
   if (t === "function") return "<fn>";
   if (depth > 8) return "...";
   if (v && typeof v === "object") {
@@ -296,10 +296,10 @@ function _scrml_log_render(v, depth, seen) {
   }
   if (v && typeof v === "object" && (v.__scrml_markup === true || v.__scrml_el || (typeof v.tag === "string" && (typeof v.children !== "undefined" || typeof v.attrs !== "undefined" || typeof v.attributes !== "undefined")))) {
     var mtag = v.tag || v.__scrml_el || "markup";
-    return "<" + String(mtag) + " …/>";
+    return "<" + _scrml_g.String(mtag) + " …/>";
   }
   if (v && v.__scrml_map === true) {
-    var mkeys = Object.keys(v.entries);
+    var mkeys = _scrml_g.Object.keys(v.entries);
     var mparts = [];
     for (var mi = 0; mi < mkeys.length; mi++) {
       var ent = v.entries[mkeys[mi]];
@@ -307,14 +307,14 @@ function _scrml_log_render(v, depth, seen) {
     }
     return "{" + mparts.join(", ") + "}";
   }
-  if (Array.isArray(v)) {
+  if (_scrml_g.Array.isArray(v)) {
     var aparts = [];
     for (var ai = 0; ai < v.length; ai++) aparts.push(_scrml_log_render(v[ai], depth + 1, seen));
     return "[" + aparts.join(", ") + "]";
   }
   if (v && typeof v._tag !== "undefined") {
-    var tag = String(v._tag);
-    var eKeys = Object.keys(v).filter(function (k) { return k !== "_tag"; }).sort();
+    var tag = _scrml_g.String(v._tag);
+    var eKeys = _scrml_g.Object.keys(v).filter(function (k) { return k !== "_tag"; }).sort();
     if (eKeys.length === 0) return tag;
     var eparts = [];
     for (var ei = 0; ei < eKeys.length; ei++) {
@@ -322,7 +322,7 @@ function _scrml_log_render(v, depth, seen) {
     }
     return tag + "(" + eparts.join(", ") + ")";
   }
-  var sKeys = Object.keys(v).sort();
+  var sKeys = _scrml_g.Object.keys(v).sort();
   var sparts = [];
   for (var si = 0; si < sKeys.length; si++) {
     sparts.push(sKeys[si] + ": " + _scrml_log_render(v[sKeys[si]], depth + 1, seen));
@@ -339,9 +339,9 @@ function _scrml_log(side, loc) {
   }
   var body = rendered.join(" ");
   var locSuffix = (typeof loc === "string" && loc.length > 0) ? " (" + loc + ")" : "";
-  var line = "[" + String(side) + "] " + body + locSuffix;
-  if (typeof console !== "undefined" && typeof console.log === "function") {
-    try { console.log(line); } catch (e) { /* never throw */ }
+  var line = "[" + _scrml_g.String(side) + "] " + body + locSuffix;
+  if (typeof _scrml_g.console !== "undefined" && typeof _scrml_g.console.log === "function") {
+    try { _scrml_g.console.log(line); } catch (e) { /* never throw */ }
   }
 }
 `;
@@ -366,8 +366,8 @@ export const SERVER_PRINT_HELPER: string = String.raw`
 // --- §20.7 print() / println() runtime (raw stdout, no decoration) ---
 function _scrml_print(s) {
   try {
-    if (typeof process !== "undefined" && process.stdout && typeof process.stdout.write === "function") {
-      process.stdout.write(typeof s === "string" ? s : String(s));
+    if (typeof _scrml_g.process !== "undefined" && _scrml_g.process.stdout && typeof _scrml_g.process.stdout.write === "function") {
+      _scrml_g.process.stdout.write(typeof s === "string" ? s : _scrml_g.String(s));
     }
   } catch (e) { /* never throw */ }
 }

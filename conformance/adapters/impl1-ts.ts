@@ -574,11 +574,12 @@ export async function run(
     // §37.5 SSE binding: happy-dom has no EventSource. Install a never-firing
     // stub for this run ONLY when the emitted client constructs one — models the
     // pre-first-event window (the cell shows its seed). See installNoopEventSource.
-    if (clientJs.includes("new EventSource")) {
+    // (spelled through the host-global alias, S457 2a: `new _scrml_g.EventSource(`)
+    if (/new (?:_scrml_g\.)?EventSource\b/.test(clientJs)) {
       restoreEventSource = installNoopEventSource();
     }
     // §38 `<channel>`: never let a run open a real socket (see installNoopWebSocket).
-    if (clientJs.includes("new WebSocket")) {
+    if (/new (?:_scrml_g\.)?WebSocket\b/.test(clientJs)) {
       restoreWebSocket = installNoopWebSocket();
     }
 
@@ -892,16 +893,23 @@ function evalServerModule(
     .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
     .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
     .replace(/^export\s+/gm, "")
-    .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
+    .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"))
+    // S457 2a — the bundle reaches host globals through `const _scrml_g = globalThis;`
+    // (compiler/src/codegen/host-global-alias.ts); point it at a view of the global
+    // object whose `Bun` is the stub, so the compiler's `_scrml_g.Bun.file(…)` reads it.
+    .replace(/^const _scrml_g = globalThis;.*$/m, "const _scrml_g = __scrml_host;");
   const BunStub = { file: () => ({ text: async () => html }) };
+  const host = Object.create(g);
+  // `Bun` is a read-only global: shadow it on the view with an own property.
+  Object.defineProperty(host, "Bun", { value: BunStub, writable: true, configurable: true, enumerable: true });
   const wrapper = new Function(
-    "_scrml_sql", "Bun", "Response", "crypto", "URL",
+    "_scrml_sql", "Bun", "Response", "crypto", "URL", "__scrml_host",
     `${runnable}\nreturn {` +
       ` fetch: typeof fetch !== "undefined" ? fetch : null,` +
       ` compose: typeof _scrml_ssr_compose_handler !== "undefined" ? _scrml_ssr_compose_handler : null` +
       ` };`,
   );
-  return wrapper(sqlBinding ?? makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL) as ServerModule;
+  return wrapper(sqlBinding ?? makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL, host) as ServerModule;
 }
 
 /**

@@ -424,7 +424,7 @@ function main(args: string[]): number {
     try {
       expect(errCodes(result)).toEqual([]);
       const libJs = readFileSync(join(dist, "elib.js"), "utf8");
-      expect(libJs).toContain("export const Status = Object.freeze(");
+      expect(libJs).toContain("export const Status = _scrml_g.Object.freeze(");
       rmSync(join(dir, "e.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "etool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(stderrBeyondCreated(run)).toBe("");

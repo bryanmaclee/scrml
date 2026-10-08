@@ -416,7 +416,7 @@ describe("§10: client IIFE has correct WebSocket URL", () => {
     const lines = emitChannelClientJs(node, [], "/test/app.scrml");
     const code = lines.join("\n");
     expect(code).toContain("/_scrml_ws/chat");
-    expect(code).toContain("new WebSocket");
+    expect(code).toContain("new _scrml_g.WebSocket");
   });
 
   test("channel name kebab-case is preserved in URL, underscored in JS ident", () => {
@@ -1446,8 +1446,8 @@ describe("§26 (C18): broadcast/disconnect injection in channel-scoped server fn
     const serverJs = out?.serverJs ?? "";
     // The injected broadcast must guard so undefined globalThis._scrml_active_server
     // doesn't crash the request handler.
-    expect(serverJs).toContain('typeof globalThis !== "undefined"');
-    expect(serverJs).toContain("globalThis._scrml_active_server");
+    expect(serverJs).toContain('typeof _scrml_g !== "undefined"');
+    expect(serverJs).toContain("_scrml_g._scrml_active_server");
     expect(serverJs).toContain('typeof _scrml_srv.publish === "function"');
   });
 

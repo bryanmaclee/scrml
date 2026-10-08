@@ -78,10 +78,11 @@ async function execEmittedLine(serverJs, cell = "new") {
   const db = new SQL(`sqlite://${join(dir, "app.db")}`);
   try {
     await db.unsafe("CREATE TABLE notes (id integer primary key, v text)");
-    const fn = new Function("_scrml_sql", "_scrml_body", "_scrml_input_state_registry",
+    // `_scrml_g`: the module's host-global alias (S457 2a), declared at the top of the bundle.
+    const fn = new Function("_scrml_sql", "_scrml_body", "_scrml_input_state_registry", "_scrml_g",
       `return (async () => { ${line} return a; })();`);
     let threw = null;
-    try { await fn(db, { [cell]: 4 }, new Map([["x", "v"]])); } catch (e) { threw = String(e.message); }
+    try { await fn(db, { [cell]: 4 }, new Map([["x", "v"]]), globalThis); } catch (e) { threw = String(e.message); }
     const tables = await db.unsafe("SELECT name FROM sqlite_master WHERE name = 'notes'");
     const dbs = await db.unsafe("PRAGMA database_list");
     return { notesPresent: tables.length === 1, attached: dbs.length, threw };

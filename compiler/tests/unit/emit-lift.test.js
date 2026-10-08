@@ -703,7 +703,7 @@ describe("emit-lift §11: tilde-decl attribute handling (toggle-checkbox-trace)"
     expect(output).not.toContain('setAttribute("data-id", "")');
     // Must NOT have setAttribute("id", ...) — the old buggy behavior using just `id`
     // from the trailing regex matching the partial name `id` instead of `data-id`
-    expect(output).not.toMatch(/setAttribute\("id",\s*String\(todo/);
+    expect(output).not.toMatch(/setAttribute\("id",\s*(?:_scrml_g\.)?String\(todo/);
   });
 
   // tilde-decl with ondblclick (label's event handler)

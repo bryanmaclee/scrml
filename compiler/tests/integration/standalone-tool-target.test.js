@@ -88,13 +88,13 @@ describe("§64 tool target — emit shape", () => {
 
   test("numeric-return main → exit-harness (process.exit)", () => {
     const { out } = compileSource(CLI_TOOL);
-    expect(out.toolJs).toMatch(/const _scrml_exit_code = await main\(process\.argv\.slice\(2\)\);/);
+    expect(out.toolJs).toMatch(/const _scrml_exit_code = await main\(_scrml_g\.process\.argv\.slice\(2\)\);/);
     expect(out.toolJs).toMatch(/process\.exit\(_scrml_exit_code\);/);
   });
 
   test("no-return main → invoke-only harness (await, NO process.exit)", () => {
     const { out } = compileSource(SERVER_TOOL);
-    expect(out.toolJs).toMatch(/await main\(process\.argv\.slice\(2\)\);/);
+    expect(out.toolJs).toMatch(/await main\(_scrml_g\.process\.argv\.slice\(2\)\);/);
     expect(out.toolJs).not.toMatch(/process\.exit/);
     expect(parsesClean(out.toolJs)).toBe(true);
   });
@@ -124,7 +124,7 @@ describe("§64 tool target — emit shape", () => {
       }
     </program>`);
     expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
-    expect(out.toolJs).toMatch(/const Cmd = Object\.freeze\(/);
+    expect(out.toolJs).toMatch(/const Cmd = _scrml_g\.Object\.freeze\(/);
     expect(out.toolJs).toMatch(/const c = Cmd\.List;/);
     expect(parsesClean(out.toolJs)).toBe(true);
   });

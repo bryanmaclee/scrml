@@ -70,7 +70,7 @@ function runGo(clientJs, n) {
   const end = clientJs.lastIndexOf("})();");
   const body = clientJs.slice(start, end);
   // eslint-disable-next-line no-new-func
-  return new Function(`${body}\nreturn ${m[1]}(${JSON.stringify(n)});`)();
+  return new Function(`const _scrml_g = globalThis;\n${body}\nreturn ${m[1]}(${JSON.stringify(n)});`)();
 }
 
 /** Each case: [name, pipe-less handler lines, piped handler lines, prefix, suffix]. */

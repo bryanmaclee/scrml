@@ -118,7 +118,8 @@ export function loadBundle(bundle, modules) {
     const i = pending.findIndex((c) => c.deps.every((d) => d in registry));
     if (i === -1) throw new Error("cyclic or missing chunk dependency: " + pending.map((c) => c.name).join(", "));
     const [c] = pending.splice(i, 1);
-    new Function("_scrml_modules", "_scrml_structural_eq", c.src)(registry, _scrml_structural_eq);
+    // `_scrml_g`: impl#1's host-global alias (S457 2a), which the runtime declares.
+    new Function("_scrml_modules", "_scrml_structural_eq", "_scrml_g", c.src)(registry, _scrml_structural_eq, globalThis);
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;

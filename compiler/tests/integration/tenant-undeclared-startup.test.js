@@ -87,7 +87,7 @@ describe("_server.js wiring", () => {
       [{ ident: "_scrml_sql", driver: "postgres", connection: "postgres://app:s3cret@db:5432/prod" }],
       ["Assets", "orders"],
     ).join("\n");
-    expect(lines).toContain('const _SCRML_TENANT_DECLARED = new Set(["assets","orders"]);');
+    expect(lines).toContain('const _SCRML_TENANT_DECLARED = new _scrml_g.Set(["assets","orders"]);');
     expect(lines).toContain("export const _scrml_tenant_startup_check = {");
     expect(lines).toContain('driver: "postgres"');
     expect(lines).not.toContain("s3cret");
@@ -101,7 +101,7 @@ describe("_server.js wiring", () => {
       const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], outputDir: join(dir, "dist"), write: true, log: () => {} });
       expect((r.errors ?? []).filter((e) => e.severity === "error").map((e) => e.code)).toEqual([]);
       const js = readFileSync(join(dir, "dist", "app.server.js"), "utf8");
-      expect(js).toContain('const _SCRML_TENANT_DECLARED = new Set(["assets"]);');
+      expect(js).toContain('const _SCRML_TENANT_DECLARED = new _scrml_g.Set(["assets"]);');
       expect(js).toContain('{ handle: _scrml_sql, driver: "sqlite", label: "./app.db" },');
       // server-only: nothing of it reaches the client bundle
       const clientFiles = ["app.client.js"].map((f) => join(dir, "dist", f)).filter(existsSync);

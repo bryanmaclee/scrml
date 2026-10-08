@@ -86,7 +86,7 @@ describe("giti033 §1 — bare ${@.} each in a <main>-direct ternary (null scope
       // The each was LOWERED (reconcile list), not rendered as a literal <each>.
       expect(foldChunkNamespacing(r.clientJs)).toContain("_scrml_reconcile_list");
       // The body `${@.}` lowered to the inner iter var (live text node).
-      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = _scrml_g.String(_scrml_each_item)");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -130,8 +130,8 @@ describe("giti033 §2 — per-item attribute + text interpolation in a ternary e
     const r = compile(src, "giti033-s2b");
     try {
       // The interpolations render the VALUE, not the literal `${...}` framing.
-      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item.kind)");
-      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item.path)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = _scrml_g.String(_scrml_each_item.kind)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = _scrml_g.String(_scrml_each_item.path)");
       // Regression guard: the pre-fix bug shipped `createTextNode("${_scrml_each_item.kind}")`.
       expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/createTextNode\("\$\{/);
     } finally {
@@ -210,8 +210,8 @@ describe("giti033 §4 — ternary each in a <match> arm binding a payload var", 
       expect(foldChunkNamespacing(r.clientJs)).toContain("d.conflicts");
       expect(foldChunkNamespacing(r.clientJs)).toContain("d.publicFiles");
       // The inner `@.` binds to the INNER each item, not the payload `d`.
-      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item)");
-      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item.kind)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = _scrml_g.String(_scrml_each_item)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = _scrml_g.String(_scrml_each_item.kind)");
       expect(foldChunkNamespacing(r.clientJs)).toContain("`tag tag-${_scrml_each_item.kind}`");
       // No sigil / literal-`${}` leak.
       expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/\(@\s*\.\)/);
@@ -248,10 +248,10 @@ describe("giti033 §4b — inner @. is the INNER item when nested in an outer <e
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // The inner text reads the inner item (§17.7.3 innermost-scope wins).
-      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = _scrml_g.String(_scrml_each_item)");
       // Regression guard: pre-fix the outer per-item markup-value over-rewrite
       // clobbered the inner `${@.}` to the outer alias → `String(d)`.
-      expect(foldChunkNamespacing(r.clientJs)).not.toContain(".textContent = String(d)");
+      expect(foldChunkNamespacing(r.clientJs)).not.toContain(".textContent = _scrml_g.String(d)");
       // The inner source still resolves against the outer alias `d`.
       expect(foldChunkNamespacing(r.clientJs)).toContain("d.files");
       execFileSync("node", ["--check", r.clientPath]);

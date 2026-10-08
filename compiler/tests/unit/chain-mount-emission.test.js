@@ -418,7 +418,7 @@ describe("§7: client JS controller for a mixed-wiring chain (N26-N28)", () => {
     const { clientJs } = compileFull(MIXED);
     expect((clientJs.match(/_scrml_chain_[A-Za-z0-9_]+_root/g) ?? []).length).toBeGreaterThan(1);
     expect((clientJs.match(/_scrml_chain_[A-Za-z0-9_]+_scope/g) ?? []).length).toBeGreaterThan(1);
-    expect(clientJs).not.toContain("_wrapper = (_scrml_root || document).querySelector");
+    expect(clientJs).not.toContain("_wrapper = (_scrml_root || _scrml_g.document).querySelector");
   });
 
   test("N28: the activate switch has ONLY mount arms (no display arm survives)", () => {

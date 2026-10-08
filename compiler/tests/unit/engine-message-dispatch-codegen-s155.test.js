@@ -128,7 +128,7 @@ describe("§51.0.S codegen — message-arm dispatch table emission", () => {
 
   test("emits the per-engine message-arm dispatch table const", () => {
     const { js } = emitClient(WORKED);
-    expect(js).toContain("const __scrml_engine_dragPhase_msg_arms = Object.freeze({");
+    expect(js).toContain("const __scrml_engine_dragPhase_msg_arms = _scrml_g.Object.freeze({");
   });
 
   test("the table is keyed by from-state tag, then message-variant tag", () => {

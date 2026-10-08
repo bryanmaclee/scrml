@@ -63,8 +63,8 @@ fn wrap(n: string) { return badge(n) }
     expect(js).not.toBeNull();
     // the transitive call is mounted (instanceof Node guard), NOT stringified
     expect(js).toMatch(/const _scrml_mv_v_\d+ = \(\s*_scrml_wrap_\d+\s*\(/);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
-    expect(js).not.toMatch(/textContent = String\(\s*_scrml_wrap_\d+\s*\(/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
+    expect(js).not.toMatch(/textContent = (?:_scrml_g\.)?String\(\s*_scrml_wrap_\d+\s*\(/);
   });
 
   test("a deeper chain wrap2→wrap→badge closes fully (fixpoint)", () => {
@@ -83,8 +83,8 @@ fn wrap2(n: string) { return wrap(n) }
 `;
     const { errors, js } = clientJs(src);
     expect(errors).toEqual([]);
-    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof Node/);
-    expect(js).not.toMatch(/textContent = String\(\s*_scrml_wrap2_\d+\s*\(/);
+    expect(js).toMatch(/_scrml_mv_v_\d+ instanceof _scrml_g\.Node/);
+    expect(js).not.toMatch(/textContent = (?:_scrml_g\.)?String\(\s*_scrml_wrap2_\d+\s*\(/);
   });
 
   test("fail-safe: a STRING-returning fn is NOT over-wrapped (stays a text node)", () => {
@@ -102,7 +102,7 @@ fn plain(n: string) { return "x-" + n }
     const { errors, js } = clientJs(src);
     expect(errors).toEqual([]);
     // a string-returning call stays a bare text node — never mount-wrapped
-    expect(js).toMatch(/textContent = String\(\s*_scrml_plain_\d+\s*\(/);
+    expect(js).toMatch(/textContent = _scrml_g\.String\(\s*_scrml_plain_\d+\s*\(/);
     expect(js).not.toMatch(/const _scrml_mv_v_\d+ = \(\s*_scrml_plain_\d+\s*\(/);
   });
 });

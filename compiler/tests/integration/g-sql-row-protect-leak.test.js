@@ -21,6 +21,7 @@ import {
   buildProtectContext,
   SERVER_PROTECT_HELPER,
 } from "../../src/codegen/protect-egress.ts";
+import { HOST_GLOBAL_ALIAS_DECL } from "../../src/codegen/host-global-alias.ts";
 
 // --- helpers ----------------------------------------------------------------
 
@@ -43,7 +44,7 @@ const parseClean = (js) =>
 // Eval the SHIPPED helper block into three callables so we exercise the exact
 // runtime the server bundle ships (not a re-implementation).
 function loadHelper() {
-  const fn = new Function(SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal };");
+  const fn = new Function(HOST_GLOBAL_ALIAS_DECL + "\n" + SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal };");
   return fn();
 }
 
@@ -464,7 +465,7 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
   test("the guard passes a NULL-body Response and refuses a body-carrying look-alike", async () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const refusal = new Function(
-      SERVER_PROTECT_HELPER + "\nreturn _scrml_protect_opaque_refusal;",
+      HOST_GLOBAL_ALIAS_DECL + "\n" + SERVER_PROTECT_HELPER + "\nreturn _scrml_protect_opaque_refusal;",
     )();
     // The guard exactly as `_opaqueResultGuard` emits it.
     const guard = (r) => {
@@ -496,7 +497,7 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
 
   test("the compiler-owned refusal carries a 500 and NO application data", async () => {
     const fn = new Function(
-      SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_opaque_refusal };",
+      HOST_GLOBAL_ALIAS_DECL + "\n" + SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_opaque_refusal };",
     );
     const { _scrml_protect_opaque_refusal } = fn();
     const res = _scrml_protect_opaque_refusal();
@@ -833,6 +834,7 @@ describe("§14.8.9 every client-egress sink redacts (enumerated over serializers
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
     const { _scrml_mountHydrate_handler } = new Function(`
+${HOST_GLOBAL_ALIAS_DECL}
 ${helper}
 async function loadUsers() { return _scrml_protect_tag([{ id: 1, name: "ada", passwordHash: "s3cret" }], ["passwordHash"]); }
 async function loadNotes() { return [{ id: 9, body: "hi" }]; }
@@ -893,7 +895,8 @@ return { _scrml_mountHydrate_handler };`)();
       // in the window is not reported as compiler drift.
       const authored = /new Response\(|Response\.(json|redirect|error)\(/.test(src);
       for (const region of iifeRegions(serverJs)) {
-        const re = /new Response\(|Response\.(?:json|redirect|error)\(/g;
+        // The compiler spells the host global through its alias (S457 2a): `new _scrml_g.Response(`.
+        const re = /new (?:_scrml_g\.)?Response\(|(?:_scrml_g\.)?Response\.(?:json|redirect|error)\(/g;
         let m;
         while ((m = re.exec(region)) !== null) {
           const before = region.slice(Math.max(0, m.index - 40), m.index);
@@ -920,12 +923,13 @@ return { _scrml_mountHydrate_handler };`)();
     // Premise pins: baseline-CSRF arm, param check INSIDE the IIFE, guard present.
     expect(serverJs).toContain("_scrml_ensure_csrf_cookie");
     expect(serverJs).toContain("E-CONTRACT-001-RT");
-    expect(serverJs).toContain("_scrml_protect_mediated(new Response(");
+    expect(serverJs).toContain("_scrml_protect_mediated(new _scrml_g.Response(");
     // Drive the emitted param check + guard over a violating value.
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
     const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
-    const { probe } = new Function(`${helper}
+    const { probe } = new Function(`${HOST_GLOBAL_ALIAS_DECL}
+${helper}
 function probe(id) {
   const _scrml_result = (() => {
     if (!(((id > 0) && (id < 10000)))) {
@@ -1156,7 +1160,7 @@ type Op:enum = {
 </program>`;
     const { serverJs } = compileSource(src);
     expect(serverJs).toContain("_scrml_mountHydrate_handler");
-    expect(serverJs).toContain("_scrml_mh_cell instanceof Response");
+    expect(serverJs).toContain("_scrml_mh_cell instanceof _scrml_g.Response");
 
     // Drive the SHIPPED handler with a loader that returns a Response.
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
@@ -1165,6 +1169,7 @@ type Op:enum = {
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
     const { h } = new Function(`
+${HOST_GLOBAL_ALIAS_DECL}
 ${helper}
 async function loadUsers() { return _scrml_protect_tag([{ id: 1, name: "ada", passwordHash: "s3cret" }], ["passwordHash"]); }
 async function loadNotes() { return Response.redirect("http://x/home", 302); }
@@ -1202,6 +1207,7 @@ return { h: _scrml_mountHydrate_handler };`)();
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
     const { h } = new Function(`
+${HOST_GLOBAL_ALIAS_DECL}
 ${helper}
 async function loadUsers() { return _scrml_protect_tag([{ id: 1, name: "ada", passwordHash: "s3cret" }], ["passwordHash"]); }
 async function loadNotes() { return [{ id: 9, body: "hi" }]; }
@@ -1638,7 +1644,7 @@ describe("§14.8.9 channel broadcast (§38) egress — strips at the publish sin
     // the SELECT is tagged at lowering
     expect(serverJs).toContain('_scrml_protect_tag((await _scrml_sql`SELECT * FROM users WHERE id = ${id}`)[0] ?? null, ["passwordHash"])');
     // the broadcast built-in redacts at the publish sink (the wire frame)
-    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_protect_redact(_scrml_data)));");
+    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", _scrml_g.JSON.stringify(_scrml_protect_redact(_scrml_data)));");
     // helper auto-injected via the on-use scan (finalEmitted.includes)
     expect(serverJs).toContain("function _scrml_protect_redact(value)");
     parseClean(serverJs);
@@ -1655,7 +1661,7 @@ describe("§14.8.9 channel broadcast (§38) egress — strips at the publish sin
     ));
     expect(serverJs).toContain("_scrml_protect_reveal(");
     // still wrapped in the publish-sink redact (which honors the reveal list)
-    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_protect_redact(_scrml_data)));");
+    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", _scrml_g.JSON.stringify(_scrml_protect_redact(_scrml_data)));");
     parseClean(serverJs);
   });
 
@@ -1681,7 +1687,7 @@ describe("§14.8.9 channel broadcast (§38) egress — strips at the publish sin
     const { serverJs } = compileSource(src);
     expect(serverJs).not.toContain("_scrml_protect");
     // the publish sink is the plain pre-floor form — no redact wrap
-    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_data));");
+    expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", _scrml_g.JSON.stringify(_scrml_data));");
     parseClean(serverJs);
   });
 });
@@ -1694,8 +1700,8 @@ describe("§14.8.9 SSE server function* (§37) egress — strips at the data: fr
     // the SELECT is tagged at lowering
     expect(serverJs).toContain('_scrml_protect_tag(await _scrml_sql`SELECT * FROM users`, ["passwordHash"])');
     // BOTH SSE data: sinks (the {event,data} shape and the bare-value shape) redact
-    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val.data))}\\n\\n`");
-    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val))}\\n\\n`");
+    expect(serverJs).toContain("`data: ${_scrml_g.JSON.stringify(_scrml_protect_redact(_scrml_val.data))}\\n\\n`");
+    expect(serverJs).toContain("`data: ${_scrml_g.JSON.stringify(_scrml_protect_redact(_scrml_val))}\\n\\n`");
     expect(serverJs).toContain("function _scrml_protect_redact(value)");
     parseClean(serverJs);
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
@@ -1722,8 +1728,8 @@ describe("§14.8.9 SSE server function* (§37) egress — strips at the data: fr
     const { serverJs } = compileSource(src);
     expect(serverJs).not.toContain("_scrml_protect");
     // the data: frame is the plain pre-floor form — no redact wrap
-    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_val.data)}\\n\\n`");
-    expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_val)}\\n\\n`");
+    expect(serverJs).toContain("`data: ${_scrml_g.JSON.stringify(_scrml_val.data)}\\n\\n`");
+    expect(serverJs).toContain("`data: ${_scrml_g.JSON.stringify(_scrml_val)}\\n\\n`");
     parseClean(serverJs);
   });
 });

@@ -42,9 +42,9 @@ function compileSource(src) {
   return { result, out };
 }
 
-const FREEZE_RE = (name) => new RegExp("const\\s+" + name + "\\s*=\\s*Object\\.freeze");
+const FREEZE_RE = (name) => new RegExp("const\\s+" + name + "\\s*=\\s*_scrml_g\\.Object\\.freeze");
 function freezeLine(js, name) {
-  const m = new RegExp("^const\\s+" + name + "\\s*=\\s*Object\\.freeze.*$", "m").exec(js || "");
+  const m = new RegExp("^const\\s+" + name + "\\s*=\\s*_scrml_g\\.Object\\.freeze.*$", "m").exec(js || "");
   return m ? m[0] : null;
 }
 const parseClean = (js) =>
@@ -75,7 +75,7 @@ type Load:enum = {
     expect(out.serverJs).toContain("Load.Bad");
     // The frozen const must precede its first member-access reference in the file
     // (module-init order) so it is not a free identifier.
-    const defIdx = out.serverJs.indexOf("const Load = Object.freeze");
+    const defIdx = out.serverJs.indexOf("const Load = _scrml_g.Object.freeze");
     const refIdx = out.serverJs.indexOf("Load.Ok");
     expect(defIdx).toBeGreaterThanOrEqual(0);
     expect(defIdx).toBeLessThan(refIdx);
@@ -108,8 +108,8 @@ type Load:enum = {
     expect(out?.serverJs).toBeTruthy();
     expect(out?.clientJs).toBeTruthy();
     // Exactly one def in each bundle (no duplication).
-    const serverDefs = (out.serverJs.match(/const Load = Object\.freeze/g) || []).length;
-    const clientDefs = (out.clientJs.match(/const Load = Object\.freeze/g) || []).length;
+    const serverDefs = (out.serverJs.match(/const Load = _scrml_g\.Object\.freeze/g) || []).length;
+    const clientDefs = (out.clientJs.match(/const Load = _scrml_g\.Object\.freeze/g) || []).length;
     expect(serverDefs).toBe(1);
     expect(clientDefs).toBe(1);
     // Byte-identical def line (so a payload-variant constructor serializes the
@@ -213,7 +213,7 @@ type Tick:enum = {
     const { out } = compileSource(src);
     expect(out?.serverJs).toBeTruthy();
     expect(out.serverJs).toMatch(FREEZE_RE("Tick"));
-    const defIdx = out.serverJs.indexOf("const Tick = Object.freeze");
+    const defIdx = out.serverJs.indexOf("const Tick = _scrml_g.Object.freeze");
     const yieldIdx = out.serverJs.indexOf("Tick.Start");
     expect(defIdx).toBeGreaterThanOrEqual(0);
     expect(defIdx).toBeLessThan(yieldIdx);

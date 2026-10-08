@@ -410,7 +410,7 @@ describe("s441 F1 — independent whole-result cell writes are parallelized (§1
 
   test("independent `@a = one(1); @b = two(2)` → one Promise.all, then the writes in source order", () => {
     const body = fnBody(js, "indep");
-    expect(body).toMatch(/const \[(_scrml_tmp_\d+), (_scrml_tmp_\d+)\] = await Promise\.all\(\[\n\s*_scrml_fetch_one_\d+\(1\),\n\s*_scrml_fetch_two_\d+\(2\)\n\s*\]\);\n\s*_scrml_cs_reactive_set\("a", \1\);\n\s*_scrml_cs_reactive_set\("b", \2\);/);
+    expect(body).toMatch(/const \[(_scrml_tmp_\d+), (_scrml_tmp_\d+)\] = await _scrml_g\.Promise\.all\(\[\n\s*_scrml_fetch_one_\d+\(1\),\n\s*_scrml_fetch_two_\d+\(2\)\n\s*\]\);\n\s*_scrml_cs_reactive_set\("a", \1\);\n\s*_scrml_cs_reactive_set\("b", \2\);/);
   });
 
   test("execution: both calls are in flight together, and the read after the batch sees both writes", async () => {
@@ -542,13 +542,13 @@ describe("s441 round 3 — only PROVABLY read-only server fns batch with a cell 
 
   test("two provably read-only loads (no calls in their bodies) still batch", () => {
     const js = clientJs(BATCH);
-    expect(fnBody(js, "indep")).toContain("await Promise.all([");
+    expect(fnBody(js, "indep")).toContain("await _scrml_g.Promise.all([");
   });
 
   test("KNOWN (gap g-const-batch-parallelizes-side-effecting-server-calls, not fixed here): the pre-existing CONST-form batch still parallelizes INSERT + SELECT", () => {
     const src = readFileSync(join(R3, "inselc.scrml"), "utf8");
     const js = clientJs(src);
-    expect(fnBody(js, "go")).toContain("await Promise.all([");
+    expect(fnBody(js, "go")).toContain("await _scrml_g.Promise.all([");
   });
 });
 
@@ -620,7 +620,7 @@ describe("s441 round 4 — a SELECT that calls a non-allowlisted SQL function ne
 
   test("sq_plain (`SELECT max(v)` + `SELECT count(*)`, allowlisted pure functions) still batches", async () => {
     const src = readFileSync(join(R4, "sq_plain.scrml"), "utf8");
-    expect(fnBody(clientJs(src), "go")).toContain("await Promise.all([");
+    expect(fnBody(clientJs(src), "go")).toContain("await _scrml_g.Promise.all([");
     const { log } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { rd1: 1, rd2: 2 });
     expect(log.slice(0, 2)).toEqual(["start rd1", "start rd2"]);
   });

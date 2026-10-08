@@ -661,7 +661,7 @@ function cellScopeKeyFn(token: string, owners: Record<string, string>): string {
   if (Object.keys(owners).length === 0) {
     return (
       `const _scrml_cs_key = (n) => {\n` +
-      `  const raw = String(n == null ? "" : n);\n` +
+      `  const raw = _scrml_g.String(n == null ? "" : n);\n` +
       `  return raw ? ${prefix} + raw : raw;\n` +
       `};\n`
     );
@@ -669,7 +669,7 @@ function cellScopeKeyFn(token: string, owners: Record<string, string>): string {
   return (
     `const _scrml_cs_owners = ${JSON.stringify(owners)};\n` +
     `const _scrml_cs_key = (n) => {\n` +
-    `  const raw = String(n == null ? "" : n);\n` +
+    `  const raw = _scrml_g.String(n == null ? "" : n);\n` +
     `  if (!raw) return raw;\n` +
     `  const d = raw.indexOf(".");\n` +
     `  const owned = _scrml_cs_owners[d === -1 ? raw : raw.slice(0, d)];\n` +

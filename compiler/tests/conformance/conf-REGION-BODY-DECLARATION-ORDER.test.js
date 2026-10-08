@@ -117,6 +117,10 @@ function runOrderOf(clientJs) {
     },
     set(target, prop, value) { target[prop] = value; return true; },
   });
+  // The emitted code reaches host globals through the runtime's alias `_scrml_g`
+  // (S457 2a): point it at the sandbox, so `_scrml_g.fetch` / `_scrml_g.setTimeout`
+  // are the recording stubs above.
+  stubs._scrml_g = sandbox;
   const body = clientJs.replace(/^\s*import\s[^;]*;\s*$/gm, "");
   // eslint-disable-next-line no-new-func
   new Function("__sandbox__", `with (__sandbox__) { ${body} }`)(sandbox);

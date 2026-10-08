@@ -790,7 +790,7 @@ function emitEachPerItemMarkupValue(
   const valueExpr = emitExprField(clone, "", { mode: "client" });
   const wrapVar = `_scrml_each_mv_${nextLocalId()}`;
   const valVar = `_scrml_mv_v_${nextLocalId()}`;
-  lines.push(`${indent}const ${wrapVar} = document.createElement("span");`);
+  lines.push(`${indent}const ${wrapVar} = _scrml_g.document.createElement("span");`);
   lines.push(`${indent}${wrapVar}.setAttribute("data-scrml-mv", "");`);
   lines.push(`${indent}${fragmentVar}.appendChild(${wrapVar});`);
   // The rebuild body re-evaluates the markup-value and swaps the wrapper's
@@ -799,8 +799,8 @@ function emitEachPerItemMarkupValue(
   const body = [
     `${indent}const ${valVar} = (${valueExpr});`,
     `${indent}${wrapVar}.replaceChildren();`,
-    `${indent}if (${valVar} instanceof Node) ${wrapVar}.appendChild(${valVar});`,
-    `${indent}else if (${valVar} !== null && ${valVar} !== undefined && ${valVar} !== "") ${wrapVar}.appendChild(document.createTextNode(String(${valVar})));`,
+    `${indent}if (${valVar} instanceof _scrml_g.Node) ${wrapVar}.appendChild(${valVar});`,
+    `${indent}else if (${valVar} !== null && ${valVar} !== undefined && ${valVar} !== "") ${wrapVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String(${valVar})));`,
   ];
   for (const l of maybeWrapEachPerItemEffect(body, iterVarName, indent)) lines.push(l);
 }
@@ -954,7 +954,7 @@ function emitEachRowLiftGroup(
       span ?? { start: 0, end: 0 },
       "error",
     ));
-    lines.push(`${indent}throw new Error("scrml: <each> row lift block was not lowered (compiler defect)");`);
+    lines.push(`${indent}throw new _scrml_g.Error("scrml: <each> row lift block was not lowered (compiler defect)");`);
     return;
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1010,7 +1010,7 @@ function emitEachRowLiftGroup(
   const fnName = registry.addNestedLiftGroup({ fnName: genVar("lift_nested"), pid, stmts: clone, params, prologue });
 
   const hostVar = `_scrml_each_lift_host_${nextLocalId()}`;
-  lines.push(`${indent}const ${hostVar} = document.createElement("span");`);
+  lines.push(`${indent}const ${hostVar} = _scrml_g.document.createElement("span");`);
   lines.push(`${indent}${hostVar}.setAttribute("data-scrml-logic", ${JSON.stringify(pid)});`);
   lines.push(`${indent}${fragmentVar}.appendChild(${hostVar});`);
 
@@ -1077,7 +1077,7 @@ function eachRcdataValueExpr(children: any[], iterVarName: string): string | nul
           if (part.type === "text") {
             if (part.v) terms.push(JSON.stringify(rewriteContextualSigil(part.v, iterVarName)));
           } else {
-            terms.push(`String(${lowerEachExpr(part.v.replace(/\s*\.\s*/g, "."), iterVarName)})`);
+            terms.push(`_scrml_g.String(${lowerEachExpr(part.v.replace(/\s*\.\s*/g, "."), iterVarName)})`);
             hasInterp = true;
           }
         }
@@ -1101,7 +1101,7 @@ function eachRcdataValueExpr(children: any[], iterVarName: string): string | nul
         : (stmt.exprNode ? emitStringFromTree(stmt.exprNode) : "");
       const inner = exprText.replace(/\s*\.\s*/g, ".");
       if (!inner) continue;
-      terms.push(`String(${lowerEachExpr(inner, iterVarName)})`);
+      terms.push(`_scrml_g.String(${lowerEachExpr(inner, iterVarName)})`);
       hasInterp = true;
       continue;
     }
@@ -1190,27 +1190,27 @@ function emitEachInterpExprToJs(
   if (markupCapable) {
     const wrapVar = `_scrml_each_mv_${nextLocalId()}`;
     const valVar = `_scrml_mv_v_${nextLocalId()}`;
-    lines.push(`${indent}const ${wrapVar} = document.createElement("span");`);
+    lines.push(`${indent}const ${wrapVar} = _scrml_g.document.createElement("span");`);
     lines.push(`${indent}${wrapVar}.setAttribute("data-scrml-mv", "");`);
     lines.push(`${indent}${fragmentVar}.appendChild(${wrapVar});`);
     const body = [
       `${indent}const ${valVar} = (${rewritten});`,
       `${indent}${wrapVar}.replaceChildren();`,
-      `${indent}if (${valVar} instanceof Node) ${wrapVar}.appendChild(${valVar});`,
-      `${indent}else if (${valVar} !== null && ${valVar} !== undefined && ${valVar} !== "") ${wrapVar}.appendChild(document.createTextNode(String(${valVar})));`,
+      `${indent}if (${valVar} instanceof _scrml_g.Node) ${wrapVar}.appendChild(${valVar});`,
+      `${indent}else if (${valVar} !== null && ${valVar} !== undefined && ${valVar} !== "") ${wrapVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String(${valVar})));`,
     ];
     for (const _l of maybeWrapEachPerItemEffect(body, iterVarName, indent)) lines.push(_l);
     return;
   }
   if (currentEachReconcileCtx() && currentEachReconcileCtx()!.iterVar === iterVarName) {
     const _tnVar = `_scrml_each_tn_${nextLocalId()}`;
-    lines.push(`${indent}const ${_tnVar} = document.createTextNode("");`);
+    lines.push(`${indent}const ${_tnVar} = _scrml_g.document.createTextNode("");`);
     lines.push(`${indent}${fragmentVar}.appendChild(${_tnVar});`);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${_tnVar}.textContent = String(${rewritten});`], iterVarName, indent,
+      [`${indent}${_tnVar}.textContent = _scrml_g.String(${rewritten});`], iterVarName, indent,
     )) lines.push(_l);
   } else {
-    lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(String(${rewritten})));`);
+    lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String(${rewritten})));`);
   }
 }
 
@@ -1309,7 +1309,7 @@ function renderTemplateChildToJs(
     // nonsense `${_scrml_each_item.id}` (GITI-030). Top-level `<code>` already
     // ships the body verbatim; this keeps the per-item path parity-correct.
     if (parentIsRawContent) {
-      lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(txt)}));`);
+      lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(txt)}));`);
       return;
     }
     // GITI-033 — a lifted-markup TEXT child can carry `${...}` interpolations
@@ -1327,7 +1327,7 @@ function renderTemplateChildToJs(
         if (part.type === "text") {
           if (part.v) {
             const litRw = rewriteContextualSigil(part.v, iterVarName);
-            lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(litRw)}));`);
+            lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(litRw)}));`);
           }
         } else {
           // Collapse the BS-padded sigil-dot before lowering (mirrors the logic
@@ -1345,7 +1345,7 @@ function renderTemplateChildToJs(
     }
     // Non-empty literal text: rewrite `@.` to iterVar, then emit as text node.
     const rewritten = rewriteContextualSigil(txt, iterVarName);
-    lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(rewritten)}));`);
+    lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(rewritten)}));`);
     return;
   }
 
@@ -1378,7 +1378,7 @@ function renderTemplateChildToJs(
     }
 
     const elVar = `_scrml_el_${nextLocalId()}`;
-    lines.push(`${indent}const ${elVar} = document.createElement(${JSON.stringify(tagName)});`);
+    lines.push(`${indent}const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tagName)});`);
 
     // S130 HU-1 iteration Landing 2 — per-item element attribute codegen.
     //
@@ -1506,13 +1506,13 @@ function renderTemplateChildToJs(
         // `.textContent`, which sets only the DEFAULT value and so stops tracking
         // once the control is dirty.
         for (const _l of maybeWrapEachPerItemEffect(
-          [`${indent}${elVar}.value = String(${exprRewritten});`], iterVarName, indent,
+          [`${indent}${elVar}.value = _scrml_g.String(${exprRewritten});`], iterVarName, indent,
         )) lines.push(_l);
       } else {
         // Cast result to string for textContent assignment. Bug 64 (S159) —
         // live-keyed under a reconcile ctx so same-key reconcile reflects new data.
         for (const _l of maybeWrapEachPerItemEffect(
-          [`${indent}${elVar}.textContent = String(${exprRewritten});`], iterVarName, indent,
+          [`${indent}${elVar}.textContent = _scrml_g.String(${exprRewritten});`], iterVarName, indent,
         )) lines.push(_l);
       }
     } else if (_rcdataValueExpr !== null) {
@@ -1531,7 +1531,7 @@ function renderTemplateChildToJs(
       const childIsRawContent =
         RAW_CONTENT_ELEMENT_NAMES.has(tagName.toLowerCase());
       const innerFragVar = `_scrml_frag_${nextLocalId()}`;
-      lines.push(`${indent}const ${innerFragVar} = document.createDocumentFragment();`);
+      lines.push(`${indent}const ${innerFragVar} = _scrml_g.document.createDocumentFragment();`);
       for (const grand of (child as any).children) {
         renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent, engineCtx, childIsRawContent, _isRcdataBody);
       }
@@ -1553,7 +1553,7 @@ function renderTemplateChildToJs(
         // run inside createFn does NOT transplant a not-yet-assigned key.
         const phVar = `_scrml_ph_${nextLocalId()}`;
         const curVar = `_scrml_cur_${nextLocalId()}`;
-        lines.push(`${indent}const ${phVar} = document.createComment("scrml-if-row");`);
+        lines.push(`${indent}const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
         lines.push(`${indent}let ${curVar} = (${ifCond}) ? ${elVar} : ${phVar};`);
         lines.push(`${indent}${fragmentVar}.appendChild(${curVar});`);
         for (const _l of maybeWrapEachPerItemEffect(
@@ -1844,7 +1844,7 @@ function renderTemplateChildToJs(
     // form uses (debug parity); the dispatch fn ignores the attr (mount is
     // passed in) but it makes the rendered DOM self-describing.
     const mountVar = `_scrml_match_mount_${nextLocalId()}`;
-    lines.push(`${indent}const ${mountVar} = document.createElement("div");`);
+    lines.push(`${indent}const ${mountVar} = _scrml_g.document.createElement("div");`);
     lines.push(`${indent}${mountVar}.setAttribute(${JSON.stringify(mountAttr)}, ${JSON.stringify(idPrefix)});`);
     lines.push(`${indent}${fragmentVar}.appendChild(${mountVar});`);
     // Per-item dispatch. The dispatch fn tears down any prior wiring on the
@@ -1917,7 +1917,7 @@ function renderTemplateChildToJs(
       innerItemsExpr = rewriteIterValueExpr(innerNode.inExprRaw ?? "[]", iterVarName);
     } else if (innerNode.iterShape === "of") {
       const ofResolved = rewriteIterValueExpr(innerNode.ofExprRaw ?? "0", iterVarName);
-      innerItemsExpr = `Array.from({length: Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
+      innerItemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
     } else {
       lines.push(`${indent}// each: nested each iter shape unresolved (neither in= nor of=); skipping`);
       return;
@@ -1936,7 +1936,7 @@ function renderTemplateChildToJs(
     const innerItemsVar = `_scrml_each_items_${nextLocalId()}`;
     // The item-local mount is created + appended ONCE (stable DOM node identity
     // across inner re-renders); the inner reconcile writes into it in place.
-    lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
+    lines.push(`${indent}const ${innerMountVar} = _scrml_g.document.createElement("div");`);
     lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${nsId(innerNode.id)}");`);
     lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
     // g-nested-each-no-own-subscription (2026-06-21) — the inner each must own a
@@ -2670,16 +2670,16 @@ function renderTemplateAttrToJs(
   ) {
     let _vexpr: string | null = null;
     if (valKind === "expr") {
-      _vexpr = `String(${lowerEachExpr(String(val.raw ?? ""), iterVarName)})`;
+      _vexpr = `_scrml_g.String(${lowerEachExpr(String(val.raw ?? ""), iterVarName)})`;
     } else if (valKind === "variable-ref") {
-      _vexpr = `String(${lowerEachExpr(String(val.name ?? ""), iterVarName)})`;
+      _vexpr = `_scrml_g.String(${lowerEachExpr(String(val.name ?? ""), iterVarName)})`;
     } else if (valKind === "call-ref") {
       // Same call-ref lowering as the `class:`/`show=` arms: route through
       // `lowerEachExpr` (not bare `rewriteIterValueExpr`) so a §42 operator in a
       // call ARG lowers instead of reaching client JS raw. Byte-identical for an
       // operator-free call. (g-each-peritem-class-call-ref-operator-arg-not-lowered
       // class — the `value`-property sibling of the class: arm.)
-      _vexpr = `String(${lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName)})`;
+      _vexpr = `_scrml_g.String(${lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName)})`;
     } else {
       const sv = String(val.value ?? "");
       const tpl = buildEachAttrTemplate(sv, iterVarName);
@@ -2705,14 +2705,14 @@ function renderTemplateAttrToJs(
   if (valKind === "expr") {
     const expr = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`_scrml_g.String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
   if (valKind === "variable-ref") {
     const expr = lowerEachExpr(String(val.name ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`_scrml_g.String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -2724,7 +2724,7 @@ function renderTemplateAttrToJs(
     // class — the generic value-attribute sibling of the class: arm.)
     const expr = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`_scrml_g.String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -3008,7 +3008,7 @@ function renderEmptyChildToJs(
     // <empty> body is in outer (no-iter) scope; no `@.` substitution.
     // Rewrite bare `@cell` references via rewriteAtCellAccess for V5-strict.
     const rewritten = rewriteAtCellAccess(expr);
-    lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(String(${rewritten})));`);
+    lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String(${rewritten})));`);
     return;
   }
   const children = (emptyChild as any).children ?? [];
@@ -3639,7 +3639,7 @@ function emitEachReconcileLines(
   if (node.emptyChild) {
     lines.push(`${indent}if (!${itemsVar} || ${lengthRef} === 0) {`);
     lines.push(`${indent}  _scrml_each_clear(${mountVar});`);
-    lines.push(`${indent}  const _emptyFrag = document.createDocumentFragment();`);
+    lines.push(`${indent}  const _emptyFrag = _scrml_g.document.createDocumentFragment();`);
     const emptyLines: string[] = [];
     renderEmptyChildToJs(node.emptyChild, "_emptyFrag", emptyLines, `${indent}  `, engineCtx);
     for (const l of emptyLines) lines.push(l);
@@ -3672,7 +3672,7 @@ function emitEachReconcileLines(
   lines.push(`${indent}  ${itemsVar},`);
   lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => ${keyFnBody},`);
   lines.push(`${indent}  (${iterVarName}, ${iterIdxName}) => {`);
-  lines.push(`${indent}    const _scrml_item_frag = document.createDocumentFragment();`);
+  lines.push(`${indent}    const _scrml_item_frag = _scrml_g.document.createDocumentFragment();`);
   // Bug 64 / R28-1c (S159) — capture this node's create-time key (the SAME
   // expression the keyFn above uses) so per-item text/class bindings can
   // re-resolve the LIVE item by key on every reconcile. Push a reconcile ctx so
@@ -3972,7 +3972,7 @@ export function emitNestedEachFromMarkup(
     innerItemsExpr = rewriteIterValueExpr(eachBlock.inExprRaw ?? "[]", enclosingScopeVar);
   } else {
     const ofResolved = rewriteIterValueExpr(eachBlock.ofExprRaw ?? "0", enclosingScopeVar);
-    innerItemsExpr = `Array.from({length: Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
+    innerItemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
   }
 
   // The inner each's iter var is its OWN `as` alias or the synthetic default —
@@ -3986,7 +3986,7 @@ export function emitNestedEachFromMarkup(
   const innerItemsVar = `_scrml_each_items_${nextLocalId()}`;
   // The item-local mount is created + appended ONCE (stable DOM node identity
   // across inner re-renders); the inner reconcile writes into it in place.
-  lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
+  lines.push(`${indent}const ${innerMountVar} = _scrml_g.document.createElement("div");`);
   lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${nsId(eachBlock.id)}");`);
   lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
   // g-nested-each-no-own-subscription (2026-06-21) — Tier-0 `${for…lift}`-nested
@@ -4204,7 +4204,7 @@ function emitArmScopedEachRenderFn(
   if (node.iterShape === "in") {
     itemsExpr = rewriteMapAwareIterable(node.inExprRaw ?? "[]", eachMapVarNames, eachSetVarNames);
   } else if (node.iterShape === "of") {
-    itemsExpr = `Array.from({length: Number(${rewriteAtCellAccess(node.ofExprRaw ?? "0")}) || 0}, (_v, _i) => _i)`;
+    itemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${rewriteAtCellAccess(node.ofExprRaw ?? "0")}) || 0}, (_v, _i) => _i)`;
   } else {
     fnLines.push(`  // each: iter shape unresolved (neither in= nor of=); skipping render`);
     fnLines.push(`}`);
@@ -4212,10 +4212,10 @@ function emitArmScopedEachRenderFn(
   }
   fnLines.push(`  const _scrml_items = ${itemsExpr};`);
   fnLines.push(`  let _scrml_mount = null;`);
-  fnLines.push(`  if (_scrml_each_root && typeof document !== "undefined") {`);
-  fnLines.push(`    const _w = document.createTreeWalker(_scrml_each_root, NodeFilter.SHOW_COMMENT);`);
+  fnLines.push(`  if (_scrml_each_root && typeof _scrml_g.document !== "undefined") {`);
+  fnLines.push(`    const _w = _scrml_g.document.createTreeWalker(_scrml_each_root, _scrml_g.NodeFilter.SHOW_COMMENT);`);
   fnLines.push(`    let _n;`);
-  fnLines.push(`    while ((_n = _w.nextNode())) { if (String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _scrml_mount = _n; break; } }`);
+  fnLines.push(`    while ((_n = _w.nextNode())) { if (_scrml_g.String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _scrml_mount = _n; break; } }`);
   fnLines.push(`  }`);
   fnLines.push(`  if (!_scrml_mount) return;`);
   for (const l of emitEachReconcileLines(node, iterVarName, "_scrml_each_idx", "_scrml_mount", "_scrml_items", "  ", engineCtx)) {
@@ -4383,7 +4383,7 @@ export function emitEachBodyRenderForFile(
       // Rewrite `@cell` → `_scrml_reactive_get("cell")`.
       const ofExprResolved = rewriteAtCellAccess(ofExpr);
       // Generate an integer range [0, 1, ..., N-1] via Array.from.
-      itemsExpr = `Array.from({length: Number(${ofExprResolved}) || 0}, (_v, _i) => _i)`;
+      itemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofExprResolved}) || 0}, (_v, _i) => _i)`;
     } else {
       // Both / neither — surface at PASS / TS time; emit a no-op here.
       fnLines.push(`  // each: iter shape unresolved (neither in= nor of=); skipping render`);
@@ -4404,7 +4404,7 @@ export function emitEachBodyRenderForFile(
     // The id is chunk-namespaced, so it is a STRING (`"a1b2c3d4_9"`) rather than
     // a bare numeric literal. `_scrml_find_each_anchor` concatenates it into
     // `"scrml-each:" + id`, so a string arg needs no runtime change.
-    fnLines.push(`  const _scrml_mount = _scrml_find_each_anchor(document, ${JSON.stringify(nsId(node.id))});`);
+    fnLines.push(`  const _scrml_mount = _scrml_find_each_anchor(_scrml_g.document, ${JSON.stringify(nsId(node.id))});`);
     fnLines.push(`  if (!_scrml_mount) return;`);
 
     // Empty-guard + per-item reconcile (shared with the nested-each inline path).

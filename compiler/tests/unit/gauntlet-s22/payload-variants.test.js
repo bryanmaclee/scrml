@@ -46,14 +46,15 @@ function compileSource(source, filename = "test.scrml") {
 // and expose it through a Function expression so we can inspect runtime shape.
 function evalEnum(enumConstLine, expr) {
   const rewritten = enumConstLine.replace(/^const\s+/, "var ");
-  return new Function(rewritten + "; return (" + expr + ");")();
+  // `_scrml_g`: the runtime's host-global alias (S457 2a) the emitted line reads through.
+  return new Function("_scrml_g", rewritten + "; return (" + expr + ");")(globalThis);
 }
 
 // Find the single-line `const Name = Object.freeze({...});` declaration by
 // walking the emitted JS and balancing parens — a regex cannot safely skip
 // the `;` characters inside the constructor function bodies.
 function enumLineFor(clientJs, enumName) {
-  const marker = `const ${enumName} = Object.freeze(`;
+  const marker = `const ${enumName} = _scrml_g.Object.freeze(`;
   const start = clientJs.indexOf(marker);
   if (start === -1) throw new Error(`Could not find const ${enumName} in emitted client JS`);
   let depth = 0;
@@ -78,7 +79,7 @@ describe("S22 §1a — enum payload variant construction", () => {
     const source = `\${\n  type Shape:enum = { Circle(r: number), Rect(w: number, h: number) }\n  let a:Shape = Shape.Circle(10)\n}\n<program><p>ok</></>\n`;
     const { fatalErrors, clientJs } = compileSource(source, "all-payload.scrml");
     expect(fatalErrors).toEqual([]);
-    expect(clientJs).toContain("const Shape = Object.freeze(");
+    expect(clientJs).toContain("const Shape = _scrml_g.Object.freeze(");
     expect(clientJs).toContain("Circle: function(r) { return { variant: \"Circle\", data: { r } }; }");
     expect(clientJs).toContain("Rect: function(w, h) { return { variant: \"Rect\", data: { w, h } }; }");
   });

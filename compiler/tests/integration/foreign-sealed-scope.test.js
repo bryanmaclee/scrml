@@ -280,7 +280,7 @@ describe("§23.2.4a — crossings, host globals, both slice shapes, the boundary
     const at = serverJs.indexOf("function _scrml_foreign_seal(site, source) {");
     expect(at).toBeGreaterThanOrEqual(0);
     const helperSrc = serverJs.slice(at, serverJs.indexOf("\n}\n", at) + 2);
-    const seal = new Function(helperSrc + "\nreturn _scrml_foreign_seal;")();
+    const seal = new Function("const _scrml_g = globalThis;\n" + helperSrc + "\nreturn _scrml_foreign_seal;")();
     const src = "async function (n) {\nreturn (n * 2\n);\n}";
     const first = seal("t.scrml:1", src);
     for (let i = 0; i < 4; i++) expect(seal("t.scrml:1", src)).toBe(first); // same built function

@@ -21,6 +21,7 @@
  * parent side lives in emit-client.ts ("worker instantiation").
  */
 
+import { withHostGlobalAlias } from "./host-global-alias.ts";
 import { basename } from "path";
 import { emitLogicNode } from "./emit-logic.ts";
 import { needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
@@ -91,9 +92,9 @@ export function generateWorkerJs(
 
     lines.push(`// Reply to the parent. \`replyTo\` names the parent's \`.send()\` being answered.`);
     lines.push(`function _scrml_reply(replyTo, data) {`);
-    lines.push(`  self.postMessage({ replyTo: replyTo, data: data });`);
+    lines.push(`  _scrml_g.self.postMessage({ replyTo: replyTo, data: data });`);
     lines.push(`}`);
-    lines.push(`self.onmessage = function(event) {`);
+    lines.push(`_scrml_g.self.onmessage = function(event) {`);
     lines.push(`  const _scrml_reply_to = event.data.id;`);
     lines.push(`  var ${binding} = event.data.data;`);
 
@@ -112,9 +113,11 @@ export function generateWorkerJs(
   const body = lines.join("\n");
   if (needsUrlShapeHelper(body)) {
     const [banner, ...rest] = lines;
-    return [banner, SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "", ...rest].join("\n");
+    return withHostGlobalAlias([banner, SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "", ...rest].join("\n")) as string;
   }
-  return body;
+  // S457 2a — host globals are spelled `_scrml_g.<name>`; a worker has no runtime, so it
+  // declares the alias itself.
+  return withHostGlobalAlias(body) as string;
 }
 
 /**

@@ -157,7 +157,7 @@ describe("<endpoint> codegen — server route-handler (§61.6), parseVariant dec
 
   test("the arm's typed value-return is enveloped DIRECTLY as the JSON success body (§61.5, status 200)", () => {
     const js = serverJs(compile(FSP_ENDPOINT));
-    expect(js).toContain(`return new Response(JSON.stringify(_scrml_result), {`);
+    expect(js).toContain(`return new _scrml_g.Response(_scrml_g.JSON.stringify(_scrml_result), {`);
     expect(js).toContain(`status: 200,`);
     expect(js).toContain(`headers: { "Content-Type": "application/json" },`);
   });

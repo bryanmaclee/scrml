@@ -88,7 +88,7 @@ export const SERVER_FOREIGN_SEAL_HELPER: string = String.raw`
 // this module's host context (require, __dirname, __filename) - never a scrml binding
 // and never a compiler-owned one.
 function _scrml_foreign_seal(site, source) {
-  const cache = _scrml_foreign_seal.cache || (_scrml_foreign_seal.cache = new Map());
+  const cache = _scrml_foreign_seal.cache || (_scrml_foreign_seal.cache = new _scrml_g.Map());
   let sealed = cache.get(source);
   if (!sealed) {
     // The module's host context, bound only where the host provides it (a module
@@ -98,7 +98,7 @@ function _scrml_foreign_seal(site, source) {
     if (typeof require === "function") { hostNames.push("require"); hostValues.push(require); }
     if (typeof __dirname === "string") { hostNames.push("__dirname"); hostValues.push(__dirname); }
     if (typeof __filename === "string") { hostNames.push("__filename"); hostValues.push(__filename); }
-    const build = new Function(...hostNames,
+    const build = new _scrml_g.Function(...hostNames,
       "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + site);
     const slice = build(...hostValues);
     sealed = async (...args) => {
@@ -106,7 +106,7 @@ function _scrml_foreign_seal(site, source) {
         return await slice(...args);
       } catch (e) {
         // A name the slice reads that is not crossed is not in scope: say so at the slice.
-        if (e instanceof ReferenceError && typeof e.message === "string" && !e.message.includes("§23.2.4a")) {
+        if (e instanceof _scrml_g.ReferenceError && typeof e.message === "string" && !e.message.includes("§23.2.4a")) {
           e.message += " (raised in the foreign-code slice at " + site + ": only the names in its in:{} header cross into a slice, plus host globals - SPEC §23.2.4a)";
         }
         throw e;

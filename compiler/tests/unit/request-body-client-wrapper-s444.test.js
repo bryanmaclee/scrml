@@ -25,6 +25,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-request-wrapper-s444");
 
@@ -144,14 +145,16 @@ function mount(source, baseName, withRequest) {
       return { ok: true, status: 200, json: async () => ({ id: n, name: "u" + n }) };
     };
     const exec = new Function(
-      "window", "document", "fetch",
-      `${runtimeJs}\n` + captureInsideChunkScope(clientJs,
+      "window", "document", "fetch", "__scrml_host__",
+      `${rebindHostAlias(runtimeJs)}\n` + captureInsideChunkScope(clientJs,
         `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
         (withRequest ? `globalThis.__req__ = _scrml_request_userReq;\n` : `globalThis.__req__ = null;\n`) +
         `globalThis.__get__ = _scrml_reactive_get;\n` +
         `globalThis.__set__ = _scrml_reactive_set;\n`),
     );
-    exec(window, document, fetchStub);
+    // The emitted code reaches host globals through the alias `_scrml_g` (S457 2a): the
+    // stubs reach it through a view of the global object, not by shadowing.
+    exec(window, document, fetchStub, hostView({ window, document, fetch: fetchStub }));
     return { req: globalThis.__req__, get: globalThis.__get__, set: globalThis.__set__, calls };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

@@ -1546,7 +1546,7 @@ export function emitVariantGuardedRender(
     dispatcherLines.push(`  if (!${MT}) return;`);
   } else {
     dispatcherLines.push(`function ${dispatchFnName}(${VV}) {`);
-    dispatcherLines.push(`  const ${MT} = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
+    dispatcherLines.push(`  const ${MT} = _scrml_g.document.querySelector('[${mountAttr}="${idPrefix}"]');`);
     dispatcherLines.push(`  if (!${MT}) return;`);
   }
   // Same-value short-circuit — skip the dispose + innerHTML rebuild when the value
@@ -1780,7 +1780,7 @@ export function emitVariantGuardedRender(
     // `{ once: true }` (S345 gate-boot-listener-fix): production-identical
     // (DOMContentLoaded fires once per document); auto-removes the init-fire
     // listener so it can never re-fire stale against a longer-lived document.
-    dispatcherLines.push(`  if (!_eager && typeof document !== "undefined") { document.addEventListener("DOMContentLoaded", _fire, { once: true }); }`);
+    dispatcherLines.push(`  if (!_eager && typeof _scrml_g.document !== "undefined") { _scrml_g.document.addEventListener("DOMContentLoaded", _fire, { once: true }); }`);
     dispatcherLines.push(`})();`);
   }
 

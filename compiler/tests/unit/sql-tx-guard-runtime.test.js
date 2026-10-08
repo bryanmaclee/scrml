@@ -28,7 +28,8 @@ function loadRuntime() {
   // every emitted server module; scrml absence is `null`, §42.8).
   expect(src).not.toMatch(/\bundefined\b/);
   // eslint-disable-next-line no-new-func
-  return new Function(`${src}\nreturn { _scrml_db_guard, _scrml_db_request_scope, _scrml_db_tx_kind, _scrml_db_savepoint_name, _scrml_db_stream_end, _scrml_db_scope_als };`)();
+  // `_scrml_g`: the bundle's host-global alias (S457 2a) the runtime reads through.
+  return new Function(`const _scrml_g = globalThis;\n${src}\nreturn { _scrml_db_guard, _scrml_db_request_scope, _scrml_db_tx_kind, _scrml_db_savepoint_name, _scrml_db_stream_end, _scrml_db_scope_als };`)();
 }
 
 const rt = loadRuntime();

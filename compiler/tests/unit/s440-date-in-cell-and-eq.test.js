@@ -49,6 +49,7 @@ import { SCRML_RUNTIME, SERVER_STRUCTURAL_EQ_SOURCE } from "../../src/runtime-te
 import { SERVER_STRUCTURAL_EQ_HELPER } from "../../src/codegen/emit-server.ts";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 import { tmpdir } from "os";
+import { hostView } from "../helpers/host-view.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -125,7 +126,8 @@ const RT = (() => {
 
 /** The SERVER copy, evaluated from the exact text emit-server inlines. */
 // eslint-disable-next-line no-new-func
-const serverEq = new Function(`${SERVER_STRUCTURAL_EQ_HELPER}\nreturn _scrml_structural_eq;`)();
+// `_scrml_g`: the bundle's host-global alias (S457 2a) the inlined copy reads through.
+const serverEq = new Function(`const _scrml_g = globalThis;\n${SERVER_STRUCTURAL_EQ_HELPER}\nreturn _scrml_structural_eq;`)();
 
 // ---------------------------------------------------------------------------
 // §1 — _scrml_deep_reactive: the allow-list
@@ -347,7 +349,10 @@ describe("s440 §2b' — a spoofed Symbol.toStringTag throws, never compares (R2
 
   test("a URL-branded value where no URL class exists throws, naming the missing reader", () => {
     // eslint-disable-next-line no-new-func
-    const noUrlEq = new Function("URL", "URLSearchParams", `${SERVER_STRUCTURAL_EQ_HELPER}\nreturn _scrml_structural_eq;`)();
+    // The host lacks URL / URLSearchParams: a view of the global object without them.
+    const noUrlEq = new Function("__scrml_host__", `const _scrml_g = __scrml_host__;\n${SERVER_STRUCTURAL_EQ_HELPER}\nreturn _scrml_structural_eq;`)(
+      hostView({ URL: undefined, URLSearchParams: undefined }),
+    );
     expect(() => noUrlEq(spoof("URL", 1), spoof("URL", 2))).toThrow("no toString reader");
     expect(() => noUrlEq(spoof("URLSearchParams", 1), spoof("URLSearchParams", 2))).toThrow("no toString reader");
     // Everything else in that environment still works.
@@ -400,10 +405,13 @@ describe("s440 §2c — _scrml_deep_set fails loud on a non-plain container (F5)
 // ---------------------------------------------------------------------------
 
 describe("s440 §3 — the server helper is sliced from the client runtime", () => {
-  test("SERVER_STRUCTURAL_EQ_HELPER carries the client function text verbatim", () => {
+  test("SERVER_STRUCTURAL_EQ_HELPER carries the client function text, host globals via the alias", () => {
     expect(SERVER_STRUCTURAL_EQ_SOURCE.startsWith("function _scrml_structural_eq(a, b, seen) {")).toBe(true);
     expect(SERVER_STRUCTURAL_EQ_SOURCE.endsWith("}")).toBe(true);
-    expect(SCRML_RUNTIME).toContain(SERVER_STRUCTURAL_EQ_SOURCE);
+    // S457 2a: the server copy shares a module scope with user bindings, so its host
+    // globals are spelled `_scrml_g.<name>`; with that spelling undone it IS the client text.
+    expect(SERVER_STRUCTURAL_EQ_SOURCE).toContain("_scrml_g.");
+    expect(SCRML_RUNTIME).toContain(SERVER_STRUCTURAL_EQ_SOURCE.replace(/_scrml_g\./g, ""));
     expect(SERVER_STRUCTURAL_EQ_HELPER).toContain(SERVER_STRUCTURAL_EQ_SOURCE);
     // No slice marker leaks into emitted output.
     expect(SERVER_STRUCTURAL_EQ_HELPER).not.toContain("__SCRML_STRUCTURAL_EQ_");
@@ -432,7 +440,7 @@ describe("s440 §3 — the server helper is sliced from the client runtime", () 
     expect(errors).toEqual([]);
     expect(serverJs).toContain("_scrml_structural_eq(a, b)");
     expect(serverJs).toContain("function _scrml_structural_eq(a, b, seen) {");
-    expect(serverJs).toContain("return sameNum(read(Date, \"getTime\", a), read(Date, \"getTime\", b));");
+    expect(serverJs).toContain("return sameNum(read(_scrml_g.Date, \"getTime\", a), read(_scrml_g.Date, \"getTime\", b));");
     expect(warnings.filter((w) => w.code === "W-CG-UNDEFINED-INTERPOLATION")).toEqual([]);
   });
 });

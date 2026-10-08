@@ -169,7 +169,7 @@ describe("RQ1: POST handler emits URL construction", () => {
     const { serverJs } = makeHandler("getUser", [
       makeReturnStmt('"ok"', span(110)),
     ]);
-    expect(serverJs).toContain("new URL(_scrml_req.url");
+    expect(serverJs).toContain("new _scrml_g.URL(_scrml_req.url");
   });
 });
 
@@ -237,7 +237,7 @@ describe("RQ6: route.query injection precedes auth check", () => {
       makeReturnStmt('"ok"', span(110)),
     ]);
 
-    const routeQueryPos = serverJs.indexOf("const _scrml_url = new URL");
+    const routeQueryPos = serverJs.indexOf("const _scrml_url = new _scrml_g.URL");
     const authCheckPos = serverJs.indexOf("_scrml_auth_check(_scrml_req)");
 
     expect(routeQueryPos).toBeGreaterThanOrEqual(0);
@@ -266,7 +266,7 @@ describe("RQ7: route.query injection precedes CSRF validation call in handler", 
     expect(handlerStart).toBeGreaterThanOrEqual(0);
 
     const handlerSlice = serverJs.slice(handlerStart);
-    const routeQueryPos = handlerSlice.indexOf("const _scrml_url = new URL");
+    const routeQueryPos = handlerSlice.indexOf("const _scrml_url = new _scrml_g.URL");
     // The CSRF validation call (not definition) looks like: if (!_scrml_validate_csrf(
     const csrfCallPos = handlerSlice.indexOf("if (!_scrml_validate_csrf(");
 
@@ -286,7 +286,7 @@ describe("RQ8: route.query injection precedes body deserialization", () => {
       makeReturnStmt('"ok"', span(110)),
     ]);
 
-    const routeQueryPos = serverJs.indexOf("const _scrml_url = new URL");
+    const routeQueryPos = serverJs.indexOf("const _scrml_url = new _scrml_g.URL");
     const bodyPos = serverJs.indexOf("_scrml_body = await _scrml_req.json()");
 
     expect(routeQueryPos).toBeGreaterThanOrEqual(0);
@@ -336,7 +336,7 @@ describe("RQ9: multiple handlers each get route.query injection", () => {
     const serverJs = result.outputs.get("/test/app.scrml").serverJs ?? "";
 
     // Count occurrences — should be 2, one per handler
-    const occurrences = (serverJs.match(/const _scrml_url = new URL/g) ?? []).length;
+    const occurrences = (serverJs.match(/const _scrml_url = new _scrml_g\.URL/g) ?? []).length;
     expect(occurrences).toBe(2);
   });
 });

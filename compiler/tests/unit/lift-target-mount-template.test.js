@@ -48,7 +48,7 @@ function compile(source) {
 /** The `_scrml_nav_rewire(_scrml_root)` body — where per-mount (rebind) wiring lives. */
 function navRewireBody(js) {
   const start = js.indexOf("function _scrml_nav_rewire(_scrml_root) {");
-  const end = js.indexOf("_scrml_nav_rewire(document);");
+  const end = js.indexOf("_scrml_nav_rewire(_scrml_g.document);");
   if (start === -1 || end === -1) return "";
   return js.slice(start, end);
 }
@@ -73,7 +73,7 @@ function expectMountDeferredLift(src) {
   expect(count(js, "function _scrml_lift_mount_run(host, body) {")).toBe(1);
   // …bound per mount from the rebind rehydrator, root-scoped.
   const rewire = navRewireBody(js);
-  expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[data-scrml-logic="${pid}"]');`);
+  expect(rewire).toContain(`const _scrml_el = (_scrml_root || _scrml_g.document).querySelector('[data-scrml-logic="${pid}"]');`);
   expect(rewire).toContain(`_scrml_lift_mount_run(_scrml_el, _scrml_lift_mount_${pid});`);
   return { js, pid };
 }
@@ -106,7 +106,7 @@ describe("lift target inside a mount <template> — emitted shape", () => {
 </program>
 `);
     expect(js).toMatch(/const _scrml_lift_tgt_\d+ = _scrml_lift_host;/);
-    expect(js).not.toMatch(/const _scrml_lift_tgt_\d+ = document\.querySelector/);
+    expect(js).not.toMatch(/const _scrml_lift_tgt_\d+ = _scrml_g\.document\.querySelector/);
   });
 
   test("non-reactive group: `_scrml_lift_target = _scrml_lift_host`", () => {
@@ -249,7 +249,7 @@ function yes() { return true }
 `);
     expect(errors).toEqual([]);
     const [pid] = logicPids(html);
-    expect(js).toContain(`_scrml_lift_target = document.querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(js).toContain(`_scrml_lift_target = _scrml_g.document.querySelector('[data-scrml-logic="${pid}"]');`);
     expect(js).not.toContain("_scrml_lift_mount_run");
     expect(js).not.toContain("_scrml_lift_host");
   });
@@ -319,7 +319,7 @@ describe("anchor display sites inside a mount <template> — emitted shape", () 
       expect(errors).toEqual([]);
       expect(js).not.toContain(`document.querySelector('[${a.attr}=`);
       const rewire = navRewireBody(js);
-      expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[${a.attr}=`);
+      expect(rewire).toContain(`const _scrml_el = (_scrml_root || _scrml_g.document).querySelector('[${a.attr}=`);
       if (a.tracked instanceof RegExp) expect(rewire).toMatch(a.tracked);
       else expect(rewire).toContain(a.tracked);
     });
@@ -327,7 +327,7 @@ describe("anchor display sites inside a mount <template> — emitted shape", () 
     test(`CONTROL ${a.name} in the SSR body: document-scoped boot block, effect untracked (unchanged)`, () => {
       const { errors, js } = compile(a.wrap(a.inner, false));
       expect(errors).toEqual([]);
-      expect(js).toContain(`    const _scrml_el = document.querySelector('[${a.attr}=`);
+      expect(js).toContain(`    const _scrml_el = _scrml_g.document.querySelector('[${a.attr}=`);
       expect(navRewireBody(js)).not.toContain(`[${a.attr}=`);
       if (a.untracked instanceof RegExp) expect(js).toMatch(a.untracked);
       else expect(js).toContain(`      ${a.untracked}`);
@@ -362,7 +362,7 @@ function loadItem(id: string)! LoadError {
     const [pid] = logicPids(html);
     expect(js).not.toContain(`document.querySelector('[data-scrml-logic="${pid}"]')`);
     const rewire = navRewireBody(js);
-    expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(rewire).toContain(`const _scrml_el = (_scrml_root || _scrml_g.document).querySelector('[data-scrml-logic="${pid}"]');`);
     expect(rewire).toContain("_eb_render_");
   });
 
@@ -370,7 +370,7 @@ function loadItem(id: string)! LoadError {
     const { errors, js, html } = compile(EB(false));
     expect(errors).toEqual([]);
     const [pid] = logicPids(html);
-    expect(js).toContain(`    const _scrml_el = document.querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(js).toContain(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-logic="${pid}"]');`);
   });
 
   const SRV = (gated) => `<program>
@@ -388,7 +388,7 @@ server function greeting() { return "SRV_OK" }
     const [pid] = logicPids(html);
     expect(js).not.toContain(`document.querySelector('[data-scrml-logic="${pid}"]')`);
     const rewire = navRewireBody(js);
-    expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(rewire).toContain(`const _scrml_el = (_scrml_root || _scrml_g.document).querySelector('[data-scrml-logic="${pid}"]');`);
     expect(rewire).toContain("_scrml_el.textContent = await (");
   });
 
@@ -396,6 +396,6 @@ server function greeting() { return "SRV_OK" }
     const { errors, js, html } = compile(SRV(false));
     expect(errors).toEqual([]);
     const [pid] = logicPids(html);
-    expect(js).toContain(`    const _scrml_el = document.querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(js).toContain(`    const _scrml_el = _scrml_g.document.querySelector('[data-scrml-logic="${pid}"]');`);
   });
 });

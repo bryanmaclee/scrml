@@ -71,11 +71,11 @@ export const TENANT_UNDECLARED_HELPER_LINES: readonly string[] = Object.freeze([
   "        rows = await h.handle`SELECT table_schema AS sch, table_name AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND lower(column_name) = 'tenant_id'`;",
   "      }",
   "    } catch (e) {",
-  "      found.push({ db: h.label, table: null, error: String((e && e.message) || e) });",
+  "      found.push({ db: h.label, table: null, error: _scrml_g.String((e && e.message) || e) });",
   "      continue;",
   "    }",
   "    for (const r of rows) {",
-  "      const name = String(r.name);",
+  "      const name = _scrml_g.String(r.name);",
   "      if (declared.has(name.toLowerCase())) continue;",
   "      found.push({ db: h.label, table: r.sch ? `${r.sch}.${name}` : name, error: null });",
   "    }",
@@ -104,7 +104,7 @@ export function tenantStartupCheckLines(
   lines.push("");
   lines.push(...TENANT_UNDECLARED_HELPER_LINES);
   lines.push("// The tables this compilation declares tenant-scoped (§14.8.10: `<schema>` + `<db tables=>`).");
-  lines.push(`const _SCRML_TENANT_DECLARED = new Set(${JSON.stringify(declared)});`);
+  lines.push(`const _SCRML_TENANT_DECLARED = new _scrml_g.Set(${JSON.stringify(declared)});`);
   lines.push(`export const ${TENANT_STARTUP_CHECK_EXPORT} = {`);
   lines.push("  undeclared: () => _scrml_tenant_undeclared_in([");
   for (const h of handles) {

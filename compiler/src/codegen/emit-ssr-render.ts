@@ -47,6 +47,7 @@ import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { quotedUrlAttrNeedsGuard, wrapUrlGuard } from "./url-attr-guard.ts";
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
+import { aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 
 /**
  * The server-bundle runtime helper block for the SSR markup renderer. Injected
@@ -62,12 +63,12 @@ export const SSR_RENDER_HELPER: string = [
   "// (an absent — e.g. §14.8.9-redacted — column) render as the empty string.",
   "function _scrml_esc(v) {",
   "  if (v === null || v === undefined) return \"\";",
-  "  return String(v)",
+  "  return _scrml_g.String(v)",
   "    .replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\");",
   "}",
   "function _scrml_esc_attr(v) {",
   "  if (v === null || v === undefined) return \"\";",
-  "  return String(v)",
+  "  return _scrml_g.String(v)",
   "    .replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\").replace(/\"/g, \"&quot;\");",
   "}",
   "// Fill one empty each-mount fence with its server-rendered rows. The mount is",
@@ -100,7 +101,8 @@ export const SSR_RENDER_HELPER: string = [
 export const SSR_URL_GUARD_HELPER: string = [
   "",
   "// --- §5.2 URL-attribute scheme guard (server copy, first-paint rows; source: runtime-url-guard.js) ---",
-  URL_GUARD_RUNTIME_SOURCE,
+  // S457 2a — the copy shares the bundle's module scope with user bindings: host globals via `_scrml_g`.
+  aliasHostGlobalsInRuntimeText(URL_GUARD_RUNTIME_SOURCE),
 ].join("\n");
 
 /**
@@ -211,7 +213,7 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
       if (close === -1) throw new SsrUnsupported("unterminated interpolation in attribute");
       const inner = raw.slice(open + 2, close);
       if (inner.includes("${")) throw new SsrUnsupported("nested interpolation in attribute");
-      segs.push(`String(${resolveRowRead(inner, iterVarName)})`);
+      segs.push(`_scrml_g.String(${resolveRowRead(inner, iterVarName)})`);
       j = close + 1;
     }
     return [`_scrml_esc_attr(${wrapUrlGuard("null", name, segs.join(" + "))})`];
@@ -230,7 +232,7 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
     if (close === -1) throw new SsrUnsupported("unterminated interpolation in attribute");
     const inner = raw.slice(open + 2, close);
     if (inner.includes("${")) throw new SsrUnsupported("nested interpolation in attribute");
-    parts.push(`_scrml_esc_attr(String(${resolveRowRead(inner, iterVarName)}))`);
+    parts.push(`_scrml_esc_attr(_scrml_g.String(${resolveRowRead(inner, iterVarName)}))`);
     i = close + 1;
   }
   return parts;
@@ -319,7 +321,7 @@ function nodeToParts(
     const parts: string[] = [JSON.stringify(`<${tag}`)];
     if (isRoot && keyReadExpr) {
       parts.push(JSON.stringify(` data-scrml-key="`));
-      parts.push(`_scrml_esc_attr(String(${keyReadExpr}))`);
+      parts.push(`_scrml_esc_attr(_scrml_g.String(${keyReadExpr}))`);
       parts.push(JSON.stringify(`"`));
     }
     for (const p of attrsToParts(node.attrs ?? node.attributes ?? [], iterVarName, tag)) parts.push(p);
@@ -585,7 +587,7 @@ function buildOneRenderer(node: any, varName: string): SsrEachRenderer | { fallb
     const fnLines: string[] = [
       `// §52.8 SSR server-side render for < ${varName} > (each_${mountId})`,
       `function ${fnName}(_scrml_rows) {`,
-      `  if (!Array.isArray(_scrml_rows)) return "";`,
+      `  if (!_scrml_g.Array.isArray(_scrml_rows)) return "";`,
       `  let _scrml_h = "";`,
       `  for (let _scrml_i = 0; _scrml_i < _scrml_rows.length; _scrml_i++) {`,
       `    const _scrml_item = _scrml_rows[_scrml_i];`,

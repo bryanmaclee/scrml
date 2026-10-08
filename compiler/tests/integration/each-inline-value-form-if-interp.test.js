@@ -65,7 +65,7 @@ ${D}{
     expect(r.js).not.toContain("empty logic interpolation skipped");
     // … it emits the §17.6 ternary as a per-item text node.
     expect(/\(\s*r\.n > 50 \? "big" : "small"\s*\)/.test(r.js)).toBe(true);
-    expect(/_scrml_each_tn_\d+\.textContent = String\(\(\s*r\.n > 50/.test(r.js)).toBe(true);
+    expect(/_scrml_each_tn_\d+\.textContent = _scrml_g\.String\(\(\s*r\.n > 50/.test(r.js)).toBe(true);
     // "big"/"small" must actually appear (they were absent pre-fix).
     expect(r.js).toContain('"big"');
     expect(r.js).toContain('"small"');
@@ -121,7 +121,7 @@ ${D}{
 </ul>
 </program>`, "plain");
     expect(r.errorCodes).toEqual([]);
-    expect(/_scrml_each_tn_\d+\.textContent = String\(r\.name\)/.test(r.js)).toBe(true);
+    expect(/_scrml_each_tn_\d+\.textContent = _scrml_g\.String\(r\.name\)/.test(r.js)).toBe(true);
   });
 
   test("RESIDUAL PIN (filed g-each-inline-value-form-match-interp-dropped): a value-form `match` in an each interp is still skipped — flip when fixed", () => {

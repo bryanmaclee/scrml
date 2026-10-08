@@ -1436,7 +1436,7 @@ function emitSetContent(elVar, parts) {
   if (currentLiftReconcileCtx()) {
     const tnVar = genVar('lift_tn');
     const out = [];
-    out.push(`const ${tnVar} = document.createTextNode("");`);
+    out.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
     out.push(`${elVar}.appendChild(${tnVar});`);
     for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = ${tpl};`])) out.push(l);
     return out;
@@ -1447,12 +1447,12 @@ function emitSetContent(elVar, parts) {
   if (liftExprReadsRequestState(tpl)) {
     const tnVar = genVar('lift_tn');
     return [
-      `const ${tnVar} = document.createTextNode("");`,
+      `const ${tnVar} = _scrml_g.document.createTextNode("");`,
       `${elVar}.appendChild(${tnVar});`,
       `_scrml_effect(function() { ${tnVar}.textContent = ${tpl}; });`,
     ];
   }
-  return [`${elVar}.appendChild(document.createTextNode(${tpl}));`];
+  return [`${elVar}.appendChild(_scrml_g.document.createTextNode(${tpl}));`];
 }
 
 /**
@@ -1470,7 +1470,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   const isVoid = VOID_ELEMENTS.has(tag);
 
   const elVar = genVar(`lift_el`);
-  lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+  lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
   // g-lift-tier0-if-reactive-structural — the node this factory RETURNS. Normally
   // the element itself; for a SOLE reconciled item root carrying a per-item `if=`
@@ -1552,7 +1552,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (_isSoleItemRoot && !_isValueIndexed) {
           const phVar = `_scrml_ph_${genVar()}`;
           const curVar = `_scrml_cur_${genVar()}`;
-          lines.push(`const ${phVar} = document.createComment("scrml-if-row");`);
+          lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
           lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
           for (const l of maybeWrapLiftPerItemEffect([`${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`])) lines.push(l);
           _returnVar = curVar;
@@ -1715,7 +1715,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
-        const _cv = `String(${callExpr} ?? "")`;
+        const _cv = `_scrml_g.String(${callExpr} ?? "")`;
         // §5.2 rule 3 (S457) — a URL attribute computed by a call: guard the write.
         pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${dynamicUrlAttrNeedsGuard(tag, name) ? wrapUrlGuard(elVar, name, _cv) : _cv});`);
       }
@@ -1823,7 +1823,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
-        const _ev = `String(${rewritten} ?? "")`;
+        const _ev = `_scrml_g.String(${rewritten} ?? "")`;
         // §5.2 rule 3 (S457) — `href=${expr}`: the expression supplies the scheme; guard the write.
         pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${dynamicUrlAttrNeedsGuard(tag, name) ? wrapUrlGuard(elVar, name, _ev) : _ev});`);
       }
@@ -1894,23 +1894,23 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 // reds in g-emit-lift-markup-text-interp.browser.test.js; NOT
                 // fixed here. See g-ast-markup-text-interp-adjacent-space-dropped.
                 const _tn = genVar('lift_tn');
-                lines.push(`const ${_tn} = document.createTextNode("");`);
+                lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
-                for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = String((${_rw}) ?? "");`])) lines.push(l);
+                for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = _scrml_g.String((${_rw}) ?? "");`])) lines.push(l);
               } else if (liftExprReadsRequestState(_rw)) {
                 const _tn = genVar('lift_tn');
-                lines.push(`const ${_tn} = document.createTextNode("");`);
+                lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
-                lines.push(`_scrml_effect(function() { ${_tn}.textContent = String((${_rw}) ?? ""); });`);
+                lines.push(`_scrml_effect(function() { ${_tn}.textContent = _scrml_g.String((${_rw}) ?? ""); });`);
               } else {
-                lines.push(`${elVar}.appendChild(document.createTextNode(String((${_rw}) ?? "")));`);
+                lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String((${_rw}) ?? "")));`);
               }
             } else if (_pt.value !== "") {
-              lines.push(`${elVar}.appendChild(document.createTextNode(${JSON.stringify(_pt.value)}));`);
+              lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(_pt.value)}));`);
             }
           }
         } else if (text.trim()) {
-          lines.push(`${elVar}.appendChild(document.createTextNode(${JSON.stringify(text)}));`);
+          lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(text)}));`);
         }
       } else if (child.kind === "markup") {
         // Bug 72 (S158) — a nested `<each>` child: route through the SHARED
@@ -1968,9 +1968,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
               // effect). Outside a reconcile ctx, unchanged static append.
               if (currentLiftReconcileCtx()) {
                 const tnVar = genVar('lift_tn');
-                lines.push(`const ${tnVar} = document.createTextNode("");`);
+                lines.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
-                for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = String((${rewritten}) ?? "");`])) lines.push(l);
+                for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = _scrml_g.String((${rewritten}) ?? "");`])) lines.push(l);
               } else if (liftExprReadsRequestState(rewritten)) {
                 // S213 ss15 items 3+4 (Seam 3) — the interpolation reads a
                 // `<request>` deep-reactive object; wrap the text-node write in
@@ -1978,11 +1978,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 // (loading → data). Stable text node + effect mirrors the
                 // inline-path render bridge.
                 const tnVar = genVar('lift_tn');
-                lines.push(`const ${tnVar} = document.createTextNode("");`);
+                lines.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
-                lines.push(`_scrml_effect(function() { ${tnVar}.textContent = String((${rewritten}) ?? ""); });`);
+                lines.push(`_scrml_effect(function() { ${tnVar}.textContent = _scrml_g.String((${rewritten}) ?? ""); });`);
               } else {
-                lines.push(`${elVar}.appendChild(document.createTextNode(String((${rewritten}) ?? "")));`);
+                lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String((${rewritten}) ?? "")));`);
               }
             } else if (logicChild.kind === "lift-expr") {
               // Nested ${ lift <inner/> } inside markup — route to current element
@@ -2142,7 +2142,7 @@ function emitCreateElementFromExprString(expr) {
   const lines = [];
   const elVar = genVar(`lift_el`);
 
-  lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+  lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
   // Parse and emit attributes
   if (attrsStr) {
@@ -2809,11 +2809,11 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     const createFnVar = genVar('create_item');
     const tmpContainerVar = genVar('tmp');
 
-    lines.push(`const ${wrapperVar} = document.createElement("div");`);
+    lines.push(`const ${wrapperVar} = _scrml_g.document.createElement("div");`);
     lines.push(`${containerElVar}.appendChild(${wrapperVar});`);
 
     lines.push(`function ${createFnVar}(${varName}, _scrml_idx) {`);
-    lines.push(`  const ${tmpContainerVar} = document.createDocumentFragment();`);
+    lines.push(`  const ${tmpContainerVar} = _scrml_g.document.createDocumentFragment();`);
     // Bug 64 (S159) — capture this node's create-time key so per-item bindings
     // (text / class:) can re-resolve the LIVE item by key on every reconcile.
     // MUST mirror the keyFn passed to _scrml_reconcile_list below (id-or-index).
@@ -3107,7 +3107,7 @@ export function emitConsolidatedLift(body, opts = {}) {
   function pushElement(tag, attrsStr) {
     pendingAttrName = null;
     const elVar = genVar(`lift_el`);
-    lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+    lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
     if (attrsStr) {
       // Detect and strip a trailing incomplete attribute (e.g. `checked =` or `data - id =`)
       // BEFORE calling parseAttrs. This happens when a BLOCK_REF splits the attribute value
@@ -3273,7 +3273,7 @@ export function emitConsolidatedLift(body, opts = {}) {
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
                   lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
                 } else {
-                  const _bv = `String(${rewritten} ?? "")`;
+                  const _bv = `_scrml_g.String(${rewritten} ?? "")`;
                   // §5.2 rule 3 (S457) — a BLOCK_REF-split `href=${expr}`: guard the URL write.
                   const _bEl = currentElement();
                   const _bt = _bEl ? _bEl.tag : "";
@@ -3545,9 +3545,9 @@ export function emitLiftExpr(node, opts = {}) {
     // No tag pattern at all — emit as text node
     const rewritten = emitExprField(liftExpr.exprNode, expr, liftExprCtx());
     if (containerVar) {
-      return `${containerVar}.appendChild(document.createTextNode(String(${rewritten} ?? "")));`;
+      return `${containerVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String(${rewritten} ?? "")));`;
     }
-    return `_scrml_lift(() => document.createTextNode(String(${rewritten} ?? "")));`;
+    return `_scrml_lift(() => _scrml_g.document.createTextNode(_scrml_g.String(${rewritten} ?? "")));`;
   }
 
   return "";

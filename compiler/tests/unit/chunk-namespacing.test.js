@@ -232,7 +232,7 @@ describe("chunk-namespacing N1: node-id-derived tokens do not collide", () => {
     // live in JS. A scheme deriving the token independently in the two emitters
     // breaks rehydration SILENTLY — no grep can see it, so pin the agreement.
     expect(alpha.html).toContain(`<!--scrml-each:${id}--><!--/scrml-each:${id}-->`);
-    expect(alpha.js).toContain(`_scrml_find_each_anchor(document, "${id}")`);
+    expect(alpha.js).toContain(`_scrml_find_each_anchor(_scrml_g.document, "${id}")`);
     expect(alpha.js).toContain(`function _scrml_each_render_${id}(`);
     expect(alpha.js).toContain(`_scrml_each_renderers["each_${id}"]`);
   });

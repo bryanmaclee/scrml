@@ -33,6 +33,7 @@ import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
+import { hostView } from "../helpers/host-view.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
@@ -107,7 +108,7 @@ describe("Issue #2 — CSRF write-path bootstrap", () => {
     const helper = clientJs.match(/function _scrml_get_csrf_token\(\)[\s\S]+?\n\}/)[0];
     // The helper returns the existing cookie token up front, then mints + plants
     // one as the fallback when the cookie is absent.
-    expect(helper).toContain("if (match) return decodeURIComponent");
+    expect(helper).toContain("if (match) return _scrml_g.decodeURIComponent");
     expect(helper).toContain("document.cookie =");
     expect(helper).toContain("scrml_csrf=");
     expect(helper).toContain("SameSite=Strict");
@@ -149,11 +150,11 @@ describe("Issue #2 — CSRF write-path bootstrap", () => {
         cookieJar = cookieJar ? `${cookieJar}; ${pair}` : pair;
       },
     };
+    // The helper reaches host globals through the alias `_scrml_g` (S457 2a).
     const getToken = new Function(
-      "document",
-      "crypto",
+      "_scrml_g",
       `${tokenFn}; return _scrml_get_csrf_token;`,
-    )(fakeDoc, globalThis.crypto);
+    )(hostView({ document: fakeDoc, crypto: globalThis.crypto }));
 
     // First client call bootstraps the token + plants the same-origin cookie.
     const token = getToken();

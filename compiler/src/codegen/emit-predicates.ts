@@ -21,6 +21,7 @@
  */
 
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
+import { aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 
 // ---------------------------------------------------------------------------
 // PredicateExpr mirror (matches type-system.ts — no import to avoid coupling)
@@ -61,11 +62,16 @@ export const URL_SHAPE_FN = "_scrml_url_shape_ok";
  * calls `_scrml_url_shape_ok(` (a `string(url)` server-function parameter or a boundary-zone decl).
  * The same source the client 'urlguard' chunk inlines. A bundle that already carries it (the SSR
  * first-paint URL guard copy) must not inline it twice — see `needsUrlShapeHelper`.
+ *
+ * The copy shares its module scope with user bindings (a server function called by another is
+ * a module-scope `async function <name>`), so its host-global references are spelled through
+ * the `_scrml_g` alias (codegen/host-global-alias.ts) — a `server function URL` must not
+ * become the judge's `new URL(…)`.
  */
 export const SERVER_URL_SHAPE_HELPER: string = [
   "",
   "// --- §53.6.1 `url` named shape + §5.2 URL scheme reader (inlined copy; source: runtime-url-guard.js) ---",
-  URL_GUARD_RUNTIME_SOURCE,
+  aliasHostGlobalsInRuntimeText(URL_GUARD_RUNTIME_SOURCE),
 ].join("\n");
 
 /** Does `emitted` call the `url` shape judge without already defining it? */
@@ -247,11 +253,11 @@ export function emitRuntimeCheck(
   const lines: string[] = [];
   lines.push(`// §53.4.5 E-CONTRACT-001-RT boundary check for '${varName}'${labelPart}`);
   lines.push(`if (!(${checkExpr})) {`);
-  lines.push(`  throw new Error(`);
+  lines.push(`  throw new _scrml_g.Error(`);
   lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
   lines.push(`    "  Variable: " + ${JSON.stringify(varName + labelPart)} + "\\n" +`);
   lines.push(`    "  Constraint: (" + ${JSON.stringify(displayPred)} + ")\\n" +`);
-  lines.push(`    "  Value: " + String(${valueExpr}) + "\\n" +`);
+  lines.push(`    "  Value: " + _scrml_g.String(${valueExpr}) + "\\n" +`);
   lines.push(`    "  Location: " + ${JSON.stringify(locationPart || varName)}`);
   lines.push(`  );`);
   lines.push(`}`);
@@ -289,12 +295,12 @@ export function emitServerParamCheck(
   const lines: string[] = [];
   lines.push(`${indent}// §53.9.4 E-CONTRACT-001-RT server-side boundary check: '${paramName}'${labelPart}`);
   lines.push(`${indent}if (!(${checkExpr})) {`);
-  lines.push(`${indent}  return new Response(JSON.stringify({`);
+  lines.push(`${indent}  return new _scrml_g.Response(_scrml_g.JSON.stringify({`);
   lines.push(`${indent}    error: "E-CONTRACT-001-RT: Value constraint violated at runtime.",`);
   lines.push(`${indent}    constraint: ${JSON.stringify(`(${displayPred})`)},`);
   lines.push(`${indent}    parameter: ${JSON.stringify(paramName + labelPart)},`);
   lines.push(`${indent}    function: ${JSON.stringify(fnName)},`);
-  lines.push(`${indent}    value: String(${paramName}),`);
+  lines.push(`${indent}    value: _scrml_g.String(${paramName}),`);
   lines.push(`${indent}  }), { status: 400, headers: { "Content-Type": "application/json" } });`);
   lines.push(`${indent}}`);
 

@@ -370,9 +370,9 @@ function f(x: number(>0)) {
 }
 </program>`;
     const { js } = compileFunctions(source);
-    expect(js).toContain("throw new Error");
+    expect(js).toContain("throw new _scrml_g.Error");
     expect(js).toContain("E-CONTRACT-001-RT");
-    expect(js).not.toContain("new Response"); // server path uses Response — client uses throw
+    expect(js).not.toMatch(/new (?:_scrml_g\.)?Response/); // server path uses Response — client uses throw
   });
 });
 

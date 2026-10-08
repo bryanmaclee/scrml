@@ -64,7 +64,7 @@ export const SQL_ERROR_EXHAUSTIVE_VARIANTS: readonly string[] = [
  * `resultVar` names the envelope.
  */
 export function unhandledFailureThrow(resultVar: string): string {
-  return `throw new Error("scrml: no handler arm matched the failure " + ${resultVar}.type + "." + ${resultVar}.variant + " (§19.4.3)");`;
+  return `throw new _scrml_g.Error("scrml: no handler arm matched the failure " + ${resultVar}.type + "." + ${resultVar}.variant + " (§19.4.3)");`;
 }
 
 /** The SQL chain methods that can follow a `?{}` in an expression (§44.3, §8.9.5, §14.8.10). */
@@ -165,11 +165,11 @@ export const SERVER_SQL_ATTEMPT_HELPER: string = [
   "// Map a driver error to a SqlError variant (§19.8.1): QueryFailed(message),",
   "// ConstraintViolation(field), ConnectionLost.",
   "function _scrml_sql_error(err) {",
-  "  const message = String((err && err.message) || err);",
-  "  const code = String((err && (err.code ?? err.errno)) ?? \"\");",
+  "  const message = _scrml_g.String((err && err.message) || err);",
+  "  const code = _scrml_g.String((err && (err.code ?? err.errno)) ?? \"\");",
   "  if (/CONSTRAINT/i.test(code) || /^23\\d{3}$/.test(code) || /constraint failed/i.test(message)) {",
   "    const m = /constraint failed: ([\\w.]+)/i.exec(message);",
-  "    const field = m ? m[1].split(\".\").pop() : String((err && (err.column ?? err.constraint)) ?? \"\");",
+  "    const field = m ? m[1].split(\".\").pop() : _scrml_g.String((err && (err.column ?? err.constraint)) ?? \"\");",
   "    return { __scrml_error: true, type: \"SqlError\", variant: \"ConstraintViolation\", data: { field } };",
   "  }",
   "  if (/ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|CONNECTION_CLOSED/i.test(code) || /^08\\d{3}$/.test(code) ||",

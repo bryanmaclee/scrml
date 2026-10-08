@@ -1144,8 +1144,8 @@ export function composeInitialChunk(
   if (hasPrefetchableLinks) {
     lines.push(``);
     lines.push(`  // --- §40.9.7 tier-2 hover-prefetch wiring (A-4.4) ---`);
-    lines.push(`  if (typeof document !== "undefined") {`);
-    lines.push(`    var _scrml_links = document.querySelectorAll("a[data-scrml-prefetch]");`);
+    lines.push(`  if (typeof _scrml_g.document !== "undefined") {`);
+    lines.push(`    var _scrml_links = _scrml_g.document.querySelectorAll("a[data-scrml-prefetch]");`);
     lines.push(`    for (var i = 0; i < _scrml_links.length; i++) {`);
     lines.push(`      (function (el) {`);
     lines.push(`        var attach = function () {`);

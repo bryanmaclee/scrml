@@ -89,6 +89,8 @@ function evalModelsRegistry(modelsJs) {
     _scrml_effect: () => ({}), _scrml_render_value: () => {}, _scrml_region_track: () => {},
     _scrml_register_rehydrator: () => {},
   });
+  // The runtime's host-global alias (S457 2a), over this context's global object.
+  vm.runInContext("var _scrml_g = globalThis;", ctx);
   vm.runInContext(modelsJs, ctx, { filename: "models.client.js" });
   return ctx._scrml_modules["models.client.js"];
 }
@@ -275,6 +277,9 @@ describe("CONF-CG-358 — runtime-half: the shipped bundles resolve DIRECT + CLO
       _scrml_register_rehydrator: () => {},
     });
 
+    // The runtime's host-global alias (S457 2a), over this context's global object
+    // (whose `document` stays undefined, so the boot IIFE still early-returns).
+    vm.runInContext("var _scrml_g = globalThis;", ctx);
     let threw = null;
     try {
       vm.runInContext(modelsJs, ctx, { filename: "models.client.js" });

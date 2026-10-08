@@ -160,16 +160,16 @@ describe("GITI-025 client: SSE stub encodes call args into EventSource URL", () 
 
   test("EventSource URL carries the param query string with the verbatim key name", () => {
     const { client } = compile(PARAM_SRC, "g25-cli-url");
-    expect(client).toContain("new URLSearchParams()");
-    expect(client).toContain('if (from !== null && from !== undefined) _scrml_qs.set("from", String(from))');
+    expect(client).toContain("new _scrml_g.URLSearchParams()");
+    expect(client).toContain('if (from !== null && from !== undefined) _scrml_qs.set("from", _scrml_g.String(from))');
     // The base path is concatenated with the query string.
-    expect(client).toMatch(/new EventSource\("\/_scrml\/__ri_route_countdown_\d+" \+ \(_scrml_q \?/);
+    expect(client).toMatch(/new _scrml_g\.EventSource\("\/_scrml\/__ri_route_countdown_\d+" \+ \(_scrml_q \?/);
   });
 
   test("no-arg generator stub keeps the plain query-less EventSource", () => {
     const { client } = compile(NOARG_SRC, "g25-cli-noarg");
     expect(client).toMatch(/function _scrml_sse_ticks_\d+\(_scrml_onMessage\)/);
-    expect(client).toMatch(/new EventSource\("\/_scrml\/__ri_route_ticks_\d+"\)/);
+    expect(client).toMatch(/new _scrml_g\.EventSource\("\/_scrml\/__ri_route_ticks_\d+"\)/);
   });
 });
 

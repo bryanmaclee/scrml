@@ -34,6 +34,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-request-settle-peter-20");
 
@@ -127,7 +128,7 @@ describe("§A: the per-route stub surfaces a non-2xx (non-envelope) as a rejecti
     const { clientJs } = compile(REQ_SRC, "req-stub-okcheck");
     // §19.9.2 — a non-2xx WITHOUT the scrml fail envelope throws (routes to .error).
     expect(clientJs).toContain('if (!_scrml_resp.ok && !(_scrml_body_json !== null && typeof _scrml_body_json === "object" && _scrml_body_json.__scrml_error === true)) {');
-    expect(clientJs).toContain('throw new Error("HTTP " + _scrml_resp.status);');
+    expect(clientJs).toContain('throw new _scrml_g.Error("HTTP " + _scrml_resp.status);');
     // A scrml-fail envelope (HTTP 500) is NOT thrown — it is a returned value.
     expect(clientJs).toContain("return _scrml_body_json;");
   });
@@ -207,12 +208,14 @@ function mountWithFetch(src, baseName, respond) {
       };
     };
     const exec = new Function(
-      "window", "document", "fetch",
-      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
+      "window", "document", "fetch", "__scrml_host__",
+      `${rebindHostAlias(runtimeJs)}\n` + captureInsideChunkScope(clientJs, `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
       `globalThis.__req__ = _scrml_request_userReq;\n` +
       `globalThis.__get__ = _scrml_reactive_get;\n`),
     );
-    exec(window, document, fetchStub);
+    // The emitted code reaches host globals through the alias `_scrml_g` (S457 2a): the
+    // stubs reach it through a view of the global object, not by shadowing.
+    exec(window, document, fetchStub, hostView({ window, document, fetch: fetchStub }));
     return { errors: result.errors ?? [], req: globalThis.__req__, get: globalThis.__get__ };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

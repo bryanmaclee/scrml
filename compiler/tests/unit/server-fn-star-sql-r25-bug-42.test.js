@@ -284,7 +284,7 @@ describe("R25-Bug-42 — server function* + ?{} lowering at top-level", () => {
     const { client } = await compile(src);
     expect(client).not.toMatch(/_scrml_sql/);
     // But MUST contain the EventSource stub.
-    expect(client).toMatch(/new EventSource/);
+    expect(client).toMatch(/new _scrml_g\.EventSource/);
   });
 
   // -------------------------------------------------------------------------
