@@ -27,6 +27,7 @@ import {
   buildExportRegistry,
   validateReExports,
   ambiguousStarSources,
+  localReExportEdges,
 } from "../../src/module-resolver.js";
 
 const D = "$";
@@ -208,5 +209,69 @@ describe("F4 — a name two `export *` bind differently is AMBIGUOUS", () => {
     const errs = validateReExports(g);
     expect(errs.map((e) => e.code)).toEqual(["E-IMPORT-004"]);
     expect(errs[0].message).toContain("`w` is ambiguous in `./b.scrml`");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S458 re-review (N1 / N2 / N2b)
+// ---------------------------------------------------------------------------
+
+describe("N1 — a re-export whose file does not exist is E-IMPORT-006 at the re-export", () => {
+  test("named: E-IMPORT-006 names the missing file at the re-exporter; no cascade E-IMPORT-004", () => {
+    const r = compile("n1-named", {
+      "m.scrml": `${D}{\n    export { M1 } from "./missing.scrml"\n}\n`,
+      "a.scrml": page("M1", "./m.scrml", "M1"),
+    });
+    expect(r.errors).toEqual(["E-IMPORT-006"]);
+    expect(r.msg("E-IMPORT-006")[0]).toContain("Cannot resolve re-export `./missing.scrml`");
+  });
+
+  test("`export *`: the missing star source is named (not only an E-IMPORT-004 at the importer)", () => {
+    const r = compile("n1-star", {
+      "m.scrml": `${D}{\n    export * from "./missing2.scrml"\n}\n`,
+      "a.scrml": page("M2", "./m.scrml", "M2"),
+    });
+    expect(r.errors).toEqual(["E-IMPORT-006"]);
+    expect(r.msg("E-IMPORT-006")[0]).toContain("`./missing2.scrml`");
+  });
+
+  test("the page script order / re-export edges never include a module outside the graph", () => {
+    const g = graphOf({ "/m.scrml": [re("M1", "/missing.scrml"), star("/gone.scrml"), re("K", "/c.scrml")], "/c.scrml": [cnst("K")] });
+    expect(localReExportEdges(g, "/m.scrml").map((e) => e.absSource)).toEqual(["/c.scrml"]);
+  });
+});
+
+describe("N2 — a name reachable only through an unexpanded stdlib star says so", () => {
+  test("`export * from \"scrml:data\"` then a named re-export of one of its names", () => {
+    const r = compile("n2-stdlib-star", {
+      "mine.scrml": `${D}{\n    export * from "scrml:data"\n}\n`,
+      "b.scrml": `${D}{\n    export { tableFor, parseVariant } from "./mine.scrml"\n}\n`,
+      "a.scrml": page("tableFor", "./b.scrml", "1"),
+    });
+    expect(r.errors).toEqual(["E-IMPORT-004", "E-IMPORT-004"]);
+    const m = r.msg("E-IMPORT-004").find((x) => x.includes("parseVariant"));
+    expect(m).toContain('only through `export * from "scrml:data"`, which is not expanded');
+    expect(m).not.toContain("add `export parseVariant`");
+  });
+});
+
+describe("N2b — no W-SERVER-IMPORT-UNEMITTED on a pair that already has a missing-name E-IMPORT-004", () => {
+  const SERVER_PAGE = (from) => `<program>\n${D}{\n    import { nope } from "${from}"\n}\nserver fn go() -> string {\n    return nope()\n}\n<msg> = ""\n<button onclick=${D}{ @msg = go() }>go</button>\n</program>\n`;
+  test("direct import of a missing name", () => {
+    const r = compile("n2b-direct", {
+      "c.scrml": `${D}{\n    export server fn w() -> string {\n        return "c"\n    }\n}\n`,
+      "a.scrml": SERVER_PAGE("./c.scrml"),
+    });
+    expect(r.errors).toEqual(["E-IMPORT-004"]);
+    expect(r.codes).not.toContain("W-SERVER-IMPORT-UNEMITTED");
+  });
+  test("import through a re-export of a missing name", () => {
+    const r = compile("n2b-reexport", {
+      "c.scrml": `${D}{\n    export const K = "k"\n}\n`,
+      "b.scrml": `${D}{\n    export { K, nope } from "./c.scrml"\n}\n`,
+      "a.scrml": SERVER_PAGE("./b.scrml"),
+    });
+    expect(r.errors).toEqual(["E-IMPORT-004"]);
+    expect(r.codes).not.toContain("W-SERVER-IMPORT-UNEMITTED");
   });
 });

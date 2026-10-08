@@ -3503,12 +3503,30 @@ function _compileScrmlImpl(options = {}) {
     // E-IMPORT-004 ("ambiguous", module-resolver.js). Its importer/target pair emits no
     // server link for that name; a "has no server content" / "missing export" warning on
     // the same pair would only misdirect, so that pair stays silent here.
+    // S458 (re-review N2b) — the same for a MISSING name: an import of a name its
+    // target does not export (pair `importer -> target`, name), and a re-export of a
+    // missing name (the re-exporter emits no binding for it, so any importer reading
+    // it through the re-exporter is covered). The E-IMPORT-004 is the report.
     const ambiguousPairs = new Set();
+    const missingByPair = new Map(); // "importer\ntarget" -> Set<name>
+    const missingReExported = new Map(); // re-exporter abs path -> Set<exported name>
     for (const e of allErrors) {
-      if (e && e.code === "E-IMPORT-004" && e.ambiguousStarName && e.importerFile && e.targetFile) {
+      if (!e || e.code !== "E-IMPORT-004" || !e.importerFile || !e.targetFile) continue;
+      if (e.ambiguousStarName) {
         ambiguousPairs.add(resolve(e.importerFile) + "\n" + resolve(e.targetFile));
+      } else if (e.missingName) {
+        const k = resolve(e.importerFile) + "\n" + resolve(e.targetFile);
+        if (!missingByPair.has(k)) missingByPair.set(k, new Set());
+        missingByPair.get(k).add(e.missingName);
+      } else if (e.reExportedMissingName) {
+        const k = resolve(e.importerFile);
+        if (!missingReExported.has(k)) missingReExported.set(k, new Set());
+        missingReExported.get(k).add(e.reExportedMissingName);
       }
     }
+    const reportedMissing = (importer, target, name) =>
+      (missingByPair.get(resolve(importer) + "\n" + resolve(target))?.has(name) ?? false) ||
+      (missingReExported.get(resolve(target))?.has(name) ?? false);
     for (const [filePath, output] of cgResult.outputs) {
       if (!output.serverJs) continue;
       const importerBase = basename(filePath, ".scrml");
@@ -3523,6 +3541,16 @@ function _compileScrmlImpl(options = {}) {
         if (!target) continue; // external / cross-unit / vendor — not our invariant
         if (ambiguousPairs.has(resolve(filePath) + "\n" + resolve(targetAbs))) continue; // S458 F4
         const targetBase = basename(targetAbs, ".scrml");
+        const wanted = [];
+        if (defaultName) wanted.push("default");
+        if (namedClause) {
+          for (const part of namedClause.split(",")) {
+            const t = part.trim();
+            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
+          }
+        }
+        // S458 N2b — every name this import reads is already an E-IMPORT-004.
+        if (wanted.length > 0 && wanted.every((n) => reportedMissing(filePath, targetAbs, n))) continue;
 
         if (!target.serverJs) {
           // (a) MISSING-FILE — target emits no .server.js at all.
@@ -3542,15 +3570,7 @@ function _compileScrmlImpl(options = {}) {
         }
         // (b) MISSING-EXPORT — target emits .server.js but not all imported names.
         const exported = exportedNamesOf(target.serverJs);
-        const wanted = [];
-        if (defaultName) wanted.push("default");
-        if (namedClause) {
-          for (const part of namedClause.split(",")) {
-            const t = part.trim();
-            if (t) wanted.push(t.split(/\s+as\s+/)[0].trim());
-          }
-        }
-        const missing = wanted.filter((n) => n && !exported.has(n));
+        const missing = wanted.filter((n) => n && !exported.has(n) && !reportedMissing(filePath, targetAbs, n));
         if (missing.length > 0) {
           const dk = "E|" + targetAbs + "|" + missing.slice().sort().join(",");
           if (seen.has(dk)) continue;

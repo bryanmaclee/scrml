@@ -358,7 +358,36 @@ export function buildImportGraph(fileASTs) {
       }
     }
 
+    // S458 (re-review N1) — a RELATIVE re-export whose file cannot be resolved is
+    // E-IMPORT-006 at the re-export, the check an `import` of the same specifier gets
+    // above: a re-export links its source module exactly like an import (§21.4). The
+    // record is left out of `exports` (as an unresolvable import is left out of
+    // `imports`), so no later stage links, registers or loads a module that does not
+    // exist; it is kept in `unresolvedReExports` so a name it would have supplied is
+    // not reported a second time (E-IMPORT-004) at an importer.
+    const unresolvedReExports = [];
+    const unresolvedExpNodes = new Set();
     for (const exp of astExports) {
+      const spec = exp.reExportSource;
+      if (typeof spec !== "string" || !(spec.startsWith("./") || spec.startsWith("../")) || spec.endsWith(".js")) continue;
+      const absSource = resolveModulePath(spec, filePath);
+      if (compileSet.has(absSource) || !existsSync(filePath) || existsSync(absSource)) continue;
+      errors.push(new ModuleError(
+        "E-IMPORT-006",
+        `E-IMPORT-006: Cannot resolve re-export \`${spec}\` — no file found at \`${absSource}\`. ` +
+        `Check the path and file name. Relative re-exports are resolved against the re-exporting file's directory.`,
+        exp.span ? { ...exp.span, file: filePath } : null,
+      ));
+      unresolvedReExports.push({
+        specifier: spec,
+        isReExportAll: exp.isReExportAll === true,
+        names: exp.isReExportAll ? [] : String(exp.exportedName ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      });
+      unresolvedExpNodes.add(exp);
+    }
+
+    for (const exp of astExports) {
+      if (unresolvedExpNodes.has(exp)) continue; // S458 N1 — E-IMPORT-006 above
       // F2 (ast-builder-grammar-fixes): `export * from './x'` — emit a
       // single `re-export-all` entry. The seeder/resolver chase via
       // `isReExportAll` rather than name matching.
@@ -417,7 +446,7 @@ export function buildImportGraph(fileASTs) {
       }
     }
 
-    graph.set(filePath, { imports, exports });
+    graph.set(filePath, { imports, exports, unresolvedReExports });
   }
 
   // g-each residual 2 (cross-module CLOSURE) — propagate `returnsMarkup` ACROSS
@@ -1055,7 +1084,8 @@ export function exportedNamesOf(graph, filePath, _seen = new Set()) {
  * never re-exports a source module's non-scrml exports — a `.server.js`'s
  * `routes` / `fetch` — by accident). Only a relative specifier ending in `.scrml`
  * counts, the filter the import side applies to `imp.source`; a stdlib / vendor
- * re-export is not an edge between two emitted modules.
+ * re-export is not an edge between two emitted modules. Nor is one whose source module
+ * is not in the graph (S458 N1: nothing emits a `.client.js` / `.server.js` for it).
  *
  * @param {Map<string, object>} graph
  * @param {string} filePath
@@ -1077,14 +1107,14 @@ export function localReExportEdges(graph, filePath) {
   };
   const named = new Set();
   for (const exp of entry.exports) {
-    if (exp.isReExportAll || !exp.reExportSource || !isLocalScrml(exp.reExportSpecifier)) continue;
+    if (exp.isReExportAll || !exp.reExportSource || !isLocalScrml(exp.reExportSpecifier) || !graph.has(exp.reExportSource)) continue;
     edgeFor(exp).names.push({ exported: exp.name, imported: exp.localName ?? exp.name });
     named.add(exp.name);
   }
   const explicit = new Set();
   for (const exp of entry.exports) if (!exp.isReExportAll && exp.name) explicit.add(exp.name);
   for (const exp of entry.exports) {
-    if (!exp.isReExportAll || !exp.reExportSource || !isLocalScrml(exp.reExportSpecifier)) continue;
+    if (!exp.isReExportAll || !exp.reExportSource || !isLocalScrml(exp.reExportSpecifier) || !graph.has(exp.reExportSource)) continue;
     const e = edgeFor(exp);
     for (const n of exportedNamesOf(graph, exp.reExportSource)) {
       if (n === "default" || explicit.has(n) || named.has(n)) continue;
@@ -1161,18 +1191,86 @@ export function validateImports(graph, exportRegistry) {
             errors.push(err);
             continue;
           }
-          errors.push(new ModuleError(
+          // S458 N1 — a name an unresolvable re-export would have supplied: that
+          // re-export's E-IMPORT-006 is the error; do not report the name again here.
+          if (mayComeFromUnresolvedReExport(graph, imp.absSource, name)) continue;
+          // S458 N2 — the target reaches names only through an `export *` from a module
+          // outside the compile graph (a stdlib / vendor module), which is never
+          // expanded: name that cause, not "add export".
+          const unexpanded = unexpandedStarSpecifiers(graph, imp.absSource);
+          const err = new ModuleError(
             "E-IMPORT-004",
-            `E-IMPORT-004: \`${name}\` is not exported by \`${imp.source}\`. ` +
-            `Check the file for available exports, or add \`export ${name}\` to \`${imp.source}\`.`,
+            unexpanded.length > 0
+              ? unexpandedStarMessage(name, imp.source, unexpanded)
+              : `E-IMPORT-004: \`${name}\` is not exported by \`${imp.source}\`. ` +
+                `Check the file for available exports, or add \`export ${name}\` to \`${imp.source}\`.`,
             imp.span,
-          ));
+          );
+          // S458 N2b — lets the server-import invariant (api.js) stay silent on this pair.
+          err.missingName = name;
+          err.importerFile = toPosix(filePath);
+          err.targetFile = toPosix(imp.absSource);
+          errors.push(err);
         }
       }
     }
   }
 
   return errors;
+}
+
+/**
+ * S458 (re-review N1) — could `name` exported by `filePath` have come from a re-export
+ * whose file does not exist (E-IMPORT-006, recorded in `unresolvedReExports`) — a named
+ * one listing it, or any unresolved `export *` — directly or through in-graph stars?
+ */
+function mayComeFromUnresolvedReExport(graph, filePath, name, _seen = new Set()) {
+  const key = toPosix(filePath);
+  if (_seen.has(key)) return false;
+  _seen.add(key);
+  const entry = graph?.get?.(filePath);
+  if (!entry) return false;
+  for (const u of entry.unresolvedReExports ?? []) {
+    if (u.isReExportAll || u.names.includes(name)) return true;
+  }
+  for (const exp of entry.exports ?? []) {
+    if (exp.isReExportAll && exp.reExportSource && graph.has(exp.reExportSource) &&
+        mayComeFromUnresolvedReExport(graph, exp.reExportSource, name, _seen)) return true;
+  }
+  return false;
+}
+
+/**
+ * S458 (re-review N2) — the specifiers of every `export *` reachable from `filePath`
+ * (through in-graph stars) whose source module is NOT in the compile graph — a stdlib
+ * (`scrml:…`) or vendor module. Such a star is never expanded, so a name it might carry
+ * is not exported through it.
+ */
+function unexpandedStarSpecifiers(graph, filePath, _seen = new Set(), _out = []) {
+  const key = toPosix(filePath);
+  if (_seen.has(key)) return _out;
+  _seen.add(key);
+  const entry = graph?.get?.(filePath);
+  if (!entry) return _out;
+  for (const exp of entry.exports ?? []) {
+    if (!exp.isReExportAll || !exp.reExportSource) continue;
+    if (graph.has(exp.reExportSource)) unexpandedStarSpecifiers(graph, exp.reExportSource, _seen, _out);
+    else {
+      const spec = exp.reExportSpecifier ?? exp.reExportSource;
+      if (!_out.includes(spec)) _out.push(spec);
+    }
+  }
+  return _out;
+}
+
+/** The E-IMPORT-004 text when the module's only route to a name is an unexpanded star (S458 N2). */
+function unexpandedStarMessage(name, moduleSpec, specs, reExportClause = null) {
+  const stars = specs.map((s) => `\`export * from "${s}"\``).join(", ");
+  return `E-IMPORT-004: \`${name}\` is not exported by \`${moduleSpec}\` by name` +
+    (reExportClause ? `, so it cannot be re-exported (\`${reExportClause}\`)` : "") +
+    `. \`${moduleSpec}\` can reach it only through ${stars}, which is not expanded ` +
+    `(an \`export *\` from a module outside this compilation — stdlib or vendor — exports no names here). ` +
+    `Re-export it by name in \`${moduleSpec}\` (\`export { ${name} } from "${specs[0]}"\`), or import it from \`${specs[0]}\` directly.`;
 }
 
 /**
@@ -1217,13 +1315,26 @@ export function validateReExports(graph, cycleFiles = new Set()) {
         errors.push(err);
         continue;
       }
-      errors.push(new ModuleError(
+      // S458 N1 — supplied (if at all) by a re-export whose file is missing: that
+      // re-export's E-IMPORT-006 is the error.
+      if (mayComeFromUnresolvedReExport(graph, exp.reExportSource, imported)) continue;
+      const clause = `export { ${imported === exp.name ? imported : `${imported} as ${exp.name}`} } from "${spec}"`;
+      const unexpanded = unexpandedStarSpecifiers(graph, exp.reExportSource);
+      const err = new ModuleError(
         "E-IMPORT-004",
-        `E-IMPORT-004: \`${imported}\` is not exported by \`${spec}\`, so it cannot be re-exported ` +
-        `(\`export { ${imported === exp.name ? imported : `${imported} as ${exp.name}`} } from "${spec}"\`). ` +
-        `Check \`${spec}\` for its exports, add \`export ${imported}\` there, or remove the name from the re-export.`,
+        unexpanded.length > 0
+          ? unexpandedStarMessage(imported, spec, unexpanded, clause)
+          : `E-IMPORT-004: \`${imported}\` is not exported by \`${spec}\`, so it cannot be re-exported ` +
+            `(\`${clause}\`). ` +
+            `Check \`${spec}\` for its exports, add \`export ${imported}\` there, or remove the name from the re-export.`,
         span,
-      ));
+      );
+      // S458 N2b — the re-exporter emits no binding for this name; the server-import
+      // invariant (api.js) stays silent about importers that read it through here.
+      err.reExportedMissingName = exp.name;
+      err.importerFile = toPosix(filePath);
+      err.targetFile = toPosix(exp.reExportSource);
+      errors.push(err);
     }
   }
   return errors;

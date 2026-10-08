@@ -520,7 +520,12 @@ function computeDependencyClientScripts(
     // s457 (§21.4) — a local `.scrml` RE-EXPORT is a dependency too: the
     // re-exporter's registry footer reads the source module's registry entry when it
     // loads, so the source's `<script>` must be on the page, and earlier.
-    for (const edge of localReExportEdges(importGraph, absScrml)) visit(edge.absSource);
+    // S458 (re-review N1) — only a module this compile emits: a re-export source
+    // outside the graph (a missing file is E-IMPORT-006) has no `.client.js`, and a
+    // `<script>` for it would 404 and leave the re-exporter's footer throwing.
+    for (const edge of localReExportEdges(importGraph, absScrml)) {
+      if (importGraph.has(edge.absSource)) visit(edge.absSource);
+    }
     visiting.delete(absScrml);
     if (!done.has(absScrml)) {
       done.add(absScrml);
