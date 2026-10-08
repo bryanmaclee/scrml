@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1458 of 1458 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1462 of 1462 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1458 of 1458 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 542 | 37.2% |
-| UNSUPPORTED | 739 | 50.7% |
+| NOT-TWINNED | 546 | 37.3% |
+| UNSUPPORTED | 739 | 50.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -34,11 +34,11 @@ Legacy-dialect cases graded on their generated §66 twin: **678** — PASS 76 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (542 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (546 cases; a case counts once per distinct reason):
 
 - 64 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 63 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 56 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- 60 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 46 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - 40 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
@@ -142,7 +142,7 @@ NOT-TWINNED by reason (542 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | reactive | 89 | 25 | · | 3 | · | 40 | 21 | · | · |
-| refinement | 53 | · | · | · | · | 21 | 32 | · | · |
+| refinement | 57 | · | · | · | · | 25 | 32 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
@@ -1161,7 +1161,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (542)
+### NOT-TWINNED (546)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/declared-prop-on-attr-lift-listener-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1600,6 +1600,10 @@ none
 - `refinement/bind-unrefined-field-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: type `number(>0) | string` has a space 
 - `refinement/cell-write-origins-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: written sequence — its grants are the l
 - `refinement/cell-write-origins-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `refinement/copy-in-define-property-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `refinement/copy-in-draft-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `refinement/copy-in-raw-ref-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `refinement/copy-in-semantics-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `refinement/edit-buffer-commit-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `refinement/engine-payload-reject-rt` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · program-move: `text` outside `<program>` (where i
 - `refinement/inplace-removal-length-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
