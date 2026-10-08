@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 245 | 6 |
-| MED | 545 | 4 |
-| LOW | 307 | 0 |
+| HIGH | 244 | 6 |
+| MED | 554 | 4 |
+| LOW | 314 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -4577,7 +4577,9 @@ Three independent axes hide in that 235 B, and **only one of them is compression
 
 **⚑ This also retires the "~200 B gzip whitespace-noise band" framing above** — the noise was never in the compile (which is deterministic), it was in *how* the artifact was being compressed.
 
-**What stays open, and why this entry is not resolved:** the shell shape is **9,628 B over** the aspiration and that is a real, tracked, unhidden gap. The ratchet stops it widening; it does not close it. The live work is the reduction itself — see [[g-emitted-js-never-minified-prize-unmeasured]] (the `--minify` flag is a documented no-op) and runtime tree-shaking. **What is no longer open is the fork**, and no future deliberation should be built on "16 KB with N bytes of margin" as though it described the shipped runtime. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
+**What stays open, and why this entry is not resolved:** the shell shape is **9,628 B over** the aspiration and that is a real, tracked, unhidden gap. The ratchet stops it widening; it does not close it. The live work is the reduction itself — see [[g-emitted-js-never-minified-prize-unmeasured]] (the `--minify` flag is a documented no-op) and runtime tree-shaking. **What is no longer open is the fork**, and no future deliberation should be built on "16 KB with N bytes of margin" as though it described the shipped runtime. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=resolved resolved-by=#1365 -->
+
+> **RESOLVED S459 (#1365):** `scrml build` now ships comment/whitespace-stripped browser JS (§47.9.9). The shell runtime is **7,442 B** gzip -9 (was 26,211; under the 16,384 aspiration), the counter 5,101; the ratchet ceiling is now **7,630 B**. Tree-shaking (ruled S459, not yet built) is the next reduction (measured: shell → ~3,400 B).
 
 > **S440 (PA-measured):** after #1137 (Date/built-in cell + `==` runtime rules) the gated counter-shape runtime sits **9 B under** the Phase-B 16 KB gzip gate — the aspiration gate on the counter shape is back on a knife edge, independent of the shell overage above.
 
@@ -13283,7 +13285,7 @@ Confirms the S346 PA lean (a) — strike — with two corrections to it: strikin
 **Why it is not filed as a defect.** Unminified output may be deliberate: SPEC §47 (Output Name Encoding) is a normative contract over these names; readable emitted JS is a stated project value; and a mangler cannot safely rename cross-chunk-referenced or string-looked-up names, which `_scrml_*` names are in places. **Class: compiler-spec, not language-spec** — emitted-JS shape is implementation freedom (the S278 ESM-chunks precedent), so this needs no language ruling.
 
 Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
-<!-- @gap id=g-emitted-js-never-minified-prize-unmeasured sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/codegen/index.ts,compiler/src/api.js — no minify/mangle stage found in the emit path at all prov=rationale:measured-S347-the-shipped-artifact-carries-45-comments-and-677-lines-and-no-mangle-stage-exists-while-the-outlet-bearing-shell-runtime-is-9628-bytes-over-the-16KB-gzip-aspiration-S353-corrected-from-a-stale-127-byte-margin -->
+<!-- @gap id=g-emitted-js-never-minified-prize-unmeasured sev=MED status=resolved resolved-by=#1365 locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/codegen/index.ts,compiler/src/api.js — no minify/mangle stage found in the emit path at all prov=rationale:measured-S347-the-shipped-artifact-carries-45-comments-and-677-lines-and-no-mangle-stage-exists-while-the-outlet-bearing-shell-runtime-is-9628-bytes-over-the-16KB-gzip-aspiration-S353-corrected-from-a-stale-127-byte-margin -->
 
 ### G-ENDPOINT-MALFORMED-JSON-BODY-THROWS-INSTEAD-OF-COMPILER-OWNED-400 — an unparseable request body escapes as an uncaught `SyntaxError` instead of §61.3's structured 400 — `NEW S347; HIGH; RESOLVED S360-peter (#619)`
 
@@ -23840,3 +23842,69 @@ The S456 write scan (§8.10.3 — hoist only a body proven not to write) accepts
 ### g-impl1-match-arm-sql-server-boundary-s455 — `?{}` inside a `match` block arm in a server function → E-CG-006 + a SyntaxError, with or without `.nobatch()` — `NEW S455; MED; open (pre-existing)`
 <!-- @gap id=g-impl1-match-arm-sql-server-boundary-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(match-arm structured-body emission ~:2796, PA-located-verify) prov=review:s455-hoist-dev -->
 Found while fixing #1325; not hoist-root.
+
+### g-splice-multi-arg-comma-expression-s459 — `@ls.splice(0, 0, @p)` compiles to `.splice((0, 0, x))`, a comma expression: the insert is silently lost (and with some values the array emptied) — `NEW S459; MED; open (pre-existing, data loss)`
+PA-verified on main 3a4a3639a: `<ls>: number[] = [1,2]; <p> = 9; function ins() { @ls.splice(0, 0, @p) }` emits `splice((0, 0, _scrml_cs_reactive_get("p")))`. The literal-argument form `splice(0, 0, p)` emits correctly; an argument that reads a cell triggers it. Found by the S459 refinement-2a review.
+<!-- @gap id=g-splice-multi-arg-comma-expression-s459 sev=MED status=open locus=searched:reactive array-mutation lowering (emit-expr.ts / rewrite.ts) — not traced prov=empirical:S459-PA-reproduced -->
+
+### g-push-object-literal-string-scope-s459 — `@rows.push({ u: "b", n: @m })` fails E-SCOPE-001 "Undeclared identifier `b`" — `NEW S459; LOW; open (pre-existing)`
+Reviewer- and builder-executed (S459 refinement rounds); PA-unverified.
+<!-- @gap id=g-push-object-literal-string-scope-s459 sev=LOW status=open locus=searched:reactive array-mutation argument lowering prov=review:s459-refinement-2a -->
+
+### g-bare-assign-to-param-emits-const-redeclaration-s459 — `function g(n) { n = 6; return n }` emits `const n = 6` → E-CODEGEN-INVALID-LOGIC ("Identifier 'n' has already been declared") — `NEW S459; MED; open (pre-existing, loud)`
+`tildeDeclIsRebind` never sees parameters. Found by the D1 round-5 agent; agent-executed.
+<!-- @gap id=g-bare-assign-to-param-emits-const-redeclaration-s459 sev=MED status=open locus=compiler/src/codegen(tildeDeclIsRebind — PA-located-verify) prov=empirical:s459-d1-r5-agent -->
+
+### g-function-value-reference-not-mangled-s459 — a top-level function used as a VALUE (not called) is never renamed: `${() => h && h()}` emits `h && _scrml_h_3()` → ReferenceError — `NEW S459; MED; open (pre-existing, silent)`
+Breaks §15.11.4's guarded-callback idiom when the caller passes a named function. Found by the D1 round-6 agent; agent-executed.
+<!-- @gap id=g-function-value-reference-not-mangled-s459 sev=MED status=open locus=compiler/src/codegen/fn-name-rename.ts(PA-located-verify) prov=empirical:s459-d1-r6-agent -->
+
+### g-component-multi-instance-body-decl-collision-s459 — two instances of a component whose body declares a `let`/`const`/`function` crash at runtime ("Cannot declare a let variable twice") — `NEW S459; MED; open (pre-existing)`
+Body-level declarations are emitted once under a shared name. Related to the §66.15.1 carried divergence (component-local state shares one global key). Reviewer-executed on main (S459 D1 reviews).
+<!-- @gap id=g-component-multi-instance-body-decl-collision-s459 sev=MED status=open locus=compiler/src/component-expander.ts(PA-located-verify) prov=review:s459-d1-r5 -->
+
+### g-component-body-given-match-unusable-s459 — `given` / `match` on a prop inside a component body fail E-COMPONENT-020/021/035, so §42.3.5's canonical narrowing forms are unusable in components — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 D1 round-6 review), same on base and head.
+<!-- @gap id=g-component-body-given-match-unusable-s459 sev=MED status=open locus=compiler/src/component-expander.ts(parseComponentDef re-parse — PA-located-verify) prov=review:s459-d1-r6 -->
+
+### g-each-block-arrow-handler-never-invoked-s459 — `onclick=${() => { … }}` inside `<each>` emits an arrow that is never invoked (silent; also outside components) — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 D1 review, `q/eachblk.scrml`).
+<!-- @gap id=g-each-block-arrow-handler-never-invoked-s459 sev=MED status=open locus=compiler/src/codegen/emit-each.ts(PA-located-verify) prov=review:s459-d1-r4 -->
+
+### g-each-in-lifted-component-renders-nothing-s459 — an `<each>` inside a lifted component renders nothing on main — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 D1 reviews, probe `lf`); example 23's AssignmentPicker / StatusPicker hit it (E-DG-002 on @currentDriverId etc. is the honest symptom after D1).
+<!-- @gap id=g-each-in-lifted-component-renders-nothing-s459 sev=MED status=open locus=searched:emit-lift.js,emit-each.ts — not traced prov=review:s459-d1-r4 -->
+
+### g-misc-component-pre-existing-s459 — component odds and ends found by the S459 D1 reviews — `NEW S459; LOW; open (pre-existing)`
+(1) destructured-parameter / parameter defaults dropped in component functions (`function f2({ n = 5 })` emits `({ n })`); (2) C-style `for (let i = 0; …)` in a component function → E-SCOPE-001; (3) `<Card id=…>` on a props component → E-COMPONENT-011, contradicting §15.5 "Adding `id=` at a call site is allowed"; (4) `<C bind:n=@v + 1/>` — the tokenizer silently splits off `+ 1`; (5) E-TYPE-031 lenient-model misses `run(onGo)` (passing a `fn | not` to a parameter — needs §7.5.1 argument typing).
+<!-- @gap id=g-misc-component-pre-existing-s459 sev=LOW status=open locus=compiler/src/component-expander.ts prov=review:s459-d1-r4..r7 -->
+
+### g-worker-when-message-separate-block-undeclared-s459 — `when message from <#w>` placed in a separate `${}` block emits an undeclared `_scrml_worker__scrml_input_<id>_` → ReferenceError at load — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 unquoted-values review); the working sample keeps the handler in the same block as the functions.
+<!-- @gap id=g-worker-when-message-separate-block-undeclared-s459 sev=MED status=open locus=compiler/src/codegen/emit-worker.ts(PA-located-verify) prov=review:s459-uq-merge -->
+
+### g-esm-chunk-parse-throws-on-errored-source-s459 — 115 esm-mode `emit-client-esm failed to parse a client chunk` throws on sources that carry compile errors, + 4 stack overflows on `nested-comments.scrml` (all pinned by name in `scripts/host-global-scan.known-throws.txt`) — `NEW S459; MED; open (pre-existing)`
+<!-- @gap id=g-esm-chunk-parse-throws-on-errored-source-s459 sev=MED status=open locus=compiler/src/codegen/emit-client-esm.ts prov=empirical:s459-host-global-scan -->
+
+### g-host-global-scan-blind-spots-s459 — the host-global alias gate (R1) exempts host names the author uses, so it cannot see a bare compiler reference in a unit that declares that same name; known-throws match the key only, not the error class — `NEW S459; LOW; open`
+Fix: a no-exemption mode over synthetic units declaring one user function per host name (or p2-style executed tests); match the error class too.
+<!-- @gap id=g-host-global-scan-blind-spots-s459 sev=LOW status=open locus=scripts/host-global-scan.ts prov=review:s459-uq-merge+s459-hgs-thrown -->
+
+### g-flaky-timing-tests-s459 — cloud-only timing flakes: §59 HAMT "large-N S94 insert loop — sub-quadratic" (Expected < 12) on the `gate` job; `scrml dev` "SIGTERM while the respawned child is starting" on `tracking` — `NEW S459; LOW; open`
+Both failed on unrelated PRs (#1176 docs-only, #1361) and passed on re-run.
+<!-- @gap id=g-flaky-timing-tests-s459 sev=LOW status=open locus=compiler/tests(the two named tests) prov=empirical:s459-ci -->
+
+### g-chunk-mount-id-nondeterminism-s459 — `_scrml_chunk_mount` node ids drift between runs in one long-lived process (`12-snippets-slots`, `gauntlet-r10-odin-filebrowser`) — `NEW S459; LOW; open (pre-existing on main)`
+Fresh-process compiles agree. Could matter for long-lived `scrml dev` / `serve`. Reviewer-executed (S459 ship-strip review).
+<!-- @gap id=g-chunk-mount-id-nondeterminism-s459 sev=LOW status=open locus=searched:route-splitter.ts,emit-client.ts — not traced prov=review:s459-ship-strip -->
+
+### g-ship-strip-esm-chunks-after-strip-s459 — with `--module-format=esm` + per-route chunks, the ESM chunk transform runs AFTER the strip: 21 chunks keep a header comment + an unstripped import line, and §47.9.9's "every hash over the stripped bytes" is false for ESM chunks — `NEW S459; LOW; open`
+Hash-before-esm-transform order is pre-existing (base too); no behaviour impact today. Fix: strip after `toEsmClientChunk`, or narrow the §47.9.9 sentence. Also: the fallback warning names a chunk by its internal EpId (absolute path); `build` ~15-25% slower on a large app (4 parses per artifact).
+<!-- @gap id=g-ship-strip-esm-chunks-after-strip-s459 sev=LOW status=open locus=compiler/src/codegen/index.ts(emitPerRouteChunks ~:4233-4245) prov=review:s459-ship-strip -->
+
+### g-eq-not-unchecked-in-block-handler-arrows-s459 — `== not` (E-EQ-002) is not checked inside block-bodied event-handler arrows: `onclick=${() => { if (@v == not) return … }}` compiles silently (top level and component bodies), while the same check fires inside a `function` — `NEW S459; LOW; open (pre-existing)`
+Agent-executed on origin/main (S459 D1 round-8 agent).
+<!-- @gap id=g-eq-not-unchecked-in-block-handler-arrows-s459 sev=LOW status=open locus=compiler/src/gauntlet-phase3-eq-checks.js(PA-located-verify) prov=empirical:s459-d1-r8-agent -->
+
+### g-top-level-given-emits-bare-name-s459 — top-level `${ given @a :> { <p>${@a.name}</p> } }` lowers the cell to a bare `a` (`if (a !== null && a !== undefined)`) → ReferenceError at load — `NEW S459; MED; open (agent-executed on the D1 branch tip; origin/main not re-checked)`
+<!-- @gap id=g-top-level-given-emits-bare-name-s459 sev=MED status=open locus=searched:emit-logic.ts given lowering — not traced prov=empirical:s459-d1-r8-agent -->
