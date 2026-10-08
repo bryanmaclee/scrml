@@ -116,3 +116,22 @@ Append-only. Times local (2026-10-07/08).
   (`lift <li if=@a != b>`), which cluster-A always forbade but the lift reader accepted. Corpus (by
   compile, head compiler on base corpus): benchmarks/todomvc/app.scrml (2 sites) — migrated to `if=(…)`;
   tests: select-row fixture, todomvc §B.3 fixture, g-lift-per-item-if browser test (3) — migrated.
+
+## commit 4 landed — 158dc1a27 (hook: 32305 pass / 0 fail)
+
+## final measurement (three captures, 2425/2433 sources)
+- A = base compiler + base corpus (0c1a1b081); B = 158dc1a27 compiler + migrated corpus;
+  C = 158dc1a27 compiler + BASE corpus.
+- A vs B: ok->fail 0, fail->ok 0, NO diagnostic-code change in any source; syntax-failing 0 both.
+  Artifacts: 1450 compiled on both sides, 1442 byte-identical after mapping `_scrml_event`->`event`;
+  the 8 that differ = 7 migrated sources + s450-attr-multi-statement-neg (IIFE call now kept — a fix).
+  benchmarks/todomvc compiles byte-identical with `if=(…)`.
+- A vs C (the expected-migration set): E-EVENT-UNBOUND in 26 sources (18 conformance cases, 6 samples,
+  2 trucking-dispatch pages via the 2 component files) + E-ATTR-UNQUOTED-OPERATOR in
+  benchmarks/todomvc (2) = EXACTLY the migrated set. Migrated beyond it (invisible to the compile because
+  the file already fails for other reasons / is outside the roots): samples/gauntlet-r11-zig-buildconfig
+  (2 sites), docs/website/pages/articles/realtime-and-workers.scrml (1 snippet).
+- gates: unit+integration+conformance 30066/0; conformance/run.ts 1354/1404 + 50 xfail; root-level
+  parser/native 2239/0; e2e-render-map 259/0; self-host-v2 slices 2016/0 + lowered 99/0; browser-baseline
+  --check PASS (48); todomvc compile + node --check OK; snippet gate, compile floor, no-default-arm lint,
+  types gate, FACTS / SPEC-INDEX / bootstrap-conformance current.
