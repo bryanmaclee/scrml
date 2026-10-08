@@ -1885,7 +1885,7 @@ export function runCG(input: CgInput): CgOutput {
         bundles.set(name, workerJs);
         // s457 3a — the worker's `when message` listener is compiler-written
         // around user text too: a free `event` in it is E-EVENT-UNBOUND.
-        for (const e of eventUnboundErrors(workerJs, filePath)) {
+        for (const e of eventUnboundErrors(workerJs, filePath, null, "when message")) {
           const wmSpan = (def.whenMessage as { span?: unknown } | null | undefined)?.span;
           if (wmSpan && typeof wmSpan === "object") e.span = wmSpan as typeof e.span;
           errors.push(e);

@@ -443,13 +443,44 @@ describe("§6 S458 re-review — (c), F7, (d), every listener emitter, <each> fu
     expect(clientJs).toMatch(/\.onerror = \(err\) => \{ _scrml_f_\d+\(err\); \}/);
   });
 
-  const W = `<program name="w">\n\${ when message(data) { send({ r: data }) } }\n</>\n`;
-  test("parent `when message from <#w> (d)` — a free `event` in the body is E-EVENT-UNBOUND", () => {
-    expect(compileToOutputs(page(`${W}\${ when message from <#w> (d) { @msg = event.type } }`)).codes).toEqual(["E-EVENT-UNBOUND"]);
+  // S458 round-3 nit: `onclient:error`'s event is named `error` (§38.10.1); with
+  // no plain parameter named in the call, `error` binds nothing.
+  test("channel `onclient:error=f(error.type)` — the unbound `error` is E-EVENT-UNBOUND at the attribute", () => {
+    const { codes, errors } = compileToOutputs(page(CH(`onclient:error=f(error.type)`)));
+    expect(codes).toEqual(["E-EVENT-UNBOUND"]);
+    expect(errors[0].message).toContain("`error` in the `onclient:error=` handler is not bound");
+    expect(errors[0].message).toContain("§38.10.1");
+    expect(errors[0].message).toContain("`onclient:error=handle(e)`");
+    expect(errors[0].message).not.toContain("${(e) =>");
   });
-  test("worker `when message(data)` — a free `event` in the worker body is E-EVENT-UNBOUND", () => {
-    expect(compileToOutputs(page(`<program name="w">\n\${ when message(data) { send({ r: event }) } }\n</>\n`)).codes)
-      .toEqual(["E-EVENT-UNBOUND"]);
+  test("channel `onclient:error=f(error.type)` beside a file-level `const error` — bound, no diagnostic", () => {
+    expect(compileToOutputs(page(CH(`onclient:error=f(error.type)`), `\${ const error = { type: "x" } }`)).codes).toEqual([]);
+  });
+  test("`error` is only the onclient:error listener's name: `onclient:open=f(error)` is not E-EVENT-UNBOUND", () => {
+    expect(compileToOutputs(page(CH(`onclient:open=g(1, error)`))).codes).not.toContain("E-EVENT-UNBOUND");
+  });
+  test("channel `onclient:open=f(event.type)` — the message gives the §38.10.1 form, not a `${(e) => …}` value", () => {
+    const { errors } = compileToOutputs(page(CH(`onclient:open=f(event.type)`)));
+    expect(errors[0].message).toContain("`onclient:open=handle(e)`");
+  });
+
+  const W = `<program name="w">\n\${ when message(data) { send({ r: data }) } }\n</>\n`;
+  test("parent `when message from <#w> (d)` — a free `event` in the body is E-EVENT-UNBOUND, described as the hook", () => {
+    const { codes, errors } = compileToOutputs(page(`${W}\${ when message from <#w> (d) { @msg = event.type } }`));
+    expect(codes).toEqual(["E-EVENT-UNBOUND"]);
+    expect(errors[0].message).toContain("`event` in the `when message` hook is not bound");
+    expect(errors[0].message).not.toContain("inline-block handler");
+  });
+  test("parent `when error from <#w> (e)` — described as the `when error` hook", () => {
+    const { codes, errors } = compileToOutputs(page(`${W}\${ when error from <#w> (e) { @msg = event.type } }`));
+    expect(codes).toEqual(["E-EVENT-UNBOUND"]);
+    expect(errors[0].message).toContain("`event` in the `when error` hook is not bound");
+  });
+  test("worker `when message(data)` — a free `event` in the worker body is E-EVENT-UNBOUND, described as the hook", () => {
+    const { codes, errors } = compileToOutputs(page(`<program name="w">\n\${ when message(data) { send({ r: event }) } }\n</>\n`));
+    expect(codes).toEqual(["E-EVENT-UNBOUND"]);
+    expect(errors[0].message).toContain("`event` in the `when message` hook is not bound");
+    expect(errors[0].message).not.toContain("emitted listener:");
   });
 
   test("<each>: a function VALUE `${() => …}` is the listener (§5.2.1) — judged as at top level", () => {

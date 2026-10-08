@@ -75,15 +75,36 @@ export interface UnboundEventListener {
   text: string;
   start: number;
   end: number;
+  /** The free name found (`event`, or a name `injectedNames` added). */
+  name: string;
 }
 
 /**
- * The compiler-written listeners in `code` whose body references a free
- * `event` (one entry per listener, innermost listener for a nested one).
- * Empty when `code` does not parse (an invalid buffer is reported elsewhere).
+ * The names a listener's parameter would bind, besides `event`. A `<channel>`
+ * `onclient:error` listener's event is called `error` (§38.10.1 table: "Injected
+ * value: `error` … bound to the parameter name in the call expression"); when
+ * the call names no plain parameter (`onclient:error=setV(error.type)`), the
+ * listener's parameter is `_scrml_event` and that `error` binds nothing.
  */
-export function findUnboundEventListeners(code: string): UnboundEventListener[] {
-  if (!code.includes(LISTENER_EVENT_PARAM) || !/(?<![A-Za-z0-9_$.])event(?![A-Za-z0-9_$])/.test(code)) return [];
+export type InjectedNames = (listenerText: string) => readonly string[];
+
+/** Every name an `InjectedNames` may return (the §38.10.1 table's non-`event` names). */
+const INJECTED_NAME_CANDIDATES: readonly string[] = ["error"];
+
+/** One name inside an identifier boundary, anywhere in `code`. */
+const mentions = (code: string, name: string): boolean =>
+  new RegExp(`(?<![A-Za-z0-9_$.])${name}(?![A-Za-z0-9_$])`).test(code);
+
+/**
+ * The compiler-written listeners in `code` whose body references a free
+ * `event` — or a free name `injectedNames` says that listener's parameter would
+ * have bound — (one entry per listener, innermost listener for a nested one;
+ * `event` reported before another name). Empty when `code` does not parse (an
+ * invalid buffer is reported elsewhere).
+ */
+export function findUnboundEventListeners(code: string, injectedNames?: InjectedNames): UnboundEventListener[] {
+  if (!code.includes(LISTENER_EVENT_PARAM)) return [];
+  if (!mentions(code, "event") && !(injectedNames && INJECTED_NAME_CANDIDATES.some((n) => mentions(code, n)))) return [];
   const ast = tryParse(code) ?? tryParse(neutralizeAwait(code));
   if (!ast) return [];
   const listeners: N[] = [];
@@ -133,19 +154,28 @@ export function findUnboundEventListeners(code: string): UnboundEventListener[] 
   };
   walkCalls(ast);
   const refs = resolveProgramReferences(ast);
-  const hit = new Map<N, true>();
+  const hit = new Map<N, string>();
+  const injectedOf = new Map<N, readonly string[]>();
+  const injected = (l: N): readonly string[] => {
+    let v = injectedOf.get(l);
+    if (v === undefined) { v = injectedNames ? injectedNames(code.slice(l.start, l.end)) : []; injectedOf.set(l, v); }
+    return v;
+  };
   for (const [id, binding] of refs) {
-    if (binding !== undefined || (id as N).name !== "event") continue;
+    const name = (id as N).name as string;
+    if (binding !== undefined || (name !== "event" && !INJECTED_NAME_CANDIDATES.includes(name))) continue;
     if (userListenerFns.some((u) => u.start <= (id as N).start && (id as N).end <= u.end)) continue;
     let inner: N | null = null;
     for (const l of listeners) {
       if (l.start <= (id as N).start && (id as N).end <= l.end && (!inner || l.start >= inner.start)) inner = l;
     }
-    if (inner) hit.set(inner, true);
+    if (!inner) continue;
+    if (name !== "event" && !injected(inner).includes(name)) continue;
+    if (hit.get(inner) !== "event") hit.set(inner, name);
   }
-  return [...hit.keys()]
-    .sort((a, b) => a.start - b.start)
-    .map((l) => ({ text: code.slice(l.start, l.end), start: l.start, end: l.end }));
+  return [...hit.entries()]
+    .sort(([a], [b]) => a.start - b.start)
+    .map(([l, name]) => ({ text: code.slice(l.start, l.end), start: l.start, end: l.end, name }));
 }
 
 /** E-EVENT-UNBOUND for every such listener, at its source attribute when recorded. */
@@ -153,6 +183,8 @@ export function eventUnboundErrors(
   code: string,
   filePath: string,
   fnNameMap?: ReadonlyMap<string, string> | null,
+  /** What an UNRECORDED listener in `code` is (the worker bundle: `"when message"`). */
+  defaultHook: string | null = null,
 ): CGError[] {
   const out: CGError[] = [];
   // The check runs on the text AFTER the user-function rename; the registry
@@ -163,8 +195,11 @@ export function eventUnboundErrors(
   const unrename = (text: string): string => inverse.size === 0 ? text
     : text.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g, (w) => inverse.get(w) ?? w);
   const reported = new Set<string>();
-  for (const l of findUnboundEventListeners(code)) {
-    const src = listenerSourceOf(l.text) ?? listenerSourceOf(unrename(l.text));
+  const sourceOf = (text: string) => listenerSourceOf(text) ?? listenerSourceOf(unrename(text));
+  // §38.10.1: the `onclient:error` listener's event is named `error`.
+  const injectedNames: InjectedNames = (text) => sourceOf(text)?.attrName === "onclient:error" ? ["error"] : [];
+  for (const l of findUnboundEventListeners(code, injectedNames)) {
+    const src = sourceOf(l.text);
     // One attribute can be wired by more than one listener (an engine arm's
     // delegated registry entry and its arm factory): report it once.
     const sp0 = src && src.span && typeof src.span === "object" ? (src.span as Record<string, unknown>) : null;
@@ -180,20 +215,37 @@ export function eventUnboundErrors(
       : /^<match:[^:]*:([^>]*)>$/.test(synthFile) ? ` (in the \`<match>\` arm \`<${/^<match:[^:]*:([^>]*)>$/.exec(synthFile)![1]}>\`)`
       : synthFile === "__meta_emit__" ? " (in markup emitted by `^{ emit(…) }`)"
       : ` (in ${synthFile})`;
-    const attr = src && src.attrName && /^on/i.test(src.attrName) ? src.attrName : null;
-    const where = attr ? `the \`${attr}=\` handler` : "an event handler";
-    const shape = attr ? `\`${attr}=\${(e) => …}\`` : "`onclick=${(e) => …}`";
     const span = (src && src.span && typeof src.span === "object" ? src.span : null)
       ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-    const listing = src ? "" : ` (emitted listener: \`${l.text.length > 160 ? l.text.slice(0, 157) + "…" : l.text}\`)`;
-    out.push(new CGError(
-      "E-EVENT-UNBOUND",
-      `E-EVENT-UNBOUND: \`event\` in ${where} is not bound. A bare or inline-block handler does not receive ` +
-      `the event object (SPEC §5.2, §5.2.3) — nothing in the handler or around it declares \`event\`, and ` +
-      `the compiler's listener parameter is not visible to it. Take the event as a parameter of a function ` +
-      `you write — ${shape} — and use that parameter where the handler reads \`event\`${listing}${where2}.`,
-      span as never,
-    ));
+    const hook = src ? (src.attrName && /^when /.test(src.attrName) ? src.attrName : null) : defaultHook;
+    const listing = src || hook ? "" : ` (emitted listener: \`${l.text.length > 160 ? l.text.slice(0, 157) + "…" : l.text}\`)`;
+    const attr = src && src.attrName && /^on/i.test(src.attrName) ? src.attrName : null;
+    const n = `\`${l.name}\``;
+    let text: string;
+    if (hook !== null) {
+      // A worker / nested-program hook (§4.12.4, §46): its body sees the value
+      // it names in parentheses, never the event object.
+      text = `${n} in the \`${hook}\` hook is not bound. A \`when message\` / \`when error\` hook does not receive ` +
+        `the event object (SPEC §4.12.4, §46) — its body sees only the value it names in parentheses ` +
+        `(\`when message(data) { … }\` in the worker, \`when message from <#w> (data) { … }\` / ` +
+        `\`when error from <#w> (e) { … }\` in the parent), and nothing in or around the body declares ${n}. ` +
+        `Read the named value where the body reads ${n}${where2}.`;
+    } else if (attr && /^onclient:/i.test(attr)) {
+      // A `<channel>` client hook (§38.10.1): the event is bound to the call's
+      // parameter NAME; with none named, the call has no event.
+      text = `${n} in the \`${attr}=\` handler is not bound. A \`<channel>\` \`onclient:*\` handler receives the ` +
+        `event only under the parameter name its call expression gives (SPEC §38.10.1) — this call names none ` +
+        `(its first argument is not a plain name), and nothing in the file declares ${n}. Name the event as the ` +
+        `call's first argument — \`${attr}=handle(e)\` — and read it in \`handle\`${where2}.`;
+    } else {
+      const where = attr ? `the \`${attr}=\` handler` : "an event handler";
+      const shape = attr ? `\`${attr}=\${(e) => …}\`` : "`onclick=${(e) => …}`";
+      text = `${n} in ${where} is not bound. A bare or inline-block handler does not receive ` +
+        `the event object (SPEC §5.2, §5.2.3) — nothing in the handler or around it declares ${n}, and ` +
+        `the compiler's listener parameter is not visible to it. Take the event as a parameter of a function ` +
+        `you write — ${shape} — and use that parameter where the handler reads ${n}${listing}${where2}.`;
+    }
+    out.push(new CGError("E-EVENT-UNBOUND", `E-EVENT-UNBOUND: ${text}`, span as never));
   }
   return out;
 }

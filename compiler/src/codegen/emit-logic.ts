@@ -4524,7 +4524,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // s457 3a — the listener parameter is `_scrml_event` (outside the user
       // namespace); the body sees `binding`, and a free `event` is E-EVENT-UNBOUND.
       const listener = `function(_scrml_event) { const ${binding} = _scrml_event.data.data; ${body}; }`;
-      recordListenerSource(listener, node.span, null);
+      recordListenerSource(listener, node.span, "when message");
       return `${workerVar}.addEventListener("message", ${listener});`;
     }
 
@@ -4546,7 +4546,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // s457 3a — as `when message`: the body sees `binding`; the listener's own
       // parameter is `_scrml_event`, so a free `event` in the body is E-EVENT-UNBOUND.
       const listener = `function(_scrml_event) { const ${binding} = _scrml_event; ${body}; }`;
-      recordListenerSource(listener, node.span, null);
+      recordListenerSource(listener, node.span, "when error");
       return `${workerVar}.addEventListener("error", ${listener});`;
     }
 
