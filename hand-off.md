@@ -1,3 +1,67 @@
+# S458 ADDENDUM (after the limit reset) — supersedes the S458 pickup table below where they differ
+
+**Rulings since the wrap** (user-voice §S458): runtime `meta.emit` GATED ("a"); D1 codes = PA recs (`E-COMPONENT-PROP-WRITE` new; E-SCOPE-001 row amended); `export *` RATIFIED ("ratify 21.4" → landed as SPEC text #1357).
+**Merged since the wrap:** #1355 (wrap) · #1356 (maps → 8ce6d61b5) · #1357 (§21.4 export * SPEC text).
+**Branches (all committed; landing ORDER matters — shared files):**
+1. **Host-global alias** — fix round 3 in flight on a FRESH branch from `cd638efe5` (library CSP: no `data:` import in browser-reachable artifacts; gate shard output to a file + R4 no-`data:` rule). Then re-review → land FIRST.
+2. **`^{}` allow-list** — final review LAND-WITH-NITS at `605337374`; final fix round in flight on a fresh branch from `605337374` (F3 compile-time `^{}` in a runtime if-branch silently dropped; F4 `meta.get` returns undefined for every cell — namespacing; `meta.*` sub-member closure; strict-mode effect bodies). Land SECOND.
+3. **Runtime `meta.emit` gate** (ruling "a") — in flight on a fresh branch from `605337374`; told to merge the meta final-fix branch. Land THIRD.
+4. **Unquoted values + `event`** — READY at `worktree-agent-a8c25b28dfe69bc8d` @ `417fa38a3` (determinism fixed: fixed host-global list, byte-identical-across-hosts test; corpus 0 outcome changes; merged with main 24922c0a1). Land after #1 (shares `fn-name-rename.ts`), then remove the host-global exception in `ref()` (follow-up noted in its progress.md). **Open ruling (nit a):** `onclient:open=onOpen(x, 1)` silently shadows a declared `x` — agent rec: extend E-CHANNEL-005 to `onclient:*` >1 arg; separately rule collision-with-declaration.
+5. **D1 declared props** — round 4 resumed (`worktree-agent-a2dd4a6ac2e78db31`) + the two D1 codes queued to it; then re-review.
+6. **Refinement 2a fix round** — resumed (`worktree-agent-a956eaa623dd550e4`); then re-review; then 2b, R4, position 5 / R1.
+Agents still running at ctx stop report into their branches' `progress.md` — read those, not this file, for their final state.
+
+---
+
+# scrml — Session 458 (bryan · ASUS-Vivobook) — WRAP (stopped by the weekly API limit)
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S457 below. Rulings: `scrml-support/user-voice-scrml.md` §S458 (2 rulings + 1 PA reading).
+> Board: `S458-bryan.md`. Changelog: `docs/changelog.md` §S458. Mechanical state: delta-log `[3930]`–`[3938]`. Solo session.
+> **Why it ended:** every agent died on `You've hit your weekly limit · resets Oct 11, 11pm (America/Denver)`. Earlier a network
+> outage (ENOTFOUND) killed all six live agents once — all resumed, nothing lost. No dispatch works until the limit resets.
+
+## ⏭ NEXT-SESSION PICKUP (ordered) — six branches parked mid-review; NOTHING is lost
+
+Every branch below is committed on its own local branch (`worktree-agent-<id>`), worktree retained under `.claude/worktrees/agent-<id>/`.
+Agents can be RESUMED only within this conversation; a new session starts fresh agents — each brief below names the branch to `git reset --hard` to and the review findings outstanding.
+**Landing order** (shared files): host-global alias → meta allow-list → unquoted values → D1 → refinement 2a. Each merges main before landing.
+
+### 1. Host-global alias (S457 ruling 2a) — `worktree-agent-ade1ea0d759a13c9d` @ `cd638efe5` — awaiting RE-REVIEW
+Round 2 done: ES-module artifacts import `_scrml_g` from a `data:` module (`import _scrml_g from "data:text/javascript,export default globalThis";`), classic scripts `var _scrml_g` before user code, worker user code in an IIFE, foreign-seal reads `import.meta`, E-CG-016 `globalThis` reservation DROPPED; CI gate `scripts/host-global-scan.ts --check` (2473 units × 5 modes, 85–130 s, bite proven). Merged with main c4eb2c589. Review-2 was killed by the limit before reporting. **Owed:** re-review — esp. `data:` import on every runtime (bun build bundling, deploy targets, Node ESM), F1 under Node (`import.meta.require` absent), no `data:` import in a BROWSER artifact (CSP), gate soundness. Frozen review tree: `.claude/worktrees/s458-rev-hga2`. Gzip SPA budget: 16382 B vs <16384 (2 B margin).
+### 2. `^{}` allow-list (ruling 1a) — `worktree-agent-a0e77ba5d2055c23b` @ `2190050f0` — round-4 fix COMMITTED, report never delivered
+Rounds 1–3b: closed allow-list, two readers, total AST descent, runtime capture rewrite (`_scrml_cap.<name>` internal object; `meta.bindings` kept as the §22.5.2 snapshot), emitted-text acorn check (allow-list by construction, NO host-name list), compile-time realm `microtaskMode: "afterEvaluate"` + 5 s bound, runtime §22.5.1 timers. Round 4 (F-A: `meta.get("constructor")` → page `Object` → prototype walk to `Function`; PA triage MED — page realm, `${}` can already call `window.eval`) was being fixed: commit `2190050f0` "author-keyed runtime registries…" — read its progress.md for what remains (it was adding a conformance positive for a cell named `constructor`). **Also owed from round 4:** runtime `meta.emit(html)` → `innerHTML` ungated — execute first, then governing-sentence gate (§22.5.1/§22.4.1/§5.2/§22.12): implement if governed, else bring to bryan as a ruling with corpus count. Then a final re-review (the last one was cut short by a safety classifier — frame reviews as base-vs-head differential, never "break it").
+### 3. Unquoted values + `event` (S457 rulings 3a/4a) — `worktree-agent-a1d9d34bac78c568c` @ `c89ffb56a` — awaiting RE-REVIEW (round 3)
+One shared reader `compiler/src/unquoted-attr-value.ts` (tokenizer + native `tag-frame.js` + lift); E-EVENT-UNBOUND on the FINAL emitted client text (`codegen/listener-event-check.ts`, after the user-fn rename); channel / worker listeners covered. Merged with main c4eb2c589. **Owed:** re-review — esp. `isHostGlobalName`'s `name in globalThis` fallback in `fn-name-rename.ts` (compiler-process-dependent → a DETERMINISM defect if it changes output by runtime; also touches the alias branch's file — land the alias first, then merge), and `_alignToSourceText` wrong-span risk. PA-accepted readings (bryan veto window): `event` refused in non-function `${…}` handlers too; operators after a non-handler unquoted value refused; lifted markup now enforces cluster-A (`lift <li if=@a != b>` refused; todomvc migrated, byte-identical). Frozen tree: `.claude/worktrees/s458-rev-uq3`.
+### 4. D1 declared props — round 4 — `worktree-agent-a2dd4a6ac2e78db31` @ `cd3ce0845` + UNCOMMITTED WORK
+Rounds 1–3 (`worktree-agent-ae6f33d76a517d33c` @ `540bc7f1e`): declared props never reach the root (fixed at the CE merge), E-COMPONENT-012 narrowed, bind-only write-back wired (§15.11.1), `_bindProps` mirror cell removed, structural substitution, text fallback deleted (`component-prop-js-substitute.ts`), tokenizer `delim` / `exprSource` escape fix. Round-3 review = DO-NOT-LAND: TWO scope models disagree — destructured locals named like a `bind` prop write the parent's cell (F5, new, silent). Round 4 (fresh agent) made ONE binding model; it committed `cd3ce0845` and left staged + unstaged edits when the limit hit. **Salvage patch:** `~/.cache/scrml-agent-tmp/s458-salvage/a2dd4a6ac2e78db31-uncommitted.patch` (+ `-status.txt`); the worktree itself still holds them. **Owed:** finish round 4 per `docs/changes/s458-d1-round4/BRIEF.md` on that branch (F5/F3/F7/F9/F1/F2/F4/N1), then re-review.
+**bryan's two code calls (still open):** a body write to a non-`bind` prop — currently E-ASSIGN-004 (PA rec: a new dedicated `E-COMPONENT-PROP-WRITE`); a prop referenced in unparseable component text — currently E-SCOPE-001 (PA rec: keep, amend its §34 row). Side effect to know: a component whose body writes a `bind` prop is now mandatory-bind under impl#1.
+### 5. Refinement — slice 2a fix round — `worktree-agent-a956eaa623dd550e4` @ `ee9d4a534` + UNCOMMITTED WORK
+Slice 1 LANDED (#1354). Slice 2a (`worktree-agent-a8d0ca5626d2a3728` @ `bacf30adf`, frozen at `.claude/worktrees/s458-rev-ref2a`) = DO-NOT-LAND: F1 bind to a struct field compiles to `if (false …)` (PA-reproduced), F2 many cell writes unchecked → boundary moved to the RUNTIME CELL SETTER, F3 exponential judges → hoisted per type, F4 worker-scan false positive. The fix-round agent committed F3 (`ee9d4a534`) and had 8 files of further edits (shadow/opaque detection in `desugarRefinedAssignExprs`) when the limit hit. **Salvage patch:** `~/.cache/scrml-agent-tmp/s458-salvage/a956eaa623dd550e4-uncommitted.patch` (+ untracked copies). **Owed:** finish F1/F2/F4 per `docs/changes/s458-refinement-2a-fix/BRIEF.md`, then re-review; then 2b (R3 + three survivors), then R4 (space-separated shared-core reader + its ~17 param sites), then position 5 / R1. Plan: `docs/changes/s458-refinement-every-position/PLAN.md`.
+### 6. Banked, not started
+O18 deep-dive (whether `class=` / `style=` / `key=` / `id=` on a plain use are markup attributes or construction data; §15.5 vs §15.10 `id=` contradiction) — bank in `handOffs/dpa-queue.md`. Meta-checker is also inconsistent with §66.15.1 class merging (bootstrap `E-DECL-USE-ATTR` refuses `class=`).
+
+## What landed (6 PRs, all S239-reviewed or carved out)
+#1345 rename/handler (S457) · #1350 maps · #1351 sinks · #1352 re-export + dev tenant gate · #1353 Windows EBUSY · #1354 refinement slice 1. Details: changelog §S458.
+
+## 🔭 DURABLE
+**Six times one lesson: two readers, one gap.** Two attribute readers (tokenizer vs native `tag-frame.js` vs lift), two scope models (structured walker vs acorn substituter), a text fallback beside a tree substituter, a deny-list beside an allow-list, a per-site judge beside a setter. Each review found the gap between the two; each fix that held moved the boundary to ONE reader on the text/tree the runtime executes. When a brief creates a second path "for the cases the first can't handle", that second path is the next finding.
+**Auto-merge can land a PR at the head CI last saw.** #1352 merged before the Windows fix commit reached the branch → main's `windows` red. Arm auto-merge only after the last commit is pushed, or re-check the merged SHA.
+**Agents die; branches don't.** The outage and the limit together killed 12 agent runs; zero work was lost because every brief demanded incremental commits + progress.md. Keep that, and salvage uncommitted worktree edits to a patch outside /tmp before any cleanup.
+
+## ⚑ MISSES (mine)
+1. ★ D1 round 2: I accepted a "text fallback for block arrows" in the fix design — it became round 3's DO-NOT-LAND. A fallback reader is a second reader.
+2. ★ Meta round 3: the agent shipped a host-global DENY list; I caught it before review, but my round-3 brief should have forbidden name lists explicitly (S456 lesson).
+3. ★ #1352: armed auto-merge before the Windows fix was pushed → main red on `windows` until #1353.
+4. ★ Briefs did not budget context; two agents ran out (refinement ×1 at 900k, D1 ~700k). Later briefs carry a CONTEXT BUDGET clause.
+
+## Worktrees (wrap 6b)
+NOT cleaned — every in-flight worktree is RETAINED (six branches above + frozen review trees `s458-rev-*`, `s458-chk-*`). Next session: remove the frozen review trees once their branches land (`git worktree list | grep s458-rev`).
+
+## Gate at close
+Cloud `gate` green on every S458 merge (#1345 #1350–#1354; `windows` red on main between #1352 and #1353, green after). Review floor: markers for #1345 #1349–#1354 written in this wrap. pa-ruled count: 3 (unchanged). Maps: NOT refreshed this wrap (agents unavailable) — stamp `125486345`; refresh next session before the first dispatch.
+
+---
+
 # scrml — Session 457 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S456 below. Rulings authority: `scrml-support/user-voice-scrml.md` §S457 (11 rulings + 2 PA readings).

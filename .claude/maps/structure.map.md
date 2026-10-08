@@ -1,6 +1,21 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
+# user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
+# event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
+# gate + re-export cycles / missing names refused, #1353 test, #1354 §53 refinement slice 1 (one reader, base-type-first
+# fail-closed judge), #1355 S458 wrap), incremental refresh in an isolated worktree @ `8ce6d61b5` = `origin/main`.**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 8 commits behind HEAD (watermark 125486345, HEAD
+# 8ce6d61b5)` — matches `git log --oneline 125486345..HEAD` (8).
+# ⛑ FIGURES AT `8ce6d61b5` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **306,600 lines / 257 files**
+# (+1 module: `codegen/fn-name-rename.ts`; `git ls-tree` incl. `.d.ts` = 258) · test files **1,655** by `git ls-tree -r
+# --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10) · `compiler/SPEC.md` **47,062** lines (+16) · conformance
+# **1423** `case.scrml` (+27: refinement 12, module 8, attr-executable-sink 7) · `bootstrap-conformance.ts --check`:
+# **current** · FACTS CLI verbs **12** · NO new diagnostic code this window (E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003,
+# E-DEPLOY-DB-TENANT-UNDECLARED gained emit sites/senses) · known-gaps heading/marker drift **68** (was 65) · `state.ts
+# --check` FAILS on `@generated:recent-sessions (master-list.md)` STALE. Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `125486345`), CARRIED. ━━━━━━━
 # ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
 # verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
 # slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
@@ -973,6 +988,34 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S458 — STRUCTURE DELTA (`125486345..8ce6d61b5`; 8 commits, source-bearing #1345 #1351 #1352 #1354)
+
+| path | change |
+|---|---|
+| `compiler/src/codegen/fn-name-rename.ts` | **NEW** (514 lines) — the client `post-fn-name-mangle` pass made SCOPE-AWARE: `renameUserFnRefsScoped(body, fnNameMap)` :86 parses the body (Acorn) and splices only references NO enclosing scope binds; returns `null` on a body that does not parse -> caller falls back to the old regex. Sole caller `codegen/emit-client.ts:3365` (`renameUserFnRefsScoped(segment, fnNameMap) ?? regexMangle(segment)`, regex at :3356) (#1345) |
+| `codegen/emit-event-wiring.ts` / `-bindings` / `-each` / `-engine` / `-variant-guard` / `-html` | compiler-emitted locals renamed into the `_scrml_` namespace (e.g. `el = "_scrml_el"` default `emit-event-wiring.ts:458`); 46 test files' pinned spellings updated (#1345) |
+| `compiler/src/tokenizer.ts` | `isPostfixContinuation` :399 — an UNQUOTED event-handler value continues through `.name` / `?.` / `[…]` / `(…)` to the §5.2.3 boundary (callers :1031/:1038) (#1345) |
+| `compiler/src/attr-injection-sink.ts` | 241 -> **407** lines — `animationUrlTarget` :191, `quotedAnimationValueNeedsRuntimeGuard` :274, `classifyInterpolatedAttrSink` :297, `executableDataWriteSink` :348 (srcdoc / event-handler text from data) (#1351) |
+| `compiler/src/codegen/url-attr-guard.ts` | 46 -> **122** lines — `urlGuardTarget` :53 (SVG animation 4th arg), `refuseExecutableDataWrite` :99 (#1351) |
+| `compiler/src/runtime-url-guard.js` | 243 -> **281** lines — `_SCRML_SVG_ANIMATION_ELEMENTS` :208, `_SCRML_SVG_ANIMATION_VALUE_ATTRS` :214; `_scrml_safe_url` now :239 (4-arg: `el, name, value, target`); `_scrml_url_shape_ok` now :272 (#1351) |
+| `compiler/src/codegen/emit-lift.js` | lift wires every rule-1 `on…` name as a listener (:388-:396 via `isExecutableEventHandlerAttrName`); `refuseExecutableDataWrite` at :1396/:1714/:1761/:1880/:3349 (#1351) |
+| `compiler/src/module-resolver.js` | 1136 -> **1629** lines — `export *` enumerated in the registry; NEW exports `resolveExportedBinding` :948 (memoized per graph), `ambiguousStarSources` :1021, `exportedNamesOf` :1059, `localReExportEdges` :1094, `isReExportedByAnother` :1140, `validateReExports` :1296; `detectCircularImports` :641 walks re-export edges; `unresolvedReExports` (E-IMPORT-006) :368; wired in `resolveModules` :1357 (:1365/:1378). ⚠ file holds a control byte at :524 — plain `grep` treats it as binary; use `grep -a` (#1352) |
+| `compiler/src/api.js` | -> **4822** lines — `emitValueOnlyServerJsForDanglingImports` :3625 (follows re-export lines to a fixpoint), `reconcileServerReExports` :3700 (called :3728), `checkServerImportInvariant` :3495 (silent on ambiguous / missing-name pairs); commit point moved: `hasFatalBeforeWrite` **:3815**, `artifactsWritten = true` :4456, result field :4699 (#1352, #1354) |
+| `compiler/src/codegen/emit-server.ts` | `serverReExportLines` :969 (`export { w as helper } from "./c.server.js"`; stars expanded to names); tenant check emit now :7267 (#1352) |
+| `compiler/src/codegen/emit-client.ts` / `emit-client-esm.ts` / `index.ts` | client registry footer + page load order follow re-exports (`emit-client.ts` :171/:210/:1210; `emit-client-esm.ts` :259/:343/:355; `index.ts` :440/:520/:594/:1448/:2592) (#1352) |
+| `compiler/src/codegen/tenant-startup-check.ts` | 110 -> **275** lines — the gate is ONE text: `TENANT_GATE_LINES` :128, `tenantGateEntryLines` :236 (what `_server.js` emits), `createTenantGate` :261 (dev runs it in-process), `tenantHealthReason` :273, `TENANT_REFUSED_STATUS_TEXT` :270 (#1352) |
+| `compiler/src/commands/dev.js` | `loadServerRoutes` :417 collects module checks -> `createTenantGate` :535; 503 for every request while a finding stands; `/_scrml/health` :315 (#1352) |
+| `compiler/src/commands/build.js` | 1607 -> **1504** lines — server-entry gate now `tenantGateEntryLines` :578 inside `generateServerEntry` :377 (inline gate text removed) (#1352) |
+| `compiler/src/type-system.ts` | -> **31,344** lines — ONE refinement reader: `findPredicateClose` :1747, `parsePredicateExpr` :1780 (whole annotation; range form; malformed -> `error` predicate), `checkRefinementJudgeable` :3668 (E-CONTRACT-002/-003 at the declaring site in every zone), `RefinementStampT` :3750, `refinementShape` :3765, `refinementStamp` :3785; stamps `param.refinement` :11029, `returnRefinement` :11089, decl `predicateCheck` :11614/:12152 (#1354) |
+| `compiler/src/codegen/emit-predicates.ts` | regex mirror `parsePredicateAnnotation` **DELETED**; `JudgeShape` :146, `judgeExpr` :168 (base type first, then containers, then predicate; unjudgeable -> `false`), `Refinement` :565, `refinementOf(stamp)` :574; `URL_SHAPE_FN` now :62, `SERVER_URL_SHAPE_HELPER` :71, `needsUrlShapeHelper` :78 (#1354) |
+| `compiler/src/ast-builder.js` | `typeTokenText` :183 — STRING tokens re-quoted when an annotation is re-joined (`collectTypeAnnotation` :7478, `-> T` collectors :11051-, `parseParamList` appendTok) (#1354) |
+| `stdlib/data/table-for.scrml` | `TableSort` now exported (surfaced by the new re-export check) (#1352) |
+| `compiler/tests/` | +10 — see test.map.md `## S458` |
+| `conformance/cases/` | +27 (1396 -> **1423**) |
+| `docs/changes/s457-*/`, `s458-*/` | 5 dispatch dirs (historical by design — compliant) |
+
+FACTS at `8ce6d61b5`: `compiler/src` **306,600 lines / 257 files** (+1). No source file deleted.
 
 ## S457 — STRUCTURE DELTA (`ba2712973..125486345`; 10 commits, source-bearing #1340-#1348)
 

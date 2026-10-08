@@ -1,6 +1,21 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
+# user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
+# event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
+# gate + re-export cycles / missing names refused, #1353 test, #1354 §53 refinement slice 1 (one reader, base-type-first
+# fail-closed judge), #1355 S458 wrap), incremental refresh in an isolated worktree @ `8ce6d61b5` = `origin/main`.**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 8 commits behind HEAD (watermark 125486345, HEAD
+# 8ce6d61b5)` — matches `git log --oneline 125486345..HEAD` (8).
+# ⛑ FIGURES AT `8ce6d61b5` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **306,600 lines / 257 files**
+# (+1 module: `codegen/fn-name-rename.ts`; `git ls-tree` incl. `.d.ts` = 258) · test files **1,655** by `git ls-tree -r
+# --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10) · `compiler/SPEC.md` **47,062** lines (+16) · conformance
+# **1423** `case.scrml` (+27: refinement 12, module 8, attr-executable-sink 7) · `bootstrap-conformance.ts --check`:
+# **current** · FACTS CLI verbs **12** · NO new diagnostic code this window (E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003,
+# E-DEPLOY-DB-TENANT-UNDECLARED gained emit sites/senses) · known-gaps heading/marker drift **68** (was 65) · `state.ts
+# --check` FAILS on `@generated:recent-sessions (master-list.md)` STALE. Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `125486345`), CARRIED. ━━━━━━━
 # ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
 # verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
 # slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
@@ -1466,6 +1481,31 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
 
+## S458 — READ FIRST (facts at `8ce6d61b5`; supersedes the S457 block below where it conflicts)
+
+- ⛑ **Refinements have ONE reader** (§53): `type-system.ts` reads the whole annotation and STAMPS it (`param.refinement`, `returnRefinement`, decl `predicateCheck`); codegen reads only the stamp via `emit-predicates.ts` `refinementOf` :574 -> `judgeExpr` :168. The codegen regex mirror `parsePredicateAnnotation` is DELETED — never re-parse annotation text in codegen. The judge checks the BASE type first and REFUSES what it cannot judge; malformed predicates are E-CONTRACT-002 at the declaring site in every zone. Enum-subset params are now checked.
+- ⛑ **`.scrml` re-exports are real** (§21.4): `export { X } from` and `export * from` reach server bundle, client registry and page; cycles via re-export are E-IMPORT-002; missing / ambiguous names E-IMPORT-004; missing file E-IMPORT-006. Resolution lives in `module-resolver.js` (`resolveExportedBinding` :948) — **use `grep -a` on that file** (a control byte at :524 makes plain grep print nothing).
+- ⛑ **The tenant startup gate is ONE text for both hosts** — `codegen/tenant-startup-check.ts` `TENANT_GATE_LINES` :128; `scrml build` emits it (`tenantGateEntryLines`), `scrml dev` runs it (`createTenantGate`). Dev now answers 503 while an undeclared tenant table exists.
+- ⛑ **User-fn rename is scope-aware** — `codegen/fn-name-rename.ts` (Acorn); compiler-emitted locals are spelled `_scrml_…`. A new emitter that introduces a bare local name re-opens g-user-function-named-id-breaks-click-dispatch-s457.
+- ⛑ **Executable sinks:** `srcdoc` from data refused; SVG animation values animating a URL attribute go through `_scrml_safe_url` (4-arg); `on…` text from data is never written.
+- ⛑ **Line-ref corrections to the S457 block/rows below** (code moved, rows not rewritten): `_scrml_safe_url` :208 -> **:239**; `_scrml_url_shape_ok` :234 -> **:272**; `url-attr-guard.ts` `dynamicUrlAttrNeedsGuard` :34 -> **:61**, `quotedUrlAttrNeedsGuard` :39 -> **:69**, `wrapUrlGuard` :44 -> **:84**; `emit-predicates.ts` `URL_SHAPE_FN` :56 -> **:62**, `SERVER_URL_SHAPE_HELPER` :65 -> **:71**, `needsUrlShapeHelper` :72 -> **:78**; `type-system.ts` `url` shape :1563 -> **:1569**; `api.js` `hasFatalBeforeWrite` :3718 -> **:3815**, commit :4351 -> **:4454**, `artifactsWritten` field :4602 -> **:4699**; S456 row `classifyInterpolatedAttrSink` :201 -> **:297**, `tenantStartupCheckLines` :97 -> **:98** (emit site `emit-server.ts` :7203 -> **:7267**), `generateServerEntry` -> **:377** (gate :578).
+
+## Map Index (counts refreshed at `8ce6d61b5`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | updated | +1 src module (`codegen/fn-name-rename.ts`; 257 FACTS files); re-export, tenant-gate, sinks, refinement-reader loci |
+| dependencies.map.md  | updated | 0 npm changes; edges to `fn-name-rename.ts`, `module-resolver.js` re-export API, `tenant-startup-check.ts` from dev/build |
+| schema.map.md        | updated | `RefinementStampT`, `Refinement`, `JudgeShape`, `TenantGate`, `AttrElementContext`, import-graph `unresolvedReExports` |
+| config.map.md        | updated | no new key; dev runs the tenant gate |
+| build.map.md         | updated | shared server-entry gate text; no CI change |
+| error.map.md         | updated | 0 new codes; new senses for E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003, E-ATTR-INTERP-EXECUTABLE, E-DEPLOY-DB-TENANT-UNDECLARED |
+| test.map.md          | updated | 1,655 test files (+10); conformance 1423 (+27) |
+| auth.map.md          | updated | dev tenant floor; srcdoc/SVG/event-text sinks; server-param refinements |
+| domain.map.md        | updated | §21.4 re-export, §53 one reader, §5.2.3, §47.1.1 |
+| infra.map.md         | updated | no infra change |
+| migrations.map.md    | updated | zero diff |
+| non-compliance.report.md | updated | S458 pass (4 new findings; S457 section layout repaired) |
+
 ## S457 — READ FIRST (facts at `125486345`; supersedes the S456 block below where it conflicts)
 
 - ⛑ **A compile that reports ANY Error-severity diagnostic writes NOTHING** (§2.2.1) — every entry point (`compile`, `build`, `dev`/`--watch`, `serve`, API `write: true`). One decision point: `api.js` `hasFatalBeforeWrite` :3718, commit :4351; `result.artifactsWritten` says which way it went. The `refusal-gate.js` code list is retired. Tests read in-memory `result.outputs`, not dist.
@@ -2552,6 +2592,12 @@ that is precisely why they went stale twice in a row.** non-compliance.report.md
 
 | If your task is about… | Read |
 |---|---|
+| **⛑ S458 — a user function name (`id`, `el`, `event`, `total`, `get`, …) renamed where it should not be, a compiler local hijacked, or `fnNameMap` call-site rewriting** | `codegen/fn-name-rename.ts` `renameUserFnRefsScoped` :86 (scope-aware; Acorn; splices ranges); single caller `codegen/emit-client.ts:3365` with regex fallback `regexMangle` :3356 only when a segment does not parse. Compiler-emitted locals MUST be spelled `_scrml_…` (§47.1.1) — a new emitter introducing a bare local re-opens the class. Host-global names (`document`, `fetch`) are NOT handled (open ruling gap). |
+| **⛑ S458 — an UNQUOTED `onclick=` value truncated or leaking junk attributes (`.then(…)`, `?.`, `[…]`)** | `tokenizer.ts` `isPostfixContinuation` :399 (callers :1031/:1038). Known open: `onclick=@count = @count + 1` drops `+ 1` (g-unquoted-handler-assignment-rhs-dropped-s457). |
+| **⛑ S458 — `srcdoc`, SVG `<set>/<animate>` `to/from/by/values`, or `on…` handler text built from data** | Compile side: `attr-injection-sink.ts` `executableDataWriteSink` :348, `animationUrlTarget` :191, `classifyInterpolatedAttrSink` :297; emit side `codegen/url-attr-guard.ts` `refuseExecutableDataWrite` :99 / `urlGuardTarget` :53 (callers `emit-html.ts:3640`, `emit-each.ts:2714`, `emit-lift.js` :1396/:1714/:1761/:1880/:3349); runtime `runtime-url-guard.js` `_scrml_safe_url` :239 (4-arg), SVG sets :208/:214. Lift listener wiring `emit-lift.js:388`. |
+| **⛑ S458 — `export { X } from` / `export * from` a `.scrml` module: server link error, missing client registry entry, page load order, re-export cycle, E-IMPORT-004/-006 at a re-export** | `module-resolver.js` (use `grep -a`): `resolveExportedBinding` :948, `exportedNamesOf` :1059, `localReExportEdges` :1094, `isReExportedByAnother` :1140, `validateReExports` :1296, `detectCircularImports` :641, wired `resolveModules` :1357. Server: `emit-server.ts` `serverReExportLines` :969; `api.js` `emitValueOnlyServerJsForDanglingImports` :3625 + `reconcileServerReExports` :3700. Client: `emit-client.ts` :210/:1210, `emit-client-esm.ts` :343/:355, `codegen/index.ts` :440/:520. Tests `unit/s458-reexport-review-fixes`, `integration/s457-reexport-scrml-module`. |
+| **⛑ S458 — the tenant startup gate (`E-DEPLOY-DB-TENANT-UNDECLARED`, 503, `/_scrml/health`) under `scrml dev` OR `scrml build`** | ONE text: `codegen/tenant-startup-check.ts` `TENANT_GATE_LINES` :128. Built server: `tenantGateEntryLines` :236 <- `commands/build.js:578` (`generateServerEntry` :377). Dev: `createTenantGate` :261 <- `commands/dev.js` `loadServerRoutes` :417 (:535), health :315. Per-module check emit: `emit-server.ts:7267` (`tenantStartupCheckLines` :98). Change the gate in the shared text, never in one host. |
+| **⛑ S458 — a refinement (`number(>0)`, `string(.length >= 1)`, `integer(...)`, enum subset, `string(url)[]`, `T?`) not checked, wrongly checked, or a new consumer needing the refinement** | Reader: `type-system.ts` `parsePredicateExpr` :1780 / `findPredicateClose` :1747; judgeability + E-CONTRACT-002/-003 `checkRefinementJudgeable` :3668; stamps `refinementStamp` :3785 -> `param.refinement` :11029, `returnRefinement` :11089, decl `predicateCheck` :11614/:12152. Codegen reads ONLY the stamp: `emit-predicates.ts` `refinementOf` :574 -> `judgeExpr` :168 (base type first). Consumers `emit-functions.ts:147`, `emit-logic.ts:3153`, `emit-bindings.ts:208`, `emit-server.ts` :4887/:5172. Do NOT re-parse annotation text in codegen (the mirror was deleted). Annotation text cooking: `ast-builder.js` `typeTokenText` :183. |
 | **⛑ S457 — A DATA-SUPPLIED URL ATTRIBUTE (`href`/`src`/`action`/`srcset`/…) set to `about:blank` at runtime, a `url-guard` log line, or adding a NEW emitter that writes an attribute** | `runtime-url-guard.js` `_scrml_safe_url` :208 (one reader for runtime + compile time); decide-to-wrap via `codegen/url-attr-guard.ts` (`dynamicUrlAttrNeedsGuard` :34 / `quotedUrlAttrNeedsGuard` :39 / `wrapUrlGuard` :44). Every emitter must call it — current list in structure.map.md `## S457` URL inventory (html, bindings, event-wiring, variant-guard, each, lift ×6, ssr-render). Runtime chunk `urlguard`, pulled by `emit-client.ts:3062`. |
 | **⛑ S457 — `string(url)` accepting/refusing a value (relative URL, `javascript:`, `data:`), or a server/worker/library/tool bundle calling an undefined `_scrml_url_shape_ok`** | `runtime-url-guard.js` `_scrml_url_shape_ok` :234; compile-time literal zone `type-system.ts:1563`; runtime check `codegen/emit-predicates.ts` (`URL_SHAPE_FN` :56, `SERVER_URL_SHAPE_HELPER` :65, `needsUrlShapeHelper` :72), inlined at `emit-server.ts:1509`, `emit-worker.ts:113`, `emit-library.ts:458`, `emit-tool.ts:390`. |
 | **⛑ S457 — WHERE A `${…}` SLOT OR A `?{}` SITE ENDS in text (any reader of SQL/expression text), or `rewriteSqlRefs` lowering something the checks skipped** | Parse, don't scan: `codegen/sql-lex.ts` `jsInterpolationEnd` :69 (uses `scrml-acorn.ts` `ScrmlParser` :130); sites: `sql-in-expression-text.ts` `sqlSitesInExpressionText` :213; `rewrite.ts` `rewriteSqlRefs` :576 lowers exactly those sites. Do not add a regex or hand scanner. |
