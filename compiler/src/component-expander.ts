@@ -2309,7 +2309,7 @@ function substitutePropsInLogicStmt(
       if ((n as ForStmtNode).variable) innerShadowed.add((n as ForStmtNode).variable);
       // S458 N2 — a C-style header's own binder (`for (let n = 0; n < 3; n++)`) shadows
       // the prop in the header and the body; read from the parsed header.
-      const header = (n as ForStmtNode).iterable;
+      const header = (n as ForStmtNode & { iterable?: string }).iterable;
       if (typeof header === "string") for (const b of bindingNamesOfForHeader(header)) innerShadowed.add(b);
       const cStyle = (n as ForStmtNode).cStyleParts;
       const newCStyle = cStyle ? {
