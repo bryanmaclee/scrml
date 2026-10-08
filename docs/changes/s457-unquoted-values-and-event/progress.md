@@ -161,3 +161,14 @@ Append-only. Times local (2026-10-07/08).
   judged as at top level.
 - E-ATTR-010 names a computed index (`@drafts[@cid]`); synthetic re-parse spans named in the
   E-EVENT-UNBOUND message (component / match arm / emit); duplicate listener reports deduped.
+
+## round 3 landed — c25422240 (hook 32597 / 0)
+- corpus vs main c4eb2c589 (A = main compiler+corpus, B = c25422240 + migrated corpus, C = c25422240
+  compiler on main corpus; 2468/2476 sources): A→B no compile-outcome or diagnostic change in any source,
+  syntax-failing 0. Artifacts: 1466 compiled on both, 1456 identical after mapping `_scrml_event`; the 10
+  that differ = 7 migrated sources + s450-attr-multi-statement-neg (IIFE call kept, a fix) +
+  examples/13-worker (when message/error listener `_scrml_event`) + channel-basic-001 (`onopen =
+  (_scrml_event) =>`). A→C = exactly the migrated set (26 E-EVENT-UNBOUND sources + todomvc 2).
+- gates: unit+integration+conformance (hook) 32597/0; conformance/run.ts 1381/1431 + 50 xfail; root-level +
+  e2e-render-map 2498/0; self-host slices 2016/0; browser-baseline PASS (48); todomvc compile + node
+  --check; snippet gate; compile floor; types gate; FACTS / SPEC-INDEX / bootstrap-conformance current.
