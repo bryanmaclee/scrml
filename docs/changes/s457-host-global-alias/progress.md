@@ -145,3 +145,6 @@ Append-only. Times local (2026-10-07/08).
 - SPA-counter runtime gzip 16382 B (main 16375 B; gate < 16384) — the fix round added no runtime bytes.
 - Browser-tier name-set gate: PASS; under load several runs hit the script's own "parser disagrees"
   guard (bun 48 vs 47 markers) — not reproducible per file, 3 clean consecutive tier runs after.
+
+## follow-up round s458-alias-r3
+- See docs/changes/s458-alias-r3/progress.md (N1 library CSP fix, gate G1/R4, Node require nit, Bun 1.2 verified).

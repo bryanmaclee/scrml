@@ -1,0 +1,41 @@
+# progress — s458-alias-r3
+
+Append-only. Base cd638efe5 (tip of worktree-agent-ade1ea0d759a13c9d). Predecessor log:
+docs/changes/s457-host-global-alias/progress.md.
+
+## N1 — library module CSP regression (0e1cffe33)
+- Governing text: SPEC §12.6 implementation note — "the client-facing library `<base>.js`";
+  §21.5.1 — "the §12.6 HTTP-route + client fetch-stub for a browser consumer".
+- Repro (reviewer's l.scrml, `--mode library`, main.js imports ./l.js, served with
+  `Content-Security-Policy: script-src 'self'`, Chromium via puppeteer):
+  data: version -> `#out` "not run", console "Loading the script 'data:text/javascript,...'
+  violates ... script-src 'self'"; fixed -> "5|true|Green".
+- Fix (api.js write phase + emit gate): a written library `<base>.js` imports the alias from
+  `<outputDir>/_scrml/_global.js` (relative to its own dir; `export default globalThis;`),
+  staged with the other writes; a user source compiling onto that path -> E-CG-015. In-memory
+  outputs, server bundles, tools, tests keep the data: module. Also covers a pure-type file
+  compiled in application mode (it writes `<base>.js` too).
+- Test: compiler/tests/unit/s458-library-host-global-module.test.js (flat, nested `../../`,
+  no-alias library writes no module, E-CG-015, relocate unit). foreign-lang-library-decl's
+  `bun --check` / import harness now writes beside the library (relative import resolves).
+
+## G1 — gate (scripts/host-global-scan.ts)
+- Shard results to a file; failed shard reported with stderr, others still listed, exit 2.
+- Dedupe key carries the mode. R4 (no data: import in a browser-reachable artifact,
+  runtime + `_scrml/` included; server/test/tool exempt). New mode `library`.
+- Bite (scratch copy of HEAD): relocation disabled -> R4 on lib.js in all 5 modes; one
+  emitter site reverted (emit-client enum `Object.freeze`) -> 404 R1, readable.
+- c4eb2c589 tree (+ the branch's fn-name-rename.ts, the gate's reader): 34166 violations
+  listed in full (5.1 MB), exit 1 — no shard failure.
+- HEAD full corpus: 2474 units, 6083 compiles, 9316 artifacts, 0 violations, 140 s.
+
+## Nit — Node require in the foreign seal
+- foreign-seal.ts: `module.createRequire(import.meta.url)` via `process.getBuiltinModule`
+  when `import.meta.require` is absent (no `import` allowed in the helper text). Node 22.20:
+  tool with `require("node:path")` in a slice — base: crash; now req=b.txt.
+- Bun 1.2: npm @oven/bun-linux-x64 1.2.0 and 1.2.23 — server bundle + value-only module +
+  tool with data: import all load/run.
+
+## New finding (pre-existing, not fixed here)
+- `--mode library`: `export const SAME_SHAPE = { a: 1 } == { a: 1 }` is emitted verbatim
+  (JS reference `==` -> false); server mode lowers it (true). Same on c4eb2c589.
