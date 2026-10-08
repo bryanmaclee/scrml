@@ -1,0 +1,29 @@
+{
+  "id": "meta-emit-url-pos",
+  "description": "§22.4.1 (S459 round 4 F4) positive — https, relative and srcset URLs in compile-time `emit()` output still render.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.12 *URL attributes*: http(s) and relative URLs are admitted. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#u1",
+        "attr": {
+          "href": "https://e.com/"
+        }
+      },
+      {
+        "selector": "#u2",
+        "attr": {
+          "href": "/r"
+        }
+      }
+    ]
+  }
+}

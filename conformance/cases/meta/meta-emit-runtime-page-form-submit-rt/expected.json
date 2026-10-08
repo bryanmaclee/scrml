@@ -1,0 +1,25 @@
+{
+  "id": "meta-emit-runtime-page-form-submit-rt",
+  "description": "§22.12 (S459 round 4 F1) — an injected submit button inside a page `<form>` would submit it. Refused: nothing written (the admitted `<p>` around it is not written either).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Insertion inside a page form* + step 4: on a violation the runtime SHALL write NOTHING. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#pf button",
+        "count": 0
+      },
+      {
+        "selector": "#pf p",
+        "count": 0
+      }
+    ]
+  }
+}
