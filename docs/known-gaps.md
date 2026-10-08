@@ -30,11 +30,27 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 245 | 6 |
+| HIGH | 244 | 6 |
 | MED | 532 | 4 |
-| LOW | 295 | 0 |
+| LOW | 298 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-toplevel-camelcase-onclick-wiring-s458 — camelCase `onClick=` at top level / in emit-html is not wired the way lift now wires every §5.2 rule-1 `on…` name as a listener — `NEW S458; LOW; open`
+
+<!-- @gap id=g-toplevel-camelcase-onclick-wiring-s458 sev=LOW status=open locus=compiler/src/codegen/emit-html.ts+compiler/src/codegen/emit-event-wiring.ts prov=review:s457-executable-sinks-srcdoc-svg-r3(nit 1) -->
+
+S457 ruling (a) aligned `emit-lift.js` (every rule-1 `on…` name → `addEventListener`); the top-level / emit-html path was not aligned in the same landing. One reader of "is this an event attribute" across emitters is the fix.
+
+### g-callref-on-non-event-attribute-s458 — a call-ref value (`title=fmt()` style handler form) on a non-event attribute has no specified/consistent lowering across emitters — `NEW S458; LOW; open`
+
+<!-- @gap id=g-callref-on-non-event-attribute-s458 sev=LOW status=open locus=searched:emit-html.ts,emit-each.ts,emit-lift.js(call-ref attr lowering) prov=review:s457-executable-sinks-srcdoc-svg-r3(nit 2) -->
+
+### g-each-emit-html-wire-one-online-onboarding-s458 — `<each>` rows and emit-html wire `one=` / `online=` / `onboarding=` data values as event listeners, contradicting §5.2 rule 1 (those exact words are ordinary attributes) — `NEW S458; LOW; open`
+
+<!-- @gap id=g-each-emit-html-wire-one-online-onboarding-s458 sev=LOW status=open locus=compiler/src/codegen/emit-each.ts+compiler/src/codegen/emit-html.ts(name.startsWith("on") classification) prov=review:s457-executable-sinks-srcdoc-svg-r3 -->
+
+lift was fixed by the S457 sinks change; the other two emitters still classify by prefix. Same one-reader fix as g-toplevel-camelcase-onclick-wiring-s458.
 
 
 ### g-unquoted-handler-assignment-rhs-dropped-s457 — `onclick=@count = @count + 1` compiles to `count = count`: the `+ 1` is silently dropped — `NEW S457; HIGH; open (silent)`
@@ -134,9 +150,11 @@ Also: stale bare-variant placeholder regexes at `codegen/rewrite.ts` (~:2299) an
 
 Pre-existing; the write happens and the caller sees a crash.
 
-### g-srcdoc-unquoted-expression-not-refused-s457 — `<iframe srcdoc=${@u}>` compiles clean and runs the data as HTML; S456 refuses only the quoted `srcdoc="${…}"` — `NEW S457; HIGH; open`
+### g-srcdoc-unquoted-expression-not-refused-s457 — `<iframe srcdoc=${@u}>` compiles clean and runs the data as HTML; S456 refuses only the quoted `srcdoc="${…}"` — `NEW S457; HIGH; RESOLVED S458 (s458-sinks-land)`
 
-<!-- @gap id=g-srcdoc-unquoted-expression-not-refused-s457 sev=HIGH status=open locus=compiler/src/validators/attribute-interpolation.ts(collectExecutableSinkErrors — quoted form only)+compiler/src/attr-injection-sink.ts prov=empirical:S457-url-guard-differential-review(Chromium, 2 dialogs on base and head) -->
+<!-- @gap id=g-srcdoc-unquoted-expression-not-refused-s457 sev=HIGH status=resolved resolved-by=s458-sinks-land locus=compiler/src/validators/attribute-interpolation.ts(collectExecutableSinkErrors — quoted form only)+compiler/src/attr-injection-sink.ts prov=empirical:S457-url-guard-differential-review(Chromium, 2 dialogs on base and head) -->
+
+**RESOLVED S458** (s458-sinks-land, from `worktree-agent-a885fd5687d9b5ebe` @ `847719d0a`): every non-literal `srcdoc` on a rendered element is `E-ATTR-INTERP-EXECUTABLE` — at VP-3 and as an emit-time backstop wherever the write is emitted, declared props included.
 
 SPEC §5.2 rule 2 / ruling S456 "your recs on 1 and 2": `srcdoc` interpolation is refused because its value is an HTML document (script). The unquoted expression form reaches the same sink and is not refused. Conformance restoration (newly-rejecting) toward the ruled purpose.
 
@@ -246,6 +264,8 @@ statically proven; `"/users/1"` fails E-CONTRACT-001. The check is "does `new UR
 ### g-svg-animation-and-meta-refresh-url-sinks-s456 — a URL can reach an executable sink through an attribute OUTSIDE the §5.2 URL-attribute set: SVG `<set attributeName="href" to="javascript:…${x}">` / `<animate attributeName="href" values="…">`, and `<meta http-equiv="refresh" content="0;url=javascript:…${x}">` — `NEW S456; LOW; open`
 
 <!-- @gap id=g-svg-animation-and-meta-refresh-url-sinks-s456 sev=HIGH status=open locus=compiler/src/attr-injection-sink.ts(URL_VALUED_ATTRS is name-based; to / values / from / by and content are not URL attributes) prov=review:S456-S239-attr-injection-rulings-F4 -->
+
+**S458 — SVG half RESOLVED** (s458-sinks-land): `<set>/<animate>/…` `to/from/by/values` animating a URL attribute are refused (literal unsafe scheme before `${…}`) or written through `_scrml_safe_url` with the animated attribute as target (`""`, fail-closed, when `attributeName` is computed); `to=${…}` is no longer dropped. **The `<meta http-equiv=refresh>` half stays OPEN.**
 
 ⚑ **S457: SVG half CONFIRMED in Chromium** (S457 URL-guard differential review, both trees): `<div if=@on><svg><a><set attributeName="href" to="${@u}"></set><rect …/></a></svg></div>` with `@u = "javascript:alert(document.domain)"`, mount, click → dialog. `to`/`values`/`from`/`by` are outside the §5.2 URL-attribute list so neither rule 2 nor rule 3 sees it; the `<meta refresh>` half is refused by Chromium itself. The expression form `to=${@u}` is silently dropped (separate bug). Severity LOW → HIGH. PLAUSIBLE, not executed (S239 review F4 of `93b36665a`). The S456 executable-sink rule reads an attribute's
 NAME to decide it is URL-valued; these sinks take their URL from a different attribute whose meaning depends
