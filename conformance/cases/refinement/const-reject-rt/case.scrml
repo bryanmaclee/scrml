@@ -1,0 +1,14 @@
+${
+    <good>: string = "https://scrml.dev/"
+    <evil>: string = "javascript:alert(1)"
+    <shown>: string = "none"
+    function show(v) {
+        const link: string(url) = v
+        @shown = link
+    }
+}
+<program>
+<button id="good" onclick=${show(@good)}>Good</button>
+<button id="bad" onclick=${show(@evil)}>Bad</button>
+<p id="out">${@shown}</p>
+</program>

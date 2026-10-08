@@ -535,7 +535,7 @@ describe("three declaration forms x both directions — `let`", () => {
 // `const` form is absent, while its STATIC limb works.
 // -----------------------------------------------------------------------------
 
-describe("`const` form — static limb verified, boundary limb DEFECT PINNED", () => {
+describe("`const` form — static limb and boundary limb both verified", () => {
 
   test("the STATIC limb works: a decided literal that fails its predicate is rejected", () => {
     const src = `\${
@@ -560,11 +560,9 @@ describe("`const` form — static limb verified, boundary limb DEFECT PINNED", (
     expect(codes(errors)).toEqual([]);
   });
 
-  test("DEFECT PINNED: the boundary limb emits no guard, for a template OR an ident", () => {
-    // What it SHOULD be once the `const` boundary limb is implemented:
-    //   expect(guardCount(tpl.emittedJs)).toBeGreaterThan(0);
-    //   expect(guardCount(ident.emittedJs)).toBeGreaterThan(0);
-    // What it IS today, on both sides of the widening:
+  test("the boundary limb is guarded, for a template OR an ident (S458 slice 2 — position 3, defect closed)", () => {
+    // Was DEFECT PINNED: the `const` emitter never read the `predicateCheck`
+    // the type-system stage stamped, so neither initializer was guarded.
     const mk = (init) => `\${
     let a = "hello"
     const s: string(.length <= 3) = ${init}
@@ -573,8 +571,8 @@ describe("`const` form — static limb verified, boundary limb DEFECT PINNED", (
 <p>ok</>`;
     const tpl = compileWholeScrml(mk("`${a} world here`"), "const-pinned-tpl");
     const ident = compileWholeScrml(mk("a"), "const-pinned-ident");
-    expect(guardCount(tpl.emittedJs)).toBe(0);
-    expect(guardCount(ident.emittedJs)).toBe(0);
+    expect(guardCount(tpl.emittedJs)).toBeGreaterThan(0);
+    expect(guardCount(ident.emittedJs)).toBeGreaterThan(0);
 
     // The contrast that makes this a DEFECT and not a design choice: the same
     // initializer under `let` IS guarded.

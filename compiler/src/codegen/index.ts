@@ -1879,7 +1879,7 @@ export function runCG(input: CgInput): CgOutput {
       const bundles = new Map<string, string>();
       for (const [name, def] of workerDefs) {
         bundles.set(name, codegenStage("emit-worker", () =>
-          generateWorkerJs(name, def.children, def.whenMessage)
+          generateWorkerJs(name, def.children, def.whenMessage, errors, filePath)
         ));
       }
       workerBundlesPerFile.set(filePath, bundles);

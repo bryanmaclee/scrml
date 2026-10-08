@@ -1155,14 +1155,34 @@ function emitAsyncLibraryFns(
  * brace, so re-emitting the WHOLE fn from the AST (which the shared member
  * emitter already does correctly) is the sound unit.
  */
+/**
+ * S458 slice 2 — does this function carry a §53 refinement obligation the
+ * type-system stage desugared into it (refinement-obligations.ts)?
+ */
+function hasRefineObligations(node: unknown, depth = 0): boolean {
+  if (!node || typeof node !== "object" || depth > 200) return false;
+  if (Array.isArray(node)) return node.some((c) => hasRefineObligations(c, depth + 1));
+  const o = node as Record<string, unknown>;
+  if (o.refineParamGuard || o.refineReturn || o.refineAssign || o.refine) return true;
+  const pc = o.predicateCheck as { zone?: string } | undefined;
+  if (pc && pc.zone === "boundary") return true;
+  for (const k of Object.keys(o)) {
+    if (k === "span") continue;
+    const v = o[k];
+    if (v && typeof v === "object" && hasRefineObligations(v, depth + 1)) return true;
+  }
+  return false;
+}
+
 function emitControlFlowLibraryFns(
   logicBody: unknown,
   sourceText: string,
   alreadyRouted: Set<string>,
-): { removals: Array<{ start: number; end: number }>; lines: string[] } {
+): { removals: Array<{ start: number; end: number }>; lines: string[]; routedNames: Set<string> } {
   const removals: Array<{ start: number; end: number }> = [];
   const outLines: string[] = [];
-  if (!Array.isArray(logicBody)) return { removals, lines: outLines };
+  const routedNames = new Set<string>();
+  if (!Array.isArray(logicBody)) return { removals, lines: outLines, routedNames };
   const emptyAsync = new Set<string>();
   for (const node of logicBody as ASTNode[]) {
     if (!node || node.kind !== "function-decl" || typeof node.name !== "string") continue;
@@ -1205,8 +1225,9 @@ function emitControlFlowLibraryFns(
     if (unloweredScrmlSyntax(emitted).length > 0) continue;
     removals.push(range);
     outLines.push(emitted);
+    routedNames.add(node.name);
   }
-  return { removals, lines: outLines };
+  return { removals, lines: outLines, routedNames };
 }
 
 /**
@@ -1836,6 +1857,26 @@ export function generateLibraryJs(
           sourceText,
           asyncEmit.routedNames,
         );
+        // S458 slice 2 (F2 for the text path) — a function carrying §53
+        // refinement obligations (param guards, refined returns / writes) must
+        // be emitted STRUCTURALLY: the raw-text path re-prints its source with
+        // the types stripped and every check gone, and no placeholder survives
+        // for the emit gate to catch. Refuse rather than ship it unchecked.
+        for (const fnNode of (logic.body as ASTNode[])) {
+          if (!fnNode || fnNode.kind !== "function-decl" || typeof fnNode.name !== "string") continue;
+          if (asyncEmit.routedNames.has(fnNode.name) || controlFlowEmit.routedNames.has(fnNode.name)) continue;
+          if (containsSqlOrTransaction(fnNode)) continue; // lives in `.server.js`, lowered there
+          if (!hasRefineObligations(fnNode)) continue;
+          errors.push(new CGError(
+            "E-CODEGEN-INVALID-LOGIC",
+            `E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output.\n` +
+              `  artifact: the library module (function \`${fnNode.name}\`)\n` +
+              `  \`${fnNode.name}\` carries §53 refinement checks (a refined parameter, return or write), but ` +
+              `the library emitter could not lower it structurally, and the text it would emit instead drops ` +
+              `every check. Compilation stops rather than ship it unchecked. This is a compiler defect; please report it.`,
+            (fnNode.span ?? { start: 0, end: 0 }) as never,
+          ));
+        }
         blockText = pruneServerFnsAndLowerGuarded(
           blockText,
           logicSpan.start,

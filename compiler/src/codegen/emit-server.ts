@@ -5036,6 +5036,10 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
+          // S458 slice 2 — a refined parameter is judged by the §53.9.4 400 check
+          // written above (the route boundary); its body guard statement is not
+          // emitted a second time here.
+          if (stmt && stmt.refineParamGuard) continue;
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
           if (code) {
             for (const line of indentBodyLines(code, "    ")) {
@@ -5358,6 +5362,10 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
+          // S458 slice 2 — a refined parameter is judged by the §53.9.4 400 check
+          // written above (the route boundary); its body guard statement is not
+          // emitted a second time here.
+          if (stmt && stmt.refineParamGuard) continue;
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
           if (code) {
             for (const line of indentBodyLines(code, _bodyIndentNonCsrf)) {

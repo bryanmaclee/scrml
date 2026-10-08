@@ -1,0 +1,11 @@
+{
+  "id": "refinement-literal-call-arg-neg",
+  "description": "S458 slice 2 (position 8) — the negative twin of literal-call-arg-pos: `rate(75)` satisfies `number(>=0 && <=100)`, so the literal argument is statically proven and no diagnostic fires.",
+  "language-version": "1.0",
+  "spec": "§53.4.2",
+  "rationale": "§53.4.2 rule 1: a numeric literal that satisfies the predicate is statically proven.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"]
+  }
+}

@@ -107,6 +107,7 @@ import {
 // §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
 // boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
+import { judgeTypeOf, wrapRefine, paramGuardStatement, isRefineCall, type JudgeType } from "./refinement-obligations.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -3782,47 +3783,222 @@ function refinementShape(t: ResolvedType | null | undefined): RefinementStampT |
   return null;
 }
 
-function refinementStamp(t: ResolvedType | null | undefined): RefinementStampT | null {
-  return refinementShape(t);
+function refinementStamp(t: ResolvedType | null | undefined): (RefinementStampT & { judge?: JudgeType }) | null {
+  // S458 slice 2 — every stamp carries the whole declared type's judge, so a
+  // struct / union / container type with a refinement anywhere inside is judged.
+  const judge = judgeTypeOf(t as never);
+  if (!judge) return null;
+  const shape = refinementShape(t);
+  return shape ? { ...shape, judge } : { baseType: "", predicate: undefined as unknown as PredicateExpr, label: null, judge };
 }
 
 /**
- * S458 — static zone for a refinement inside containers (`T[]`, `T | not`).
- * Returns true when the initializer is proven (every leaf a literal satisfying
- * the predicate, or `not` into a nullable), false when a literal leaf refutes it
- * (E-CONTRACT-001 pushed by `checkPredicateLiteral`), null when it cannot be
- * decided at compile time (→ boundary: a runtime check is emitted).
+ * S458 slice 2 — desugar a function's refinement obligations into its AST
+ * (refinement-obligations.ts). Runs once per function-decl, after the body walk:
+ *
+ *   - every refined PARAMETER gets a guard statement prepended to the body, so
+ *     every function emitter (client, server, nested, worker, tool, library)
+ *     emits the §53.9.1 check by construction — not only the two that used to
+ *     write a prologue;
+ *   - every `return` of a function with a refined return type is stamped
+ *     (`refineReturn`) — the return emitter judges it whatever form the return
+ *     takes (`?{}` query, `match`, plain expression). The stamp is on the
+ *     statement, not inherited through emit options, so a nested function's
+ *     returns are judged by ITS type, never its parent's. A tail expression the
+ *     emitter turns into an implicit return (`fn` / `-> T`) is stamped too.
  */
-function staticRefinedInit(
-  shape: RefinementStampT,
-  wrapAt: number,
-  initExpr: unknown,
-  span: Span,
-  errors: TSError[],
-): boolean | null {
-  const node = initExpr as { kind?: string; litType?: string; elements?: unknown[] } | null;
-  if (!node || typeof node !== "object") return null;
-  const w = shape.wrap ?? [];
-  if (wrapAt < w.length) {
-    if (w[wrapAt] === "nullable") {
-      if (node.kind === "lit" && node.litType === "not") return true;
-      return staticRefinedInit(shape, wrapAt + 1, initExpr, span, errors);
-    }
-    // array
-    if (node.kind !== "array" || !Array.isArray(node.elements)) return null;
-    let result: boolean | null = true;
-    for (const el of node.elements) {
-      const r = staticRefinedInit(shape, wrapAt + 1, el, span, errors);
-      if (r === false) result = false;
-      else if (r === null && result !== false) result = null;
-    }
-    return result;
+const _FN_LIKE_KINDS = new Set(["function-decl", "lambda", "fn-expr", "function-expr"]);
+
+function stampRefinedReturns(node: unknown, judge: JudgeType, fn: string, depth = 0): void {
+  if (!node || typeof node !== "object" || depth > 200) return;
+  if (Array.isArray(node)) { for (const c of node) stampRefinedReturns(c, judge, fn, depth + 1); return; }
+  const o = node as Record<string, unknown>;
+  if (typeof o.kind === "string" && _FN_LIKE_KINDS.has(o.kind) && depth > 0) return;
+  if (o.kind === "return-stmt") o.refineReturn = { judge, fn };
+  for (const k of Object.keys(o)) {
+    if (k === "span" || k === "refineReturn" || k === "refine" || k === "fnExprNode") continue;
+    const v = o[k];
+    if (v && typeof v === "object") stampRefinedReturns(v, judge, fn, depth + 1);
   }
-  const info = classifyLiteralFromExprNode(node as never);
-  if (info.kind !== "literal") return null;
-  if (typeof info.value === "boolean" && shape.baseType === "boolean") return null;
-  const pt: PredicatedType = { kind: "predicated", baseType: shape.baseType as PredicatedType["baseType"], predicate: shape.predicate, label: shape.label };
-  return checkPredicateLiteral(pt, info.value, span, errors);
+}
+
+function desugarFnRefinements(n: ASTNodeLike): void {
+  const rec = n as Record<string, unknown>;
+  if (rec.__refineDesugared === true) return;
+  rec.__refineDesugared = true;
+  const body = rec.body as unknown[] | undefined;
+  if (!Array.isArray(body)) return;
+  const fnName = typeof rec.name === "string" && rec.name ? rec.name : "<anonymous>";
+  const guards: unknown[] = [];
+  for (const p of (rec.params as unknown[] | undefined) ?? []) {
+    if (!p || typeof p !== "object") continue;
+    const po = p as { name?: unknown; refinement?: { judge?: JudgeType } | null };
+    if (typeof po.name !== "string" || !po.refinement?.judge) continue;
+    guards.push(paramGuardStatement(po.name, po.refinement.judge, fnName, rec.span));
+  }
+  if (guards.length) body.unshift(...guards);
+  const ret = (rec.returnRefinement as { judge?: JudgeType } | null | undefined)?.judge;
+  if (ret) {
+    for (const s of body) stampRefinedReturns(s, ret, fnName, 1);
+    // implicit tail return (emitFnShortcutBody): the last non-compile-time statement
+    if (rec.fnKind === "fn" || rec.hasReturnType === true) {
+      for (let i = body.length - 1; i >= 0; i--) {
+        const s = body[i] as Record<string, unknown> | null;
+        if (!s || s._compileTimeOnly) continue;
+        if (s.refineParamGuard) break; // a guard is never the tail value
+        if (s.kind === "bare-expr" || s.kind === "match-stmt" || s.kind === "match-expr" || s.kind === "switch-stmt") {
+          s.refineReturn = { judge: ret, fn: fnName };
+        }
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * S458 slice 2 — the declared type of an assignment target: a local / parameter
+ * (`x`), a cell (`@x`), or a field chain over either (`l.u`, `@link.u.v`) read
+ * through struct field types. null when not statically known.
+ */
+function declaredTypeOfTarget(target: unknown, scopeChain: ScopeChain): ResolvedType | null {
+  const t = target as { kind?: string; name?: unknown; object?: unknown; property?: unknown; computed?: unknown } | null;
+  if (!t || typeof t !== "object") return null;
+  if (t.kind === "ident" && typeof t.name === "string") {
+    const e = scopeChain.lookup(t.name) as { kind?: string; resolvedType?: ResolvedType } | undefined;
+    if (!e || (e.kind !== "variable" && e.kind !== "reactive")) return null;
+    return e.resolvedType ?? null;
+  }
+  if (t.kind === "member" && typeof t.property === "string" && t.computed !== true) {
+    let objT = declaredTypeOfTarget(t.object, scopeChain);
+    // a nullable struct (`T | not`) — the field of its non-absent member
+    if (objT && objT.kind === "union") {
+      const nn = ((objT as UnionType).members ?? []).filter((m) => m.kind !== "not");
+      objT = nn.length === 1 ? nn[0] : null;
+    }
+    if (objT && objT.kind === "struct") return (objT as StructType).fields.get(t.property) ?? null;
+  }
+  return null;
+}
+
+/** The assignment ops that fold to a binary op when desugared to `=`. */
+const _COMPOUND_ASSIGN: Record<string, string> = {
+  "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%", "**=": "**",
+  "&&=": "&&", "||=": "||", "??=": "??", "&=": "&", "|=": "|", "^=": "^", "<<=": "<<", ">>=": ">>", ">>>=": ">>>",
+};
+
+/** Is `t` a side-effect-free target (ident or a static member chain over one)? */
+function _isPlainTarget(t: unknown): boolean {
+  const n = t as { kind?: string; object?: unknown; computed?: unknown } | null;
+  if (!n) return false;
+  if (n.kind === "ident") return true;
+  return n.kind === "member" && n.computed !== true && _isPlainTarget(n.object);
+}
+
+function desugarRefinedAssignExprs(node: unknown, scopeChain: ScopeChain, span: Span, errors: TSError[], depth = 0): void {
+  if (!node || typeof node !== "object" || depth > 200) return;
+  if (Array.isArray(node)) { for (const c of node) desugarRefinedAssignExprs(c, scopeChain, span, errors, depth + 1); return; }
+  const o = node as Record<string, unknown>;
+  if (o.kind === "lambda" || isRefineCall(o)) return; // a lambda body is its own scope; never re-wrap
+  for (const k of Object.keys(o)) {
+    if (k === "span" || k === "target") continue;
+    const v = o[k];
+    if (v && typeof v === "object") desugarRefinedAssignExprs(v, scopeChain, span, errors, depth + 1);
+  }
+  if (o.kind !== "assign") return;
+  const judge = judgeTypeOf(declaredTypeOfTarget(o.target, scopeChain) as never);
+  if (!judge) return;
+  const op = typeof o.op === "string" ? o.op : "=";
+  if (op !== "=") {
+    // `x += v` writes `x + v`: judge THAT. Only a side-effect-free target can be
+    // re-read; anything else stays as written and is reported below.
+    const bin = _COMPOUND_ASSIGN[op];
+    if (!bin || !_isPlainTarget(o.target)) {
+      errors.push(new TSError(
+        "E-CONTRACT-002",
+        `E-CONTRACT-002: a compound assignment \`${op}\` to a refined target whose value the compiler cannot ` +
+          "re-read cannot be judged. Write it as a plain assignment (`x = x + v`).",
+        span,
+      ));
+      return;
+    }
+    o.value = { kind: "binary", op: bin, left: JSON.parse(JSON.stringify(o.target)), right: o.value, span: o.span };
+    o.op = "=";
+  }
+  const proven = staticJudge(judge, o.value, span, errors);
+  if (proven !== null) return;
+  const name = _targetText(o.target);
+  o.value = wrapRefine(o.value, judge, { kind: "assign", name });
+}
+
+function _targetText(t: unknown): string {
+  const n = t as { kind?: string; name?: unknown; object?: unknown; property?: unknown } | null;
+  if (!n) return "?";
+  if (n.kind === "ident") return String(n.name);
+  if (n.kind === "member") return `${_targetText(n.object)}.${String(n.property)}`;
+  return "?";
+}
+
+/**
+ * S458 slice 2 (position 1) — a reassignment of a binding whose DECLARED type
+ * carries a refinement: judge the new value. `prior` is the binding being
+ * reassigned (scope lookup); a literal is decided now (E-CONTRACT-001 on
+ * refutation), anything else stamps `refineAssign` for the emitter, which
+ * judges the value before the assignment (§53.3.3: "the variable retains its
+ * prior value"). A binding with no declared refinement is untouched.
+ */
+function markRefinedReassign(n: ASTNodeLike, prior: ScopeEntry | undefined, initExpr: unknown, span: Span, errors: TSError[]): void {
+  if (!prior || prior.kind !== "variable" || typeof n.name !== "string") return;
+  const st = refinementStamp(prior.resolvedType);
+  if (!st || !st.judge) return;
+  const proven = initExpr ? staticJudge(st.judge, initExpr, span, errors) : null;
+  if (proven === null) (n as Record<string, unknown>).refineAssign = { judge: st.judge, name: n.name };
+}
+
+/**
+ * S458 slice 2 — the static zone over a whole judged type (refinement-
+ * obligations.ts JudgeType): literals, array literals, `not`, object literals
+ * against a struct's refined fields. true = proven, false = refuted
+ * (E-CONTRACT-001 pushed), null = undecidable at compile time (→ the runtime
+ * check stands).
+ */
+function staticJudge(j: JudgeType, expr: unknown, span: Span, errors: TSError[]): boolean | null {
+  const node = expr as { kind?: string; litType?: string; elements?: unknown[]; props?: Array<Record<string, unknown>> } | null;
+  if (!node || typeof node !== "object") return null;
+  const all = (rs: Array<boolean | null>): boolean | null =>
+    rs.some((r) => r === false) ? false : rs.every((r) => r === true) ? true : null;
+  switch (j.k) {
+    case "pred": {
+      const info = classifyLiteralFromExprNode(node as never);
+      if (info.kind !== "literal") return null;
+      if (typeof info.value === "boolean" && j.baseType === "boolean") return null;
+      const pt: PredicatedType = { kind: "predicated", baseType: j.baseType as PredicatedType["baseType"], predicate: j.predicate as PredicateExpr, label: j.label };
+      // An unjudgeable refinement is reported where it is DECLARED (F1), never
+      // again at each site a value is written into it: decide quietly here.
+      if (!checkRefinementJudgeable(pt, span, [])) {
+        if (j.predicate && typeof j.predicate === "object") _judgeabilityReported.add(j.predicate as object);
+        return null;
+      }
+      return checkPredicateLiteral(pt, info.value, span, errors);
+    }
+    case "nullable":
+      if (node.kind === "lit" && node.litType === "not") return true;
+      return staticJudge(j.of, expr, span, errors);
+    case "array":
+      if (node.kind !== "array" || !Array.isArray(node.elements)) return null;
+      return all(node.elements.map((el) => staticJudge(j.of, el, span, errors)));
+    case "struct": {
+      if (node.kind !== "object" || !Array.isArray(node.props)) return null;
+      if (node.props.some((p) => p.kind !== "prop" || p.computed === true)) return null;
+      const rs: Array<boolean | null> = [];
+      for (const [name, fj] of j.fields) {
+        const prop = node.props.find((p) => p.key === name || (p.key as { name?: unknown } | null)?.name === name);
+        rs.push(prop ? staticJudge(fj, prop.value, span, errors) : null);
+      }
+      return all(rs);
+    }
+    default:
+      return null;
+  }
 }
 
 /**
@@ -11112,6 +11288,10 @@ function annotateNodes(
           }
         }
         enclosingFnReturnTypeStack.pop();
+        // S458 slice 2 — desugar this function's refinement obligations (param
+        // guards, refined-return stamps) into its AST, after the body walk so no
+        // type-system walker sees the synthetic nodes.
+        desugarFnRefinements(n);
 
         scopeChain.pop();
 
@@ -11629,12 +11809,14 @@ function annotateNodes(
             // for an array, `not` admitted for a nullable. Literal initializers
             // are proven / refuted statically, anything else is the boundary.
             {
-              const _letShape = refinementShape(letAnnoType);
-              if (_letShape && _letShape.wrap) {
+              // S458 slice 2 — and a struct / union type with a refined member
+              // anywhere inside (positions 2, 3): the whole declared type's judge.
+              const _letStamp = refinementStamp(letAnnoType);
+              if (_letStamp && _letStamp.judge) {
                 const _sp = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
                 const _ini = (n as any).initExpr;
-                const _proven = _ini ? staticRefinedInit(_letShape, 0, _ini, _sp, errors) : null;
-                (n as ASTNodeLike).predicateCheck = { ..._letShape, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
+                const _proven = _ini ? staticJudge(_letStamp.judge, _ini, _sp, errors) : null;
+                (n as ASTNodeLike).predicateCheck = { ..._letStamp, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
               }
             }
             // §7.5.1 position 1 — E-TYPE-031 literal-mismatch for unpredicated
@@ -11940,6 +12122,8 @@ function annotateNodes(
         // a const and reject the NEXT assignment to `w`.
         if ((n as Record<string, unknown>)._bareAssign === true && typeof n.name === "string") {
           const bareSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          // S458 slice 2 (position 1) — `x = ?{…}` reassigning a refined local.
+          markRefinedReassign(n, scopeChain.lookup(n.name) as ScopeEntry | undefined, (n as Record<string, unknown>).initExpr, bareSpan, errors);
           bindOrRejectBareAssignment(n.name, bareSpan, scopeChain, errors);
           const mxnBare = (n as { matchExpr?: ASTNodeLike }).matchExpr;
           if (mxnBare && typeof mxnBare === "object") visitNode(mxnBare);
@@ -12159,12 +12343,12 @@ function annotateNodes(
           } else {
             // S458 — a refinement inside containers, as at the let/const site.
             {
-              const _cellShape = refinementShape(reactAnnoType);
-              if (_cellShape && _cellShape.wrap) {
+              const _cellStamp = refinementStamp(reactAnnoType);
+              if (_cellStamp && _cellStamp.judge) {
                 const _sp = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
                 const _ini = (n as any).initExpr;
-                const _proven = _ini ? staticRefinedInit(_cellShape, 0, _ini, _sp, errors) : null;
-                (n as ASTNodeLike).predicateCheck = { ..._cellShape, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
+                const _proven = _ini ? staticJudge(_cellStamp.judge, _ini, _sp, errors) : null;
+                (n as ASTNodeLike).predicateCheck = { ..._cellStamp, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
               }
             }
             // §7.5.1 position 2 — E-TYPE-031 on an annotated STATE-CELL
@@ -12306,6 +12490,25 @@ function annotateNodes(
             // struct-return), fire the §14.8.8 check against the contract. No
             // annotation / no sqlNode here, so this is the connective tissue
             // between the cell contract and the SQL-row data-flow.
+            // S458 slice 2 (position 1) — `@cell = v` reassigning a cell whose
+            // DECLARED type carries a refinement. The AST builder collapses the
+            // reassignment into an unannotated state-decl, so its own annotation
+            // never asked the question; the cell's prior bind answers it. A
+            // literal is decided now; anything else stamps the same
+            // `predicateCheck` a refined declaration carries, and the state-decl
+            // emitter judges the value before the set (the cell keeps its prior
+            // value on refusal, §53.3.3).
+            if (!reactAnnot && typeof n.name === "string" && n.name.length > 0 && !(n as ASTNodeLike).predicateCheck) {
+              const _priorCell = scopeChain.lookup(`@${n.name}`) as { kind?: string; resolvedType?: ResolvedType } | undefined;
+              const _cellStampR = _priorCell && _priorCell.kind === "reactive" ? refinementStamp(_priorCell.resolvedType) : null;
+              if (_cellStampR && _cellStampR.judge) {
+                const _rSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                const _proven = reactInitExprNode ? staticJudge(_cellStampR.judge, reactInitExprNode, _rSpan, errors) : null;
+                if (_proven === null) {
+                  (n as ASTNodeLike).predicateCheck = { ..._cellStampR, zone: "boundary", sourceKind: "reassign" };
+                }
+              }
+            }
             if (!reactAnnot && typeof n.name === "string" && n.name.length > 0) {
               const _priorContractBind = scopeChain.lookup(`@${n.name}`) as
                 | { kind?: string; resolvedType?: ResolvedType }
@@ -12871,6 +13074,17 @@ function annotateNodes(
         // call — shared with event-handler attribute values (see
         // `checkUnhandledFailableBareCall`).
         checkUnhandledFailableBareCall(n);
+        // S458 slice 2 (positions 1, 2) — assignment EXPRESSIONS whose target's
+        // declared type carries a refinement (`@x += 1`, `l.u = v`,
+        // `@link.u = v`): the written value is judged. Last in this case, after
+        // every type-system walk of the statement.
+        {
+          const _beExpr = (n as Record<string, unknown>).exprNode;
+          if (_beExpr) {
+            const _beSpan2 = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            desugarRefinedAssignExprs(_beExpr, scopeChain, _beSpan2, errors);
+          }
+        }
         break;
       }
 
@@ -13870,6 +14084,11 @@ function annotateNodes(
               inferBareVariantsInExpr(tildInitExpr, rt, tildSpan, errors);
             }
           }
+          // S458 slice 2 (position 1) — `x = v` reassigning a REFINED local (or
+          // parameter): the new value is judged against the declared type
+          // (§53.3.3). Literal → static zone now; otherwise the emitter checks
+          // before the assignment (the binding keeps its prior value).
+          markRefinedReassign(n, typeof n.name === "string" ? scopeChain.lookup(n.name) as ScopeEntry | undefined : undefined, tildInitExpr, tildSpan, errors);
         }
         // §50.8.5 E-ASSIGN-004 — STATEMENT-form `const` reassignment.
         //
@@ -17822,6 +18041,9 @@ function checkEqPayloadVariantOperands(
  *   §14.10 line 7291 — "any other position where the type is fixed"
  *   §34            — E-VARIANT-AMBIGUOUS + E-TYPE-063
  */
+/** S458 slice 2 — call arguments already judged statically (one report each). */
+const _staticArgJudged: WeakSet<object> = new WeakSet();
+
 function inferBareVariantsAtCallArgs(
   exprNode: unknown,
   fnSignatures: Map<string, {
@@ -17874,6 +18096,17 @@ function inferBareVariantsAtCallArgs(
             const param = sig.params[i];
             if (!param) continue; // varargs / over-supplied — silent.
             const paramType = param.type;
+            // S458 slice 2 (position 8) — a LITERAL argument to a refined
+            // parameter is decided at compile time (§53.4.2 rules 1-2, §53.12.3:
+            // "Call site: 10 is a literal … static zone"); a refuted literal is
+            // E-CONTRACT-001. Anything else is judged by the callee's entry guard.
+            if (arg && typeof arg === "object" && !_staticArgJudged.has(arg as object)) {
+              const _argJudge = judgeTypeOf(paramType as never);
+              if (_argJudge) {
+                _staticArgJudged.add(arg as object);
+                staticJudge(_argJudge, arg, span, errors);
+              }
+            }
             if (paramType.kind !== "enum" && paramType.kind !== "union") {
               continue; // non-enum param type — bare variants make no sense here.
             }

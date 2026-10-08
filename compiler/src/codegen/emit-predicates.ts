@@ -21,6 +21,7 @@
  */
 
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
+import { describeJudge, type JudgeType } from "../refinement-obligations.ts";
 
 // ---------------------------------------------------------------------------
 // PredicateExpr mirror (matches type-system.ts — no import to avoid coupling)
@@ -146,6 +147,10 @@ function jsLiteral(v: number | string): string {
 export interface JudgeShape {
   baseType?: string;
   wrap?: Array<"array" | "nullable">;
+  /** S458 slice 2 — the whole declared type's judge; when present it is used. */
+  judge?: JudgeType;
+  /** §53 R2 — a server-side failure report omits the value. */
+  noValue?: boolean;
 }
 
 /** JS boolean: is `v` a value of `baseType`? `null` = no base guard (enum subset). */
@@ -166,6 +171,7 @@ function baseTypeGuard(baseType: string | undefined, v: string): string | null {
  * (a parameter or temp name) — it is read more than once.
  */
 export function judgeExpr(predicate: PredicateExpr, valueExpr: string, shape: JudgeShape = {}): string {
+  if (shape.judge) return judgeTypeExpr(shape.judge, valueExpr);
   const wrap = shape.wrap ?? [];
   const inner = (v: string, at: number): string => {
     if (at < wrap.length) {
@@ -178,6 +184,91 @@ export function judgeExpr(predicate: PredicateExpr, valueExpr: string, shape: Ju
     return guard ? `(${guard} && ${pred})` : pred;
   };
   return inner(valueExpr, 0);
+}
+
+/**
+ * S458 slice 2 — the judge for a whole declared type (refinement-obligations.ts
+ * `JudgeType`): containers, structs, unions and refinements, in one expression.
+ * `valueExpr` is read more than once, so it must be a side-effect-free name.
+ */
+export function judgeTypeExpr(j: JudgeType, valueExpr: string, depth = 0): string {
+  const v = valueExpr;
+  switch (j.k) {
+    case "pred": {
+      const guard = baseTypeGuard(j.baseType, v);
+      const pred = predicateToJsExpr(j.predicate as PredicateExpr, v);
+      return guard ? `(${guard} && ${pred})` : pred;
+    }
+    case "array": {
+      const el = `_scrml_el${depth}`;
+      return `(Array.isArray(${v}) && ${v}.every((${el}) => ${judgeTypeExpr(j.of, el, depth + 1)}))`;
+    }
+    case "nullable":
+      return `(${v} === null || ${v} === undefined || ${judgeTypeExpr(j.of, v, depth)})`;
+    case "struct": {
+      const parts = j.fields.map(([name, f]) => {
+        const access = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? `${v}.${name}` : `${v}[${JSON.stringify(name)}]`;
+        // a field read is a property access on an already-checked object: no side effects
+        return judgeTypeExpr(f, access, depth + 1);
+      });
+      return `(${v} !== null && typeof ${v} === "object" && !Array.isArray(${v}) && ${parts.join(" && ")})`;
+    }
+    case "anyOf":
+      return `(${j.of.map((m) => judgeTypeExpr(m, v, depth)).join(" || ")})`;
+    case "prim":
+      return baseTypeGuard(j.baseType, v) ?? FAIL_CLOSED;
+    case "any":
+      return "true /* an unrefined union member: not judged */";
+    default:
+      return FAIL_CLOSED;
+  }
+}
+
+/** The human description of a judge (failure reports). */
+export function describeJudgeType(j: JudgeType): string {
+  return describeJudge(j, (p) => predicateToDisplayString(p as PredicateExpr));
+}
+
+/**
+ * S458 slice 2 — the lowering of a refine placeholder call
+ * (`__scrml_refine_<token>__(value)`, refinement-obligations.ts): an inline
+ * arrow that judges the value, refuses it, and otherwise yields it unchanged.
+ * `server` — a server-side failure (§53 R2): the report carries no value (an
+ * uncaught throw reaches the host's 500 response, which may echo the message).
+ */
+export function emitRefineExpr(valueJs: string, judge: JudgeType, where: { kind: string; name: string; fn?: string }, server: boolean): string {
+  const v = "_scrml_rv";
+  const check = judgeTypeExpr(judge, v);
+  const loc = where.fn ? `${where.kind} '${where.name}' in ${where.fn}` : `${where.kind} '${where.name}'`;
+  const msg =
+    `"E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" + ` +
+    `"  Location: " + ${JSON.stringify(loc)} + "\\n" + ` +
+    `"  Constraint: (" + ${JSON.stringify(describeJudgeType(judge))} + ")"` +
+    (server ? "" : ` + "\\n  Value: " + ${safeValueText(v)}`);
+  return `((${v}) => { if (!${check}) throw new Error(${msg}); return ${v}; })(${valueJs})`;
+}
+
+/**
+ * S458 slice 2 — a parameter guard STATEMENT (the body-prepended obligation for
+ * a refined parameter). `response400` — inside a server route handler body: the
+ * §53.9.4 400 response, exactly the shape `emitServerParamCheck` writes.
+ */
+export function emitParamGuardStatement(param: string, judge: JudgeType, fnName: string, mode: "throw" | "throw-server" | "response400"): string[] {
+  if (mode === "response400") {
+    return emitServerParamCheck(param, { kind: "error" } as PredicateExpr, null, fnName, "", { judge });
+  }
+  const check = judgeTypeExpr(judge, param);
+  const lines: string[] = [];
+  lines.push(`// §53.9.1 E-CONTRACT-001-RT boundary check: parameter '${param}' of ${fnName}`);
+  lines.push(`if (!${check}) {`);
+  lines.push(`  throw new Error(`);
+  lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
+  lines.push(`    "  Location: " + ${JSON.stringify(`fn ${fnName}, parameter '${param}'`)} + "\\n" +`);
+  lines.push(`    "  Constraint: (" + ${JSON.stringify(describeJudgeType(judge))} + ")"` + (mode === "throw" ? ` + "\\n" +` : ``));
+  if (mode === "throw") lines.push(`    "  Value: " + ${safeValueText(param)}`);
+  lines.push(`  );`);
+  lines.push(`}`);
+  return lines;
 }
 
 /**
@@ -353,7 +444,7 @@ export function emitRuntimeCheck(
 ): string[] {
   // S458 — the one judge: base type, containers, predicate.
   const checkExpr = judgeExpr(predicate, valueExpr, shape);
-  const displayPred = predicateToDisplayString(predicate);
+  const displayPred = shape.judge ? describeJudgeType(shape.judge) : predicateToDisplayString(predicate);
   const labelPart = label ? ` [${label}]` : "";
   const locationPart = location ? ` (${location})` : "";
 
@@ -364,7 +455,9 @@ export function emitRuntimeCheck(
   lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
   lines.push(`    "  Variable: " + ${JSON.stringify(varName + labelPart)} + "\\n" +`);
   lines.push(`    "  Constraint: (" + ${JSON.stringify(displayPred)} + ")\\n" +`);
-  lines.push(`    "  Value: " + ${safeValueText(valueExpr)} + "\\n" +`);
+  // §53 R2 (S458) — a SERVER-side failure carries no value: the uncaught throw
+  // reaches the host's 500 response, which may echo the message.
+  if (!shape.noValue) lines.push(`    "  Value: " + ${safeValueText(valueExpr)} + "\\n" +`);
   lines.push(`    "  Location: " + ${JSON.stringify(locationPart || varName)}`);
   lines.push(`  );`);
   lines.push(`}`);
@@ -399,7 +492,7 @@ export function emitServerParamCheck(
   // S458 — the one judge: base type, containers, predicate. A value of the
   // wrong base type (or a missing field) is a clean 400, not a thrown 500.
   const checkExpr = judgeExpr(predicate, paramName, shape);
-  const displayPred = predicateToDisplayString(predicate);
+  const displayPred = shape.judge ? describeJudgeType(shape.judge) : predicateToDisplayString(predicate);
   const labelPart = label ? ` [${label}]` : "";
 
   const lines: string[] = [];
@@ -568,12 +661,24 @@ export interface Refinement {
   label: string | null;
   /** Containers around the refined value, outermost first (`T[]`, `T | not`). */
   wrap?: Array<"array" | "nullable">;
+  /** S458 slice 2 — the whole declared type's judge (preferred when present). */
+  judge?: JudgeType;
 }
 
 /** The refinement carried by a TS stamp (param / fn return / decl), or null. */
 export function refinementOf(stamp: unknown): Refinement | null {
   if (!stamp || typeof stamp !== "object") return null;
-  const r = stamp as { predicate?: unknown; baseType?: unknown; label?: unknown; wrap?: unknown };
+  const r = stamp as { predicate?: unknown; baseType?: unknown; label?: unknown; wrap?: unknown; judge?: unknown };
+  // S458 slice 2 — a stamp carrying the whole declared type's judge (structs,
+  // unions) need not have a top-level predicate.
+  if (r.judge && typeof r.judge === "object") {
+    return {
+      baseType: typeof r.baseType === "string" ? r.baseType : "",
+      predicate: (r.predicate && typeof r.predicate === "object" ? r.predicate : { kind: "error" }) as PredicateExpr,
+      label: typeof r.label === "string" ? r.label : null,
+      judge: r.judge as JudgeType,
+    };
+  }
   if (!r.predicate || typeof r.predicate !== "object") return null;
   const wrap = Array.isArray(r.wrap)
     ? (r.wrap as unknown[]).filter((w): w is "array" | "nullable" => w === "array" || w === "nullable")

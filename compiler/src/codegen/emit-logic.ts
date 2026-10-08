@@ -12,7 +12,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHead
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRuntimeCheck, refinementOf } from "./emit-predicates.ts";
+import { emitRuntimeCheck, refinementOf, emitParamGuardStatement, emitRefineExpr } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -547,12 +547,6 @@ export interface EmitLogicOpts {
    * emits no boundary check (correct for non-refinement-typed returns).
    */
   returnTypeAnnotation?: string | null;
-  /**
-   * S458 one reader — the TS-resolved return refinement (`fnNode.returnRefinement`,
-   * stamped by type-system.ts). return-stmt judges THIS, never the annotation
-   * string. Threaded alongside `returnTypeAnnotation`.
-   */
-  returnRefinement?: unknown;
   /**
    * C16 (§53.9.3) — The enclosing function's name, used in error messages
    * for return-stmt boundary check failures. Paired with returnTypeAnnotation.
@@ -2121,6 +2115,14 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // In lift context, emit-lift handles them for tag reconstruction.
       return "";
     case "bare-expr": {
+      // S458 slice 2 — a refined parameter's guard statement (prepended to the
+      // function body by the type-system stage, refinement-obligations.ts).
+      // Emitted as a readable `if (!judge) throw …` statement. Server side (§53
+      // R2): the report carries no value.
+      if ((node as any).refineParamGuard) {
+        const g = (node as any).refineParamGuard as { name: string; judge: any; fn: string };
+        return emitParamGuardStatement(g.name, g.judge, g.fn, opts.boundary === "server" ? "throw-server" : "throw").join("\n");
+      }
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {
         // §32 — orphan `~` accumulator at statement position.
@@ -2390,7 +2392,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
           return [
             `const ${_checkTmpVar} = ${rhs};`,
             ..._checkLines,
@@ -2409,7 +2411,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
         return [`const ${_checkTmpVar} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`, ..._checkLines, `let ${node.name} = ${_checkTmpVar};`].join("\n");
       }
       return `let ${_letDeclLhs} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`;
@@ -2422,13 +2424,24 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // A5 (2026-05-17) — same as let-decl: `node.name` may be a structured
       // DestructurePattern (const-decl only; tilde-decl never destructures).
       const _constDeclLhs = nameOrPatternText(node.name);
+      // S458 slice 2 (position 1) — a reassignment of a REFINED binding
+      // (`refineAssign`, stamped by the type-system stage): judge the new value
+      // BEFORE the assignment, so the binding keeps its prior value on refusal
+      // (§53.3.3).
+      const _assignChecked = (name: string, rhs: string): string => {
+        const ra = (node as any).refineAssign as { judge: any; name: string } | undefined;
+        if (!ra) return `${name} = ${rhs};`;
+        const _tmp = genVar(`_scrml_chk_${name}`);
+        const _lines = emitRuntimeCheck({ kind: "error" } as any, _tmp, name, null, undefined, { judge: ra.judge, noValue: opts.boundary === "server" });
+        return [`const ${_tmp} = ${rhs};`, ..._lines, `${name} = ${_tmp};`].join("\n");
+      };
       // For tilde-decl: if name was already declared by let-decl, emit as reassignment
       // s427 round 2 (H1): not when the nearest declaration is a `const` on a lift-scope
       // set — base's fresh-`const` emission is kept there (see tildeDeclIsRebind).
       if (node.kind === "tilde-decl" && typeof node.name === "string" && tildeDeclIsRebind(opts.declaredNames, node.name)) {
         const init = node.init ?? "";
         const tildeRhs = emitExprField(node.initExpr, init, _makeExprCtx(opts));
-        return `${node.name} = ${tildeRhs};`;
+        return _assignChecked(node.name, tildeRhs);
       }
       // #274 Wall-2 — the SQL-init sibling of the tilde-decl reassignment above. A
       // keywordless bare assignment `w = ?{...}.run()` parses as a `_bareAssign`
@@ -2447,7 +2460,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (opts.boundary === "server") {
           const sqlStmt = emitLogicNode(node.sqlNode, opts);
           const sqlExpr = sqlStmt.replace(/;\s*$/, "");
-          return `${node.name} = ${sqlExpr};`;
+          return _assignChecked(node.name, sqlExpr);
         }
         return `${node.name} = null; // SQL-init reassignment for ${node.name} — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function.`;
       }
@@ -2459,7 +2472,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         (node as any)._bareAssign && !node.sqlNode
         && typeof node.name === "string" && tildeDeclIsRebind(opts.declaredNames, node.name)
       ) {
-        return `${node.name} = ${emitExprField(node.initExpr, node.init ?? "", _makeExprCtx(opts))};`;
+        return _assignChecked(node.name, emitExprField(node.initExpr, node.init ?? "", _makeExprCtx(opts)));
       }
       // For tilde-decl with reactive deps: emit as derived reactive (auto-updates)
       // Phase 4d: ExprNode-first reactive dep extraction, string fallback
@@ -2494,6 +2507,19 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           markDeclaredImmutable(opts.declaredNames, node.name);
         }
       }
+      // S458 slice 2 (position 3) — a refined `const` is judged exactly as a
+      // refined `let` is. The type-system stage has always stamped
+      // `predicateCheck` on a const-decl; this emitter never read it, so every
+      // `const x: string(url) = f()` — top level or in a function — was unchecked.
+      const _constChecked = (rhs: string): string => {
+        const _pc = node.predicateCheck;
+        if (!(_pc && _pc.zone === "boundary" && typeof node.name === "string")) {
+          return `const ${_constDeclLhs} = ${rhs};`;
+        }
+        const _tmp = genVar(`_scrml_chk_${node.name}`);
+        const _lines = emitRuntimeCheck(_pc.predicate, _tmp, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
+        return [`const ${_tmp} = ${rhs};`, ..._lines, `const ${node.name} = ${_tmp};`].join("\n");
+      };
       // If-as-expression: `const a = if (cond) { lift val }`
       if (node.ifExpr) {
         return emitIfExprDecl(_constDeclLhs, node.ifExpr, "const", opts, node);
@@ -2515,7 +2541,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (opts.boundary === "server") {
           const sqlStmt = emitLogicNode(node.sqlNode, opts);
           const sqlExpr = sqlStmt.replace(/;\s*$/, "");
-          return `const ${_constDeclLhs} = ${sqlExpr};`;
+          return _constChecked(sqlExpr);
         }
         // Client boundary: cannot evaluate; emit `const x = null;` (const must
         // have an initializer) + comment so the JS parses and the cause is
@@ -2528,13 +2554,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (opts.boundary === "server") {
           const fStmt = emitLogicNode((node as any).foreignNode, opts);
           const fExpr = fStmt.replace(/;\s*$/, "");
-          return `const ${_constDeclLhs} = ${fExpr};`;
+          return _constChecked(fExpr);
         }
         return `const ${_constDeclLhs} = null; // foreign-init for ${_constDeclLhs} — _{} runs server-side; use a server-side function.`;
       }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
-        return `const ${_constDeclLhs} = ${emitExpr(node.initExpr, _makeExprCtx(opts))};`;
+        return _constChecked(emitExpr(node.initExpr, _makeExprCtx(opts)));
       }
       // Phase 4 simplified fallback: initExpr is missing (rare — e.g. tilde expressions)
       let constInit: string = node.init ?? "";
@@ -2543,7 +2569,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         opts.tildeContext.var = null;
       }
       if (!constInit) return `const ${_constDeclLhs};`;
-      return `const ${_constDeclLhs} = ${emitExprField(node.initExpr, constInit, _makeExprCtx(opts))};`;
+      return _constChecked(emitExprField(node.initExpr, constInit, _makeExprCtx(opts)));
     }
 
     case "state-decl": {
@@ -3119,7 +3145,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
           return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
@@ -3135,7 +3161,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
         return _appendSidecar([`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n"));
       }
       return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
@@ -3149,21 +3175,26 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // C16 (§53.9.3) — Helper: when the enclosing function declares a
       // refinement-typed return type, wrap the return expression in a
       // boundary check (E-CONTRACT-001-RT) before returning.
-      const _retPredInfo = opts.returnTypeAnnotation
-        ? refinementOf(opts.returnRefinement)
-        : null;
+      // S458 slice 2 — the obligation is stamped on THIS return statement by the
+      // type-system stage (`refineReturn`, the enclosing function's refined
+      // return type). It used to be inherited through emit options, which only
+      // the client top-level emitter set (server / worker / tool / library
+      // returns went unchecked) and which a nested function inherited from its
+      // parent.
+      const _rr = (node as any).refineReturn as { judge: any; fn: string } | undefined;
+      const _retPredInfo = _rr ? refinementOf({ judge: _rr.judge }) : null;
       const _wrapReturnWithCheck = (retExprStr: string): string => {
         if (!_retPredInfo) return `return ${retExprStr};`;
         const _tmpVar = genVar(`_scrml_chk_ret`);
         const _label = _retPredInfo.label;
-        const _fnName = opts.enclosingFnName ?? "<anonymous>";
+        const _fnName = _rr?.fn ?? opts.enclosingFnName ?? "<anonymous>";
         const _checkLines = emitRuntimeCheck(
           _retPredInfo.predicate,
           _tmpVar,
           `<return value of ${_fnName}>`,
           _label,
           `fn ${_fnName}, return statement`,
-          _retPredInfo,
+          { ..._retPredInfo, noValue: opts.boundary === "server" },
         );
         return [
           `const ${_tmpVar} = ${retExprStr};`,
@@ -4969,6 +5000,17 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
  *
  * Returns emitted JS code strings (each entry may be multi-line; caller indents).
  */
+/**
+ * S458 slice 2 — an implicit tail return of a function with a refined return
+ * type (the type-system stage stamps the tail statement `refineReturn`): the
+ * returned value is judged, exactly as an explicit `return` is.
+ */
+function refinedTailValue(stmt: any, valueJs: string, opts: EmitLogicOpts): string {
+  const rr = stmt && stmt.refineReturn as { judge: any; fn: string } | undefined;
+  if (!rr) return valueJs;
+  return emitRefineExpr(valueJs, rr.judge, { kind: "return", name: "<return value>", fn: rr.fn }, opts.boundary === "server");
+}
+
 export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: string | undefined, hasReturnType?: boolean, _inheritTilde?: boolean): string[] {
   const TAIL_KINDS = new Set(["bare-expr", "match-stmt", "match-expr", "switch-stmt"]);
   let tailIdx = -1;
@@ -4984,6 +5026,7 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
     for (let i = body.length - 1; i >= 0; i--) {
       const s = body[i];
       if (!s || s._compileTimeOnly) continue;
+      if (s.refineParamGuard) break; // S458 — a parameter guard is never the tail value
       if (TAIL_KINDS.has(s.kind)) tailIdx = i;
       else if (s.kind === "try-stmt" && s.deferLowered === true) deferTailIdx = i;
       break;
@@ -5019,13 +5062,13 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
         const exprCode = stmt.exprNode
           ? emitExpr(stmt.exprNode, exprCtx)
           : emitExprField(null, stmt.expr ?? "", exprCtx);
-        code = exprCode ? `return ${exprCode};` : "";
+        code = exprCode ? `return ${refinedTailValue(stmt, exprCode, bodyOpts)};` : "";
       } else {
         // match/switch emit as IIFE expression strings — wrap in `return ...;`.
         const rawCode = emitLogicNode(stmt, bodyOpts);
         if (rawCode) {
           const stripped = rawCode.replace(/;\s*$/, "");
-          code = `return ${stripped};`;
+          code = `return ${refinedTailValue(stmt, stripped, bodyOpts)};`;
         } else {
           code = "";
         }

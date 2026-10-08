@@ -1,0 +1,14 @@
+{
+  "id": "refinement-struct-field-reject-rt",
+  "description": "S458 slice 2 (position 2): a struct value built at run time is judged field by field. show(h) builds `const l: Link = { href: h }` with Link.href: string(url); called with \"https://scrml.dev/\" it passes (@shown takes it), called with \"javascript:alert(1)\" the check throws E-CONTRACT-001-RT before `l` binds, so @shown keeps the https value.",
+  "language-version": "1.0",
+  "spec": "§53.2.2",
+  "rationale": "§53.2.2 struct field usage position; §53.15.2 boundary row (\"Runtime … check emitted at the assignment site\"); §53.4.5.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#good" }, { "click": "#bad" }],
+    "state": { "shown": "https://scrml.dev/" },
+    "domAnchored": [{ "selector": "#out", "text": "https://scrml.dev/" }]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "refinement-reassign-cell-reject-rt",
+  "description": "S458 slice 2 (position 1): REASSIGNING a refined cell is judged. `@link = v` inside a function writes into `<link>: string(url)`; with v = \"javascript:alert(1)\" the check throws E-CONTRACT-001-RT before the write, so @link keeps its prior value. Before S458 a reassignment was never checked — only the declaration's initializer was — and the cell took the executable URL.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"When a value is assigned to a variable of a constrained type, the compiler performs an assignment-site check … the compiler-generated check SHALL throw a runtime error with code E-CONTRACT-001-RT before the assignment is applied. The variable retains its prior value.\" §53.6.2: \"the type predicate fires at every assignment\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#bad" }],
+    "state": { "link": "https://scrml.dev/" },
+    "domAnchored": [{ "selector": "#out", "text": "https://scrml.dev/" }]
+  }
+}

@@ -592,6 +592,9 @@ const SERVER_ONLY_STATE_TYPES = new Set(["schema", "seeds"]);
  */
 function stmtContainsRenderableLogic(node: any): boolean {
   if (!node || typeof node !== "object") return false;
+  // S458 slice 2 — a refined parameter's guard (a body-prepended bare-expr the
+  // type-system stage adds, refinement-obligations.ts) renders nothing.
+  if (node.refineParamGuard) return false;
   if (node.kind === "bare-expr" || node.kind === "lift-expr") return true;
   for (const key of ["body", "consequent", "alternate"]) {
     if (Array.isArray(node[key])) {
