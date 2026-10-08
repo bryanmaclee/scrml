@@ -42,6 +42,7 @@ import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
 import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
+import { withCompilationPlaceholderToken, scrubPlaceholderToken, currentPlaceholderToken } from "./placeholder-nonce.ts";
 // §14.8.10 (S455) — the one authoritative E-TENANT-SCHEMA-HAZARD stage (post-expansion),
 // and the compilation's ONE tenant set it shares with the floor in CG.
 import { fileTenantSchemaHazards } from "./tenant-schema-hazards.ts";
@@ -999,6 +1000,42 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * }}
  */
 export function compileScrml(options = {}) {
+  // S457 — every compilation gets its OWN unforgeable placeholder token, held in
+  // an AsyncLocalStorage context for exactly this call (placeholder-nonce.ts):
+  // a token seen in an earlier compile's output is just a name to this one, and
+  // two compilations interleaved in one process never read each other's token.
+  return withCompilationPlaceholderToken(() => _compileScrmlChokepoint(options));
+}
+
+/**
+ * Deep-scrub the current compilation's placeholder token from every string in
+ * `value` (in place; Maps, arrays and plain objects). The token never leaves
+ * the compiler — not in an artifact (incl. one written on the error path,
+ * g-impl1-artifacts-written-on-error-s451), a diagnostic, or a serve/LSP reply.
+ */
+function scrubPlaceholderTokenDeep(value, seen = new WeakSet()) {
+  const token = currentPlaceholderToken();
+  const visit = (v) => {
+    if (typeof v === "string") return v.indexOf(token) === -1 ? v : scrubPlaceholderToken(v, token);
+    if (!v || typeof v !== "object" || seen.has(v) || Object.isFrozen(v)) return v;
+    seen.add(v);
+    if (v instanceof Map) {
+      for (const [k, x] of v) { const y = visit(x); if (y !== x) v.set(k, y); }
+    } else if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) { const y = visit(v[i]); if (y !== v[i]) v[i] = y; }
+    } else {
+      for (const k of Object.keys(v)) {
+        const x = v[k];
+        const y = visit(x);
+        if (y !== x) { try { v[k] = y; } catch { /* read-only — leave */ } }
+      }
+    }
+    return v;
+  };
+  return visit(value);
+}
+
+function _compileScrmlChokepoint(options = {}) {
   // s430-dev-db-stub F4 — THE OUTPUT CHOKEPOINT for a compile.
   //
   // The compile unit's connection values (`<program db>`, `<page db>`,
@@ -1023,7 +1060,7 @@ export function compileScrml(options = {}) {
     try { redactor.addSource(readFileSync(resolve(f), "utf8")); } catch { /* a directory / unreadable — BS reports it */ }
   }
   const userLog = typeof options.log === "function" ? options.log : console.log;
-  const log = (...args) => userLog(...args.map((a) => (typeof a === "string" ? redactor.redact(a) : a)));
+  const log = (...args) => userLog(...args.map((a) => (typeof a === "string" ? scrubPlaceholderToken(redactor.redact(a)) : a)));
   const restoreOutput = interceptCompileOutput(redactor);
   let result;
   try {
@@ -1036,6 +1073,11 @@ export function compileScrml(options = {}) {
   for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
     if (Array.isArray(list)) for (const d of list) redactor.redactDiagnostic(d);
   }
+  // S457 — no placeholder token in anything returned (diagnostics, outputs).
+  for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
+    if (Array.isArray(list)) scrubPlaceholderTokenDeep(list);
+  }
+  if (result.outputs) scrubPlaceholderTokenDeep(result.outputs);
   result.redact = (text) => redactor.redact(text);
   result.redactSource = (text) => redactor.redactSource(text);
   return result;
@@ -1047,7 +1089,7 @@ export function compileScrml(options = {}) {
  * synchronous, so nothing else writes while the patch is in place.
  */
 function interceptCompileOutput(redactor) {
-  const red = (a) => (typeof a === "string" ? redactor.redact(a) : a);
+  const red = (a) => (typeof a === "string" ? scrubPlaceholderToken(redactor.redact(a)) : a);
   const saved = {
     log: console.log, error: console.error, warn: console.warn, info: console.info,
     out: process.stdout.write, err: process.stderr.write,
@@ -3234,6 +3276,11 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
+  // S457 — every placeholder is lowered by now; any that survived (a refused
+  // construct) loses its compilation token here, before the emit gate reads,
+  // reports or any write lands — including the artifacts still written on the
+  // error path. The gate's shape test still sees `__scrml_<name>__`.
+  scrubPlaceholderTokenDeep(cgResult);
   // §6.6.9 / §20.5 (S449) — the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER
   // reports a server `@session` lowering the front end MISSED. When route
   // inference already reported E-SESSION-AMBIENT-SERVER the backstop's hits are
@@ -3760,7 +3807,10 @@ function _compileScrmlImpl(options = {}) {
       if (emitPerRoute && cgResult.chunksBootJs && cgResult.chunksBootFilename) {
         pushArtifact(cgResult.chunksBootFilename, cgResult.chunksBootFilename, cgResult.chunksBootJs);
       }
-      const gateErrors = validateEmittedArtifacts(gateArtifacts);
+      // Wording only (never an exemption): did the author's source text mention
+      // a placeholder-shaped name the gate found? See validate-emit.ts.
+      const gateErrors = validateEmittedArtifacts(gateArtifacts,
+        (name) => [...sourceByFile.values()].some((src) => typeof src === "string" && src.includes(name)));
       if (gateErrors.length > 0) {
         for (const ge of gateErrors) {
           allErrors.push({

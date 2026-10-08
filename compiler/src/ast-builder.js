@@ -35,6 +35,7 @@
  * No type information, no scope resolution, no code generation here.
  */
 
+import { PHP_MV, placeholderParam } from "./placeholder-nonce.ts";
 import {
   tokenizeAttributes as _defaultTokenizeAttributes,
   tokenizeLogic as _defaultTokenizeLogic,
@@ -5307,7 +5308,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     for (let s = 0; s < spans.length; s++) {
       const [a, b] = spans[s];
       skeleton += expr.slice(last, a);
-      const ph = `__scrml_mv_${s}__`;
+      const ph = `${PHP_MV()}${s}__`; // unforgeable (placeholder-nonce.ts)
       skeleton += ph;
       last = b;
       // Recover the markup node by re-tokenizing `lift <markup>` and parsing.
@@ -5354,9 +5355,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const substitute = (n) => {
       if (!n || typeof n !== "object") return n;
       if (n.kind === "ident" && typeof n.name === "string") {
-        const m = /^__scrml_mv_(\d+)__$/.exec(n.name);
-        if (m) {
-          const idx = Number(m[1]);
+        const mvIdx = placeholderParam(n.name, "mv");
+        if (mvIdx !== null && /^\d+$/.test(mvIdx)) {
+          const idx = Number(mvIdx);
           return { kind: "markup-value", span: n.span, node: markupNodes[idx] };
         }
         return n;

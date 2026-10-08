@@ -40,6 +40,7 @@
 // ---------------------------------------------------------------------------
 
 import { regexAllowedAfter } from "./code-segments.ts";
+import { PH_IS_SOME, PH_IS_NOT, PH_IS_NOT_NOT, PH_IS_VARIANT, currentPlaceholderToken } from "../placeholder-nonce.ts";
 
 /**
  * The single-eval IIFE parameter name for a non-trivial `is`-operand.
@@ -74,12 +75,10 @@ export function lowerVariantCheck(operand: string, variantLiteral: string): stri
 // The placeholder vocabulary `expression-parser.ts formatIsPredicate` writes.
 // ---------------------------------------------------------------------------
 
-const IS_PLACEHOLDERS = new Set([
-  "__scrml_is_some__",
-  "__scrml_is_not__",
-  "__scrml_is_not_not__",
-  "__scrml_is_variant__",
-]);
+// The parser's UNFORGEABLE names (placeholder-nonce.ts, S457): an author-typed
+// `__scrml_is_some__(x)` is an ordinary identifier and is not lowered here.
+// The set depends on the current compilation, so it is built per call.
+const isPlaceholderNames = (): Set<string> => new Set([PH_IS_SOME(), PH_IS_NOT(), PH_IS_NOT_NOT(), PH_IS_VARIANT()]);
 
 /** A textual operand that re-reading cannot observe: a bare name, `@cell`, or a literal. */
 export function isTrivialOperandText(t: string): boolean {
@@ -205,7 +204,7 @@ function splitTopLevelArgs(s: string): string[] {
  */
 function lowerOne(name: string, argText: string): string | null {
   const args = splitTopLevelArgs(argText);
-  if (name === "__scrml_is_variant__") {
+  if (name === PH_IS_VARIANT()) {
     if (args.length !== 2) return null;
     const operand = lowerIsPlaceholders(args[0].trim());
     const tagText = args[1].trim();
@@ -220,7 +219,7 @@ function lowerOne(name: string, argText: string): string | null {
   const operand = lowerIsPlaceholders(args[0].trim());
   if (!operand) return null;
   const trivial = isTrivialOperandText(operand);
-  return name === "__scrml_is_not__"
+  return name === PH_IS_NOT()
     ? lowerAbsenceCheck(operand, trivial)
     : lowerPresenceCheck(operand, trivial);
 }
@@ -235,7 +234,8 @@ function lowerOne(name: string, argText: string): string | null {
  * (identity, byte for byte).
  */
 export function lowerIsPlaceholders(text: string): string {
-  if (!text || text.indexOf("__scrml_is_") === -1) return text;
+  if (!text || text.indexOf(currentPlaceholderToken()) === -1) return text;
+  const IS_PLACEHOLDERS = isPlaceholderNames();
   let out = "";
   let i = 0;
   while (i < text.length) {

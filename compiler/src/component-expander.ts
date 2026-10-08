@@ -42,6 +42,7 @@
  * Parallelism: per-file — fully parallel across Bun workers.
  */
 
+import { placeholderParam } from "./placeholder-nonce.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
@@ -3508,7 +3509,10 @@ function _injectChildrenWalk(
           const callee = (en as any).callee;
           if (!callee || callee.kind !== "ident") continue;
           const calleeName = callee.name as string;
-          const nameM = calleeName.match(/^__scrml_render_([A-Za-z_$][A-Za-z0-9_$]*)__$/);
+          // Only the parser's unforgeable placeholder (placeholder-nonce.ts) —
+          // an author-typed `__scrml_render_x__` is an ordinary identifier.
+          const renderName = placeholderParam(calleeName, "render");
+          const nameM = renderName !== null && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(renderName) ? [calleeName, renderName] : null;
           if (!nameM) continue;
           const args = ((en as any).args ?? []) as ExprNode[];
           if (args.length === 0) {
