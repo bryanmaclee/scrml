@@ -28,6 +28,7 @@
  */
 import { ScrmlParser } from "./scrml-acorn.ts";
 import { boundNamesOf } from "./binding-names.ts";
+import { parseScrmlTextToEstree } from "./expression-parser.ts";
 
 type ES = { type: string; start: number; end: number; [k: string]: unknown };
 
@@ -77,22 +78,72 @@ export function substitutePropsInJsSource(
   shadowed: Set<string>,
   hooks: JsPropSubstitutionHooks,
 ): string | null {
-  let ast: ES;
-  // The expression form is parsed UNWRAPPED: acorn's `parseExpressionAt("(e)")` returns
-  // the inner node, whose `end` stops before the closing paren.
-  const text = src;
+  // S458 (fourth round, F1) — ONE parser for scrml expression text. The text is parsed
+  // with the expression parser's own front (`parseScrmlTextToEstree`: the `is some` /
+  // `is not` / `not` / `::` / `.Variant` preprocessing, then acorn + the `@` / `::`
+  // plugins), so `label is some` in a block arrow parses exactly as it does anywhere else.
+  // That preprocessing MOVES text, so node offsets do not address `src`. Instead every
+  // candidate identifier TOKEN of `src` (a name token spelled like a prop, not a member
+  // tail) is first renamed to a unique tag (`name__scrmlpropN__`); the tree is analysed
+  // with the tags read back as their names, and each decision is applied to the token in
+  // the ORIGINAL text. A candidate that does not survive into the tree (the front dropped
+  // or duplicated it in a way this cannot follow) makes the whole text unsubstitutable —
+  // never a guess.
+  const candidates: Array<{ start: number; end: number; name: string }> = [];
   try {
-    if (asProgram) {
-      ast = ScrmlParser.parse(text, PARSE_OPTS) as unknown as ES;
-    } else {
-      ast = ScrmlParser.parseExpressionAt(text, 0, PARSE_OPTS) as unknown as ES;
-      if (text.slice(ast.end).trim() !== "") return null; // trailing content: not one expression
+    let prevDot = false;
+    for (const tok of ScrmlParser.tokenizer(src, PARSE_OPTS) as Iterable<{ type: { label: string }; value: unknown; start: number; end: number }>) {
+      if (tok.type.label === "name" && typeof tok.value === "string" && !prevDot
+          && hooks.replacementFor(tok.value) !== null && src.slice(tok.start, tok.end) === tok.value) {
+        candidates.push({ start: tok.start, end: tok.end, name: tok.value });
+      }
+      prevDot = tok.type.label === "." || tok.type.label === "?.";
     }
   } catch {
-    return null;
+    candidates.length = 0;
+    // The plain tokenizer cannot read scrml-only lexemes; fall back to a word scan that
+    // skips string / comment content only through the parse below (a tag inside a string
+    // never becomes an Identifier, so it is never "seen" and the text is refused).
+    for (const m of src.matchAll(/(?<![.\w$@])[A-Za-z_$][\w$]*/g)) {
+      if (hooks.replacementFor(m[0]) !== null) candidates.push({ start: m.index!, end: m.index! + m[0].length, name: m[0] });
+    }
   }
+  if (candidates.length === 0) {
+    // Nothing to substitute — the text is returned verbatim if it parses at all.
+    return parseScrmlTextToEstree(src, asProgram) ? src : null;
+  }
+  const TAG = /^([A-Za-z_$][\w$]*?)__scrmlprop(\d+)__$/;
+  let tagged = "";
+  let last = 0;
+  candidates.forEach((c, i) => { tagged += src.slice(last, c.start) + `${c.name}__scrmlprop${i}__`; last = c.end; });
+  tagged += src.slice(last);
+  const ast = parseScrmlTextToEstree(tagged, asProgram) as unknown as ES | null;
+  if (!ast) return null;
+  // Read every tag back as its name; remember which candidate each Identifier is.
+  const seen = new Set<number>();
+  const untag = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const x of node) untag(x); return; }
+    const r = node as ES;
+    if (r.type === "Identifier" && typeof r.name === "string") {
+      const m = TAG.exec(r.name as string);
+      if (m) { r.name = m[1]; r.__cand = Number(m[2]); seen.add(Number(m[2])); }
+    }
+    for (const k of Object.keys(r)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+      const v = r[k];
+      if (v && typeof v === "object") untag(v);
+    }
+  };
+  untag(ast);
+  if (seen.size !== candidates.length) return null;
 
   const edits: Array<{ start: number; end: number; text: string }> = [];
+  // An edit addresses the candidate TOKEN in `src` (via the Identifier's tag).
+  const at = (id: ES): { start: number; end: number } => {
+    const c = candidates[id.__cand as number];
+    return { start: c.start, end: c.end };
+  };
   const isProp = (name: string, shadow: Set<string>) => !shadow.has(name) && hooks.replacementFor(name) !== null;
 
   const visitPattern = (p: ES | null | undefined, shadow: Set<string>): void => {
@@ -118,7 +169,7 @@ export function substitutePropsInJsSource(
     switch (t.type) {
       case "Identifier": {
         const name = t.name as string;
-        if (isProp(name, shadow)) { hooks.onWrite(name); edits.push({ start: t.start, end: t.end, text: hooks.replacementFor(name) as string }); }
+        if (isProp(name, shadow) && t.__cand !== undefined) { hooks.onWrite(name); edits.push({ ...at(t), text: hooks.replacementFor(name) as string }); }
         break;
       }
       case "ObjectPattern":
@@ -165,7 +216,7 @@ export function substitutePropsInJsSource(
           if ((parent.type === "LabeledStatement" || parent.type === "BreakStatement" || parent.type === "ContinueStatement") && key === "label") return;
           if (parent.type === "MetaProperty") return;
         }
-        if (isProp(name, shadow)) edits.push({ start: node.start, end: node.end, text: hooks.replacementFor(name) as string });
+        if (isProp(name, shadow) && node.__cand !== undefined) edits.push({ ...at(node), text: hooks.replacementFor(name) as string });
         return;
       }
       case "Literal": case "TemplateElement": case "ThisExpression": case "Super": case "EmptyStatement":
@@ -264,7 +315,7 @@ export function substitutePropsInJsSource(
         // A shorthand property in an object LITERAL is a read: `{ label }` → `{ label: <value> }`.
         if (parent && parent.type === "ObjectExpression" && node.shorthand && (node.value as ES)?.type === "Identifier") {
           const name = (node.value as ES).name as string;
-          if (isProp(name, shadow)) edits.push({ start: node.start, end: node.end, text: `${name}: ${hooks.replacementFor(name)}` });
+          if (isProp(name, shadow) && (node.value as ES).__cand !== undefined) edits.push({ ...at(node.value as ES), text: `${name}: ${hooks.replacementFor(name)}` });
           return;
         }
         if (node.computed) visit(node.key as ES, node, "key", shadow);
@@ -279,11 +330,20 @@ export function substitutePropsInJsSource(
   visit(ast, null, "", new Set(shadowed));
   if (edits.length === 0) return src;
   edits.sort((a, b) => b.start - a.start);
-  let out = text;
+  let out = src;
   let lastStart = Infinity;
   for (const e of edits) {
     if (e.end > lastStart) continue; // overlapping (should not happen) — keep the outer edit
-    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+    // The left operand of a §42 `is` predicate is located TEXTUALLY by the predicate
+    // lowering downstream (an identifier / member chain / a parenthesized group), so a
+    // value that is not a plain name chain lands there grouped: `label is some` with
+    // `label="L"` → `("L") is some`.
+    let text = e.text;
+    if (/^\s*is\b/.test(src.slice(e.end)) && !/^@?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(text)
+        && !(text.startsWith("(") && text.endsWith(")"))) {
+      text = `(${text})`;
+    }
+    out = out.slice(0, e.start) + text + out.slice(e.end);
     lastStart = e.start;
   }
   return out;

@@ -52,3 +52,22 @@
   to `substituteProps`.
 - Base flip (540bc7f1e compiler files by copy): all 5 round-4 probes FAIL on base (F2 base: "Left side of
   for-of statement is not a reference"), PASS on head. conformance/run.ts 1386/1436 + 50 xfail, 0 fail.
+
+## 2026-10-08 — step 3: F1 — one parser for scrml expression text
+- (Resumed after an API-limit stop; worktree intact.) Commit 2 (F7/F9) gate: 32565 pass / 0 fail.
+- Side effect measured + pinned: value-attr-binding-i81 §i81.10 "parametric-snippet prop" — a snippet prop CALLED
+  as `row(i)` inside a lift used to ship as a bare unbound call (a ReferenceError at load, which the test pinned as
+  "parses"); it is now substituted as in plain markup, where the same call was already E-CODEGEN-INVALID-LOGIC at
+  the write gate (on c4eb2c589 too). Test retargeted to assert that refusal (no artifact).
+- NEW `parseScrmlTextToEstree` (expression-parser.ts): extractHandledOperands + preprocessForAcorn +
+  parseExpression / parseStatements — the expression parser's own front. `substitutePropsInJsSource` parses with
+  it. Because the front MOVES text, every candidate identifier token of the original is first renamed to a tag
+  (`name__scrmlpropN__`), the tree is analysed with tags read back as names, and each decision is applied to the
+  token in the ORIGINAL text (scrml text out, never placeholder text). A candidate the tree does not contain →
+  the text is unsubstitutable (refused), never guessed.
+- A non-name value landing as an `is` operand is grouped (`("L") is some`); rewrite.ts did not lower a
+  parenthesized STRING-literal `is` operand (it spans three code segments) — `lowerParenthesizedStringIsOps`
+  pre-pass, located on the literal-blanked text.
+- `when @t changes { … }` anywhere in a component body fails the component re-parse with E-COMPONENT-021 on
+  540bc7f1e and head alike (pre-existing) — the when-body (asProgram) path is covered by unit only.
+- Probe f1 executed: base E-SCOPE-001 + empty output; head `true,none,true`.

@@ -3380,6 +3380,28 @@ export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; war
  * serialization and structural equality); ast-builder's body-top check reads it
  * through `hasLostTrailingContent`.
  */
+/**
+ * S458 (fourth round) — parse scrml expression / statement TEXT to an ESTree with the SAME
+ * front the expression parser uses (`extractHandledOperands` + `preprocessForAcorn`: the
+ * `is some` / `is not` / `not` / `::` / `.Variant` / match / map lowering to acorn-legal
+ * placeholders, then `parseExpression` / `parseStatements` with the `@` / `::` plugins).
+ * Identifiers keep their spelling through the preprocessing (they may move), so a caller
+ * that needs to map a node back to the ORIGINAL text tags its identifiers before calling.
+ * Returns null when the text does not parse, or parses only a prefix.
+ */
+export function parseScrmlTextToEstree(raw: string, asProgram: boolean): ESNode | null {
+  if (!raw || !raw.trim()) return null;
+  let processed: string;
+  try {
+    processed = preprocessForAcorn(extractHandledOperands(raw.trim()));
+  } catch {
+    return null;
+  }
+  const r = asProgram ? parseStatements(processed) : parseExpression(processed);
+  if (!r.ast || r.error || r.trailingContent) return null;
+  return r.ast;
+}
+
 export function hasLostTrailingContent(node: unknown): boolean {
   return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
 }

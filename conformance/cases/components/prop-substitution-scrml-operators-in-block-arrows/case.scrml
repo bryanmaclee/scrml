@@ -1,0 +1,16 @@
+<program>
+<t> = 0
+<out> = ""
+<w> = ""
+const C = <div class="c" props={ label: string, missing?: string }>
+    ${
+      const has = x => { return label is some }
+      const none = x => { if (missing is not) { return "none" } else { return "some" } }
+      const neg = x => { return !(label is not) }
+      function run() { @out = [has(1), none(1), neg(1)].join(","); @t = @t + 1 }
+    }
+    <button class="r" onclick=run()>r</button>
+</>
+<C label="L"/>
+<p id="o">${@out}</p>
+</program>

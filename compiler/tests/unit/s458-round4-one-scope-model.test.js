@@ -149,3 +149,28 @@ const C = <div props={ label: string }>
     expect((r.clientJs.match(/Lbl/g) ?? []).length).toBe(2);
   });
 });
+
+describe("F1 — scrml operators in unstructured text parse with the expression parser's own front", () => {
+  const P = { label: '"L"', n: "@v" };
+  const sub = (src, asProgram = false) => substitutePropsInJsSource(src, asProgram, new Set(), {
+    replacementFor: (x) => (x in P ? P[x] : null),
+    onWrite: () => {},
+  });
+  test("`is some` / `is not` / `is not not` / `.Variant` / `::` — substituted, never refused; an `is` operand is grouped", () => {
+    expect(sub("x => { return label is some }")).toBe('x => { return ("L") is some }');
+    expect(sub("x => { if (n is .Active) { return Status::Done } return not }")).toBe("x => { if (@v is .Active) { return Status::Done } return not }");
+    expect(sub("x => { return n == .Active && label is not not }")).toBe('x => { return @v == .Active && ("L") is not not }');
+  });
+  test("a statement body (a `when` / handler body) with scrml operators; locals still shadow", () => {
+    expect(sub("if (label is not) { @x = 1 } else { const label = 2; @y = label }", true))
+      .toBe('if (("L") is not) { @x = 1 } else { const label = 2; @y = label }');
+  });
+  test("text that does not parse is still null (refused by the caller), never text-rewritten", () => {
+    expect(sub("x => { return label is }")).toBe(null);
+  });
+  test("a parenthesized string literal operand of `is` lowers in the raw rewrite (it spans three code segments)", async () => {
+    const { rewriteExprArrowBody } = await import("../../src/codegen/rewrite.ts");
+    expect(rewriteExprArrowBody('x => { return ("L") is some }')).toBe('x => { return ("L" !== null && "L" !== undefined) }');
+    expect(rewriteExprArrowBody('x => { return "(\\"a\\") is some" }')).toBe('x => { return "(\\"a\\") is some" }');
+  });
+});
