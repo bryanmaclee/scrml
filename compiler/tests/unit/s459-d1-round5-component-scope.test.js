@@ -237,4 +237,35 @@ const C = <div class="c" props={ label: string }>
     expect(spans).toContainEqual([6, 24]);
     expect(spans).toContainEqual([7, 25]);
   });
+  test("round 7 item 5 — an occurrence inside a source comment is skipped", () => {
+    const r = compile(`<program>
+const C = <div class="c" props={ label: string }>
+    // old: title='x'
+    <b>y</b>
+    <i class="a" title='x'>a</i>
+</>
+<C label="L"/>
+</program>`);
+    const e = r.errors.find((x) => x.code === "E-ATTR-001");
+    expect([e.span.line, e.span.col]).toEqual([5, 24]);
+  });
+});
+
+describe("round 7 — E-TYPE-031 for an optional function prop is placed at the offending call", () => {
+  test("each unguarded call in the body, in every form, at its own line/col", () => {
+    const r = compile(`<program>
+const Bare = <div class="b" props={ onGo?: () => void }>
+    <button class="g" onclick=onGo()>g</button>
+</>
+const Fn = <div class="f" props={ onGo?: () => void }>
+    \${ function f() { if (onGo) { } else { onGo() } } }
+    <button class="g" onclick=f()>g</button>
+</>
+<Bare/>
+<Fn/>
+</program>`);
+    const spans = r.errors.filter((x) => x.code === "E-TYPE-031").map((e) => [e.span.line, e.span.col]);
+    expect(spans).toContainEqual([3, 31]);
+    expect(spans).toContainEqual([6, 44]);
+  });
 });

@@ -45,16 +45,16 @@
 import { placeholderParam } from "./placeholder-nonce.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
-import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck } from "./ast-builder.js";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 import {
   substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader,
-  PROP_GUARD_PREFIX,
 } from "./component-prop-js-substitute.ts";
 import { boundNamesOf, declareIn } from "./binding-names.ts";
+import { walkBodyNarrowed, type NarrowSpan } from "./presence-narrowing.ts";
 import type {
   Span,
   FileAST,
@@ -322,31 +322,84 @@ function lineColAt(text: string, offset: number): { line: number; col: number } 
 }
 
 /**
- * S459 round 6 (F3) — the SOURCE span of a diagnostic raised inside a component body
- * re-parse. The re-parse reads a normalized copy of the body, so its offsets do not address
- * the file; the diagnosed text (`text`, the exact bytes the reader refused) is located in
- * the definition's own source range instead — the k-th occurrence there, where k is its
- * occurrence index in the normalized body. Falls back to the definition span when the
- * source is not this file's (a cross-file definition) or the text is not found.
+ * S459 rounds 6–7 (F3, items 2 and 5) — the SOURCE span of a node of a component body
+ * re-parse. The re-parse reads a NORMALIZED copy of the body (comments dropped, whitespace
+ * re-laid: `if (x)` → `if(x)`, `</>` → `< / >`), so its offsets do not address the file.
+ * The node's normalized text is located in the definition's own source range instead,
+ * WHITESPACE-INSENSITIVELY and skipping source comments (an occurrence inside a `//` /
+ * block comment is not one the re-parse saw; a `//` inside a `"…"` value — a URL — is
+ * not a comment): the k-th occurrence there, where k is its occurrence index in the
+ * normalized body. Falls back to the definition's start (with its line/col computed from
+ * the source) when the definition is in another file or the text is not found.
  */
-function bodyDiagnosticSourceSpan(
-  defSpan: Span,
-  text: string | undefined,
-  occurrence: number,
-): Span {
+interface SquashedText { chars: string; offs: number[] }
+function squashSource(text: string, from: number, to: number): SquashedText {
+  let chars = "";
+  const offs: number[] = [];
+  let i = from;
+  let inStr = false;
+  while (i < to) {
+    const c = text[i];
+    if (inStr) {
+      if (c === "\\" && i + 1 < to) { chars += c + text[i + 1]; offs.push(i, i + 1); i += 2; continue; }
+      if (c === "\"") inStr = false;
+      if (!/\s/.test(c)) { chars += c; offs.push(i); }
+      i++;
+      continue;
+    }
+    if (c === "\"") { inStr = true; chars += c; offs.push(i); i++; continue; }
+    if (c === "/" && text[i + 1] === "/") { while (i < to && text[i] !== "\n") i++; continue; }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? to : Math.min(to, end + 2);
+      continue;
+    }
+    if (!/\s/.test(c)) { chars += c; offs.push(i); }
+    i++;
+  }
+  return { chars, offs };
+}
+function squash(text: string): string { return text.replace(/\s+/g, ""); }
+
+function defStartSpan(defSpan: Span): Span {
   const src = _currentFileSource;
-  if (!text || !src || !defSpan || (defSpan.file && defSpan.file !== src.path)) return defSpan;
+  if (!src || !defSpan || (defSpan.file && defSpan.file !== src.path) || typeof defSpan.start !== "number") return defSpan;
+  const { line, col } = lineColAt(src.text, defSpan.start);
+  return { ...defSpan, line, col };
+}
+
+/** Locate normalized-body text [start, end) in the definition's source; null when not found. */
+function locateNormalizedInSource(defSpan: Span, normalizedBody: string, start: number, end: number): Span | null {
+  const src = _currentFileSource;
+  if (!src || !defSpan || (defSpan.file && defSpan.file !== src.path)) return null;
+  if (!(end > start) || end > normalizedBody.length) return null;
+  const needle = squash(normalizedBody.slice(start, end));
+  if (!needle) return null;
+  const prefix = squash(normalizedBody.slice(0, start));
+  let occurrence = 0;
+  for (let i = (prefix + needle).indexOf(needle); i >= 0 && i < prefix.length; i = (prefix + needle).indexOf(needle, i + 1)) occurrence++;
   const from = defSpan.start ?? 0;
   const to = Math.min(src.text.length, (defSpan.end ?? src.text.length) + 1);
+  const sq = squashSource(src.text, from, to);
   let at = -1;
-  let p = from;
+  let p = 0;
   for (let k = 0; k <= occurrence; k++) {
-    at = src.text.indexOf(text, p);
-    if (at < 0 || at + text.length > to) return defSpan;
+    at = sq.chars.indexOf(needle, p);
+    if (at < 0) return null;
     p = at + 1;
   }
-  const { line, col } = lineColAt(src.text, at);
-  return { file: src.path, start: at, end: at + text.length, line, col };
+  const s0 = sq.offs[at];
+  const s1 = sq.offs[at + needle.length - 1] + 1;
+  const { line, col } = lineColAt(src.text, s0);
+  return { file: src.path, start: s0, end: s1, line, col };
+}
+
+function bodyDiagnosticSourceSpan(defSpan: Span, normalizedBody: string, start: number | undefined, end: number | undefined): Span {
+  if (typeof start === "number" && typeof end === "number") {
+    const at = locateNormalizedInSource(defSpan, normalizedBody, start, end);
+    if (at) return at;
+  }
+  return defStartSpan(defSpan);
 }
 
 function collectFileDerivedCellNames(ast: FileAST): Set<string> {
@@ -1297,7 +1350,7 @@ export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string
-): { nodes: MarkupNode[]; errors: Array<CEError & { text?: string; occurrence?: number }>; bodyEngines: BodyEngine[] } {
+): { nodes: MarkupNode[]; errors: CEError[]; bodyEngines: BodyEngine[]; normalizedBody?: string } {
   try {
     const normalized = normalizeTokenizedRaw(raw);
 
@@ -1327,19 +1380,15 @@ export function parseComponentBody(
 
     return {
       nodes: markupNodes,
-      errors: realErrors.map((e) => {
-        // S459 round 6 (F3) — the exact refused bytes and their occurrence index in the
-        // normalized body, so the caller can place the diagnostic in the SOURCE.
-        const st = e.span?.start;
-        const en = e.span?.end;
-        const text = typeof st === "number" && typeof en === "number" && en > st ? normalized.slice(st, en) : undefined;
-        let occurrence = 0;
-        if (text) for (let i = normalized.indexOf(text); i >= 0 && i < (st as number); i = normalized.indexOf(text, i + 1)) occurrence++;
-        return { code: e.code, message: e.message, span: e.span, text, occurrence };
-      }),
+      errors: realErrors.map((e) => ({
+        code: e.code,
+        message: e.message,
+        span: e.span,
+      })),
       // §15.13.5 / §51.0.K — engines declared inside the re-parsed body (both
       // the structural `engine-decl` form and the `${ <engine/> }` lift form).
       bodyEngines: collectBodyEngines(reparsed.ast),
+      normalizedBody: normalized,
     };
   } catch (e) {
     const err = e as Error;
@@ -1367,7 +1416,8 @@ function parseComponentDef(
   const { name, raw, span, defChildren } = def;
   if (!name || !raw) return null;
 
-  const { nodes, errors: allParseErrors, bodyEngines } = parseComponentBody(raw, name, filePath);
+  const { nodes, errors: allParseErrors, bodyEngines, normalizedBody: nb } = parseComponentBody(raw, name, filePath);
+  const normalizedBody = nb ?? "";
 
   // S459 L2 — an attribute-level refusal (E-ATTR-001: a single-quoted value, which is not
   // an attribute-string delimiter) is reported under its OWN code, exactly as outside a
@@ -1380,7 +1430,8 @@ function parseComponentDef(
       "E-ATTR-001",
       `${e.message.replace(/^E-ATTR-001:\s*/, "E-ATTR-001: ")} (in component \`${name}\`)`,
       // F3 — at the attribute value's own source position, not the definition's.
-      bodyDiagnosticSourceSpan(defSpan, (e as { text?: string }).text, (e as { occurrence?: number }).occurrence ?? 0),
+      // (the error's span addresses the normalized body the re-parse read).
+      bodyDiagnosticSourceSpan(defSpan, normalizedBody, e.span?.start, e.span?.end),
     ));
   }
 
@@ -1510,8 +1561,196 @@ function parseComponentDef(
   // Secondary nodes (index 1+) are stored verbatim — no props attr stripping needed
   const storedNodes: MarkupNode[] = [storedPrimary as MarkupNode, ...nodes.slice(1)];
 
+  // §15.11.4 / §42.3.5 (S459 round 7) — an optional function prop is `fn | not` in the body;
+  // a call of it must be absence-safe. Judged once per DEFINITION (used or not).
+  if (propsDecl) {
+    checkOptionalFnPropCalls(
+      storedNodes, propsDecl, normalizedBody, span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }, name, ceErrors,
+    );
+  }
+
   return { nodes: storedNodes, propsDecl, defChildren: defChildren || [] };
 }
+
+/**
+ * S459 round 7 — §15.11.4: "An optional function-typed prop (declared with `?`) that is not
+ * provided at the call site SHALL have value `not` inside the component body. The component
+ * body SHALL guard against `not` before calling it; an unguarded call to a potentially-absent
+ * function-typed prop SHALL be a compile error (E-TYPE-031 …)." "Guarded" is §42.3.5's
+ * absence-safety, decided by THE §42 presence-narrowing reader (presence-narrowing.ts), the
+ * same walker E-TYPE-046 uses for a `T | not` cell — so a prop is judged exactly as a
+ * possibly-`not` cell is:
+ *   (1) "Optional chaining the access itself — … `recv?.method(...)`" — `onGo?.()`;
+ *   (2) "Narrowing … via any canonical presence-discrimination: the `if=` markup guard
+ *       (§42.4), `given recv :> { ... }`, an `if (recv is not) return` / `is some`
+ *       early-return, or a `match recv …` arm" — plus the `is some` / truthy consequent, the
+ *       else of a negated test, a ternary consequent and a `&&` right operand.
+ * Which identifiers ARE the prop is the expander's own one scope model: the body is
+ * substituted with a unique marker per optional function prop (a local / parameter named
+ * like the prop is never marked), and the narrowing walker tracks the markers.
+ * Reported at each offending call (its source position, as for the body E-ATTR-001).
+ */
+const OPT_FN_MARK = "@__scrml_optfn__";
+function checkOptionalFnPropCalls(
+  nodes: MarkupNode[],
+  propsDecl: PropDecl[],
+  normalizedBody: string,
+  defSpan: Span,
+  componentName: string,
+  ceErrors: CEError[],
+): void {
+  const optional = propsDecl.filter((d) => d.optional && !d.isSnippet && isFunctionType(d.type));
+  if (optional.length === 0) return;
+  const markerMap = new Map<string, ExprNode>(optional.map((d) => [
+    d.name,
+    { kind: "ident", name: OPT_FN_MARK + d.name, span: { file: defSpan.file ?? "", start: 0, end: 0, line: 1, col: 1 } } as unknown as ExprNode,
+  ]));
+  // A pure substitution pass: no prop-write / unsubstitutable bookkeeping.
+  const prevCtx = _propWriteCtx;
+  _propWriteCtx = null;
+  let marked: ASTNode[];
+  try {
+    marked = nodes.map((n) => substituteProps(n as unknown as ASTNode, new Map<string, string>(), markerMap, new Set<string>()));
+  } finally {
+    _propWriteCtx = prevCtx;
+  }
+  // The body re-parse leaves attribute values as raw text (no `exprNode`, no handler
+  // statement list — substitution rewrites raw text). Give the MARKED copy the trees TAB
+  // would build, from the same parsers: handler values through the one handler statement
+  // parser, every other expression value through the expression parser.
+  // Substitution shares every unchanged subtree with the stored body, so the copy is made
+  // private before anything is attached to it (the stored body must stay as re-parsed).
+  try { marked = structuredClone(marked); } catch { return; }
+  const parseAttrExprs = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) parseAttrExprs(x); return; }
+    const r = n as Record<string, unknown>;
+    if (r.kind === "markup" && Array.isArray(r.attrs)) {
+      for (const a of r.attrs as AttrNode[]) {
+        const v = a?.value as { kind?: string; raw?: string; exprNode?: ExprNode } | undefined;
+        if (v && v.kind === "expr" && typeof v.raw === "string" && v.raw.includes(OPT_FN_MARK)) {
+          // A handler value is a statement list (§5.2.3) — the type system's own check view
+          // (`parseHandlerStatementsForCheck`: an arrow value yields its BODY); any other
+          // value is one expression.
+          const stmts = typeof a.name === "string" && isEventHandlerAttrName(a.name)
+            ? parseHandlerStatementsForCheck({ kind: "expr", raw: v.raw }, defSpan.file ?? "") : null;
+          if (stmts) (v as unknown as Record<string, unknown>).handlerBlock = { stmts };
+          else if (!v.exprNode) {
+            try { const e = parseExprToNode(v.raw, defSpan.file ?? "", 0); if (e) v.exprNode = e; } catch { /* keep raw */ }
+          }
+        }
+      }
+    }
+    for (const k of Object.keys(r)) { if (k !== "span" && r[k] && typeof r[k] === "object") parseAttrExprs(r[k]); }
+  };
+  parseAttrExprs(marked);
+  const keyOf = (node: unknown): string | null => {
+    const r = node as { kind?: string; name?: string } | undefined;
+    return r && r.kind === "ident" && typeof r.name === "string" && r.name.startsWith(OPT_FN_MARK)
+      ? r.name.slice(OPT_FN_MARK.length) : null;
+  };
+  // Item 2 (round 7) — each offending call is reported at its own source position. Spans
+  // inside a re-parsed `${}` block are block-relative, so a call is placed through its
+  // ANCHOR (the attribute value or logic block that holds it — body-relative spans): the
+  // anchor's text is located in the source, then the call is the i-th call / member hop of
+  // the prop inside it (i counted over every such use the walk meets in that anchor, guarded
+  // or not, in walk order = source order).
+  type Anchor = { start: number; end: number };
+  const anchorOf = new WeakMap<object, Anchor>();
+  const markAnchors = (n: unknown, anchor: Anchor | null): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) markAnchors(x, anchor); return; }
+    const r = n as Record<string, unknown>;
+    let here = anchor;
+    const sp = r.span as { start?: number; end?: number } | undefined;
+    if (r.kind === "logic" && sp && typeof sp.start === "number" && typeof sp.end === "number") here = { start: sp.start, end: sp.end };
+    if (here) anchorOf.set(r, here);
+    if (r.kind === "markup" && Array.isArray(r.attrs)) {
+      for (const at of r.attrs as AttrNode[]) {
+        const v = at?.value as unknown as Record<string, unknown> | undefined;
+        const vs = v?.span as { start?: number; end?: number } | undefined;
+        markAnchors(v, v && vs && typeof vs.start === "number" && typeof vs.end === "number" ? { start: vs.start, end: vs.end } : here);
+      }
+    }
+    for (const k of Object.keys(r)) {
+      if (k === "span" || k === "attrs") continue;
+      if (r[k] && typeof r[k] === "object") markAnchors(r[k], here);
+    }
+  };
+  markAnchors(marked, null);
+  let lastAnchor: Anchor | null = null;
+  const usesPerAnchor = new Map<Anchor, number>();
+  const offending: Array<{ prop: string; anchor: Anchor | null; index: number }> = [];
+  walkBodyNarrowed(marked as unknown[], new Set<string>(), defSpan, {
+    receiverKey: keyOf,
+    givenKey: (v: string) => (optional.some((d) => d.name === v) ? v : null),
+    onExpr: (n, present) => {
+      const a = anchorOf.get(n);
+      if (a) lastAnchor = a;
+      // A call of the prop (`onGo()`) or a member hop through it (`onGo.call()`) that is
+      // not optional-chained and not under a narrowing that proves it present.
+      const recv = n.kind === "call" ? n.callee : n.kind === "member" ? n.object : null;
+      const k = recv ? keyOf(recv) : null;
+      if (!k) return;
+      const anchor = lastAnchor;
+      const index = anchor ? (usesPerAnchor.get(anchor) ?? 0) : 0;
+      if (anchor) usesPerAnchor.set(anchor, index + 1);
+      if (n.optional !== true && !present.has(k)) offending.push({ prop: k, anchor, index });
+    },
+    // A block-bodied arrow the parser kept as an escape hatch: its statements, parsed by the
+    // one handler statement parser (tokenizeLogic + parseLogicBody).
+    expandOpaque: (n) => blockArrowStatements(n),
+  });
+  const seen = new Set<string>();
+  for (const o of offending) {
+    const at = locatePropUse(defSpan, normalizedBody, o.anchor, o.prop, o.index);
+    const key = `${o.prop}@${at.start}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const decl = optional.find((d) => d.name === o.prop);
+    ceErrors.push(makeCEError(
+      "E-TYPE-031",
+      `E-TYPE-031: the body of \`<${componentName}>\` calls its optional function prop \`${o.prop}\` ` +
+      `(\`${o.prop}?: ${decl?.type ?? "fn"}\`) without an absence check — cannot call a value of type ` +
+      `\`fn | not\` (§15.11.4). Make the call absence-safe (§42.3.5): \`${o.prop}?.()\`, ` +
+      `\`if (${o.prop}) { ${o.prop}() }\`, \`if (${o.prop} is not) return\`, or an \`if=${o.prop}\` guard on ` +
+      `the element — or make the prop required.`,
+      at,
+    ));
+  }
+}
+
+/** The source span of the `index`-th call / member use of `prop` inside `anchor`. */
+function locatePropUse(defSpan: Span, normalizedBody: string, anchor: { start: number; end: number } | null, prop: string, index: number): Span {
+  const region = anchor ? locateNormalizedInSource(defSpan, normalizedBody, anchor.start, anchor.end) : null;
+  const src = _currentFileSource;
+  if (!region || !src) return region ?? defStartSpan(defSpan);
+  const esc = prop.replace(/[$]/g, "\\$");
+  const re = new RegExp(`(?<![\\w$.@])${esc}\\s*(?:\\?\\.\\s*)?[(.]`, "g");
+  const text = src.text.slice(region.start ?? 0, region.end ?? 0);
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (i === index) {
+      const s0 = (region.start ?? 0) + m.index;
+      const { line, col } = lineColAt(src.text, s0);
+      return { file: src.path, start: s0, end: s0 + prop.length, line, col };
+    }
+    i++;
+  }
+  return region;
+}
+
+/**
+ * The statements of an arrow the parser kept as an escape hatch (a block-bodied arrow), by
+ * the type system's own check view — an arrow yields its BODY (`parseHandlerStatementsForCheck`).
+ */
+function blockArrowStatements(n: Record<string, unknown>): unknown[] | null {
+  const raw = typeof n.raw === "string" ? n.raw : "";
+  if (!raw.includes(OPT_FN_MARK) || !raw.includes("=>")) return null;
+  return parseHandlerStatementsForCheck({ kind: "expr", raw }, "");
+}
+
 
 function buildComponentRegistry(
   componentDefs: ExtendedComponentDefNode[],
@@ -1751,15 +1990,15 @@ function substituteJsTextOrRefuse(
       if (!node) return null;
       const s = emitStringFromTree(node);
       // A PRIMARY expression keeps its own shape (an assignment target `@cell = …` must
-      // stay one); every other value — an operator expression, a number (`5.x` would not
-      // parse) — is grouped so it keeps its own precedence where it lands.
+      // stay one); every other value — an operator expression, a number (`5.x` would not parse),
+      // the absence literal `not` (`not()` would lower as the `not` OPERATOR, S459 r7) — is
+      // grouped so it keeps its own meaning and precedence where it lands.
       const primary = node.kind === "ident" || node.kind === "member" || node.kind === "call"
         || node.kind === "index" || node.kind === "array"
-        || (node.kind === "lit" && (node as LitExpr).litType !== "number");
+        || (node.kind === "lit" && !["number", "not", "null", "undefined"].includes(String((node as LitExpr).litType)));
       return primary ? s : `(${s})`;
     },
     onWrite: (name: string) => notePropWrite(name),
-    onCall: (name: string, guarded: boolean) => notePropCall(name, guarded),
   };
   // A handler value may be a STATEMENT (`if (@r > 0) act()`), not an expression.
   const out = substitutePropsInJsSource(text, asProgram, shadowed, hooks)
@@ -1948,35 +2187,7 @@ let _propWriteCtx: {
   written: Set<string>;
   /** S458 third round — props referenced in text that could not be parsed (prop → that text). */
   unsubstitutable: Map<string, string>;
-  /** S459 round 6 (F4) — the optional (`?`) function-typed props of this component. */
-  optionalFns: Set<string>;
-  /** S459 round 6 (F4) — optional function props CALLED with no absence check. */
-  unguardedCalls: Set<string>;
 } | null = null;
-/**
- * S459 round 6 (F4) — record a call whose callee is a prop. §15.11.4: "an unguarded call to
- * a potentially-absent function-typed prop SHALL be a compile error (E-TYPE-031 …)". A guard
- * is a region under a test that reads the prop (`if (p) …`, `p && p()`, `p ? p() : …`) — the
- * test marks the region in the shadow set (`PROP_GUARD_PREFIX + name`, the same scope sets
- * both substituters thread; component-prop-js-substitute.ts reports through `onCall`).
- */
-function notePropCall(name: string, guarded: boolean): void {
-  if (!_propWriteCtx || guarded) return;
-  if (_propWriteCtx.optionalFns.has(name)) _propWriteCtx.unguardedCalls.add(name);
-}
-function noteCallee(callee: ExprNode, propExprMap: Map<string, ExprNode>, shadowed: Set<string>): void {
-  if (callee && callee.kind === "ident") {
-    const nm = (callee as IdentExpr).name;
-    if (!shadowed.has(nm) && propExprMap.has(nm)) notePropCall(nm, shadowed.has(PROP_GUARD_PREFIX + nm));
-  }
-}
-/** The shadow set for a region guarded by `test` (every name the test reads is guarded). */
-function guardedBy(shadowed: Set<string>, test: ExprNode | undefined | null): Set<string> {
-  if (!test) return shadowed;
-  const g = new Set(shadowed);
-  for (const n of exprNodeIdentNames(test)) g.add(PROP_GUARD_PREFIX + n);
-  return g;
-}
 function notePropWrite(name: string): void {
   if (!_propWriteCtx) return;
   if (_propWriteCtx.declared.has(name) && !_propWriteCtx.bound.has(name)) _propWriteCtx.written.add(name);
@@ -2093,8 +2304,7 @@ function substitutePropsInExprNode(
       return {
         ...n,
         left: substitutePropsInExprNode(n.left, propExprMap, shadowed),
-        // `p && p()` — the right operand runs only when the left tested truthy (F4 guard).
-        right: substitutePropsInExprNode(n.right, propExprMap, n.op === "&&" ? guardedBy(shadowed, n.left) : shadowed),
+        right: substitutePropsInExprNode(n.right, propExprMap, shadowed),
       } satisfies BinaryExpr;
     }
     case "assign": {
@@ -2111,7 +2321,7 @@ function substitutePropsInExprNode(
       return {
         ...n,
         condition: substitutePropsInExprNode(n.condition, propExprMap, shadowed),
-        consequent: substitutePropsInExprNode(n.consequent, propExprMap, guardedBy(shadowed, n.condition)),
+        consequent: substitutePropsInExprNode(n.consequent, propExprMap, shadowed),
         alternate: substitutePropsInExprNode(n.alternate, propExprMap, shadowed),
       } satisfies TernaryExpr;
     }
@@ -2130,7 +2340,6 @@ function substitutePropsInExprNode(
     }
     case "call": {
       const n = node as CallExpr;
-      noteCallee(n.callee, propExprMap, shadowed);
       return {
         ...n,
         callee: substitutePropsInExprNode(n.callee, propExprMap, shadowed),
@@ -2494,8 +2703,7 @@ function substitutePropsInLogicStmt(
       return {
         ...n,
         condExpr: subInExpr(n.condExpr),
-        // The consequent runs only when the condition tested truthy (F4 guard).
-        consequent: (n.consequent ? substitutePropsInLogicStmts(n.consequent, propExprMap, guardedBy(shadowed, n.condExpr)) : n.consequent) as LogicStatement[],
+        consequent: subInStmts(n.consequent) as LogicStatement[],
         alternate: n.alternate ? (subInStmts(n.alternate) as LogicStatement[]) : null,
       } as typeof n;
     }
@@ -2826,8 +3034,6 @@ function substituteProps(
           // whose tree is the call with the substituted callee.
           const calleeProp = typeof callVal.name === "string" ? propExprMap.get(callVal.name) : undefined;
           if (calleeProp) {
-            // The bare call form has no place for an absence check (F4): always unguarded.
-            notePropCall(callVal.name, false);
             const argNodes0 = Array.isArray(callVal.argExprNodes) ? callVal.argExprNodes : [];
             const newArgNodes0 = argNodes0.map((a) => substitutePropsInExprNode(a, propExprMap, new Set()));
             const newArgs0 = newArgNodes0.length === (callVal.args ?? []).length
@@ -3438,7 +3644,15 @@ function expandComponentNode(
         if (!decl || decl.isSnippet || !isFunctionType(decl.type)) continue;
         const v = attr.value as { kind: string; value?: string; exprNode?: ExprNode; raw?: string };
         let litShown: string | null = null;
-        if (v.kind === "string-literal") litShown = `"${v.value ?? ""}"`;
+        // S459 round 7 — `not` inhabits an OPTIONAL function prop's type (`fn | not`,
+        // §15.11.4: an omitted optional prop "SHALL have value `not`"), so passing it is
+        // admitted there; a required function prop does not admit it.
+        const isNotValue = (v.kind === "expr" && v.exprNode && v.exprNode.kind === "lit"
+            && ["not", "null", "undefined"].includes(String((v.exprNode as LitExpr).litType)))
+          || (v.kind === "variable-ref" && (v as { name?: string }).name === "not");
+        if (isNotValue && decl.optional) continue;
+        if (isNotValue) litShown = "not";
+        else if (v.kind === "string-literal") litShown = `"${v.value ?? ""}"`;
         else if (v.kind === "expr" && v.exprNode
           && (v.exprNode.kind === "lit" || v.exprNode.kind === "array" || v.exprNode.kind === "object")) {
           litShown = String(v.raw ?? emitStringFromTree(v.exprNode));
@@ -3613,12 +3827,6 @@ function expandComponentNode(
     ),
     written: new Set<string>(),
     unsubstitutable: new Map<string, string>(),
-    optionalFns: new Set(
-      ((def.propsDecl ?? []) as PropDecl[])
-        .filter((p: PropDecl) => p.optional && !p.isSnippet && isFunctionType(p.type))
-        .map((p: PropDecl) => p.name),
-    ),
-    unguardedCalls: new Set<string>(),
   };
   _propWriteCtx = writeCtx;
 
@@ -3864,31 +4072,9 @@ function expandComponentNode(
     ));
   }
 
-  // S459 round 6 (F4) — §15.11.4: "an unguarded call to a potentially-absent function-typed
-  // prop SHALL be a compile error (E-TYPE-031: cannot call a value of type `fn | not` without
-  // an absence check)". A property of the DEFINITION (the prop is `fn | not` in the body
-  // whatever a given caller passes), so it is reported once per component, not per instance.
-  for (const name of writeCtx.unguardedCalls) {
-    const seen = _unguardedCallReported.get(def) ?? new Set<string>();
-    _unguardedCallReported.set(def, seen);
-    if (seen.has(name)) continue;
-    seen.add(name);
-    const decl = ((def.propsDecl ?? []) as PropDecl[]).find((p: PropDecl) => p.name === name);
-    ceErrors.push(makeCEError(
-      "E-TYPE-031",
-      `E-TYPE-031: the body of \`<${componentName}>\` calls its optional function prop \`${name}\` ` +
-      `(\`${name}?: ${decl?.type ?? "fn"}\`) without an absence check — cannot call a value of type ` +
-      `\`fn | not\` (§15.11.4). An omitted optional prop is \`not\`. Guard the call ` +
-      `(\`onclick=\${ if (${name}) { ${name}() } }\`), or make the prop required.`,
-      node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-    ));
-  }
-
   return [expandedNode, ...secondaryNodes];
 }
 
-/** S459 round 6 (F4) — E-TYPE-031 (unguarded optional-fn call) reported once per definition. */
-const _unguardedCallReported = new WeakMap<object, Set<string>>();
 
 /**
  * Inject caller children into the expanded component markup tree.

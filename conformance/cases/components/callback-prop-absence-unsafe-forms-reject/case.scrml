@@ -1,0 +1,27 @@
+<program>
+<log> = ""
+${ function h() { @log = @log + "h" } }
+const IsNotThen = <div class="a" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo is not) { onGo() } }}>g</button>
+</>
+const BangAnd = <div class="b" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => !onGo && onGo()}>g</button>
+</>
+const Or = <div class="c" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo || onGo()}>g</button>
+</>
+const TernAlt = <div class="d" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo ? 0 : onGo()}>g</button>
+</>
+const Member = <div class="e" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo.call()}>g</button>
+</>
+const TestCall = <div class="f" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo()) { } }}>g</button>
+</>
+const AttrValue = <div class="h" props={ onGo?: () => void }>
+    <span class=${onGo()}>s</span>
+</>
+<IsNotThen onGo=${() => h()}/><BangAnd/><Or/><TernAlt/><Member/><TestCall/><AttrValue/>
+<p id="o">${@log}</p>
+</program>

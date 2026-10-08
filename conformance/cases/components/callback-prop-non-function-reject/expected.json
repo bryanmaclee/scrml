@@ -1,11 +1,11 @@
 {
   "id": "components-callback-prop-non-function-reject",
-  "description": "§15.11.4 (S459 round 6, F4) — a literal (string `\"x\"`, number `${5}`) passed to a function-typed prop is E-TYPE-031, once per call site. Before round 6 it emitted `\"x\"()` with no diagnostic.",
+  "description": "§15.11.4 (S459 round 6, F4) — a literal (string `\"x\"`, number `${5}`) passed to a function-typed prop is E-TYPE-031, once per call site; so is `not` passed to a REQUIRED function prop (it does not inhabit `() => void`; an OPTIONAL one admits it — callback-prop-pass-not). Before round 6 it emitted `\"x\"()` with no diagnostic.",
   "language-version": "1.0",
   "spec": "§15.11.4",
   "rationale": "§15.11.4: \"The compiler SHALL verify at the call site that the value provided for a function-typed prop is assignable to the declared function signature. A type mismatch SHALL be E-TYPE-031.\"",
   "expect": {
     "codes": ["E-TYPE-031"],
-    "codeCounts": { "E-TYPE-031": 2 }
+    "codeCounts": { "E-TYPE-031": 3 }
   }
 }

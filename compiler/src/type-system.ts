@@ -89,6 +89,7 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { boundNamesOf } from "./binding-names.ts";
+import { walkBodyNarrowed } from "./presence-narrowing.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
 import { ifChainChildNodes } from "./ast-if-chain.js";
@@ -31046,222 +31047,38 @@ function checkOptionalMemberAccess(
     return "the receiver";
   }
 
-  // A presence-discrimination condition narrows a bare optional cell. Returns
-  // the cell and WHICH branch proves presence: `@x is some` / bare `@x` prove
-  // presence when TRUE (`not` is falsy, §42.4); `@x is not` proves presence
-  // when FALSE. Used by ternary + if-stmt narrowing. Returns null otherwise.
-  function discriminateCondition(cond: unknown): { cell: string; presentWhenTrue: boolean } | null {
-    let c = cond as Record<string, unknown> | undefined;
-    while (c && c.kind === "paren" && c.expr) c = c.expr as Record<string, unknown>;
-    if (!c) return null;
-    if (c.kind === "binary" && (c.op === "is-some" || c.op === "is-not")) {
-      const cell = bareCellName(c.left);
-      if (cell && optionalCells.has(cell)) return { cell, presentWhenTrue: c.op === "is-some" };
-    }
-    // Bare `@x` truthiness (`not` is falsy) proves presence when TRUE.
-    if (c.kind === "ident") {
-      const cell = bareCellName(c);
-      if (cell && optionalCells.has(cell)) return { cell, presentWhenTrue: true };
-    }
-    return null;
-  }
-
-  // Walk an expression node tree, firing at bare possibly-`not` hops.
-  function checkExpr(node: unknown, present: Set<string>, span: Span): void {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const el of node) checkExpr(el, present, span);
-      return;
-    }
-    const n = node as Record<string, unknown>;
-    // Ternary narrowing: `@x is some ? A : B` proves `@x` present in A;
-    // `@x is not ? A : B` proves it present in B (§42.2.5). Special-cased so
-    // each branch is walked with its own narrowing (not the generic descent).
-    if (n.kind === "ternary" || n.kind === "conditional") {
-      const cond = (n.condition ?? n.test) as unknown;
-      checkExpr(cond, present, span);
-      const disc = discriminateCondition(cond);
-      const thenPresent = disc && disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
-      const elsePresent = disc && !disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
-      checkExpr(n.consequent, thenPresent, span);
-      checkExpr(n.alternate, elsePresent, span);
-      return;
-    }
-    if (n.kind === "member" && n.optional !== true) {
-      const recv = resolveValueInfo(n.object);
-      if (recv.optional) {
-        const cell = bareCellName(n.object);
-        if (!(cell && present.has(cell))) {
-          fire(receiverLabel(n.object), span);
-        }
-      }
-    } else if (n.kind === "index" && n.optional !== true) {
-      // A bare `[key]` on an optional map value is a read, not a deref of the
-      // element, so it does not itself fault — the FAULT is a further `.field`
-      // hop (handled at the enclosing member node). Nothing to fire here.
-    }
-    for (const key of Object.keys(n)) {
-      const v = n[key];
-      if (v && typeof v === "object") checkExpr(v, present, span);
-    }
-  }
-
-  // The if=/show=/else-if= attrs of a markup node that narrow a bare optional
-  // cell to present for the node's children (§42.4). Only a BARE `if=@x`
-  // condition narrows; a compound condition (`if=(@x.foo)`) does not.
-  function markupNarrowedCells(markupNode: Record<string, unknown>): string[] {
-    const out: string[] = [];
-    const attrs = markupNode.attrs as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(attrs)) return out;
-    for (const attr of attrs) {
-      const name = attr.name as string | undefined;
-      if (name !== "if" && name !== "show" && name !== "else-if") continue;
-      const val = attr.value as Record<string, unknown> | undefined;
-      if (!val) continue;
-      const exprNode = (val.exprNode as Record<string, unknown> | undefined) ?? val;
-      // Unwrap a redundant paren wrapper if present.
-      let target = exprNode;
-      while (target && target.kind === "paren" && target.expr) {
-        target = target.expr as Record<string, unknown>;
-      }
-      if (target && target.kind === "ident" && typeof target.name === "string") {
-        const bare = target.name.startsWith("@") ? target.name.slice(1) : target.name;
-        if (optionalCells.has(bare)) out.push(bare);
-      }
-    }
-    return out;
-  }
-
-  // A markup attr's own value expression (fires on `if=(@x.foo)` etc.).
-  function checkMarkupAttrs(markupNode: Record<string, unknown>, present: Set<string>, span: Span): void {
-    const attrs = markupNode.attrs as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(attrs)) return;
-    for (const attr of attrs) {
-      const val = attr.value as Record<string, unknown> | undefined;
-      if (val && typeof val === "object") checkExpr(val, present, span);
-    }
-  }
-
-  // If `node` is an `if (@x is not) <exit>` discrimination, return the cell it
-  // narrows for the REST of the enclosing body (early-return / fail). §42.2.3.
-  function earlyReturnNarrowedCell(node: Record<string, unknown>): string | null {
-    if (node.kind !== "if-stmt") return null;
-    const condExpr = node.condExpr as Record<string, unknown> | undefined;
-    if (!condExpr) return null;
-    let c = condExpr;
-    while (c && c.kind === "paren" && c.expr) c = c.expr as Record<string, unknown>;
-    if (c.kind !== "binary" || c.op !== "is-not") return null;
-    const left = c.left as Record<string, unknown> | undefined;
-    const cell = bareCellName(left);
-    if (!cell || !optionalCells.has(cell)) return null;
-    // The consequent must EXIT (return / fail) for the narrowing to hold after.
-    const consequent = node.consequent as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(consequent)) return null;
-    const exits = consequent.some((s) => s && (s.kind === "return-stmt" || s.kind === "fail-stmt" || s.kind === "fail-expr"));
-    return exits ? cell : null;
-  }
-
-  // The bare optional cell a `match` header discriminates, if any (§42.2.3).
-  function matchHeaderCell(node: Record<string, unknown>): string | null {
-    const headerExpr = node.headerExpr as Record<string, unknown> | undefined;
-    const cell = bareCellName(headerExpr);
+  // S459 D1 round 7 — the narrowing itself (which receivers are PROVEN present at a
+  // node: `if=` / `show=` / `given` / `is not` early return / `match` / `is some` /
+  // ternary / `&&`) is the ONE §42 presence-narrowing reader, presence-narrowing.ts. It
+  // is shared with the component-prop E-TYPE-031 check (an optional function prop is
+  // `fn | not` in the body), so both judge a possibly-`not` receiver identically. This
+  // consumer supplies only what a receiver IS (a plain-optional `@cell`) and what it
+  // fires on (a bare member hop).
+  const receiverKey = (node: unknown): string | null => {
+    const cell = bareCellName(node);
     return cell && optionalCells.has(cell) ? cell : null;
-  }
-
-  const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "conditionExpr"];
-  const CHILD_KEYS = ["body", "children", "consequent", "alternate", "cases", "arms"];
-
-  function spanOf(node: Record<string, unknown>, fallback: Span): Span {
-    const s = node.span as Span | undefined;
-    return s && typeof s.line === "number" ? s : fallback;
-  }
-
-  // Walk one node with the current `present` narrowing set.
-  function walkNode(node: unknown, present: Set<string>, span: Span): void {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) { walkBody(node as ASTNodeLike[], present, span); return; }
-    const n = node as Record<string, unknown>;
-    const here = spanOf(n, span);
-
-    // Fire on every expression this node carries (with the current narrowing).
-    for (const k of EXPR_KEYS) {
-      if (n[k] && typeof n[k] === "object") checkExpr(n[k], present, here);
-    }
-
-    if (n.kind === "markup") {
-      checkMarkupAttrs(n, present, here);
-      const narrowed = markupNarrowedCells(n);
-      const childPresent = narrowed.length > 0 ? new Set(present) : present;
-      for (const c of narrowed) childPresent.add(c);
-      walkBody((n.children as ASTNodeLike[]) ?? [], childPresent, here);
-      return;
-    }
-
-    if (n.kind === "given-guard") {
-      const bodyPresent = new Set(present);
-      const vars = n.variables as string[] | undefined;
-      if (Array.isArray(vars)) {
-        for (const v of vars) {
-          const bare = v.startsWith("@") ? v.slice(1) : v;
-          if (optionalCells.has(bare)) bodyPresent.add(bare);
-        }
-      }
-      walkBody((n.body as ASTNodeLike[]) ?? [], bodyPresent, here);
-      return;
-    }
-
-    if (n.kind === "match-stmt") {
-      const cell = matchHeaderCell(n);
-      const bodyPresent = cell ? new Set(present).add(cell) : present;
-      walkBody((n.body as ASTNodeLike[]) ?? [], bodyPresent, here);
-      return;
-    }
-
-    if (n.kind === "if-stmt") {
-      // Positive/negative narrowing: `if (@x is some) { … }` proves `@x` present
-      // in the consequent; `if (@x is not) { … } else { … }` proves it present
-      // in the alternate (§42.2.5). The condition itself was already checked via
-      // EXPR_KEYS above. Early-return narrowing across siblings is handled in
-      // walkBody (`earlyReturnNarrowedCell`).
-      const disc = discriminateCondition(n.condExpr);
-      const conseqPresent = disc && disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
-      const altPresent = disc && !disc.presentWhenTrue ? new Set(present).add(disc.cell) : present;
-      walkBody((n.consequent as ASTNodeLike[]) ?? [], conseqPresent, here);
-      walkBody((n.alternate as ASTNodeLike[]) ?? [], altPresent, here);
-      return;
-    }
-
-    // Generic descent into structural child arrays.
-    for (const k of CHILD_KEYS) {
-      const v = n[k];
-      if (Array.isArray(v)) walkBody(v as ASTNodeLike[], present, here);
-    }
-    // Some containers hold nested nodes under other keys (e.g. imports). Descend
-    // into any remaining array-of-nodes we have not already handled.
-    for (const k of Object.keys(n)) {
-      if (CHILD_KEYS.includes(k) || EXPR_KEYS.includes(k) || k === "attrs" || k === "children") continue;
-      const v = n[k];
-      if (Array.isArray(v) && v.length > 0 && v[0] && typeof v[0] === "object" && typeof (v[0] as Record<string, unknown>).kind === "string") {
-        walkBody(v as ASTNodeLike[], present, here);
-      }
-    }
-  }
-
-  // Walk a body array, threading early-return narrowing across siblings.
-  function walkBody(body: ASTNodeLike[], present: Set<string>, span: Span): void {
-    if (!Array.isArray(body)) return;
-    let acc = present;
-    for (const node of body) {
-      walkNode(node, acc, span);
-      const narrowed = node && typeof node === "object" ? earlyReturnNarrowedCell(node as Record<string, unknown>) : null;
-      if (narrowed) {
-        acc = new Set(acc);
-        acc.add(narrowed);
-      }
-    }
-  }
-
-  walkBody(topNodes, new Set<string>(), fileSpan);
+  };
+  walkBodyNarrowed(topNodes as unknown[], new Set<string>(), fileSpan, {
+    receiverKey,
+    // An `if=` guard names the cell bare or `@`-prefixed (§42.4).
+    guardKey: (node: unknown): string | null => {
+      const t = node as { kind?: string; name?: string } | undefined;
+      if (!t || t.kind !== "ident" || typeof t.name !== "string") return null;
+      const bare = t.name.startsWith("@") ? t.name.slice(1) : t.name;
+      return optionalCells.has(bare) ? bare : null;
+    },
+    givenKey: (v: string): string | null => {
+      const bare = v.startsWith("@") ? v.slice(1) : v;
+      return optionalCells.has(bare) ? bare : null;
+    },
+    onExpr: (n, present, span) => {
+      if (n.kind !== "member" || n.optional === true) return;
+      const recv = resolveValueInfo(n.object);
+      if (!recv.optional) return;
+      const cell = bareCellName(n.object);
+      if (!(cell && present.has(cell))) fire(receiverLabel(n.object), span as Span);
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,46 @@
+<program>
+<log> = ""
+${ function h() { @log = @log + "h" } }
+const Opt = <div class="opt" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo?.()}>g</button>
+</>
+const IfAttr = <div class="ifattr" props={ onGo?: () => void }>
+    <button class="g" if=onGo onclick=onGo()>g</button>
+</>
+const IfAnc = <div class="ifanc" props={ onGo?: () => void }>
+    <span if=onGo><button class="g" onclick=onGo()>g</button></span>
+</>
+const ErIsNot = <div class="erisnot" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo is not) return; onGo() }}>g</button>
+</>
+const ErBang = <div class="erbang" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (!onGo) return; onGo() }}>g</button>
+</>
+const ErEqNot = <div class="ereqnot" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo == not) return; onGo() }}>g</button>
+</>
+const IsSome = <div class="issome" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo is some) { onGo() } }}>g</button>
+</>
+const Truthy = <div class="truthy" props={ onGo?: () => void }>
+    <button class="g" onclick=${ if (onGo) { onGo() } }>g</button>
+</>
+const ElseNeg = <div class="elseneg" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo is not) { } else { onGo() } }}>g</button>
+</>
+const Tern = <div class="tern" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo ? onGo() : 0}>g</button>
+</>
+const And = <div class="and" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo && onGo()}>g</button>
+</>
+<div id="none">
+    <Opt/><IfAttr/><IfAnc/><ErIsNot/><ErBang/><ErEqNot/><IsSome/><Truthy/><ElseNeg/><Tern/><And/>
+</div>
+<div id="some">
+    <Opt onGo=${() => h()}/><IfAttr onGo=${() => h()}/><IfAnc onGo=${() => h()}/><ErIsNot onGo=${() => h()}/>
+    <ErBang onGo=${() => h()}/><ErEqNot onGo=${() => h()}/><IsSome onGo=${() => h()}/><Truthy onGo=${() => h()}/>
+    <ElseNeg onGo=${() => h()}/><Tern onGo=${() => h()}/><And onGo=${() => h()}/>
+</div>
+<p id="o">${@log}</p>
+</program>
