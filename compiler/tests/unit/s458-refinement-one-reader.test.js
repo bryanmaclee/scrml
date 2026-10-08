@@ -428,6 +428,72 @@ describe("G — string-literal operands (review F-C)", () => {
   });
 });
 
+describe("I — re-review R2-1 / R2-2", () => {
+  // The source text for the escape cases, verbatim (backslashes are scrml-source escapes).
+  const ESC_SRC = [
+    "<program>",
+    "${",
+    '  function p(x: string(eq("a\\"b"))) { return x }',
+    '  function pn(x: string(eq("a\\nb"))) { return x }',
+    "  function d(v) {",
+    '    let q: string(eq("a\\"b")) = v',
+    "    return q",
+    "  }",
+    '  function r(v) -> string(eq("a\\"b")) { return v }',
+    '  server function s(x: string(eq("a\\"b"))) { return x }',
+    "}",
+    '<p>${p("a\\"b")}${pn("a\\nb")}${d("a\\"b")}${r("a\\"b")}</p>',
+    '<button onclick=s("a\\"b")>go</button>',
+    "</program>",
+    "",
+  ].join("\n");
+
+  test("R2-1: an escaped string operand means the same string on every path (param, decl, return, server)", async () => {
+    const out = compileSource(ESC_SRC, "escapes");
+    try {
+      expect(out.errors).toHaveLength(0);
+      const Q = 'a"b', BSQ = 'a\\"b';
+      for (const name of ["p", "d", "r"]) {
+        const f = clientFn(out.clientJs, name);
+        expect([name, refused(f, Q), refused(f, BSQ)]).toEqual([name, false, true]);
+      }
+      const pn = clientFn(out.clientJs, "pn");
+      expect([refused(pn, "a\nb"), refused(pn, "a\\nb")]).toEqual([false, true]);
+      const mod = await import(out.serverPath);
+      const route = mod.routes.find((r) => r.method === "POST");
+      const call = (x) => mod.fetch(new Request("http://localhost" + route.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: "scrml_csrf=t", "X-CSRF-Token": "t" },
+        body: JSON.stringify({ x }),
+      }));
+      expect((await call(Q)).status).toBe(200);
+      expect((await call(BSQ)).status).toBe(400);
+    } finally {
+      rmSync(out.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("R2-2: a literal of the wrong BASE type is E-CONTRACT-001 at compile time", () => {
+    const cases = [
+      ["integer from a fraction", "function f() {\n    let q: integer(>0) = 1.5\n    return q\n  }", true],
+      ["number from a string", "function f() {\n    let q: number(>0) = \"5\"\n    return q\n  }", true],
+      ["number from a boolean", "function f() {\n    let q: number(>0) = true\n    return q\n  }", true],
+      ["string from a number", "function f() {\n    let q: string(.length > 0) = 5\n    return q\n  }", true],
+      ["array element of the wrong base", "function f() {\n    let a: string(url)[] = [5]\n    return a\n  }", true],
+      ["integer from an integer", "function f() {\n    let q: integer(>0) = 2\n    return q\n  }", false],
+      ["number from a fraction", "function f() {\n    let q: number(>0) = 1.5\n    return q\n  }", false],
+    ];
+    for (const [label, body, refusedAtCompile] of cases) {
+      const out = compileSource(`<program>\n\${\n  ${body}\n}\n<p>\${f()}</p>\n</program>\n`, "baselit");
+      try {
+        expect([label, codes(out).includes("E-CONTRACT-001")]).toEqual([label, refusedAtCompile]);
+      } finally {
+        rmSync(out.dir, { recursive: true, force: true });
+      }
+    }
+  });
+});
+
 describe("H — refinements inside containers (review F-B)", () => {
   test("`T[]` is judged element-wise; `T | not` / `T?` admit `not`", () => {
     const fns = clientFns(`  function list(v) {

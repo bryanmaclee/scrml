@@ -3819,7 +3819,8 @@ function staticRefinedInit(
     return result;
   }
   const info = classifyLiteralFromExprNode(node as never);
-  if (info.kind !== "literal" || typeof info.value === "boolean") return null;
+  if (info.kind !== "literal") return null;
+  if (typeof info.value === "boolean" && shape.baseType === "boolean") return null;
   const pt: PredicatedType = { kind: "predicated", baseType: shape.baseType as PredicatedType["baseType"], predicate: shape.predicate, label: shape.label };
   return checkPredicateLiteral(pt, info.value, span, errors);
 }
@@ -3847,6 +3848,32 @@ function checkPredicateLiteral(
   // with every declaration site (`checkRefinementJudgeable` reports a given
   // predicate once). An unjudgeable predicate is not evaluated.
   if (!checkRefinementJudgeable(predType, span, errors)) return null;
+
+  // S458 — the BASE type first, exactly as the runtime judge does
+  // (emit-predicates judgeExpr): a literal that is not a value of the base type
+  // does not inhabit the refinement. `let q: integer(>0) = 1.5` and
+  // `<n>: number(>0) = "5"` used to compile with no error AND no runtime check.
+  {
+    const base = predType.baseType;
+    const okBase =
+      base === "number" ? typeof value === "number" && !Number.isNaN(value)
+      : base === "integer" ? typeof value === "number" && Number.isInteger(value)
+      : base === "string" ? typeof value === "string"
+      : base === "boolean" ? typeof value === "boolean"
+      : true;
+    if (!okBase) {
+      errors.push(new TSError(
+        "E-CONTRACT-001",
+        "E-CONTRACT-001: Value constraint violated. " +
+          "Type: " + base + "(" + formatPredicateExpr(predType.predicate) + ")" +
+          (predType.label ? " [" + predType.label + "]" : "") + ". " +
+          "Value " + (typeof value === "string" ? JSON.stringify(value) : String(value)) +
+          " is not " + (base === "integer" ? "an integer" : "a " + base) + ".",
+        span,
+      ));
+      return false;
+    }
+  }
 
   // E-CONTRACT-001: static literal evaluation
   if (typeof value === "boolean") return null;
@@ -4353,7 +4380,15 @@ function classifyPredicateZone(
       // here would silently DELETE that guard in exchange for a compile-time
       // check that does not happen. So the zone is unchanged from what this
       // position had before the widening — which is also the honest answer.
-      if (typeof sourceInfo.value === "boolean") return "boundary";
+      // S458 — a boolean literal into a NON-boolean base is a base-type
+      // mismatch, decidable now: checkPredicateLiteral reports E-CONTRACT-001.
+      if (typeof sourceInfo.value === "boolean") {
+        if (targetType.baseType !== "boolean") {
+          checkPredicateLiteral(targetType, sourceInfo.value, span, errors);
+          return "static";
+        }
+        return "boundary";
+      }
       // T-PRED-1: evaluate predicate against literal at compile time.
       // S458 — the static zone is a PROOF (§53.4.2): a literal the evaluator
       // cannot decide (`null` — e.g. a string literal into `number(>0)`, a base-

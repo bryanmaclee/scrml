@@ -12844,7 +12844,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         next += ' ';
       }
       if (tok.kind === 'STRING') {
-        next += tok.isTemplate ? '`' + tok.text + '`' : JSON.stringify(tok.text);
+        // S458 — one cooking path for every annotation collector (typeTokenText):
+        // `.text` is the RAW inner text (escapes NOT interpreted), so
+        // JSON.stringify(text) re-escaped the backslash — `"a\"b"` became
+        // `"a\\\"b"` (a different string) in a parameter's refinement and in a
+        // parameter default value.
+        next += typeTokenText(tok);
       } else {
         next += tok.text;
       }
