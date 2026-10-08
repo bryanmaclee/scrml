@@ -243,14 +243,14 @@ describe("§2: ${<#id>.data} interpolation routes to _scrml_request_<id> + react
   test("the interpolation reads _scrml_request_feed.data (NOT the §36 input-state registry)", () => {
     const result = compile(urlInterpFx);
     const js = clientJs(result, urlInterpFx);
-    expect(js).toMatch(/_scrml_render_value\(el, _scrml_request_feed\.data\)/);
+    expect(js).toMatch(/_scrml_render_value\(_scrml_el, _scrml_request_feed\.data\)/);
     expect(js).not.toMatch(/_scrml_input_state_registry\.get\("feed"\)/);
   });
 
   test("the interpolation binding is _scrml_effect-wrapped (re-renders on resolve)", () => {
     const result = compile(urlInterpFx);
     const js = clientJs(result, urlInterpFx);
-    expect(js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_request_feed\.data\); \}\)/);
+    expect(js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(_scrml_el, _scrml_request_feed\.data\); \}\)/);
   });
 
   test("api= mode interpolation routes to _scrml_request_svc.loading", () => {

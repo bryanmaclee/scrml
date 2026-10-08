@@ -307,7 +307,7 @@ function failAfterFirst(errMsg) {
 test("S454 B-2 — an async <errorBoundary> render failure with no fallback is logged once and does not escape", async () => {
   const pre = `  <x> = 0\n  server function load() { return 1 }\n`;
   const app = mount(`<program>\n${pre}  <errorBoundary><p id="q">\${load()}</p></errorBoundary>\n</program>\n`);
-  expect(app.clientJs).toMatch(/async function _eb_render_/);
+  expect(app.clientJs).toMatch(/async function _scrml_eb_render_/);
   failAfterFirst("render call failed");
   await app.boot();
   expect(app.initError).toBeNull();

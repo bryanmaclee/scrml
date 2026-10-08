@@ -140,8 +140,8 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
       // Emit-level guards: the fire-hooks machinery must EXIST and be wired.
       expect(cj).toContain("function __scrml_engine_mode_fire_hooks");
       // Both engine-direct edges present, each incrementing transitions.
-      expect(cj).toContain(`if (fromVariant === "Nav" && toVariant === "Edit")`);
-      expect(cj).toContain(`if (fromVariant === "Edit" && toVariant === "Nav")`);
+      expect(cj).toContain(`if (_scrml_from === "Nav" && _scrml_to === "Edit")`);
+      expect(cj).toContain(`if (_scrml_from === "Edit" && _scrml_to === "Nav")`);
       // The effect body is emitted (NOT just the <transitions>=0 init).
       const effectMatches = cj.match(
         /_scrml_reactive_set\("transitions", _scrml_reactive_get\("transitions"\) \+ 1\)/g,

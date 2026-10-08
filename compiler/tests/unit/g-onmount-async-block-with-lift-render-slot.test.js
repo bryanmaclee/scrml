@@ -8,7 +8,7 @@
  * (no render slot) — UNLESS the node ALSO contains a `lift-expr`, in which case
  * the placeholder is legitimately kept for the lift. In that case the per-child
  * binding loop still registered the bare-expr as a logic-binding, so
- * emit-event-wiring.ts emitted `_scrml_render_value(el, boot())` (the call's
+ * emit-event-wiring.ts emitted `_scrml_render_value(_scrml_el, boot())` (the call's
  * RETURN renders into the DOM — `[object Promise]` for an async/CPS call) plus,
  * when the body transitively reads a reactive cell, a re-running `_scrml_effect`
  * wrapper. This is the flogence-adopter shape (`function boot() { refresh() }` /
@@ -80,7 +80,7 @@ describe("g-onmount-async — on-mount-in-${}-with-lift is an effect, not a disp
     const { clientJs } = compileClientJs(NON_REACTIVE, "non-reactive");
     expect(clientJs).toBeTruthy();
     // The smoking gun: the on-mount call's RETURN must NOT render into the DOM.
-    expect(clientJs).not.toMatch(/_scrml_render_value\(el, _scrml_boot_\d+\(\)\)/);
+    expect(clientJs).not.toMatch(/_scrml_render_value\(_scrml_el, _scrml_boot_\d+\(\)\)/);
   });
 
   test("the on-mount runs ONCE as a mount effect (`boot();` present, not effect-wrapped render)", () => {
@@ -100,8 +100,8 @@ describe("g-onmount-async — on-mount-in-${}-with-lift is an effect, not a disp
     const { clientJs } = compileClientJs(REACTIVE, "reactive");
     expect(clientJs).toBeTruthy();
     // Neither the one-shot render nor the re-run effect may reference the on-mount call.
-    expect(clientJs).not.toMatch(/_scrml_render_value\(el, _scrml_boot_\d+\(\)\)/);
-    expect(clientJs).not.toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_boot_\d+\(\)\); \}\)/);
+    expect(clientJs).not.toMatch(/_scrml_render_value\(_scrml_el, _scrml_boot_\d+\(\)\)/);
+    expect(clientJs).not.toMatch(/_scrml_effect\(function\(\) \{ _scrml_render_value\(_scrml_el, _scrml_boot_\d+\(\)\); \}\)/);
     // It still runs once as a mount effect.
     expect(clientJs).toMatch(/_scrml_boot_\d+\(\);/);
   });
@@ -114,7 +114,7 @@ describe("g-onmount-async — on-mount-in-${}-with-lift is an effect, not a disp
 </program>`, "markup-interp-renders");
     expect(clientJs).toBeTruthy();
     // Inside a real markup element, the interpolation renders — UNCHANGED.
-    expect(clientJs).toMatch(/_scrml_render_value\(el, _scrml_boot_\d+\(\)\)/);
+    expect(clientJs).toMatch(/_scrml_render_value\(_scrml_el, _scrml_boot_\d+\(\)\)/);
   });
 
   test("the desugared on-mount bare-expr carries the _onMountEffect marker (any context)", () => {

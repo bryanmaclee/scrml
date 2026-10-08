@@ -1742,7 +1742,7 @@ export function generateHtml(
       for (const [variant, rawMarkup] of info.renders) {
         const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
         const payloadFields = info.variantFields.get(variant);
-        out[variant] = emitBoundaryMarkupExpr(tpl, "_eb_result.data", payloadFields);
+        out[variant] = emitBoundaryMarkupExpr(tpl, "_scrml_eb_result.data", payloadFields);
       }
     }
     return out;
@@ -2137,7 +2137,7 @@ export function generateHtml(
             (fv.exprNode && typeof fv.exprNode.raw === "string" ? fv.exprNode.raw : "") ?? "";
           if (rawMarkup.trim() !== "") {
             const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
-            fallbackExpr = emitBoundaryMarkupExpr(tpl, "_eb_result && _eb_result.data");
+            fallbackExpr = emitBoundaryMarkupExpr(tpl, "_scrml_eb_result && _scrml_eb_result.data");
             hasFallback = true;
           }
         }

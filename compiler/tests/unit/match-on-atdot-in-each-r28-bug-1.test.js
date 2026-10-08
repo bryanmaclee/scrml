@@ -386,7 +386,7 @@ describe("§11: R28-1b match-in-each dispatch is item-scoped (no module trigger)
     const matchOut = emitMatchBodyRenderForFile(ast, ctx);
     const matchJs = [...matchOut.renderFunctions, ...matchOut.dispatchers].join("\n");
     // Item-scoped dispatch fn signature.
-    expect(matchJs).toMatch(/function __scrml_match_match_\d+_dispatch\(_mount, _v\)/);
+    expect(matchJs).toMatch(/function __scrml_match_match_\d+_dispatch\(_scrml_arm_mount, _scrml_arm_v\)/);
     // No module-scope trigger that would reference `article` (undefined at top level).
     expect(matchJs).not.toMatch(/_scrml_effect\(\s*function\(\)\s*\{[\s\S]*article\.status/);
     expect(matchJs).not.toMatch(/_dispatch\(article\.status\)/);

@@ -775,7 +775,7 @@ export function emitBindings(ctx: CompileContext): string[] {
         // absent before first paint. Same `if (el)` shape as every other block here.
         lines.push(`// ref=@${refVarName}`);
         lines.push(`{`);
-        lines.push(`  const ${refElemId} = (root || document).querySelector('[data-scrml-ref="${refVarName}"]');`);
+        lines.push(`  const ${refElemId} = (_scrml_root || document).querySelector('[data-scrml-ref="${refVarName}"]');`);
         lines.push(`  if (${refElemId}) {`);
         lines.push(`    _scrml_reactive_set(${JSON.stringify(encodedRefName)}, ${refElemId});`);
         // A ref= INSIDE an if= subtree must not outlive the subtree: after unmount
@@ -816,7 +816,7 @@ export function emitBindings(ctx: CompileContext): string[] {
         // options (document.querySelector acquire + bare file-scope `_scrml_effect`)
         // reproduce the pre-extraction emission byte-for-byte.
         for (const _bindLine of emitBindDirectiveBody(bAttr, mkNode, {
-          acquire: (sel) => `(root || document).querySelector('${sel}')`,
+          acquire: (sel) => `(_scrml_root || document).querySelector('${sel}')`,
           // §17.1 — the whole emitBindings output is a root-scoped
           // `_scrml_bind_rewire(root)` re-invoked when an `if=` subtree mounts, so
           // the effect it creates must be owned by that mount's scope. Outside a
@@ -861,7 +861,7 @@ export function emitBindings(ctx: CompileContext): string[] {
             const cVarName = rawName.replace(/^@/, "");
             lines.push(`// class:${cClassName}=@${cVarName}`);
             lines.push(`{`);
-            lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+            lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
             lines.push(`    if (_scrml_reactive_get(${JSON.stringify(cVarName)})) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
             lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!_scrml_reactive_get(${JSON.stringify(cVarName)})); }));`);
@@ -879,7 +879,7 @@ export function emitBindings(ctx: CompileContext): string[] {
               : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
             lines.push(`// class:${cClassName}=${rawName}`);
             lines.push(`{`);
-            lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+            lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
             lines.push(`    if (${readExpr}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
             lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${readExpr})); }));`);
@@ -915,7 +915,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           const exprRefs = (_loweredDir ? _loweredDir.refs : []) as string[];
           lines.push(`// class:${cClassName}=${rawExpr}`);
           lines.push(`{`);
-          lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+          lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
           lines.push(`    if (${rewrittenExpr}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
           // Auto-tracking effect handles all reactive dependencies automatically
@@ -944,7 +944,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           }
           lines.push(`// class:${cClassName}=${callExpr}`);
           lines.push(`{`);
-          lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
+          lines.push(`  const ${cElemId} = (_scrml_root || document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
           lines.push(`    if (${rewrittenCall}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
           if (callRefs.length > 0) {
@@ -1001,7 +1001,7 @@ export function emitBindings(ctx: CompileContext): string[] {
 
         lines.push(`// template-attr ${attrName}="${rawValue}"`);
         lines.push(`{`);
-        lines.push(`  const ${tplElemId} = (root || document).querySelector('${tplSelector}');`);
+        lines.push(`  const ${tplElemId} = (_scrml_root || document).querySelector('${tplSelector}');`);
         lines.push(`  if (${tplElemId}) {`);
         if (isFormControlValue) {
           const vVar = genVar("tpl_val");
@@ -1105,7 +1105,7 @@ export function emitBindings(ctx: CompileContext): string[] {
       `// render-by-tag bind:${dispatch.flavour}=@${cellName} (cell=${cellName}, tag=${renderSpecTag})`,
     );
     lines.push(`{`);
-    lines.push(`  const ${elemId} = (root || document).querySelector('${selector}');`);
+    lines.push(`  const ${elemId} = (_scrml_root || document).querySelector('${selector}');`);
     lines.push(`  if (${elemId}) {`);
 
     // Initial DOM read — synchronise the rendered element with the cell's

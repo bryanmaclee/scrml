@@ -176,16 +176,16 @@ describe("Phase A10 Phase 3 §3 — multi state-child dispatcher", () => {
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "multi"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Phase A10 re-wire (S78, 2026-05-10): the dispatcher is now a NAMED
-    // function `__scrml_engine_phase_dispatch(_v)` invoked by both the
+    // function `__scrml_engine_phase_dispatch(_scrml_arm_v)` invoked by both the
     // `_scrml_reactive_subscribe` registration AND the `DOMContentLoaded`
     // initial-fire block. The subscribe call passes the dispatch fn by
     // reference instead of an inline `function(_v) { ... }` literal.
-    expect(clientJs).toMatch(/function __scrml_engine_phase_dispatch\(_v\)/);
+    expect(clientJs).toMatch(/function __scrml_engine_phase_dispatch\(_scrml_arm_v\)/);
     expect(clientJs).toMatch(/_scrml_reactive_subscribe\("phase", __scrml_engine_phase_dispatch\)/);
     // Each variant has an if/else-if branch
-    expect(clientJs).toMatch(/if \(_tag === "Idle"\) {[\s\S]*?_scrml_engine_phase_render_Idle\(\)/);
-    expect(clientJs).toMatch(/else if \(_tag === "Loading"\) {[\s\S]*?_scrml_engine_phase_render_Loading\(\)/);
-    expect(clientJs).toMatch(/else if \(_tag === "Done"\) {[\s\S]*?_scrml_engine_phase_render_Done\(\)/);
+    expect(clientJs).toMatch(/if \(_scrml_arm_tag === "Idle"\) {[\s\S]*?_scrml_engine_phase_render_Idle\(\)/);
+    expect(clientJs).toMatch(/else if \(_scrml_arm_tag === "Loading"\) {[\s\S]*?_scrml_engine_phase_render_Loading\(\)/);
+    expect(clientJs).toMatch(/else if \(_scrml_arm_tag === "Done"\) {[\s\S]*?_scrml_engine_phase_render_Done\(\)/);
     // mount-element querySelector
     expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-engine-mount="phase"\]'\)/);
   });
@@ -252,7 +252,7 @@ describe("Phase A10 Phase 3 §5 — body with ${@cell} interpolation", () => {
     // NOT by the file-level "Reactive display wiring" section. The wire
     // fn calls `_scrml_effect` so the textContent updates on cell change.
     expect(clientJs).toMatch(
-      /function _scrml_engine_phase_wire_Showing\(_root\) {[\s\S]*?_scrml_effect\(function/,
+      /function _scrml_engine_phase_wire_Showing\(_scrml_arm_root\) {[\s\S]*?_scrml_effect\(function/,
     );
   });
 });
@@ -278,10 +278,10 @@ describe("Phase A10 Phase 3 §6 — body with payload binding", () => {
     // Error render fn signature includes the msg parameter
     expect(clientJs).toMatch(/function _scrml_engine_phase_render_Error\(msg\) {/);
     // S95 Bug 2 fix — dispatcher passes the named-field lookup
-    // `_data && _data["msg"]` instead of the never-realized positional
+    // `_scrml_arm_data && _scrml_arm_data["msg"]` instead of the never-realized positional
     // `_payload[0]`. Per SPEC §51.3.2 the runtime data shape is
     // `{ fieldName: value }` keyed by the variant's declared field names.
-    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_data && _data\["msg"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_scrml_arm_data && _scrml_arm_data\["msg"\]\)/);
   });
 });
 
@@ -302,10 +302,10 @@ describe("Phase A10 Phase 3 §7 — dispatcher subscribes via _scrml_reactive_su
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "subscribe"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Phase A10 re-wire (S78, 2026-05-10): the dispatcher body lives in
-    // the NAMED function `__scrml_engine_phase_dispatch(_v)`. The subscribe
+    // the NAMED function `__scrml_engine_phase_dispatch(_scrml_arm_v)`. The subscribe
     // and DOMContentLoaded blocks both invoke it. Match the named function
     // body and assert it doesn't fall back to _scrml_effect.
-    const dispatcherMatch = clientJs.match(/function __scrml_engine_phase_dispatch\(_v\) {[\s\S]*?_mount\.innerHTML[\s\S]*?\n\}/);
+    const dispatcherMatch = clientJs.match(/function __scrml_engine_phase_dispatch\(_scrml_arm_v\) {[\s\S]*?_mount\.innerHTML[\s\S]*?\n\}/);
     expect(dispatcherMatch).not.toBeNull();
     // Subscribe registration passes the dispatch fn by reference.
     expect(clientJs).toMatch(/_scrml_reactive_subscribe\("phase", __scrml_engine_phase_dispatch\);/);
@@ -421,10 +421,10 @@ describe("Phase A10 Phase 3 §9 — emit-variant-guard helper unit tests", () =>
       { idPrefix: "phase", variantSubscribeName: "phase" },
     );
     // Phase A10 re-wire (S78, 2026-05-10): the dispatcher body is now a
-    // NAMED function `__scrml_engine_phase_dispatch(_v)` invoked by both
+    // NAMED function `__scrml_engine_phase_dispatch(_scrml_arm_v)` invoked by both
     // the subscribe registration and the DOMContentLoaded initial-fire
     // block. The subscribe call passes the dispatch fn by reference.
-    expect(out.dispatcherJs).toContain("function __scrml_engine_phase_dispatch(_v)");
+    expect(out.dispatcherJs).toContain("function __scrml_engine_phase_dispatch(_scrml_arm_v)");
     expect(out.dispatcherJs).toContain('_scrml_reactive_subscribe("phase", __scrml_engine_phase_dispatch)');
     // DOMContentLoaded initial-fire bridges the subscribe-doesn't-fire-on-init gap.
     expect(out.dispatcherJs).toContain("DOMContentLoaded");
@@ -606,21 +606,21 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-cell"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Per-arm wire fn declared.
-    expect(clientJs).toMatch(/function _scrml_engine_phase_wire_Showing\(_root\)/);
-    expect(clientJs).toMatch(/function _scrml_engine_phase_wire_Idle\(_root\)/);
+    expect(clientJs).toMatch(/function _scrml_engine_phase_wire_Showing\(_scrml_arm_root\)/);
+    expect(clientJs).toMatch(/function _scrml_engine_phase_wire_Idle\(_scrml_arm_root\)/);
     // The Showing wire fn queries within _root, not document, and binds
     // textContent + _scrml_effect.
     const wireMatch = clientJs.match(
-      /function _scrml_engine_phase_wire_Showing\(_root\) {[\s\S]*?_root\.querySelector\('\[data-scrml-logic=[\s\S]*?_scrml_effect\(function/,
+      /function _scrml_engine_phase_wire_Showing\(_scrml_arm_root\) {[\s\S]*?_root\.querySelector\('\[data-scrml-logic=[\s\S]*?_scrml_effect\(function/,
     );
     expect(wireMatch).not.toBeNull();
     // Wire fn returns a dispose function.
     expect(clientJs).toMatch(
-      /function _scrml_engine_phase_wire_Showing\(_root\) {[\s\S]*?return function\(\) { for \(const _d of _disposers\)/,
+      /function _scrml_engine_phase_wire_Showing\(_scrml_arm_root\) {[\s\S]*?return function\(\) { for \(const _d of _scrml_arm_disposers\)/,
     );
     // The Idle wire fn (no arm bindings) is a no-op shell.
     expect(clientJs).toMatch(
-      /function _scrml_engine_phase_wire_Idle\(_root\) { return function\(\) {}; }/,
+      /function _scrml_engine_phase_wire_Idle\(_scrml_arm_root\) { return function\(\) {}; }/,
     );
   });
 
@@ -640,7 +640,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
     expect(clientJs).toMatch(/let __scrml_engine_phase_dispose = null;/);
     // Dispatcher: dispose-then-replace-then-rewire ordering.
     const dispatcherBody = clientJs.match(
-      /function __scrml_engine_phase_dispatch\(_v\) {[\s\S]*?\n}/,
+      /function __scrml_engine_phase_dispatch\(_scrml_arm_v\) {[\s\S]*?\n}/,
     );
     expect(dispatcherBody).not.toBeNull();
     if (dispatcherBody) {
@@ -703,7 +703,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
     // should appear in the wire fn, NOT in a `document.querySelector(`
     // call — wire fns query via `_root.querySelector(`.
     const wireFnMatch = clientJs.match(
-      /function _scrml_engine_phase_wire_Showing\(_root\) {[\s\S]*?_root\.querySelector\('\[data-scrml-logic=[^']+'\)/,
+      /function _scrml_engine_phase_wire_Showing\(_scrml_arm_root\) {[\s\S]*?_root\.querySelector\('\[data-scrml-logic=[^']+'\)/,
     );
     expect(wireFnMatch).not.toBeNull();
     // Sanity: the arm-tagged logic placeholder should NOT also appear in
@@ -744,7 +744,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
     // re-renders of the same variant. Every fire runs the dispose-then-wire
     // sequence.
     const dispatcherBody = clientJs.match(
-      /function __scrml_engine_phase_dispatch\(_v\) {[\s\S]*?\n}/,
+      /function __scrml_engine_phase_dispatch\(_scrml_arm_v\) {[\s\S]*?\n}/,
     );
     expect(dispatcherBody).not.toBeNull();
     if (dispatcherBody) {
