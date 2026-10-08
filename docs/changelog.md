@@ -785,6 +785,19 @@ bathwater go out?*
 
 **12 PRs landed.** Full session stream in `handOffs/delta-log.md`.
 
+### 2026-10-07 — S457: injection sinks and SQL checks moved to the text the runtime executes; `__scrml_` reserved; failed compiles write nothing
+
+Security-heavy session. Every landing was the S456 "two readers of one text" class, closed by moving the check to where the runtime reads (or refusing at the source). Eleven rulings (user-voice §S457). Eight PRs, each with ≥1 differential S239 review (several 2–6 rounds); adopter issue #1333 closed.
+- #1340 maps non-compliance: FACTS verbs, `scrml fix --help`, bootstrap-conformance report gate made blocking on corpus PRs.
+- #1341 SPEC §5.2 rule 3 — runtime scheme guard `_scrml_safe_url` on every data-supplied URL attribute write (17 emitters incl. SSR first paint; element-scoped; one scheme reader with the compile-time rule).
+- #1342 one JS-accurate SQL `${}` slot reader (acorn parse); `rewriteSqlRefs` lowers exactly the checker's sites; `.unsafe` params one per slot.
+- #1343 (#1333) `is some` / `is not` inside function-expression bodies lower correctly; `(expr) is not` treats undefined as absent.
+- #1344 program-body SQL checks (§8.1.2 + §14.8.10 item 1) run at every lowering on the SQL each driver call sends — three executed DROP TABLE bypasses closed.
+- #1346 `__scrml_` reserved; compiler placeholders carry a per-compilation unguessable token, never emitted; emit gate refuses any un-lowered placeholder.
+- #1347 `string(url)` refuses non-safe schemes (one judge with the URL guard).
+- #1348 any Error-severity diagnostic → no artifact written (compile / build / dev / serve).
+- In flight: #1345 (scope-aware user-fn rename + handler call chains; CI browser pins), srcdoc/SVG sinks, re-export + `scrml dev` tenant check, `^{}` allow-list (§22.12; held on a ruling). Gate: cloud green on every merge; main `125486345`.
+
 ### The execution half (before the assessment)
 
 **#859 — entry-ness → `FileAST.fileShape`.** bryan's S400 deferral. Four adversarial rounds; the agent
