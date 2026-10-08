@@ -1,0 +1,11 @@
+<program>
+<count> = 1
+const <doubled>: number(>=0) = @count * 2
+${
+  function dec() {
+    @count = -5
+  }
+}
+<p id="out">${@doubled}</p>
+<button onclick=dec()>dec</button>
+</program>

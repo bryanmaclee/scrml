@@ -128,6 +128,29 @@ export const PROBES = [
 </program>
 ` },
 
+  { name: "p2e-struct-server-param", src: `<program>
+\${
+  type Link:struct = { u: string(url), n: number(>0) }
+  server function save(l: Link) {
+    return l.u
+  }
+}
+<button onclick=save({ u: "https://example.com", n: 1 })>save</button>
+</program>
+` },
+  { name: "p10-derived-cell", src: `<program>
+<count> = 1
+const <doubled>: number(>=0) = @count * 2
+\${
+  function dec() {
+    @count = -5
+  }
+}
+<p id="out">\${@doubled}</p>
+<button onclick=dec()>dec</button>
+</program>
+` },
+
   // ---- (3) top-level const / const anywhere ----
   { name: "p3a-toplevel-const", src: `<program>
 \${

@@ -83,6 +83,11 @@ show("c2 control: server param save(link: url)", await post("c2-server-param", {
 show("(4a) <endpoint> Save{link: javascript:}", await post("p4a-endpoint-payload", { tag: "Save", link: BAD }, "/e"), "400 InvalidPayload");
 show("(4a) <endpoint> Count{n: -5}", await post("p4a-endpoint-payload", { tag: "Count", n: -5 }, "/e"), "400 InvalidPayload");
 show("(6) server fn make(v) -> string(url)", await post("p6a-server-return", { v: BAD }), "refused (not 200 + value)");
+show("(2e) server save(l: Link{u: url, n: >0})", await post("p2e-struct-server-param", { l: { u: BAD, n: -1 } }), "400");
+{
+  const js = readFileSync(out("p10-derived-cell"), "utf8");
+  show("(10) const <doubled>: number(>=0) = @count*2", /_scrml_cs_derived_declare\("doubled", \(\) => _scrml_cs_reactive_get\("count"\) \* 2\)/.test(js) && !js.includes("E-CONTRACT-001-RT") ? "no check on recompute (count=-5 -> -10)" : "?", "refused on recompute");
+}
 show("(f4) server promote(r: Role oneOf(...))", await post("f4-enum-subset-server-param", { r: "Viewer" }), "400");
 
 // --- (7) library module / tool ---
