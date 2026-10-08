@@ -4326,3 +4326,4 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3936] land · #1353 Windows EBUSY in dev tenant-gate test cleanup (main windows red after #1352 auto-merged at its previous head)
 [3937] land · #1354 §53 refinement slice 1 — one reader, base-type-first judge fails closed, annotations read whole · @adv:g-refinement-checks-absent-in-n-positions-s457
 [3938] state · S458 WRAP — 6 PRs (#1345 #1350–#1354); weekly API limit stopped every agent (resets 2026-10-11 23:00 MT); parked branches + salvage patches in hand-off §S458
+[3939] state · S458 ADDENDUM — rulings meta.emit gate (a), D1 codes, ratify §21.4; #1355–#1357 merged; uq branch ready @417fa38a3; 5 branches in flight (hand-off top)
