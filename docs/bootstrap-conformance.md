@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1450 of 1450 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1453 of 1453 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1450 of 1450 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.9% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 553 | 38.1% |
-| UNSUPPORTED | 720 | 49.7% |
+| NOT-TWINNED | 556 | 38.3% |
+| UNSUPPORTED | 720 | 49.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -34,9 +34,9 @@ Legacy-dialect cases graded on their generated §66 twin: **660** — PASS 76 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (553 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (556 cases; a case counts once per distinct reason):
 
-- 90 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 93 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 67 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 47 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
@@ -104,7 +104,7 @@ NOT-TWINNED by reason (553 cases; a case counts once per distinct reason):
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
-| components | 59 | · | · | 2 | · | 56 | 1 | · | · |
+| components | 62 | · | · | 2 | · | 59 | 1 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -1142,7 +1142,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (553)
+### NOT-TWINNED (556)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1199,6 +1199,9 @@ none
 - `components/bind-prop-write-back-block-arrows` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-prop-write-back-positions` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `components/callback-prop-bare-call-form` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/callback-prop-non-function-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/callback-prop-optional-guarded` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/callback-prop-optional-unguarded-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/component-scope-by-value-local-shadows` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/component-scope-later-block-write` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/component-scope-lift-nested-read` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)

@@ -1,0 +1,9 @@
+<program>
+<log> = ""
+const C = <div class="c" props={ onGo: () => void }>
+    <button class="g" onclick=onGo()>g</button>
+</>
+<C onGo="x"/>
+<C onGo=${5}/>
+<p id="o">${@log}</p>
+</program>

@@ -3767,7 +3767,11 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "ternary": {
-      const cond = emitStringFromTree(node.condition);
+      // S459 round 6 — an arrow / assignment / conditional in the CONDITION is re-wrapped
+      // (round-trip twin of emit-expr.ts emitTernary).
+      const ck = node.condition.kind;
+      const condRaw = emitStringFromTree(node.condition);
+      const cond = (ck === "lambda" || ck === "assign" || ck === "ternary") ? `(${condRaw})` : condRaw;
       const cons = emitStringFromTree(node.consequent);
       const alt = emitStringFromTree(node.alternate);
       return `${cond} ? ${cons} : ${alt}`;

@@ -52,6 +52,7 @@ import { collectExecutableSinkErrors } from "./validators/attribute-interpolatio
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 import {
   substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader,
+  PROP_GUARD_PREFIX,
 } from "./component-prop-js-substitute.ts";
 import { boundNamesOf, declareIn } from "./binding-names.ts";
 import type {
@@ -1711,6 +1712,7 @@ function substituteJsTextOrRefuse(
       return primary ? s : `(${s})`;
     },
     onWrite: (name: string) => notePropWrite(name),
+    onCall: (name: string, guarded: boolean) => notePropCall(name, guarded),
   };
   // A handler value may be a STATEMENT (`if (@r > 0) act()`), not an expression.
   const out = substitutePropsInJsSource(text, asProgram, shadowed, hooks)
@@ -1899,7 +1901,35 @@ let _propWriteCtx: {
   written: Set<string>;
   /** S458 third round — props referenced in text that could not be parsed (prop → that text). */
   unsubstitutable: Map<string, string>;
+  /** S459 round 6 (F4) — the optional (`?`) function-typed props of this component. */
+  optionalFns: Set<string>;
+  /** S459 round 6 (F4) — optional function props CALLED with no absence check. */
+  unguardedCalls: Set<string>;
 } | null = null;
+/**
+ * S459 round 6 (F4) — record a call whose callee is a prop. §15.11.4: "an unguarded call to
+ * a potentially-absent function-typed prop SHALL be a compile error (E-TYPE-031 …)". A guard
+ * is a region under a test that reads the prop (`if (p) …`, `p && p()`, `p ? p() : …`) — the
+ * test marks the region in the shadow set (`PROP_GUARD_PREFIX + name`, the same scope sets
+ * both substituters thread; component-prop-js-substitute.ts reports through `onCall`).
+ */
+function notePropCall(name: string, guarded: boolean): void {
+  if (!_propWriteCtx || guarded) return;
+  if (_propWriteCtx.optionalFns.has(name)) _propWriteCtx.unguardedCalls.add(name);
+}
+function noteCallee(callee: ExprNode, propExprMap: Map<string, ExprNode>, shadowed: Set<string>): void {
+  if (callee && callee.kind === "ident") {
+    const nm = (callee as IdentExpr).name;
+    if (!shadowed.has(nm) && propExprMap.has(nm)) notePropCall(nm, shadowed.has(PROP_GUARD_PREFIX + nm));
+  }
+}
+/** The shadow set for a region guarded by `test` (every name the test reads is guarded). */
+function guardedBy(shadowed: Set<string>, test: ExprNode | undefined | null): Set<string> {
+  if (!test) return shadowed;
+  const g = new Set(shadowed);
+  for (const n of exprNodeIdentNames(test)) g.add(PROP_GUARD_PREFIX + n);
+  return g;
+}
 function notePropWrite(name: string): void {
   if (!_propWriteCtx) return;
   if (_propWriteCtx.declared.has(name) && !_propWriteCtx.bound.has(name)) _propWriteCtx.written.add(name);
@@ -2016,7 +2046,8 @@ function substitutePropsInExprNode(
       return {
         ...n,
         left: substitutePropsInExprNode(n.left, propExprMap, shadowed),
-        right: substitutePropsInExprNode(n.right, propExprMap, shadowed),
+        // `p && p()` — the right operand runs only when the left tested truthy (F4 guard).
+        right: substitutePropsInExprNode(n.right, propExprMap, n.op === "&&" ? guardedBy(shadowed, n.left) : shadowed),
       } satisfies BinaryExpr;
     }
     case "assign": {
@@ -2033,7 +2064,7 @@ function substitutePropsInExprNode(
       return {
         ...n,
         condition: substitutePropsInExprNode(n.condition, propExprMap, shadowed),
-        consequent: substitutePropsInExprNode(n.consequent, propExprMap, shadowed),
+        consequent: substitutePropsInExprNode(n.consequent, propExprMap, guardedBy(shadowed, n.condition)),
         alternate: substitutePropsInExprNode(n.alternate, propExprMap, shadowed),
       } satisfies TernaryExpr;
     }
@@ -2052,6 +2083,7 @@ function substitutePropsInExprNode(
     }
     case "call": {
       const n = node as CallExpr;
+      noteCallee(n.callee, propExprMap, shadowed);
       return {
         ...n,
         callee: substitutePropsInExprNode(n.callee, propExprMap, shadowed),
@@ -2415,7 +2447,8 @@ function substitutePropsInLogicStmt(
       return {
         ...n,
         condExpr: subInExpr(n.condExpr),
-        consequent: subInStmts(n.consequent) as LogicStatement[],
+        // The consequent runs only when the condition tested truthy (F4 guard).
+        consequent: (n.consequent ? substitutePropsInLogicStmts(n.consequent, propExprMap, guardedBy(shadowed, n.condExpr)) : n.consequent) as LogicStatement[],
         alternate: n.alternate ? (subInStmts(n.alternate) as LogicStatement[]) : null,
       } as typeof n;
     }
@@ -2746,6 +2779,8 @@ function substituteProps(
           // whose tree is the call with the substituted callee.
           const calleeProp = typeof callVal.name === "string" ? propExprMap.get(callVal.name) : undefined;
           if (calleeProp) {
+            // The bare call form has no place for an absence check (F4): always unguarded.
+            notePropCall(callVal.name, false);
             const argNodes0 = Array.isArray(callVal.argExprNodes) ? callVal.argExprNodes : [];
             const newArgNodes0 = argNodes0.map((a) => substitutePropsInExprNode(a, propExprMap, new Set()));
             const newArgs0 = newArgNodes0.length === (callVal.args ?? []).length
@@ -3342,6 +3377,33 @@ function expandComponentNode(
         }
       }
 
+      // S459 round 6 (F4) — §15.11.4: "The compiler SHALL verify at the call site that the
+      // value provided for a function-typed prop is assignable to the declared function
+      // signature. A type mismatch SHALL be E-TYPE-031." A LITERAL (string / number /
+      // boolean / array / object) is never a function; a name or other expression is
+      // judged downstream (its type is not known here).
+      for (const attr of callerAttrs) {
+        if (!attr || !attr.name || !attr.value) continue;
+        const decl = propsDecl.find((p: PropDecl) => p.name === attr.name);
+        if (!decl || decl.isSnippet || !isFunctionType(decl.type)) continue;
+        const v = attr.value as { kind: string; value?: string; exprNode?: ExprNode; raw?: string };
+        let litShown: string | null = null;
+        if (v.kind === "string-literal") litShown = `"${v.value ?? ""}"`;
+        else if (v.kind === "expr" && v.exprNode
+          && (v.exprNode.kind === "lit" || v.exprNode.kind === "array" || v.exprNode.kind === "object")) {
+          litShown = String(v.raw ?? emitStringFromTree(v.exprNode));
+        }
+        if (litShown !== null) {
+          ceErrors.push(makeCEError(
+            "E-TYPE-031",
+            `E-TYPE-031: \`${attr.name}=${litShown}\` passes a non-function value to the ` +
+            `function-typed prop \`${attr.name}: ${decl.type}\` of \`<${componentName}>\` (§15.11.4). ` +
+            `Pass a function: \`${attr.name}=handlerName\` or \`${attr.name}=\${(…) => …}\`.`,
+            attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+      }
+
       // E-COMPONENT-011: Extra undeclared props
       // Note: bind:propName attrs use the base prop name for lookup (strip "bind:" prefix)
       for (const attr of callerAttrs) {
@@ -3501,6 +3563,12 @@ function expandComponentNode(
     ),
     written: new Set<string>(),
     unsubstitutable: new Map<string, string>(),
+    optionalFns: new Set(
+      ((def.propsDecl ?? []) as PropDecl[])
+        .filter((p: PropDecl) => p.optional && !p.isSnippet && isFunctionType(p.type))
+        .map((p: PropDecl) => p.name),
+    ),
+    unguardedCalls: new Set<string>(),
   };
   _propWriteCtx = writeCtx;
 
@@ -3746,8 +3814,31 @@ function expandComponentNode(
     ));
   }
 
+  // S459 round 6 (F4) — §15.11.4: "an unguarded call to a potentially-absent function-typed
+  // prop SHALL be a compile error (E-TYPE-031: cannot call a value of type `fn | not` without
+  // an absence check)". A property of the DEFINITION (the prop is `fn | not` in the body
+  // whatever a given caller passes), so it is reported once per component, not per instance.
+  for (const name of writeCtx.unguardedCalls) {
+    const seen = _unguardedCallReported.get(def) ?? new Set<string>();
+    _unguardedCallReported.set(def, seen);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const decl = ((def.propsDecl ?? []) as PropDecl[]).find((p: PropDecl) => p.name === name);
+    ceErrors.push(makeCEError(
+      "E-TYPE-031",
+      `E-TYPE-031: the body of \`<${componentName}>\` calls its optional function prop \`${name}\` ` +
+      `(\`${name}?: ${decl?.type ?? "fn"}\`) without an absence check — cannot call a value of type ` +
+      `\`fn | not\` (§15.11.4). An omitted optional prop is \`not\`. Guard the call ` +
+      `(\`onclick=\${ if (${name}) { ${name}() } }\`), or make the prop required.`,
+      node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+
   return [expandedNode, ...secondaryNodes];
 }
+
+/** S459 round 6 (F4) — E-TYPE-031 (unguarded optional-fn call) reported once per definition. */
+const _unguardedCallReported = new WeakMap<object, Set<string>>();
 
 /**
  * Inject caller children into the expanded component markup tree.

@@ -37,6 +37,40 @@ export interface JsPropSubstitutionHooks {
   replacementFor(name: string): string | null;
   /** Called for every WRITE to a prop (not shadowed). */
   onWrite(name: string): void;
+  /**
+   * S459 round 6 (F4) — called for every CALL whose callee is a prop (not shadowed);
+   * `guarded` is true when the call sits under a test of that prop (`if (p) …`,
+   * `p && p()`, `p ? p() : …`). §15.11.4: an unguarded call to a potentially-absent
+   * function-typed prop is E-TYPE-031.
+   */
+  onCall?(name: string, guarded: boolean): void;
+}
+
+/**
+ * S459 round 6 (F4) — the marker a GUARD occupies in a shadow set: `PROP_GUARD_PREFIX + name`
+ * means "this region runs only when `name` tested truthy". It cannot collide with a binding
+ * (no identifier starts with NUL), so it rides the same scope sets both substituters already
+ * thread, and a guard ends exactly where its region's scope ends.
+ */
+export const PROP_GUARD_PREFIX = "\u0000guard:";
+
+/** Every Identifier name in an ESTree subtree (a guard test's names). */
+function esIdentNames(node: unknown, out: string[] = []): string[] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) { for (const x of node) esIdentNames(x, out); return out; }
+  const r = node as ES;
+  if (r.type === "Identifier" && typeof r.name === "string") out.push(r.name as string);
+  for (const k of Object.keys(r)) {
+    if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+    const v = r[k];
+    if (v && typeof v === "object") esIdentNames(v, out);
+  }
+  return out;
+}
+function guardedScope(shadow: Set<string>, test: unknown): Set<string> {
+  const g = new Set(shadow);
+  for (const n of esIdentNames(test)) g.add(PROP_GUARD_PREFIX + n);
+  return g;
 }
 
 const PARSE_OPTS = {
@@ -301,6 +335,28 @@ export function substitutePropsInJsSource(
         visit(node.body as ES, node, "body", inner);
         return;
       }
+      case "CallExpression": {
+        const callee = node.callee as ES;
+        if (hooks.onCall && callee && callee.type === "Identifier" && isProp(callee.name as string, shadow)) {
+          hooks.onCall(callee.name as string, shadow.has(PROP_GUARD_PREFIX + (callee.name as string)));
+        }
+        visitChildren(node, shadow);
+        return;
+      }
+      case "IfStatement":
+        visit(node.test as ES, node, "test", shadow);
+        visit(node.consequent as ES, node, "consequent", guardedScope(shadow, node.test));
+        visit(node.alternate as ES, node, "alternate", shadow);
+        return;
+      case "ConditionalExpression":
+        visit(node.test as ES, node, "test", shadow);
+        visit(node.consequent as ES, node, "consequent", guardedScope(shadow, node.test));
+        visit(node.alternate as ES, node, "alternate", shadow);
+        return;
+      case "LogicalExpression":
+        visit(node.left as ES, node, "left", shadow);
+        visit(node.right as ES, node, "right", node.operator === "&&" ? guardedScope(shadow, node.left) : shadow);
+        return;
       case "AssignmentExpression":
         visitAssignTarget(node.left as ES, shadow);
         visit(node.right as ES, node, "right", shadow);
