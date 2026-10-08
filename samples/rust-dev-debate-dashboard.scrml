@@ -246,14 +246,14 @@ on mount {
                 <input
                     type="text"
                     placeholder="Item name"
-                    oninput=${@newOrderItem = event.target.value}
+                    oninput=${(e) => @newOrderItem = e.target.value}
                     value=${@newOrderItem}
                     disabled=${@submitState is .Saving}
                 />
                 <input
                     type="number"
                     placeholder="Amount"
-                    oninput=${@newOrderAmount = event.target.value}
+                    oninput=${(e) => @newOrderAmount = e.target.value}
                     value=${@newOrderAmount}
                     disabled=${@submitState is .Saving}
                 />

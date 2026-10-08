@@ -43,7 +43,7 @@ function compileToClient(src) {
 // (dpa-056 D2); the `event.data.data` binding anchor skips the `.send()` reply
 // router, which is also a "message" listener.
 function onmessageBody(clientJs) {
-  const m = clientJs.match(/addEventListener\("message", function\s*\(event\)\s*\{(\s*const \w+ = event\.data\.data;[\s\S]*?)\}\);/);
+  const m = clientJs.match(/addEventListener\("message", function\s*\(_scrml_event\)\s*\{(\s*const \w+ = _scrml_event\.data\.data;[\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 function onerrorBody(clientJs) {

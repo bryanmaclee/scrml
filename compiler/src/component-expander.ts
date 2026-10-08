@@ -43,10 +43,10 @@
  */
 
 import { placeholderParam } from "./placeholder-nonce.ts";
+import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
-import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
@@ -1217,12 +1217,44 @@ function reparseSynthesizedFile(
   return { ast: result.ast, errors };
 }
 
+/**
+ * s457 4a (S458 F7) — the one refusal the shared unquoted-value reader can
+ * only make on the body AS WRITTEN: a handler expression followed by `>` after
+ * inline whitespace (`onclick=@n = @n > 1>t` — a comparison and a tag close read
+ * the same). normalizeTokenizedRaw strips the whitespace before `>` (it undoes
+ * tokenizer spacing), so the re-parse would read `onclick=@n=@n>` and render
+ * ` 1>t` silently. Each handler attribute of the raw text is read here by the
+ * SAME reader over the same text the top-level path sees; only its `gt`
+ * refusals are taken (every other refusal survives normalization and is made
+ * by the re-parse).
+ */
+function spacedGtHandlerRefusals(raw: string, filePath: string): Array<{ code: string; message: string; span: Span }> {
+  const out: Array<{ code: string; message: string; span: Span }> = [];
+  const re = /(?:^|[\s"'}])(on[A-Za-z][\w:-]*)=(?=[!(\[A-Za-z0-9_@])/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const name = m[1];
+    const valueStart = m.index + m[0].length;
+    const r = readUnquotedAttrValue(raw, valueStart, name, { inParenList: false, handlerSemicolonTail: false });
+    if (r.kind !== "ATTR_OP_REJECT") continue;
+    let payload: { reason?: string };
+    try { payload = JSON.parse(r.text); } catch { continue; }
+    if (payload.reason !== "gt") continue;
+    const d = unquotedRejectDiagnostic(name, r.text);
+    out.push({ code: d.code, message: d.message, span: { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span });
+  }
+  return out;
+}
+
 export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string
 ): { nodes: MarkupNode[]; errors: CEError[]; bodyEngines: BodyEngine[] } {
   try {
+    // s457 4a (S458 F7) — whitespace-dependent refusals judged on the body
+    // text BEFORE normalizeTokenizedRaw, which strips the space before a `>`.
+    const preNormalizeErrors = spacedGtHandlerRefusals(raw, filePath);
     const normalized = normalizeTokenizedRaw(raw);
 
     const reparsed = reparseSynthesizedFile(filePath + "#" + componentName, normalized);
@@ -1245,9 +1277,9 @@ export function parseComponentBody(
     // Filter out W-PROGRAM-001, warnings, and native-parser info diagnostics
     // — they're expected for snippets / multi-root fragments / dropped Test
     // blocks and do not indicate parse failure.
-    const realErrors = reparsed.errors.filter(
+    const realErrors = [...preNormalizeErrors, ...reparsed.errors.filter(
       (e) => e.severity !== "warning" && e.severity !== "info" && e.code !== "W-PROGRAM-001"
-    );
+    )];
 
     return {
       nodes: markupNodes,
@@ -1298,7 +1330,24 @@ function parseComponentDef(
     ceErrors.push(makeComponentEngineScopeError(engine, name, filePath));
   }
 
-  if (parseErrors.length > 0) {
+  // s457 4a — a refused unquoted attribute value (the shared reader's
+  // E-ATTR-UNQUOTED-OPERATOR / E-ATTR-MULTI-STATEMENT) is reported as itself,
+  // anchored at the definition: the body DID parse (the value recovers as
+  // `absent`), so failing the whole def as E-COMPONENT-021 would cascade into
+  // E-COMPONENT-020 / -035 at every use site and bury the real cause.
+  const ATTR_VALUE_REFUSALS = new Set(["E-ATTR-UNQUOTED-OPERATOR", "E-ATTR-MULTI-STATEMENT"]);
+  for (const e of parseErrors) {
+    if (!ATTR_VALUE_REFUSALS.has(e.code)) continue;
+    ceErrors.push(makeCEError(
+      e.code,
+      `${e.message} (in component \`${name}\`)`,
+      span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+  const structuralParseErrors = parseErrors.filter((e) => !ATTR_VALUE_REFUSALS.has(e.code));
+
+  if (structuralParseErrors.length > 0) {
+    const parseErrors = structuralParseErrors;
     const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     ceErrors.push(makeCEError(
       "E-COMPONENT-021",
@@ -2442,17 +2491,14 @@ function substituteProps(
       const outerPropExprMap = propExprMap;
       cloned.attrs = (cloned.attrs as AttrNode[]).map((attr: AttrNode) => {
         if (!attr || !attr.value) return attr;
-        // Inside an event-handler value `event` is the DOM event (§5.2.2), so a
-        // prop named `event` is shadowed there — in EVERY lowering path (the
-        // statement list already shadowed it; the one-statement / call-ref / raw
-        // paths substituted it — S440 N4).
-        const isHandlerAttr = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
-        const props = isHandlerAttr && outerProps.has("event")
-          ? new Map([...outerProps].filter(([k]) => k !== "event"))
-          : outerProps;
-        const propExprMap = isHandlerAttr && outerPropExprMap && outerPropExprMap.has("event")
-          ? new Map([...outerPropExprMap].filter(([k]) => k !== "event"))
-          : outerPropExprMap;
+        // s457 3a — a handler the compiler wraps does NOT bind `event` (§5.2 /
+        // §5.2.3; the listener parameter is `_scrml_event`), so a prop named
+        // `event` is an ordinary prop inside a handler value too and is
+        // substituted in every lowering path. (S440 N4 had shadowed it, reading
+        // `event` as the DOM event.) A `${(event) => …}` handler binds its own
+        // parameter, which the substitution respects.
+        const props = outerProps;
+        const propExprMap = outerPropExprMap;
         if (attr.value.kind === "string-literal") {
           // First the whole-prop-name `${name}` substitution (string values).
           let newVal = applyPropSubstitutions(attr.value.value, props);
@@ -2576,10 +2622,10 @@ function substituteProps(
           // §5.2.3 statement list (`handlerBlock`, attached at the body re-parse):
           // it is what codegen emits and what the type system checks, so the
           // props are substituted INTO it — every statement, not just the first
-          // (the `exprNode` below only ever held statement 1). The handler's
-          // `event` binding shadows a same-named prop.
+          // (the `exprNode` below only ever held statement 1). A prop named
+          // `event` is substituted like any other (s457 3a — no handler binds it).
           if (exprVal.handlerBlock && Array.isArray(exprVal.handlerBlock.stmts)) {
-            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set(["event"]));
+            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set());
             const first = exprVal.exprNode ? substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set()) : exprVal.exprNode;
             return { ...attr, value: { ...exprVal, exprNode: first, handlerBlock: { stmts } } };
           }

@@ -1,0 +1,3 @@
+<msg> = "a"
+
+<p title=@msg + "x">t</p>

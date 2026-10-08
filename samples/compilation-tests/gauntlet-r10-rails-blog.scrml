@@ -397,7 +397,7 @@
                     <input
                         type="text"
                         value=@newTagName
-                        oninput=${@newTagName = event.target.value}
+                        oninput=${(e) => @newTagName = e.target.value}
                         placeholder="Tag name"/>
                     <button onclick=handleAddGlobalTag()>Add</>
                 </div>
@@ -509,14 +509,14 @@
                             <input
                                 type="text"
                                 value=@formTitle
-                                oninput=${@formTitle = event.target.value}
+                                oninput=${(e) => @formTitle = e.target.value}
                                 placeholder="Post title"
                                 required/>
                         </div>
                         <div class="form-field">
                             <label>Body</>
                             <textarea
-                                oninput=${@formBody = event.target.value}
+                                oninput=${(e) => @formBody = e.target.value}
                                 placeholder="Write your post...">
                             </textarea>
                         </div>
@@ -525,7 +525,7 @@
                                 <input
                                     type="checkbox"
                                     checked=@formPublished
-                                    onchange=${@formPublished = event.target.checked}/>
+                                    onchange=${(e) => @formPublished = e.target.checked}/>
                                 Published
                             </>
                         </div>
@@ -534,7 +534,7 @@
                             <input
                                 type="text"
                                 value=@formTagInput
-                                oninput=${@formTagInput = event.target.value}
+                                oninput=${(e) => @formTagInput = e.target.value}
                                 placeholder="ruby, rails, web"/>
                         </div>
                         <div class="form-actions">
@@ -563,14 +563,14 @@
                             <input
                                 type="text"
                                 value=@formTitle
-                                oninput=${@formTitle = event.target.value}
+                                oninput=${(e) => @formTitle = e.target.value}
                                 placeholder="Post title"
                                 required/>
                         </div>
                         <div class="form-field">
                             <label>Body</>
                             <textarea
-                                oninput=${@formBody = event.target.value}
+                                oninput=${(e) => @formBody = e.target.value}
                                 placeholder="Write your post...">
                             </textarea>
                         </div>
@@ -579,7 +579,7 @@
                                 <input
                                     type="checkbox"
                                     checked=@formPublished
-                                    onchange=${@formPublished = event.target.checked}/>
+                                    onchange=${(e) => @formPublished = e.target.checked}/>
                                 Published
                             </>
                         </div>
@@ -588,7 +588,7 @@
                             <input
                                 type="text"
                                 value=@formTagInput
-                                oninput=${@formTagInput = event.target.value}
+                                oninput=${(e) => @formTagInput = e.target.value}
                                 placeholder="ruby, rails, web"/>
                         </div>
                         <div class="form-actions">

@@ -80,6 +80,7 @@ import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
 import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
+import { eventUnboundErrors } from "./listener-event-check.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
@@ -1885,9 +1886,17 @@ export function runCG(input: CgInput): CgOutput {
     if (workerDefs.size > 0) {
       const bundles = new Map<string, string>();
       for (const [name, def] of workerDefs) {
-        bundles.set(name, codegenStage("emit-worker", () =>
+        const workerJs = codegenStage("emit-worker", () =>
           generateWorkerJs(name, def.children, def.whenMessage)
-        ));
+        );
+        bundles.set(name, workerJs);
+        // s457 3a — the worker's `when message` listener is compiler-written
+        // around user text too: a free `event` in it is E-EVENT-UNBOUND.
+        for (const e of eventUnboundErrors(workerJs, filePath, null, "when message")) {
+          const wmSpan = (def.whenMessage as { span?: unknown } | null | undefined)?.span;
+          if (wmSpan && typeof wmSpan === "object") e.span = wmSpan as typeof e.span;
+          errors.push(e);
+        }
       }
       workerBundlesPerFile.set(filePath, bundles);
     }

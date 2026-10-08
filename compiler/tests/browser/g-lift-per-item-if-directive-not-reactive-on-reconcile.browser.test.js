@@ -67,7 +67,7 @@ type Row:struct = { id: string, name: string, active: (not to timestamp) }
 <rows>: Row[] = []
 <div id="root">
   \${ for (let e of @rows) {
-    lift <div class="row" if=e.active is some>\${e.name}</div>;
+    lift <div class="row" if=(e.active is some)>\${e.name}</div>;
   } }
 </div>
 </program>
@@ -90,7 +90,7 @@ type Row:struct = { id: string, name: string, active: (not to timestamp) }
 <div id="root">
   \${ for (let e of @rows) {
     let a = e.active;
-    lift <div class="row" if=a is some>\${e.name}</div>;
+    lift <div class="row" if=(a is some)>\${e.name}</div>;
   } }
 </div>
 </program>
@@ -110,7 +110,7 @@ type Row:struct = { id: string, name: string }
 <rows>: Row[] = []
 <div id="root">
   \${ for (let e of @rows) {
-    lift <div class="row" if=@showAll is some>\${e.name}</div>;
+    lift <div class="row" if=(@showAll is some)>\${e.name}</div>;
   } }
 </div>
 </program>

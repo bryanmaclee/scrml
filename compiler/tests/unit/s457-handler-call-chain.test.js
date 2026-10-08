@@ -5,7 +5,7 @@
  *
  *     <button onclick=Promise.resolve(5).then(function (v) { @msg = "x" })>
  *
- * emitted `function(event) { Promise.resolve(5); }` — the callback vanished and
+ * emitted `function(_scrml_event) { Promise.resolve(5); }` — the callback vanished and
  * `then function v @msg="x"` leaked onto the <button> as attributes, at exit 0.
  *
  * Governing text, SPEC §5.2.3:
@@ -84,19 +84,19 @@ describe("§1 the whole chain is the handler; nothing leaks into the element", (
     );
     expect(errors).toEqual([]);
     expect(handlerOf(clientJs)).toBe(
-      `function(event) { Promise.resolve(5).then(function (v) { _scrml_cs_reactive_set("msg", "x"); }); }`,
+      `function(_scrml_event) { Promise.resolve(5).then(function (v) { _scrml_cs_reactive_set("msg", "x"); }); }`,
     );
     expect(buttonTag(html)).toBe(`<button data-scrml-bind-onclick="_scrml_attr_onclick_1">`);
   });
 
   const shapes = [
-    [`onclick=fn(1).then(g)`, /^function\(event\) \{ _scrml_fn_\d+\(1\)\.then\(_scrml_g_\d+\); \}$/],
-    [`onclick=fn(1)(2)`, /^function\(event\) \{ _scrml_fn_\d+\(1\)\(2\); \}$/],
-    [`onclick=fn()?.x()`, /^function\(event\) \{ _scrml_fn_\d+\(\)\?\.x\(\); \}$/],
-    [`onclick=fn()[0]`, /^function\(event\) \{ _scrml_fn_\d+\(\)\[0\]; \}$/],
-    [`onclick=handlers[0]()`, /^function\(event\) \{ handlers\[0\]\(\); \}$/],
-    [`onclick=@list[0].go()`, /^function\(event\) \{ _scrml_cs_reactive_get\("list"\)\[0\]\.go\(\); \}$/],
-    [`on:click=fn(1).then(g)`, /^function\(event\) \{ _scrml_fn_\d+\(1\)\.then\(_scrml_g_\d+\); \}$/],
+    [`onclick=fn(1).then(g)`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(1\)\.then\(_scrml_g_\d+\); \}$/],
+    [`onclick=fn(1)(2)`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(1\)\(2\); \}$/],
+    [`onclick=fn()?.x()`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(\)\?\.x\(\); \}$/],
+    [`onclick=fn()[0]`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(\)\[0\]; \}$/],
+    [`onclick=handlers[0]()`, /^function\(_scrml_event\) \{ handlers\[0\]\(\); \}$/],
+    [`onclick=@list[0].go()`, /^function\(_scrml_event\) \{ _scrml_cs_reactive_get\("list"\)\[0\]\.go\(\); \}$/],
+    [`on:click=fn(1).then(g)`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(1\)\.then\(_scrml_g_\d+\); \}$/],
   ];
   for (const [attr, want] of shapes) {
     test(`\`${attr}\` — one expression`, () => {
@@ -125,9 +125,9 @@ describe("§1 the whole chain is the handler; nothing leaks into the element", (
 describe("§2 the shapes this does not touch are byte-identical", () => {
   // Each of these reached the reader before s457 and must emit exactly what it did.
   const controls = [
-    [`onclick=g(1)`, `function(event) { _scrml_g_4(1); }`],
-    [`onclick=@count++`, `function(event) { _scrml_cs_reactive_set("count", _scrml_cs_reactive_get("count") + 1); }`],
-    [`onclick=@msg = "b"`, `function(event) { _scrml_cs_reactive_set("msg", "b"); }`],
+    [`onclick=g(1)`, `function(_scrml_event) { _scrml_g_4(1); }`],
+    [`onclick=@count++`, `function(_scrml_event) { _scrml_cs_reactive_set("count", _scrml_cs_reactive_get("count") + 1); }`],
+    [`onclick=@msg = "b"`, `function(_scrml_event) { _scrml_cs_reactive_set("msg", "b"); }`],
   ];
   for (const [attr, want] of controls) {
     test(`\`${attr}\``, () => {

@@ -2806,9 +2806,17 @@ export function generateHtml(
             const rawName: string | null = val && val.kind === "variable-ref"
               ? val.name
               : (val && val.kind === "string-literal" ? val.value : null);
+            // s457 4a — an indexed / chained cell (`@drafts[@cid]`) is now read whole
+            // as an expression; name the index as the problem, not the sigil.
+            const exprRaw: string = val && val.kind === "expr" && typeof val.raw === "string" ? val.raw.trim() : "";
+            const indexed = /^@[A-Za-z_$][\w$.]*(?:\?\.)?\[/.test(exprRaw) || /^@[A-Za-z_$][\w$.]*\(/.test(exprRaw);
             const hint = rawName
               ? ` \`${rawName}\` is not reactive. Use \`@${rawName}\` or change \`${bindName}\` to \`${suffix}=${rawName}\`.`
-              : ` The right-hand side of \`${bindName}\` must be an \`@\`-prefixed reactive variable, e.g. \`bind:value=@myVar\`.`;
+              : indexed
+                ? ` \`${exprRaw}\` reads the cell through a computed index or call; \`${bindName}\` writes back to a cell or a ` +
+                  `state field path (\`@cell\`, \`@cell.field\`), never to a computed entry. Bind a cell per entry, or ` +
+                  `write \`value=${exprRaw}\` with an \`oninput\` handler that updates the cell.`
+                : ` The right-hand side of \`${bindName}\` must be an \`@\`-prefixed reactive variable, e.g. \`bind:value=@myVar\`.`;
             errors.push(new CGError(
               "E-ATTR-010",
               `E-ATTR-010: \`bind:\` requires a reactive \`@\` variable.${hint}`,

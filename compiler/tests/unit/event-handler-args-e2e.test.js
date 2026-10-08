@@ -214,12 +214,12 @@ describe("§3: multiple args — onclick=fn(item.id, \"action\") → fn(item.id,
 });
 
 // ---------------------------------------------------------------------------
-// §4: No args — onclick=fn() → function(event) { fn(); } per SPEC §5.2.2
+// §4: No args — onclick=fn() → function(_scrml_event) { fn(); } per SPEC §5.2.2
 // ---------------------------------------------------------------------------
 //
 // S96 Bug 14 — SPEC §5.2.2 normative wording (line 1128):
 //   "`onclick=fn()` SHALL wire `fn` as a click handler. The compiler MUST
-//    auto-wrap the call as `function(event) { fn(); }`. `fn` is NOT invoked
+//    auto-wrap the call as `function(_scrml_event) { fn(); }`. `fn` is NOT invoked
 //    at render time."
 //
 // Spec is explicit: `fn()` SHALL emit `fn()` inside the wrapper — NOT
@@ -232,7 +232,7 @@ describe("§3: multiple args — onclick=fn(item.id, \"action\") → fn(item.id,
 // the implementation was reverted to the spec-compliant shape and these
 // tests were updated in lockstep.
 
-describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.2.2)", () => {
+describe("§4: no args — onclick=fn() → function(_scrml_event) { fn(); } (SPEC §5.2.2)", () => {
   test("empty args array preserves bare-call shape — does NOT thread event into fn", () => {
     const result = runCGSimple([
       makeMarkupNode("button", [
@@ -247,7 +247,7 @@ describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // SPEC §5.2.2: fn() stays fn() — wrapper takes `event` but doesn't forward it
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function\(event\)\s*\{\s*doThing\(\);/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function\(_scrml_event\)\s*\{\s*doThing\(\);/);
     // Pre-S96 spec-divergent shape must not reappear
     expect(foldChunkNamespacing(out.clientJs)).not.toContain("doThing(event)");
   });
@@ -269,7 +269,7 @@ describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.
     // The wrapper still takes `event` so the listener signature is satisfied,
     // but `event` is NOT forwarded into the call. The escape-hatch for keyboard
     // handlers that need the event is `onkeydown=${(e) => handleKey(e)}`.
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function\(event\)\s*\{\s*handleKey\(\);/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function\(_scrml_event\)\s*\{\s*handleKey\(\);/);
     expect(foldChunkNamespacing(out.clientJs)).not.toContain("handleKey(event)");
   });
 

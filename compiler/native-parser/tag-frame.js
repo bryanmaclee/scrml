@@ -48,6 +48,9 @@ import {
 // (MK2.1 created the field as null). body-mode.js imports nothing from
 // the native parser, so tag-frame.js -> body-mode.js is acyclic.
 import { bodyModeForChildOf } from "./body-mode.js";
+// s457 4a — the ONE unquoted-attribute-value reader, shared with the TAB
+// tokenizer and the lifted-markup tag parser.
+import { isUnquotedValueStart, readUnquotedAttrValue, unquotedRejectDiagnostic } from "../src/unquoted-attr-value.ts";
 
 // TagKind variant tags — all 4 per the .scrml's type declaration.
 // PURE DATA (calculation classification, per D1 OQ1): the four-way
@@ -664,6 +667,10 @@ export function tokenizeOpener(cursor, ltAnchor) {
         // own descriptor fields here).
         attrs: attrPass.attrs,
         tokenizedAttrs: attrPass.tokens,
+        // s457 4a — refusals of the shared unquoted-value reader; recognizeOpener
+        // reports them unless the opener turns out to be a phantom (aborted /
+        // malformed — e.g. a less-than inside logic text).
+        attrDiagnostics: attrPass.diagnostics,
         // M6.6.b.1 — `:`-SHORTHAND BODY DISCRIMINATOR (SPEC §4.14 /
         // §51.0.I). When the opener carries a `:`-shorthand body
         // (`<Tag attrs : single-expression>`), this is the verbatim
@@ -970,6 +977,13 @@ export function splitCallArgs(raw) {
 export function tokenizeAttributeRegion(source, start, end, line, col, isStateOpener) {
     const tokens = [];
     const attrs = [];
+    // s457 4a — refusals of the shared unquoted-value reader ({ code, message, span }).
+    const diagnostics = [];
+    // s457 4a — the shared reader's per-opener state, and the depth of a
+    // parenthesized state-child payload list (`<Done (rows=r)>`) opened in
+    // attribute position (live parity: tokenizer.ts `attrParenDepth`).
+    const unquotedState = { inParenList: false, handlerSemicolonTail: false };
+    let attrParenDepth = 0;
     let p = start;
 
     // skipWs — advance `p` past inter-attribute whitespace.
@@ -1135,102 +1149,6 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                         span: makeSpan(valStart, p, line, col),
                     };
                 }
-            } else if (vc === "!") {
-                // Unquoted negation expression: `!@var`, `!!@var`,
-                // `!obj.prop`. Read to whitespace / tag-close boundary.
-                let expr = "";
-                while (p < end) {
-                    const ec = source.charAt(p);
-                    if (isAttrWhitespace(ec) || ec === ">" || ec === "/") {
-                        break;
-                    }
-                    expr = expr + ec;
-                    p = p + 1;
-                }
-                valTok = makeAttrToken("ATTR_EXPR", expr,
-                    valStart, p, line, col);
-                value = {
-                    kind: "expr", raw: expr, refs: collectRefs(expr),
-                    // M6.6.b.1.5 — verbatim source slice (== `expr` here,
-                    // since no wrappers were stripped — kept for shape
-                    // uniformity across AttrValue variants).
-                    sourceText: source.slice(valStart, p),
-                    span: makeSpan(valStart, p, line, col),
-                };
-            } else if (vc === "(") {
-                // Parenthesized expression: `if=(@a && @b)`. Read the
-                // matched outer parens, preserving them.
-                let expr = "(";
-                p = p + 1;
-                let depth = 1;
-                while (p < end && depth > 0) {
-                    const ec = source.charAt(p);
-                    if (ec === "(") {
-                        depth = depth + 1;
-                    } else if (ec === ")") {
-                        depth = depth - 1;
-                        if (depth === 0) {
-                            expr = expr + ec;
-                            p = p + 1;
-                            break;
-                        }
-                    }
-                    expr = expr + ec;
-                    p = p + 1;
-                }
-                valTok = makeAttrToken("ATTR_EXPR", expr,
-                    valStart, p, line, col);
-                value = {
-                    kind: "expr", raw: expr, refs: collectRefs(expr),
-                    // M6.6.b.1.5 — verbatim source slice (== `expr` here,
-                    // since the parens are kept as part of `raw`).
-                    sourceText: source.slice(valStart, p),
-                    span: makeSpan(valStart, p, line, col),
-                };
-            } else if (vc === "[") {
-                // §41.14 — array-literal value: `pick=["a","b"]`. Read the
-                // matched outer brackets, string-aware.
-                let expr = "[";
-                p = p + 1;
-                let depth = 1;
-                let inSQ = false;
-                let inDQ = false;
-                while (p < end && depth > 0) {
-                    const ec = source.charAt(p);
-                    if (inSQ) {
-                        if (ec === "'" && source.charAt(p - 1) !== "\\") {
-                            inSQ = false;
-                        }
-                    } else if (inDQ) {
-                        if (ec === "\"" && source.charAt(p - 1) !== "\\") {
-                            inDQ = false;
-                        }
-                    } else if (ec === "'") {
-                        inSQ = true;
-                    } else if (ec === "\"") {
-                        inDQ = true;
-                    } else if (ec === "[") {
-                        depth = depth + 1;
-                    } else if (ec === "]") {
-                        depth = depth - 1;
-                        if (depth === 0) {
-                            expr = expr + ec;
-                            p = p + 1;
-                            break;
-                        }
-                    }
-                    expr = expr + ec;
-                    p = p + 1;
-                }
-                valTok = makeAttrToken("ATTR_EXPR", expr,
-                    valStart, p, line, col);
-                value = {
-                    kind: "expr", raw: expr, refs: collectRefs(expr),
-                    // M6.6.b.1.5 — verbatim source slice (== `expr` here,
-                    // since the brackets are kept as part of `raw`).
-                    sourceText: source.slice(valStart, p),
-                    span: makeSpan(valStart, p, line, col),
-                };
             } else if (vc === "$" && p + 1 < end
                        && source.charAt(p + 1) === "{") {
                 // Inline expression: `${() => fn()}`, `${a ? b : c}`.
@@ -1302,152 +1220,42 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                     sourceText: source.slice(valStart, p),
                     span: makeSpan(valStart, p, line, col),
                 };
-            } else if (isAttrUnquotedValueStart(vc)) {
-                // Unquoted ident-or-call. The ident run excludes `-` for
-                // event-handler attributes (so postfix `--` terminates the
-                // ident — live parity); otherwise `-` is admitted (e.g.
-                // `class=foo-bar`).
-                const evHandler = isEventHandlerAttrName(name);
-                let ident = "";
-                while (p < end) {
-                    const ec = source.charAt(p);
-                    const code = ec.charCodeAt(0);
-                    const digit = code >= 48 && code <= 57;
-                    const word = ec === "_" || ec === "." || ec === "@"
-                        || isAsciiLetter(ec) || digit;
-                    const hyphen = ec === "-";
-                    const ok = evHandler ? word : (word || hyphen);
-                    if (!ok) break;
-                    ident = ident + ec;
-                    p = p + 1;
-                }
-
-                if (p < end && source.charAt(p) === "(") {
-                    // Call form: collect to the matching `)`.
-                    p = p + 1;
-                    let args = "";
-                    let depth = 1;
-                    while (p < end && depth > 0) {
-                        const ec = source.charAt(p);
-                        if (ec === "(") {
-                            depth = depth + 1;
-                        } else if (ec === ")") {
-                            depth = depth - 1;
-                            if (depth === 0) { p = p + 1; break; }
-                        }
-                        args = args + ec;
-                        p = p + 1;
-                    }
-                    valTok = makeAttrToken("ATTR_CALL",
-                        JSON.stringify({ name: ident, args }),
-                        valStart, p, line, col);
-                    const argList = splitCallArgs(args);
+            } else if (isUnquotedValueStart(vc)) {
+                // s457 4a — ONE reader for every unquoted value: the SAME
+                // reader the TAB tokenizer uses (compiler/src/unquoted-attr-
+                // value.ts). It reads `!…`, `(…)`, `[…]` and ident / call
+                // values whole — a handler expression across whitespace, a
+                // postfix chain in any attribute — or refuses them. The native
+                // parser had its own copy of the pre-s457 reader; every
+                // component-body / `<match>`-arm / engine / meta re-parse went
+                // through it, so the S457 rulings did not hold there (S458
+                // review F1/F2). `raw` runs to this opener's closing `>` /
+                // `/>` so the reader judges the tag close it meets.
+                let rawEnd = end;
+                if (source.charAt(end) === ">") rawEnd = end + 1;
+                else if (source.charAt(end) === "/" && source.charAt(end + 1) === ">") rawEnd = end + 2;
+                unquotedState.inParenList = attrParenDepth > 0;
+                const r = readUnquotedAttrValue(source.slice(0, rawEnd), p, name, unquotedState);
+                p = r.end > end ? end : r.end;
+                valTok = makeAttrToken(r.kind, r.text, valStart, p, line, col);
+                const sourceText = source.slice(valStart, p);
+                const span = makeSpan(valStart, p, line, col);
+                if (r.kind === "ATTR_IDENT") {
+                    value = { kind: "variable-ref", name: r.text, sourceText, span };
+                } else if (r.kind === "ATTR_CALL") {
+                    const call = JSON.parse(r.text);
                     value = {
-                        kind: "call-ref", name: ident, args: argList,
-                        // M6.6.b.1.5 — verbatim source slice INCLUDING
-                        // the `(...)` arg-list wrapper.
-                        sourceText: source.slice(valStart, p),
-                        span: makeSpan(valStart, p, line, col),
+                        kind: "call-ref", name: call.name, args: splitCallArgs(call.args),
+                        sourceText, span,
                     };
-                } else if (evHandler
-                           && attrBareExprContinuation(source, p, end)) {
-                    // SPEC §5.2.3 bare-form event handler — `onclick=@x = .A`
-                    // / `onclick=@count++`. Continue reading in
-                    // expression mode to the next attribute / tag-close
-                    // boundary. Live parity: tokenizer.ts ATTR_EXPR.
-                    let expr = ident;
-                    while (p < end && (source.charAt(p) === " "
-                           || source.charAt(p) === "\t")) {
-                        expr = expr + source.charAt(p);
-                        p = p + 1;
-                    }
-                    const opC = p < end ? source.charAt(p) : "";
-                    const opN = p + 1 < end ? source.charAt(p + 1) : "";
-                    if ((opC === "+" || opC === "-") && opN === opC) {
-                        // Postfix update — two chars, done.
-                        expr = expr + opC + opN;
-                        p = p + 2;
-                    } else {
-                        // Assignment / compound assignment — read the RHS
-                        // to the attribute / tag-close boundary, depth +
-                        // string aware.
-                        let parenD = 0;
-                        let braceD = 0;
-                        let bracketD = 0;
-                        let strCh = "";
-                        let consumedEq = false;
-                        let consumedRhs = false;
-                        while (p < end) {
-                            const ec = source.charAt(p);
-                            if (strCh !== "") {
-                                if (ec === "\\" && p + 1 < end) {
-                                    expr = expr + ec + source.charAt(p + 1);
-                                    p = p + 2;
-                                    continue;
-                                }
-                                if (ec === strCh) strCh = "";
-                                expr = expr + ec;
-                                p = p + 1;
-                                continue;
-                            }
-                            const atZero = parenD === 0 && braceD === 0
-                                && bracketD === 0;
-                            if (atZero) {
-                                if (ec === ">" || ec === "/") break;
-                                if (consumedEq && consumedRhs
-                                    && isAttrWhitespace(ec)) {
-                                    break;
-                                }
-                            }
-                            if (ec === "\"" || ec === "'" || ec === "`") {
-                                strCh = ec;
-                                expr = expr + ec;
-                                p = p + 1;
-                                continue;
-                            }
-                            if (ec === "(") { parenD = parenD + 1; }
-                            else if (ec === ")") { parenD = parenD - 1; }
-                            else if (ec === "[") { bracketD = bracketD + 1; }
-                            else if (ec === "]") { bracketD = bracketD - 1; }
-                            else if (ec === "{") { braceD = braceD + 1; }
-                            else if (ec === "}") { braceD = braceD - 1; }
-                            if (atZero) {
-                                if (!consumedEq && ec === "=") {
-                                    consumedEq = true;
-                                    expr = expr + ec;
-                                    p = p + 1;
-                                    continue;
-                                }
-                                if (consumedEq && !isAttrWhitespace(ec)) {
-                                    consumedRhs = true;
-                                }
-                            }
-                            expr = expr + ec;
-                            p = p + 1;
-                        }
-                    }
-                    const trimmed = expr.replace(/\s+$/, "");
-                    valTok = makeAttrToken("ATTR_EXPR", trimmed,
-                        valStart, p, line, col);
-                    value = {
-                        kind: "expr", raw: trimmed, refs: collectRefs(trimmed),
-                        // M6.6.b.1.5 — verbatim source slice. May differ
-                        // from `raw` because trailing whitespace is
-                        // stripped in `raw` but kept in the source slice.
-                        sourceText: source.slice(valStart, p),
-                        span: makeSpan(valStart, p, line, col),
-                    };
+                } else if (r.kind === "ATTR_EXPR") {
+                    value = { kind: "expr", raw: r.text, refs: collectRefs(r.text), sourceText, span };
                 } else {
-                    // A bare identifier value — a variable reference.
-                    valTok = makeAttrToken("ATTR_IDENT", ident,
-                        valStart, p, line, col);
-                    value = {
-                        kind: "variable-ref", name: ident,
-                        // M6.6.b.1.5 — verbatim source slice (== `name`
-                        // here, since variable-ref has no wrappers).
-                        sourceText: source.slice(valStart, p),
-                        span: makeSpan(valStart, p, line, col),
-                    };
+                    // ATTR_OP_REJECT — the shared diagnostic; the value recovers
+                    // as `absent` (live parity: ast-builder parseAttributes).
+                    const d = unquotedRejectDiagnostic(name, r.text);
+                    diagnostics.push({ code: d.code, message: d.message, span });
+                    value = { kind: "absent" };
                 }
             } else {
                 // An unrecognized value-start char (e.g. a single-quote —
@@ -1496,11 +1304,14 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
         }
 
         // An unexpected char — skip it (live parity: the tokenizer
-        // advances past it without emitting a token).
+        // advances past it without emitting a token). A `(` / `)` here
+        // brackets a state-child payload list.
+        if (c === "(") attrParenDepth = attrParenDepth + 1;
+        else if (c === ")" && attrParenDepth > 0) attrParenDepth = attrParenDepth - 1;
         p = p + 1;
     }
 
-    return { tokens, attrs };
+    return { tokens, attrs, diagnostics };
 }
 
 // attrBareExprContinuation — calculation (predicate). Mirrors the live
@@ -1737,6 +1548,13 @@ export function popTagFrame(ctx) {
 export function recognizeOpener(ctx, cursor, ltAnchor) {
     // 1. One-pass opener-body tokenization.
     const opener = tokenizeOpener(cursor, ltAnchor);
+    if (!opener.aborted && !opener.malformed
+        && Array.isArray(opener.attrDiagnostics) && opener.attrDiagnostics.length > 0) {
+        ensureDiagnostics(ctx);
+        for (const d of opener.attrDiagnostics) {
+            ctx.diagnostics.push(makeDiagnostic(d.code, d.message, d.span));
+        }
+    }
 
     // 2. The TagKind calculation.
     const tagKind = tagKindFor(opener.name, opener.hadSpaceAfterLt);
