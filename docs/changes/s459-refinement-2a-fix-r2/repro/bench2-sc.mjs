@@ -1,0 +1,5 @@
+const mk = (T) => `\${\n    type L:struct = { u: string, n: number(>0) }\n    <ls>: ${T} = []\n    <s>: number = 0\n    function fill() {\n        const a = []\n        for (let i = 1; i <= 5000; i++) { a.push({ u: "a", n: i }) }\n        @ls = a\n    }\n    function sum() {\n        let t = 0\n        for (let r = 0; r < 20; r++) {\n            for (let i = 0; i < 5000; i++) { t = t + @ls[i].n }\n        }\n        @s = t\n    }\n    function upd() {\n        for (let i = 0; i < 500; i++) { @ls[i].n = i + 1 }\n    }\n}\n<program>\n<button id="f" onclick=fill()>f</button>\n<button id="s" onclick=sum()>s</button>\n<button id="u" onclick=upd()>u</button>\n<p>\${@s}</p>\n</program>\n`;
+export const SCENARIOS = [
+  { name: "rows-refined", cell: "s", expect: "x", src: mk("L[]"), steps: [{ click: "#f" }, { click: "#s" }, { click: "#u" }] },
+  { name: "rows-unrefined", cell: "s", expect: "x", src: mk("{ u: string, n: number }[]".replace(/.*/, "Q[]")).replace("type L:struct", "type Q:struct = { u: string, n: number }\n    type L:struct"), steps: [{ click: "#f" }, { click: "#s" }, { click: "#u" }] },
+];
