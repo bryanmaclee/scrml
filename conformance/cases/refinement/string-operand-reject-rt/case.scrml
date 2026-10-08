@@ -1,0 +1,13 @@
+${
+    <yes>: string = "yes"
+    <no>: string = "no"
+    <shown>: string = "none"
+    function confirm(answer: string(eq("yes"))) {
+        @shown = answer
+    }
+}
+<program>
+<button id="yes" onclick=${confirm(@yes)}>Yes</button>
+<button id="no" onclick=${confirm(@no)}>No</button>
+<p id="out">${@shown}</p>
+</program>

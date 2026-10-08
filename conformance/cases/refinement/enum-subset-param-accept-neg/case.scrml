@@ -1,0 +1,12 @@
+${
+    type Role:enum = { Admin, Editor, Viewer }
+    <ok>: Role = .Editor
+    <shown>: string = "none"
+    function promote(r: Role oneOf([.Admin, .Editor])) {
+        @shown = "promoted"
+    }
+}
+<program>
+<button id="ok" onclick=${promote(@ok)}>Ok</button>
+<p id="out">${@shown}</p>
+</program>

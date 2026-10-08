@@ -1,0 +1,12 @@
+${
+  import { schemaFor } from 'scrml:data'
+  type Link:struct = {
+    u: string(url)
+    n: number(>0)
+  }
+}
+<program db="./db.sqlite">
+  <schema>
+    ${ schemaFor(Link) }
+  </>
+</program>

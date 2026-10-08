@@ -1,0 +1,4 @@
+${
+    <links>: string(url)[] = ["https://scrml.dev/", "javascript:alert(1)"]
+}
+<program><p>${@links.length}</p></program>

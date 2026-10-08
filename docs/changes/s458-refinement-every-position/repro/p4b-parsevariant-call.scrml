@@ -1,0 +1,18 @@
+<program>
+${
+  import { parseVariant } from 'scrml:data'
+  type Req:enum = {
+    Save(link: string(url))
+  }
+  function decode(raw) {
+    const r = parseVariant(raw, Req) !{
+      .MissingDiscriminator :> { return "missing" }
+      .UnknownVariant(tag) :> { return "unknown" }
+      .InvalidPayload(field, reason) :> { return "invalid" }
+      .Malformed(reason) :> { return "malformed" }
+    }
+    return "ok"
+  }
+}
+<p>${decode("{}")}</p>
+</program>

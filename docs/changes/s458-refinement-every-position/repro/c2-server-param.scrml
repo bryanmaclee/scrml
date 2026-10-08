@@ -1,0 +1,8 @@
+<program>
+${
+  server function save(link: string(url)) {
+    return link
+  }
+}
+<button onclick=save("https://example.com")>save</button>
+</program>

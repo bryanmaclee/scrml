@@ -1,0 +1,14 @@
+<program>
+${
+  type Q:struct = { id: int }
+  type Res:enum = {
+    Found(link: string(url))
+    NotFound
+  }
+  <query>: Q = { id: 1 }
+}
+<api base="https://api.example.com">
+  getIt(Q) -> GET "/x/${id}" : Res
+</api>
+<request id="r" api="getIt" args=@query></>
+</program>

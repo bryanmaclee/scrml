@@ -803,7 +803,13 @@ interface RefBindingType {
 // Predicate expression — recursive representation of the boolean expression
 // inside the outer parens of a predicated type annotation.
 interface PredicateExpr {
-  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set";
+  // S458 — `on-length` (§55.1 `length(pred)`: `operand` judged on `.length`),
+  // `pattern` (`value` = regex source, `flags`), `value-set` (`variantMode`
+  // oneOf/notIn over literal `values`), `req` (non-empty).
+  kind: "comparison" | "property" | "named-shape" | "and" | "or" | "not" | "error" | "variant-set"
+    | "on-length" | "pattern" | "value-set" | "req";
+  flags?: string;            // pattern
+  values?: Array<number | string>; // value-set
   op?: string;               // comparison / property
   value?: number | string;   // comparison / property
   prop?: string;             // property
@@ -1726,6 +1732,51 @@ function splitTopLevel(s: string, delimiters: string[]): string[] {
  * External @identifier references set hasExternalRef: true (E-CONTRACT-003).
  * Parse failures produce { kind: "error", message: "..." }.
  */
+/**
+ * S458 — §55.1 shared-core words that take an argument, as read inside a
+ * refinement predicate's parentheses. The comparison words map to the
+ * comparison operator they denote (`min(0)` is `>=0`); `length`, `pattern`,
+ * `oneOf`, `notIn` have their own predicate kinds.
+ */
+/**
+ * S458 — index of the `)` that closes the `(` at `openIdx` in a refinement
+ * annotation, or -1. String literals (`"…"`, `'…'`, with `\` escapes) and regex
+ * literals (`/…/`, with escapes and `[…]` classes) are skipped: a parenthesis
+ * inside them is text. `/` never means division inside a predicate.
+ */
+function findPredicateClose(text: string, openIdx: number): number {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
+      continue;
+    }
+    if (c === "/") {
+      let inClass = false;
+      for (i++; i < text.length; i++) {
+        const d = text[i];
+        if (d === "\\") { i++; continue; }
+        if (d === "[") inClass = true;
+        else if (d === "]") inClass = false;
+        else if (d === "/" && !inClass) break;
+      }
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+const SHARED_CORE_FNS: Map<string, string> = new Map([
+  ["min", ">="], ["max", "<="], ["gt", ">"], ["lt", "<"], ["gte", ">="], ["lte", "<="], ["eq", "=="], ["neq", "!="],
+  ["length", ""], ["pattern", ""], ["oneOf", ""], ["notIn", ""],
+]);
+
 function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: boolean } {
   const trimmed = raw.trim();
   let hasExternalRef = false;
@@ -1741,10 +1792,18 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     | { t: "or" }
     | { t: "not" }
     | { t: "lp" }
-    | { t: "rp" };
+    | { t: "rp" }
+    // S458 — §55.1 shared-core vocabulary in refinement-type position (§53.6.1,
+    // §55.3): `oneOf([…])` / `notIn([…])` lists and `pattern(/re/flags)`.
+    | { t: "lb" }
+    | { t: "rb" }
+    | { t: "comma" }
+    | { t: "regex"; v: string; flags: string };
 
   const tokens: PToken[] = [];
   let i = 0;
+  const malformed = (message: string) =>
+    Object.assign({ kind: "error" as const, message }, { hasExternalRef });
 
   while (i < trimmed.length) {
     // Skip whitespace
@@ -1765,6 +1824,35 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     if (ch === "!") { tokens.push({ t: "not" }); i++; continue; }
     if (ch === "(") { tokens.push({ t: "lp" }); i++; continue; }
     if (ch === ")") { tokens.push({ t: "rp" }); i++; continue; }
+    if (ch === "[") { tokens.push({ t: "lb" }); i++; continue; }
+    if (ch === "]") { tokens.push({ t: "rb" }); i++; continue; }
+    if (ch === ",") { tokens.push({ t: "comma" }); i++; continue; }
+
+    // S458 — a regex literal (`pattern(/^a+$/i)`). `/` is never division in this
+    // grammar (there is no arithmetic), so a `/` always opens a regex. Read to the
+    // closing `/` that is neither escaped nor inside a `[…]` class, then flags.
+    if (ch === "/") {
+      let j = i + 1;
+      let inClass = false;
+      let src = "";
+      while (j < trimmed.length) {
+        const c = trimmed[j];
+        if (c === "\\" && j + 1 < trimmed.length) { src += c + trimmed[j + 1]; j += 2; continue; }
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) break;
+        src += c;
+        j++;
+      }
+      if (j >= trimmed.length) return malformed("unterminated regex literal in inline predicate");
+      j++; // closing '/'
+      let flags = "";
+      while (j < trimmed.length && /[a-z]/.test(trimmed[j])) { flags += trimmed[j]; j++; }
+      try { new RegExp(src, flags); } catch { return malformed(`invalid regex /${src}/${flags} in inline predicate`); }
+      tokens.push({ t: "regex", v: src, flags });
+      i = j;
+      continue;
+    }
 
     // External reference @identifier
     if (ch === "@") {
@@ -1778,14 +1866,26 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     // Property access .identifier
     if (ch === ".") {
       let prop = "."; i++;
+      // S458 — a parameter annotation reaches here re-joined from tokens, with a
+      // space after the dot (`string(. length>=1)` for source `.length >= 1`).
+      // Whitespace between `.` and the property name is not significant; reading
+      // `.` as an empty property made the README flagship's
+      // `text: string(.length >= 1)` an unreadable predicate that was silently
+      // never checked.
+      while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
       while (i < trimmed.length && /[A-Za-z0-9_]/.test(trimmed[i])) { prop += trimmed[i]; i++; }
       tokens.push({ t: "prop", v: prop });
       continue;
     }
 
-    // Negative number: "-" followed by a digit
-    if (ch === "-" && i + 1 < trimmed.length && /[0-9]/.test(trimmed[i + 1])) {
+    // Negative number: "-" followed by a digit. S458 — whitespace may separate
+    // the sign from the digits: a return type / struct field annotation reaches
+    // here re-joined from tokens (`number ( >= - 1 )` for source `number(>= -1)`).
+    // `-` is only ever a sign in this grammar (there is no arithmetic). Before
+    // S458 the unknown `-` was SKIPPED, so `>= -1` silently read as `>= 1`.
+    if (ch === "-" && /^-\s*[0-9]/.test(trimmed.slice(i))) {
       let num = "-"; i++;
+      while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
       while (i < trimmed.length && /[0-9.]/.test(trimmed[i])) { num += trimmed[i]; i++; }
       tokens.push({ t: "num", v: parseFloat(num) });
       continue;
@@ -1801,9 +1901,16 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
 
     // String literal
     if (ch === "'" || ch === '"') {
+      // S458 — escapes are cooked (`"a\"b"` is `a"b`), and an unterminated
+      // string is malformed rather than silently closed at end of text.
       const q = ch; let str = ""; i++;
-      while (i < trimmed.length && trimmed[i] !== q) { str += trimmed[i]; i++; }
-      if (i < trimmed.length) i++;
+      const ESC: Record<string, string> = { n: "\n", t: "\t", r: "\r", "\\": "\\", '"': '"', "'": "'" };
+      while (i < trimmed.length && trimmed[i] !== q) {
+        if (trimmed[i] === "\\" && i + 1 < trimmed.length) { str += ESC[trimmed[i + 1]] ?? trimmed[i + 1]; i += 2; continue; }
+        str += trimmed[i]; i++;
+      }
+      if (i >= trimmed.length) return malformed("unterminated string literal in inline predicate");
+      i++;
       tokens.push({ t: "str", v: str });
       continue;
     }
@@ -1816,7 +1923,14 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
       continue;
     }
 
-    i++; // skip unknown char
+    // S458 F1 — a character the §53.2.1 grammar does not contain is NOT skipped.
+    // Skipping it let `string(pattern(/^a$/))` read as the bare shape `pattern`
+    // (and its regex's `@`-free remainder vanish), which the judge then could not
+    // judge. The predicate is malformed; say so.
+    return Object.assign(
+      { kind: "error" as const, message: `unexpected character '${ch}' in inline predicate` },
+      { hasExternalRef },
+    );
   }
 
   let pos = 0;
@@ -1859,7 +1973,8 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
     if (t.t === "lp") {
       consume();
       const expr = parseOr();
-      if (peek()?.t === "rp") consume();
+      if (peek()?.t !== "rp") return { kind: "error", message: "unclosed '(' in inline predicate" };
+      consume();
       return expr;
     }
 
@@ -1894,11 +2009,86 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
 
     if (t.t === "ident") {
       const it = consume() as { t: "ident"; v: string };
-      return { kind: "named-shape", name: it.v };
+      const name = it.v;
+      // S458 — §55.1 shared-core vocabulary in refinement-type position
+      // (§53.6.1: it "MAY appear … in refinement-type position"; §55.3 shows
+      // `string(pattern(/…/))` and `number(min(0) && max(100))`). Each word is
+      // lowered to a predicate the one judge already knows, or to one of three
+      // new kinds (`on-length`, `pattern`, `value-set`, plus `req`).
+      if (name === "req" && peek()?.t !== "lp") return { kind: "req" };
+      if (peek()?.t === "lp" && SHARED_CORE_FNS.has(name)) {
+        consume(); // '('
+        const closeOr = (p: PredicateExpr): PredicateExpr => {
+          if (peek()?.t !== "rp") return { kind: "error", message: `expected ')' after ${name}(…)` };
+          consume();
+          return p;
+        };
+        if (name === "length") {
+          // length(predicate) — the inner predicate is judged on `.length`.
+          return closeOr({ kind: "on-length", operand: parseOr() });
+        }
+        if (name === "pattern") {
+          const rt = peek();
+          if (rt?.t !== "regex") return { kind: "error", message: "pattern(…) takes a regex literal, e.g. pattern(/^[a-z]+$/)" };
+          consume();
+          const r = rt as { t: "regex"; v: string; flags: string };
+          return closeOr({ kind: "pattern", value: r.v, flags: r.flags });
+        }
+        if (name === "oneOf" || name === "notIn") {
+          if (peek()?.t !== "lb") return { kind: "error", message: `${name}(…) takes a list, e.g. ${name}(["a", "b"])` };
+          consume();
+          const values: Array<number | string> = [];
+          while (peek() && peek()!.t !== "rb") {
+            const vt = consume();
+            if (vt.t === "num" || vt.t === "str") values.push((vt as { v: number | string }).v);
+            else if (vt.t === "extref") return { kind: "named-shape", name: (vt as { v: string }).v };
+            else return { kind: "error", message: `${name}([…]) takes literal values` };
+            if (peek()?.t === "comma") consume();
+            else if (peek()?.t !== "rb") return { kind: "error", message: `expected ',' or ']' in ${name}([…])` };
+          }
+          if (peek()?.t !== "rb") return { kind: "error", message: `unclosed '[' in ${name}([…])` };
+          consume();
+          return closeOr({ kind: "value-set", variantMode: name as "oneOf" | "notIn", values });
+        }
+        // min / max / gt / lt / gte / lte / eq / neq — one literal argument.
+        const at = peek();
+        if (at?.t === "extref") {
+          // Cross-field args (`gte(@startDate)`) reference external state —
+          // §53.3.1 / E-CONTRACT-003, reported by checkRefinementJudgeable.
+          consume();
+          return { kind: "named-shape", name: (at as { v: string }).v };
+        }
+        const numericOnly = name !== "eq" && name !== "neq";
+        if (at?.t === "num" || (!numericOnly && at?.t === "str")) {
+          consume();
+          return closeOr({ kind: "comparison", op: SHARED_CORE_FNS.get(name)!, value: (at as { v: number | string }).v });
+        }
+        return { kind: "error", message: `${name}(…) takes a ${numericOnly ? "number" : "number or string"} literal` };
+      }
+      return { kind: "named-shape", name };
     }
 
     if (t.t === "num") {
-      consume();
+      // §53.2.1 range form: `numeric-literal comparison-op "value" comparison-op
+      // numeric-literal` (`number(0 < value < 10)`). Lowered to the conjunction of
+      // the two value-relative comparisons, so it is judged exactly like
+      // `number(>0 && <10)`.
+      const lo = (consume() as { t: "num"; v: number }).v;
+      const op1 = peek();
+      const vId = tokens[pos + 1];
+      const op2 = tokens[pos + 2];
+      const hi = tokens[pos + 3];
+      if (op1?.t === "op" && vId?.t === "ident" && (vId as { v: string }).v === "value"
+          && op2?.t === "op" && hi?.t === "num") {
+        pos += 4;
+        const flip: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!=" };
+        const leftOp = flip[(op1 as { v: string }).v];
+        return {
+          kind: "and",
+          left: { kind: "comparison", op: leftOp, value: lo },
+          right: { kind: "comparison", op: (op2 as { v: string }).v, value: (hi as { v: number }).v },
+        };
+      }
       return { kind: "error", message: "bare number not a valid predicate primary" };
     }
 
@@ -1910,6 +2100,15 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
   }
 
   const result = parseOr();
+  // S458 F1 — every token SHALL be consumed. A predicate the grammar cannot read
+  // whole (`number(>0 foo)`, `number(min(0))`'s `(0)` tail) used to keep its
+  // first primary and silently drop the rest.
+  if (pos < tokens.length) {
+    return Object.assign(
+      { kind: "error" as const, message: "unexpected trailing tokens in inline predicate" },
+      { hasExternalRef },
+    );
+  }
   return Object.assign(result, { hasExternalRef });
 }
 
@@ -1918,6 +2117,29 @@ function parsePredicateExpr(raw: string): PredicateExpr & { hasExternalRef: bool
  * Returns true/false if provable, null if undeterminable (needs runtime check).
  */
 function evaluatePredicateOnLiteral(pred: PredicateExpr, value: number | string): boolean | null {
+  if (pred.kind === "comparison" && typeof pred.value === "string") {
+    // S458 — `eq("x")` / `neq("x")`: string equality against a string literal.
+    if (typeof value !== "string") return null;
+    if (pred.op === "==") return value === pred.value;
+    if (pred.op === "!=") return value !== pred.value;
+    return null;
+  }
+  // S458 — §55.1 shared-core kinds in refinement position.
+  if (pred.kind === "on-length") {
+    if (typeof value !== "string") return null;
+    return pred.operand ? evaluatePredicateOnLiteral(pred.operand, value.length) : null;
+  }
+  if (pred.kind === "pattern") {
+    if (typeof value !== "string") return null;
+    try { return new RegExp(String(pred.value ?? ""), pred.flags ?? "").test(value); } catch { return null; }
+  }
+  if (pred.kind === "value-set") {
+    const has = (pred.values ?? []).includes(value);
+    return pred.variantMode === "notIn" ? !has : has;
+  }
+  if (pred.kind === "req") {
+    return typeof value === "string" ? value !== "" : true;
+  }
   if (pred.kind === "comparison") {
     if (typeof value !== "number") return null;
     const rhs = pred.value as number;
@@ -3159,33 +3381,64 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
     if (parenIdx > 0) {
       const base = trimmed.slice(0, parenIdx).trim();
       if (PRED_BASES.has(base)) {
-        // Find matching close paren (depth-aware)
-        let depth = 0;
-        let closeIdx = -1;
-        for (let pi = parenIdx; pi < trimmed.length; pi++) {
-          if (trimmed[pi] === "(") depth++;
-          else if (trimmed[pi] === ")") {
-            depth--;
-            if (depth === 0) { closeIdx = pi; break; }
-          }
+        // Find the matching close paren (depth-aware). S458 — a `(` / `)` inside a
+        // string literal or a regex literal is text, not grouping:
+        // `string(pattern(/a)b/))` used to end the predicate at the regex's `)`.
+        const closeIdx = findPredicateClose(trimmed, parenIdx);
+        if (closeIdx < 0) {
+          // S458 F1 — `number((>0)` never closes. Refined-looking but unreadable:
+          // a refinement carrying an `error` predicate, not an untyped annotation.
+          return tPredicated(
+            base as "number" | "string" | "boolean" | "integer",
+            Object.assign({ kind: "error" as const, message: "unbalanced parentheses in inline predicate" }, { hasExternalRef: false }),
+            null,
+          );
         }
         if (closeIdx > parenIdx) {
           const predicateStr = trimmed.slice(parenIdx + 1, closeIdx);
-          // Optional label: [identifier] after closing paren
+          // Optional label: [identifier] after closing paren. S458 — the tail
+          // after `)` SHALL be empty, exactly one `[label]`, or array suffixes.
+          // `[]` suffixes (`string(url)[]` — an ARRAY of refined strings) fall
+          // through to the postfix-array branch below, which resolves the
+          // element. ANY other tail (`number(>0) foo`, `number(>0)!`,
+          // `[a] [b]`, `[a-b]`) is malformed: a refinement carrying an `error`
+          // predicate — refused with a diagnostic, never silently untyped (base
+          // ignored such a tail and checked the predicate; S458 slice 1 briefly
+          // let it fall through to `asIs`).
           let label: string | null = null;
           const rest = trimmed.slice(closeIdx + 1).trim();
-          if (rest.startsWith("[") && rest.endsWith("]")) {
-            label = rest.slice(1, -1).trim();
+          const labelMatch = rest.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]$/);
+          // §42 `T?` is sugar for `T | not` (desugared before type checking).
+          if (rest === "?") {
+            return tUnion([
+              tPredicated(base as "number" | "string" | "boolean" | "integer", parsePredicateExpr(predicateStr), null),
+              tNot(),
+            ]);
           }
-          const parsed = parsePredicateExpr(predicateStr);
-          if (parsed.kind !== "error") {
+          if (rest !== "" && !labelMatch && !/^(\[\s*\]\s*)+$/.test(rest)) {
+            return tPredicated(
+              base as "number" | "string" | "boolean" | "integer",
+              Object.assign(
+                { kind: "error" as const, message: `unexpected text after the predicate: '${rest}'` },
+                { hasExternalRef: false },
+              ),
+              null,
+            );
+          }
+          if (rest === "" || labelMatch) {
+            if (labelMatch) label = labelMatch[1];
+            const parsed = parsePredicateExpr(predicateStr);
+            // S458 F1 — a malformed predicate is NOT an untyped annotation. It
+            // used to fall through to `asIs` (no check, no diagnostic). It now
+            // stays a predicated type carrying an `error` predicate, which
+            // `checkRefinementJudgeable` reports as E-CONTRACT-002 at the
+            // declaration and the codegen judge fails closed on.
             return tPredicated(
               base as "number" | "string" | "boolean" | "integer",
               parsed,
               label,
             );
           }
-          // parse error — fall through to asIs
         }
       }
     }
@@ -3370,8 +3623,12 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
  */
 function formatPredicateExpr(pred: PredicateExpr): string {
   switch (pred.kind) {
-    case "comparison": return (pred.op ?? "") + String(pred.value ?? "");
-    case "property":   return "." + (pred.prop ?? "") + (pred.op ?? "") + String(pred.value ?? "");
+    case "comparison": return (pred.op ?? "") + (typeof pred.value === "string" ? JSON.stringify(pred.value) : String(pred.value ?? ""));
+    case "property":   return "." + (pred.prop ?? "") + (pred.op ?? "") + (typeof pred.value === "string" ? JSON.stringify(pred.value) : String(pred.value ?? ""));
+    case "on-length":  return "length(" + (pred.operand ? formatPredicateExpr(pred.operand) : "?") + ")";
+    case "pattern":    return "pattern(/" + String(pred.value ?? "") + "/" + (pred.flags ?? "") + ")";
+    case "value-set":  return (pred.variantMode ?? "oneOf") + "(" + JSON.stringify(pred.values ?? []) + ")";
+    case "req":        return "req";
     case "named-shape": return pred.name ?? "?";
     case "and":        return formatPredicateExpr(pred.left!) + " && " + formatPredicateExpr(pred.right!);
     case "or":         return "(" + formatPredicateExpr(pred.left!) + " || " + formatPredicateExpr(pred.right!) + ")";
@@ -3379,6 +3636,193 @@ function formatPredicateExpr(pred: PredicateExpr): string {
     case "error":      return "?invalid?";
     default:           return "?";
   }
+}
+
+/**
+ * S458 F1 — predicates already reported by `checkRefinementJudgeable`. The
+ * literal path (`checkPredicateLiteral`) consults this so a declaration whose
+ * predicate is unjudgeable reports once, not once per zone classification.
+ */
+const _judgeabilityReported: WeakSet<object> = new WeakSet();
+
+/**
+ * S458 F1 (§53.6.3, §53.11, §53.3.1) — every refinement annotation the reader
+ * classifies as refined SHALL be judgeable, in EVERY zone. Before S458 the
+ * E-CONTRACT-002 / -003 diagnostics fired only inside `checkPredicateLiteral`,
+ * i.e. only when the initializer was a literal; a boundary-zone `string(ssn)`,
+ * `string(pattern(/…/))` or `number(min(0))` compiled clean to a runtime check
+ * of `true`. This is called at each site where a refinement is DECLARED
+ * (variable / cell / parameter / return annotation, struct field, enum payload
+ * field), so the type itself is refused, wherever and however it is used.
+ *
+ * Walks `t` through union members and array elements. Does not descend into a
+ * named struct/enum's fields — those are checked once at their own `type` decl.
+ * An enum-subset error marker (baseType "enum") is owned by
+ * `maybeRejectEnumSubsetMarker` and skipped here.
+ *
+ * Emits E-CONTRACT-002 (malformed predicate, or a named shape not in the
+ * registry — including the §55.1 shared-core names, which impl#1 does not yet
+ * read in refinement-type position) and E-CONTRACT-003 (external reference).
+ * Returns true when the type is judgeable.
+ */
+function checkRefinementJudgeable(
+  t: ResolvedType | null | undefined,
+  span: Span,
+  errors: TSError[],
+  annotText?: string,
+): boolean {
+  if (!t || typeof t !== "object") return true;
+  if (t.kind === "union") {
+    let ok = true;
+    for (const m of (t as UnionType).members ?? []) ok = checkRefinementJudgeable(m, span, errors, annotText) && ok;
+    return ok;
+  }
+  if (t.kind === "array") {
+    return checkRefinementJudgeable((t as { element?: ResolvedType }).element, span, errors, annotText);
+  }
+  if (t.kind !== "predicated") return true;
+  const pt = t as PredicatedType;
+  if (pt.baseType === "enum") return true;
+  const pred = pt.predicate as PredicateExpr & { hasExternalRef?: boolean };
+  if (!pred || typeof pred !== "object") return true;
+  if (_judgeabilityReported.has(pred)) return false;
+  const shown = annotText ? `\`${annotText.trim()}\`` : `${pt.baseType}(${formatPredicateExpr(pred)})`;
+
+  const problems: Array<{ code: string; message: string }> = [];
+  const extRefs: string[] = [];
+  const unknownShapes: string[] = [];
+  let malformed: string | null = null;
+  const walk = (p: PredicateExpr | undefined): void => {
+    if (!p) return;
+    switch (p.kind) {
+      case "error": if (malformed === null) malformed = p.message ?? "malformed predicate"; return;
+      case "named-shape":
+        if (p.name && p.name.startsWith("@")) extRefs.push(p.name);
+        else if (!p.name || !NAMED_SHAPES.has(p.name)) unknownShapes.push(p.name ?? "?");
+        return;
+      case "and": case "or": walk(p.left); walk(p.right); return;
+      case "not": case "on-length": walk(p.operand); return;
+      default: return;
+    }
+  };
+  walk(pred);
+  const isExternal = extRefs.length > 0 || pred.hasExternalRef === true;
+  if (isExternal) {
+    problems.push({
+      code: "E-CONTRACT-003",
+      message:
+        "E-CONTRACT-003: Inline predicate references an external reactive variable" +
+        (extRefs.length ? ` (${extRefs.join(", ")})` : "") + " in " + shown + ". " +
+        "Inline predicates must be stateless — they may only reference the incoming value. " +
+        "For constraints that depend on external state, use <engine>.",
+    });
+  } else if (malformed !== null) {
+    problems.push({
+      code: "E-CONTRACT-002",
+      message:
+        `E-CONTRACT-002: Inline predicate ${shown} is malformed (${malformed}), so it cannot be enforced. ` +
+        "§53.2.1 predicates are comparisons (`>0`), property comparisons (`.length > 7`, `.kind == \"a\"`), " +
+        "the range form (`0 < value < 10`), built-in named shapes (" + Array.from(NAMED_SHAPES.keys()).join(", ") + "), " +
+        "and the §55.1 shared-core words (`req`, `length(>=2)`, `pattern(/re/)`, `min(0)`, `max(9)`, `gt`, `lt`, " +
+        "`gte`, `lte`, `eq`, `neq`, `oneOf([…])`, `notIn([…])`), combined with `&&`, `||`, `!` and parentheses.",
+    });
+  } else if (unknownShapes.length > 0) {
+    problems.push({
+      code: "E-CONTRACT-002",
+      message:
+        "E-CONTRACT-002: Named shape '" + unknownShapes[0] + "' not found in the shape registry (in " + shown + "). " +
+        "Built-in shapes: " + Array.from(NAMED_SHAPES.keys()).join(", ") + ". " +
+        "To register a custom shape, use a ^{} meta block.",
+    });
+  }
+  if (problems.length === 0) return true;
+  _judgeabilityReported.add(pred);
+  for (const p of problems) errors.push(new TSError(p.code, p.message, span));
+  return false;
+}
+
+/**
+ * S458 one reader — the refinement a codegen consumer judges, as plain
+ * (clone-safe) data read off the TS-resolved type. `null` when the type carries
+ * no TOP-LEVEL refinement. Codegen never re-parses an annotation string.
+ */
+type RefinementWrap = "array" | "nullable";
+interface RefinementStampT {
+  baseType: string;
+  predicate: PredicateExpr;
+  label: string | null;
+  /**
+   * S458 — the containers around the refined value, OUTERMOST first:
+   * `string(url)[]` → ["array"]; `string(url) | not` / `string(url)?` →
+   * ["nullable"]; `(number(>0) | not)[]` → ["array", "nullable"]. Absent when
+   * the annotation IS the refinement. The judge descends them (an array is
+   * judged element-wise; `not` inhabits a nullable).
+   */
+  wrap?: RefinementWrap[];
+}
+
+/** The refinement inside `t` and the containers around it, or null. */
+function refinementShape(t: ResolvedType | null | undefined): RefinementStampT | null {
+  const wrap: RefinementWrap[] = [];
+  let cur: ResolvedType | null | undefined = t;
+  for (let guard = 0; cur && guard < 16; guard++) {
+    if (cur.kind === "predicated") {
+      const pt = cur as PredicatedType;
+      return { baseType: pt.baseType, predicate: pt.predicate, label: pt.label ?? null, ...(wrap.length ? { wrap } : {}) };
+    }
+    if (cur.kind === "array") { wrap.push("array"); cur = (cur as { element?: ResolvedType }).element; continue; }
+    if (cur.kind === "union") {
+      const ms = (cur as UnionType).members ?? [];
+      const nonNot = ms.filter((m) => m.kind !== "not");
+      if (ms.length === 2 && nonNot.length === 1) { wrap.push("nullable"); cur = nonNot[0]; continue; }
+      return null;
+    }
+    return null;
+  }
+  return null;
+}
+
+function refinementStamp(t: ResolvedType | null | undefined): RefinementStampT | null {
+  return refinementShape(t);
+}
+
+/**
+ * S458 — static zone for a refinement inside containers (`T[]`, `T | not`).
+ * Returns true when the initializer is proven (every leaf a literal satisfying
+ * the predicate, or `not` into a nullable), false when a literal leaf refutes it
+ * (E-CONTRACT-001 pushed by `checkPredicateLiteral`), null when it cannot be
+ * decided at compile time (→ boundary: a runtime check is emitted).
+ */
+function staticRefinedInit(
+  shape: RefinementStampT,
+  wrapAt: number,
+  initExpr: unknown,
+  span: Span,
+  errors: TSError[],
+): boolean | null {
+  const node = initExpr as { kind?: string; litType?: string; elements?: unknown[] } | null;
+  if (!node || typeof node !== "object") return null;
+  const w = shape.wrap ?? [];
+  if (wrapAt < w.length) {
+    if (w[wrapAt] === "nullable") {
+      if (node.kind === "lit" && node.litType === "not") return true;
+      return staticRefinedInit(shape, wrapAt + 1, initExpr, span, errors);
+    }
+    // array
+    if (node.kind !== "array" || !Array.isArray(node.elements)) return null;
+    let result: boolean | null = true;
+    for (const el of node.elements) {
+      const r = staticRefinedInit(shape, wrapAt + 1, el, span, errors);
+      if (r === false) result = false;
+      else if (r === null && result !== false) result = null;
+    }
+    return result;
+  }
+  const info = classifyLiteralFromExprNode(node as never);
+  if (info.kind !== "literal") return null;
+  if (typeof info.value === "boolean" && shape.baseType === "boolean") return null;
+  const pt: PredicatedType = { kind: "predicated", baseType: shape.baseType as PredicatedType["baseType"], predicate: shape.predicate, label: shape.label };
+  return checkPredicateLiteral(pt, info.value, span, errors);
 }
 
 /**
@@ -3400,36 +3844,36 @@ function checkPredicateLiteral(
   span: Span,
   errors: TSError[],
 ): boolean | null {
-  // E-CONTRACT-003: predicate references external reactive variable
-  if ((predType.predicate as PredicateExpr & { hasExternalRef?: boolean }).hasExternalRef) {
-    errors.push(new TSError(
-      "E-CONTRACT-003",
-      "E-CONTRACT-003: Inline predicate references an external reactive variable. " +
-        "Inline predicates must be stateless — they may only reference the incoming value. " +
-        "For constraints that depend on external state, use <engine>.",
-      span,
-    ));
-    return null;
-  }
+  // E-CONTRACT-002 / E-CONTRACT-003 — S458 F1: ONE judgeability check, shared
+  // with every declaration site (`checkRefinementJudgeable` reports a given
+  // predicate once). An unjudgeable predicate is not evaluated.
+  if (!checkRefinementJudgeable(predType, span, errors)) return null;
 
-  // E-CONTRACT-002: check for unknown named shapes
-  function checkNamedShapes(pred: PredicateExpr): void {
-    if (pred.kind === "named-shape" && pred.name && !pred.name.startsWith("@") && !NAMED_SHAPES.has(pred.name)) {
+  // S458 — the BASE type first, exactly as the runtime judge does
+  // (emit-predicates judgeExpr): a literal that is not a value of the base type
+  // does not inhabit the refinement. `let q: integer(>0) = 1.5` and
+  // `<n>: number(>0) = "5"` used to compile with no error AND no runtime check.
+  {
+    const base = predType.baseType;
+    const okBase =
+      base === "number" ? typeof value === "number" && !Number.isNaN(value)
+      : base === "integer" ? typeof value === "number" && Number.isInteger(value)
+      : base === "string" ? typeof value === "string"
+      : base === "boolean" ? typeof value === "boolean"
+      : true;
+    if (!okBase) {
       errors.push(new TSError(
-        "E-CONTRACT-002",
-        "E-CONTRACT-002: Named shape '" + pred.name + "' not found in the shape registry. " +
-          "Built-in shapes: " + Array.from(NAMED_SHAPES.keys()).join(", ") + ". " +
-          "To register a custom shape, use a ^{} meta block.",
+        "E-CONTRACT-001",
+        "E-CONTRACT-001: Value constraint violated. " +
+          "Type: " + base + "(" + formatPredicateExpr(predType.predicate) + ")" +
+          (predType.label ? " [" + predType.label + "]" : "") + ". " +
+          "Value " + (typeof value === "string" ? JSON.stringify(value) : String(value)) +
+          " is not " + (base === "integer" ? "an integer" : "a " + base) + ".",
         span,
       ));
+      return false;
     }
-    if ((pred.kind === "and" || pred.kind === "or") && pred.left && pred.right) {
-      checkNamedShapes(pred.left);
-      checkNamedShapes(pred.right);
-    }
-    if (pred.kind === "not" && pred.operand) checkNamedShapes(pred.operand);
   }
-  checkNamedShapes(predType.predicate);
 
   // E-CONTRACT-001: static literal evaluation
   if (typeof value === "boolean") return null;
@@ -3936,10 +4380,21 @@ function classifyPredicateZone(
       // here would silently DELETE that guard in exchange for a compile-time
       // check that does not happen. So the zone is unchanged from what this
       // position had before the widening — which is also the honest answer.
-      if (typeof sourceInfo.value === "boolean") return "boundary";
-      // T-PRED-1: evaluate predicate against literal at compile time
-      checkPredicateLiteral(targetType, sourceInfo.value, span, errors);
-      return "static";
+      // S458 — a boolean literal into a NON-boolean base is a base-type
+      // mismatch, decidable now: checkPredicateLiteral reports E-CONTRACT-001.
+      if (typeof sourceInfo.value === "boolean") {
+        if (targetType.baseType !== "boolean") {
+          checkPredicateLiteral(targetType, sourceInfo.value, span, errors);
+          return "static";
+        }
+        return "boundary";
+      }
+      // T-PRED-1: evaluate predicate against literal at compile time.
+      // S458 — the static zone is a PROOF (§53.4.2): a literal the evaluator
+      // cannot decide (`null` — e.g. a string literal into `number(>0)`, a base-
+      // type mismatch) is not proven, so it keeps the runtime check, whose base-
+      // type guard refuses it. It used to be called "static" and elided.
+      return checkPredicateLiteral(targetType, sourceInfo.value, span, errors) === null ? "boundary" : "static";
 
     case "literal-type-only":
       // The TYPE is known, the value is not (an interpolated template). There
@@ -10567,6 +11022,11 @@ function annotateNodes(
                 // parameter type (`fn promote(r: Role oneOf(.A .. .B))`).
                 const paramSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
                 maybeRejectEnumSubsetMarker(resolved, paramSpan, errors);
+                // S458 F1 + one reader — refuse an unjudgeable refinement, and
+                // stamp the RESOLVED refinement on the param so every codegen
+                // consumer reads this type, never the annotation string again.
+                checkRefinementJudgeable(resolved, paramSpan, errors, paramAnnot);
+                if (paramObj) paramObj.refinement = refinementStamp(resolved);
               }
               const paramEntry: ScopeEntry = { kind: "variable", resolvedType: paramResolvedType };
               if (paramIsLin) paramEntry.isLin = true;
@@ -10618,6 +11078,17 @@ function annotateNodes(
         // suppress duplicate W-CPS-NEEDS-FAILABLE warnings when the caller
         // is `!`-typed (per body-split soundness design dive §3.4).
         const _enclosingFnCanFail = n.canFail === true;
+        // S458 one reader — the RESOLVED return refinement (§53.9.3), stamped for
+        // codegen, plus the F1 judgeability check on the return annotation.
+        {
+          const retAnnot = (n as ASTNodeLike).returnTypeAnnotation as string | undefined;
+          if (typeof retAnnot === "string" && retAnnot.trim().length > 0) {
+            const retType = resolveTypeExpr(retAnnot, typeRegistry);
+            const retSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            checkRefinementJudgeable(retType, retSpan, errors, retAnnot);
+            (n as ASTNodeLike).returnRefinement = refinementStamp(retType);
+          }
+        }
         // S84 v0.2.4 #5-followon (Gap B.3): push the enclosing function's
         // return type onto the stack so nested return-stmts (including
         // those inside if/while/for/match-arm bodies) see the right
@@ -11046,6 +11517,18 @@ function annotateNodes(
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
             for (const fieldType of (resolvedType as StructType).fields.values()) {
               maybeRejectEnumSubsetMarker(fieldType, declSpan, errors);
+              // S458 F1 — an unjudgeable refinement on a field is refused here.
+              checkRefinementJudgeable(fieldType, declSpan, errors);
+            }
+          }
+          // S458 F1 — the same for every enum variant payload field (the
+          // parseVariant / <endpoint> / <api> decode reads these types).
+          if (resolvedType.kind === "enum") {
+            const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            for (const v of (resolvedType as EnumType).variants ?? []) {
+              if (v.payload instanceof Map) {
+                for (const pType of v.payload.values()) checkRefinementJudgeable(pType as ResolvedType, declSpan, errors);
+              }
             }
           }
         } else {
@@ -11108,6 +11591,9 @@ function annotateNodes(
           {
             const letMapSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
             checkMapKeyComparability(letAnnoType, letMapSpan, errors);
+            // S458 F1 — a refinement the reader cannot judge is refused at the
+            // declaration, whatever the initializer's zone.
+            checkRefinementJudgeable(letAnnoType, letMapSpan, errors, letAnnot);
           }
           if (letAnnoType.kind === "predicated") {
             resolvedType = letAnnoType;
@@ -11127,6 +11613,8 @@ function annotateNodes(
             // check emission on `zone === "boundary"` (additive, non-breaking).
             (n as ASTNodeLike).predicateCheck = {
               predicate: letAnnoType.predicate,
+              baseType: letAnnoType.baseType,
+              label: letAnnoType.label ?? null,
               zone: letZone,
               sourceKind: letSourceInfo.kind,
             };
@@ -11135,6 +11623,19 @@ function annotateNodes(
             // (e.g. enum-typed variables used in `is .Variant` checks). §S19.
             if (letAnnoType && letAnnoType.kind !== "asIs") {
               resolvedType = letAnnoType;
+            }
+            // S458 — a refinement inside containers (`string(url)[]`,
+            // `string(url) | not`, `string(url)?`) is judged too: element-wise
+            // for an array, `not` admitted for a nullable. Literal initializers
+            // are proven / refuted statically, anything else is the boundary.
+            {
+              const _letShape = refinementShape(letAnnoType);
+              if (_letShape && _letShape.wrap) {
+                const _sp = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                const _ini = (n as any).initExpr;
+                const _proven = _ini ? staticRefinedInit(_letShape, 0, _ini, _sp, errors) : null;
+                (n as ASTNodeLike).predicateCheck = { ..._letShape, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
+              }
             }
             // §7.5.1 position 1 — E-TYPE-031 literal-mismatch for unpredicated
             // primitive annotations (number/string/boolean). This is the ONE
@@ -11631,6 +12132,8 @@ function annotateNodes(
           {
             const reactMapSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
             checkMapKeyComparability(reactAnnoType, reactMapSpan, errors);
+            // S458 F1 — same rule as the let/const site.
+            checkRefinementJudgeable(reactAnnoType, reactMapSpan, errors, reactAnnot);
           }
           if (reactAnnoType.kind === "predicated") {
             resolvedType = reactAnnoType;
@@ -11648,10 +12151,22 @@ function annotateNodes(
             // `zone === "boundary"` (additive, non-breaking).
             (n as ASTNodeLike).predicateCheck = {
               predicate: reactAnnoType.predicate,
+              baseType: reactAnnoType.baseType,
+              label: reactAnnoType.label ?? null,
               zone: reactZone,
               sourceKind: reactSourceInfo.kind,
             };
           } else {
+            // S458 — a refinement inside containers, as at the let/const site.
+            {
+              const _cellShape = refinementShape(reactAnnoType);
+              if (_cellShape && _cellShape.wrap) {
+                const _sp = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+                const _ini = (n as any).initExpr;
+                const _proven = _ini ? staticRefinedInit(_cellShape, 0, _ini, _sp, errors) : null;
+                (n as ASTNodeLike).predicateCheck = { ..._cellShape, zone: _proven === null ? "boundary" : "static", sourceKind: "contained" };
+              }
+            }
             // §7.5.1 position 2 — E-TYPE-031 on an annotated STATE-CELL
             // declaration. Same rule, same literal set and same message as
             // position 1 above (`let` / `const`); this is the reactive-decl

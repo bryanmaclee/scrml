@@ -1,0 +1,14 @@
+{
+  "id": "refinement-base-type-reject-rt",
+  "description": "S458: the runtime check tests the BASE type before the predicate. take(n: number(>0)) is called with the number 7 (passes; @shown becomes 7) and then with the STRING \"9\" (refused: not a number — E-CONTRACT-001-RT, @shown keeps 7). Before S458 the check was `(n > 0)`, which JavaScript coerces: \"9\" > 0 is true, so a string inhabited `number(>0)`.",
+  "language-version": "1.0",
+  "spec": "§53.3.4",
+  "rationale": "§53.3.4: \"A `number(>0 && <10000)` value IS a `number`. The constrained type is a subtype of the base type\" — a value that is not of the base type cannot inhabit the refinement; §53.4.5 the boundary check refuses it.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#num" }, { "click": "#text" }],
+    "state": { "shown": 7 },
+    "domAnchored": [{ "selector": "#out", "text": "7" }]
+  }
+}

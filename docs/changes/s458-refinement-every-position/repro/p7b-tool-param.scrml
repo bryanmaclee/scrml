@@ -1,0 +1,9 @@
+<program kind="tool" lang="js">
+    function take(u: string(url)): string {
+        return u
+    }
+    function main(args: string[]): number {
+        println(take(args[0]))
+        return 0
+    }
+</program>
