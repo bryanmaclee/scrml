@@ -113,3 +113,14 @@
   braces. Not chased. App `import { TableSort, tableFor } from "scrml:data"`: before and after both compile (exit 0);
   emitted artifacts byte-identical (diff -r); the W-STDLIB-SEED-FAILCLOSED warning ("server-only re-export `TableSort`
   … could not be resolved to a terminal") no longer fires (3 -> 2 warnings).
+- [2026-10-07] Re-review round N1/N2/N2b (93d6366c3; hook 32188 pass / 58 skip / 0 fail). Reproduced on 3a9ec9e93:
+  `export { M1 } from "./missing.scrml"` compiled clean, page loaded missing.client.js; `export * from
+  "./missing2.scrml"` clean (or only E-IMPORT-004 at the importer); `export * from "scrml:data"` + named re-export ->
+  "add `export parseVariant`"; W-SERVER-IMPORT-UNEMITTED alongside a missing-name E-IMPORT-004 (direct and via re-export).
+  Fix: buildImportGraph E-IMPORT-006 for an unresolvable relative re-export (named + star), record kept out of exports
+  (graph entry `unresolvedReExports`); validateImports/validateReExports skip names such a re-export could supply;
+  localReExportEdges + codegen/index.ts page script order only in-graph modules; unexpanded-star E-IMPORT-004 text;
+  api.js suppression for missing-name pairs and re-exporters. Conformance +2 (e-import-006-reexport-missing-file-reject,
+  -star-missing-file-reject), 1354/1404 + 50 xfail; unit file 19 tests; types OK; browser-baseline PASS.
+  Corpus by compile base 46ed1f8ff vs head 93d6366c3: 0 newly failing / 0 newly passing; 60 diagnostic-code changes,
+  ALL `-W-STDLIB-SEED-FAILCLOSED` (the TableSort export); artifacts: only the 38 ex23 diffs (unchanged).
