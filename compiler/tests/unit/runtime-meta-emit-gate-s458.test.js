@@ -66,6 +66,14 @@ const REFUSED = [
   ["svg set", '<svg><set attributeName="fill" to="red"/></svg>', "red"],
   ["data:text/html src", '<img src="data:text/html,<script>1</script>">', "text/html"],
   ["non-standard element", "<Counter>SECRETX</Counter>", "SECRETX"],
+  // S458 "your recs on all four" item 3 — the data-scrml- attribute namespace is compiler-owned.
+  ["data-scrml-* attribute", '<p data-scrml-meta="SECRETX">p</p>', "SECRETX"],
+  ["data-scrml-* upper case", '<p DATA-SCRML-OUTLET="SECRETX">p</p>', "SECRETX"],
+  ["data-scrml-* no value", "<p data-scrml-gated>SECRETX</p>", "SECRETX"],
+  ["data-scrml-* after a /", '<p/data-scrml-each-mount="SECRETX">p</p>', "SECRETX"],
+  ["data-scrml-* unquoted", "<p data-scrml-x=SECRETX>p</p>", "SECRETX"],
+  ["data-scrml-* on svg (foreign content)", '<svg><rect Data-Scrml-X="SECRETX"/></svg>', "SECRETX"],
+  ["data-scrml-* nested", '<ul><li><b data-scrml-x="SECRETX">b</b></li></ul>', "SECRETX"],
 ];
 
 describe("S458 'a' — runtime meta.emit refuses, writes nothing, logs once", () => {
@@ -113,6 +121,11 @@ const ADMITTED = [
   "<title>t</title><p>y</p>",
   "<p>unclosed <b>bold",
   "a &amp; b &lt;c&gt;",
+  // Ordinary data-* and near-miss names are not in the compiler-owned data-scrml- namespace. A
+  // character reference in an attribute NAME is not decoded by the tokenizer, so
+  // `data&#45;scrml-x` is that literal name, not data-scrml-x.
+  '<p data-x="1" data-scrmlx="2" data-scrml="3" x-data-scrml-y="4">ok</p>',
+  '<p data&#45;scrml-x="1">ok</p>',
 ];
 
 describe("S458 'a' — admitted markup is inserted exactly as the ungated path inserted it", () => {

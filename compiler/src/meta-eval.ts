@@ -663,6 +663,22 @@ function runInMetaRealm(
 const EMIT_ATTR_VALUE_KINDS = new Set(["string-literal", "absent"]);
 
 /**
+ * SPEC §22.4.1 (ruling S458 "your recs on all four", item 3): the `data-scrml-` attribute
+ * namespace is compiler-owned — the runtime's own markers (`data-scrml-meta`,
+ * `data-scrml-outlet`, `data-scrml-each-mount`, `data-scrml-gated`, …) live there — so an
+ * attribute in emit() output whose name begins with it is refused. A PREFIX rule, never a
+ * list of marker names. The name is read the way the HTML tokenizer reads the attribute name
+ * the compiler writes out for it: ASCII upper-case letters folded to lower case (and nothing
+ * else — the tokenizer does not decode character references in an attribute name). The
+ * runtime `meta.emit` gate applies the same prefix to the names its parse produced
+ * (runtime-meta-emit-gate.js `_SCRML_META_EMIT_RESERVED_ATTR_PREFIX`).
+ */
+const COMPILER_OWNED_ATTR_PREFIX = "data-scrml-";
+function isCompilerOwnedAttrName(name: string): boolean {
+  return name.replace(/[A-Z]/g, (c) => c.toLowerCase()).startsWith(COMPILER_OWNED_ATTR_PREFIX);
+}
+
+/**
  * `emit()` output re-enters the pipeline AFTER the type system, route inference and
  * every front-end check have run (ME is Stage 6.5), so a construct those stages own
  * would reach code generation unchecked — measured S457: an emitted `<script>`
@@ -708,6 +724,13 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
           continue;
         }
         for (const a of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
+          if (isCompilerOwnedAttrName(String(a?.name ?? ""))) {
+            refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` the attribute ` +
+              `'${String(a.name)}'. The \`data-scrml-\` attribute namespace is reserved for the compiler's own ` +
+              `runtime markers (\`data-scrml-meta\`, \`data-scrml-outlet\`, …), like the \`_scrml_\` name prefix, so ` +
+              `emit() output may not carry it (§22.4.1) — use another \`data-\` name.`);
+            continue;
+          }
           const v = a?.value as { kind?: string } | undefined;
           const interpolated = v && typeof v === "object" && v.kind === "string-literal"
             && typeof (v as { value?: unknown }).value === "string" && ((v as { value: string }).value).includes("${");

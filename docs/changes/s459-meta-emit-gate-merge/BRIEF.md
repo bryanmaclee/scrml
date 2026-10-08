@@ -40,3 +40,15 @@ Copy this entire brief verbatim to `$WT/docs/changes/s459-meta-emit-gate-merge/B
 
 ## Final report
 WT path · final SHA · branch name · merge conflicts and how each was resolved · files touched by Step 3 · test/conformance/differential results (executed) · the source-markup `data-scrml-*` count · anything not done. Do NOT push.
+
+## S459 addendum
+
+PA addendum to your brief (s459-meta-emit-gate-merge) — add this as Step 3b after the data-scrml-* work; append it verbatim to your BRIEF.md under "S459 addendum". The base allow-list branch (a55464de4) is now PR #1359, landing to main as-is; these are its review nits, to land on YOUR branch:
+
+1. MED (pre-existing, also on main): in a COMPILE-TIME `^{}`, `while`, `function` and `match` statements are silently dropped — `meta-eval.ts` `serializeNode` returns "" in its `default:` while reader 1 admits them (e.g. a `while (i<3)` loop building `<li>`s renders `<ul></ul>` with no diagnostic). Reproduce first. Then: grep SPEC §22 (esp. §22.4, §22.12) for whether these statements are legal in compile-time meta. If a governing sentence admits them → make the serializer EMIT them (conformance restoration). If none → refuse every statement kind the serializer cannot emit, with a diagnostic naming the kind (fail closed), and measure the corpus count. Either way: no statement kind admitted by reader 1 may be dropped — make that true by construction (the serializer's default case must refuse, not return "").
+2. LOW: a `function wrap(){}` inside compile-time `^{}` reports "E-META-001 'wrap' is not available … not a local binding" — wrong cause; falls out of #1.
+3. LOW: a runtime `^{}` reading `window` reports E-META-001 twice (both checkers) — report once.
+4. LOW: the E-META-001 message for a plain `x = …` reassignment is broken ("…or declare a new `const` is not admitted…") — fix the wording.
+5. LOW docs: §22.5.2 still says "The compiler SHALL emit `capturedBindings` as an object literal" while the ruled form emits a function (the §22.5 note) — reconcile §22.5.2 to the ruled form.
+6. LOW (open from the prior review): `_SCRML_DEFAULT_MESSAGES` / `_SCRML_TAG_TO_VALIDATOR` are plain `{}` at runtime-template.js (~:4948, ~:4986) — use null-prototype objects (or the same author-keyed registry shape) so a key like "constructor" cannot read Object.prototype.
+Report each with executed evidence. Rebase note: when #1359 merges, `git merge origin/main` should be a no-op for those files since you already merged a55464de4.
