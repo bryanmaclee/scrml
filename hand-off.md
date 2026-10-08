@@ -1,3 +1,55 @@
+# scrml — Session 459 (bryan · ASUS-Vivobook) — WRAP (at ~85% context, by plan)
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S458 below. Rulings: `scrml-support/user-voice-scrml.md` §S459 (~12 entries). Board `S459-bryan.md`. Changelog §S459. Delta-log `[3940]`–`[3955]`. Solo session (a dPA ran alongside on bryan's command).
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. bryan's rulings owed — FIVE dPA deep-dives complete, awaiting him (scrml-support/docs/deep-dives/*-2026-10-08.md)
+- **dpa-070 — ONE presence test (FIRST — it unblocks D1).** Verdict 5/5 pole E: **bare `x` on a `T | not` value IS the presence test, in logic AND markup — ALREADY RULED S440 "Truthiness Q1" and built in the bootstrap (TYPED presence, not JS truthiness: `0`/`""`/`false` are present)**; `is some` and `given`-as-presence retire. ⚑ This means the S459 PA misread: the PA told bryan truthiness was "wrong" and dispatched D1 round 8 to REFUSE `if (onGo)` — that contradicts S440. Round 8 was STOPPED (see §1). Put the dpa-070 verdict to bryan with worked code; if ratified, D1 round 7 may already be right (check whether its reader treats bare `x` on `T | not` as typed presence vs plain truthiness on non-optional types).
+- **dpa-065** (O35: non-literal own value needs `:T`?) — infer within a file from the initializer only; failed inference = hard error; live fork = require `:T` where the type leaves the compilation unit.
+- **dpa-068** (bare `return`/`fail`/`break`/`continue` as an arm body) — W1 4–1, + one §18.4 sentence.
+- **dpa-069** (O18 undeclared use-site attributes) — R now (E-DECL-USE-ATTR + §34 row; 0 adopter sites) + X (typed opt-in forwarding) as the only widening.
+- One at a time (axiom floor) — dpa-070 first.
+
+### 1. In flight at wrap — every branch committed; read each branch's progress.md, NOT this file, for its final state
+| arc | branch @ tip at wrap | state | next |
+|---|---|---|---|
+| **D1 declared props** | `s459-d1-r5` @ `78576ce7a` (round 7) | round 7 DONE (one §42.3.5 reader `presence-narrowing.ts` shared by E-TYPE-046 + component E-TYPE-031; E-TYPE-031 at the offending call; `not` to optional fn prop admitted; F3 locator) — NOT reviewed | rule dpa-070 → then review round 7 (or adjust) → land |
+| D1 round 8 (STOPPED) | `s459-d1-r8` (agent a86c…, commits WIP + "STOPPED — S440 conflict") | refused truthiness on `T|not` — contradicts S440 | discard unless dpa-070 rules otherwise |
+| **meta.emit gate** | `s459-meta-emit-gate` @ `c56f2c353` + round 4 on `s459-meta-r4` (agent aca4…, in flight) | final review LAND-WITH-NITS at c56f2c353; round 4 = PA-ruled F1–F5 (refuse `<label for>`, form controls inside a page form; scope id/name belt to named-property elements; svg-template guard; ONE URL judge both phases; `<meta name>` case-fold) | read r4 progress → review r4 → land |
+| **refinement copy-in** | `s459-refine-copy-in` @ `7415dffee` + fix round (agent ae99…, in flight) | review LAND-WITH-NITS; fix round = MED-1 (Object.create objects stored uncopied — fail-open), MED-2 (DAG copy exponential), LOW-1 (depth cap ≠ cycle detection), re-merge main (index.ts worker loop: keep both errors/filePath AND #1363's eventUnboundErrors) | read progress → short re-review → land |
+| ship-strip follow-ups | — | ESM per-route chunks are transformed AFTER the strip (21 chunks keep one comment; §47.9.9 sentence false for ESM) | small fix or narrow the SPEC sentence |
+| onclient:* shadowing (S458 ruling item 1) | not started | extend E-CHANNEL-005 to `onclient:*` >1 arg + collision with in-scope declaration = error | dispatch (unquoted values landed #1363) |
+| runtime tree-shake (option 3, ruled) | not started | measured: shell 7,442 → ~3,400 B; first targets errors chunk (always shipped, dead), scope→{timers,animation} edge, engine helpers in core, mount chunk false trigger | dispatch after copy-in + meta land (both edit runtime-template.js) |
+| `splice` data loss | gap filed | `splice(0,0,@p)` → comma expression | dispatch |
+
+### 2. Carried
+O18 → dpa-069 done. The S457/S458 carried list in §S458/§S457 below still stands except what landed here.
+
+## What landed (8 PRs; every code PR S239-reviewed)
+#1359 `^{}` closed allow-list · #1176 README (tightened to linked pages; Quick start kept) · #1360 `"private": true` · #1361 host-global alias (`_scrml_g`; full `_scrml_`-prefix trust sweep) · #1362 host-global-scan known throws pinned by name · #1363 unquoted values read whole + `event` not bound in bare handlers (E-EVENT-UNBOUND) · #1364 dpa-070 banked · #1365 ship-strip (`scrml build` ships comment/whitespace-stripped browser JS, proven token-identical; shell runtime 26,211 → 7,442 B gzip -9; ratchet 26,268 → 7,630). Also npm names `scrml` + `create-scrml` reserved (0.0.1 stubs STAGED — bryan must approve the staged release on npmjs.com within 30 days or the placeholder is deleted).
+
+## 🔭 DURABLE
+**Sweep the ledger before advising on a design question — I failed it this session.** On the D1 truthiness fork I reasoned from §42.3.5 + S89 and recommended refusing truthiness; the S440 "Truthiness Q1" ruling (bare `x` on `T|not` = typed presence) already answered it, and the dPA found it in minutes. A relayed/derived premise is not a ruling; `grep user-voice` for the topic word FIRST.
+**Four review rounds on one mechanism = change the boundary (S452 rule, applied in time this session).** Refinement 2a's delta-judging found a new aliasing hole every round; bryan ruled copy-in at round 4 and the holder machinery was deleted.
+**A merge can widen a fail-closed reader.** The alias + allow-list merge let `_scrml_g.document` through a reader that trusted the `_scrml_` prefix; the merge agent caught it, and a full prefix-trust sweep followed. Every merge of two security changes owes that sweep.
+**Measure before optimising paid off big:** 57% of the shipped runtime was comments; option 1 alone cut it ~72%.
+
+## ⚑ MISSES (mine)
+1. ★★ D1 truthiness: recommended (a) "truthiness counts", then (after bryan's pushback) "truthiness is wrong" and dispatched round 8 to refuse it — both without sweeping user-voice; S440 had ruled it. Round 8 stopped.
+2. ★ Missed relaying the ctx-ping 75% notice (hook fired 15:21).
+3. ★ Banked dpa-070 via a PR and told bryan it was banked before it merged; he fired the dPA and it skipped 070. Say "merged" not "banked".
+4. ★ Process slips by agents (recorded): meta.emit agent's first commit used `--no-verify` (reset + redone with the hook); strip reviewer ran `git merge --no-verify` in a scratch worktree; hgs-thrown agent ran one pattern `pkill -f` on its own loop.
+5. ★ One `grep --include=*.scrml` unquoted under zsh (all-zero counts) — re-ran quoted.
+
+## Worktrees (6b)
+Retained (in flight): agent worktrees for D1 (a9259…/a86c…), meta.emit (ab5c…/aca4…), refine copy-in (ae99…). Removed: every S459 review tree; land-strip. Older S458 agent trees whose branches landed can be removed next session (dry-run first).
+
+## Gate at close
+Cloud `gate` green on every S459 merge (one flaky-timing re-run on #1176; `tracking` flake on #1361 — filed). Review markers for #1359 #1361–#1363 #1365 + carve-outs #1176 #1360 #1364 written in this wrap. Context-ping hook installed (`~/.claude/hooks/ctx-ping.mjs`, `.claude/settings.local.json`).
+
+---
+
 # S458 ADDENDUM (after the limit reset) — supersedes the S458 pickup table below where they differ
 
 **Rulings since the wrap** (user-voice §S458): runtime `meta.emit` GATED ("a"); D1 codes = PA recs (`E-COMPONENT-PROP-WRITE` new; E-SCOPE-001 row amended); `export *` RATIFIED ("ratify 21.4" → landed as SPEC text #1357).

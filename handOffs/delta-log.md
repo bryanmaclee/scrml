@@ -4327,3 +4327,18 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3937] land · #1354 §53 refinement slice 1 — one reader, base-type-first judge fails closed, annotations read whole · @adv:g-refinement-checks-absent-in-n-positions-s457
 [3938] state · S458 WRAP — 6 PRs (#1345 #1350–#1354); weekly API limit stopped every agent (resets 2026-10-11 23:00 MT); parked branches + salvage patches in hand-off §S458
 [3939] state · S458 ADDENDUM — rulings meta.emit gate (a), D1 codes, ratify §21.4; #1355–#1357 merged; uq branch ready @417fa38a3; 5 branches in flight (hand-off top)
+[3940] state · S459 boot — six S458 branches parked; four differential re-reviews dispatched · @adv:g-refinement-checks-absent-in-n-positions-s457
+[3941] land · #1359 ^{} closed allow-list on the executed text (S458 1a)
+[3942] land · #1176 README tightened to linked pages; #1360 package private
+[3943] ruling · S459 "ratify 22.4 sentence" — a compile-time ^{} statement is never dropped
+[3944] ruling · S459 "measure first, 1 and 3 for sure" — strip shipped JS; tree-shake next
+[3945] land · #1361 host-global alias + _scrml_ prefix trust sweep (S457 2a)
+[3946] land · #1362 host-global-scan known throws by name
+[3947] ruling · S459 "a, go" — refined cells copy on the way in; holder machinery deleted · @adv:g-refinement-checks-absent-in-n-positions-s457
+[3948] land · #1363 unquoted values read whole + E-EVENT-UNBOUND (S457 3a/4a)
+[3949] ruling · S459 presence test — D1 strict + bank dpa-070 (later found to contradict S440; round 8 stopped)
+[3950] land · #1364 dpa-070 banked; dPA completed 065/068/069/070 (advisory)
+[3951] land · #1365 ship-strip — shell runtime 26,211 → 7,442 B gzip -9 · @adv:g-spa-runtime-gzip-budget-knife-edge,g-emitted-js-never-minified-prize-unmeasured
+[3952] disp · meta.emit round 4 (PA-ruled F1–F5) · refinement copy-in fix round (MED-1/2) · D1 round 8 (STOPPED)
+[3953] state · npm scrml + create-scrml 0.0.1 STAGED (bryan approves on npmjs.com)
+[3954] state · S459 WRAP — 8 PRs; three arcs in flight on branches; five dPA verdicts awaiting bryan (070 first)

@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 245 | 6 |
-| MED | 554 | 4 |
-| LOW | 312 | 0 |
+| HIGH | 244 | 6 |
+| MED | 553 | 4 |
+| LOW | 313 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -4577,7 +4577,9 @@ Three independent axes hide in that 235 B, and **only one of them is compression
 
 **⚑ This also retires the "~200 B gzip whitespace-noise band" framing above** — the noise was never in the compile (which is deterministic), it was in *how* the artifact was being compressed.
 
-**What stays open, and why this entry is not resolved:** the shell shape is **9,628 B over** the aspiration and that is a real, tracked, unhidden gap. The ratchet stops it widening; it does not close it. The live work is the reduction itself — see [[g-emitted-js-never-minified-prize-unmeasured]] (the `--minify` flag is a documented no-op) and runtime tree-shaking. **What is no longer open is the fork**, and no future deliberation should be built on "16 KB with N bytes of margin" as though it described the shipped runtime. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
+**What stays open, and why this entry is not resolved:** the shell shape is **9,628 B over** the aspiration and that is a real, tracked, unhidden gap. The ratchet stops it widening; it does not close it. The live work is the reduction itself — see [[g-emitted-js-never-minified-prize-unmeasured]] (the `--minify` flag is a documented no-op) and runtime tree-shaking. **What is no longer open is the fork**, and no future deliberation should be built on "16 KB with N bytes of margin" as though it described the shipped runtime. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=resolved resolved-by=#1365 -->
+
+> **RESOLVED S459 (#1365):** `scrml build` now ships comment/whitespace-stripped browser JS (§47.9.9). The shell runtime is **7,442 B** gzip -9 (was 26,211; under the 16,384 aspiration), the counter 5,101; the ratchet ceiling is now **7,630 B**. Tree-shaking (ruled S459, not yet built) is the next reduction (measured: shell → ~3,400 B).
 
 > **S440 (PA-measured):** after #1137 (Date/built-in cell + `==` runtime rules) the gated counter-shape runtime sits **9 B under** the Phase-B 16 KB gzip gate — the aspiration gate on the counter shape is back on a knife edge, independent of the shell overage above.
 
@@ -13283,7 +13285,7 @@ Confirms the S346 PA lean (a) — strike — with two corrections to it: strikin
 **Why it is not filed as a defect.** Unminified output may be deliberate: SPEC §47 (Output Name Encoding) is a normative contract over these names; readable emitted JS is a stated project value; and a mangler cannot safely rename cross-chunk-referenced or string-looked-up names, which `_scrml_*` names are in places. **Class: compiler-spec, not language-spec** — emitted-JS shape is implementation freedom (the S278 ESM-chunks precedent), so this needs no language ruling.
 
 Scoping: `docs/changes/emit-minification-prize/SCOPING.md`.
-<!-- @gap id=g-emitted-js-never-minified-prize-unmeasured sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/codegen/index.ts,compiler/src/api.js — no minify/mangle stage found in the emit path at all prov=rationale:measured-S347-the-shipped-artifact-carries-45-comments-and-677-lines-and-no-mangle-stage-exists-while-the-outlet-bearing-shell-runtime-is-9628-bytes-over-the-16KB-gzip-aspiration-S353-corrected-from-a-stale-127-byte-margin -->
+<!-- @gap id=g-emitted-js-never-minified-prize-unmeasured sev=MED status=resolved resolved-by=#1365 locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/codegen/index.ts,compiler/src/api.js — no minify/mangle stage found in the emit path at all prov=rationale:measured-S347-the-shipped-artifact-carries-45-comments-and-677-lines-and-no-mangle-stage-exists-while-the-outlet-bearing-shell-runtime-is-9628-bytes-over-the-16KB-gzip-aspiration-S353-corrected-from-a-stale-127-byte-margin -->
 
 ### G-ENDPOINT-MALFORMED-JSON-BODY-THROWS-INSTEAD-OF-COMPILER-OWNED-400 — an unparseable request body escapes as an uncaught `SyntaxError` instead of §61.3's structured 400 — `NEW S347; HIGH; RESOLVED S360-peter (#619)`
 
@@ -23895,3 +23897,7 @@ Both failed on unrelated PRs (#1176 docs-only, #1361) and passed on re-run.
 ### g-chunk-mount-id-nondeterminism-s459 — `_scrml_chunk_mount` node ids drift between runs in one long-lived process (`12-snippets-slots`, `gauntlet-r10-odin-filebrowser`) — `NEW S459; LOW; open (pre-existing on main)`
 Fresh-process compiles agree. Could matter for long-lived `scrml dev` / `serve`. Reviewer-executed (S459 ship-strip review).
 <!-- @gap id=g-chunk-mount-id-nondeterminism-s459 sev=LOW status=open locus=searched:route-splitter.ts,emit-client.ts — not traced prov=review:s459-ship-strip -->
+
+### g-ship-strip-esm-chunks-after-strip-s459 — with `--module-format=esm` + per-route chunks, the ESM chunk transform runs AFTER the strip: 21 chunks keep a header comment + an unstripped import line, and §47.9.9's "every hash over the stripped bytes" is false for ESM chunks — `NEW S459; LOW; open`
+Hash-before-esm-transform order is pre-existing (base too); no behaviour impact today. Fix: strip after `toEsmClientChunk`, or narrow the §47.9.9 sentence. Also: the fallback warning names a chunk by its internal EpId (absolute path); `build` ~15-25% slower on a large app (4 parses per artifact).
+<!-- @gap id=g-ship-strip-esm-chunks-after-strip-s459 sev=LOW status=open locus=compiler/src/codegen/index.ts(emitPerRouteChunks ~:4233-4245) prov=review:s459-ship-strip -->
