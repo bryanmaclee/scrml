@@ -10,10 +10,17 @@
  * can capture a compiler reference. The guarantee is only as good as its gate, so this
  * script compiles the corpus in every emission mode and checks every emitted artifact:
  *
- *   R1  no FREE reference to a host global whose name the author's own source does not
+ *   R1  no FREE reference to a host global whose name the author's own CODE does not
  *       use. A free host-global reference the author did not write is the compiler's,
  *       and a same-named user binding would capture it. (Scope analysis by the same
- *       walk the user-function rename uses — codegen/fn-name-rename.ts.)
+ *       walk the user-function rename uses — codegen/fn-name-rename.ts.) "The author's
+ *       code" is read by the compiler's own block splitter + tokenizer (authorCodeNames):
+ *       a name in a comment, a string literal, markup text or a plain attribute value
+ *       does not count. Residual: markup lifted INSIDE a logic body is tokenized as
+ *       logic, so its text words count as code (under-reports only there).
+ *   A compile that THROWS leaves its unit unchecked: listed, counted, and above the
+ *   recorded ceiling (THROWN_CEILING) the scan is incomplete (exit 2).
+ *   Debug: `--author-names <file.scrml>` prints the identifiers R1 counts for one file.
  *   R2  an artifact that reads `_scrml_g` declares or imports it — or, for a classic
  *       client chunk, the runtime it loads declares it.
  *   R3  no binding sits at the top level of a CLASSIC script (a client chunk, a worker
@@ -49,7 +56,7 @@
  *
  * USAGE
  *   bun scripts/host-global-scan.ts [--check] [--concurrency N] [--roots a,b] [--modes m1,m2]
- * EXIT 0 = no violation · 1 = violations (listed) · 2 = the scan itself failed / scanned nothing.
+ * EXIT 0 = no violation · 1 = violations (listed) · 2 = the scan itself failed / scanned nothing / more compiles threw than THROWN_CEILING.
  */
 import { readdirSync, readFileSync, writeFileSync, statSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { join, relative, dirname, resolve } from "path";
@@ -86,20 +93,123 @@ async function hostNames(): Promise<Set<string>> {
   return names;
 }
 
-/** The author's text for a unit: the entry(s) plus every relative .scrml they import, transitively. */
-function authorText(entries: string[]): string {
+/** The source files of a unit: the entry(s) plus every relative .scrml they import, transitively. */
+function authorFiles(entries: string[]): { file: string; src: string }[] {
   const seen = new Set<string>();
   const stack = [...entries];
-  let text = "";
+  const out: { file: string; src: string }[] = [];
   while (stack.length) {
     const f = stack.pop()!;
     if (seen.has(f) || !existsSync(f)) continue;
     seen.add(f);
     const src = readFileSync(f, "utf8");
-    text += "\n" + src;
+    out.push({ file: f, src });
     for (const m of src.matchAll(/from\s+["'](\.{1,2}\/[^"']+\.scrml)["']/g)) stack.push(resolve(dirname(f), m[1]));
   }
-  return text;
+  return out;
+}
+
+/** Bodies whose bare text is code (§40.8 default-logic bodies; ast-builder.js isProgramRoot / isPageRoot / isChannelRoot). */
+const CODE_DEFAULT_TAGS = new Set(["program", "page", "channel"]);
+/** A bare declaration the AST builder lifts out of any body — ast-builder.js BARE_DECL_RE, per line. */
+const BARE_DECL_LINE = /^\s*(?:export\s+)?(server\s+(?:fn|function)[*\s]|type\s+\w|fn[*\s]\w?|function[*\s]\w?|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/m;
+
+/**
+ * The identifiers the author wrote AS CODE in one source file — read by the compiler's own
+ * front end (block-splitter.js `splitBlocks` + tokenizer.ts `tokenizeBlock`), so a name that
+ * appears only in a comment, a string literal, markup text, or a plain attribute value is NOT
+ * counted (R1 judged "the author wrote `document`" from raw text before: a `document` in a
+ * paragraph or a comment exempted every compiler `document` reference in that unit).
+ *
+ *   - logic / meta / test / error-effect bodies: IDENT tokens; a template literal's `${…}`
+ *     interpolations and every BLOCK_REF (nested logic, `?{}` slots, `^{}`) are read the same way;
+ *     a plain string literal's text is data.
+ *   - markup / state tags: the expression an attribute value carries (`{…}`, `${…}`, `(…)`,
+ *     a bare identifier, a call's name and arguments, the `${…}` inside a quoted value); the
+ *     tag's children are read as blocks. Markup text and comments are not code.
+ *   - `?{}` / `#{}`: only their `${…}` interpolation blocks.
+ *   - a foreign-code block (`_={ … }=`): its identifier-shaped words — the author's code in
+ *     another language, emitted as written.
+ *
+ * Returns `null` when the front end refuses the file (the caller reports it and falls back).
+ */
+function authorCodeNames(file: string, src: string, fe: { splitBlocks: any; tokenizeBlock: any; tokenizeLogic: any }): Set<string> | null {
+  const names = new Set<string>();
+  const IDENT_RE = /[A-Za-z_$][\w$]*/g;
+  const addLogicText = (text: string) => {
+    let toks: any[];
+    try { toks = fe.tokenizeLogic(text, 0, 1, 1, []); }
+    catch { for (const m of text.matchAll(IDENT_RE)) names.add(m[0]); return; } // unreadable expression text: count every word (never under-counts code)
+    readTokens(toks, []);
+  };
+  /** The `${…}` interiors of a quoted attribute value / template text (balanced braces). */
+  const interpolations = (text: string): string[] => {
+    const out: string[] = [];
+    for (let i = text.indexOf("${"); i !== -1; i = text.indexOf("${", i + 2)) {
+      let depth = 1, j = i + 2;
+      for (; j < text.length && depth > 0; j++) { if (text[j] === "{") depth++; else if (text[j] === "}") depth--; }
+      out.push(text.slice(i + 2, j - 1));
+    }
+    return out;
+  };
+  const readTokens = (toks: any[], children: any[]): void => {
+    for (const t of toks) {
+      switch (t.kind) {
+        case "IDENT": names.add(t.text); break;
+        case "STRING":
+          if (t.isTemplate) {
+            // A template literal's interpolations are code: read the child blocks inside its span
+            // (the splitter's view), or its `${…}` text when no child block is there.
+            const inside = children.filter((c: any) => c.span && t.span && c.span.start >= t.span.start && c.span.end <= t.span.end);
+            if (inside.length > 0) for (const c of inside) readBlock(c, false);
+            else for (const e of interpolations(t.text)) addLogicText(e);
+          }
+          break;
+        case "BLOCK_REF": if (t.block) readBlock(t.block, false); break;
+        case "ATTR_BLOCK": case "ATTR_EXPR": case "ATTR_IDENT": addLogicText(t.text); break;
+        case "ATTR_CALL": {
+          try { const c = JSON.parse(t.text); addLogicText(String(c.name)); addLogicText(String(c.args ?? "")); }
+          catch { addLogicText(t.text); }
+          break;
+        }
+        case "ATTR_TYPED_DECL": {
+          try { const c = JSON.parse(t.text); addLogicText(String(c.typeExpr ?? "")); } catch { addLogicText(t.text); }
+          break;
+        }
+        case "ATTR_STRING": for (const e of interpolations(t.text)) addLogicText(e); break;
+        default: break; // keywords, punctuation, numbers, comments, markup text, SQL / CSS text
+      }
+    }
+  };
+  const readBlock = (b: any, codeBody: boolean) => {
+    if (!b || b.type === "comment") return;
+    if (b.type === "text") {
+      // Bare text is CODE in a code-default body — the file root and the direct children of
+      // `<program>` / `<page>` / `<channel>` (§40.8; ast-builder.js liftBareDeclarations), where a
+      // display string is a `"…"` literal (a STRING token, not counted) — and a bare declaration
+      // lifted out of any other body (ast-builder.js BARE_DECL_RE). Elsewhere it is markup text.
+      if (codeBody || BARE_DECL_LINE.test(String(b.raw))) addLogicText(String(b.raw));
+      return;
+    }
+    if (b.type === "foreign") { for (const m of String(b.raw).matchAll(IDENT_RE)) names.add(m[0]); return; }
+    const toks: any[] = fe.tokenizeBlock(b, file);
+    const kids: any[] = b.children ?? [];
+    readTokens(toks, kids);
+    // A tag's children, and the `${…}` blocks of `?{}` / `#{}`, are blocks of their own. A logic
+    // body's children are reached through its tokens (BLOCK_REF, template literals) only — its
+    // child `text` blocks repeat the body's raw text, strings and comments included.
+    if (b.type === "markup" || b.type === "state" || b.type === "sql" || b.type === "css") {
+      const kidsAreCode = (b.type === "markup" || b.type === "state") && CODE_DEFAULT_TAGS.has(String(b.name));
+      for (const c of kids) readBlock(c, kidsAreCode);
+    }
+  };
+  try {
+    const r = fe.splitBlocks(file, src);
+    for (const b of (r?.blocks ?? [])) readBlock(b, true);
+  } catch {
+    return null;
+  }
+  return names;
 }
 
 /** A static, side-effect or dynamic import of a `data:` module (R4). */
@@ -121,8 +231,14 @@ async function runShard(units: string[][], modes: Mode[]) {
   const { aliasFreeGlobalRefs } = await import(join(REPO, "compiler/src/codegen/fn-name-rename.ts"));
   const acorn = await import("acorn");
   const NAMES = await hostNames();
+  const fe = {
+    splitBlocks: (await import(join(REPO, "compiler/src/block-splitter.js"))).splitBlocks,
+    ...(await import(join(REPO, "compiler/src/tokenizer.ts"))),
+  };
   const violations: Violation[] = [];
   const unparsed: string[] = [];
+  const thrown: string[] = [];
+  const unreadAuthor: string[] = [];
   let artifacts = 0, compiled = 0;
   const RT_START = "// --- scrml reactive runtime ---";
   const RT_END = "// --- end scrml reactive runtime ---";
@@ -130,8 +246,17 @@ async function runShard(units: string[][], modes: Mode[]) {
 
   for (const entries of units) {
     const unit = relative(REPO, entries.length === 1 ? entries[0] : dirname(entries[0]));
-    const author = authorText(entries);
-    const usesName = (n: string) => new RegExp(`(?<![\\w$])${n.replace(/\$/g, "\\$")}(?![\\w$])`).test(author);
+    const files0 = authorFiles(entries);
+    const author = files0.map((f) => f.src).join("\n");
+    // R1's "the author wrote this name": the identifiers in the author's CODE (authorCodeNames).
+    // A file the front end refuses falls back to its raw words — reported below, never silent.
+    const authorNames = new Set<string>();
+    for (const { file, src } of files0) {
+      const got = authorCodeNames(file, src, fe);
+      if (got === null) { unreadAuthor.push(relative(REPO, file)); for (const m of src.matchAll(/[A-Za-z_$][\w$]*/g)) authorNames.add(m[0]); }
+      else for (const n of got) authorNames.add(n);
+    }
+    const usesName = (n: string) => authorNames.has(n);
     const wantsTest = /~\{|<engine\b/.test(author);
     const wantsLibrary = /\bexport\b/.test(author);
     for (const mode of modes) {
@@ -141,7 +266,12 @@ async function runShard(units: string[][], modes: Mode[]) {
       try {
         let r: any;
         try { r = compileScrml({ inputFiles: entries, outputDir: out, write: true, log: () => {}, ...MODE_OPTS[mode] }); }
-        catch (e) { continue; } // a compiler crash is not this gate's subject (validate-emit / suites own it)
+        catch (e) {
+          // A compiler crash means this unit's artifacts went unchecked: counted and listed, and
+          // the scan does not report clean while any unit threw (fail toward reporting).
+          thrown.push(`[${mode}] ${unit} — ${String((e as Error)?.message ?? e).split("\n")[0].slice(0, 200)}`);
+          continue;
+        }
         if (!r || r.artifactsWritten === false) continue;
         compiled++;
         const files = walkJs(out);
@@ -221,7 +351,7 @@ async function runShard(units: string[][], modes: Mode[]) {
       }
     }
   }
-  return { violations, artifacts, compiled, unparsed };
+  return { violations, artifacts, compiled, unparsed, thrown, unreadAuthor };
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +387,15 @@ function enumerate(roots: string[]): string[][] {
     }
   }
   return units;
+}
+
+if (flag("--author-names")) {
+  // Debug: the identifiers R1 counts as author-written for one source file.
+  const f = resolve(opt("--author-names", ""));
+  const fe = { splitBlocks: (await import(join(REPO, "compiler/src/block-splitter.js"))).splitBlocks, ...(await import(join(REPO, "compiler/src/tokenizer.ts"))) };
+  const got = authorCodeNames(f, readFileSync(f, "utf8"), fe);
+  console.log(got === null ? "(front end refused the file)" : [...got].sort().join(" "));
+  process.exit(0);
 }
 
 if (flag("--shard")) {
@@ -296,8 +435,10 @@ const violations: Violation[] = done.flatMap((r: any) => r.violations);
 const artifacts = done.reduce((a: number, r: any) => a + r.artifacts, 0);
 const compiled = done.reduce((a: number, r: any) => a + r.compiled, 0);
 const unparsed: string[] = done.flatMap((r: any) => r.unparsed);
+const thrown: string[] = done.flatMap((r: any) => r.thrown);
+const unreadAuthor: string[] = [...new Set<string>(done.flatMap((r: any) => r.unreadAuthor))];
 const secs = ((Date.now() - t0) / 1000).toFixed(0);
-console.log(`host-global-scan: ${units.length} units × modes [${modes.join(", ")}] — ${compiled} compiles, ${artifacts} artifacts scanned, ${violations.length} violation(s), ${secs}s`);
+console.log(`host-global-scan: ${units.length} units × modes [${modes.join(", ")}] — ${compiled} compiles, ${thrown.length} threw, ${artifacts} artifacts scanned, ${violations.length} violation(s), ${secs}s`);
 if (artifacts === 0) { console.error("host-global-scan: scanned no artifact"); process.exit(2); }
 const seen = new Set<string>();
 for (const v of violations) {
@@ -310,5 +451,23 @@ if (unparsed.length > 0) {
   console.log(`  (not judged — ${unparsed.length} artifact(s) that do not parse at all; a separate defect, listed:)`);
   for (const u of [...new Set(unparsed)]) console.log(`    ${u}`);
 }
+if (unreadAuthor.length > 0) {
+  console.log(`  (author source the front end refused — R1 judged it by raw words, which can under-report: ${unreadAuthor.length})`);
+  for (const u of unreadAuthor) console.log(`    ${u}`);
+}
+if (thrown.length > 0) {
+  console.error(`host-global-scan: ${thrown.length} compile(s) THREW — their artifacts were not checked:`);
+  for (const u of thrown) console.error(`    ${u}`);
+}
 if (shardFailed) { console.error("host-global-scan: a shard failed (above) — the scan is incomplete"); process.exit(2); }
-process.exit(violations.length > 0 ? 1 : 0);
+if (violations.length > 0) process.exit(1);
+// A compile that throws leaves its unit unchecked. The full default run is known to see
+// THROWN_CEILING throws, every one pre-existing and reproducing on main 49b7fcc1d (115 are the
+// esm-mode `[scrml emit-client-esm] failed to parse a client chunk` throw, on sources that carry
+// a compile error; 4 are samples/gauntlet-s19-phase4/nested-comments.scrml overflowing the stack
+// in default / esm / embed / build). More than
+// that is a compiler regression shrinking this gate's coverage: the scan is incomplete, exit 2.
+// The ceiling may only be LOWERED (as those crashes are fixed).
+const THROWN_CEILING = 119;
+if (thrown.length > THROWN_CEILING) { console.error(`host-global-scan: incomplete — ${thrown.length} compiles threw, above the recorded ${THROWN_CEILING} (listed above)`); process.exit(2); }
+process.exit(0);
