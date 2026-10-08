@@ -50,3 +50,29 @@
     lab="is-green"; star.html 200 -> out="from-c|star" lab="is-Green"; 0 page errors.
     b.server.js `export { w as helper } from "./c.server.js";` b2.server.js `export { w } from "./c.server.js";`
     page scripts: runtime, c.client, b.client, app.client.
+- [2026-10-07] EMPIRICAL B (.tmp/empB/run.sh: `scrml dev src --port P` then `scrml build src -o dist` +
+  `PORT=P+1 bun _server.js`; same three probes each; dbs seeded by bun:sqlite):
+  Governing: SPEC §47.14 "A server built by `scrml build`, and `scrml dev`'s app server, SHALL, before it serves, ask every
+  database it opens which relations carry a `tenant_id` column outside the compiled tenant set … While any does, or a
+  database cannot be inspected, it SHALL print `E-DEPLOY-DB-TENANT-UNDECLARED` once per finding, answer `503` to EVERY request".
+  dirty (src/app.db + undeclared `invoices(tenant_id)`): dev AND built identical —
+    health 503 {"status":"unavailable","reason":"1 undeclared tenant table(s) or unchecked database(s) — see the server log"},
+    app.html 503, POST /_scrml/__ri_route_listAssets_1 503 "Service Unavailable"; log
+    `scrml: E-DEPLOY-DB-TENANT-UNDECLARED: database ./app.db holds "invoices", which has a tenant_id column, …` once.
+  clean: dev AND built — health 200 {"status":"ok",…}, app.html 200, route 403 CSRF (= dispatched).
+  no database: dev starts and serves (app.html 200, route 403 CSRF); health 404 under dev vs 200 built — dev has no
+    /_scrml/health unless the tenant gate is armed (pre-existing on base: dev never had the route). Not changed.
+  Postgres `db="postgres://…@127.0.0.1:59999/nodb"` (nothing listening): no crash at startup in either host; both answer
+    503 everywhere + log "database postgres://<redacted>@127.0.0.1:59999/nodb could not be checked — … (Failed to
+    connect) …". Fail-closed per §14.8.10 item 3 — NB this means `scrml dev` on a PG app without a live PG no longer
+    serves even the page (semantics change for dev; built server has done so since S456).
+- [2026-10-07] Corpus measurement: `bun scripts/corpus-emit-differential.ts capture` base = git-archived origin/main
+  46ed1f8ff (.tmp/base, node_modules symlinked) vs head 6093dc064; `diff` verdict INCOMPARABLE only because base is not a
+  git checkout (rev "<unknown>") and absolute paths differ. Enumerated 2425/2425, compiled 1450/1450, failure SET
+  identical (0 newly failing / 0 newly passing), 0 diagnostic-code changes, 0 syntax delta, artifact set delta 0.
+  200 content diffs: 162 are only `_scrml_project_root` (path-stripping normalizer .tmp/norm.ts: 7084 files, 38 differ
+  after stripping "/.tmp/base"); all 38 are examples/23-trucking-dispatch (pages now load ../schema.client.js;
+  models/auth.client.js footer registers re-exported UserRole; schema.client.js gains its registry footer) — same as the
+  predecessor's measurement. `corpus-compile-floor --check` PASS; `snippet-gate` 122/122.
+- [2026-10-07] `regen-spec-index.ts --check` OK (0 stale). `facts.ts --check` FAIL: `@generated:facts-table` STALE —
+  needs `bun scripts/facts.ts --write` (denied to this agent by the harness classifier; PA to run).
