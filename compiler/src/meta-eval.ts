@@ -569,11 +569,29 @@ type RealmResult =
   | { ok: false; message: string };
 
 /**
+ * Wall-clock bound on one compile-time `^{}` evaluation (S458). The body runs as a
+ * STRICT-mode function and Bun's engine (JavaScriptCore) implements proper tail calls in
+ * strict mode, so `const f = () => f(); f()` is an endless loop rather than a stack
+ * overflow — without a bound it hung the compiler (as any `while (true) {}` always did).
+ * An impl#1 limit, not a language rule: a body that exceeds it is E-META-EVAL-001.
+ */
+const META_EVAL_TIME_LIMIT_MS = 5000;
+
+/**
  * Run the checked, wrapped body in a fresh `node:vm` context whose global object has no
  * `process` / `Bun` / `require` and whose builtins are the realm's own. This is NOT the
  * security boundary (the allow-list is) — it bounds the damage of a hole in it.
+ *
+ * The body is evaluated exactly as checked (`vm.runInContext(wrapped)` yields the function),
+ * then INVOKED inside the realm by a second `runInContext` so the vm `timeout` bounds the
+ * run: a timeout applies only to code started by `runInContext`, not to a realm function
+ * the host calls directly. The two handles sit on the realm's global only for that call.
  */
-function runInMetaRealm(wrapped: string, typeRegistry: TypeRegistry): RealmResult {
+function runInMetaRealm(
+  wrapped: string,
+  typeRegistry: TypeRegistry,
+  timeLimitMs: number = META_EVAL_TIME_LIMIT_MS,
+): RealmResult {
   const reflect = createReflect(typeRegistry as unknown as Map<string, never>);
   const table: Record<string, string> = {};
   for (const name of registryTypeNames(typeRegistry)) table[name] = JSON.stringify(reflect(name));
@@ -583,8 +601,23 @@ function runInMetaRealm(wrapped: string, typeRegistry: TypeRegistry): RealmResul
     const makeRunner = vm.runInContext(META_REALM_PRELUDE, context) as (t: string) => (b: unknown) => unknown;
     const runner = makeRunner(JSON.stringify(table));
     const body = vm.runInContext(wrapped, context);
-    json = runner(body);
+    const realmGlobal = context as Record<string, unknown>;
+    realmGlobal.scrmlMetaRunner = runner;
+    realmGlobal.scrmlMetaBody = body;
+    try {
+      json = vm.runInContext("scrmlMetaRunner(scrmlMetaBody)", context, { timeout: timeLimitMs });
+    } finally {
+      delete realmGlobal.scrmlMetaRunner;
+      delete realmGlobal.scrmlMetaBody;
+    }
   } catch (e) {
+    if (e !== null && typeof e === "object" && (e as { code?: unknown }).code === "ERR_SCRIPT_EXECUTION_TIMEOUT") {
+      return {
+        ok: false,
+        message: `the ^{} body did not finish within ${timeLimitMs} ms (the compile-time evaluation limit) — ` +
+          "a loop or recursion that never ends? (a strict-mode tail call does not overflow the stack; it loops)",
+      };
+    }
     let message = "unknown error";
     try {
       message = e !== null && typeof e === "object" && typeof (e as { message?: unknown }).message === "string"
@@ -878,5 +911,6 @@ export {
   evaluateMetaBlock,
   processNodeList,
   runInMetaRealm,
+  META_EVAL_TIME_LIMIT_MS,
   checkEmittedNodes,
 };
