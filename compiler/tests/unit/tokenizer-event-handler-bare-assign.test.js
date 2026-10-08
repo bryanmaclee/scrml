@@ -33,7 +33,7 @@
  * continuation after the ident is `=` (not `==`, not `=>`), the tokenizer
  * switches to expression-mode and reads the full expression as ATTR_EXPR.
  * The downstream parseAttributes ATTR_EXPR branch produces a `kind: "expr"`
- * value, and emit-event-wiring wraps it as `function(event) { <expr>; }`
+ * value, and emit-event-wiring wraps it as `function(_scrml_event) { <expr>; }`
  * per SPEC §5.2.2. The reactive-assign rewrite pass converts the leaked
  * `_scrml_reactive_get("X") = expr` pattern to `_scrml_reactive_set("X", expr)`.
  *
@@ -97,7 +97,7 @@ describe("§1 — bare-assignment in event handler value", () => {
     // Wired as a real handler that uses the setter (not the getter)
     expect(client).toMatch(/_scrml_cs_reactive_set\("mode",\s*"Active"\)/);
     // Wrapper shape per SPEC §5.2.2
-    expect(client).toMatch(/function\(event\)\s*\{[^}]*_scrml_cs_reactive_set\("mode"/);
+    expect(client).toMatch(/function\(_scrml_event\)\s*\{[^}]*_scrml_cs_reactive_set\("mode"/);
   });
 
   test("§1.2 emitted client JS passes syntax validation", () => {
@@ -203,7 +203,7 @@ describe("§2 — pre-existing event-handler forms unchanged", () => {
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
     // Function call wiring shape per §5.2.2 line 1128
-    expect(client).toMatch(/function\(event\)\s*\{[^}]*_scrml_doIt[^(]*\(\)/);
+    expect(client).toMatch(/function\(_scrml_event\)\s*\{[^}]*_scrml_doIt[^(]*\(\)/);
   });
 
   test("§2.2 onclick=${(e) => fn(e)} (arrow form) still works", () => {

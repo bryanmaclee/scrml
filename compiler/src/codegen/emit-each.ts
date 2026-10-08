@@ -2253,7 +2253,7 @@ function buildEachExprHandlerBody(preLowered: string, iterVarName: string): stri
       const { rewriteBlockBody } = require("./emit-control-flow.ts") as {
         rewriteBlockBody: (b: string, d: unknown, e: EngineRewriteCtx | null) => string;
       };
-      return `(function(${params}) { ${rewriteBlockBody(body, null, null)}; })(event);`;
+      return `(function(${params}) { ${rewriteBlockBody(body, null, null)}; })(_scrml_event);`;
     }
   }
 
@@ -2288,11 +2288,11 @@ function buildEachExprHandlerBody(preLowered: string, iterVarName: string): stri
 
   if (node.kind === "lambda") {
     // The arrow IS the handler — invoke it with the DOM event.
-    return `(${lowered})(event);`;
+    return `(${lowered})(_scrml_event);`;
   }
   if (node.kind === "ident") {
     // Bare handler reference (`${@h}` cell handler / `${localHandler}`).
-    return `${lowered}(event);`;
+    return `${lowered}(_scrml_event);`;
   }
   // Plain expression / call / assignment → structured statement.
   return `${lowered};`;
@@ -2521,7 +2521,7 @@ function renderTemplateAttrToJs(
       // `onclick=@handler` — reference a reactive/handler cell. Rewrite then
       // invoke with the event. (Not an engine transition — bare cell handler.)
       const ref = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
-      handlerBody = `${ref}(event);`;
+      handlerBody = `${ref}(_scrml_event);`;
     } else {
       // §2.2.1 — a handler value kind this emitter cannot lower is REFUSED, never a silent
       // no-op listener (run-wide sink, refused-lowering-errors.ts; s456 review).
@@ -2549,7 +2549,7 @@ function renderTemplateAttrToJs(
     // double-inject risk. preventDefault is the FIRST statement — BEFORE the
     // Bug-73 live-keying prelude — so it fires even if the prelude early-returns
     // on a stale (reconciled-away) item.
-    const preventLine = ev === "submit" ? "event.preventDefault(); " : "";
+    const preventLine = ev === "submit" ? "_scrml_event.preventDefault(); " : "";
     const wrappedHandlerBody = maybeWrapEachPerItemHandler(handlerBody, iterVarName);
     // s441 (g-server-call-in-inline-handler-condition-unawaited) — a row handler
     // is built as TEXT and never reaches the function-body auto-await, so
@@ -2564,7 +2564,7 @@ function renderTemplateAttrToJs(
     // S453 (bryan S449 A3) — `boundaryId` so a logged rejection names the row
     // listener (see js-async-analysis `wrapHandlerRejectionLog`).
     const handlerFn = colorActiveHandler(
-      `function(event) { ${preventLine}${wrappedHandlerBody} }`,
+      `function(_scrml_event) { ${preventLine}${wrappedHandlerBody} }`,
       (attr as { span?: unknown }).span ?? (elNode as { span?: unknown } | null)?.span,
       {
         ...(valKind === "expr" ? activeHandlerStatementListColor(val.handlerBlock?.stmts) : {}),

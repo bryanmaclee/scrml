@@ -1,0 +1,17 @@
+{
+  "id": "markup-handler-s457-unquoted-member-chain-condition",
+  "description": "S457 4a — a member chain on a call in an unquoted CONDITION is part of the value: `if=check(2).ok` tests `.ok`. Before s457 the reader stopped at the call's `)`, the condition became `check(2)` (an object, always truthy) and `.ok` was dropped.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "source-test": "compiler/tests/unit/s457-unquoted-values-and-event.test.js",
+  "rationale": "§5.2 \"An unquoted value is read WHOLE\" — \"In every attribute, an identifier or a call MAY be followed by a postfix chain\" (ruling:user-voice-scrml.md S457 \"1a 2a 3a 4a 5 dd it 6a\", item 4); cluster-A's atomic forms include the chain.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#yes",
+        "text": "shown"
+      }
+    ]
+  }
+}

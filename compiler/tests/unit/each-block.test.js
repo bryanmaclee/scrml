@@ -639,7 +639,7 @@ function pick(id) {
     expect(errors).toEqual([]);
     // onclick lowers to addEventListener("click", ...) — NOT inert
     // setAttribute("onclick", "").
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ /);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ /);
     // The handler is invoked with the rewritten item field (@.id -> iter var).
     // The handler name is rewritten to the emitted fn name (_scrml_pick_N).
     expect(clientJs).toMatch(/_scrml_pick_\d+\(_scrml_each_item\.id\);/);
@@ -660,7 +660,7 @@ function handle(id) {
 </program>`;
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-on-ns"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
-    expect(clientJs).toMatch(/\.addEventListener\("dblclick", function\(event\) \{ /);
+    expect(clientJs).toMatch(/\.addEventListener\("dblclick", function\(_scrml_event\) \{ /);
     expect(clientJs).not.toContain('setAttribute("on:dblclick"');
   });
 
@@ -760,7 +760,7 @@ function clk(i) {
     // null-guard) before reading the iter var, so a same-key reconcile fires the
     // handler with live data, not the create-time snapshot. The iter-var read in
     // the handler arg is preserved (it now resolves to the re-bound `let`).
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
     expect(clientJs).toContain('.setAttribute("data-i", String(_scrml_each_item));');
   });
 });

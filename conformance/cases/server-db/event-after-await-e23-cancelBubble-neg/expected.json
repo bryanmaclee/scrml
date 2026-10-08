@@ -1,6 +1,6 @@
 {
   "id": "server-db-event-after-await-e23-cancelBubble-neg",
-  "description": "s441 round 4 (review round 3, finding 3). A handler that awaits a server call then uses the event a control property write (`event.cancelBubble = true`). By then the browser has already acted on the event, so the control has no effect (the form submits). Rounds 2-3 matched call shapes and each shape was bypassed; round 4 POISONS the event binding after the first await: any use of the event, or of anything derived from it, other than a plain read of a non-control property is E-EVENT-CONTROL-AFTER-AWAIT.",
+  "description": "s441 round 4 (review round 3, finding 3). A handler that awaits a server call then uses the event a control property write (`event.cancelBubble = true`). By then the browser has already acted on the event, so the control has no effect (the form submits). Rounds 2-3 matched call shapes and each shape was bypassed; round 4 POISONS the event binding after the first await: any use of the event, or of anything derived from it, other than a plain read of a non-control property is E-EVENT-CONTROL-AFTER-AWAIT. (s457 3a: the handler takes the event as the parameter of a `${(event) => { … }}` listener — a compiler-wrapped handler does not bind `event`, SPEC §5.2.)",
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
   "spec": "\u00a713.2",

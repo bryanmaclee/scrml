@@ -46,7 +46,6 @@ import { placeholderParam } from "./placeholder-nonce.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
-import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
@@ -2437,17 +2436,14 @@ function substituteProps(
       const outerPropExprMap = propExprMap;
       cloned.attrs = (cloned.attrs as AttrNode[]).map((attr: AttrNode) => {
         if (!attr || !attr.value) return attr;
-        // Inside an event-handler value `event` is the DOM event (§5.2.2), so a
-        // prop named `event` is shadowed there — in EVERY lowering path (the
-        // statement list already shadowed it; the one-statement / call-ref / raw
-        // paths substituted it — S440 N4).
-        const isHandlerAttr = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
-        const props = isHandlerAttr && outerProps.has("event")
-          ? new Map([...outerProps].filter(([k]) => k !== "event"))
-          : outerProps;
-        const propExprMap = isHandlerAttr && outerPropExprMap && outerPropExprMap.has("event")
-          ? new Map([...outerPropExprMap].filter(([k]) => k !== "event"))
-          : outerPropExprMap;
+        // s457 3a — a handler the compiler wraps does NOT bind `event` (§5.2 /
+        // §5.2.3; the listener parameter is `_scrml_event`), so a prop named
+        // `event` is an ordinary prop inside a handler value too and is
+        // substituted in every lowering path. (S440 N4 had shadowed it, reading
+        // `event` as the DOM event.) A `${(event) => …}` handler binds its own
+        // parameter, which the substitution respects.
+        const props = outerProps;
+        const propExprMap = outerPropExprMap;
         if (attr.value.kind === "string-literal") {
           // First the whole-prop-name `${name}` substitution (string values).
           let newVal = applyPropSubstitutions(attr.value.value, props);
@@ -2571,10 +2567,10 @@ function substituteProps(
           // §5.2.3 statement list (`handlerBlock`, attached at the body re-parse):
           // it is what codegen emits and what the type system checks, so the
           // props are substituted INTO it — every statement, not just the first
-          // (the `exprNode` below only ever held statement 1). The handler's
-          // `event` binding shadows a same-named prop.
+          // (the `exprNode` below only ever held statement 1). A prop named
+          // `event` is substituted like any other (s457 3a — no handler binds it).
           if (exprVal.handlerBlock && Array.isArray(exprVal.handlerBlock.stmts)) {
-            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set(["event"]));
+            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set());
             const first = exprVal.exprNode ? substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set()) : exprVal.exprNode;
             return { ...attr, value: { ...exprVal, exprNode: first, handlerBlock: { stmts } } };
           }

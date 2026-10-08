@@ -239,7 +239,7 @@ describe("§5: server-escalated handler name resolution", () => {
 
     // S96 Bug 14 — SPEC §5.2.2: server-escalated bare-call still emits `fn()`
     // in wrapper body (no event auto-thread).
-    expect(out).toContain("function(event) { saveData(); }");
+    expect(out).toContain("function(_scrml_event) { saveData(); }");
     expect(out).not.toContain("_scrml_saveData_42");
     expect(out).not.toContain("saveData(event)");
   });
@@ -293,7 +293,7 @@ describe("§7: handler registry key format", () => {
     ]);
 
     // Key must appear as a JSON-quoted string in the registry literal
-    expect(out).toContain('"_scrml_attr_onclick_118": function(event)');
+    expect(out).toContain('"_scrml_attr_onclick_118": function(_scrml_event)');
   });
 });
 
@@ -664,7 +664,7 @@ describe("§16: raw-string args from splitArgs — real AST shape regression", (
   test("onclick=fn() — no args wraps as fn() inside event handler (SPEC §5.2.2)", () => {
     // splitArgs('') with empty rawArgs → argList = [] (early exit in ast-builder).
     // S96 Bug 14 — SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
-    // `function(event) { fn(); }`. The escape-hatch for handlers needing the
+    // `function(_scrml_event) { fn(); }`. The escape-hatch for handlers needing the
     // event is `onclick=${(e) => fn(e)}`. Pre-S96 the impl auto-threaded event
     // citing tutorial §1.5 (non-normative); reverted per pa.md Rule 4.
     const out = run([
@@ -719,7 +719,7 @@ describe("§16: raw-string args from splitArgs — real AST shape regression", (
 // §17: fn() in handlerExpr — no double-wrap, body correctly rewritten
 //
 // Bug: onclick=${fn() { @color = "black" }} produced:
-//   function(event) { function() { @color = "black" }; }
+//   function(_scrml_event) { function() { @color = "black" }; }
 // The inner unnamed function declaration is a JS syntax error.
 //
 // Fix: parseFnExpression() detects the fn() form, extracts body, rewrites it
@@ -733,10 +733,10 @@ describe("§17: fn() handlerExpr — no double function wrapping", () => {
       makeExprBinding("_scrml_attr_onclick_2", "onclick", 'fn() { @color = "black" }'),
     ]);
     // Must NOT produce nested function declarations
-    expect(out).not.toContain("function(event) { function()");
+    expect(out).not.toContain("function(_scrml_event) { function()");
     // Must produce a single function with the reactive set inside
     expect(out).toContain('_scrml_reactive_set("color", "black")');
-    // The outer wrapper must be function(), not function(event)
+    // The outer wrapper must be function(), not function(_scrml_event)
     expect(out).toContain('"_scrml_attr_onclick_2": function() {');
   });
 
@@ -746,7 +746,7 @@ describe("§17: fn() handlerExpr — no double function wrapping", () => {
     ]);
     expect(out).toContain('_scrml_reactive_set("x", 1)');
     expect(out).toContain('_scrml_reactive_set("y", 2)');
-    expect(out).not.toContain("function(event) { function()");
+    expect(out).not.toContain("function(_scrml_event) { function()");
   });
 
   test("fn() with params — params preserved in output", () => {
@@ -755,14 +755,14 @@ describe("§17: fn() handlerExpr — no double function wrapping", () => {
     ]);
     // Parameters must be preserved
     expect(out).toContain("function(e)");
-    expect(out).not.toContain("function(event) { function(");
+    expect(out).not.toContain("function(_scrml_event) { function(");
   });
 
-  test("plain expression still wraps in function(event)", () => {
+  test("plain expression still wraps in function(_scrml_event)", () => {
     const out = run([
       makeExprBinding("_scrml_attr_onclick_5", "onclick", "doSomething()"),
     ]);
-    expect(out).toContain("function(event) { doSomething();");
+    expect(out).toContain("function(_scrml_event) { doSomething();");
   });
 
   test("arrow function used directly without outer wrapper", () => {
@@ -770,7 +770,7 @@ describe("§17: fn() handlerExpr — no double function wrapping", () => {
       makeExprBinding("_scrml_attr_onclick_6", "onclick", "() => doSomething()"),
     ]);
     // Arrow functions should not be double-wrapped
-    expect(out).not.toContain("function(event) { () =>");
+    expect(out).not.toContain("function(_scrml_event) { () =>");
     expect(out).toContain("() => doSomething()");
   });
 
@@ -780,8 +780,8 @@ describe("§17: fn() handlerExpr — no double function wrapping", () => {
       makeExprBinding("_scrml_attr_onclick_7", "onclick", 'fn() { @active = true }'),
     ]);
     // A function declaration statement inside an object literal is a syntax error.
-    // We check the pattern that caused the bug: `function(event) { function() {`
-    expect(out).not.toMatch(/"_scrml_attr_onclick_7":\s*function\(event\)\s*\{\s*function\(\)/);
+    // We check the pattern that caused the bug: `function(_scrml_event) { function() {`
+    expect(out).not.toMatch(/"_scrml_attr_onclick_7":\s*function\(_scrml_event\)\s*\{\s*function\(\)/);
   });
 
   test("multiple fn() handlers on same page — each rewritten independently", () => {
@@ -794,7 +794,7 @@ describe("§17: fn() handlerExpr — no double function wrapping", () => {
     expect(out).toContain('_scrml_reactive_set("color", "red")');
     expect(out).toContain('_scrml_reactive_set("color", "blue")');
     // None should have the double-wrap
-    expect(out).not.toContain("function(event) { function()");
+    expect(out).not.toContain("function(_scrml_event) { function()");
   });
 
   test("§18 bare function reference in handlerExpr gets called", () => {

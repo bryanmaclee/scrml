@@ -134,18 +134,18 @@ describe("§B: refetch in an inline multi-statement handler", () => {
   test("a TRAILING refetch survives (was: only the write)", () => {
     const { fatal, clientJs } = compile(INLINE_SRC, "inline");
     expect(fatal).toEqual([]);
-    expect(clientJs).toContain('function(event) { _scrml_cs_reactive_set("n", 5); _scrml_request_rows.refetch(); }');
+    expect(clientJs).toContain('function(_scrml_event) { _scrml_cs_reactive_set("n", 5); _scrml_request_rows.refetch(); }');
   });
 
   test("a LEADING refetch compiles and keeps the write (was: E-CODEGEN-INVALID-LOGIC)", () => {
     const { fatal, clientJs } = compile(INLINE_SRC, "inline-lead");
     expect(fatal).toEqual([]);
-    expect(clientJs).toContain('function(event) { _scrml_request_rows.refetch(); _scrml_cs_reactive_set("n", 6); }');
+    expect(clientJs).toContain('function(_scrml_event) { _scrml_request_rows.refetch(); _scrml_cs_reactive_set("n", 6); }');
   });
 
   test("the single-expression form is unchanged (control)", () => {
     const { clientJs } = compile(INLINE_SRC, "inline-single");
-    expect(clientJs).toContain("function(event) { _scrml_request_rows.refetch(); }");
+    expect(clientJs).toContain("function(_scrml_event) { _scrml_request_rows.refetch(); }");
   });
 
   test("an <each> row handler keeps a trailing refetch", () => {

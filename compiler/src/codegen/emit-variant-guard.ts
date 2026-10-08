@@ -1178,7 +1178,7 @@ function emitArmWireFunction(
           ..._engineExprCtxExtras,
           engineBindings: _engineRewriteCtx?.engineBindings ?? null,
         });
-        return `function(event) { ${blockBody} }`;
+        return `function(_scrml_event) { ${blockBody} }`;
       }
       // Detect fn(params) { body } shorthand.
       const fnMatch = String(binding.handlerExpr).match(/^\s*fn\s*\(/);
@@ -1235,12 +1235,12 @@ function emitArmWireFunction(
           mode: "client",
           ..._engineExprCtxExtras,
         });
-        return `function(event) { ${sbody}; }`;
+        return `function(_scrml_event) { ${sbody}; }`;
       }
       const rewritten = rewriteBlockBody(binding.handlerExpr, null, _engineRewriteCtx);
       const isBareRef = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(rewritten.trim());
       const body = isBareRef ? `${rewritten}()` : rewritten;
-      return `function(event) { ${body}; }`;
+      return `function(_scrml_event) { ${body}; }`;
     }
     // call-ref path: handler name + args. Server-fn name resolution via
     // fnNameMap is not available in this scope; rely on the ORIGINAL name
@@ -1262,9 +1262,9 @@ function emitArmWireFunction(
       if (node && typeof (node as any).value !== "undefined") return JSON.stringify((node as any).value);
       return String(a);
     }).join(", ");
-    const callArgs = args.length === 0 ? "event" : args;
+    const callArgs = args.length === 0 ? "_scrml_event" : args;
     const domEvent = String(binding.eventName || "").replace(/^on/, "");
-    const preventLine = domEvent === "submit" ? "event.preventDefault(); " : "";
+    const preventLine = domEvent === "submit" ? "_scrml_event.preventDefault(); " : "";
     // A5-6 Feature 1 (§51.0.M name= extension, S79). Mirror the
     // emit-event-wiring.ts call-ref recognition for non-delegable events
     // (e.g. `<input onfocus=cancelTimer("X")>` inside an arm body). Same
@@ -1282,9 +1282,9 @@ function emitArmWireFunction(
       handlerName, binding.handlerArgs || [], binding.engineArm as string | undefined,
     );
     if (lowered !== null) {
-      return `function(event) { ${preventLine}${lowered}; }`;
+      return `function(_scrml_event) { ${preventLine}${lowered}; }`;
     }
-    return `function(event) { ${preventLine}${handlerName}(${callArgs}); }`;
+    return `function(_scrml_event) { ${preventLine}${handlerName}(${callArgs}); }`;
   }
 
   for (const binding of wireableEvents) {

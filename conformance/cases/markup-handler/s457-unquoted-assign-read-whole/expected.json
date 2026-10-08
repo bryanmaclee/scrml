@@ -1,0 +1,28 @@
+{
+  "id": "markup-handler-s457-unquoted-assign-read-whole",
+  "description": "S457 4a — a bare handler assignment is read WHOLE: `onclick=@count = @count + 1` adds one per click. Before s457 the unquoted-value reader stopped at the whitespace after `@count`, so the handler ran `@count = @count` (the `+ 1` silently dropped, exit 0).",
+  "language-version": "1.0",
+  "spec": "§5.2, §5.2.3",
+  "source-test": "compiler/tests/unit/s457-unquoted-values-and-event.test.js",
+  "rationale": "§5.2 \"An unquoted value is read WHOLE\" (ruling:user-voice-scrml.md S457 \"1a 2a 3a 4a 5 dd it 6a\", item 4); §5.2.3 table: a bare handler value is one expression — \"calls, assignments, compound updates\". Two clicks: 0 → 2.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#inc"
+      },
+      {
+        "click": "#inc"
+      }
+    ],
+    "state": {
+      "count": 2
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "2"
+      }
+    ]
+  }
+}

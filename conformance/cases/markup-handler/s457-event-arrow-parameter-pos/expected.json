@@ -1,0 +1,25 @@
+{
+  "id": "markup-handler-s457-event-arrow-parameter-pos",
+  "description": "S457 3a — the handler that needs the event takes it as a parameter: `onclick=${(e) => @last = e.type}` records `click`.",
+  "language-version": "1.0",
+  "spec": "§5.2, §5.2.1",
+  "source-test": "compiler/tests/unit/s457-unquoted-values-and-event.test.js",
+  "rationale": "§5.2.1: \"The expression form is required when: You need the event object: `onclick=${(e) => handler(e, arg)}`\"; §5.2 \"Handler values do not bind `event`\" (ruling:user-voice-scrml.md S457 \"1a 2a 3a 4a 5 dd it 6a\", item 3).",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "state": {
+      "last": "click"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "click"
+      }
+    ]
+  }
+}

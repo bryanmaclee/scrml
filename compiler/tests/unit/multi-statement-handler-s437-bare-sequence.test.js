@@ -250,23 +250,23 @@ describe("§4 the message gives §5.2.3's fix built from the user's statements",
     expect(e.message).toContain('`onclick={ @count = 0; @msg = "a"; track("z") }`');
   });
 
-  test("value that ran on into the next attribute — no braces rewrite, says what happened", () => {
-    // The tokenizer (unchanged) reads `hidden=@on` as part of the handler value
-    // when the value ends in a string; a rewrite built from that text would
-    // move `hidden=` INTO the handler.
+  test("a value that ends in a string no longer runs on into the next attribute (s457 4a)", () => {
+    // Before s457 the tokenizer read `hidden=@on` as part of the handler value
+    // when the value ended in a string, and this case pinned the "runs on into
+    // the next attribute" fix-it. The one unquoted-value reader (SPEC §5.2 "An
+    // unquoted value is read WHOLE") now ends the handler at `@a = "s"`, so
+    // `hidden=@on` is its own attribute and the `;` after ITS value is a
+    // statement list in a non-handler attribute (§5.2.4).
     const r = compileSource(`<program>
 <a> = ""
 <on> = false
 <button onclick=@a = "s" hidden=@on;>x</button>
 </program>
 `);
-    const [e] = mshErrors(r);
+    expect(mshErrors(r)).toEqual([]);
+    const e = (r.errors ?? []).find((d) => d.code === "E-ATTR-MULTI-STATEMENT");
     expect(e).toBeDefined();
-    expect(e.message).not.toContain("hidden=@on }");
-    expect(e.message).not.toContain("Wrap the statements in braces");
-    expect(e.message).toContain("runs on into what looks like the next attribute (`hidden=`)");
-    expect(e.message).toContain("`onclick={ … }`");
-    expect(e.message).toContain("quote the value");
+    expect(e.message).toContain("attribute `hidden`");
   });
 
   test("trailing attribute is not pulled into the fix-it", () => {
@@ -290,8 +290,8 @@ describe("§5 the braced form compiles and its handler body carries every statem
 `);
     expect(r.errors.filter((e) => e.severity !== "warning").length).toBe(0);
     const js = r.clientJs;
-    // Emitted shape: `"_scrml_attr_onclick_1": function(event) { <set>; <call>; },`
-    const handler = js.match(/["']_scrml_attr_onclick_\d+["']\s*:\s*function\(event\)\s*\{[^\n]*\}/)?.[0] ?? "";
+    // Emitted shape: `"_scrml_attr_onclick_1": function(_scrml_event) { <set>; <call>; },`
+    const handler = js.match(/["']_scrml_attr_onclick_\d+["']\s*:\s*function\(_scrml_event\)\s*\{[^\n]*\}/)?.[0] ?? "";
     expect(handler).not.toBe("");
     const setAt = handler.search(/_scrml_\w*reactive_set\(\s*["']count["']\s*,\s*0\s*\)/);
     const callAt = handler.search(/track\w*\(\s*["']reset["']\s*\)/);
@@ -382,7 +382,7 @@ type Phase:enum = { Idle, Loading }
   const r = compileSource(src);
   const js = r.clientJs;
   // Every emitted handler function, one per line in the output.
-  const handlers = js.split("\n").filter((l) => /function\(event\) \{/.test(l));
+  const handlers = js.split("\n").filter((l) => /function\(_scrml_event\) \{/.test(l));
   const handlerWith = (needle) => handlers.find((h) => h.includes(needle)) ?? "";
   const setOf = (n) => new RegExp(`_scrml_\\w*reactive_set\\("a", ${n}\\)`);
   const callOf = (arg) => new RegExp(`_scrml_track_\\d+\\(${arg}\\)`);
@@ -563,7 +563,7 @@ describe("§8b every shape compiles and emits its statements in order, in all fo
       expect(errs.map((e) => e.code)).toEqual([]);
       // One listener per position; find it by its position tag, then check the
       // markers appear in order within it.
-      const lines = r.clientJs.split(/(?=function\(event\) \{)/);
+      const lines = r.clientJs.split(/(?=function\(_scrml_event\) \{)/);
       for (const P of ["T", "E", "M", "R"]) {
         const tagged = markers.map((m) => m.split("P").join(P));
         const handler = lines.find((l) => new RegExp(tagged[tagged.length - 1]).test(l.slice(0, 600)) && new RegExp(tagged[0]).test(l.slice(0, 600))) ?? "";
@@ -707,8 +707,11 @@ describe("§9d #3 — statements 2..n get the same scope / state checks as a fun
     const r = compileSource(prog("<ul><each in=[1] as it><li><button onclick={ @n = 1; @zz = 3 }>x</button></li></each></ul>"));
     expect(codesOf(r)).toContain("E-STATE-UNDECLARED");
   });
-  test("no false positives: `event`, the row alias, `@.`, declared cells, locals", () => {
-    const r = compileSource(prog(`<ul><each in=[1] as it><li><button onclick={ @n = it; console.log(event.type, it) }>x</button><button onclick={ @n = @.; const k = @n + 1\n @r = k }>y</button></li></each></ul>`));
+  // (s457 3a — `event` left this list: an inline block does not bind it, so a
+  // free `event` there is E-EVENT-UNBOUND; pinned in
+  // s457-unquoted-values-and-event.test.js.)
+  test("no false positives: the row alias, `@.`, declared cells, locals", () => {
+    const r = compileSource(prog(`<ul><each in=[1] as it><li><button onclick={ @n = it; console.log(it) }>x</button><button onclick={ @n = @.; const k = @n + 1\n @r = k }>y</button></li></each></ul>`));
     expect(codesOf(r)).toEqual([]);
   });
 });

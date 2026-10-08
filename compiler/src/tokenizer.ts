@@ -406,6 +406,131 @@ function isPostfixContinuation(raw: string, pos: number): boolean {
   return c === "[" || c === "(";
 }
 
+// ---------------------------------------------------------------------------
+// s457 4a — one reader for every unquoted attribute value
+// ---------------------------------------------------------------------------
+//
+// Ruling (user-voice-scrml.md S457 "4a"): an unquoted attribute value is read
+// WHOLE — a handler's assignment (`onclick=@count = @count + 1`) and a member
+// chain in ANY attribute (`if=fn().ok`, `title=fmt(1).trim()`,
+// `onclick=fn() .then(g)`). A value that is still ambiguous is REFUSED with a
+// diagnostic — never silently truncated. The helpers below are the pure
+// look-ahead predicates the unquoted-value reader in `tokenizeAttributes` uses.
+
+/** Index of the first char at/after `pos` that is not whitespace (incl. newlines). */
+function skipAllWs(raw: string, pos: number): number {
+  let i = pos;
+  while (i < raw.length && /[ \t\r\n\f]/.test(raw[i])) i++;
+  return i;
+}
+
+/**
+ * Whether, after whitespace at `pos`, the value continues as a MEMBER access —
+ * `.name` or `?.` — e.g. `onclick=fn(1) .then(g)`. Neither `.` nor `?` can begin
+ * an attribute, so the continuation is the only reading. Returns the index of
+ * the `.` / `?`, or -1.
+ */
+function spacedMemberAt(raw: string, pos: number): number {
+  if (pos >= raw.length || !/[ \t\r\n\f]/.test(raw[pos])) return -1;
+  const i = skipAllWs(raw, pos);
+  if (i >= raw.length) return -1;
+  const c = raw[i];
+  const n = i + 1 < raw.length ? raw[i + 1] : "";
+  if (c === "." && /[A-Za-z_$]/.test(n)) return i;
+  if (c === "?" && n === "." && !/[0-9]/.test(i + 2 < raw.length ? raw[i + 2] : "")) return i;
+  return -1;
+}
+
+/**
+ * Whether an event-handler expression whose text so far is `text` is
+ * syntactically INCOMPLETE — it ends in an operator that needs a right operand
+ * (`@count = `, `@a + `, `@ok ? 1 :`), so whitespace there cannot be the
+ * attribute boundary.
+ */
+function exprEndsIncomplete(text: string): boolean {
+  const t = text.replace(/[ \t\r\n\f]+$/, "");
+  if (t.length === 0) return true;
+  if (/(?:\+\+|--)$/.test(t)) return false;
+  if (/[=+\-*/%&|^!~<?:,]$/.test(t)) return true;
+  if (/(?:^|[^A-Za-z0-9_$.])(?:instanceof|in|typeof|new|void|delete|is)$/.test(t)) return true;
+  return false;
+}
+
+/**
+ * Whether, after whitespace at `pos`, an event-handler expression continues
+ * with an INFIX operator — binary, assignment, ternary, member access, or the
+ * scrml keyword tests `is` / `instanceof` / `in`. None of these can begin an
+ * attribute, so the expression goes on. A `>` is NOT a continuation: at depth 0
+ * it is the tag close (the block splitter has already ended the opener there);
+ * a `>` after whitespace is refused by the caller as ambiguous.
+ */
+function handlerInfixAt(raw: string, pos: number): boolean {
+  const i = skipAllWs(raw, pos);
+  if (i >= raw.length) return false;
+  const c = raw[i];
+  const n = i + 1 < raw.length ? raw[i + 1] : "";
+  if (c === ">") return false;
+  if (c === "/") return n !== ">";
+  if (c === ".") return /[A-Za-z_$]/.test(n);
+  if (c === "!") return n === "=";
+  if ("+-*%&|^=<?:".includes(c)) return true;
+  return /^(?:is|instanceof|in)[ \t\r\n\f]+(?!=)/.test(raw.slice(i, i + 12));
+}
+
+/**
+ * The text found at the attribute boundary after an unquoted value, when it
+ * cannot begin anything an attribute list holds: an attribute name, the tag
+ * close (`>` / `/>`), a sigil block (`${…}` …), or the `;` that
+ * E-MULTI-STATEMENT-HANDLER owns. Before s457 the attribute loop skipped such a
+ * character silently ("Unexpected char — skip"), which is how the tail of a
+ * value the reader stopped short of (`title=@msg + "x"`, `onclick=fn() (g)`)
+ * vanished at exit 0. Returns the stray character, or null.
+ *
+ * `;` — after an EVENT-HANDLER value it begins a bare statement sequence, which
+ * E-MULTI-STATEMENT-HANDLER owns (the AST builder's opener scan); after any
+ * other value it is stray (`title=f(); g()`, §5.2.4). `)` / `,` — inside the
+ * parenthesized payload list of a state-child opener (`<Done (rows=r, n=k)>`,
+ * `inParenList`) they close / separate that list.
+ */
+function strayAfterValue(raw: string, pos: number, isHandler: boolean, inParenList: boolean): string | null {
+  const i = skipAllWs(raw, pos);
+  if (i >= raw.length) return null;
+  const c = raw[i];
+  const n = i + 1 < raw.length ? raw[i + 1] : "";
+  if (c === ">") return null;
+  if (c === ";" && isHandler) return null;
+  if ((c === ")" || c === ",") && inParenList) return null;
+  if (c === "/" && n === ">") return null;
+  if (/[A-Za-z_@]/.test(c)) return null;
+  if ("$^?#!~".includes(c) && n === "{") return null;
+  return c;
+}
+
+/**
+ * s457 4a — the operator after a NON-handler, non-condition unquoted value, or
+ * null. The condition test (`attrConditionOperatorAhead`, cluster-A) minus its
+ * spaced-`>` reading: such a value admits no operator at all (§5.1), so a `>`
+ * after it has one reading — the tag close (`<program serve=7878 >`).
+ */
+function nonHandlerOperatorAhead(raw: string, pos: number): string | null {
+  const op = attrConditionOperatorAhead(raw, pos);
+  return op === ">" ? null : op;
+}
+
+/**
+ * Whether the tag close follows the value after INLINE whitespace
+ * (`onclick=@big = @n > 1>`). The block splitter ends the opener at the first
+ * depth-0 `>`, so `@n > 1` cannot be told apart from the value `@n` followed by
+ * the tag close — the same reading cluster-A (S188) refuses for conditions.
+ * A newline before the `>` is a layout choice, not an operator, and is fine.
+ */
+function spacedTagCloseAt(raw: string, pos: number): boolean {
+  let i = pos;
+  let sawWs = false;
+  while (i < raw.length && (raw[i] === " " || raw[i] === "\t")) { i++; sawWs = true; }
+  return sawWs && i < raw.length && raw[i] === ">";
+}
+
 /**
  * S188 follow-up — detect whether the chars at `pos` (immediately AFTER the
  * keyword `not` in an unquoted attribute value) begin a prefix-`not`-as-negation
@@ -570,6 +695,15 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
   const tokens: Token[] = [];
 
   let pos = 0;      // offset within raw
+  // s457 4a — depth of a parenthesized attribute list opened in ATTRIBUTE
+  // position (`<Done (rows=r)>`, a state-child payload binding), so the value
+  // reader does not take its `)` / `,` for stray text after a value.
+  let attrParenDepth = 0;
+  // s457 4a — set once a bare event-handler value is followed by `;`: the rest
+  // of the opener is that handler's unbounded statement sequence, which
+  // E-MULTI-STATEMENT-HANDLER reports (AST builder opener scan). The value
+  // reader does not refuse its pieces a second time.
+  let handlerSemicolonTail = false;
   let line = baseLine;
   let col = baseCol;
 
@@ -604,44 +738,73 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
   // silent-WRONG class for `is not`: `if=fn() is not` emitted `if((fn()))` —
   // plain truthiness, the absence check dropped + inverted).
   function pushConditionOpReject(name: string, atomicExpr: string, vs: number, vl: number, vc: number) {
-    const op = attrConditionOperatorAhead(raw, pos)!;
+    pushValueReject(name, atomicExpr, attrConditionOperatorAhead(raw, pos)!, "operator", vs, vl, vc);
+  }
+
+  // s457 4a — the reject capture for an unquoted value that cannot be read
+  // whole. `reason`:
+  //   - "operator": an operator follows the value (cluster-A for conditions;
+  //     s457 for every non-handler attribute). Consumes the leading inline
+  //     whitespace + the operator chars, then the run to the tag close.
+  //   - "stray": text that cannot begin an attribute follows the value
+  //     (`onclick=fn() (g)`, `title=x "y"`). Consumes the run to the tag close.
+  //   - "gt": the tag close follows the value after inline whitespace
+  //     (`onclick=@big = @n > 1>`) — a comparison and a tag close read the same.
+  //     Consumes nothing: the `>` still closes the tag.
+  // Pushes ONE ATTR_OP_REJECT token (payload {name, value, op, reason}); the AST
+  // builder fires E-ATTR-UNQUOTED-OPERATOR once, steering to the delimited form.
+  function pushValueReject(
+    name: string,
+    atomicExpr: string,
+    op: string,
+    reason: "operator" | "stray" | "gt",
+    vs: number, vl: number, vc: number,
+  ) {
     let expr = atomicExpr;
-    // Consume the leading inline whitespace + the detected operator chars FIRST,
-    // so the boundary loop below reads only the RHS (a bare spaced `>` operator
-    // is consumed here; the loop then breaks on the genuine tag-close `>`).
-    while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) { expr += raw[pos]; advance(); }
-    for (let k = 0; k < op.length && pos < raw.length; k++) { expr += raw[pos]; advance(); }
-    let parenDepth = 0;
-    let braceDepth = 0;
-    let bracketDepth = 0;
-    let stringCh: string | null = null;
-    while (pos < raw.length) {
-      const c2 = raw[pos];
-      if (stringCh !== null) {
-        if (c2 === "\\" && pos + 1 < raw.length) { expr += c2 + raw[pos + 1]; advance(2); continue; }
-        if (c2 === stringCh) stringCh = null;
-        expr += c2; advance(); continue;
+    if (reason !== "gt") {
+      // Consume the leading whitespace + (for an operator) the operator chars
+      // FIRST, so the boundary loop below reads only the RHS (a bare spaced `>`
+      // operator is consumed here; the loop then breaks on the genuine tag-close
+      // `>`).
+      while (pos < raw.length && /[ \t\r\n\f]/.test(raw[pos])) { expr += raw[pos]; advance(); }
+      if (reason === "operator") {
+        for (let k = 0; k < op.length && pos < raw.length; k++) { expr += raw[pos]; advance(); }
       }
-      const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
-      if (atDepthZero) {
-        // `/>` self-close and a bare `>` tag-close end the RHS run. The leading
-        // operator (incl. the `>` of `>=` / spaced `>`) was already consumed
-        // above, so any `>` reached here is a genuine tag boundary.
-        if (c2 === "/" && raw[pos + 1] === ">") break;
-        if (c2 === ">") break;
+      let parenDepth = 0;
+      let braceDepth = 0;
+      let bracketDepth = 0;
+      let stringCh: string | null = null;
+      while (pos < raw.length) {
+        const c2 = raw[pos];
+        if (stringCh !== null) {
+          if (c2 === "\\" && pos + 1 < raw.length) { expr += c2 + raw[pos + 1]; advance(2); continue; }
+          if (c2 === stringCh) stringCh = null;
+          expr += c2; advance(); continue;
+        }
+        const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
+        if (atDepthZero) {
+          // `/>` self-close and a bare `>` tag-close end the RHS run. The leading
+          // operator (incl. the `>` of `>=` / spaced `>`) was already consumed
+          // above, so any `>` reached here is a genuine tag boundary.
+          if (c2 === "/" && raw[pos + 1] === ">") break;
+          if (c2 === ">") break;
+          // An unmatched closer is not part of the run (it would drive the depth
+          // negative and swallow the tag close and the body after it).
+          if (c2 === ")" || c2 === "]" || c2 === "}") break;
+        }
+        if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; expr += c2; advance(); continue; }
+        if (c2 === "(") { parenDepth++; expr += c2; advance(); continue; }
+        if (c2 === ")") { parenDepth = Math.max(0, parenDepth - 1); expr += c2; advance(); continue; }
+        if (c2 === "[") { bracketDepth++; expr += c2; advance(); continue; }
+        if (c2 === "]") { bracketDepth = Math.max(0, bracketDepth - 1); expr += c2; advance(); continue; }
+        if (c2 === "{") { braceDepth++; expr += c2; advance(); continue; }
+        if (c2 === "}") { braceDepth = Math.max(0, braceDepth - 1); expr += c2; advance(); continue; }
+        expr += c2; advance();
       }
-      if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; expr += c2; advance(); continue; }
-      if (c2 === "(") { parenDepth++; expr += c2; advance(); continue; }
-      if (c2 === ")") { parenDepth--; expr += c2; advance(); continue; }
-      if (c2 === "[") { bracketDepth++; expr += c2; advance(); continue; }
-      if (c2 === "]") { bracketDepth--; expr += c2; advance(); continue; }
-      if (c2 === "{") { braceDepth++; expr += c2; advance(); continue; }
-      if (c2 === "}") { braceDepth--; expr += c2; advance(); continue; }
-      expr += c2; advance();
     }
     tokens.push(makeToken(
       "ATTR_OP_REJECT",
-      JSON.stringify({ name, value: expr.replace(/\s+$/, ""), op }),
+      JSON.stringify({ name, value: expr.replace(/\s+$/, ""), op, reason }),
       vs, absOff(), vl, vc,
     ));
   }
@@ -838,95 +1001,6 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             advance();
           }
           tokens.push(makeToken("ATTR_BLOCK", blockContent, vs, absOff(), vl, vc));
-        } else if (ch() === "!") {
-          // Unquoted negation expression: `!@var`, `!!@var`, `!obj.prop`, etc.
-          // Applies to any attribute (if=, class:name=, show=, etc.).
-          // Read everything up to whitespace or tag-close characters.
-          // Note: `>` and `/` would close the tag so they cannot appear unquoted.
-          // Expressions with >, <, &&, ||, ===, !== must be quoted; use parens: `(!@a || !@b)`.
-          const vs = absOff();
-          const vl = line;
-          const vc = col;
-          let expr = "";
-          while (pos < raw.length && !/[ \t\r\n\f>\/]/.test(raw[pos])) {
-            expr += raw[pos];
-            advance();
-          }
-          tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
-        } else if (ch() === "(") {
-          // Parenthesized expression for any attribute: `if=(@state === "loading")`,
-          // `class:active=(@tool === "select")`, `show=(@count > 0)`, etc.
-          // Read everything between the outer parens, preserving the parens in the output.
-          // Supports nested parens: `if=((@a || @b) && @c)`.
-          const vs = absOff();
-          const vl = line;
-          const vc = col;
-          let expr = "";
-          expr += raw[pos]; // include opening (
-          advance();
-          let depth = 1;
-          while (pos < raw.length && depth > 0) {
-            if (raw[pos] === "(") depth++;
-            else if (raw[pos] === ")") {
-              depth--;
-              if (depth === 0) {
-                expr += raw[pos];
-                advance();
-                break;
-              }
-            }
-            expr += raw[pos];
-            advance();
-          }
-          tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
-        } else if (ch() === "[") {
-          // §41.14 — Array-literal attribute value: `pick=["a", "b"]`,
-          // `omit=["c"]`. The array-literal form is normative for the formFor
-          // `pick=`/`omit=` attributes (§41.14.5). The form is admitted
-          // generically for any attribute name — there's no per-attribute
-          // gate at the tokenizer level; downstream attribute-grammar
-          // validation (attribute-registry.js) may further restrict.
-          //
-          // Read everything between matched square brackets, preserving the
-          // brackets in the output. Supports nested brackets/quotes:
-          //   pick=[["a", "b"], ["c"]]                ← nested arrays
-          //   pick=["a, b, c"]                         ← comma in string
-          //
-          // Bracket-depth tracking is depth-aware over `[` / `]`; string
-          // literal contexts are tracked so `[` inside `"..."` does NOT
-          // increment depth. Mirrors the brace-block / paren handlers.
-          const vs = absOff();
-          const vl = line;
-          const vc = col;
-          let expr = "";
-          expr += raw[pos]; // include opening [
-          advance();
-          let depth = 1;
-          let inSQ = false;
-          let inDQ = false;
-          while (pos < raw.length && depth > 0) {
-            const c = raw[pos];
-            if (inSQ) {
-              if (c === "'" && raw[pos - 1] !== "\\") inSQ = false;
-            } else if (inDQ) {
-              if (c === '"' && raw[pos - 1] !== "\\") inDQ = false;
-            } else {
-              if (c === "'") inSQ = true;
-              else if (c === '"') inDQ = true;
-              else if (c === "[") depth++;
-              else if (c === "]") {
-                depth--;
-                if (depth === 0) {
-                  expr += c;
-                  advance();
-                  break;
-                }
-              }
-            }
-            expr += c;
-            advance();
-          }
-          tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
         } else if (ch() === '$' && pos + 1 < raw.length && raw[pos + 1] === '{') {
           // Inline expression: ${() => fn(arg)}, ${condition ? a : b}, etc.
           const vs = absOff();
@@ -948,133 +1022,232 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
           const interpTok = makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc);
           interpTok.attrInterp = true;
           tokens.push(interpTok);
-        } else if (/[A-Za-z0-9_@]/.test(ch())) {
-          // Unquoted: peek ahead to see if it's a call (has `(`)
+        } else if (ch() === "!" || ch() === "(" || ch() === "[" || /[A-Za-z0-9_@]/.test(ch())) {
+          // ------------------------------------------------------------------
+          // s457 4a — ONE reader for every unquoted (undelimited) value.
+          //
+          // Ruling user-voice-scrml.md S457 "4a": an unquoted attribute value is
+          // read WHOLE, and a value that is still ambiguous is REFUSED — never
+          // silently truncated. SPEC §5.2.3: "a bare attribute value has no
+          // closing delimiter of its own; its extent is found by scanning
+          // forward, and an attribute boundary is whitespace at depth 0" — a
+          // whitespace is a boundary only where the value is complete and what
+          // follows cannot continue it.
+          //
+          // The value is read in three steps:
+          //   1. its HEAD — `!expr`, a parenthesized `(…)`, an array literal
+          //      `[…]`, or an identifier with an optional call `fn(…)`;
+          //   2. a POSTFIX CHAIN on the head, in every attribute: `.name`, `?.`,
+          //      `[…]`, `(…)` — adjacent, or `.name` / `?.` after whitespace
+          //      (neither `.` nor `?` can begin an attribute) — `if=fn().ok`,
+          //      `title=fmt(1).trim()`, `onclick=fn(1) .then(g)`;
+          //   3. what follows the value:
+          //      - a CONDITION (`if=`/`show=`/`else-if=`) followed by an operator
+          //        is refused (cluster-A, S188: conditions are atomic-only);
+          //      - an EVENT HANDLER followed by an assignment, compound update,
+          //        postfix update or infix operator is ONE expression (§5.2.3)
+          //        and is read to its end (`onclick=@count = @count + 1`);
+          //      - any OTHER attribute followed by an operator is refused (§5.1:
+          //        its unquoted forms are identifier and call; an expression is
+          //        written `(…)`, `${…}` or `"…"`);
+          //      - text that cannot begin an attribute, or a tag close `>` after
+          //        inline whitespace (a comparison and a tag close read the same
+          //        there), is refused for every attribute.
+          // Refusals are ONE ATTR_OP_REJECT token -> E-ATTR-UNQUOTED-OPERATOR.
+          // ------------------------------------------------------------------
           const vs = absOff();
           const vl = line;
           const vc = col;
-          let ident = "";
-          // For event handler attributes, exclude `-` from the value-ident
-          // regex so postfix `--` (e.g. `onclick=@count--`) terminates the
-          // ident at the boundary. JS identifiers don't allow `-`, and
-          // event-handler values are always JS-expression-shaped (call,
-          // assignment, member chain), so the exclusion is safe. For all
-          // other attributes (e.g. `class=foo-bar`), the legacy regex
-          // continues to allow hyphenated unquoted values.
-          const valueIdentRe = isEventHandlerAttrName(name)
-            ? /[A-Za-z0-9_\.@]/
-            : /[A-Za-z0-9_\-\.@]/;
-          while (pos < raw.length && valueIdentRe.test(raw[pos])) {
-            ident += raw[pos];
-            advance();
-          }
           const isHandlerAttr = isEventHandlerAttrName(name);
-          // s457 (g-onclick-unquoted-call-chain-drops-callback-s457) — the rest
-          // of a bare handler value, read to its SPEC §5.2.3 boundary: whitespace
-          // at depth 0 outside strings, or the tag close (`>` / `/>`) at depth 0.
-          // Same depth/string tracking as the bare `not` and bare-assignment
-          // readers below. Called only when isPostfixContinuation() holds, i.e.
-          // the value continues past its first identifier or call without a
-          // break — the shape the readers above used to cut short.
-          const readBareValueTail = (): string => {
-            let tail = "";
-            let parenDepth = 0;
-            let braceDepth = 0;
-            let bracketDepth = 0;
+          const isCondAttr = isConditionAttrName(name);
+          // `derived=` on an engine opener is a §51.0.J logic EXPRESSION whose
+          // unquoted operators are legal; the AST builder reads it from the
+          // opener's raw text. This reader leaves it exactly as it was.
+          const isLogicExprAttr = name === "derived";
+
+          // A balanced `(…)` / `[…]` group at `pos`, strings opaque.
+          const readGroup = (): string => {
+            const open = raw[pos];
+            const close = open === "(" ? ")" : "]";
+            let out = "";
+            let depth = 0;
             let stringCh: string | null = null;
             while (pos < raw.length) {
               const c2 = raw[pos];
               if (stringCh !== null) {
-                if (c2 === "\\" && pos + 1 < raw.length) { tail += c2 + raw[pos + 1]; advance(2); continue; }
+                if (c2 === "\\" && pos + 1 < raw.length) { out += c2 + raw[pos + 1]; advance(2); continue; }
                 if (c2 === stringCh) stringCh = null;
-                tail += c2; advance(); continue;
+                out += c2; advance(); continue;
+              }
+              if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; out += c2; advance(); continue; }
+              if (c2 === open) depth++;
+              else if (c2 === close) {
+                depth--;
+                if (depth === 0) { out += c2; advance(); break; }
+              }
+              out += c2; advance();
+            }
+            return out;
+          };
+
+          // Step 2 — the postfix chain (see above). Returns "" when none.
+          const readPostfixChain = (): string => {
+            let out = "";
+            for (;;) {
+              if (isPostfixContinuation(raw, pos)) {
+                const c2 = raw[pos];
+                if (c2 === "(" || c2 === "[") { out += readGroup(); continue; }
+                if (c2 === "?") { out += "?."; advance(2); }
+                else { out += "."; advance(); }
+                while (pos < raw.length && /[A-Za-z0-9_$]/.test(raw[pos])) { out += raw[pos]; advance(); }
+                continue;
+              }
+              const at = spacedMemberAt(raw, pos);
+              if (at >= 0) {
+                while (pos < at) { out += raw[pos]; advance(); }
+                continue;
+              }
+              return out;
+            }
+          };
+
+          // Step 3, event handlers — read ONE expression to its end. Whitespace
+          // at depth 0 ends it only when the text so far is complete and what
+          // follows cannot continue it (exprEndsIncomplete / handlerInfixAt).
+          // Stops at the tag close and at a depth-0 `;` (a bare `;` sequence is
+          // E-MULTI-STATEMENT-HANDLER, found by the AST builder's opener scan).
+          // `gt` — the run ended at a `>` it had reached across whitespace while
+          // INCOMPLETE (`onclick=@x = >`): ambiguous, refused by the caller.
+          const readExprRun = (initial: string): { text: string; gt: boolean } => {
+            let text = initial;
+            let parenDepth = 0;
+            let braceDepth = 0;
+            let bracketDepth = 0;
+            let stringCh: string | null = null;
+            let gt = false;
+            while (pos < raw.length) {
+              const c2 = raw[pos];
+              if (stringCh !== null) {
+                if (c2 === "\\" && pos + 1 < raw.length) { text += c2 + raw[pos + 1]; advance(2); continue; }
+                if (c2 === stringCh) stringCh = null;
+                text += c2; advance(); continue;
               }
               if (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
                 if (c2 === "/" && raw[pos + 1] === ">") break;
-                if (c2 === ">") break;
-                if (/[ \t\r\n\f]/.test(c2)) break;
+                if (c2 === ">") { gt = /[ \t]$/.test(text); break; }
+                if (c2 === ";") break;
+                // An unmatched closer ends the expression (a payload list's `)`).
+                if (c2 === ")" || c2 === "]" || c2 === "}") break;
+                if (/[ \t\r\n\f]/.test(c2)) {
+                  if (exprEndsIncomplete(text) || handlerInfixAt(raw, pos)) {
+                    while (pos < raw.length && /[ \t\r\n\f]/.test(raw[pos])) { text += raw[pos]; advance(); }
+                    continue;
+                  }
+                  break;
+                }
               }
-              if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; tail += c2; advance(); continue; }
+              if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; text += c2; advance(); continue; }
               if (c2 === "(") parenDepth++;
               else if (c2 === ")") parenDepth--;
               else if (c2 === "[") bracketDepth++;
               else if (c2 === "]") bracketDepth--;
               else if (c2 === "{") braceDepth++;
               else if (c2 === "}") braceDepth--;
-              tail += c2; advance();
+              text += c2; advance();
             }
-            return tail;
+            return { text: text.replace(/[ \t\r\n\f]+$/, ""), gt };
           };
-          // Set when a postfix continuation extended the value past its first
-          // identifier or call; the value is then ONE expression (ATTR_EXPR),
-          // or the left-hand side of a bare assignment that follows it.
-          let bareLhs: string | null = null;
-          let emitted = false;
-          if (ch() === "(") {
-            // Call form: collect everything up to matching `)`
-            let args = "";
-            advance(); // consume `(`
-            let depth = 1;
-            while (pos < raw.length && depth > 0) {
-              if (raw[pos] === "(") depth++;
-              else if (raw[pos] === ")") { depth--; if (depth === 0) { advance(); break; } }
-              args += raw[pos];
-              advance();
+
+          // Push the value token unless the attribute boundary after it holds
+          // stray text, or — for a handler EXPRESSION (`checkGt`), where an
+          // operator is legal and a comparison is a plausible reading — the tag
+          // close after inline whitespace; then refuse. (A non-handler unquoted
+          // value admits no operator at all, so its `>` has one reading: the tag
+          // close. Conditions keep cluster-A's own spaced-`>` rule.)
+          const finishValue = (kind: string, tokText: string, shown: string, checkGt = false) => {
+            if (!isLogicExprAttr && !handlerSemicolonTail) {
+              if (checkGt && spacedTagCloseAt(raw, pos)) { pushValueReject(name, shown, ">", "gt", vs, vl, vc); return; }
+              const stray = strayAfterValue(raw, pos, isHandlerAttr, attrParenDepth > 0);
+              if (stray !== null) { pushValueReject(name, shown, stray, "stray", vs, vl, vc); return; }
             }
-            // cluster-A — a CONDITION attribute call followed by a bare operator
-            // (`if=fn() is not` / `if=fn() && @m`) rejects-with-parens, exactly
-            // like the bare-ident path below. Without this the ATTR_CALL emit
-            // committed here and the trailing operator run was silently dropped.
-            if (isConditionAttrName(name) && attrConditionOperatorAhead(raw, pos) !== null) {
-              pushConditionOpReject(name, `${ident}(${args})`, vs, vl, vc);
-              emitted = true;
-            } else if (isHandlerAttr && isPostfixContinuation(raw, pos)) {
-              // `onclick=fn(1).then(g)`, `onclick=fn()(2)`, `onclick=fn()?.x()`
-              bareLhs = `${ident}(${args})` + readBareValueTail();
-            } else {
-              tokens.push(makeToken("ATTR_CALL", JSON.stringify({ name: ident, args }), vs, absOff(), vl, vc));
-              emitted = true;
+            tokens.push(makeToken(kind, tokText, vs, absOff(), vl, vc));
+            // A bare handler value followed by `;` opens the E-MULTI-STATEMENT-HANDLER
+            // tail: what follows is the handler's unbounded statement sequence, not
+            // attributes, so the value reader does not refuse it again.
+            if (isHandlerAttr && raw[skipAllWs(raw, pos)] === ";") handlerSemicolonTail = true;
+          };
+
+          // Step 1 — the head.
+          let head = "";
+          let ident = "";
+          let shape: "ident" | "call" | "expr" = "ident";
+          let callArgs = "";
+          if (ch() === "!") {
+            // Unquoted negation: `!@var`, `!!@var`, `!obj.prop` (any attribute).
+            // Read up to whitespace or the tag close; an operator expression is
+            // written `(!@a || !@b)`.
+            while (pos < raw.length && !/[ \t\r\n\f>\/]/.test(raw[pos])) { head += raw[pos]; advance(); }
+            shape = "expr";
+          } else if (ch() === "(") {
+            // Parenthesized expression for any attribute: `if=(@state === "loading")`,
+            // `class:active=(@tool === "select")`, `show=(@count > 0)`.
+            head = readGroup();
+            shape = "expr";
+          } else if (ch() === "[") {
+            // §41.14 — array-literal value: `pick=["a", "b"]`, `omit=["c"]`.
+            head = readGroup();
+            shape = "expr";
+          } else {
+            // For event handler attributes, exclude `-` from the value-ident
+            // regex so postfix `--` (e.g. `onclick=@count--`) terminates the
+            // ident at the boundary. JS identifiers don't allow `-`, and
+            // event-handler values are always JS-expression-shaped (call,
+            // assignment, member chain), so the exclusion is safe. For all
+            // other attributes (e.g. `class=foo-bar`), the legacy regex
+            // continues to allow hyphenated unquoted values.
+            const valueIdentRe = isHandlerAttr ? /[A-Za-z0-9_\.@]/ : /[A-Za-z0-9_\-\.@]/;
+            while (pos < raw.length && valueIdentRe.test(raw[pos])) { ident += raw[pos]; advance(); }
+            head = ident;
+            if (ch() === "(") {
+              // Call form: collect everything up to the matching `)`.
+              const group = readGroup();
+              callArgs = group.endsWith(")") ? group.slice(1, -1) : group.slice(1);
+              head = `${ident}${group}`;
+              shape = "call";
             }
-          } else if (isHandlerAttr && isPostfixContinuation(raw, pos)) {
-            // `onclick=handlers[0]()`, `onclick=@list[0].go()`, `onclick=obj?.go()`
-            bareLhs = ident + readBareValueTail();
           }
-          if (emitted) {
-            // the call path above already pushed its token
-          } else if (bareLhs !== null && !isBareExprContinuation(raw, pos)) {
-            tokens.push(makeToken("ATTR_EXPR", bareLhs, vs, absOff(), vl, vc));
-          } else if (bareLhs === null && ident === "not" && isPrefixNotOperandAhead(raw, pos)) {
+          // Step 2 — the postfix chain.
+          if (!isLogicExprAttr) {
+            const chain = readPostfixChain();
+            if (chain) { head += chain; shape = "expr"; }
+          }
+
+          // Step 3 — what follows.
+          if (isLogicExprAttr) {
+            if (shape === "ident") tokens.push(makeToken("ATTR_IDENT", head, vs, absOff(), vl, vc));
+            else if (shape === "call") tokens.push(makeToken("ATTR_CALL", JSON.stringify({ name: ident, args: callArgs }), vs, absOff(), vl, vc));
+            else tokens.push(makeToken("ATTR_EXPR", head, vs, absOff(), vl, vc));
+          } else if (isCondAttr && attrConditionOperatorAhead(raw, pos) !== null) {
+            // cluster-A (S188 "reject + parens") — a CONDITION whose unquoted value
+            // continues into a binary/ternary operator (`>= > < <= == != && || + -
+            // * /`, ternary `?:`, `is not` / `is some`). SPEC §5.2: an unquoted
+            // condition admits only the atomic forms; operator conditions SHALL be
+            // parenthesized `if=(expr)` or quoted `if="expr"`.
+            pushConditionOpReject(name, head, vs, vl, vc);
+          } else if (shape === "ident" && ident === "not" && isPrefixNotOperandAhead(raw, pos)) {
             // S188 follow-up (g-not-negation-enforce attr-bare hole) — bare
             // prefix-`not`-as-negation in an UNQUOTED attribute value, e.g.
             // `<p if=not @y>` / `<p show=not @y>`. SPEC §42.10 forbids prefix
             // `not` as boolean negation (E-TYPE-045); the negation operator is
-            // `!`. The paren form `if=(not @y)` already tokenizes as ATTR_EXPR
-            // and fires via the type-system harvest of the lowering choke-point
-            // stamp. The BARE form did NOT: the unquoted-value reader stopped at
-            // the space after `not`, emitting ATTR_IDENT "not" (the absence
-            // VALUE) and stranding the operand (`@y`) as a stray bareword
-            // attribute — so `not @y` never reached parseExprToNode, never
-            // stamped `_notPrefixNegation`, and silently mis-compiled.
-            //
-            // Fix: when the unquoted value is exactly the keyword `not` followed
-            // (after inline whitespace) by a negation operand, capture the whole
-            // `not <operand>` run as a single ATTR_EXPR. It then routes through
-            // the SAME parseExprToNode choke-point as every other position, gets
-            // stamped, and the harvest fires E-TYPE-045 exactly ONCE (span-dedup
-            // guards against any double-fire). The operand is read in
-            // expression-mode (paren/brace/bracket/string-tracked) up to the
-            // attribute boundary so member chains / call operands are captured
-            // whole. Bare `if=not` with NO operand following stays ATTR_IDENT
-            // (the valid absence-value form) — never reached here.
+            // `!`. Capture the whole `not <operand>` run as ONE ATTR_EXPR so it
+            // routes through the parseExprToNode lowering choke-point, gets
+            // stamped, and the harvest fires E-TYPE-045 exactly once. Bare
+            // `if=not` with NO operand stays ATTR_IDENT (the absence value).
             let expr = ident; // "not"
-            // Consume the inline whitespace between `not` and the operand so the
-            // captured ATTR_EXPR is `not <operand>` (the choke-point lowering's
-            // `not[ \t]+<operand>` detector matches this verbatim).
-            while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) {
-              expr += raw[pos];
-              advance();
-            }
-            // Read the operand in expression-mode up to the attribute boundary
+            // The inline whitespace between `not` and the operand is kept, so the
+            // choke-point's `not[ \t]+<operand>` detector matches verbatim.
+            while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) { expr += raw[pos]; advance(); }
+            // The operand, in expression-mode, up to the attribute boundary
             // (whitespace at depth 0 outside strings, or tag close `>` / `/>`).
             let parenDepth = 0;
             let braceDepth = 0;
@@ -1087,170 +1260,43 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
                 if (c2 === stringCh) stringCh = null;
                 expr += c2; advance(); continue;
               }
-              const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
-              if (atDepthZero) {
+              if (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
                 if (c2 === "/" && raw[pos + 1] === ">") break;
                 if (c2 === ">") break;
                 if (/[ \t\r\n\f]/.test(c2)) break;
               }
               if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; expr += c2; advance(); continue; }
-              if (c2 === "(") { parenDepth++; expr += c2; advance(); continue; }
-              if (c2 === ")") { parenDepth--; expr += c2; advance(); continue; }
-              if (c2 === "[") { bracketDepth++; expr += c2; advance(); continue; }
-              if (c2 === "]") { bracketDepth--; expr += c2; advance(); continue; }
-              if (c2 === "{") { braceDepth++; expr += c2; advance(); continue; }
-              if (c2 === "}") { braceDepth--; expr += c2; advance(); continue; }
+              if (c2 === "(") parenDepth++;
+              else if (c2 === ")") parenDepth--;
+              else if (c2 === "[") bracketDepth++;
+              else if (c2 === "]") bracketDepth--;
+              else if (c2 === "{") braceDepth++;
+              else if (c2 === "}") braceDepth--;
               expr += c2; advance();
             }
             tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
-          } else if (isHandlerAttr && isBareExprContinuation(raw, pos)) {
-            // S97 — SPEC §5.2.3 bare-assignment event handler.
-            //
-            // L19 normatively recognizes three bare-form shapes:
-            //   1. Bare call           — `onclick=fn()`                  (handled above as ATTR_CALL)
-            //   2. Bare assignment     — `onclick=@phase = .Loading`     (handled HERE)
-            //   3. Bare single-expr    — `onclick=@count++` etc.         (NOT YET — see isBareExprContinuation)
-            //
-            // Without this branch, the unquoted-value reader stops at the
-            // first whitespace after the ident, then the outer loop sees `=`
-            // as an unexpected char, silently swallows it, and misinterprets
-            // the rest as boolean attributes. Symptom on
-            // `<button onclick=@phase = .Loading>`: HTML emitted as
-            // `<button onclick="phase" Loading>` — `@` stripped, value
-            // string-quoted, `.Loading` becomes a bare attribute.
-            //
-            // The fix: when the attribute name is an event handler AND the
-            // continuation after the ident looks like an expression-continuation
-            // operator (`=` not-comparison-not-arrow, `++`, `--`, compound
-            // assigns like `+=`, `??=`), keep reading in expression-mode
-            // (paren/brace/bracket/string-tracked) until the tag-closing `>`
-            // or `/>` at depth 0 outside strings. Emit as ATTR_EXPR — the
-            // downstream parseAttributes ATTR_EXPR branch produces a `kind:
-            // "expr"` value with the full expression text + reactive refs,
-            // and the emit-event-wiring path wraps it as `function(event) {
-            // <expr>; }` per §5.2.2 line 1128.
-            //
-            // SPEC authority:
-            //   - §5.2.3 lines 1140-1152 (bare-form rule + worked example)
-            //   - §50 (assignment-as-expression)
-            //   - §34 / multi-statement-scan E-MULTI-STATEMENT-HANDLER stays
-            //     intact — the multi-statement scanner runs on the captured
-            //     ATTR_EXPR raw text in ast-builder.js post-tokenization.
-            // Two bare-form shapes per SPEC §5.2.3, distinguished by the
-            // operator following the LHS ident:
-            //   - Postfix update (`++` / `--`): self-contained, no RHS to read.
-            //   - Assignment / compound assignment: consume the op then read
-            //     RHS until the next attribute boundary (whitespace at depth
-            //     0 outside strings) or tag close (`>` / `/>`).
-            // s457 — the LHS may be a postfix chain (`onclick=@list[0] = 1`).
-            let expr = bareLhs ?? ident;
-            // Skip whitespace between LHS ident and the operator.
-            while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) {
-              expr += raw[pos];
-              advance();
-            }
-            const opC = pos < raw.length ? raw[pos] : "";
-            const opN = pos + 1 < raw.length ? raw[pos + 1] : "";
-            if ((opC === "+" || opC === "-") && opN === opC) {
-              // Postfix update — consume 2 chars and we're done.
-              expr += opC + opN;
-              advance(2);
-              tokens.push(makeToken("ATTR_EXPR", expr.replace(/\s+$/, ""), vs, absOff(), vl, vc));
-            } else {
-              // Assignment / compound assignment — read until boundary.
-              // Boundary detection:
-              //   - Inside strings / parens / brackets / braces (depth > 0):
-              //     keep reading regardless of whitespace.
-              //   - At depth 0 outside strings: STOP on whitespace ONLY after
-              //     we've consumed the `=` and at least one non-whitespace
-              //     RHS char. (Without this guard, multiple bare-assignment
-              //     handlers on the same element collide — the first reader
-              //     would swallow `onmouseenter=...` etc. up to the tag close.)
-              //   - Also STOP on `>` or `/>` at depth 0 outside strings.
-              let parenDepth = 0;
-              let braceDepth = 0;
-              let bracketDepth = 0;
-              let stringCh: string | null = null;
-              let consumedEq = false;        // have we passed the `=` of the assignment?
-              let consumedRhsChar = false;   // and at least one non-ws RHS char?
-              while (pos < raw.length) {
-                const c2 = raw[pos];
-                if (stringCh !== null) {
-                  if (c2 === '\\' && pos + 1 < raw.length) {
-                    expr += c2 + raw[pos + 1];
-                    advance(2);
-                    continue;
-                  }
-                  if (c2 === stringCh) { stringCh = null; }
-                  expr += c2;
-                  advance();
-                  continue;
-                }
-                const atDepthZero = parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
-                if (atDepthZero) {
-                  if (c2 === '/' && raw[pos + 1] === '>') break;
-                  if (c2 === '>') break;
-                  if (consumedEq && consumedRhsChar && /[ \t\r\n\f]/.test(c2)) break;
-                }
-                if (c2 === '"' || c2 === "'" || c2 === '`') { stringCh = c2; expr += c2; advance(); continue; }
-                if (c2 === '(') { parenDepth++; expr += c2; advance(); continue; }
-                if (c2 === ')') { parenDepth--; expr += c2; advance(); continue; }
-                if (c2 === '[') { bracketDepth++; expr += c2; advance(); continue; }
-                if (c2 === ']') { bracketDepth--; expr += c2; advance(); continue; }
-                if (c2 === '{') { braceDepth++; expr += c2; advance(); continue; }
-                if (c2 === '}') { braceDepth--; expr += c2; advance(); continue; }
-                if (atDepthZero) {
-                  // `consumedEq` flips on the `=` that ENDS the assignment
-                  // operator. For plain `=`, that's the only char. For
-                  // compound `+=` / `??=` / etc., the `=` is the last char
-                  // of the op; the earlier chars (`+`, `?`, etc.) flow
-                  // through the plain append below and don't toggle the flag.
-                  if (!consumedEq && c2 === '=') {
-                    consumedEq = true;
-                    expr += c2;
-                    advance();
-                    continue;
-                  }
-                  if (consumedEq && !/[ \t\r\n\f]/.test(c2)) {
-                    consumedRhsChar = true;
-                  }
-                }
-                expr += c2;
-                advance();
-              }
-              tokens.push(makeToken("ATTR_EXPR", expr.replace(/\s+$/, ""), vs, absOff(), vl, vc));
-            }
-          } else if (
-            isConditionAttrName(name) &&
-            attrConditionOperatorAhead(raw, pos) !== null
-          ) {
-            // cluster-A (S188 "reject + parens") — a CONDITION attribute
-            // (`if=`/`show=`/`else-if=`) whose unquoted value continues past
-            // the first atomic ident into a BINARY/TERNARY operator
-            // (`>= > < <= == != && || + - * /` or ternary `?:`). SPEC §5.1/§5.2
-            // admit only the ATOMIC unquoted forms for a condition; operator
-            // conditions SHALL be parenthesized `if=(expr)` or quoted
-            // `if="expr"`.
-            //
-            // Before this branch, the value-reader stopped at the operator and
-            // the operator + RHS were either silently shredded (the operator
-            // and its operand DROPPED at token level — the dangerous class) or
-            // the first `>` of `>=` closed the tag early (the misleading
-            // E-CTX-001 "no matching tag" cascade). Here we CAPTURE the whole
-            // operator run as a single ATTR_OP_REJECT token so the AST builder
-            // can fire E-ATTR-UNQUOTED-OPERATOR exactly ONCE, naming the real
-            // cause and steering to parens/quotes — no silent drop, no stray
-            // DOM-leaked operand, no E-CTX-001 cascade.
-            //
-            // The run is read in expression-mode (paren/brace/bracket/string-
-            // tracked) up to the attribute boundary so the captured text
-            // mirrors the author's intent in the diagnostic. The `>=` / spaced
-            // `>` cases are intercepted here BEFORE the outer tag-close test
-            // would consume the `>`. Shared with the call path via
-            // pushConditionOpReject (atomic value = the bare ident here).
-            pushConditionOpReject(name, ident, vs, vl, vc);
+          } else if (isHandlerAttr && (isBareExprContinuation(raw, pos) || handlerInfixAt(raw, pos))) {
+            // SPEC §5.2.3 — a bare handler value is ONE expression: "calls,
+            // assignments, compound updates, method invocations". Bare assignment
+            // `onclick=@phase = .Loading` (the SPEC's own spaced example), compound
+            // `onclick=@n += 2`, postfix `onclick=@count++`, and an expression
+            // continuing past its head (`onclick=@count = @count + 1`,
+            // `onclick=ok() && go()`) are read to their end. Lowered downstream by
+            // `rewriteReactiveAssign` (S97) like any handler expression.
+            const run = readExprRun(head);
+            if (run.gt) pushValueReject(name, run.text, ">", "gt", vs, vl, vc);
+            else finishValue("ATTR_EXPR", run.text, run.text, true);
+          } else if (!isHandlerAttr && !isCondAttr && !handlerSemicolonTail && nonHandlerOperatorAhead(raw, pos) !== null) {
+            // s457 4a — an operator after a NON-handler value (`title=@msg + "x"`
+            // was `title="msg"` plus a stray `x` attribute, at exit 0). Refused
+            // like a condition's: write `(…)`, `${…}` or a quoted value.
+            pushValueReject(name, head, nonHandlerOperatorAhead(raw, pos)!, "operator", vs, vl, vc);
+          } else if (shape === "ident") {
+            finishValue("ATTR_IDENT", head, head);
+          } else if (shape === "call") {
+            finishValue("ATTR_CALL", JSON.stringify({ name: ident, args: callArgs }), head);
           } else {
-            tokens.push(makeToken("ATTR_IDENT", ident, vs, absOff(), vl, vc));
+            finishValue("ATTR_EXPR", head, head);
           }
         } else if (ch() === '<' && pos + 1 < raw.length && raw[pos + 1] === '#') {
           // Worker ref or input state ref in attribute value position.
@@ -1364,7 +1410,10 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
         }
         continue;
       }
-      // Unexpected char — skip
+      // Unexpected char — skip (a `(` / `)` here brackets a state-child payload
+      // list, tracked for the value reader's stray-text test).
+      if (c === "(") attrParenDepth++;
+      else if (c === ")" && attrParenDepth > 0) attrParenDepth--;
       advance();
     }
   }

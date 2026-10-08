@@ -4177,18 +4177,64 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // steering to parens/quotes, then recover the value as `absent` so
             // the rejected condition does not cascade into a misleading
             // E-CTX-001 / E-SCOPE-001 downstream.
+            //
+            // s457 4a — the same token now also carries the refusals of the ONE
+            // unquoted-value reader (`reason`): an operator after a non-handler
+            // value ("operator"), text after a value that cannot begin an
+            // attribute ("stray"), and a tag close `>` after inline whitespace
+            // ("gt" — `onclick=@big = @n > 1>`: a comparison and a tag close
+            // read the same). Each is refused, never silently truncated.
             let _rej;
             try { _rej = JSON.parse(valTok.text); } catch { _rej = { name, value: valTok.text, op: "" }; }
             const _opName = _rej.op || "an operator";
             const _shown = (_rej.value || "").trim();
-            errors.push(new TABError(
-              "E-ATTR-UNQUOTED-OPERATOR",
-              `E-ATTR-UNQUOTED-OPERATOR: \`${name}=\` is an unquoted condition — it cannot contain ` +
-              `the operator \`${_opName}\`. An unquoted attribute condition admits only the atomic ` +
-              `forms (\`@var\`, \`obj.prop\`, \`fn()\`, or prefix \`!\`). Parenthesize or quote the ` +
-              `operator condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`,
-              valSpan,
-            ));
+            const _reason = _rej.reason || "operator";
+            const _isCond = name === "if" || name === "show" || name === "else-if";
+            const _isHandler = isEventHandlerAttrName(name);
+            let _msg;
+            if (_isCond && _reason === "operator") {
+              _msg =
+                `E-ATTR-UNQUOTED-OPERATOR: \`${name}=\` is an unquoted condition — it cannot contain ` +
+                `the operator \`${_opName}\`. An unquoted attribute condition admits only the atomic ` +
+                `forms (\`@var\`, \`obj.prop\`, \`fn()\`, or prefix \`!\`). Parenthesize or quote the ` +
+                `operator condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`;
+            } else {
+              const _what = _reason === "gt"
+                ? `is followed by \`>\` after a space. Unquoted, \`>\` there closes the tag, so a comparison ` +
+                  `(\`a > b\`) and a value followed by the end of the tag read the same`
+                : _reason === "stray"
+                  ? `is followed by \`${_opName}\`, which cannot begin an attribute: an unquoted value ends at ` +
+                    `whitespace, so the text after it would be dropped`
+                  : `is followed by the operator \`${_opName}\`. An unquoted value is an identifier, a member ` +
+                    `chain or a call (§5.1); an expression with an operator needs a delimiter`;
+              const _fix = _isHandler
+                ? `Delimit the handler: \`${name}={ ${_shown} }\` (an inline block, §5.2.3) or ` +
+                  `\`${name}=\${() => …}\`.`
+                : _isCond
+                  ? `Parenthesize or quote the condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`
+                  : `Delimit the value: \`${name}=(${_shown})\` or \`${name}=\${${_shown}}\`.`;
+              _msg = `E-ATTR-UNQUOTED-OPERATOR: the unquoted value of \`${name}=\` ${_what}. ${_fix}`;
+              if (_reason === "gt") {
+                _msg += ` If the \`>\` is the end of the tag, remove the space before it.`;
+              }
+            }
+            let _code = "E-ATTR-UNQUOTED-OPERATOR";
+            if (_reason === "stray" && _opName === ";" && !_isHandler) {
+              // §5.2.4 — a `;` after a bare NON-handler value is a statement
+              // list where ONE expression belongs (`title=f(); g()`).
+              _code = "E-ATTR-MULTI-STATEMENT";
+              _msg =
+                `E-ATTR-MULTI-STATEMENT: The value of attribute \`${name}\` is followed by \`;\` — a statement ` +
+                `list — but a non-handler attribute value is ONE expression, and a bare value has nothing to ` +
+                `bound it. Write a single expression, or move the statements into a function and use its ` +
+                `result (\`function compute() { … }\` then \`${name}=compute()\`). Only an event-handler ` +
+                `attribute (\`on…=\`) takes a statement list (SPEC §5.2.3, §5.2.4).`;
+            }
+            const _err = new TABError(_code, _msg, valSpan);
+            // Kept so _forwardSubparseErrors can rebuild it with a file-true
+            // span when it fires inside an `<each>` / engine / `<match>` sub-build.
+            _err.baseMessage = _msg;
+            errors.push(_err);
             value = { kind: "absent" };
           } else {
             // E-ATTR-001: unexpected token type as attribute value
@@ -18020,7 +18066,11 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // can never be silently read the wrong way").
 // E-ATTR-MULTI-STATEMENT (§5.2.4, S450) qualifies the same way: decided only in
 // parseAttributes / parseLiftTag, re-derived by nothing downstream.
-const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT"]);
+// E-ATTR-UNQUOTED-OPERATOR (§5.2, s457 4a) too: a refused unquoted value
+// recovers as `absent`, so in an `<each>` row / engine arm / `<match>` arm a
+// DISCARDED diagnostic would leave the attribute — a handler included —
+// silently missing.
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR"]);
 
 /**
  * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
@@ -18261,8 +18311,10 @@ function splitArrowHandlerValue(raw) {
  * the statement list of an ARROW-valued handler's body, parsed with the same
  * function-body statement grammar as an inline block. The arrow's parameter
  * receives the event, so a single parameter `p` becomes a leading
- * `const p = event` statement (binding it for the checker and for the
- * statement-list emitter). Returns `undefined` when the value is not an
+ * `const p = _scrml_event` statement (binding it for the checker and for the
+ * statement-list emitter; `_scrml_event` is the parameter of the listener the
+ * statement-list emitter writes — s457 3a moved it out of the user namespace,
+ * so a parameter named `event` gets the prelude too). Returns `undefined` when the value is not an
  * arrow-valued handler this view models (not an arrow; an arrow that is only the
  * first statement of a sequence; more than one parameter), else
  * `{ stmts, fatal, nonFatal }`.
@@ -18301,9 +18353,9 @@ function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, ba
   if (!split.braced && bodyRes.stmts.length !== 1) return undefined;
   let prelude = [];
   const param = paramText.replace(/\s*:\s*[A-Za-z_$][\w$.<>\[\]| ]*$/, "").trim(); // drop a type annotation
-  if (param !== "" && param !== "event") {
+  if (param !== "") {
     const preRes = parseHandlerStatementListCore(
-      { raw: `const ${param} = event`, span: value.span }, filePath, idCounter, parentBlock,
+      { raw: `const ${param} = _scrml_event`, span: value.span }, filePath, idCounter, parentBlock,
       baseOffset, baseLine, baseCol,
     );
     if (!preRes || !Array.isArray(preRes.stmts) || preRes.parseErrors.some(isFatalHandlerParseError)) {
