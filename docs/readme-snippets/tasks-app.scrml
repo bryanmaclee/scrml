@@ -1,9 +1,10 @@
-// tasks-app.scrml — the README flagship example, as ONE compiling program.
+// tasks-app.scrml — the README flagship until S443; README.md no longer shows it.
 //
-// README.md presents this app in four narrative pieces. This file is the whole
-// thing, byte-for-byte the same code, and it is gated by
-// `scripts/snippet-gate.js` — if it stops compiling, CI fails and the README is
-// caught making a false claim.
+// The current flagship is docs/readme-snippets/tasks.scrml. This file stays
+// because an integration test compiles it (the engine opener effect= boot), and
+// it is still gated by `scripts/snippet-gate.js`. Do not point readers at it as
+// a runnable app: under auth="required" with no login page, serving it redirects
+// every visitor to a /login route that does not exist.
 //
 // S280: the four README blocks were reconstructed and compiled for the FIRST
 // time. They produced 8 errors, 7 of which contradicted the SPEC (not the

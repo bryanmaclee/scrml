@@ -234,7 +234,7 @@ describe("Meta error codes (regression)", () => {
     const { fatalErrors, clientJs } = compileSource(source, "multi-meta.scrml");
     expect(fatalErrors).toHaveLength(0);
     // Both should be runtime meta blocks
-    const metaEffectMatches = clientJs.match(/_scrml_meta_effect\(/g);
+    const metaEffectMatches = clientJs.match(/_scrml_(?:cs_)?meta_effect\("/g);
     expect(metaEffectMatches).not.toBeNull();
     expect(metaEffectMatches.length).toBeGreaterThanOrEqual(2);
   });

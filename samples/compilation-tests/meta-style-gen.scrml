@@ -12,9 +12,9 @@
         { name: "danger", hex: "#ef4444" }
     ]
 
-    emit("<div class=color-palette>\n  <h2>Design Tokens</h2>\n")
+    emit("<div class=\"color-palette\">\n  <h2>Design Tokens</h2>\n")
     for (const c of colors) {
-        emit("  <div class=swatch-" + c.name + ">\n    <span>" + c.name + " " + c.hex + "</span>\n  </div>\n")
+        emit("  <div class=\"swatch-" + c.name + "\">\n    <span>" + c.name + " " + c.hex + "</span>\n  </div>\n")
     }
     emit("</div>\n")
 }

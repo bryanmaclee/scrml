@@ -4,11 +4,11 @@
     "apps": 434,
     "cells": 438,
     "histogram": {
-      "renders-empty": 20,
+      "renders-empty": 19,
       "needs-server": 9,
       "renders-clean": 259,
       "compiles-but-throws": 22,
-      "fails-compile": 126,
+      "fails-compile": 127,
       "smell-detected-wrong": 1,
       "HARNESS-TIMEOUT": 1
     },
@@ -3354,9 +3354,16 @@
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-in-function-001.scrml#empty": {
       "tier": "probe",
-      "state": "renders-empty",
-      "smells": [],
-      "seeded": false
+      "state": "fails-compile",
+      "smells": [
+        "D0-COMPILE-ERROR"
+      ],
+      "seeded": false,
+      "detail": {
+        "compileErrorCodes": [
+          "E-META-EVAL-002"
+        ]
+      }
     },
     "samples/compilation-tests/gauntlet-s20-meta/meta-lift-006.scrml#empty": {
       "tier": "probe",
