@@ -149,10 +149,16 @@ describe("S457 — the executed text is checked, not only the scrml AST", () => 
   });
 
   test("a captured enclosing declaration is evaluated with the block and is checked", () => {
-    const { errors } = compileSource(`<program>\n\${\n  const evil = "".constructor.constructor("${PWN}")()\n}\n^{\n  emit("<p>x</p>")\n}\n</program>\n`);
+    const { errors } = compileSource(`<program>\n\${\n  const evil = "".constructor.constructor("${PWN}")()\n}\n^{\n  emit("<p>" + evil + "</p>")\n}\n</program>\n`);
     expect(globalThis.__s457_pwn).toBeUndefined();
     const hit = meta001(errors).find((e) => e.message.includes("captures from its enclosing scope"));
     expect(hit).toBeDefined();
+  });
+
+  test("S458 F4 — an enclosing declaration the body does NOT read is neither evaluated nor checked with it", () => {
+    const { errors } = compileSource(`<program>\n\${\n  const evil = "".constructor.constructor("${PWN}")()\n}\n^{\n  emit("<p>x</p>")\n}\n</program>\n`);
+    expect(globalThis.__s457_pwn).toBeUndefined();
+    expect(meta001(errors).filter((e) => e.message.includes("captures from its enclosing scope"))).toEqual([]);
   });
 
   test("checkExecutedMetaJs refuses a body that escapes its wrapper", () => {

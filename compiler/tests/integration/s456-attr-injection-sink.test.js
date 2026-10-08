@@ -371,26 +371,43 @@ const Lnk = <a props={u:string} href="\${u}">x</a>
 });
 
 describe("§4 F2 — markup spliced in by `^{ emit(…) }` is checked after ME", () => {
-  test("an emitted quoted onclick and javascript: href are both refused, anchored at their ^{} blocks", () => {
-    const { refusals } = compile("f2", `<program>
+  // S458 (review F3): impl#1 now admits only PLAIN attribute values in emit() output
+  // (§22.4.1 impl#1 status — "with plain attribute values"): a quoted value carrying a
+  // `${…}` interpolation lowers to executed code (`setAttribute("class", `a ${ … }`)`)
+  // that no front-end stage checked, so the emit gate refuses it (E-META-EVAL-002)
+  // before the §5.2 check over the spliced nodes would see it. Both the executable and
+  // the formerly-"safe" interpolated forms below are therefore refused, at their ^{}
+  // blocks, by the stricter gate; neither reaches the client.
+  test("an emitted quoted onclick and javascript: href with ${…} are refused at the emit gate, anchored at their ^{} blocks", () => {
+    const { result, client } = compile("f2", `<program>
 <nm> = "a"
 \${ function go(n) { log(n) } }
 ^{ emit("<button onclick=\\"go('" + "$" + "{@nm}')\\">b</button>") }
 ^{ emit("<a href=\\"javascript:go('" + "$" + "{@nm}')\\">a</a>") }
 </program>
 `);
-    expect(refusals.length).toBe(2);
-    expect(refusals.map((r) => r.span.line).sort()).toEqual([4, 5]);
-    for (const r of refusals) expect(r.message).toContain("emitted by the `^{ emit(…) }` block");
+    const gate = (result.errors ?? []).filter((d) => d.code === "E-META-EVAL-002");
+    expect(gate.length).toBe(2);
+    expect(gate.map((r) => r.span.line).sort()).toEqual([4, 5]);
+    expect(client ?? "").not.toContain("javascript:");
   });
 
-  test("an emitted safe attribute is admitted", () => {
-    const { refusals } = compile("f2ok", `<program>
+  test("an emitted interpolated attribute is refused even when its scheme is safe (S458)", () => {
+    const { result } = compile("f2ok", `<program>
 <nm> = "a"
 ^{ emit("<a href=\\"/u/" + "$" + "{@nm}\\">a</a>") }
 </program>
 `);
+    expect((result.errors ?? []).map((d) => d.code)).toContain("E-META-EVAL-002");
+  });
+
+  test("an emitted plain (literal) attribute is admitted", () => {
+    const { refusals, result } = compile("f2plain", `<program>
+^{ emit("<a href=\\"/u/a\\">a</a>") }
+</program>
+`);
     expect(refusals.length).toBe(0);
+    expect((result.errors ?? []).filter((d) => d.severity !== "warning" && d.severity !== "info")).toEqual([]);
   });
 });
 

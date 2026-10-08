@@ -189,3 +189,37 @@ describe("§22.5.1 timers §8: the migrated corpus file", () => {
     expect(out).not.toMatch(/(^|[^.\w])setInterval\s*\(/);
   });
 });
+
+describe("§22.5.1 timers §9 (S458 review F5): no timer outlives its scope", () => {
+  test("a timer registered inside meta.cleanup during destroy is never started", () => {
+    const { rt, host } = makeRuntime();
+    rt._scrml_meta_effect("s", (meta) => {
+      meta.cleanup(() => { meta.interval(5, () => {}); });
+    });
+    rt._scrml_destroy_scope("s");
+    expect(host.live.size).toBe(0);
+    expect(host.log.filter((e) => e[0] === "set").length).toBe(0);
+  });
+
+  test("a timer registered inside meta.cleanup before a re-run is never started", () => {
+    const { rt, host } = makeRuntime();
+    rt._scrml_reactive_set("n", 1);
+    rt._scrml_meta_effect("s", (meta) => {
+      meta.get("n");
+      meta.cleanup(() => { meta.timeout(5, () => {}); });
+    });
+    rt._scrml_reactive_set("n", 2);
+    expect(host.log.filter((e) => e[0] === "set").length).toBe(0);
+  });
+
+  test("a meta object retained past _scrml_destroy_scope registers nothing", () => {
+    const { rt, host } = makeRuntime();
+    let kept = null;
+    rt._scrml_meta_effect("s", (meta) => { kept = meta; });
+    rt._scrml_destroy_scope("s");
+    const id = kept.interval(5, () => {});
+    expect(host.live.size).toBe(0);
+    kept.clearInterval(id); // a no-op, not a throw
+  });
+
+});

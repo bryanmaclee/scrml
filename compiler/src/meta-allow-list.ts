@@ -168,7 +168,13 @@ function resolve(name: string, scope: Scope, ctx: MetaAllowListContext): Resolut
   if (scope.has(name)) return { kind: "local" };
   if (name.startsWith("@")) return { kind: "local" };          // (a) @cell read
   if (ctx.captured.has(name)) return { kind: "local" };        // (c)
-  if (ctx.typeNames.has(name)) return { kind: "local" };       // (a) type name
+  // (a) A declared TYPE name is NOT a value here (S458 review F1). Neither the
+  // compile-time realm nor the client bundle reliably binds a value under a type's
+  // name (the realm binds none; the client emits a `const` only for some enums), so a
+  // type name in value position fell through to the host global of the same name:
+  // `type Function:enum = {A}` + `Function("…")()` ran. A type name is admitted only
+  // as the argument of `reflect(T)` (quoted to a string before evaluation — see the
+  // call case in each reader); in any other position it is refused like any free name.
   if (name === "not") return { kind: "plain" };                // (a) §42 absence
   if (PRIMITIVE_MEMBERS.has(name)) return { kind: "primitive", members: PRIMITIVE_MEMBERS.get(name) ?? null }; // (d)
   return { kind: "refused" };

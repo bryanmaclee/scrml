@@ -2146,8 +2146,16 @@ export function collectRuntimeVars(fileAST: MetaFileAST): Map<string, "reactive"
       // logic-body iteration kind (including JS-style for-of/for-in/C-style).
       if (node.kind === "for-loop" || node.kind === "for-stmt") continue;
 
+      // S458 review F2 — the same rule for EVERY block-scoped body, by allow-list rather
+      // than by naming the scope-introducing kinds one at a time: markup `children` and
+      // a `${}` logic block's `body` are module scope; any other statement's `body`
+      // (`while`, `if`, `match` arms, `try`, …) is a block whose declarations are not.
+      // Descending into a `while` body counted its `const window = 1` as a module
+      // binding — the ^{} allow-list then admitted `window` as captured, and the
+      // emitted effect read the GLOBAL `window` (`window.eval(…)` ran). The captured
+      // set must be the names actually in scope at the `^{}` site.
       if (Array.isArray(node.children)) walk(node.children, inMeta);
-      if (Array.isArray(node.body)) walk(node.body, inMeta);
+      if (node.kind === "logic" && Array.isArray(node.body)) walk(node.body, inMeta);
     }
   }
 

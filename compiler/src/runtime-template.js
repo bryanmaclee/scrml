@@ -3663,6 +3663,13 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
   // lifetime").
   const timers = new Map();
   let nextTimerId = 0;
+  // A timer may be registered only while the scope is live and not discharging: one
+  // registered by a meta.cleanup callback (which runs as the scope is torn down or
+  // before a re-run) or through a meta object retained past _scrml_destroy_scope would
+  // otherwise outlive every clear (S458 review F5). Such a registration is a no-op that
+  // returns an id no clear will ever match.
+  let timersClosed = false;
+  let discharging = false;
 
   function clearScopeTimers() {
     const live = Array.from(timers.values());
@@ -3679,6 +3686,7 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
       throw new TypeError("meta." + kind + "(ms, callback): callback must be a function");
     }
     const id = Object.freeze({ scope: scopeId, timer: ++nextTimerId });
+    if (timersClosed || discharging) return id;
     function run() {
       if (kind === "timeout") timers.delete(id);
       try { callback(); } catch(e) { console.error("[scrml] meta " + kind + " callback error in " + scopeId + ":", e); }
@@ -3711,14 +3719,21 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
     runCount++;
     if (runCount > MAX_RUNS) {
       console.error("[scrml] meta effect " + scopeId + " exceeded " + MAX_RUNS + " re-runs — possible infinite loop");
+      // The bailed run's timers must not keep ticking (S458 review F5).
+      clearScopeTimers();
       isRunning = false;
       return;
     }
 
     // Clear the previous execution's timers, then run its cleanup callbacks (LIFO order)
     clearScopeTimers();
-    for (let i = cleanupFns.length - 1; i >= 0; i--) {
-      try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect cleanup error:", e); }
+    discharging = true;
+    try {
+      for (let i = cleanupFns.length - 1; i >= 0; i--) {
+        try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect cleanup error:", e); }
+      }
+    } finally {
+      discharging = false;
     }
     cleanupFns = [];
 
@@ -3803,6 +3818,7 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
   // Register scope-level cleanup: runs when _scrml_destroy_scope(scopeId) is called.
   // Fires all accumulated per-run cleanups and unsubscribes all reactive dependencies.
   _scrml_register_cleanup(function() {
+    timersClosed = true;
     clearScopeTimers();
     for (let i = cleanupFns.length - 1; i >= 0; i--) {
       try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect final cleanup error:", e); }

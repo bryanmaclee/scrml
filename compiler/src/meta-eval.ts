@@ -39,6 +39,7 @@ import type { Span, FileAST, ASTNode, ExprNode, MetaNode, LogicStatement } from 
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
 import * as vm from "node:vm";
+import * as acorn from "acorn";
 import { checkExecutedMetaJs } from "./meta-allow-list.ts";
 import { isStandardMarkupElementName } from "./html-elements.js";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
@@ -597,7 +598,13 @@ function runInMetaRealm(
   for (const name of registryTypeNames(typeRegistry)) table[name] = JSON.stringify(reflect(name));
   let json: unknown;
   try {
-    const context = vm.createContext(Object.create(null));
+    // `microtaskMode: "afterEvaluate"` (S458 review F1b): a microtask the body queues
+    // runs INSIDE the bounded `runInContext` call, not on the compiler's own loop after
+    // it returns — measured in Bun: without it, `Promise.resolve().then(() => { while
+    // (true) {} })` returned from a 500 ms-bounded call and then hung the process; with
+    // it, the same call throws ERR_SCRIPT_EXECUTION_TIMEOUT at 500 ms. (The allow-list
+    // already keeps `Promise` and every async form out of reach; this is the belt.)
+    const context = vm.createContext(Object.create(null), { microtaskMode: "afterEvaluate" });
     const makeRunner = vm.runInContext(META_REALM_PRELUDE, context) as (t: string) => (b: unknown) => unknown;
     const runner = makeRunner(JSON.stringify(table));
     const body = vm.runInContext(wrapped, context);
@@ -643,8 +650,17 @@ function runInMetaRealm(
 // The emitted-output gate (§22.4.1, S457)
 // ---------------------------------------------------------------------------
 
-/** Attribute value kinds admitted in emit() output — all plain markup attribute forms. */
-const EMIT_ATTR_VALUE_KINDS = new Set(["string-literal", "variable-ref", "call-ref", "expr", "absent"]);
+/**
+ * Attribute value kinds admitted in emit() output: PLAIN values only (§22.4.1 impl#1
+ * status — "with plain attribute values"). A literal string, or no value. A
+ * `variable-ref` (`onclick=save`), `call-ref` (`onclick=save()`) or `expr`
+ * (`title=${…}`) value is LOGIC — it would reach code generation without scope
+ * resolution, the type system or route inference (S458 review F3: `onclick=${
+ * nosuchFunction(@count) }` compiled clean where source gives E-SCOPE-001, and
+ * `title=${ window.PWNED = 1 }` passed). A literal that carries a `${` interpolation
+ * is logic too.
+ */
+const EMIT_ATTR_VALUE_KINDS = new Set(["string-literal", "absent"]);
 
 /**
  * `emit()` output re-enters the pipeline AFTER the type system, route inference and
@@ -693,9 +709,12 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
         }
         for (const a of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
           const v = a?.value as { kind?: string } | undefined;
-          if (v && typeof v === "object" && !EMIT_ATTR_VALUE_KINDS.has(String(v.kind))) {
+          const interpolated = v && typeof v === "object" && v.kind === "string-literal"
+            && typeof (v as { value?: unknown }).value === "string" && ((v as { value: string }).value).includes("${");
+          if (v && typeof v === "object" && (!EMIT_ATTR_VALUE_KINDS.has(String(v.kind)) || interpolated)) {
             refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` attribute ` +
-              `'${String(a.name)}' a '${String(v.kind)}' value, which impl#1 does not admit in emit() output (§22.4.1).`);
+              `'${String(a.name)}' a '${String(v.kind)}'${interpolated ? " (interpolated)" : ""} value; impl#1 admits only plain ` +
+              `attribute values — a literal string or no value — in emit() output (§22.4.1).`);
           }
         }
         if (Array.isArray(n.children)) visit(n.children);
@@ -727,12 +746,94 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
 // parent's body or children array.
 // ---------------------------------------------------------------------------
 
+/**
+ * An enclosing declaration a compile-time `^{}` body may capture (§22.3): its name, the
+ * JS text it is evaluated as, its AST node (marked `_compileTimeOnly` when consumed) and
+ * the identifiers its initializer reads.
+ */
+interface ScopeDecl {
+  name: string;
+  code: string;
+  node: ASTNode;
+  refs: Set<string>;
+}
+
+/**
+ * The identifiers a JS text READS — every Identifier except a non-computed member
+ * property or object-literal key. An over-approximation (a name the text binds locally
+ * is listed too); it only ever selects an extra declaration, which is then held to the
+ * allow-list like the body. Unparseable text falls back to every identifier-shaped word.
+ */
+function identifierReads(text: string): Set<string> {
+  const out = new Set<string>();
+  let ast: any = null;
+  try { ast = acorn.parse(text, { ecmaVersion: 2025, sourceType: "script", allowReturnOutsideFunction: true }); }
+  catch {
+    try { ast = acorn.parseExpressionAt(text, 0, { ecmaVersion: 2025, sourceType: "script" }); } catch { ast = null; }
+  }
+  if (!ast) {
+    for (const m of text.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) out.add(m[0]);
+    return out;
+  }
+  const visit = (n: any, parent: any, key: string): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) visit(x, parent, key); return; }
+    if (typeof n.type !== "string") return;
+    if (n.type === "Identifier") {
+      const isMemberProp = parent?.type === "MemberExpression" && key === "property" && !parent.computed;
+      const isKey = parent?.type === "Property" && key === "key" && !parent.computed && !parent.shorthand;
+      if (!isMemberProp && !isKey) out.add(n.name);
+      return;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      visit(n[k], n, k);
+    }
+  };
+  visit(ast, null, "");
+  return out;
+}
+
+/**
+ * The enclosing declarations a body actually captures (S458 review F4; §22.12 "the
+ * enclosing declarations it captures"): those the body reads, plus — transitively —
+ * those THEIR initializers read. Before S458 every earlier non-`@` const/let of every
+ * enclosing scope was prepended, used or not, so an unrelated `const n = double(4)` or
+ * `const m = Math.max(1, 2)` refused (or broke) a body that never mentions it — and was
+ * then stripped from the client as "compile-time only". When a name is declared more
+ * than once, the latest declaration (the one in scope at the `^{}` site) is the one taken.
+ */
+function selectCapturedDecls(scope: ScopeDecl[], bodyReads: Set<string>): ScopeDecl[] {
+  const latest = new Map<string, number>();
+  scope.forEach((d, idx) => latest.set(d.name, idx));
+  const chosen = new Set<number>();
+  const pending = [...bodyReads];
+  while (pending.length > 0) {
+    const name = pending.pop() as string;
+    const idx = latest.get(name);
+    if (idx === undefined || chosen.has(idx)) continue;
+    chosen.add(idx);
+    for (const r of scope[idx].refs) pending.push(r);
+  }
+  return scope.filter((_, idx) => chosen.has(idx));
+}
+
+function scopeDeclOf(node: ASTNode): ScopeDecl | null {
+  if (node.kind !== "const-decl" && node.kind !== "let-decl") return null;
+  const pn = node as Record<string, unknown>;
+  const initStr = pn.initExpr
+    ? (() => { try { return emitStringFromTree(pn.initExpr as ExprNode); } catch { return null; } })()
+    : (typeof pn.init === "string" ? pn.init : null);
+  if (!initStr || typeof pn.name !== "string" || !pn.name || /@/.test(initStr)) return null;
+  const kw = node.kind === "const-decl" ? "const" : "let";
+  return { name: pn.name, code: `${kw} ${pn.name} = ${initStr};`, node, refs: identifierReads(`(${initStr})`) };
+}
+
 function processNodeList(
   nodes: ASTNode[],
   typeRegistry: TypeRegistry,
   errors: MetaEvalError[],
-  outerScope?: string,
-  outerDeclNodes?: ASTNode[],
+  outerScope?: ScopeDecl[],
   filePath: string = "",
 ): boolean {
   if (!Array.isArray(nodes)) return false;
@@ -740,11 +841,8 @@ function processNodeList(
   let changed = false;
   let i = 0;
 
-  // Accumulate declarations from this level to propagate to nested scopes
-  const scopeParts: string[] = outerScope ? [outerScope] : [];
-  // Track the actual AST nodes corresponding to scope declarations so we can
-  // mark them _compileTimeOnly when a descendant meta block consumes them.
-  const declNodes: ASTNode[] = outerDeclNodes ? [...outerDeclNodes] : [];
+  // Accumulate declarations from this level to propagate to nested scopes.
+  const scopeDecls: ScopeDecl[] = outerScope ? [...outerScope] : [];
 
   while (i < nodes.length) {
     const node = nodes[i];
@@ -755,31 +853,15 @@ function processNodeList(
 
     // Collect compile-time-safe declarations as we walk, for scope injection
     // Phase 4d: ExprNode-first — reconstruct init from initExpr, string fallback
-    if (node.kind === "const-decl" || node.kind === "let-decl") {
-      const pn = node as Record<string, unknown>;
-      const initStr = pn.initExpr
-        ? (() => { try { return emitStringFromTree(pn.initExpr as ExprNode); } catch { return null; } })()
-        : (typeof pn.init === "string" ? pn.init : null);
-      if (initStr && pn.name && !/@/.test(initStr)) {
-        const kw = node.kind === "const-decl" ? "const" : "let";
-        scopeParts.push(`${kw} ${pn.name} = ${initStr};`);
-        declNodes.push(node);
-      }
+    {
+      const d = scopeDeclOf(node);
+      if (d) scopeDecls.push(d);
     }
     if (node.kind === "logic" && Array.isArray((node as Record<string, unknown>).body)) {
       for (const stmt of (node as Record<string, unknown>).body as ASTNode[]) {
         if (!stmt || typeof stmt !== "object") continue;
-        if (stmt.kind === "const-decl" || stmt.kind === "let-decl") {
-          const sn = stmt as Record<string, unknown>;
-          const initStr = sn.initExpr
-            ? (() => { try { return emitStringFromTree(sn.initExpr as ExprNode); } catch { return null; } })()
-            : (typeof sn.init === "string" ? sn.init : null);
-          if (initStr && sn.name && !/@/.test(initStr)) {
-            const kw = stmt.kind === "const-decl" ? "const" : "let";
-            scopeParts.push(`${kw} ${sn.name} = ${initStr};`);
-            declNodes.push(stmt);
-          }
-        }
+        const d = scopeDeclOf(stmt);
+        if (d) scopeDecls.push(d);
       }
     }
 
@@ -801,15 +883,17 @@ function processNodeList(
       const refused = (node as Record<string, unknown>)._metaAllowListRefused === true;
 
       if (isCompileTime && !hasReactiveVars && !hasNestedMeta && !refused) {
-        const precedingDecls = scopeParts.length > 0 ? scopeParts.join("\n") : undefined;
+        const bodyText = serializeBody((body || []) as LogicStatement[], collectMetaLocals((body || []) as LogicStatement[]));
+        const captured = selectCapturedDecls(scopeDecls, identifierReads(`(function () {\n${bodyText}\n})`));
+        const precedingDecls = captured.length > 0 ? captured.map((d) => d.code).join("\n") : undefined;
 
         const replacementNodes = evaluateMetaBlock(node as MetaNode, typeRegistry, errors, precedingDecls, filePath);
 
         if (replacementNodes !== null) {
-          // Mark preceding declarations consumed by this meta block as compile-time-only
-          // so they are stripped from client JS output.
-          for (const dn of declNodes) {
-            (dn as Record<string, unknown>)._compileTimeOnly = true;
+          // Mark the declarations this meta block consumed as compile-time-only so they
+          // are stripped from client JS output (only those it captured — S458 F4).
+          for (const d of captured) {
+            (d.node as Record<string, unknown>)._compileTimeOnly = true;
           }
           // §5.2 executable-sink rule (S456) — the emitted nodes' spans point into the
           // re-parsed emit text (`__meta_emit__`); record the `^{}` block's own span so the
@@ -833,12 +917,11 @@ function processNodeList(
 
     // Recurse into children and body arrays, propagating accumulated scope
     const n = node as Record<string, unknown>;
-    const currentScope = scopeParts.length > 0 ? scopeParts.join("\n") : undefined;
     if (Array.isArray(n.children)) {
-      if (processNodeList(n.children as ASTNode[], typeRegistry, errors, currentScope, declNodes, filePath)) changed = true;
+      if (processNodeList(n.children as ASTNode[], typeRegistry, errors, scopeDecls, filePath)) changed = true;
     }
     if (Array.isArray(n.body) && node.kind !== "meta") {
-      if (processNodeList(n.body as ASTNode[], typeRegistry, errors, currentScope, declNodes, filePath)) changed = true;
+      if (processNodeList(n.body as ASTNode[], typeRegistry, errors, scopeDecls, filePath)) changed = true;
     }
 
     i++;
@@ -888,7 +971,7 @@ export function runMetaEval(input: MetaEvalInput): MetaEvalOutput {
     const nodes = (fileAST.ast?.nodes ?? (fileAST as unknown as { nodes?: ASTNode[] }).nodes ?? []) as ASTNode[];
 
     // Process all meta blocks
-    processNodeList(nodes, typeRegistry, allErrors, undefined, undefined, fileAST.filePath ?? "");
+    processNodeList(nodes, typeRegistry, allErrors, undefined, fileAST.filePath ?? "");
   }
 
   return {
