@@ -88,7 +88,7 @@ describe("<each> row — a `${ for … lift }` block is lowered, not skipped", (
     expect(fn.body).toContain("_scrml_lift(");
     // Driven per row, live-keyed on the row's create-time key.
     expect(js).toContain(`_scrml_lift_item_run(`);
-    expect(js).toMatch(/const _scrml_lv0 = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\);/);
+    expect(js).toMatch(/const _scrml_lv0 = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\);/);
     expect(count(js, "function _scrml_lift_scoped_run(")).toBe(1);
     expect(count(js, "function _scrml_lift_item_run(")).toBe(1);
   });
@@ -154,10 +154,10 @@ describe("match / engine arm — the arm's lift group runs from its wire functio
     expect(fn.params).toEqual(["rows"]);
     expect(fn.body).toContain("for (const r of rows)");
     // The Ready arm's wire fn runs it and hands the teardown to the arm's disposers.
-    const wire = js.slice(js.indexOf("_wire_Ready(_root, rows) {"));
-    expect(wire).toMatch(/_disposers\.push\(_scrml_lift_scoped_run\(el, _scrml_lift_nested_\d+, \[rows\]\)\);/);
+    const wire = js.slice(js.indexOf("_wire_Ready(_scrml_arm_root, rows) {"));
+    expect(wire).toMatch(/_scrml_arm_disposers\.push\(_scrml_lift_scoped_run\(_scrml_arm_el, _scrml_lift_nested_\d+, \[rows\]\)\);/);
     // The NotAsked arm has no lift: it stays the no-op shell.
-    expect(js).toMatch(/_wire_NotAsked\(_root\) \{ return function\(\) \{\}; \}/);
+    expect(js).toMatch(/_wire_NotAsked\(_scrml_arm_root\) \{ return function\(\) \{\}; \}/);
   });
 
   test("<engine> arm over a reactive cell: effect-wrapped group, disposed with the arm", () => {
@@ -176,7 +176,7 @@ describe("match / engine arm — the arm's lift group runs from its wire functio
     const fn = nestedFn(js);
     expect(fn.params).toEqual([]);
     expect(fn.body).toContain("_scrml_reconcile_list(");
-    expect(js).toMatch(/_disposers\.push\(_scrml_lift_scoped_run\(el, _scrml_lift_nested_\d+, \[\]\)\);/);
+    expect(js).toMatch(/_scrml_arm_disposers\.push\(_scrml_lift_scoped_run\(_scrml_arm_el, _scrml_lift_nested_\d+, \[\]\)\);/);
   });
 });
 

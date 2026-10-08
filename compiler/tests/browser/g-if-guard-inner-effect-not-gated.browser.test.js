@@ -103,20 +103,20 @@ describe("g-if-guard-inner-effect §1 — codegen gates inner effects on the tog
     // per flip. Guard and toggle share ONE lowering, so they cannot drift.
     for (const field of ["batch_number", "recipe_name"]) {
       const re = new RegExp(
-        `_scrml_effect\\(function\\(\\) \\{ if \\(!\\(\\(\\(_scrml_reactive_get\\("cell"\\) !== null && _scrml_reactive_get\\("cell"\\) !== undefined\\)\\)\\)\\) return; _scrml_render_value\\(el, _scrml_reactive_get\\("cell"\\)\\.${field}\\);`,
+        `_scrml_effect\\(function\\(\\) \\{ if \\(!\\(\\(\\(_scrml_reactive_get\\("cell"\\) !== null && _scrml_reactive_get\\("cell"\\) !== undefined\\)\\)\\)\\) return; _scrml_render_value\\(_scrml_el, _scrml_reactive_get\\("cell"\\)\\.${field}\\);`,
       );
       expect(re.test(clientJs)).toBe(true);
     }
     // The nested chain is guarded as a unit (the whole `.meta.deep` walk).
-    expect(/if \(!\(.*\)\) return; _scrml_render_value\(el, _scrml_reactive_get\("cell"\)\.meta\.deep\);/.test(clientJs)).toBe(true);
+    expect(/if \(!\(.*\)\) return; _scrml_render_value\(_scrml_el, _scrml_reactive_get\("cell"\)\.meta\.deep\);/.test(clientJs)).toBe(true);
   });
 
   test("show= inner effect is NOT gated (Vue v-show keeps running inner effects)", () => {
     const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // The msg interpolation effect must be the plain (ungated) shape.
-    expect(/_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_reactive_get\("msg"\)\); \}\);/.test(clientJs)).toBe(true);
+    expect(/_scrml_effect\(function\(\) \{ _scrml_render_value\(_scrml_el, _scrml_reactive_get\("msg"\)\); \}\);/.test(clientJs)).toBe(true);
     // It must NOT carry the cell guard.
-    expect(/return; _scrml_render_value\(el, _scrml_reactive_get\("msg"\)\)/.test(clientJs)).toBe(false);
+    expect(/return; _scrml_render_value\(_scrml_el, _scrml_reactive_get\("msg"\)\)/.test(clientJs)).toBe(false);
   });
 });
 
@@ -142,7 +142,7 @@ describe("g-if-guard-inner-effect §2 — runtime: no crash on null mount, rende
     exec(window, document);
     try {
       // The crash window: mount runs with @cell === null. Pre-fix the ungated
-      // `_scrml_render_value(el, _scrml_reactive_get("cell").batch_number)` threw
+      // `_scrml_render_value(_scrml_el, _scrml_reactive_get("cell").batch_number)` threw
       // a TypeError here.
       document.dispatchEvent(new Event("DOMContentLoaded"));
     } catch (e) {

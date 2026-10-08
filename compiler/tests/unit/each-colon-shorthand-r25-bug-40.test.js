@@ -2,7 +2,7 @@
  * each-colon-shorthand-r25-bug-40.test.js — regression tests for R25-Bug-40.
  *
  * Bug 40: `<each in=@list><span : @.field></each>` emitted an EMPTY per-item
- * factory body — `return _itemFrag.firstChild` returned `null`. Confirmed by
+ * factory body — `return _scrml_item_frag.firstChild` returned `null`. Confirmed by
  * R25 dev-3-svelte + overseer-3 + likely dev-1 (whose "all 7 `<each>` item
  * factory bodies are empty" finding used `<li class="card" : @.title>`
  * `:`-shorthand throughout).
@@ -126,10 +126,10 @@ describe("R25-Bug-40 §1 — minimal repro <each in=@items><li : @.name></each>"
     // The factory MUST wire @.name as textContent (iter-var.name).
     expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
     // Factory MUST append the element to the fragment.
-    expect(clientJs).toMatch(/_itemFrag\.appendChild\(/);
-    // Pre-fix symptom: factory body was empty — only `return _itemFrag.firstChild`.
+    expect(clientJs).toMatch(/_scrml_item_frag\.appendChild\(/);
+    // Pre-fix symptom: factory body was empty — only `return _scrml_item_frag.firstChild`.
     // Post-fix: there's content BEFORE the return.
-    const factoryMatch = clientJs.match(/\(_scrml_each_item, _scrml_each_idx\) => \{([\s\S]*?)return _itemFrag\.firstChild/);
+    const factoryMatch = clientJs.match(/\(_scrml_each_item, _scrml_each_idx\) => \{([\s\S]*?)return _scrml_item_frag\.firstChild/);
     expect(factoryMatch).not.toBeNull();
     const factoryBody = factoryMatch[1];
     // Body should have at least the createElement + textContent + appendChild.
@@ -300,8 +300,8 @@ describe("R25-Bug-40 §7 — `<empty>` bare-body regression guard", () => {
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "bug40-empty-bare");
     expect(errors).toEqual([]);
-    // Empty-state branch fires when _items.length === 0.
-    expect(clientJs).toMatch(/if \(!_items \|\| _items\.length === 0\) \{/);
+    // Empty-state branch fires when _scrml_items.length === 0.
+    expect(clientJs).toMatch(/if \(!_scrml_items \|\| _scrml_items\.length === 0\) \{/);
     // The "No items" text is wired into the empty fragment.
     expect(clientJs).toMatch(/createTextNode\("No items"\)/);
     // The shorthand body STILL works alongside.
@@ -327,7 +327,7 @@ describe("R25-Bug-40 §8 — `<empty : 'literal'>` shorthand on empty-state", ()
     const { errors, clientJs } = compileToOutputs(src, "bug40-empty-short");
     expect(errors).toEqual([]);
     // The empty-state branch still fires.
-    expect(clientJs).toMatch(/if \(!_items \|\| _items\.length === 0\) \{/);
+    expect(clientJs).toMatch(/if \(!_scrml_items \|\| _scrml_items\.length === 0\) \{/);
     // The "None" literal should reach the empty fragment via textContent
     // (the renderEmptyChildToJs walker routes through the same
     // renderTemplateChildToJs path, which now sees `:`-shorthand on the

@@ -438,19 +438,18 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     expect(appOut[1].clientJs).toMatch(/const \{ get, post \} = _scrml_modules\["[^"]+"\];/);
   });
 
-  test("§2d a SHADOWING destructure keeps its LOUD failure (S239 half-repair guard)", () => {
-    // The shorthand handling must not touch a binding pattern. If it did, the
-    // pattern would bind `get`/`post` to `src`'s members while the call sites in
-    // the same scope stayed mangled — dead bindings, calls resolving to the
-    // module-level fns, and a wrong answer with NO error. Neither emission is
-    // correct (the right answer is "src-get1|src-post2"), so the property this
-    // guards is that the failure stays OBSERVABLE.
+  test("§2d a SHADOWING destructure binds its own names — the CORRECT answer (s457 scope-aware rename)", () => {
+    // Before s457 the pass had no scope model, so the best it could protect here
+    // was LOUDNESS: neither emission produced the right answer. The rename is now
+    // scope-aware (codegen/fn-name-rename.ts): `const { get, post } = src` BINDS
+    // `get`/`post` in run()'s scope, so the uses below resolve to those bindings
+    // and nothing in this scope is renamed. The program now computes what its
+    // source says: "src-get1|src-post2".
     const result = compile(shadowFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(shadowFx).clientJs;
-    // The pattern is emitted with the SAME rewrite the pass has always applied.
-    expect(js).toMatch(/const \{ _scrml_get_\d+, _scrml_post_\d+ \} = src;/);
-    expect(js).not.toMatch(/const \{ get, post \} = src;/);
+    expect(js).toMatch(/const \{ get, post \} = src;/);
+    expect(js).toMatch(/return get\(1\) \+ "\|" \+ post\(2\);/);
 
     // EXECUTED: lift the three emitted fns out of the shipped text and run.
     const lift = (prefix) => {
@@ -461,27 +460,22 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     const src = ["_scrml_get_", "_scrml_post_", "_scrml_run_"].map(lift).join("\n");
     const runName = js.match(/function (_scrml_run_\d+)\(/)[1];
     const run = new Function(`${src}\n; return ${runName};`)();
-    // LOUD, not a silent "G1|P2".
-    expect(() => run()).toThrow(TypeError);
+    expect(run()).toBe("src-get1|src-post2");
   });
 
-  test("§2e `{ __proto__ }` is NOT expanded — B.3.1 shape preservation (S239)", () => {
+  test("§2e `{ __proto__ }` expands to the COMPUTED key — B.3.1 shape preservation (S239, s457)", () => {
     // ECMA-262 B.3.1: `{ __proto__: v }` SETS [[Prototype]]; `{ __proto__ }`
-    // creates an ordinary own property. Expanding the shorthand therefore
-    // changes the object's SHAPE. Measured before the guard: own keys 2 -> 1 and
-    // `typeof o.call` "undefined" -> "function" (the object began inheriting
-    // from the function it was handed).
+    // creates an ordinary own property. So the shorthand must never become the
+    // plain colon form. The computed form `["__proto__"]: v` is an ordinary own
+    // property too, so it is the one expansion that keeps the object's SHAPE and
+    // still resolves the value to the encoded function (s457).
     const result = compile(protoFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(protoFx).clientJs;
-    expect(js).not.toMatch(/__proto__:/);
-    // The WHOLE region is skipped, not just the one name — a bare `__proto__`
-    // shorthand beside expanded siblings would be a free reference, and that is
-    // engine-dependent (node binds the global's prototype, bun throws).
-    expect(js).toMatch(/const o = \{_scrml___proto___\d+, _scrml_get_\d+\};/);
+    expect(js).not.toMatch(/[{,]\s*__proto__\s*:/);
+    expect(js).toMatch(/const o = \{\["__proto__"\]: _scrml___proto___\d+, get: _scrml_get_\d+\};/);
 
-    // EXECUTED: the emitted object must still have TWO own keys and must NOT
-    // have inherited anything.
+    // EXECUTED: TWO own keys, nothing inherited, and both keys hold the functions.
     const lift = (prefix) => {
       const m = js.match(new RegExp(`^function ${prefix}\\d+\\([^)]*\\) \\{`, "m"));
       expect(m).not.toBeNull();
@@ -493,34 +487,22 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     expect(shape()).toBe("2|undefined");
   });
 
-  test("§2f RESIDUAL MAP — the shapes this fix does NOT reach (S239 F5, measured)", () => {
-    // A partial fix that names its residual is fine; one that implies full
-    // coverage is not. Every row below was MEASURED against base 13edcfbf, and
-    // two of the five shapes relayed as residual turned out NOT to be.
+  test("§2f the former RESIDUAL MAP — every shape is now expanded (s457 scope-aware rename)", () => {
+    // These five shapes were the measured residual of the regex region fence
+    // (S239 F5): nested, spread, mixed, the ternary ALTERNATE, and the commented
+    // group. The rename now reads the parsed program, where each is an ordinary
+    // shorthand property of an object literal, so each expands the same way.
     const result = compile(residualFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(residualFx).clientJs;
-
-    // STILL BROKEN — nested: the inner group's left context is `:`, which the
-    // classifier deliberately does not admit (a `label:`/`case x:` block).
-    expect(js).toMatch(/const nested = \{api: \{_scrml_get_\d+, _scrml_post_\d+\}\};/);
-    // STILL BROKEN — spread: `{...base, get, post}` is not an all-bare-identifier
-    // group, so it is not a region at all.
-    expect(js).toMatch(/const spread = \{\.\.\.base, _scrml_get_\d+, _scrml_post_\d+\};/);
-    // STILL BROKEN — mixed: same reason (`n: 1` breaks the all-identifier shape).
-    expect(js).toMatch(/const mixed = \{_scrml_get_\d+, _scrml_post_\d+, n: 1\};/);
-    // ASYMMETRIC — a ternary's CONSEQUENT is fixed (left context `?`), its
-    // ALTERNATE is not (left context `:`, excluded). Worth stating explicitly:
-    // the same source expression compiles correctly on one branch and
-    // incorrectly on the other.
-    expect(js).toMatch(
-      /const ternary = flag \? \{get: _scrml_get_\d+, post: _scrml_post_\d+\} : \{_scrml_get_\d+, _scrml_post_\d+\};/,
-    );
-    // NOT A RESIDUAL after all — a source-level comment inside the object does
-    // NOT survive into the emitted buffer, so the group is contiguous and IS
-    // fixed. The comment-split hazard is a property of the mechanism, not an
-    // observable shape reachable from scrml source.
-    expect(js).toMatch(/const commented = \{get: _scrml_get_\d+, post: _scrml_post_\d+\};/);
+    const pair = "get: _scrml_get_\\d+, post: _scrml_post_\\d+";
+    expect(js).toMatch(new RegExp(`const nested = \\{api: \\{${pair}\\}\\};`));
+    expect(js).toMatch(new RegExp(`const spread = \\{\\.\\.\\.base, ${pair}\\};`));
+    expect(js).toMatch(new RegExp(`const mixed = \\{${pair}, n: 1\\};`));
+    expect(js).toMatch(new RegExp(`const ternary = flag \\? \\{${pair}\\} : \\{${pair}\\};`));
+    expect(js).toMatch(new RegExp(`const commented = \\{${pair}\\};`));
+    // No KEY is renamed anywhere.
+    expect(js).not.toMatch(/[{,]\s*_scrml_(get|post)_\d+\s*[,}]/);
   });
 
   test("§2f a group with NO left context stays unknown (interpolation-leading)", () => {

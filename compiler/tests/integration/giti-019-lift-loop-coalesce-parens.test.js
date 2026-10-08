@@ -17,7 +17,7 @@
  *     createTextNode(String((e.description || "(no message)") ?? ""))
  *
  * Scope is the lift-loop / markup-embedded text-interpolation path ONLY. A
- * DIRECT top-level reactive interpolation takes the `el.textContent = expr`
+ * DIRECT top-level reactive interpolation takes the `_scrml_el.textContent = expr`
  * path with NO `?? ""` wrap and is unaffected — §3 asserts it stays clean.
  *
  * Validation: acorn (the compiler's own parser dep, ecmaVersion 2022 / module)
@@ -166,9 +166,9 @@ describe("GITI-019 §3: direct top-level interpolation unchanged (no regression)
     expect(isValidEsm(client).ok).toBe(true);
     // The unaffected path: direct interpolation display, no `?? ""` coalesce guard.
     // markup-value-in-expression-2026-06-17: the display routes through the
-    // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`);
+    // node-aware `_scrml_render_value(_scrml_el, expr)` helper (was `el.textContent =`);
     // the coalesce-free expression is preserved verbatim as the value argument.
-    expect(client).toContain('_scrml_render_value(el, _scrml_reactive_get("msg") || "fallback")');
+    expect(client).toContain('_scrml_render_value(_scrml_el, _scrml_reactive_get("msg") || "fallback")');
     expect(client).not.toContain('?? ""');
   });
 });

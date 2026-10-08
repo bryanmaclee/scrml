@@ -539,7 +539,7 @@ describe("§i81.6 — <match> arm scoping (S239 findings 1 + 4)", () => {
   test("the arm payload value attr is wired INSIDE the arm wire fn, via _root", () => {
     const client = emittedClient(compile(payloadSrc));
     // The wire fn must bind the payload as a parameter AND wire the attr there.
-    expect(client).toMatch(/function\s+_scrml_[A-Za-z0-9_]*wire_Ok\(_root, cls\)/);
+    expect(client).toMatch(/function\s+_scrml_[A-Za-z0-9_]*wire_Ok\(_scrml_arm_root, cls\)/);
     expect(client).toMatch(/_root\.querySelector\(.*data-scrml-bind-attr-class/);
     expect(client).toContain('setAttribute("class"');
   });
@@ -548,13 +548,13 @@ describe("§i81.6 — <match> arm scoping (S239 findings 1 + 4)", () => {
     // Regression on the early-return shell: `wireableValueAttrs` had to be added
     // to the "nothing to wire" test or the arm fn returned `function() {}`.
     const client = emittedClient(compile(payloadSrc));
-    expect(client).not.toMatch(/function\s+_scrml_[A-Za-z0-9_]*wire_Ok\(_root, cls\)\s*\{\s*return function\(\)\s*\{\};\s*\}/);
+    expect(client).not.toMatch(/function\s+_scrml_[A-Za-z0-9_]*wire_Ok\(_scrml_arm_root, cls\)\s*\{\s*return function\(\)\s*\{\};\s*\}/);
   });
 
   test("the per-arm wire is disposed on variant swap (no leak onto a detached node)", () => {
     const client = emittedClient(compile(payloadSrc));
     // Same contract the class:/attr-tpl per-arm loop uses.
-    expect(client).toMatch(/_disposers\.push\(_scrml_effect\(function\(\) \{ \{ const _scrml_w/);
+    expect(client).toMatch(/_scrml_arm_disposers\.push\(_scrml_effect\(function\(\) \{ \{ const _scrml_w/);
   });
 
   test("a reactive-cell value attr in an arm also wires per-arm, not globally", () => {
@@ -578,7 +578,7 @@ describe("§i81.6 — <match> arm scoping (S239 findings 1 + 4)", () => {
     expect(client).toMatch(/_root\.querySelector\(.*data-scrml-bind-attr-class/);
     // Must NOT also be wired from the global pass (double-wiring a node that the
     // arm swap replaces).
-    expect(client).not.toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-bind-attr-class/);
+    expect(client).not.toMatch(/\(_scrml_root \|\| document\)\.querySelector\('\[data-scrml-bind-attr-class/);
   });
 
   test("a value attr in a match arm emits no dead data-scrml-logic wire", () => {
@@ -678,7 +678,7 @@ describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () =
     expect(client).toContain("el.value = _scrml_s");
     expect(client).not.toContain('setAttribute("value"');
     // Guarded so re-assigning an identical string cannot reset the caret.
-    expect(client).toContain("if (el.value !== _scrml_s)");
+    expect(client).toContain("if (_scrml_el.value !== _scrml_s)");
   });
 
   test("F5: value= on a NON-form element still uses setAttribute", () => {

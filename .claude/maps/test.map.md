@@ -1,6 +1,20 @@
 # test.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -978,6 +992,17 @@
 # **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
 # check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
+
+## S457 — TEST SURFACE DELTA (`ba2712973..125486345`)
+
++10 test files (1,635 -> **1,645** by `git ls-tree -r --name-only <rev> compiler/tests | grep -c '\.test\.'`):
+- unit: `is-predicate-in-function-expression-1333`, `reserved-double-prefix-s457`, `s457-string-url-executable-schemes`, `s457-url-scheme-runtime-guard`, `sql-check-at-lowering-s457`, `sql-one-reader-s457`
+- integration: `s457-no-artifacts-on-error`, `s457-url-scheme-runtime-guard`
+- commands: `s457-no-artifacts-on-error-cli`
+- browser: `s457-url-scheme-runtime-guard.browser`
+Conformance +5 (1391 -> **1396**): `attr-executable-sink/url-data-scheme-runtime-guard`, `codegen/reserved-prefix-double-underscore-{pos,neg}`, `refinement/url-executable-scheme-{literal-pos,reject-rt}`.
+
+**Pattern change (#1348):** a compile with an Error writes nothing — ~38 test files migrated to read `result.outputs` (in memory) instead of dist; a test asserting files on disk after an Error is now wrong by SPEC §2.2.1. Runtime source for browser tests: `result.runtimeSource()`.
 
 ## S456 — TEST SURFACE DELTA (`9c556dc74..ba2712973`)
 - Test files **1,620** (+11, FACTS): `integration/{foreign-slice-lexing,protect-handle-response-egress,s456-attr-injection-sink,sql-one-statement-pg,tenant-undeclared-startup}.test.js`, `unit/{s456-hoist-divergences,sql-one-statement,sql-slot-extent,tenant-small-residuals-s456,tenant-substrate-read,tenant-undeclared}.test.js`.

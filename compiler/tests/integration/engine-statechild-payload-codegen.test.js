@@ -71,12 +71,12 @@ describe("B1 §1 bare-attribute form end-to-end", () => {
     // No payload-binding-related errors.
     expect(errors.filter((e) => e.code.startsWith("E-ENGINE-PAYLOAD"))).toEqual([]);
     // Wire-fn signature contains `rows` param (not just `_root`).
-    expect(clientJs).toContain("function _scrml_engine_loadPhase_wire_Done(_root, rows)");
+    expect(clientJs).toContain("function _scrml_engine_loadPhase_wire_Done(_scrml_arm_root, rows)");
     // Render-fn signature contains `rows` param.
     expect(clientJs).toContain("function _scrml_engine_loadPhase_render_Done(rows)");
     // Dispatcher passes _data["rows"] to BOTH render + wire.
-    expect(clientJs).toMatch(/_scrml_engine_loadPhase_render_Done\(_data && _data\["rows"\]\)/);
-    expect(clientJs).toMatch(/_scrml_engine_loadPhase_wire_Done\(_mount, _data && _data\["rows"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_loadPhase_render_Done\(_scrml_arm_data && _scrml_arm_data\["rows"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_loadPhase_wire_Done\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["rows"\]\)/);
   });
 });
 
@@ -95,9 +95,9 @@ describe("B1 §2 parenthesized form end-to-end", () => {
 `;
     const { errors, clientJs } = compile(src);
     expect(errors.filter((e) => e.code.startsWith("E-ENGINE-PAYLOAD"))).toEqual([]);
-    expect(clientJs).toContain("function _scrml_engine_loadPhase_wire_Done(_root, rows)");
+    expect(clientJs).toContain("function _scrml_engine_loadPhase_wire_Done(_scrml_arm_root, rows)");
     expect(clientJs).toContain("function _scrml_engine_loadPhase_render_Done(rows)");
-    expect(clientJs).toMatch(/_scrml_engine_loadPhase_wire_Done\(_mount, _data && _data\["rows"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_loadPhase_wire_Done\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["rows"\]\)/);
   });
 });
 
@@ -119,11 +119,11 @@ describe("B1 §3 positional local-name renamed", () => {
     // wire-fn takes the LOCAL `count` as param (per SPEC §51.0.B.1
     // normative: positional binding is position-determined, local name
     // does not need to match field name).
-    expect(clientJs).toContain("function _scrml_engine_loadPhase_wire_Done(_root, count)");
+    expect(clientJs).toContain("function _scrml_engine_loadPhase_wire_Done(_scrml_arm_root, count)");
     // Dispatcher looks up by FIELD name `rows`, passes the value as the
     // positional arg — binding the local `count` inside wire-fn scope.
-    expect(clientJs).toMatch(/_scrml_engine_loadPhase_render_Done\(_data && _data\["rows"\]\)/);
-    expect(clientJs).toMatch(/_scrml_engine_loadPhase_wire_Done\(_mount, _data && _data\["rows"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_loadPhase_render_Done\(_scrml_arm_data && _scrml_arm_data\["rows"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_loadPhase_wire_Done\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["rows"\]\)/);
   });
 });
 
@@ -145,11 +145,11 @@ describe("B1 §4 multi-field variants — BracketStack canonical worked example"
 `;
     const { errors, clientJs } = compile(src);
     expect(errors.filter((e) => e.code.startsWith("E-ENGINE-PAYLOAD"))).toEqual([]);
-    expect(clientJs).toContain("function _scrml_engine_bracketStack_wire_OpenAt(_root, depth, opener, span)");
+    expect(clientJs).toContain("function _scrml_engine_bracketStack_wire_OpenAt(_scrml_arm_root, depth, opener, span)");
     expect(clientJs).toContain("function _scrml_engine_bracketStack_render_OpenAt(depth, opener, span)");
     // Dispatcher: three positional args to BOTH render and wire.
-    expect(clientJs).toMatch(/_scrml_engine_bracketStack_render_OpenAt\(_data && _data\["depth"\], _data && _data\["opener"\], _data && _data\["span"\]\)/);
-    expect(clientJs).toMatch(/_scrml_engine_bracketStack_wire_OpenAt\(_mount, _data && _data\["depth"\], _data && _data\["opener"\], _data && _data\["span"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_bracketStack_render_OpenAt\(_scrml_arm_data && _scrml_arm_data\["depth"\], _scrml_arm_data && _scrml_arm_data\["opener"\], _scrml_arm_data && _scrml_arm_data\["span"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_bracketStack_wire_OpenAt\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["depth"\], _scrml_arm_data && _scrml_arm_data\["opener"\], _scrml_arm_data && _scrml_arm_data\["span"\]\)/);
   });
 
   test("OpenAt(depth, opener, span) parenthesized form — equivalent codegen", () => {
@@ -165,7 +165,7 @@ describe("B1 §4 multi-field variants — BracketStack canonical worked example"
 `;
     const { errors, clientJs } = compile(src);
     expect(errors.filter((e) => e.code.startsWith("E-ENGINE-PAYLOAD"))).toEqual([]);
-    expect(clientJs).toContain("function _scrml_engine_bracketStack_wire_OpenAt(_root, depth, opener, span)");
+    expect(clientJs).toContain("function _scrml_engine_bracketStack_wire_OpenAt(_scrml_arm_root, depth, opener, span)");
   });
 });
 
@@ -187,8 +187,8 @@ describe("B1 §5 array-typed payload — ErrorRecovery", () => {
 `;
     const { errors, clientJs } = compile(src);
     expect(errors.filter((e) => e.code.startsWith("E-ENGINE-PAYLOAD"))).toEqual([]);
-    expect(clientJs).toContain("function _scrml_engine_errorRecovery_wire_AccumulatingSkipped(_root, tokens)");
-    expect(clientJs).toMatch(/_scrml_engine_errorRecovery_wire_AccumulatingSkipped\(_mount, _data && _data\["tokens"\]\)/);
+    expect(clientJs).toContain("function _scrml_engine_errorRecovery_wire_AccumulatingSkipped(_scrml_arm_root, tokens)");
+    expect(clientJs).toMatch(/_scrml_engine_errorRecovery_wire_AccumulatingSkipped\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["tokens"\]\)/);
   });
 });
 

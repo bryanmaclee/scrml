@@ -156,7 +156,7 @@ fn val() { return 42 }
 </program>`, "markup-interp-renders");
     expect(clientJs).toBeTruthy();
     expect(clientJs).toContain("_scrml_render_value");
-    expect(clientJs).toMatch(/_scrml_render_value\(el, _scrml_val_\d+\(\)\)/);
+    expect(clientJs).toMatch(/_scrml_render_value\(_scrml_el, _scrml_val_\d+\(\)\)/);
   });
 
   // ----- OVER-FIX GUARD: a default-logic lift-expr is NOT suppressed -----

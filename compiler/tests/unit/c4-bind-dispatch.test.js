@@ -517,9 +517,9 @@ describe("C4 §C4.12 — Hookpoint contract", () => {
     // C3 stamps the attribute on the rendered element.
     expect(html).toContain(`data-scrml-render-by-tag="${id}"`);
     // C4 emits a querySelector for the same attribute value. §17.1 Phase 2 (S301):
-    // the acquire is root-scoped (`(root || document)`) because emitBindings' output
-    // is wrapped in a re-invocable `_scrml_bind_rewire(root)` for `if=` mounts.
-    expect(js).toContain(`(root || document).querySelector('[data-scrml-render-by-tag="${id}"]')`);
+    // the acquire is root-scoped (`(_scrml_root || document)`) because emitBindings' output
+    // is wrapped in a re-invocable `_scrml_bind_rewire(_scrml_root)` for `if=` mounts.
+    expect(js).toContain(`(_scrml_root || document).querySelector('[data-scrml-render-by-tag="${id}"]')`);
   });
 });
 

@@ -62,7 +62,7 @@ function pick(nm) { @items = @items }
     // The per-item handler re-resolves the live item by its create-time key,
     // bails on canonical absence (null), THEN calls the handler with the live field.
     expect(clientJs).toMatch(
-      /\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_pick_\d+\(_scrml_each_item\.name\); \}\)/,
+      /\.addEventListener\("click", function\(event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_pick_\d+\(_scrml_each_item\.name\); \}\)/,
     );
   });
 
