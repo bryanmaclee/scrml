@@ -109,6 +109,11 @@ describe("§1 4a — a handler expression is read whole", () => {
     [`onclick=@n += 2 * 3`, /_scrml_cs_reactive_set\("n", _scrml_cs_reactive_get\("n"\) \+ \(2 \* 3\)\)/],
     [`onclick=mk(1) .then(g)`, /_scrml_mk_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/],
     [`onclick=@count = mk(1) .x() + 1`, /_scrml_cs_reactive_set\("count", _scrml_mk_\d+\(1\)\s*\.x\(\) \+ 1\)/],
+    // `>=` never closes the opener (block splitter, issue #28), spaced or not
+    [`onclick=@big = @n >= 2`, /_scrml_cs_reactive_set\("big", _scrml_cs_reactive_get\("n"\) >= 2\)/],
+    [`onclick=@big = @n>=2`, /_scrml_cs_reactive_set\("big", _scrml_cs_reactive_get\("n"\) >= 2\)/],
+    [`onclick=@big = @n < 3`, /_scrml_cs_reactive_set\("big", _scrml_cs_reactive_get\("n"\) < 3\)/],
+    [`onclick=@ok = @msg is not`, /_scrml_cs_reactive_set\("ok", _scrml_cs_reactive_get\("msg"\) === null/],
   ];
   for (const [attr, want] of shapes) {
     test(`\`${attr}\``, () => {
@@ -118,6 +123,19 @@ describe("§1 4a — a handler expression is read whole", () => {
       expect(html).toMatch(/<button data-scrml-bind-onclick="_scrml_attr_onclick_\d+">/);
     });
   }
+
+  test("`>=` right after a call is the tag close + a `=` label, as the block splitter reads it", () => {
+    // samples/compilation-tests/combined-020-calculator.scrml: `<button onclick=calculate()>=</>`
+    const { errors, clientJs, html } = compileToOutputs(page(`<button id="eq" onclick=g(1)>=</button>`));
+    expect(errors).toEqual([]);
+    expect(handlersOf(clientJs)[0]).toMatch(/^function\(_scrml_event\) \{ _scrml_g_\d+\(1\); \}$/);
+    expect(html).toMatch(/<button id="eq" data-scrml-bind-onclick="_scrml_attr_onclick_\d+">=<\/button>/);
+  });
+
+  test("a spaced `>=` the opener scan ended the tag at is refused, not truncated", () => {
+    const { codes } = compileToOutputs(page(`<button onclick=@big = mk(1).x() >= 2>go</button>`));
+    expect(codes).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+  });
 
   test("two assignment handlers and a class on one element stay three attributes", () => {
     const { errors, clientJs, html } = compileToOutputs(

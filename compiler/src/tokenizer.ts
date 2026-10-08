@@ -460,7 +460,7 @@ function exprEndsIncomplete(text: string): boolean {
  * Whether, after whitespace at `pos`, an event-handler expression continues
  * with an INFIX operator — binary, assignment, ternary, member access, or the
  * scrml keyword tests `is` / `instanceof` / `in`. None of these can begin an
- * attribute, so the expression goes on. A `>` is NOT a continuation: at depth 0
+ * attribute, so the expression goes on. A `>` is NOT a continuation here: at depth 0
  * it is the tag close (the block splitter has already ended the opener there);
  * a `>` after whitespace is refused by the caller as ambiguous.
  */
@@ -469,7 +469,7 @@ function handlerInfixAt(raw: string, pos: number): boolean {
   if (i >= raw.length) return false;
   const c = raw[i];
   const n = i + 1 < raw.length ? raw[i + 1] : "";
-  if (c === ">") return false;
+  if (c === ">") return false; // `>=` is decided by readExprRun (it must agree with the block splitter)
   if (c === "/") return n !== ">";
   if (c === ".") return /[A-Za-z_$]/.test(n);
   if (c === "!") return n === "=";
@@ -515,6 +515,29 @@ function strayAfterValue(raw: string, pos: number, isHandler: boolean, inParenLi
 function nonHandlerOperatorAhead(raw: string, pos: number): string | null {
   const op = attrConditionOperatorAhead(raw, pos);
   return op === ">" ? null : op;
+}
+
+/**
+ * Whether the BLOCK SPLITTER reads a `>=` that follows `valueText` as part of
+ * the value (true) or as the opener's `>` followed by body text `=` (false).
+ * Mirrors block-splitter.js `inUnquotedValue` (issue #28): a depth-0 `=` sets
+ * it; a depth-0 `(` / `[` / `{` / quote / sigil brace clears it. The tokenizer
+ * sees the whole element text, so it must stop where the splitter ended the
+ * opener: `onclick=calculate()>=</>` is a button labelled `=`.
+ */
+function splitterKeepsGtEq(valueText: string): boolean {
+  let flag = true; // the value began right after its attribute's `=`
+  let depth = 0;
+  let str: string | null = null;
+  for (let i = 0; i < valueText.length; i++) {
+    const c = valueText[i];
+    if (str) { if (c === "\\") { i++; continue; } if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { if (depth === 0) flag = false; str = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { if (depth === 0) flag = false; depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { if (depth > 0) depth--; continue; }
+    if (c === "=" && depth === 0) flag = true;
+  }
+  return flag;
 }
 
 /**
@@ -1134,12 +1157,17 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
               }
               if (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
                 if (c2 === "/" && raw[pos + 1] === ">") break;
+                // `>=` is an operator where the block splitter kept it in the
+                // value (issue #28) — read on; elsewhere it is the tag close.
+                if (c2 === ">" && raw[pos + 1] === "=" && splitterKeepsGtEq(text)) { text += ">="; advance(2); continue; }
                 if (c2 === ">") { gt = /[ \t]$/.test(text); break; }
                 if (c2 === ";") break;
                 // An unmatched closer ends the expression (a payload list's `)`).
                 if (c2 === ")" || c2 === "]" || c2 === "}") break;
                 if (/[ \t\r\n\f]/.test(c2)) {
-                  if (exprEndsIncomplete(text) || handlerInfixAt(raw, pos)) {
+                  const nx = skipAllWs(raw, pos);
+                  const gtEqAhead = raw[nx] === ">" && raw[nx + 1] === "=" && splitterKeepsGtEq(text);
+                  if (exprEndsIncomplete(text) || handlerInfixAt(raw, pos) || gtEqAhead) {
                     while (pos < raw.length && /[ \t\r\n\f]/.test(raw[pos])) { text += raw[pos]; advance(); }
                     continue;
                   }

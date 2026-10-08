@@ -58,3 +58,13 @@ Append-only. Times local (2026-10-07/08).
   now refused; fixture fixed to `onclick={…}`) -> 0 fail after the fix.
 - conformance/run.ts: 1354/1404 pass + 50 xfail (8 new s457 cases pass, 4 with runtime).
 - types:check OK; SPEC-INDEX + FACTS regenerated (scripts).
+
+## commit 1 landed — c2fd93e6a (pre-commit hook: 32277 pass / 0 fail)
+
+## round 2 — `>=` (adversarial self-review)
+- found: `onclick=@big = @n>=2` still dropped `>=2` (the reader stopped at `>`; the block splitter had kept
+  `>=` in the value — issue #28). A first fix read every `>=` on and broke `<button onclick=calculate()>=</>`
+  (a button LABELLED `=`; the tokenizer sees the whole element text) — caught by the corpus differential
+  (2 calculator samples OK->FAIL). Final: `splitterKeepsGtEq` mirrors block-splitter `inUnquotedValue`, so the
+  tokenizer reads `>=` on exactly where the splitter kept it, and a spaced `>=` the splitter closed the tag at
+  is the `gt` refusal. Both calculators compile again.
