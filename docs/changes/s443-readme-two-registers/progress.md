@@ -15,3 +15,7 @@
 - 2026-10-08T15:50Z `scrml fix` (default rules) on docs/readme-snippets/tasks.scrml: arm-pipe (`| ::Duplicate` → `::Duplicate`), sql-failable (`loadTasks` read gets `!{ _ :> [] }`), client-server-call (`load`'s `loadTasks()` gets `!{ .Transport(_) :> { return } }`). Line count unchanged, so the README ranges are unchanged; README copies resynced; drift 27/0. Left for a human by the fixer: `insertTask`'s `!{}` has no `.Transport` arm; `flipTask` called in a value position (`replaceRow(flipTask(id))`); the UPDATE write is unhandled. All compile today (E-ERROR-002 for these is in the SPEC but the compiler does not fire it yet).
 - 2026-10-08T16:05Z server smoke on the fixed tasks.scrml: db-migrate creates the table; dev serves; loadTasks [] → insert "milk" → duplicate returns TaskError.Duplicate → flip sets completed_at → load returns the row; no CSRF token → 403.
 - 2026-10-08T16:12Z README fact fixes: CLI verbs 11 → 12 (`fix` joined; FACTS.md); removed the "class/async at program top level come out as page text" gap (now E-CLASS-NOT-IN-SCRML / E-ASYNC-NOT-IN-SCRML, probed); conformance "a handful of known, pinned defects" → "known defects, each pinned to a tracked gap" (xfail-pinned cases: 7 at PR time, 50 now).
+
+## S459 tighten
+
+- 2026-10-08T16:41Z — setup: branch s459-readme-tighten from 172247211; brief copied to S459-TIGHTEN-BRIEF.md
