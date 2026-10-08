@@ -308,6 +308,46 @@ let _currentFileEngineMountNames: Set<string> = new Set();
  * (A reactive cell cannot be exported, E-EXPORT-001, so the file is the whole scope.)
  */
 let _currentFileDerivedCellNames: Set<string> = new Set();
+/** S459 round 6 (F3) — the current file's source text + path, to place a body diagnostic. */
+let _currentFileSource: { path: string; text: string } | null = null;
+
+/** 1-based line / col of `offset` in `text`. */
+function lineColAt(text: string, offset: number): { line: number; col: number } {
+  let line = 1;
+  let lastNl = -1;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) { line++; lastNl = i; }
+  }
+  return { line, col: offset - lastNl };
+}
+
+/**
+ * S459 round 6 (F3) — the SOURCE span of a diagnostic raised inside a component body
+ * re-parse. The re-parse reads a normalized copy of the body, so its offsets do not address
+ * the file; the diagnosed text (`text`, the exact bytes the reader refused) is located in
+ * the definition's own source range instead — the k-th occurrence there, where k is its
+ * occurrence index in the normalized body. Falls back to the definition span when the
+ * source is not this file's (a cross-file definition) or the text is not found.
+ */
+function bodyDiagnosticSourceSpan(
+  defSpan: Span,
+  text: string | undefined,
+  occurrence: number,
+): Span {
+  const src = _currentFileSource;
+  if (!text || !src || !defSpan || (defSpan.file && defSpan.file !== src.path)) return defSpan;
+  const from = defSpan.start ?? 0;
+  const to = Math.min(src.text.length, (defSpan.end ?? src.text.length) + 1);
+  let at = -1;
+  let p = from;
+  for (let k = 0; k <= occurrence; k++) {
+    at = src.text.indexOf(text, p);
+    if (at < 0 || at + text.length > to) return defSpan;
+    p = at + 1;
+  }
+  const { line, col } = lineColAt(src.text, at);
+  return { file: src.path, start: at, end: at + text.length, line, col };
+}
 
 function collectFileDerivedCellNames(ast: FileAST): Set<string> {
   const names = new Set<string>();
@@ -1257,7 +1297,7 @@ export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string
-): { nodes: MarkupNode[]; errors: CEError[]; bodyEngines: BodyEngine[] } {
+): { nodes: MarkupNode[]; errors: Array<CEError & { text?: string; occurrence?: number }>; bodyEngines: BodyEngine[] } {
   try {
     const normalized = normalizeTokenizedRaw(raw);
 
@@ -1287,11 +1327,16 @@ export function parseComponentBody(
 
     return {
       nodes: markupNodes,
-      errors: realErrors.map((e) => ({
-        code: e.code,
-        message: e.message,
-        span: e.span,
-      })),
+      errors: realErrors.map((e) => {
+        // S459 round 6 (F3) — the exact refused bytes and their occurrence index in the
+        // normalized body, so the caller can place the diagnostic in the SOURCE.
+        const st = e.span?.start;
+        const en = e.span?.end;
+        const text = typeof st === "number" && typeof en === "number" && en > st ? normalized.slice(st, en) : undefined;
+        let occurrence = 0;
+        if (text) for (let i = normalized.indexOf(text); i >= 0 && i < (st as number); i = normalized.indexOf(text, i + 1)) occurrence++;
+        return { code: e.code, message: e.message, span: e.span, text, occurrence };
+      }),
       // §15.13.5 / §51.0.K — engines declared inside the re-parsed body (both
       // the structural `engine-decl` form and the `${ <engine/> }` lift form).
       bodyEngines: collectBodyEngines(reparsed.ast),
@@ -1330,10 +1375,12 @@ function parseComponentDef(
   const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001");
   for (const e of allParseErrors) {
     if (e.code !== "E-ATTR-001") continue;
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     ceErrors.push(makeCEError(
       "E-ATTR-001",
       `${e.message.replace(/^E-ATTR-001:\s*/, "E-ATTR-001: ")} (in component \`${name}\`)`,
-      span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      // F3 — at the attribute value's own source position, not the definition's.
+      bodyDiagnosticSourceSpan(defSpan, (e as { text?: string }).text, (e as { occurrence?: number }).occurrence ?? 0),
     ));
   }
 
@@ -3371,7 +3418,10 @@ function expandComponentNode(
             "E-COMPONENT-010",
             `E-COMPONENT-010: Required prop \`${decl.name}\` (type: ${decl.type}) is missing ` +
             `at \`<${componentName}/>\` call site. ` +
-            `Declare it as \`${decl.name}="value"\` on the call site.`,
+            // S459 round 6 (L4) — a `bind` prop is supplied by binding a cell, not a value.
+            (decl.bindable
+              ? `Bind it at the call site: \`<${componentName} bind:${decl.name}=@cell/>\`.`
+              : `Declare it as \`${decl.name}="value"\` on the call site.`),
             node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
           ));
         }
@@ -4866,6 +4916,7 @@ export function runCEFile(
   // away from the misleading E-COMPONENT-020 to E-COMPONENT-ENGINE-SCOPE.
   _currentFileEngineMountNames = ast ? collectFileEngineMountNames(ast) : new Set();
   _currentFileDerivedCellNames = ast ? collectFileDerivedCellNames(ast) : new Set();
+  _currentFileSource = typeof tabOutput._sourceText === "string" ? { path: filePath, text: tabOutput._sourceText } : null;
 
   const ceErrors: CEError[] = [];
 

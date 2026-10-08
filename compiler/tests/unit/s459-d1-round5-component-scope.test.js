@@ -205,4 +205,36 @@ const D = <div props={ bind n: number }>
     expect(e.message).toContain("Write `bind:n=@v`");
     expect(e.message).not.toContain("is an expression");
   });
+  test("round 6 — E-COMPONENT-010 for an omitted required bind prop says to bind it", () => {
+    const r = compile(`<program>
+const D = <div props={ bind n: number }>
+    <p>\${n}</p>
+</>
+<D/>
+</program>`);
+    const e = r.errors.find((x) => x.code === "E-COMPONENT-010");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("`<D bind:n=@cell/>`");
+    expect(e.message).not.toContain('n="value"');
+  });
+});
+
+describe("round 6 F3 — a component-body E-ATTR-001 is placed at the attribute", () => {
+  test("line/col of the single-quoted value, not the definition", () => {
+    const r = compile(`<program>
+<p>x</p>
+
+const C = <div class="c" props={ label: string }>
+    <b>y</b>
+    <i class="a" title='\${label}x'>a</i>
+    <i class="a2" title='\${label}x'>b</i>
+</>
+<C label="L"/>
+</program>`);
+    const es = r.errors.filter((x) => x.code === "E-ATTR-001");
+    expect(es.length).toBe(2);
+    const spans = es.map((e) => [e.span.line, e.span.col]);
+    expect(spans).toContainEqual([6, 24]);
+    expect(spans).toContainEqual([7, 25]);
+  });
 });

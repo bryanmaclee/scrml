@@ -1,0 +1,4 @@
+<program>
+^{ emit("<p id=\"m\" onclick=\"go('a')\">hi</p>") }
+${ function go(s) { } }
+</program>

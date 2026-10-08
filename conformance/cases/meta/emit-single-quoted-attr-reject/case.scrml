@@ -1,0 +1,3 @@
+<program>
+^{ emit("<p class='x' id=\"m\">hi</p>") }
+</program>
