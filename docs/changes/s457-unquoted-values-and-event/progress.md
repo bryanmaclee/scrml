@@ -172,3 +172,7 @@ Append-only. Times local (2026-10-07/08).
 - gates: unit+integration+conformance (hook) 32597/0; conformance/run.ts 1381/1431 + 50 xfail; root-level +
   e2e-render-map 2498/0; self-host slices 2016/0; browser-baseline PASS (48); todomvc compile + node
   --check; snippet gate; compile floor; types gate; FACTS / SPEC-INDEX / bootstrap-conformance current.
+
+## S458 round-3 finish — see docs/changes/s458-uq-determinism/progress.md
+- determinism fix (fixed host-global list, NodeFilter added, parent/top/frames restored), onclient:error `error` covered, hook-specific E-EVENT-UNBOUND messages; onclient:* arity/collision diagnostic REPORTED (no SPEC code fits).
+- follow-up: once the host-global alias branch lands (compiler refs become `_scrml_g.<name>`), drop the host-global exception in fn-name-rename.ts `ref()` so every reference to a user binding is renamed.
