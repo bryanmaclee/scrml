@@ -50,6 +50,8 @@ export const META_EMIT_GATE_RUNTIME_SOURCE =
   JSON.stringify(standardMarkupElementNamesLowercase()) + ");\n" +
   "const _SCRML_CUSTOM_ELEMENT_NAME = " + String(CUSTOM_ELEMENT_NAME_PATTERN) + ";\n" +
   // S459 round 3 — the ONE attribute judge, shared with compile-time emit() (meta-eval.ts imports it).
+  // S459 round 4 — the document / form member tables the id/name named-property rule reads (generated).
+  readFileSync(join(__runtime_template_dir, "dom-named-property-members.js"), "utf8").replace(/^export /gm, "") +
   readFileSync(join(__runtime_template_dir, "markup-attr-allow-list.js"), "utf8").replace(/^export /gm, "") +
   readFileSync(join(__runtime_template_dir, "runtime-meta-emit-gate.js"), "utf8").replace(/^export /gm, "");
 

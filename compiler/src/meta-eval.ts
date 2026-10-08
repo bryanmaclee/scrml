@@ -47,7 +47,14 @@ import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
 import {
   _scrml_emit_attr_name_verdict, _scrml_emit_attr_value_verdict, _scrml_emit_child_ns,
   _scrml_emit_fold_name, _scrml_emit_reserved_attr_name, _SCRML_EMIT_NS_HTML,
+  _scrml_emit_named_value_verdict,
 } from "./markup-attr-allow-list.js";
+// S459 round 4 (F2) — the generated document / HTMLFormElement member tables the named-property rule
+// reads (the compiler has no DOM; the runtime gate reads the same tables plus the live prototypes).
+import { _SCRML_EMIT_DOCUMENT_MEMBERS, _SCRML_EMIT_FORM_MEMBERS } from "./dom-named-property-members.js";
+// S459 round 4 (F4) — the ONE §5.2 URL judge, the one the runtime meta.emit gate applies.
+import { _scrml_is_url_attr, _scrml_url_value_admitted } from "./runtime-url-guard.js";
+import { CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
 // The ONE reader of `match` arm syntax (§18) — shared with the runtime lowering, so a compile-time
 // `match` is read exactly as the same arms are read everywhere else.
 import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockBinding, type MatchArm } from "./codegen/emit-control-flow.ts";
@@ -954,7 +961,11 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
     reported.add(message);
     errors.push(new MetaEvalError(code, message, site));
   };
-  const visit = (list: unknown[], parentNs: string = _SCRML_EMIT_NS_HTML, parentTag: string = ""): void => {
+  const members = { document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: _SCRML_EMIT_FORM_MEMBERS };
+  // `inForm`: an emitted `<form>` encloses this list (S459 round 4 F2 — a control's id / name becomes a
+  // named property of that form). The page around a compile-time `^{}` is author source, judged as
+  // source; only the run-time gate knows a page form around a `meta.emit` insertion point (F1).
+  const visit = (list: unknown[], parentNs: string = _SCRML_EMIT_NS_HTML, parentTag: string = "", inForm: boolean = false): void => {
     for (const n0 of list) {
       if (!n0 || typeof n0 !== "object") continue;
       const n = n0 as Record<string, unknown>;
@@ -978,9 +989,13 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
             `that expand and check it in source.`);
           continue;
         }
-        const lowerTag = tag.toLowerCase();
+        // ASCII-only fold, as the HTML tokenizer (and the runtime gate) fold.
+        const lowerTag = _scrml_emit_fold_name(tag);
         const ns = _scrml_emit_child_ns(parentNs, parentTag, lowerTag);
-        for (const a of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
+        const attrList = Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : [];
+        const hasNameAttr = attrList.some((a) => _scrml_emit_fold_name(String(a?.name ?? "")) === "name");
+        const isCustom = CUSTOM_ELEMENT_NAME_PATTERN.test(lowerTag);
+        for (const a of attrList) {
           const nameVerdict = _scrml_emit_attr_name_verdict(ns, lowerTag, String(a?.name ?? ""));
           if (nameVerdict !== "") {
             const reserved = _scrml_emit_reserved_attr_name(_scrml_emit_fold_name(String(a?.name ?? "")));
@@ -1003,6 +1018,25 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
                 `(§22.4.1).`);
               continue;
             }
+            const literal = String((v as { value?: unknown }).value ?? "");
+            const lowerName = _scrml_emit_fold_name(String(a.name));
+            const namedVerdict = _scrml_emit_named_value_verdict(ns, lowerTag, lowerName, literal, hasNameAttr,
+              inForm, isCustom, members);
+            if (namedVerdict !== "") {
+              refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives ${namedVerdict} (§22.12). Rename ` +
+                `it — on these elements an \`id\` / \`name\` becomes a named property of \`document\` or of the form, ` +
+                `and one spelled like a member hides that member from every script that reads it.`);
+              continue;
+            }
+            // §22.12 / §5.2 — the URL judge the runtime gate applies (S459 round 4 F4): the literal is the
+            // string the browser parses there.
+            if (_scrml_is_url_attr("", lowerName) && !_scrml_url_value_admitted(lowerName, literal)) {
+              refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` a ${lowerName}= URL ` +
+                `whose scheme is not admitted (§22.4.1, §5.2): emitted markup admits http:, https:, ftp:, ` +
+                `mailto:, tel:, sms:, a relative URL, or a raster data:image on an image source — the same ` +
+                `rule runtime meta.emit() output is held to.`);
+              continue;
+            }
           }
           const interpolated = v && typeof v === "object" && v.kind === "string-literal"
             && typeof (v as { value?: unknown }).value === "string" && ((v as { value: string }).value).includes("${");
@@ -1017,7 +1051,9 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
               `attribute values — a literal string or no value — in emit() output (§22.4.1).`);
           }
         }
-        if (Array.isArray(n.children)) visit(n.children, ns, lowerTag);
+        if (Array.isArray(n.children)) {
+          visit(n.children, ns, lowerTag, inForm || (lowerTag === "form" && ns === _SCRML_EMIT_NS_HTML));
+        }
         continue;
       }
       refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output contains a '${String(n.kind)}' construct. impl#1 ` +

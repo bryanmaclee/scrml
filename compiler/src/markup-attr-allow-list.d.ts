@@ -14,3 +14,16 @@ export declare function _scrml_emit_reserved_attr_name(lowerName: string): boole
 export declare function _scrml_emit_attr_name_verdict(ns: string | null | undefined, tag: string, name: unknown): string;
 export declare function _scrml_emit_attr_value_verdict(name: unknown, value: unknown, tag: string): string;
 export declare function _scrml_emit_child_ns(parentNs: string, parentTag: string, childTag: string): string;
+export declare const _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME: Set<string>;
+export declare const _SCRML_EMIT_FORM_LISTED_ELEMENTS: Set<string>;
+export declare function _scrml_emit_is_form_control(ns: string | null | undefined, tag: string, isCustom: boolean): boolean;
+export declare function _scrml_emit_named_value_verdict(
+  ns: string | null | undefined,
+  tag: string,
+  lowerName: string,
+  value: unknown,
+  hasNameAttr: boolean,
+  inForm: boolean,
+  isCustom: boolean,
+  members: { document: Set<string>; form: Set<string>; documentProto?: object | null; formProto?: object | null },
+): string;

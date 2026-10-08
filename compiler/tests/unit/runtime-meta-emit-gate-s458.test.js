@@ -99,6 +99,14 @@ const REFUSED = [
   ["clobber previousSibling", '<img src=x onerror="window.__pwn=41"><form><input name="previousSibling"></form>', "__pwn"],
   ["clobber attributes (action)", '<form action="javascript:window.__pwn=42"><input name="attributes"><button>go</button></form>', "__pwn"],
   ["clobber attributes (onclick)", '<form onclick="window.__pwn=43"><input name="attributes"><button type=button>go</button></form>', "__pwn"],
+  // S459 round 4 F1 — a label's `for` acts on the page's `#id`.
+  ["label for= (acts on a page element by id)", '<label for="SECRETX">free stuff</label>', "SECRETX"],
+  // S459 round 4 F2 — named properties of an EMITTED form / of document.
+  ["input name=name inside an emitted form", '<form><input name="name" value="SECRETX"></form>', "SECRETX"],
+  ["img id= a form member inside an emitted form", '<form><img id="elements" src="/a.png" alt="SECRETX"></form>', "SECRETX"],
+  ["custom element id= a form member inside an emitted form", '<form><x-f id="method">SECRETX</x-f></form>', "SECRETX"],
+  // S459 round 4 — ASCII-only name folding: a KELVIN SIGN attribute name is not `k`.
+  ["KELVIN SIGN attribute name (not folded to k)", '<svg><g K="SECRETX"></g></svg>', "SECRETX"],
 ];
 
 describe("S458 'a' — runtime meta.emit refuses, writes nothing, logs once", () => {
@@ -133,7 +141,7 @@ const ADMITTED = [
   '<img src="data:image/png;base64,AAAA" alt="x">',
   '<p style="color: red" title="t" aria-label="l" role="note" lang="en" dir="ltr" tabindex="0">s</p>',
   "<my-widget class=\"w\" data-a=\"1\">c</my-widget>",
-  '<form><label for="q">Q</label><input id="q" name="q" type="text" placeholder="p" required>' +
+  '<form><label>Q <input id="q" name="q" type="text" placeholder="p" required></label>' +
     '<select name="s"><option value="1" selected>1</option></select><textarea name="t" rows="2"></textarea>' +
     '<button type="submit" name="go" value="1">go</button></form>',
   '<table><tr><th scope="col" colspan="2">h</th></tr><tr><td rowspan="1">d</td></tr></table>',
@@ -156,6 +164,12 @@ const ADMITTED = [
   "a &amp; b &lt;c&gt;",
   // Ordinary data-* (data-scrmlx is not in the compiler-owned data-scrml namespace) and aria-*.
   '<p data-x="1" data-scrmlx="2" aria-label="l">ok</p>',
+  // S459 round 4 F2 — a plain element takes any id / name; a control outside a form names nothing.
+  '<h2 id="title">T</h2><div id="hidden">a</div><section id="focus">b</section><p id="constructor">c</p>',
+  '<input name="name"><input name="action">',
+  '<img id="title" src="/a.png" alt="a">',
+  // F1 — a label without `for`; `<output for>` names its inputs only.
+  '<label>Name <input name="n"></label><output for="a b">1</output>',
 ];
 
 describe("S458 'a' — admitted markup is inserted exactly as the ungated path inserted it", () => {
@@ -190,6 +204,92 @@ describe("S458 'a' — admitted markup is inserted exactly as the ungated path i
     expect(logs.length).toBe(1);
     rt._scrml_meta_effect("m1", (meta) => { meta.emit("<p>ok</p>"); });
     expect(slot().innerHTML).toBe("<p>ok</p>");
+  });
+});
+
+/** A page whose meta placeholder sits inside a page `<form id="pf">` (S459 round 4 F1). */
+function makeFormPage() {
+  const win = new Window({ url: "http://localhost/" });
+  const document = win.document;
+  document.body.innerHTML = '<form id="pf"><div><span data-scrml-meta="m1">old</span></div></form>';
+  const logs = [];
+  const cons = { error: (...a) => logs.push(a.map(String).join(" ")), log() {}, warn() {}, info() {} };
+  // eslint-disable-next-line no-new-func
+  const rt = new Function("document", "window", "console",
+    SCRML_RUNTIME + "\nreturn { _scrml_meta_emit };")(document, win, cons);
+  const slot = () => document.querySelector('[data-scrml-meta="m1"]');
+  return { win, document, rt, logs, slot };
+}
+
+describe("S459 round 4 F1 — an insertion point inside a page <form> admits no form control", () => {
+  const CONTROLS = [
+    ["hidden input (would feed the page form's FormData)", '<input type="hidden" name="amount" value="999999">'],
+    ["submit button (would submit the page form)", '<button type="submit">go</button>'],
+    ["select", '<select name="s"><option>1</option></select>'],
+    ["textarea", '<textarea name="t"></textarea>'],
+    ["output", "<output>1</output>"],
+    ["fieldset", "<fieldset>f</fieldset>"],
+    ["a control nested in admitted markup", '<p>text <b><input name="q"></b></p>'],
+    ["a custom element (may be form-associated once upgraded)", "<x-field>f</x-field>"],
+    ["an emitted form's control (still inside the page form)", '<form><input name="q"></form>'],
+  ];
+  for (const [label, html] of CONTROLS) {
+    test(`refused: ${label}`, () => {
+      const { rt, logs, slot, document } = makeFormPage();
+      rt._scrml_meta_emit("m1", html);
+      expect(slot().innerHTML).toBe("old");
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain("inside a page <form>");
+      expect(logs[0]).not.toContain("999999");
+      expect(win2FormData(document)).toEqual([]);
+    });
+  }
+  test("non-control markup inside a page form is admitted", () => {
+    const { rt, logs, slot } = makeFormPage();
+    rt._scrml_meta_emit("m1", '<p class="hint">Enter <b>your</b> name</p><label>Q</label>');
+    expect(logs).toEqual([]);
+    expect(slot().innerHTML).toBe('<p class="hint">Enter <b>your</b> name</p><label>Q</label>');
+  });
+  test("an img id naming a member of the page form is refused there (it would shadow pf.<member>)", () => {
+    const { rt, logs, slot } = makeFormPage();
+    rt._scrml_meta_emit("m1", '<img id="action" src="/a.png" alt="a">');
+    expect(slot().innerHTML).toBe("old");
+    expect(logs.length).toBe(1);
+  });
+  test("the same controls outside a form are admitted", () => {
+    const { rt, logs, slot } = makePage("old");
+    rt._scrml_meta_emit("m1", '<input type="hidden" name="amount" value="1"><button type="submit">go</button>');
+    expect(logs).toEqual([]);
+    expect(slot().innerHTML).toBe(ungated('<input type="hidden" name="amount" value="1"><button type="submit">go</button>'));
+  });
+});
+
+/** Entries of `new FormData(#pf)` — empty when nothing joined the page form. */
+function win2FormData(document) {
+  const pf = document.getElementById("pf");
+  const out = [];
+  for (const el of pf.querySelectorAll("input,select,textarea,button")) if (el.name) out.push(el.name);
+  return out;
+}
+
+describe("S459 round 4 F3 — a non-HTML <template> is an ordinary element; the gate never throws", () => {
+  for (const html of ["<svg><template><circle r=\"1\"></circle></template></svg>", "<math><template><mi>x</mi></template></math>"]) {
+    test(`no exception: ${html}`, () => {
+      const { rt, logs, slot } = makePage("old");
+      expect(() => rt._scrml_meta_emit("m1", html)).not.toThrow();
+      // Admitted (its children judged as ordinary children) — or, if the environment's parser gave
+      // the gate something it could not read, refused with ONE report. Never an exception.
+      // (Read through childNodes: happy-dom's own serializer throws on a foreign-namespace `template`.)
+      const first = slot().firstChild;
+      if (first && first.nodeType === 3 && first.data === "old") expect(logs.length).toBe(1);
+      else expect(logs).toEqual([]);
+    });
+  }
+  test("a refused child of a non-HTML template is still refused", () => {
+    const { rt, logs, slot } = makePage("old");
+    rt._scrml_meta_emit("m1", '<svg><template><a href="javascript:window.__pwn=1"><text>x</text></a></template></svg>');
+    expect(slot().innerHTML).toBe("old");
+    expect(logs.length).toBe(1);
   });
 });
 

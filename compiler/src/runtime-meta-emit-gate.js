@@ -26,7 +26,9 @@
 // This file is inlined into the client runtime verbatim (runtime-template.js, chunk 'metaemit',
 // `export ` stripped) after the 'urlguard' chunk, whose scheme reader it calls (`_scrml_is_url_attr`,
 // `_scrml_url_value_admitted` — runtime-url-guard.js; do NOT write a second URL reader here), and
-// after markup-attr-allow-list.js (`_scrml_emit_attr_name_verdict`, `_scrml_emit_attr_value_verdict`).
+// after dom-named-property-members.js (`_SCRML_EMIT_DOCUMENT_MEMBERS`, `_SCRML_EMIT_FORM_MEMBERS`) and
+// markup-attr-allow-list.js (`_scrml_emit_attr_name_verdict`, `_scrml_emit_attr_value_verdict`,
+// `_scrml_emit_named_value_verdict`, `_scrml_emit_is_form_control`, `_scrml_emit_fold_name`).
 // `_SCRML_META_EMIT_KNOWN_ELEMENTS` is defined immediately before this file's source by
 // runtime-template.js from the compiler's ONE element list (html-elements.js
 // `standardMarkupElementNamesLowercase()`), the list compile-time `emit()` output is judged against;
@@ -95,6 +97,7 @@ function _scrml_meta_emit_dom() {
   const dom = {
     firstChild: getter(N, "firstChild"),
     nextSibling: getter(N, "nextSibling"),
+    parentNode: getter(N, "parentNode"),
     nodeType: getter(N, "nodeType"),
     appendChild: method(N, "appendChild"),
     removeChild: method(N, "removeChild"),
@@ -113,78 +116,110 @@ function _scrml_meta_emit_dom() {
     createElement: method(D, "createElement"),
     body: getter(D, "body") || (w.HTMLDocument ? getter(w.HTMLDocument.prototype, "body") : null),
     createHTMLDocument: implProto ? method(implProto, "createHTMLDocument") : null,
-    // `id=` / `name=` values that would shadow a member of an `HTMLFormElement` (its own members and
-    // every inherited Node / Element / HTMLElement member) — derived from the live prototype, not a
-    // list (UNFORGEABLE READS, belt and braces).
+    // The live prototypes the named-property rule (S459 round 4 F2) asks `in` of, on top of the
+    // generated member tables: a real `document`'s prototype (HTMLDocument → Document → …) and
+    // HTMLFormElement's. Captured here, at load; data cannot reach them.
+    documentProto: typeof document !== "undefined" ? Object.getPrototypeOf(document) : null,
     formProto: w.HTMLFormElement ? w.HTMLFormElement.prototype : null,
   };
-  for (const k in dom) if (dom[k] === null && k !== "templateContent" && k !== "formProto") return null;
+  for (const k in dom) {
+    if (dom[k] === null && k !== "templateContent" && k !== "documentProto" && k !== "formProto") return null;
+  }
   return dom;
 }
 const _SCRML_META_EMIT_DOM = _scrml_meta_emit_dom();
 
-// Does an `id` / `name` VALUE name a member of `HTMLFormElement` (and so, inside a form, shadow that
-// member — `<input name="action">` makes `form.action` the input)? Read with `in` on the captured
-// prototype, which data cannot reach.
-function _scrml_meta_emit_shadows_member(value) {
-  const proto = _SCRML_META_EMIT_DOM && _SCRML_META_EMIT_DOM.formProto;
-  return proto !== null && proto !== undefined && value !== "" && (value in proto);
+// Is `el` (an element of the page) inside an HTML `<form>`? Walked up through the captured `parentNode`
+// / `localName` / `namespaceURI` accessors — the page's own markup may name its elements anything.
+function _scrml_meta_emit_inside_form(el) {
+  const dom = _SCRML_META_EMIT_DOM;
+  for (let p = dom.parentNode.call(el); p; p = dom.parentNode.call(p)) {
+    if (dom.nodeType.call(p) !== 1) continue;
+    if (dom.localName.call(p) === "form" && dom.namespaceURI.call(p) === _SCRML_EMIT_NS_HTML) return true;
+  }
+  return false;
 }
 
 // The violation the tree rooted at `root` carries, as a short description naming the element and the
 // attribute but NEVER the value (it is data, and may be sensitive) — or "" when it carries none.
-// Walks every descendant, including a nested `<template>`'s content, reading ONLY through the captured
-// accessors. A DOM-member `id` / `name` (UNFORGEABLE READS, belt and braces) is reported only when the
-// walk finds nothing else.
-function _scrml_meta_emit_violation(root) {
+// Walks every descendant, including an HTML `<template>`'s content, reading ONLY through the captured
+// accessors. `inPageForm`: the insertion point sits inside a page `<form>` (S459 round 4 F1) — then a
+// form-associated control anywhere in the tree is refused (it would join that form's submission and
+// named properties: an injected `<input type=hidden name=amount>` fed the page form's FormData, an
+// injected `<button type=submit>` submitted it). A named-property `id` / `name` (F2) is reported only
+// when the walk finds nothing else, so a refusal names what such a shadowing would have hidden.
+function _scrml_meta_emit_violation(root, inPageForm) {
   const dom = _SCRML_META_EMIT_DOM;
   const call = (fn, self, a, b) => fn.call(self, a, b);
-  const stack = [];
+  const members = {
+    document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: _SCRML_EMIT_FORM_MEMBERS,
+    documentProto: dom.documentProto, formProto: dom.formProto,
+  };
+  const stack = []; // [node, insideAForm]
   let shadowing = "";
-  for (let c = call(dom.firstChild, root); c; c = call(dom.nextSibling, c)) stack.push(c);
-  stack.reverse();
+  const pushChildren = (parent, inForm) => {
+    const kids = [];
+    for (let c = call(dom.firstChild, parent); c; c = call(dom.nextSibling, c)) kids.push(c);
+    for (let k = kids.length - 1; k >= 0; k--) stack.push([kids[k], inForm]);
+  };
+  pushChildren(root, inPageForm === true);
   while (stack.length > 0) {
-    const node = stack.pop();
+    const entry = stack.pop();
+    const node = entry[0];
+    let inForm = entry[1];
     const type = call(dom.nodeType, node);
     if (type === 1) {
-      const tag = String(call(dom.localName, node)).toLowerCase();
+      // Names are folded the way the HTML tokenizer folds them — ASCII only (a KELVIN SIGN stays
+      // itself, as it does in the compile-time judge).
+      const tag = _scrml_emit_fold_name(String(call(dom.localName, node)));
       const ns = call(dom.namespaceURI, node);
       if (_SCRML_META_EMIT_REFUSED_ELEMENTS.has(tag)) return "a <" + tag + "> element";
-      if (!_SCRML_META_EMIT_KNOWN_ELEMENTS.has(tag) && !_SCRML_CUSTOM_ELEMENT_NAME.test(tag)) {
+      const isCustom = _SCRML_CUSTOM_ELEMENT_NAME.test(tag);
+      if (!_SCRML_META_EMIT_KNOWN_ELEMENTS.has(tag) && !isCustom) {
         return "a <" + tag + "> element (not a standard HTML / SVG / MathML element or a custom element)";
+      }
+      if (inPageForm === true && _scrml_emit_is_form_control(ns, tag, isCustom)) {
+        return "a <" + tag + "> element inserted inside a page <form> (a form control there would join " +
+          "that form's submission)";
       }
       const attrs = call(dom.attributes, node);
       const n = call(dom.attrsLength, attrs);
+      const read = [];
+      let hasNameAttr = false;
       for (let i = 0; i < n; i++) {
         const a = call(dom.attrsItem, attrs, i);
-        const name = String(call(dom.attrName, a)).toLowerCase();
-        const value = String(call(dom.attrValue, a));
+        const name = _scrml_emit_fold_name(String(call(dom.attrName, a)));
+        if (name === "name") hasNameAttr = true;
+        read.push([name, String(call(dom.attrValue, a))]);
+      }
+      for (let i = 0; i < read.length; i++) {
+        const name = read[i][0];
+        const value = read[i][1];
         const nameVerdict = _scrml_emit_attr_name_verdict(ns, tag, name);
         if (nameVerdict !== "") return nameVerdict;
         const valueVerdict = _scrml_emit_attr_value_verdict(name, value, tag);
         if (valueVerdict !== "") return valueVerdict + " on <" + tag + ">";
-        if ((name === "id" || name === "name") && shadowing === "" && _scrml_meta_emit_shadows_member(value)) {
-          // Recorded, not returned: the walk goes on, so a refusal names what the shadowing would have
-          // hidden (an `onerror` past a `name="lastChild"`) — the evidence that the walk was not fooled.
-          shadowing = "a " + name + "= value on <" + tag + "> that names a DOM member (it would shadow " +
-            "that member of an enclosing form)";
+        if (shadowing === "") {
+          // Recorded, not returned: the walk goes on (see above).
+          shadowing = _scrml_emit_named_value_verdict(ns, tag, name, value, hasNameAttr, inForm, isCustom, members);
         }
         if (_scrml_is_url_attr("", name) && !_scrml_url_value_admitted(name, value)) {
           return "a " + name + "= URL on <" + tag + "> whose scheme is not admitted";
         }
       }
-      if (tag === "template" && dom.templateContent !== null) {
+      if (tag === "form" && ns === _SCRML_EMIT_NS_HTML) inForm = true;
+      // Only an HTML `<template>` has a content fragment (the getter throws on an SVG / MathML element
+      // named `template`, which is an ordinary element whose children are walked below).
+      if (tag === "template" && ns === _SCRML_EMIT_NS_HTML && dom.templateContent !== null) {
         const content = call(dom.templateContent, node);
-        if (content) stack.push(content);
+        if (content) stack.push([content, inForm]);
       }
     } else if (type === 11) {
       // a template's content fragment — its children are judged like any others
     } else if (type !== 3 && type !== 8) {
       return "a node of type " + type;
     }
-    const kids = [];
-    for (let c = call(dom.firstChild, node); c; c = call(dom.nextSibling, c)) kids.push(c);
-    for (let k = kids.length - 1; k >= 0; k--) stack.push(kids[k]);
+    pushChildren(node, inForm);
   }
   return shadowing;
 }
@@ -207,13 +242,22 @@ function _scrml_meta_emit_report(scopeId, violation) {
 
 // Parse `htmlString` inertly as the content of a `contextTag` element in a document with no browsing
 // context and judge it. Returns that inert container when admitted; `null` (after one report) when not.
-function _scrml_meta_emit_checked(scopeId, htmlString, contextTag) {
+// `inPageForm`: the insertion point is inside a page `<form>` (see `_scrml_meta_emit_violation`).
+// Anything the reading throws (an accessor the environment applies differently) is a refusal too —
+// reported, nothing written, never an exception out of `meta.emit`.
+function _scrml_meta_emit_checked(scopeId, htmlString, contextTag, inPageForm) {
   const dom = _SCRML_META_EMIT_DOM;
-  const impl = dom.implementation.call(document);
-  const inert = dom.createHTMLDocument.call(impl, "");
-  const container = dom.createElement.call(inert, contextTag || "span");
-  dom.innerHTML.call(container, String(htmlString)); // the string conversion the ungated path used
-  const violation = _scrml_meta_emit_violation(container);
+  let violation = "";
+  let container = null;
+  try {
+    const impl = dom.implementation.call(document);
+    const inert = dom.createHTMLDocument.call(impl, "");
+    container = dom.createElement.call(inert, contextTag || "span");
+    dom.innerHTML.call(container, String(htmlString)); // the string conversion the ungated path used
+    violation = _scrml_meta_emit_violation(container, inPageForm);
+  } catch (e) {
+    violation = "markup the gate could not read to the end (reading it threw)";
+  }
   if (violation === "") return container;
   _scrml_meta_emit_report(scopeId, violation);
   return null;
@@ -233,7 +277,9 @@ function _scrml_meta_emit_insert(scopeId, htmlString) {
   }
   let placeholder = dom.querySelector.call(document, '[data-scrml-meta="' + scopeId + '"]');
   const contextTag = placeholder ? String(dom.localName.call(placeholder)) : "span";
-  const judged = _scrml_meta_emit_checked(scopeId, htmlString, contextTag);
+  // The fallback span is appended to <body>, outside any form.
+  const inPageForm = placeholder ? _scrml_meta_emit_inside_form(placeholder) : false;
+  const judged = _scrml_meta_emit_checked(scopeId, htmlString, contextTag, inPageForm);
   if (judged === null) return;
   if (!placeholder) {
     placeholder = dom.createElement.call(document, "span");

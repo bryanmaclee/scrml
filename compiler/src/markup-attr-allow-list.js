@@ -10,16 +10,22 @@
 // accessibility and form-value attributes that never run text as script and never load or navigate
 // on their own; the URL-valued names they admit (`href`, `src`, `srcset`, `cite`, `poster`,
 // `xlink:href`, `itemid`, `itemtype`, `usemap`) are ADDITIONALLY judged by scheme per §5.2 by the
-// caller (runtime: `_scrml_url_value_admitted` on the parsed value; compile time: the §5.2 sink check
-// over the spliced nodes, which reads the literal text).
+// caller, in BOTH phases with the ONE §5.2 reader (S459 round 4 F4): `_scrml_is_url_attr("", name)` +
+// `_scrml_url_value_admitted(name, value)` from runtime-url-guard.js — the runtime on the parsed value,
+// compile time (meta-eval.ts `checkEmittedNodes`) on the literal value the emitted markup carries,
+// which is the string the browser parses (the compiler HTML-escapes it on output). (Before round 4
+// this header claimed compile time was covered by the §5.2 sink check over the spliced nodes; that
+// check judges only the literal text before a `${`, so a fully literal `href="javascript:…"` in
+// `emit()` output passed — the review's F4.)
 //
 // Deliberately NOT on the lists (refused): every `on*` event handler; `srcdoc`; `is` (instantiates a
 // page-registered customized built-in); `nonce` / `integrity`; `ping`; `xml:base` (re-bases relative
 // URLs); `action`, `method`, `enctype`, `target` on `<form>`, and `form`, `formaction`, `formmethod`,
 // `formenctype`, `formtarget`, `formnovalidate` (data must not redirect or retarget a submission — of
 // the emitted form or, through `form=`, of a form already on the page); `popovertarget`,
-// `popovertargetaction`, `commandfor`, `command`, `anchor` (act on an element elsewhere in the page by
-// id); the SVG animation attributes `attributename`, `to`, `from`, `by`, `begin` (their elements are
+// `popovertargetaction`, `commandfor`, `command`, `anchor`, and `for` on `<label>` (act on an element
+// elsewhere in the page by id — a `<label for="x">` click IS a click on the page's `#x`, S459 round 4
+// F1; `<output for>` only names its inputs and is admitted); the SVG animation attributes `attributename`, `to`, `from`, `by`, `begin` (their elements are
 // refused anyway); and the compiler-owned `data-scrml` / `data-scrml-*` namespace (ruling S458 "your
 // recs on all four" item 3 + PA-ruled S459 consequence: the component CSS scope root and the runtime
 // markers).
@@ -52,7 +58,7 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   // sink). `http-equiv` is on no list, so it is refused outright, and THAT is what makes admitting
   // `content` safe — which is why `content` is scoped to `<meta>` here, never admitted globally.
   // (The runtime gate refuses the `<meta>` element itself; these names matter for compile-time
-  // `emit()` output, e.g. `<meta name="robots" content="index, follow">`.)
+  // `emit()` output, e.g. `<meta name="robots" content="index, follow">`, `<meta name="Description">`.)
   charset: ["meta"],
   content: ["meta"],
   property: ["meta"],
@@ -73,7 +79,10 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   disabled: ["button", "fieldset", "input", "optgroup", "option", "select", "textarea"],
   download: ["a", "area"],
   fetchpriority: ["img"],
-  for: ["label", "output"],
+  // `for` on `<label>` is NOT admitted (S459 round 4 F1): activating a label activates its control,
+  // and `for="id"` picks that control anywhere in the page — `<label for="danger">` made a click on
+  // emitted text a click on the page's `#danger`. `<output for>` only lists its inputs.
+  for: ["output"],
   headers: ["td", "th"],
   height: ["img", "video", "canvas", "input", "source"],
   high: ["meter"],
@@ -205,21 +214,77 @@ export function _scrml_emit_attr_name_verdict(ns, tag, name) {
 
 // The value half of the judge (names already admitted). `tag` is the element's lowercased local name.
 //   - An `id` / `name` whose value begins with the compiler-reserved prefix `_scrml` / `__scrml`
-//     (§47.1.1) is refused — such an element would become a `window._scrml…` named property, which
-//     the runtime's own `typeof _scrml_x === "function"` probes would then find.
-//   - A `<meta name=…>` value must be a lowercase metadata token (`robots`, `theme-color`,
-//     `og:title`, `twitter:card` — letters, digits, `-` `_` `.` `:`), so a DOM-member spelling such
-//     as `querySelector` is refused at compile time as well as run time (PA-ruled S459: the id/name
-//     clobbering belt applies to `<meta name>`; the compiler has no live DOM to read members from,
-//     and every camelCase member fails this shape).
+//     (§47.1.1) is refused on EVERY element — any element's `id` becomes a `window._scrml…` named
+//     property, which the runtime's own `typeof _scrml_x === "function"` probes would then find.
+//   - Other `id` / `name` values are judged by `_scrml_emit_named_value_verdict` below, and only on
+//     the elements that make them a named property of `document` or of a form.
+//   - `<meta name>` values are not judged (S459 round 4 F5). `<meta>` creates no named property of
+//     `document`, `window` or a form, so no value of it can shadow anything; meta names are ASCII
+//     case-insensitive tokens of any spelling (`Description`, `DC.title`, `msapplication-TileColor`).
+//     The earlier lowercase-token rule refused those and guarded nothing, so it is dropped rather than
+//     case-folded.
+// `tag` is kept in the signature for callers; the value rules here are element-independent.
 // Returns "" or a reason naming the attribute (never its value).
 export function _scrml_emit_attr_value_verdict(name, value, tag) {
   const lowerName = _scrml_emit_fold_name(name);
   if ((lowerName === "id" || lowerName === "name") && /^_{1,2}scrml/i.test(String(value).trim())) {
     return "a " + lowerName + "= value in the compiler-reserved _scrml / __scrml namespace";
   }
-  if (lowerName === "name" && String(tag).toLowerCase() === "meta" && !/^[a-z0-9]+(?:[-_.:][a-z0-9]+)*$/.test(String(value))) {
-    return "a name= value on <meta> that is not a lowercase metadata token";
+  return "";
+}
+
+// NAMED PROPERTIES (S459 round 4 F2). `Document` and `HTMLFormElement` are [LegacyOverrideBuiltIns]:
+// an element they expose BY NAME shadows their member of the same name (`<img name="querySelector">`
+// makes `document.querySelector` that image; `<input name="action">` inside a form makes `form.action`
+// that input). So an `id` / `name` value is refused when — and only when — the element makes it such a
+// named property AND it names a member of that object. Which elements, per the HTML standard:
+//   - `document` (Document's supported property names): the `name` of `embed`, `form`, `iframe`,
+//     `img`, `object`; the `id` of `object`; the `id` of an `img` that also has a `name`;
+//   - a form (HTMLFormElement's supported property names): the `id` and the `name` of every LISTED
+//     element whose form owner is that form — `button`, `fieldset`, `input`, `object`, `output`,
+//     `select`, `textarea`, and a form-associated custom element (whether a custom element is
+//     form-associated is known only once the page upgrades it, so every custom element counts) — and
+//     of every `img` inside the form.
+// `window`'s named properties are not consulted: Window is NOT [LegacyOverrideBuiltIns], so an element
+// named like a window member never shadows it (the reserved `_scrml` prefix above covers the names the
+// runtime probes for). Every other element — `div`, `h2`, `section`, `p`, … — is admitted with any
+// `id` / `name` value (the round-3 belt refused the 370 HTMLFormElement member names on EVERY element).
+export const _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME = new Set(["embed", "form", "iframe", "img", "object"]);
+export const _SCRML_EMIT_FORM_LISTED_ELEMENTS = new Set([
+  "button", "fieldset", "input", "object", "output", "select", "textarea",
+]);
+
+// Is the element `tag` (lowercased) in namespace `ns` a form-associated control — one that joins the
+// submission and the named properties of the form it sits in? `isCustom`: `tag` is a custom-element
+// name.
+export function _scrml_emit_is_form_control(ns, tag, isCustom) {
+  if (ns && ns !== _SCRML_EMIT_NS_HTML) return false;
+  return _SCRML_EMIT_FORM_LISTED_ELEMENTS.has(tag) || isCustom === true;
+}
+
+// The named-property judge for attribute `lowerName` (folded) with `value` on the element `tag`
+// (lowercased) in namespace `ns`. `hasNameAttr`: the element also carries `name`. `inForm`: the element
+// sits inside a `<form>` — of the emitted tree, or (at run time) the page form around the insertion
+// point. `members` = { document, form }: the generated member tables (dom-named-property-members.js),
+// plus at run time { documentProto, formProto }: the live prototypes captured at load (`in` on them
+// reaches the platform's own members, data cannot). Returns "" or a reason naming the attribute and
+// the object it would shadow a member of (never the value).
+export function _scrml_emit_named_value_verdict(ns, tag, lowerName, value, hasNameAttr, inForm, isCustom, members) {
+  if (lowerName !== "id" && lowerName !== "name") return "";
+  if (ns && ns !== _SCRML_EMIT_NS_HTML) return "";
+  const v = String(value);
+  if (v === "") return "";
+  const isMember = (table, proto) => table.has(v) || (proto !== null && proto !== undefined && v in proto);
+  const ofDocument = (lowerName === "name" && _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME.has(tag))
+    || (lowerName === "id" && (tag === "object" || (tag === "img" && hasNameAttr === true)));
+  if (ofDocument && isMember(members.document, members.documentProto)) {
+    return "a " + lowerName + "= value on <" + tag + "> that names a member of document (the element " +
+      "would shadow that member)";
+  }
+  const ofForm = inForm === true && (_scrml_emit_is_form_control(ns, tag, isCustom) || tag === "img");
+  if (ofForm && isMember(members.form, members.formProto)) {
+    return "a " + lowerName + "= value on <" + tag + "> inside a form that names a member of the form " +
+      "(the element would shadow that member)";
   }
   return "";
 }

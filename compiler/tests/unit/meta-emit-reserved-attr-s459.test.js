@@ -103,8 +103,11 @@ describe("PA-ruled S459: meta descriptive attrs; http-equiv refused", () => {
     expect(r.codes).toContain("E-META-EVAL-002");
   });
 
-  test("the id/name belt applies to <meta name>: a DOM-member spelling is refused, a metadata token is fine", () => {
-    expect(compile(emitOf('<meta name="querySelector" content="x"/>')).codes).toContain("E-META-EVAL-002");
-    expect(compile(emitOf('<meta name="twitter:card" content="x"/>')).codes).toEqual([]);
+  // S459 round 4 F5: `<meta>` creates no named property, so its `name` value shadows nothing — the
+  // round-3 lowercase-token rule (which refused `Description`, `DC.title`) is dropped.
+  test("<meta name> values are not judged: any spelling compiles clean", () => {
+    for (const v of ["twitter:card", "Description", "DC.title", "msapplication-TileColor", "querySelector"]) {
+      expect(compile(emitOf(`<meta name="${v}" content="x"/>`)).codes).toEqual([]);
+    }
   });
 });
