@@ -58,7 +58,7 @@ const DRIFT_DOC_EXCLUDE = ["docs/changes"];
  * (the hollow-gate shape snippet-gate.js's header records). Adding a row is how
  * a document commits to the contract permanently.
  */
-export const DRIFT_REQUIRED_DOCS = ["docs/tutorial.md"];
+export const DRIFT_REQUIRED_DOCS = ["docs/tutorial.md", "README.md"];
 
 const MARKER_RE = /^\s*<!--\s*snippet:\s*(\S+?)(?:#L(\d+)-L(\d+))?\s*-->\s*$/;
 const FENCE_OPEN_RE = /^\s*```scrml\s*$/;
