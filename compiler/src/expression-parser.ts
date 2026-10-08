@@ -3675,7 +3675,13 @@ export function emitStringFromTree(node: ExprNode): string {
       return `...${emitStringFromTree(node.argument)}`;
 
     case "unary": {
-      const arg = emitStringFromTree(node.argument);
+      // S458 — an operand that binds looser than a unary operator (binary incl. the
+      // §42 `is` predicates, ternary, assign, arrow) is re-wrapped: `not (x is not)`
+      // parses as unary(!, is-not(x)) and used to round-trip as `!x is not`, which
+      // re-parses as `(!x) is not`. Same kind-match as receiverNeedsParensRT.
+      const argNeedsParens = node.argument.kind === "binary" || node.argument.kind === "ternary"
+        || node.argument.kind === "assign" || node.argument.kind === "lambda";
+      const arg = argNeedsParens ? `(${emitStringFromTree(node.argument)})` : emitStringFromTree(node.argument);
       if (!node.prefix) return `${arg}${node.op}`;
       // Special keyword operators need a space
       const needsSpace = ["typeof", "void", "delete", "await"].includes(node.op);

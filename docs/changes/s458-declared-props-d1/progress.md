@@ -85,3 +85,37 @@ SHALL propagate back to `@var` in the parent." Worked example: "When the user cl
   attribute, and that a declared prop never reaches the root (§15.10).
 - docs/bootstrap-conformance.md regenerated (`bootstrap-conformance.ts --write`; generated file, renamed/new cases).
 - The S457 declared-`on…` lift listener wiring is not dead code: it still serves the undeclared fallthrough.
+
+## 2026-10-08 — step 5: PA review fix round F1–F6 (base 08adefc4c vs b4994a7fc)
+Resumed after a network-outage kill (tip b4994a7fc + 1 uncommitted edit, expression-parser.ts — reviewed, kept).
+- F1 (structural substitution): new `substituteExprText` — parse with scrml's parser, replace identifier NODES
+  (shadow-aware) with the caller's expression node in ONE pass (a substituted node is never re-scanned), never
+  touch string/template literal content, re-emit from the tree (precedence structural); unchanged text returned
+  verbatim. Every attribute-text site now uses it: quoted `${…}` segments (`substituteInterpSegments` →
+  `rewriteTemplateInterpolations` → per segment), unquoted `expr` raws without an exprNode, the variable-ref
+  member path, `<each>`/`<match>` `in`/`of`/`key`/`on` fields, and template-literal segments in logic.
+  TEXT-ONLY fallback, and why: `rewriteIdentsInRawExpr`, used only when the text does not parse to a structured
+  expression (the parser's escape hatch — a block-bodied arrow, an `@.field is some` sigil raw); it is single
+  pass, skips string literals, and now PARENTHESIZES a compound substituted value. `asName` (a binder name, not
+  an expression) keeps the legacy rewrite.
+  - emitStringFromTree (expression-parser.ts): a unary operator now keeps a compound operand grouped —
+    `not (x is not)` used to round-trip as `!x is not`.
+- F2: only a prop the CALLER bound with `bind:` may be written (§15.11.1 "A bindable prop declares that the
+  component may write back to the caller's reactive variable through this channel"; §15.13.2 "Not reactive
+  (captured once at mount): Non-`bind` props passed by value at the call site"). Writes (`=`, compound, `++`/`--`,
+  in handlers, functions, block arrows, a forwarded `bind:value=value`) are recorded during substitution
+  (`_propWriteCtx`) and refused: E-ASSIGN-004 — SPEC names no code; its §34 text ("`const` variable as assignment
+  target") is the closest. ROUTED FOR A RULING. Forwarding `bind:value=value` stays a bind only for a bound prop.
+- F3: `bind:n=@d` of a `const <d>` derived cell → E-DERIVED-WRITE at the bind site (CE collects the file's
+  derived cells as SYM does: `state-decl` isConst + shape "derived").
+- F4: block-bodied arrows (escape-hatch `ArrowFunctionExpression`) are substituted in `raw`, with the arrow's own
+  parameters shadowing same-named props — `() => { n = 200 }`, `.forEach(x => { n = n + x })`, `.map(x => { return label + x })`.
+- F5: a write to an unbound bindable prop (with or without a default) → E-ASSIGN-004 (no per-instance cell in
+  impl#1, §66.15.1 carried divergence) — ROUTED with F2. `bind:n=@v.k` → E-ATTR-010 (§15.11.1 grammar
+  `'@' identifier`).
+- F6: SPEC E-COMPONENT-012 rows cite `component-expander.ts`, `expandComponentNode` (no line number); the dormant
+  `_bindProps` consumers in emit-reactive-wiring.ts / emit-client.ts deleted.
+- Tests: unit s458-prop-write-and-substitution (13); conformance prop-substitution-structural (title 8 / v=8 / literal
+  content / no capture, executed) and bind-prop-write-back-block-arrows (executed). Gate 30203 pass / 0 fail.
+- Found, not fixed (pre-existing): a component whose body declares `const`s cannot be instantiated twice (module-scope
+  `const` redeclared → SyntaxError at load) and cannot be used inside `<each>` (E-EACH-BODY-DECL-UNSUPPORTED).
