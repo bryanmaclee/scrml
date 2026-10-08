@@ -1,0 +1,9 @@
+<program>
+${ <n> = 1 }
+<div>
+^{
+  const w = globalThis
+  meta.set("n", 2)
+}
+</div>
+</program>

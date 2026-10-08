@@ -1,0 +1,11 @@
+{
+  "id": "meta-allow-list-computed-key-neg",
+  "description": "§22.12 closed allow-list (S457) — a computed member access with a non-literal key (`emit[k]`) inside a `^{}` body is E-META-001: the key's value cannot be known to avoid `constructor` / `__proto__` / `prototype` (here it is built to equal `constructor`). An element is read with `x.at(i)`, a collection iterated with `for … of`, a keyed lookup made with a Map's `.get(k)`.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "expect": {
+    "codes": ["E-META-001"],
+    "notCodes": ["E-META-EVAL-001"],
+    "severity": { "E-META-001": "error" }
+  }
+}

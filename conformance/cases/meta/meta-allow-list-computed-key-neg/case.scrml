@@ -1,0 +1,5 @@
+^{
+  const k = "constr" + "uctor"
+  const F = emit[k]
+  emit("<p>x</p>")
+}
