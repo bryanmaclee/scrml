@@ -1,6 +1,20 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -961,6 +975,14 @@
 #
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
+
+## S457 — AUTH-RELEVANT DELTA (`ba2712973..125486345`)
+
+- **Security refusals are no longer bypassable by ignoring the exit code**: every Error cancels the write, at every entry point including API `compileScrml({ write: true })` (executed this pass: `E-STATE-UNDECLARED` -> `artifactsWritten: false`, output dir not created). `api.js` :3718.
+- **§5.2 rule 3 runtime URL guard**: `_scrml_safe_url` (`runtime-url-guard.js:208`) on every data-supplied URL attribute; refusal -> `about:blank` + `url-guard` log (value never logged). Server first-paint rows guarded too (`emit-ssr-render.ts:203`).
+- **§53.6.1 `string(url)`** refuses `javascript:`/`vbscript:`/`data:`/`blob:`/`file:` and relative URLs (`_scrml_url_shape_ok` :234), same judge at compile time and runtime.
+- **§47.1.1**: `__scrml_` reserved; placeholders unforgeable (`placeholder-nonce.ts`); emit gate refuses any placeholder in output (`validate-emit.ts:82`).
+- **§8.1.2 / §14.8.10**: program-body SQL rules judged on the SQL each driver call SENDS, at every lowering (`judgeDriverCallDetail` :298) — closes three executed `DROP TABLE` bypasses (#1344).
 
 ## S456 — AUTH-RELEVANT DELTA (`9c556dc74..ba2712973`)
 - §14.8.9 (#1330): the value an author `handle()` returns is a protect egress sink (sink kind `"handle"`, `codegen/protect-flow.ts:186`, `isHandleResultDeclarator` :127); `Response` is recognized by value (`globalThis.Response`, aliases), not spelling -> `E-PROTECT-006`.

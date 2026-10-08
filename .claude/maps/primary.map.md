@@ -1,6 +1,20 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S456 STAMP — `9c556dc74` -> `ba2712973`. 11 COMMITS (#1326 S455 wrap, #1327 the S455 maps refresh, #1328 state regen,
 # #1329 docs, #1330 protect `handle()` sink, #1331 W-TENANT-SUBSTRATE-SCOPED + CR-aware `--`, #1332 §8.10 hoist divergences,
 # #1334 E-TENANT-UNDECLARED + startup check, #1335 one SQL statement + `${}` slot reader, #1336 foreign-slice lexing +
@@ -1452,6 +1466,31 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
 
+## S457 — READ FIRST (facts at `125486345`; supersedes the S456 block below where it conflicts)
+
+- ⛑ **A compile that reports ANY Error-severity diagnostic writes NOTHING** (§2.2.1) — every entry point (`compile`, `build`, `dev`/`--watch`, `serve`, API `write: true`). One decision point: `api.js` `hasFatalBeforeWrite` :3718, commit :4351; `result.artifactsWritten` says which way it went. The `refusal-gate.js` code list is retired. Tests read in-memory `result.outputs`, not dist.
+- ⛑ **Every data-supplied URL attribute goes through `_scrml_safe_url`** (`runtime-url-guard.js` :208) — a non-admitted scheme becomes `about:blank` + one log report. A new attribute emitter MUST use `codegen/url-attr-guard.ts`.
+- ⛑ **`string(url)` = absolute URL with a safe scheme** (`_scrml_url_shape_ok` :234; same file as the attribute guard). Relative URLs and all `data:` fail it.
+- ⛑ **SQL text is read by PARSING**: slot extent `sql-lex.ts` `jsInterpolationEnd` (via `scrml-acorn.ts` `ScrmlParser`); `?{}` sites `sqlSitesInExpressionText`; the emitted driver call is judged at every lowering (`judgeDriverCallDetail`).
+- ⛑ **`__scrml_` is reserved like `_scrml_`**; compiler placeholders carry a per-compilation token (`placeholder-nonce.ts`) and the emit gate refuses any left in an artifact.
+- ⛑ **`is` predicates have ONE lowering** — `codegen/is-predicate-lowering.ts`.
+
+## Map Index (counts refreshed at `125486345`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | updated | +6 src files (256 FACTS files); NEW inventories: URL scheme guard, one SQL reader, reserved `__scrml_` + nonce + emit gate, `is` lowering, commit point |
+| dependencies.map.md  | updated | 0 npm changes; edges to the 5 new modules |
+| schema.map.md        | updated | +5 shapes (`DriverCallJudgement`, `ProgramStatementRefusal`, `ExprTextSqlSite`, `CompileResult.artifactsWritten`, `DriverCallVerdict` +`not-admitted`) |
+| config.map.md        | updated | no new env var |
+| build.map.md         | updated | CI bootstrap-conformance gate step; no-write-on-error at every command |
+| error.map.md         | updated | 0 new codes; E-CODEGEN-INVALID-LOGIC placeholder gate; refusal posture now general |
+| test.map.md          | updated | 1,645 test files (+10); conformance 1396 (+5) |
+| auth.map.md          | updated | URL scheme guard; reserved `__scrml_`; refusals no longer bypassable by ignoring exit code |
+| domain.map.md        | updated | §2.2.1 commit point, §5.2 rule 3, §53.6.1 `url` |
+| infra.map.md         | updated | CI gate step |
+| migrations.map.md    | updated | zero diff note |
+| non-compliance.report.md | updated | S457 pass |
+
 ## S456 — READ FIRST (facts at `ba2712973`; supersedes the S455 block below where it conflicts)
 
 - ⛑ **Program-body SQL is a CLOSED statement + lexical allow-list** (database compilations only): one statement per `?{}` (§8.1.2), admitted statement kinds from `schema-differ.js` `programStatementVerdicts`, a body outside the lexical subset is refused. A relation carrying `tenant_id` outside the compilation tenant set = `E-TENANT-UNDECLARED`.
@@ -2513,6 +2552,14 @@ that is precisely why they went stale twice in a row.** non-compliance.report.md
 
 | If your task is about… | Read |
 |---|---|
+| **⛑ S457 — A DATA-SUPPLIED URL ATTRIBUTE (`href`/`src`/`action`/`srcset`/…) set to `about:blank` at runtime, a `url-guard` log line, or adding a NEW emitter that writes an attribute** | `runtime-url-guard.js` `_scrml_safe_url` :208 (one reader for runtime + compile time); decide-to-wrap via `codegen/url-attr-guard.ts` (`dynamicUrlAttrNeedsGuard` :34 / `quotedUrlAttrNeedsGuard` :39 / `wrapUrlGuard` :44). Every emitter must call it — current list in structure.map.md `## S457` URL inventory (html, bindings, event-wiring, variant-guard, each, lift ×6, ssr-render). Runtime chunk `urlguard`, pulled by `emit-client.ts:3062`. |
+| **⛑ S457 — `string(url)` accepting/refusing a value (relative URL, `javascript:`, `data:`), or a server/worker/library/tool bundle calling an undefined `_scrml_url_shape_ok`** | `runtime-url-guard.js` `_scrml_url_shape_ok` :234; compile-time literal zone `type-system.ts:1563`; runtime check `codegen/emit-predicates.ts` (`URL_SHAPE_FN` :56, `SERVER_URL_SHAPE_HELPER` :65, `needsUrlShapeHelper` :72), inlined at `emit-server.ts:1509`, `emit-worker.ts:113`, `emit-library.ts:458`, `emit-tool.ts:390`. |
+| **⛑ S457 — WHERE A `${…}` SLOT OR A `?{}` SITE ENDS in text (any reader of SQL/expression text), or `rewriteSqlRefs` lowering something the checks skipped** | Parse, don't scan: `codegen/sql-lex.ts` `jsInterpolationEnd` :69 (uses `scrml-acorn.ts` `ScrmlParser` :130); sites: `sql-in-expression-text.ts` `sqlSitesInExpressionText` :213; `rewrite.ts` `rewriteSqlRefs` :576 lowers exactly those sites. Do not add a regex or hand scanner. |
+| **⛑ S457 — a program-body SQL refusal (`E-SQL-MULTIPLE-STATEMENTS` / `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED` / `E-TENANT-UNDECLARED`) that the compile-time check missed but the emitted driver call sends** | `codegen/sql-one-statement-guard.ts` `judgeDriverCallDetail` :298 at EVERY lowering (`rewrite.ts` :663/:719, `emit-logic.ts` :3792) under the policy `codegen/index.ts:2366`; refusals recorded `recordProgramStatementRefusal` :241, drained `codegen/index.ts` :3292/:4344. |
+| **⛑ S457 — `ReferenceError: __scrml_…__ is not defined` in an artifact, an author name starting `__scrml_`, or adding a NEW compiler placeholder** | Name it via `placeholder-nonce.ts` (`placeholderName` :98 / `placeholderPrefix` :103 — carries the per-compilation token); author names refused by `validators/reserved-prefix.ts` (`RESERVED_NAME_PREFIXES` :94); any un-lowered placeholder is refused by `codegen/validate-emit.ts` `validateEmittedArtifact` :82 (`E-CODEGEN-INVALID-LOGIC`). |
+| **⛑ S457 — `is some` / `is not` / `is .Variant` lowering, esp. inside a block-bodied callback or object method** | `codegen/is-predicate-lowering.ts` — `lowerPresenceCheck` :54 / `lowerAbsenceCheck` :60 / `lowerVariantCheck` :70 (structured, `emit-expr.ts`), `lowerIsPlaceholders` :236 (string path, `rewrite.ts` :2903/:2989). One definition — change it there. |
+| **⛑ S457 — files written (or not) after a failed compile; `artifactsWritten`; "No files were written"; `dev` serving the error; a NEW pre-write check** | `api.js` commit point: `hasFatalBeforeWrite` :3718 -> staged writes committed :4351. A new pre-write check must run before :4351. `commands/refusal-gate.js` holds only `noFilesWrittenLine` :38 (the code list is retired). Readers: `compile.js:585`, `build.js:1425`, `serve.js:226`. |
+| **⛑ S457 — CI failing "Bootstrap conformance report current"** | `.github/workflows/ci.yml` `gate` step (PR-only; fires when the PR touches `conformance/cases/**` or `compiler/self-host-v2/**`). Fix: `bun scripts/bootstrap-conformance.ts --write`. |
 | **⛑ S456 — PROGRAM-BODY SQL: a `?{}` refused as `E-SQL-MULTIPLE-STATEMENTS` / `E-SQL-QUERY-NOT-READABLE` / `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED` / `E-TENANT-UNDECLARED`, a statement kind not on the allow-list, a body outside the closed lexical subset, or ANY reader that splits `${…}` slots in SQL text** | ONE token walk, ONE slot reader. Compile side: `schema-differ.js` `programStatementVerdicts` :3967 / `programStatementCount` :4010 over module-local `programSqlTokens` :4056; `sql-one-statement.ts` (`forEachProgramBodySql` :50, `programBodyMultipleStatements` :93); `tenant-undeclared.ts` (`programBodyUndeclaredTenantTables` :117); expression-text `?{}` via `sql-in-expression-text.ts` `scanExpressionTextForSql` :43. Slot extent: `codegen/sql-lex.ts` `jsInterpolationEnd` :91 — do not write a second `${}` scanner. Codegen backstop: `codegen/sql-one-statement-guard.ts` `judgeDriverCall` :58 (acorn re-read of the emitted call; fails closed), consumers `rewrite.ts` :614/:619/:659, `emit-logic.ts` :3667/:3777. Wired `api.js:3045`/`:3048`, only when `compilationHasDatabase`. structure.map.md `## S456` inventory. |
 | **⛑ S456 — A CODEGEN REFUSAL THAT DID NOT REACH THE DIAGNOSTICS (exit 0 with a broken/null emit), or adding a new refusal inside a lowering** | `codegen/refused-lowering-errors.ts` — `recordRefusedLowering` :51; reset `codegen/index.ts:1331`, drained `:3266`/`:4317` + `emit-server.ts:1453`. Record there; do not thread a new errors array through opts. Recorder list in structure.map.md `## S456`. |
 | **⛑ S456 — `${}` IN AN ATTRIBUTE THE BROWSER EXECUTES: `on…=` handler text, `href="javascript:…${x}"`, `srcdoc`, `E-ATTR-INTERP-EXECUTABLE`** | `attr-injection-sink.ts` `classifyInterpolatedAttrSink` :201 is THE reader; four callers: VP-3 `runAttributeInterpolation` (`api.js:2338`), post-ME `runExecutableSinkCheck` (`api.js:2995`), component expander (`component-expander.ts:1323`, the only stage that sees raw component-body text), `<each>` lowering (`codegen/emit-each.ts:2741`). Walker is `walkEveryMarkupNode` (`validators/attribute-interpolation.ts:159`), NOT `walkFileAst` (skips `bodyChildren`). |
