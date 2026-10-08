@@ -492,20 +492,52 @@ export function renameUserFnRefsScoped(
 }
 
 /**
- * A host-environment global the emitted code may reference as a free name:
- * an ECMAScript / runtime global (anything on `globalThis` here), or a browser
- * global absent from the compiler's own runtime.
+ * A host-environment global the emitted code may reference as a free name —
+ * a FIXED list committed in source: the ECMAScript standard built-ins and the
+ * web-platform globals. Never probed from the compiler's own process
+ * (`name in globalThis`): that made the output depend on the host running
+ * the compiler (Bun vs Node; a test process with happy-dom globals registered
+ * saw `open` / `event` as globals and emitted different code — S458 review).
+ * A compile is a pure function of its inputs.
+ *
+ * The list MUST hold every host global the compiler itself emits into client
+ * text as a free name outside a call position (the rename runs on the client
+ * buffer only; the runtime is spliced in after it) — e.g. `NodeFilter.SHOW_COMMENT`
+ * (emit-each), `document.…`, `window.…`, `globalThis.…`. Otherwise a user
+ * function of that name would capture the compiler's reference. Server / tool
+ * globals (`process`, `Bun`, `Buffer`) are not here: the client buffer the
+ * rename sees never references them, so a user function named `process` is
+ * renamed in every position like any other user binding. Names that are window
+ * properties but ordinary words (`open`, `close`, `name`, `event`, `status`) are
+ * deliberately absent for the same reason — they are the user's names.
+ * `tests/unit/fn-name-rename-determinism.test.js` pins the host independence.
  */
-const BROWSER_GLOBALS = new Set([
+const ECMASCRIPT_GLOBALS = [
+  "globalThis", "Infinity", "NaN", "undefined", "eval", "isFinite", "isNaN", "parseFloat", "parseInt",
+  "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "unescape",
+  "Object", "Function", "Boolean", "Symbol", "Error", "AggregateError", "EvalError", "RangeError",
+  "ReferenceError", "SyntaxError", "TypeError", "URIError", "Number", "BigInt", "Math", "Date",
+  "String", "RegExp", "Array", "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array",
+  "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array",
+  "BigUint64Array", "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "FinalizationRegistry",
+  "ArrayBuffer", "SharedArrayBuffer", "DataView", "Atomics", "JSON", "Promise", "Proxy", "Reflect",
+  "Intl", "Iterator",
+];
+const WEB_GLOBALS = [
   "window", "document", "navigator", "location", "history", "localStorage", "sessionStorage",
   "performance", "screen", "customElements", "requestAnimationFrame", "cancelAnimationFrame",
-  "requestIdleCallback", "matchMedia", "getComputedStyle", "alert", "confirm", "prompt",
-  "HTMLElement", "Element", "Node", "Event", "CustomEvent", "MutationObserver",
-  "IntersectionObserver", "ResizeObserver", "DOMParser", "FileReader", "Image", "XMLHttpRequest",
-  "WebSocket", "EventSource", "Worker", "indexedDB", "caches", "self", "parent", "top", "frames",
-]);
+  "requestIdleCallback", "cancelIdleCallback", "matchMedia", "getComputedStyle", "alert", "confirm",
+  "prompt", "console", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+  "queueMicrotask", "structuredClone", "atob", "btoa", "URL", "URLSearchParams", "Headers", "Request",
+  "Response", "FormData", "Blob", "File", "AbortController", "AbortSignal", "TextEncoder", "TextDecoder",
+  "HTMLElement", "Element", "Node", "NodeFilter", "Event", "CustomEvent", "PopStateEvent", "EventTarget",
+  "MutationObserver", "IntersectionObserver", "ResizeObserver", "DOMParser", "FileReader", "Image",
+  "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "BroadcastChannel", "MessageChannel", "indexedDB",
+  "caches", "self", "parent", "top", "frames",
+];
+const HOST_GLOBAL_NAMES: ReadonlySet<string> = new Set([...ECMASCRIPT_GLOBALS, ...WEB_GLOBALS]);
 function isHostGlobalName(name: string): boolean {
-  return BROWSER_GLOBALS.has(name) || name in globalThis;
+  return HOST_GLOBAL_NAMES.has(name);
 }
 
 /**
