@@ -3631,7 +3631,12 @@ const _scrml_tracking_stack = [];
  * @param {object|null} capturedBindings — frozen object of lexical bindings at ^{} breakout point
  * @param {object|null} typeRegistry — plain object mapping type names to reflection data
  */
-function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
+function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry, cellKey) {
+  // A cell NAME given to meta.get / meta.set / meta.subscribe is an author name; the
+  // store holds it under the chunk's namespaced key. cellKey is the chunk's own
+  // _scrml_cs_key (passed by the chunk cell-scope wrapper), so these resolve through
+  // the same mapping every compiled cell read uses (S458 review F4).
+  const key = typeof cellKey === "function" ? cellKey : String;
   let cleanupFns = [];
   let currentDeps = new Set();
   let unsubscribers = [];
@@ -3684,6 +3689,11 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
     // A host timer given a string evaluates it as code; only a function is admitted.
     if (typeof callback !== "function") {
       throw new TypeError("meta." + kind + "(ms, callback): callback must be a function");
+    }
+    // ms is a number (§22.5.1); a non-number, NaN, Infinity or negative delay is refused,
+    // never coerced to a 0 ms busy timer.
+    if (typeof ms !== "number" || !(ms >= 0) || ms === Infinity) {
+      throw new TypeError("meta." + kind + "(ms, callback): ms must be a finite number >= 0, got " + ms);
     }
     const id = Object.freeze({ scope: scopeId, timer: ++nextTimerId });
     if (timersClosed || discharging) return id;
@@ -3763,13 +3773,24 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
       globalThis._scrml_reactive_get = trackingGet;
     }
 
+    // meta.bindings for this run. A function is a per-run snapshot: non-reactive entries
+    // are the values current when this run starts (§22.5.2); reactive entries are live
+    // getters. (A plain object is the pre-S458 shape, kept for already-compiled output.)
+    let runBindings = null;
+    try {
+      runBindings = typeof capturedBindings === "function" ? capturedBindings()
+        : capturedBindings != null ? capturedBindings : null;
+    } catch(e) {
+      console.error("[scrml] meta effect bindings error in " + scopeId + ":", e);
+    }
+
     // Build the meta API object for this run.
     // meta.cleanup() collects cleanup callbacks for the current run (not scope-level).
     // meta.get uses trackingGet so reads inside fn body are auto-tracked.
     const meta = {
-      get: trackingGet,
-      set: _scrml_reactive_set,
-      subscribe: _scrml_reactive_subscribe,
+      get: function(name) { return trackingGet(key(name)); },
+      set: function(name, value) { return _scrml_reactive_set(key(name), value); },
+      subscribe: function(name, callback) { return _scrml_reactive_subscribe(key(name), callback); },
       emit: function(htmlString) { _scrml_meta_emit(scopeId, htmlString); },
       cleanup: function(cleanupFn) { cleanupFns.push(cleanupFn); },
       interval: function(ms, callback) { return startTimer("interval", ms, callback); },
@@ -3777,7 +3798,7 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
       clearInterval: function(id) { stopTimer("interval", id); },
       clearTimeout: function(id) { stopTimer("timeout", id); },
       scopeId: scopeId,
-      bindings: capturedBindings != null ? capturedBindings : null,
+      bindings: runBindings,
       types: {
         reflect: function(name) {
           if (!name || typeof name !== "string") return null;

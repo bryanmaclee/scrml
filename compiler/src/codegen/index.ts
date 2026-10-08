@@ -635,6 +635,9 @@ const CELL_SCOPE_ACCESSORS = [
   "_scrml_engine_clear_named_timer",
   "_scrml_engine_arm_idle_watchdog",
   "_scrml_engine_reset_idle_watchdog",
+  // §22.5.1 — meta.get / meta.set / meta.subscribe take an AUTHOR cell name; the wrapper
+  // hands the runtime THIS chunk's key fn so they resolve exactly as a compiled read does.
+  "_scrml_meta_effect",
 ] as const;
 
 /**
@@ -647,7 +650,7 @@ const CELL_SCOPE_ACCESSORS = [
  */
 const CELL_SCOPE_ACCESSOR_POSITIONS: Record<
   string,
-  "arg0" | "arg01" | "arg2" | "passthrough" | "ssrApply"
+  "arg0" | "arg01" | "arg2" | "passthrough" | "ssrApply" | "keyFnLast"
 > = {
   // BOTH arguments are cell keys — a dirty-propagation edge between two cells.
   _scrml_derived_subscribe: "arg01",
@@ -661,6 +664,8 @@ const CELL_SCOPE_ACCESSOR_POSITIONS: Record<
   // Threads THIS chunk's key fn into the shared apply routine, which STAYS in
   // core (`_scrml_ssr_seed_apply_scoped`); the seed keys are mapped at apply time.
   _scrml_ssr_seed_apply: "ssrApply",
+  // No key argument: the chunk's key fn is appended as the 5th argument (S458 review F4).
+  _scrml_meta_effect: "keyFnLast",
 };
 
 /** The RHS arrow expression for one `_scrml_cs_<accessor>` prologue wrapper. */
@@ -674,6 +679,8 @@ function cellScopeWrapper(name: string): string {
       return `(n) => ${name}(n)`;
     case "ssrApply":
       return `(skipShell) => _scrml_ssr_seed_apply_scoped(_scrml_cs_key, skipShell)`;
+    case "keyFnLast":
+      return `(s, f, b, t) => ${name}(s, f, b, t, _scrml_cs_key)`;
     default:
       return `(n, ...r) => ${name}(_scrml_cs_key(n), ...r)`;
   }

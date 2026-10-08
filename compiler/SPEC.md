@@ -23106,6 +23106,17 @@ signature only to preserve backward compatibility with existing compiled output.
 are absent, behavior is identical to the pre-Option-D implementation. New compilations SHALL
 always pass all four arguments.
 
+> **impl#1 (S458 final review F4).** (a) A cell name given to `meta.get` / `meta.set` /
+> `meta.subscribe` is the AUTHOR name; impl#1 stores a cell under a per-chunk namespaced
+> key, so the runtime SHALL resolve the name through the same key mapping the chunk's
+> compiled cell reads use. impl#1 routes the call through the chunk's cell-scope wrapper
+> (`_scrml_cs_meta_effect`), which passes the chunk's key function as an optional fifth
+> argument; absent, a name is its own key. (b) The `capturedBindings` argument MAY be a
+> function returning the frozen bindings object; the runtime calls it at the start of
+> every run, which is how §22.5.2's per-run value ("the value that was current when the
+> effect function was invoked for this run") is met. impl#1 emits that form; an object
+> evaluated once at the `^{}` site held the FIRST run's values for every later run.
+
 #### 22.5.1 The `meta` API Object
 
 The runtime SHALL construct a `meta` object and pass it to the effect function on every run.

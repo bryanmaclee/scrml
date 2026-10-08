@@ -107,7 +107,7 @@ describe("meta-integration §1: runtime ^{} → _scrml_meta_effect", () => {
     expect(fatalErrors).toHaveLength(0);
 
     // ScopeId should follow the pattern "_scrml_meta_<integer>"
-    expect(clientJs).toMatch(/_scrml_meta_effect\("_scrml_meta_[0-9a-z]{8}_\d+"/);
+    expect(clientJs).toMatch(/_scrml_(?:cs_)?meta_effect\("_scrml_meta_[0-9a-z]{8}_\d+"/);
   });
 
   test("_scrml_meta_effect wraps a function(meta) callback", () => {
@@ -333,7 +333,7 @@ p "second"
     expect(fatalErrors).toHaveLength(0);
 
     // Count occurrences of _scrml_meta_effect(
-    const matches = (clientJs.match(/_scrml_meta_effect\(/g) || []).length;
+    const matches = (clientJs.match(/_scrml_(?:cs_)?meta_effect\("/g) || []).length;
     expect(matches).toBe(2);
   });
 
@@ -353,7 +353,7 @@ p "second"
     expect(fatalErrors).toHaveLength(0);
 
     // Extract all scopeIds from the output
-    const scopeIdMatches = clientJs.match(/_scrml_meta_effect\("(_scrml_meta_[0-9a-z]{8}_\d+)"/g) || [];
+    const scopeIdMatches = clientJs.match(/_scrml_(?:cs_)?meta_effect\("(_scrml_meta_[0-9a-z]{8}_\d+)"/g) || [];
     expect(scopeIdMatches.length).toBe(2);
 
     // ScopeIds must be distinct

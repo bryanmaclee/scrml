@@ -938,7 +938,11 @@ function emitCapturedBindings(node: any): string {
   }
 
   if (props.length === 0) return "null";
-  return ["Object.freeze({", props.join(",\n"), "})"].join("\n");
+  // A thunk, called by the runtime at the start of EVERY run: §22.5.2 "For non-`@var`
+  // bindings: `meta.bindings.varName` SHALL return the value that was current when the
+  // effect function was invoked for this run." An object literal evaluated once at the
+  // `^{}` site froze the FIRST run's values for every later run (S458 review F4).
+  return ["() => Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
 /**

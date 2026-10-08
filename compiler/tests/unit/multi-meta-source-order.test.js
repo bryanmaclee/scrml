@@ -71,7 +71,7 @@ describe("Multi-top-level `^{}` source-order (SPEC §22.3)", () => {
   test("three runtime blocks emit three _scrml_meta_effect calls", () => {
     const { clientJs } = compileSource(THREE_RUNTIME_SRC, "three-runtime");
     expect(clientJs).toBeTruthy();
-    const matches = clientJs.match(/_scrml_meta_effect\("_scrml_meta_[0-9a-z]{8}_\d+"/g) || [];
+    const matches = clientJs.match(/_scrml_(?:cs_)?meta_effect\("_scrml_meta_[0-9a-z]{8}_\d+"/g) || [];
     expect(matches.length).toBe(3);
   });
 
@@ -90,7 +90,7 @@ describe("Multi-top-level `^{}` source-order (SPEC §22.3)", () => {
 
   test("each block gets a unique _scrml_meta_N scopeId", () => {
     const { clientJs } = compileSource(THREE_RUNTIME_SRC, "unique-ids");
-    const idMatches = [...clientJs.matchAll(/_scrml_meta_effect\("(_scrml_meta_[0-9a-z]{8}_\d+)"/g)];
+    const idMatches = [...clientJs.matchAll(/_scrml_(?:cs_)?meta_effect\("(_scrml_meta_[0-9a-z]{8}_\d+)"/g)];
     const ids = idMatches.map(m => m[1]);
     expect(ids.length).toBe(3);
     expect(new Set(ids).size).toBe(3);
@@ -113,7 +113,7 @@ describe("Multi-top-level `^{}` source-order (SPEC §22.3)", () => {
 <p>ready: \${@ready}</p>
 </program>`;
     const { clientJs } = compileSource(src, "single-block");
-    const matches = clientJs.match(/_scrml_meta_effect\(/g) || [];
+    const matches = clientJs.match(/_scrml_(?:cs_)?meta_effect\("/g) || [];
     expect(matches.length).toBe(1);
   });
 
@@ -132,7 +132,7 @@ describe("Multi-top-level `^{}` source-order (SPEC §22.3)", () => {
     const { clientJs, errors } = compileSource(src, "lifecycle-idiom");
     expect(errors.filter(e => e.severity === "error" || e.severity === undefined).length).toBe(0);
     expect(clientJs).toBeTruthy();
-    const matches = clientJs.match(/_scrml_meta_effect\(/g) || [];
+    const matches = clientJs.match(/_scrml_(?:cs_)?meta_effect\("/g) || [];
     expect(matches.length).toBe(2);
     // Verify init call is emitted before mount call (names get mangled via
     // genVar; search for the mangled invocation inside the meta_effect bodies).
