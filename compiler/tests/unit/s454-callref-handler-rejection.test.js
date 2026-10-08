@@ -62,10 +62,11 @@ function emit(markup, pre = PRE) {
   writeFileSync(input, `<program>\n${pre}  ${markup}\n  <p id="o">\${@x} \${@y}</p>\n</program>\n`);
   try {
     const r = compileScrml({ inputFiles: [input], write: true, outputDir: outDir, log: () => {} });
-    const p = resolve(outDir, "app.client.js");
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+    // in-memory client output (a clean compile writes the same codegen).
     return {
       errs: (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code),
-      js: existsSync(p) ? readFileSync(p, "utf8") : "",
+      js: r.outputs.get(input)?.clientJs ?? "",
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

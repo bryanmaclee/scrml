@@ -21,11 +21,14 @@ function compile(source, parser) {
   const r = compileScrml({ inputFiles: [f], outputDir: out, write: true, log: () => {}, parser: parser ?? null });
   const errors = r.errors ?? [];
   const warnings = r.warnings ?? [];
-  const read = (ext) => (existsSync(join(out, `c-${n}.${ext}`)) ? readFileSync(join(out, `c-${n}.${ext}`), "utf8") : "");
-  const m = read("html").match(/<body>([\s\S]*?)<script/);
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file —
+  // the cases that report one are read from the in-memory outputs.
+  if (errors.length > 0) expect(existsSync(out)).toBe(false);
+  const output = r.outputs.get(f) ?? {};
+  const m = (output.html ?? "").match(/<body>([\s\S]*?)<script/);
   return {
     errors, codes: errors.map((e) => e.code), warns: warnings.map((w) => w.code),
-    body: (m ? m[1] : "").replace(/\s+/g, " ").trim(), client: read("client.js"),
+    body: (m ? m[1] : "").replace(/\s+/g, " ").trim(), client: output.clientJs ?? "",
   };
 }
 

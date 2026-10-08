@@ -66,9 +66,13 @@ function compileOne(source) {
       !String(e.code ?? "").startsWith("W-") &&
       !String(e.code ?? "").startsWith("I-"),
   );
-  const runtime = result.runtimeFilename
-    ? readFileSync(join(outDir, result.runtimeFilename), "utf8")
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file — the
+  // refusal case (E-SYNTAX-002) has no runtime on disk and asserts on diagnostics.
+  const runtimePath = result.runtimeFilename ? join(outDir, result.runtimeFilename) : "";
+  const runtime = runtimePath && existsSync(runtimePath)
+    ? readFileSync(runtimePath, "utf8")
     : "";
+  if (fatal.length > 0) expect(existsSync(outDir)).toBe(false);
   const sfPath = join(outDir, "serverfns.json");
   const serverFns = existsSync(sfPath)
     ? JSON.parse(readFileSync(sfPath, "utf8"))

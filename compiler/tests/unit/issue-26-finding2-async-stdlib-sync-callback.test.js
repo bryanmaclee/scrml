@@ -50,20 +50,9 @@ function compileServer(name, src) {
   writeFileSync(inputPath, src);
   const outDir = join(dir, "dist");
   const result = compileScrml({ inputFiles: [inputPath], outputDir: outDir, write: true, log: () => {} });
-  function walk(d) {
-    if (!existsSync(d)) return [];
-    const out = [];
-    for (const e of readdirSync(d)) {
-      const p = join(d, e);
-      if (statSync(p).isDirectory()) out.push(...walk(p));
-      else out.push(p);
-    }
-    return out;
-  }
-  let serverJs = "";
-  for (const f of walk(outDir)) {
-    if (f.endsWith(".server.js") && !f.includes("/_scrml/")) serverJs = readFileSync(f, "utf8");
-  }
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file, and these
+  // fixtures report one (E-PA-002, no database file) — read the in-memory server output.
+  const serverJs = result.outputs.get(inputPath)?.serverJs ?? "";
   const errors = (result.errors || []).filter(e => e.severity !== "warning" && e.code !== "E-PA-002");
   return { serverJs, codes: errors.map(e => e.code) };
 }
