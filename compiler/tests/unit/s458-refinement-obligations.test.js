@@ -63,7 +63,7 @@ function clientFn(js, name) {
   const cells = new Map();
   // S458 2a-fix F3 — struct judges are hoisted functions; carry their definitions along.
   const defs = [];
-  for (const m of js.matchAll(/function _scrml_judge_[A-Za-z0-9_]+\(v\) \{/g)) {
+  for (const m of js.matchAll(/function _scrml_judge_[A-Za-z0-9_]+\([^)]*\) \{/g)) {
     let j = m.index + m[0].length, d = 1;
     for (; j < js.length && d > 0; j++) { if (js[j] === "{") d++; else if (js[j] === "}") d--; }
     defs.push(js.slice(m.index, j));

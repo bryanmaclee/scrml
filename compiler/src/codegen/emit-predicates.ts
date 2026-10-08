@@ -179,7 +179,7 @@ export function judgeExpr(predicate: PredicateExpr, valueExpr: string, shape: Ju
     if (at < wrap.length) {
       if (wrap[at] === "nullable") return `(${v} === null || ${v} === undefined || ${inner(v, at + 1)})`;
       const el = `_scrml_el${at}`;
-      return `(Array.isArray(${v}) && ${v}.every((${el}) => ${inner(el, at + 1)}))`;
+      return `(Array.isArray(${v}) && ${JUDGE_EACH}(${v}, (${el}) => ${inner(el, at + 1)}))`;
     }
     const guard = baseTypeGuard(shape.baseType, v);
     const pred = predicateToJsExpr(predicate, v);
@@ -202,8 +202,9 @@ export function judgeTypeExpr(j: JudgeType, valueExpr: string, depth = 0): strin
       return guard ? `(${guard} && ${pred})` : pred;
     }
     case "array": {
+      // S459 — every slot, holes included (a hole reads as `not`, §42; `.every` skips holes)
       const el = `_scrml_el${depth}`;
-      return `(Array.isArray(${v}) && ${v}.every((${el}) => ${judgeTypeExpr(j.of, el, depth + 1)}))`;
+      return `(Array.isArray(${v}) && ${JUDGE_EACH}(${v}, (${el}) => ${judgeTypeExpr(j.of, el, depth + 1)}))`;
     }
     case "nullable":
       return `(${v} === null || ${v} === undefined || ${judgeTypeExpr(j.of, v, depth)})`;
@@ -249,6 +250,18 @@ export function describeJudgeType(j: JudgeType): string {
 // ---------------------------------------------------------------------------
 
 const _judgeDefs = new Map<string, string>();
+
+// S459 — an array judge visits EVERY slot: `Array.prototype.every` skips holes, but
+// a hole reads as `not` (§42), so `number(>0)[]` must not admit `[1, , 3]`.
+// Hoisted like the struct judges (appended to each artifact that calls it).
+const JUDGE_EACH = "_scrml_judge_each";
+_judgeDefs.set(JUDGE_EACH, [
+  "// §53 every slot of an array satisfies its element judge (a hole reads as `not`, §42)",
+  "function _scrml_judge_each(a, ok) {",
+  "  for (let i = 0; i < a.length; i++) if (!ok(a[i])) return false;",
+  "  return true;",
+  "}",
+].join("\n"));
 
 /** A field read `obj.field` (or `obj["field"]`) as JS text. */
 function fieldAccess(obj: string, field: string): string {

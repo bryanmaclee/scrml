@@ -140,7 +140,8 @@ describe("F2 — refined cells register their judge; the shipped runtime carries
     expect(runtime).toContain("function _scrml_refine_check(");
     expect(runtime).toContain("function _scrml_deep_reactive(");
     // the setter judges FIRST (before any timing rule / commit), and the proxy hooks are installed
-    expect(runtime).toMatch(/_scrml_reactive_set = function \(name, value\) \{\n\s*if \(_scrml_refine_judges\[name\] !== undefined\) value = _scrml_refine_check\(name, value\);/);
+    // (S459 r3: the copy-on-write fact is taken — and cleared — by every set, first)
+    expect(runtime).toMatch(/_scrml_reactive_set = function \(name, value\) \{\n\s*const last = _scrml_refine_last_path;\n\s*_scrml_refine_last_path = null;\n\s*if \(_scrml_refine_judges\[name\] !== undefined\) value = _scrml_refine_check\(name, value, last\);/);
     expect(runtime).toContain("_scrml_deep_reactive = function (value) {");
   });
 

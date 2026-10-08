@@ -39954,6 +39954,20 @@ The assignment is applied if and only if the predicate evaluates to `true`. If t
 evaluates to `false` at runtime, the compiler-generated check SHALL throw a runtime error with
 code `E-CONTRACT-001-RT` before the assignment is applied. The variable retains its prior value.
 
+**Arrays of a refined element type (S459).** Every slot of an array is an element. An empty slot
+(left by lengthening an array, writing past its end, or deleting an element) reads as `not` (§42).
+It is judged as `not` against the element type: `number(>0)[]` does not admit it, and
+`(number(>0) | not)[]` does. This applies whether the array is written whole or changed in place.
+Shortening an array writes no element, so it is not refused by the element type.
+
+> **Provenance:** spec:§42 (absence is `not`) applied to §53.3.1 ("a pure boolean expression over
+> the incoming value at every assignment or binding site") · review:S459 round-3 MED-2 (impl#1 ran the
+> element judge on a `length` value and refused every `@rows.length = n`; it also admitted holes,
+> because its whole-array judge skipped them) · ruling-pending: S459 PA · supersedes: nothing struck
+> — §53 said nothing about empty slots · **Direction of change: newly-rejecting** for a refined
+> array that gains an empty slot (corpus impact: see the S459 round-3 differential);
+> **newly-accepting** for shortening a refined array of structs.
+
 ### §53.3.4 Type Compatibility
 
 A `number(>0 && <10000)` value IS a `number`. The constrained type is a subtype of the base

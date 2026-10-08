@@ -70,7 +70,7 @@ describe("MED-1 — a refined collection write judges only what it changes", () 
   test("the registration carries a descriptor built from the judge (element, struct fields by a hoisted parts function)", () => {
     const { js, errors } = compile(page(`<ls>: L[] = []\n  function g() {\n    const r = { u: "a", n: 1 }\n    @ls.push(r)\n  }`), "desc");
     expect(errors).toEqual([]);
-    expect(js).toMatch(/_scrml_cs_refine_register\("ls", \{ ok: \(v\) => \(Array\.isArray\(v\) && v\.every\(\(_scrml_el0\) => _scrml_judge_L_[a-z0-9]+\(_scrml_el0\)\)\), el: \{ ok: _scrml_judge_L_[a-z0-9]+, fields: _scrml_judge_parts_L_[a-z0-9]+ \} \}, "L\[\]", "ls"\);/);
+    expect(js).toMatch(/_scrml_cs_refine_register\("ls", \{ ok: \(v\) => \(Array\.isArray\(v\) && _scrml_judge_each\(v, \(_scrml_el0\) => _scrml_judge_L_[a-z0-9]+\(_scrml_el0\)\)\), el: \{ ok: _scrml_judge_L_[a-z0-9]+, fields: _scrml_judge_parts_L_[a-z0-9]+ \} \}, "L\[\]", "ls"\);/);
     expect(js).toMatch(/function _scrml_judge_parts_L_[a-z0-9]+\(\) \{\n  return \{\n    n: \{ ok: \(v\) => \(typeof v === "number" && !Number\.isNaN\(v\) && \(v > 0\)\) \},\n  \};\n\}/);
     expect((js.match(/function _scrml_judge_parts_L_/g) ?? []).length).toBe(1);
   });
@@ -221,5 +221,119 @@ describe("LOW-MED-3 — a union member is never admitted wholesale", () => {
   test("a nullable array is described as the array it is when present", () => {
     const d = judgeDescriptorExpr(judgeTypeOf(U({ kind: "array", element: P(">", 0) }, { kind: "not" })));
     expect(d).toMatch(/^\{ ok: \(v\) => \(v === null \|\| v === undefined \|\| .*\), el: \{ ok: \(v\) => .*v > 0.* \} \}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S459 round 3
+// ---------------------------------------------------------------------------
+
+describe("r3 HIGH-1 — a copy-on-write delta is trusted only when proven, and only by the set that follows it", () => {
+  const src = page(`<ls>: number(>0)[] = [1, 2]\n  <draft>: number[] = []\n  <other>: number = 0\n  function w(i, v) { @draft[i] = v }`);
+  const cell = (rt, name) => Object.keys(rt.state).find((k) => k === name || k.endsWith("$" + name));
+
+  test("an edit buffer: path-edited, then pushed in place, then committed — the commit is judged whole", () => {
+    const { js, runtime, errors } = compile(src, "lp");
+    expect(errors).toEqual([]);
+    const rt = load(js, runtime);
+    const ls = rt.key("ls"), draft = cell(rt, "draft");
+    rt.set(draft, rt.state[ls]);                                  // @draft = @ls
+    rt.set(draft, rt.deepSet(rt.state[draft], [0], 5));           // @draft[0] = 5
+    rt.state[draft].push(-5);                                     // @draft.push(-5) (unrefined cell: unjudged)
+    expect(throwsContract(() => rt.set(ls, rt.state[draft]))).toBe(true); // @ls = @draft
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([1, 2]);
+  });
+
+  test("a delta not set at once is discarded by the next set of ANY cell; a result changed off the path is not a path update", () => {
+    const { js, runtime } = compile(src, "lp2");
+    const rt = load(js, runtime);
+    const ls = rt.key("ls"), other = cell(rt, "other");
+    const counts = {};
+    instrument(rt.judges[ls].d, counts, "ls");
+    const r = rt.deepSet(rt.state[ls], [0], 7);
+    rt.set(other, 1);                                             // an unrelated set consumes the fact
+    rt.set(ls, r);
+    expect(counts.ls).toBe(1);                                    // judged whole
+    const r2 = rt.deepSet(rt.state[ls], [1], 8);
+    r2.push(-1);                                                  // the result changed off the path
+    expect(throwsContract(() => rt.set(ls, r2))).toBe(true);      // not proven -> judged whole -> refused
+    expect(counts.ls).toBe(2);
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([7, 2]);
+    rt.set(ls, rt.deepSet(rt.state[ls], [1], 9));                 // a genuine path update: judged at the path
+    expect(counts.ls).toBe(2);
+    expect(counts["ls.el"]).toBe(1);
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([7, 9]);
+  });
+});
+
+describe("r3 MED-2 — `length` is not an element", () => {
+  test("shortening is admitted (path update and in place); lengthening leaves holes, judged as `not`", () => {
+    const { js, runtime, errors } = compile(page(`<rows>: L[] = []\n  <ls>: number(>0)[] = [1, 2, 3]\n  <o>: (number(>0) | not)[] = [1]\n  function w(n) { @rows.length = n }`), "len");
+    expect(errors).toEqual([]);
+    const rt = load(js, runtime);
+    const rows = rt.key("rows"), ls = rt.key("ls"), o = rt.key("o");
+    rt.set(rows, [{ u: "a", n: 1 }, { u: "b", n: 2 }]);
+    rt.set(rows, rt.deepSet(rt.state[rows], ["length"], 1));
+    expect(rt.state[rows].length).toBe(1);
+    rt.set(ls, rt.deepSet(rt.state[ls], ["length"], 0));
+    expect(rt.state[ls].length).toBe(0);
+    rt.set(ls, [1, 2]);
+    expect(throwsContract(() => rt.set(ls, rt.deepSet(rt.state[ls], ["length"], 4)))).toBe(true);
+    expect(throwsContract(() => { rt.state[ls].length = 4; })).toBe(true);
+    expect(throwsContract(() => rt.set(ls, [1, , 3]))).toBe(true); // a hole is `not` in a whole value too
+    rt.state[ls].length = 1;
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([1]);
+    rt.state[o].length = 3;                                       // `not` inhabits this element type
+    expect(rt.state[o].length).toBe(3);
+  });
+});
+
+describe("r3 LOW-MED-3 — an element removed in place leaves the cell", () => {
+  test("shift / pop / splice / length / overwrite release it; a duplicate keeps it held", () => {
+    const { js, runtime } = compile(page(`<rows>: L[] = []`), "release");
+    const rt = load(js, runtime);
+    const k = rt.key("rows");
+    const fresh = () => rt.set(k, [{ u: "a", n: 1 }, { u: "b", n: 2 }, { u: "c", n: 3 }]);
+    const removedThenWrite = (remove, pick) => { fresh(); const r = rt.state[k][pick]; remove(); r.n = -5; return r.n; };
+    expect(removedThenWrite(() => rt.state[k].shift(), 0)).toBe(-5);
+    expect(removedThenWrite(() => rt.state[k].pop(), 2)).toBe(-5);
+    expect(removedThenWrite(() => rt.state[k].splice(1, 1), 1)).toBe(-5);
+    expect(removedThenWrite(() => { rt.state[k].length = 1; }, 2)).toBe(-5);
+    expect(removedThenWrite(() => { rt.state[k][0] = { u: "q", n: 9 }; }, 0)).toBe(-5);
+    // still in the cell: refused
+    fresh();
+    expect(throwsContract(() => { rt.state[k].shift(); rt.state[k][0].n = -5; })).toBe(true);
+    const dup = { u: "d", n: 4 };
+    rt.set(k, [dup, dup]);
+    rt.state[k].shift();
+    expect(throwsContract(() => { rt.state[k][0].n = -5; })).toBe(true);
+  });
+});
+
+describe("r3 LOW-4 — under debounced= the committed value stays held until the new one commits", () => {
+  test("an in-place write to the still-committed value during the window is judged", () => {
+    const { js, runtime, errors } = compile(page(`<rows debounced=50ms>: L[] = [{ u: "a", n: 1 }]`), "deb");
+    expect(errors).toEqual([]);
+    const rt = load(js, runtime);
+    const k = rt.key("rows");
+    const e = rt.state[k][0];
+    rt.set(k, [{ u: "b", n: 2 }]);                                // scheduled, not committed
+    expect(rt.state[k][0].u).toBe("a");
+    expect(throwsContract(() => { e.n = -5; })).toBe(true);
+    expect(throwsContract(() => rt.set(k, [{ u: "c", n: -1 }]))).toBe(true); // judged when written, too
+  });
+
+  test("throttled=: the leading write commits (and is held) at once; a write inside the window is held back like a debounced one", () => {
+    const { js, runtime, errors } = compile(page(`<rows throttled=1000ms>: L[] = [{ u: "a", n: 1 }]`), "thr");
+    expect(errors).toEqual([]);
+    const rt = load(js, runtime);
+    const k = rt.key("rows");
+    rt.set(k, [{ u: "b", n: 2 }]);                                // leading: committed now
+    expect(rt.state[k][0].u).toBe("b");
+    const e = rt.state[k][0];
+    expect(throwsContract(() => { e.n = -5; })).toBe(true);
+    rt.set(k, [{ u: "c", n: 3 }]);                                // inside the window: held back
+    expect(rt.state[k][0].u).toBe("b");
+    expect(throwsContract(() => { e.n = -5; })).toBe(true);       // the committed value is still judged
   });
 });
