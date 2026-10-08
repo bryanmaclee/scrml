@@ -1,0 +1,10 @@
+<program>
+${
+  type Link:struct = { u: string(url), n: number(>0) }
+  function mk() {
+    const l: Link = { u: "javascript:alert(1)", n: -1 }
+    return l
+  }
+}
+<p>${mk().u}</p>
+</program>

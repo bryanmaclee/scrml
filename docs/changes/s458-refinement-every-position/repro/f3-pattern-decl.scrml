@@ -1,0 +1,9 @@
+<program>
+${
+  function pick(v) {
+    let e: string(pattern(/^[^@]+@[^@]+$/)) = v
+    return e
+  }
+}
+<p>${pick("a@b")}</p>
+</program>

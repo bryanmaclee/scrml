@@ -1,0 +1,10 @@
+<program>
+${
+  function pick() {
+    let n: number(min(0) && max(100)) = 500
+    let s: string.req.length(>=2) = ""
+    return n
+  }
+}
+<p>${pick()}</p>
+</program>

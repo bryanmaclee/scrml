@@ -1,0 +1,11 @@
+<program>
+${
+  type Role:enum = { Admin, Editor, Viewer }
+  type Post:struct = { title: string, role: Role oneOf([.Admin, .Editor]) }
+  function mk() {
+    const bad: Post = { title: "x", role: .Viewer }
+    return bad
+  }
+}
+<p>${mk().title}</p>
+</program>
