@@ -71,3 +71,9 @@
 - `when @t changes { … }` anywhere in a component body fails the component re-parse with E-COMPONENT-021 on
   540bc7f1e and head alike (pre-existing) — the when-body (asProgram) path is covered by unit only.
 - Probe f1 executed: base E-SCOPE-001 + empty output; head `true,none,true`.
+
+## 2026-10-08 — step 4: N1 — one E-ATTR-010 per refused component bind target
+- Commit 3 (F1) gate: pass (pre-commit). TAB element-form bind check (which offered a "state field path") is skipped
+  on a component call site; CE owns it (one message naming `bind:n=@cell`). A refused bind prop reads `not` in the
+  body (recovery: no cascading undeclared-`n` E-SCOPE-001) and is not re-judged from `_callSiteProps`. Unit: 4 forms
+  -> exactly `["E-ATTR-010"]`.

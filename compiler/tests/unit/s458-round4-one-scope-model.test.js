@@ -174,3 +174,24 @@ describe("F1 — scrml operators in unstructured text parse with the expression 
     expect(rewriteExprArrowBody('x => { return "(\\"a\\") is some" }')).toBe('x => { return "(\\"a\\") is some" }');
   });
 });
+
+describe("N1 — a component bind target that is not a cell is refused ONCE", () => {
+  test.each([["bind:n=v"], ['bind:n="s"'], ["bind:n=@v.k"], ["bind:n=${@v + 1}"]])("%s → exactly one diagnostic, E-ATTR-010", (attr) => {
+    const r = compile(`<program>
+<v> = 1
+const C = <div props={ bind n: number }>\${n}</>
+<C ${attr}/>
+</program>`);
+    expect(r.codes).toEqual(["E-ATTR-010"]);
+  });
+  test("the bare-identifier message names the §15.11.1 form and never offers a state path", () => {
+    const r = compile(`<program>
+<v> = 1
+const C = <div props={ bind n: number }>\${n}</>
+<C bind:n=v/>
+</program>`);
+    const msg = r.errors.map((e) => e.message).join("\n");
+    expect(msg).toContain("bind:n=@cell");
+    expect(msg).not.toContain("state field path");
+  });
+});

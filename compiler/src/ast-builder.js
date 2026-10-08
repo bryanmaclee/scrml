@@ -4228,10 +4228,13 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
           };
 
           // §5.4: bind: directive validation
-          // §15.11.1: on component call sites (isComponent=true), defer E-ATTR-011 for
-          // unrecognized bind: names — CE validates against propsDecl (E-COMPONENT-013).
-          if (name.startsWith("bind:")) {
-            if (!BIND_DIRECTIVES.has(name) && !isComponent) {
+          // §15.11.1: on a component call site (isComponent=true) BOTH checks belong to the
+          // expander: the bind NAME against propsDecl (E-COMPONENT-013), and the bind
+          // TARGET against `bind:prop=@cell` (E-ATTR-010, one message — S458 round 4 N1;
+          // the element-form target check below offers a state path, which would
+          // contradict it).
+          if (name.startsWith("bind:") && !isComponent) {
+            if (!BIND_DIRECTIVES.has(name)) {
               errors.push(new TABError(
                 "E-ATTR-011",
                 `E-ATTR-011: \`${name}\` is not a supported bind directive. ` +

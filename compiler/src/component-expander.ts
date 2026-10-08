@@ -3123,6 +3123,11 @@ function expandComponentNode(
     if (attr.name.startsWith("bind:")) {
       if (attr.value && attr.value.kind === "variable-ref" && attr.value.name.startsWith("@")) {
         props.set(attr.name.slice(5), attr.value.name);
+      } else if (attr.value && attr.value.kind !== "absent") {
+        // S458 (fourth round, N1) — a bind target that is not a cell is refused ONCE, below
+        // (E-ATTR-010). For recovery the prop reads as absent (`not`) in the body, so the
+        // refusal is not followed by cascading "undeclared `n`" diagnostics.
+        props.set(attr.name.slice(5), "null");
       }
       continue;
     }
@@ -3330,9 +3335,9 @@ function expandComponentNode(
           if (attr.value.kind === "variable-ref" && !attr.value.name.startsWith("@")) {
             ceErrors.push(makeCEError(
               "E-ATTR-010",
-              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable. ` +
-              `\`${attr.value.name}\` is not reactive. ` +
-              `Use \`@${attr.value.name}\` or remove the \`bind:\` prefix.`,
+              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
+              `\`bind:${propName}=@cell\`). \`${attr.value.name}\` is not a cell. ` +
+              `Bind a cell (\`@${attr.value.name}\` if that is the cell you mean), or pass the value without \`bind:\`.`,
               attrSpan,
             ));
           } else if (attr.value.kind === "variable-ref" && !/^@[A-Za-z_$][\w$]*$/.test(attr.value.name)) {
@@ -3459,8 +3464,13 @@ function expandComponentNode(
   );
   const isCallSiteDeclaredProp = (a: AttrNode): boolean =>
     rootDeclaredPropNames.has(a.name.startsWith("bind:") ? a.name.slice(5) : a.name);
+  // A `bind:` whose target is not an `@` cell was already refused (E-ATTR-010, one
+  // message — S458 N1); it is not handed on to be judged again as an expression.
+  const isRefusedBindTarget = (a: AttrNode): boolean =>
+    a.name.startsWith("bind:") && !!a.value && a.value.kind !== "absent"
+    && !(a.value.kind === "variable-ref" && (a.value as { name: string }).name.startsWith("@"));
   const callSiteProps = callerAttrs.filter(
-    (a: AttrNode) => a && a.name && a.name !== "class" && isCallSiteDeclaredProp(a),
+    (a: AttrNode) => a && a.name && a.name !== "class" && isCallSiteDeclaredProp(a) && !isRefusedBindTarget(a),
   );
   const callerNonClassAttrs = callerAttrs.filter(
     (a: AttrNode) => a && a.name !== "class" && !isCallSiteDeclaredProp(a),
