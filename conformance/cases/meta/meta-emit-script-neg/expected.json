@@ -1,0 +1,11 @@
+{
+  "id": "meta-emit-script-neg",
+  "description": "§22.4.1 (S457) — emit() output is held to the rules source is held to. A `<script>` element in emitted markup is E-SCRIPT-001, exactly as in source (§4.17). Before S457 the re-parse of emit() output did not apply the block-splitter's `<script>` rejection and the element reached the emitted HTML verbatim.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "expect": {
+    "codes": ["E-SCRIPT-001"],
+    "notCodes": [],
+    "severity": { "E-SCRIPT-001": "error" }
+  }
+}

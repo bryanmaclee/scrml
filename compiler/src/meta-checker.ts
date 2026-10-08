@@ -4,6 +4,7 @@ import type { Span, FileAST, ASTNode, ExprNode, CallExpr, IdentExpr } from "./ty
 // and the scrml-native `"Meta"` spelling — the M5-swap reconciliation).
 import { isMetaKind } from "./types/ast.ts";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { checkMetaBodyNodes, type MetaAllowListContext } from "./meta-allow-list.ts";
 
 /**
  * Meta Checker — Phase separation and reflect() API for ^{} meta contexts.
@@ -159,46 +160,6 @@ export const META_BUILTINS = new Set([
   // use"); META_BUILTINS membership is purely to suppress the redundant
   // "runtime variable" classification.
   "compiler",
-]);
-
-// ---------------------------------------------------------------------------
-// JS-host forbidden identifiers (S134 Bug 17 — runtime-meta scoping fix)
-//
-// JS-host ambient globals that are NOT in scrml-native's meta primitive set
-// (§22.5.1 meta API + §22.4 compile-time API). Per SPEC §22.12 line 14687
-// (S114 Approach C ratification) + §22.5 line 14375 (S114 timer-primitive
-// ratification), referencing any of these identifiers inside a ^{} body — be
-// it compile-time or runtime — SHALL trigger E-META-001.
-//
-// Why a separate set from META_BUILTINS:
-//   META_BUILTINS gates compile-time runtime-variable enforcement (§22.4 / line 1233).
-//   JS_HOST_FORBIDDEN gates the categorical §22.12 constraint that applies regardless
-//   of compile-time vs runtime classification. A runtime ^{} body that uses
-//   the JS-host `bun.eval(...)` surface would otherwise silently pass through
-//   the compile-time-only gate (early-return at line 1091) and runtime-crash
-//   on a ReferenceError.
-//
-// Migration paths:
-//   setInterval / setTimeout / clearInterval / clearTimeout → meta.interval /
-//     meta.timeout / meta.clearInterval / meta.clearTimeout (§22.5.1 / S114).
-//   fetch → server-fn boundary (no client-side direct fetch inside ^{}).
-//   bun / Bun / process / console → not available inside ^{} bodies; if a
-//     legitimate need arises, surface as an Approach C revisit (§22.12 trigger).
-// ---------------------------------------------------------------------------
-
-export const JS_HOST_FORBIDDEN = new Set<string>([
-  // Bun / Node ambient host
-  "bun",
-  "Bun",
-  "process",
-  "console",
-  // JS-host timers (replaced by meta.interval / meta.timeout under §22.5.1)
-  "setInterval",
-  "setTimeout",
-  "clearInterval",
-  "clearTimeout",
-  // JS-host network primitive (replaced by server-fn boundary)
-  "fetch",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1170,117 +1131,198 @@ export function checkMetaBlock(
 }
 
 // ---------------------------------------------------------------------------
-// JS-host globals check (S134 Bug 17 — categorical §22.12 enforcement)
+// §22.12 closed allow-list (S457) — supersedes the S134 deny list
 // ---------------------------------------------------------------------------
 
 /**
- * Check a meta block (compile-time OR runtime) for references to JS-host
- * ambient globals (`bun`, `process`, `setInterval`, `fetch`, etc.).
+ * Check one `^{}` body (compile-time OR runtime) against the CLOSED allow-list of
+ * §22.12 (meta-allow-list.ts). Every violation is an E-META-001 naming the identifier,
+ * member or construct and the allowed set. A refused block is stamped
+ * `_metaAllowListRefused` so meta-eval (Stage 6.5 ME) never executes it.
  *
- * Unlike `checkMetaBlock` (§22.4 compile-time runtime-variable enforcement),
- * this walker is UNCONDITIONAL — it runs on every `^{}` body regardless of
- * compile-time vs runtime classification. Per SPEC §22.12 line 14687 (S114
- * Approach C ratification) and §22.5 line 14375 (S114 timer-primitive
- * ratification), JS-host ambient globals are categorically not in scope inside
- * `^{}` bodies; using them SHALL emit `E-META-001`.
+ * This supersedes the S134 deny list (`JS_HOST_FORBIDDEN` +
+ * `checkMetaBlockForJsHostGlobals`), which named nine host globals and let every other
+ * name through — `globalThis`, `Reflect`, `"".constructor.constructor(…)`,
+ * `emit.constructor` all reached the compiler's host realm.
  *
- * Local declarations inside the body (let/const) shadow JS-host globals and
- * are NOT flagged — they reference the local binding, not the host global.
- * Likewise, JS keywords (e.g. `new`, `typeof`) and the META_BUILTINS set
- * (e.g. `Object`, `JSON`, `reflect`, `emit`) are skipped.
- *
- * Recursive: walks into nested ^{} blocks so a runtime parent containing a
- * compile-time child (or vice versa) checks every body.
+ * Nested `^{}` blocks are walked as part of their outermost block (they see its
+ * locals); `nestedChecked` records them so `findMetaBlocks`' own visit of the nested
+ * node does not report the same violation twice.
  */
-export function checkMetaBlockForJsHostGlobals(
+export function checkMetaBlockAllowList(
   metaNode: LogicNode,
   filePath: string,
   errors: MetaError[],
+  ctx: MetaAllowListContext,
+  nestedChecked: WeakSet<object> = new WeakSet(),
 ): void {
+  if (nestedChecked.has(metaNode)) return;
   const body = metaNode.body;
   if (!Array.isArray(body) || body.length === 0) return;
-
-  // Local declarations inside the body shadow JS-host globals.
-  const metaLocals = collectMetaLocals(body);
-
-  function checkIdent(id: string, span: Span | undefined): void {
-    if (!JS_HOST_FORBIDDEN.has(id)) return;
-    if (JS_KEYWORDS.has(id)) return; // belt-and-suspenders; no overlap today
-    if (META_BUILTINS.has(id)) return; // belt-and-suspenders; no overlap today
-    if (metaLocals.has(id)) return; // user shadowed with local decl — local wins
-
-    const errorSpan = span || metaNode.span || { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span;
-    errors.push(new MetaError(
-      "E-META-001",
-      `E-META-001: JS-host ambient global '${id}' is not available inside ^{} meta blocks. ` +
-      `Per SPEC §22.12 (Approach C), only scrml-native and the enumerated meta primitive set ` +
-      `(reflect / emit / emit.raw / meta.*) are in scope. ` +
-      (id === "setInterval" || id === "setTimeout" || id === "clearInterval" || id === "clearTimeout"
-        ? `Hint: use meta.interval / meta.timeout / meta.clearInterval / meta.clearTimeout (§22.5.1).`
-        : id === "fetch"
-          ? `Hint: move network calls behind a server-fn boundary.`
-          : `Hint: this surface is not available inside ^{} bodies.`),
-      errorSpan,
-    ));
+  markNestedMeta(body, nestedChecked);
+  const fallback = metaNode.span || { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span;
+  const violations = checkMetaBodyNodes(body, ctx, fallback);
+  if (violations.length === 0) return;
+  metaNode._metaAllowListRefused = true;
+  for (const v of violations) {
+    errors.push(new MetaError("E-META-001", v.message, (v.span ?? fallback) as Span));
   }
+}
 
-  function checkNodeIdents(node: LogicNode): void {
-    const nodeAny = node as Record<string, unknown>;
-    const span = (node.span || metaNode.span) as Span | undefined;
+function markNestedMeta(nodes: unknown[], into: WeakSet<object>): void {
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    const node = n as LogicNode;
+    if (isMetaKind(node.kind)) into.add(node);
+    // Total descent (round 3): mark a nested `^{}` wherever it sits, not only under
+    // the four named branch fields — a nested meta in a ternary / match arm / loop of
+    // another shape would otherwise be visited twice by `findMetaBlocks`.
+    forEachChildNode(node as Record<string, unknown>, (child) => markNestedMeta([child], into));
+  }
+}
 
-    // Try ExprNode fields first (parallels checkNodeForRuntimeVars at line ~1218).
-    const exprNodeFields: unknown[] = [
-      nodeAny.exprNode, nodeAny.initExpr, nodeAny.condExpr,
-      nodeAny.valueExpr, nodeAny.iterExpr, nodeAny.headerExpr,
-    ];
-    let foundExprNode = false;
-    for (const field of exprNodeFields) {
-      if (!field || typeof field !== "object" || !(field as { kind?: string }).kind) continue;
-      foundExprNode = true;
-      forEachIdentInExprNode(field as ExprNode, (ident) => {
-        checkIdent(ident.name, span);
-      });
+/** File-scope names a ^{} body may capture (§22.3): runtime vars + imports + `use` names. */
+export function collectFileScopeNames(
+  fileAST: MetaFileAST,
+  runtimeVars: Map<string, string>,
+): Set<string> {
+  const names = new Set<string>(runtimeVars.keys());
+  const addImport = (imp: Record<string, unknown>): void => {
+    const specs = Array.isArray(imp.specifiers) ? imp.specifiers as Array<{ local?: string }> : [];
+    for (const s of specs) if (s && typeof s.local === "string") names.add(s.local);
+    if (Array.isArray(imp.names)) for (const n of imp.names as unknown[]) if (typeof n === "string") names.add(n);
+  };
+  const imports = (fileAST.imports ?? (fileAST.ast as { imports?: unknown[] } | undefined)?.imports ?? []) as Array<Record<string, unknown>>;
+  for (const imp of Array.isArray(imports) ? imports : []) if (imp && typeof imp === "object") addImport(imp);
+  const nodes: LogicNode[] = fileAST.ast?.nodes ?? fileAST.nodes ?? [];
+  const visit = (list: LogicNode[]): void => {
+    for (const n of list) {
+      if (!n || typeof n !== "object" || isMetaKind(n.kind)) continue;
+      if (n.kind === "import-decl" || n.kind === "use-decl") addImport(n as Record<string, unknown>);
+      if (Array.isArray(n.children)) visit(n.children);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body);
     }
+  };
+  visit(nodes);
+  return names;
+}
 
-    // Fall back to string init for let/const-decl when no ExprNode is present.
-    if (!foundExprNode) {
-      const expr = (node.kind === "let-decl" || node.kind === "const-decl") ? node.init : undefined;
-      if (expr) {
-        let ids: string[];
-        try {
-          ids = extractIdentifiersFromAST(expr);
-        } catch {
-          ids = extractIdentifiers(expr);
+/**
+ * For every ^{} node, the names bound by its enclosing statement lists and functions
+ * (let / const / lin / state / function declarations, function params, loop variables)
+ * — the lexical scope at the breakout point (§22.3).
+ */
+/**
+ * The names a DECLARATION node introduces into its own statement list (hoisted):
+ * `let` / `const` / `lin` / `state` / `function`, including a destructured target
+ * (`const { a, b } = …`, `const [x] = …`) whether the pattern is carried structurally
+ * on `node.name` or textually in `node.init`.
+ */
+function declBindings(n: LogicNode, out: Set<string>): void {
+  const decl = n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "lin-decl"
+    || n.kind === "state-decl" || n.kind === "function-decl";
+  if (!decl) return;
+  if (typeof n.name === "string" && n.name) { out.add(n.name); return; }
+  if (n.name && typeof n.name === "object") {
+    // A structured destructure pattern (DestructurePattern).
+    patternBindNamesInto(n.name as Record<string, unknown>, out);
+    return;
+  }
+  const init = typeof n.init === "string" ? n.init : "";
+  const eq = init.indexOf("=");
+  if (eq > 0) {
+    const pat = init.slice(0, eq).trim();
+    if (pat.startsWith("{") || pat.startsWith("[")) extractParamBindings(pat, out);
+  }
+}
+
+function patternBindNamesInto(p: Record<string, unknown>, out: Set<string>): void {
+  if (!p || typeof p !== "object") return;
+  if (p.kind === "destructure-object") {
+    for (const pr of (p.properties as Record<string, unknown>[]) ?? []) {
+      if (pr?.kind === "name" && typeof pr.bindName === "string") out.add(pr.bindName);
+      else if (pr?.kind === "nested") patternBindNamesInto(pr.pattern as Record<string, unknown>, out);
+    }
+  } else if (p.kind === "destructure-array") {
+    for (const el of (p.elements as Record<string, unknown>[]) ?? []) {
+      if (el?.kind === "name" && typeof el.name === "string") out.add(el.name);
+      else if (el?.kind === "nested") patternBindNamesInto(el.pattern as Record<string, unknown>, out);
+    }
+  }
+  if (typeof p.rest === "string" && p.rest) out.add(p.rest);
+}
+
+/**
+ * The names a SCOPE-INTRODUCING node binds for its OWN children (not its siblings):
+ * function parameters (incl. destructured), loop variables (for-of / for-in target,
+ * which may be a destructure pattern, the index variable, and a C-style `for (let i …)`
+ * init), and a match arm's payload bindings (`.Circle(r) :>` binds `r`).
+ */
+function childScopeBindings(n: LogicNode, out: Set<string>): void {
+  if (n.kind === "function-decl") {
+    for (const p of Array.isArray(n.params) ? n.params : []) {
+      if (typeof p === "string") extractParamBindings(p, out);
+      else if (p && typeof p === "object") {
+        const pn = (p as { name?: unknown }).name;
+        if (typeof pn === "string") out.add(pn);
+        // A destructured parameter — `function f({ a, b })` — carries a pattern object.
+        else if (pn && typeof pn === "object") patternBindNamesInto(pn as Record<string, unknown>, out);
+      }
+    }
+  } else if (n.kind === "for-stmt" || n.kind === "for-loop") {
+    if (typeof n.variable === "string" && n.variable) extractParamBindings(n.variable, out);
+    else if (n.variable && typeof n.variable === "object") patternBindNamesInto(n.variable as Record<string, unknown>, out);
+    if (typeof n.indexVariable === "string" && n.indexVariable) out.add(n.indexVariable);
+    // C-style `for (let i = 0; …)` — the live parser carries the init on
+    // `cStyleParts.initExpr` (an escape-hatch whose `raw` is the init text).
+    const cs = (n as Record<string, unknown>).cStyleParts as Record<string, unknown> | undefined;
+    const initRaw = cs && cs.initExpr && typeof (cs.initExpr as Record<string, unknown>).raw === "string"
+      ? (cs.initExpr as Record<string, unknown>).raw as string
+      : (typeof (n as Record<string, unknown>).rawInit === "string" ? (n as Record<string, unknown>).rawInit as string : "");
+    const m = /^\s*(?:let|const|var)\s+(\{[^}]*\}|\[[^\]]*\]|[A-Za-z_$][A-Za-z0-9_$]*)/.exec(initRaw);
+    if (m) extractParamBindings(m[1], out);
+  } else if (n.kind === "match-arm-inline" || n.kind === "match-arm-block") {
+    // The live parser resolves a variant payload to `payloadBindings` (names);
+    // fall back to the pattern text for other shapes.
+    const pb = (n as Record<string, unknown>).payloadBindings;
+    if (Array.isArray(pb)) for (const b of pb) if (typeof b === "string" && b) out.add(b);
+    else {
+      const test = typeof n.test === "string" ? n.test : (typeof n.pattern === "string" ? n.pattern : "");
+      const paren = /\(([^)]*)\)/.exec(test);
+      if (paren) extractParamBindings(paren[1], out);
+    }
+  }
+}
+
+export function collectEnclosingNames(nodes: LogicNode[]): Map<LogicNode, Set<string>> {
+  const out = new Map<LogicNode, Set<string>>();
+  const walk = (list: LogicNode[], inherited: Set<string>): void => {
+    if (!Array.isArray(list)) return;
+    const here = new Set(inherited);
+    // Hoist every declaration in this statement list (siblings see each other).
+    for (const n of list) if (n && typeof n === "object") declBindings(n, here);
+    for (const n of list) {
+      if (!n || typeof n !== "object") continue;
+      if (isMetaKind(n.kind)) { out.set(n, here); continue; }
+      const inner = new Set(here);
+      childScopeBindings(n, inner);
+      // Total descent (round 3): recurse into every child CONTAINER, not a named list.
+      // Arrays are walked whole so siblings in one statement list hoist together; a
+      // single child node is walked as a one-element list.
+      const rec = n as Record<string, unknown>;
+      for (const key of Object.keys(rec)) {
+        if (NON_CHILD_KEYS.has(key)) continue;
+        const v = rec[key];
+        if (Array.isArray(v)) {
+          if (v.some((el) => el && typeof el === "object" && typeof (el as LogicNode).kind === "string")) walk(v as LogicNode[], inner);
+        } else if (v && typeof v === "object" && typeof (v as LogicNode).kind === "string") {
+          walk([v as LogicNode], inner);
         }
-        for (const id of ids) checkIdent(id, span);
       }
     }
-  }
-
-  function walk(nodes: LogicNode[]): void {
-    if (!Array.isArray(nodes)) return;
-    for (const node of nodes) {
-      if (!node || typeof node !== "object") continue;
-
-      if (isMetaKind(node.kind)) {
-        // Recurse into nested ^{} bodies — the categorical rule applies to
-        // every body in the nest, independent of classification.
-        checkMetaBlockForJsHostGlobals(node, filePath, errors);
-        continue;
-      }
-
-      if (node.kind === "bare-expr" || node.kind === "let-decl" || node.kind === "const-decl") {
-        checkNodeIdents(node);
-      }
-
-      if (Array.isArray(node.body)) walk(node.body);
-      if (Array.isArray(node.children)) walk(node.children);
-      if (Array.isArray(node.consequent)) walk(node.consequent);
-      if (Array.isArray(node.alternate)) walk(node.alternate);
-    }
-  }
-
-  walk(body);
+  };
+  walk(nodes, new Set());
+  return out;
 }
 
 /**
@@ -1589,22 +1631,65 @@ export function typeToString(type: ResolvedType | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Walk an AST node tree and find all meta blocks.
+ * Property names that never hold a child AST node — spans, source text, and back
+ * references. Skipped by the generic node walk so it does not descend into position
+ * metadata or loop on a parent pointer.
  */
+const NON_CHILD_KEYS: ReadonlySet<string> = new Set([
+  "span", "tabSpan", "loc", "start", "end", "line", "col", "file", "parent",
+  "raw", "expr", "init", "condition", "test", "name", "kind", "type",
+]);
+
+/**
+ * Call `fn` on every child AST node of `node` — every own property that holds a node
+ * (an object with a string `kind`) or an array, recursively into arrays. This is the
+ * TOTAL descent (S458 review round 3, HIGH-1): the hand-written `children`/`body`-only
+ * recursion missed a `^{}` sitting directly in an `if` / `else` branch, a ternary, a
+ * match arm, a loop body of a kind other than `body`, etc., so the allow-list never saw
+ * it and meta-eval never evaluated it. Whatever container a meta block sits in, it is
+ * reached here. (Strings carrying raw code — `expr` / `init` / `condition` — are NOT
+ * nodes and are checked as text by the allow-list's own readers, so they are skipped.)
+ */
+function forEachChildNode(node: Record<string, unknown>, fn: (child: LogicNode) => void): void {
+  for (const key of Object.keys(node)) {
+    if (NON_CHILD_KEYS.has(key)) continue;
+    const v = node[key];
+    if (Array.isArray(v)) {
+      for (const el of v) if (el && typeof el === "object" && typeof (el as LogicNode).kind === "string") fn(el as LogicNode);
+    } else if (v && typeof v === "object" && typeof (v as LogicNode).kind === "string") {
+      fn(v as LogicNode);
+    }
+  }
+}
+
+/**
+ * Walk an AST node tree and find all meta blocks, wherever they sit (total descent).
+ */
+/**
+ * The `^{}` nodes that sit inside an `<each>` row template (an `each-block`'s body, at any
+ * depth). impl#1 emits no per-row `^{}` effect: the row renderer has no lowering for a meta
+ * node, so a runtime `^{}` there never ran (S458 final F7).
+ */
+function collectMetaInEachRows(nodes: LogicNode[]): WeakSet<object> {
+  const out = new WeakSet<object>();
+  const visit = (node: LogicNode, inRow: boolean): void => {
+    if (!node || typeof node !== "object") return;
+    if (inRow && isMetaKind(node.kind)) out.add(node);
+    const nowInRow = inRow || node.kind === "each-block";
+    forEachChildNode(node as Record<string, unknown>, (child) => visit(child, nowInRow));
+  };
+  for (const n of nodes) visit(n, false);
+  return out;
+}
+
 function findMetaBlocks(nodes: LogicNode[], visitor: (node: LogicNode) => void): void {
   if (!Array.isArray(nodes)) return;
-
-  for (const node of nodes) {
-    if (!node || typeof node !== "object") continue;
-
-    if (isMetaKind(node.kind)) {
-      visitor(node);
-    }
-
-    // Recurse into children
-    if (Array.isArray(node.children)) findMetaBlocks(node.children, visitor);
-    if (Array.isArray(node.body)) findMetaBlocks(node.body, visitor);
-  }
+  const visit = (node: LogicNode): void => {
+    if (!node || typeof node !== "object") return;
+    if (isMetaKind(node.kind)) visitor(node);
+    forEachChildNode(node as Record<string, unknown>, visit);
+  };
+  for (const node of nodes) visit(node);
 }
 
 
@@ -1767,17 +1852,66 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
     );
 
     const nodes: LogicNode[] = fileAST.ast?.nodes ?? fileAST.nodes ?? [];
+    // §22.3 — the names a ^{} body may capture: file-scope bindings + imports, and
+    // the bindings of every enclosing statement list / function at the breakout point.
+    const fileScopeNames = collectFileScopeNames(fileAST, runtimeVars);
+    // Reactive cell names (§22.5.2): a store key, not a JS binding — a bare reference
+    // in a ^{} body resolves to a free global, not the cell (S458 review round 3).
+    const metaCellNames = new Set<string>(
+      [...runtimeVars.entries()].filter(([, k]) => k === "reactive").map(([n]) => n).filter((n) => !n.startsWith("@")),
+    );
+    const enclosingNames = collectEnclosingNames(nodes);
+    const nestedChecked = new WeakSet<object>();
+    const metaInEachRows = collectMetaInEachRows(nodes);
     findMetaBlocks(nodes, (metaNode) => {
       const body = metaNode.body || [];
       const isCompileTime = bodyUsesCompileTimeApis(body);
 
-      checkMetaBlock(metaNode, fileAST.scopeChain, typeRegistry, filePath, allErrors, outerCompileTimeConsts);
+      // S458 final F7 — a RUNTIME `^{}` inside an `<each>` row. impl#1 emits no per-row
+      // `^{}` effect (the row renderer has no lowering for it), so the block never ran and
+      // the row's `as` binding cannot be captured per row. Refused with that cause rather
+      // than as a free-identifier error on the `as` binding (or, with no such read, a
+      // silent drop). A compile-time `^{}` there (static emit()) is spliced as before.
+      if (!isCompileTime && body.length > 0 && metaInEachRows.has(metaNode)) {
+        // The row template is reachable under two keys of the each-block; report once.
+        if (metaNode._metaAllowListRefused === true) return;
+        allErrors.push(new MetaError(
+          "E-META-001",
+          `E-META-001: a runtime ^{} inside an <each> row is not supported — impl#1 does not emit a ` +
+          `per-row ^{} effect, so the row's \`as\` binding cannot be captured per row and the block ` +
+          `would never run (§22.5). Render the row from its binding directly (e.g. \`\${person.name}\`), ` +
+          `use a compile-time ^{} with emit() for static row markup, or move the runtime ^{} outside ` +
+          `the <each> and read the list with meta.get(…).`,
+          metaNode.span || { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
+        ));
+        metaNode._metaAllowListRefused = true;
+        metaNode._metaCompileTime = false;
+        return;
+      }
 
-      // S134 Bug 17: JS-host ambient globals are categorically forbidden inside
-      // ^{} bodies (compile-time OR runtime) per SPEC §22.12 / §22.5 line 14375.
-      // This walker is UNCONDITIONAL — checkMetaBlock's early-return at line ~1131
-      // skips runtime classifications, but the §22.12 rule applies to both.
-      checkMetaBlockForJsHostGlobals(metaNode, filePath, allErrors);
+      // §22.12 (S457) — the CLOSED allow-list (meta-allow-list.ts), on every ^{} body
+      // whatever its classification. Supersedes the S134 deny list of host names
+      // (`checkMetaBlockForJsHostGlobals`), which failed open. A refused block is
+      // marked so meta-eval never executes it.
+      const captured = new Set([...fileScopeNames, ...(enclosingNames.get(metaNode) ?? [])]);
+      const allowListErrors: MetaError[] = [];
+      checkMetaBlockAllowList(metaNode, filePath, allowListErrors, {
+        captured,
+        typeNames: new Set(typeRegistry.keys()),
+        cells: metaCellNames,
+      }, nestedChecked);
+
+      // §22.4 compile-time "runtime variable" check. A name that is no binding of the
+      // file at all (`globalThis`, `process`) is not a runtime variable — it is a host
+      // name, and the allow-list's message (naming the allowed set) is the one of record.
+      const phaseErrors: MetaError[] = [];
+      checkMetaBlock(metaNode, fileAST.scopeChain, typeRegistry, filePath, phaseErrors, outerCompileTimeConsts);
+      for (const e of phaseErrors) {
+        const m = /^E-META-001: Runtime variable '([^']+)'/.exec(e.message);
+        if (m && !captured.has(m[1]) && allowListErrors.some((a) => a.message.includes(`'${m[1]}'`))) continue;
+        allErrors.push(e);
+      }
+      allErrors.push(...allowListErrors);
 
       checkReflectCalls(body, typeRegistry, filePath, metaNode.span, allErrors);
 
@@ -1859,11 +1993,22 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
         }
       }
 
+      // The classification codegen relies on: a COMPILE-TIME body never reaches the client
+      // (meta-eval splices it away; if its evaluation failed, that failure is already an
+      // error). Codegen emits a `_scrml_meta_effect` only for a body marked runtime here.
+      metaNode._metaCompileTime = isCompileTime;
+
       // §22.5: Annotate runtime meta nodes with scope and type registry for CG stage.
       // Runtime meta blocks are those that do NOT use compile-time API patterns.
       if (!isCompileTime) {
         metaNode.capturedScope = buildCapturedScope(runtimeVars);
         metaNode.typeRegistrySnapshot = serializeTypeRegistry(typeRegistry);
+        // §22.12 (S458 review round 3, HIGH-2) — the names codegen may route through the
+        // capture object: everything in scope at the `^{}` site per the ONE scope analysis
+        // (file scope + imports + enclosing bindings), cells excluded (a cell is reached
+        // only as `@name` / `meta.get`, §22.5.2). codegen rewrites a body reference to one
+        // of these to `_scrml_cap.<name>` and refuses any other free identifier.
+        metaNode.capturedNames = [...captured].filter((n) => !n.startsWith("@") && !metaCellNames.has(n));
       }
     });
 
@@ -2162,8 +2307,16 @@ export function collectRuntimeVars(fileAST: MetaFileAST): Map<string, "reactive"
       // logic-body iteration kind (including JS-style for-of/for-in/C-style).
       if (node.kind === "for-loop" || node.kind === "for-stmt") continue;
 
+      // S458 review F2 — the same rule for EVERY block-scoped body, by allow-list rather
+      // than by naming the scope-introducing kinds one at a time: markup `children` and
+      // a `${}` logic block's `body` are module scope; any other statement's `body`
+      // (`while`, `if`, `match` arms, `try`, …) is a block whose declarations are not.
+      // Descending into a `while` body counted its `const window = 1` as a module
+      // binding — the ^{} allow-list then admitted `window` as captured, and the
+      // emitted effect read the GLOBAL `window` (`window.eval(…)` ran). The captured
+      // set must be the names actually in scope at the `^{}` site.
       if (Array.isArray(node.children)) walk(node.children, inMeta);
-      if (Array.isArray(node.body)) walk(node.body, inMeta);
+      if (node.kind === "logic" && Array.isArray(node.body)) walk(node.body, inMeta);
     }
   }
 

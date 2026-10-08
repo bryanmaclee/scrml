@@ -231,7 +231,8 @@ describe("collect-meta §9: meta with empty body is yielded", () => {
 describe("collect-meta §10: integration with emitLogicNode", () => {
   test("collected top-level meta node emits IIFE via emitLogicNode", () => {
     resetVarCounter();
-    const meta = metaNode([bareExpr("doRuntimeOp()")]);
+    // S458 r3: a runtime ^{} body may read only body-locals, meta primitives and captures.
+    const meta = metaNode([bareExpr('meta.emit("doRuntimeOp")')]);
     const fileAST = makeFileAST([meta]);
 
     const stmts = collectTopLevelLogicStatements(fileAST);
@@ -240,7 +241,7 @@ describe("collect-meta §10: integration with emitLogicNode", () => {
 
     const output = emitLogicNode(stmts[0]);
     expect(output).toContain("_scrml_meta_effect(");
-    expect(output).toContain("doRuntimeOp();");
+    expect(output).toContain('meta.emit("doRuntimeOp");');
     expect(output).toContain("function(meta)");
   });
 

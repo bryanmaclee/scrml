@@ -12,7 +12,7 @@
     ]
 
     for (const card of cards) {
-        emit("<div class=card-" + card.icon + ">\n  <h2>" + card.title + "</h2>\n  <p>" + card.desc + "</p>\n</div>\n")
+        emit("<div class=\"card-" + card.icon + "\">\n  <h2>" + card.title + "</h2>\n  <p>" + card.desc + "</p>\n</div>\n")
     }
 }
 

@@ -642,10 +642,12 @@ describe("runMetaChecker", () => {
     // (JS-host ambient globals are not in META_BUILTINS). The replacement uses
     // `JSON.stringify(...)` (JSON is still in META_BUILTINS) as a compile-time-
     // evaluable initializer that preserves §24's "clean meta block" intent.
+    // S457: `JSON` is a JS-host global, not scrml — the §22.12 closed allow-list
+    // refuses it. The clean initializer is now a scrml object literal.
     const fileAST = makeFileAST({
       nodes: [
         makeMetaNode([
-          makeConstDecl("CONFIG", 'JSON.parse(\'{ "port": 3000 }\')'),
+          makeConstDecl("CONFIG", '{ port: 3000 }'),
         ]),
       ],
     });

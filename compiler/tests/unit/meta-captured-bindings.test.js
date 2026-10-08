@@ -41,6 +41,8 @@ function makeMetaNodeWithScope(body, id, capturedScope) {
   };
 }
 
+// S458 r3: fixture bodies call a meta primitive (`meta.emit`), not a free `x()` — a runtime
+// ^{} body may read only body-locals, meta primitives and captured bindings.
 function makeBareExpr(expr) {
   return { kind: "bare-expr", expr };
 }
@@ -51,14 +53,14 @@ function makeBareExpr(expr) {
 
 describe("meta-captured-bindings CB-1: no capturedScope → null", () => {
   test("meta node with no capturedScope emits null for capturedBindings", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 1, undefined);
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 1, undefined);
     const output = emitLogicNode(node);
     // Should end with "}, null, null);" (both capturedBindings and typeRegistry are null)
     expect(output).toContain("}, null, null);");
   });
 
   test("meta node with empty capturedScope emits null for capturedBindings", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 1, []);
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 1, []);
     const output = emitLogicNode(node);
     expect(output).toContain("}, null, null);");
   });
@@ -70,7 +72,7 @@ describe("meta-captured-bindings CB-1: no capturedScope → null", () => {
 
 describe("meta-captured-bindings CB-2: single @var emits getter", () => {
   test("@var binding emits Object.freeze getter using _scrml_reactive_get", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 2, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 2, [
       { name: "count", kind: "reactive" },
     ]);
     const output = emitLogicNode(node);
@@ -87,7 +89,7 @@ describe("meta-captured-bindings CB-2: single @var emits getter", () => {
 
 describe("meta-captured-bindings CB-3: multiple @vars emit multiple getters", () => {
   test("multiple @var bindings each emit a getter", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 3, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 3, [
       { name: "count", kind: "reactive" },
       { name: "items", kind: "reactive" },
     ]);
@@ -105,7 +107,7 @@ describe("meta-captured-bindings CB-3: multiple @vars emit multiple getters", ()
 
 describe("meta-captured-bindings CB-4: let binding emits direct reference", () => {
   test("let binding emits varName: varName (direct reference)", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 4, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 4, [
       { name: "localVar", kind: "let" },
     ]);
     const output = emitLogicNode(node);
@@ -122,7 +124,7 @@ describe("meta-captured-bindings CB-4: let binding emits direct reference", () =
 
 describe("meta-captured-bindings CB-5: const binding emits direct reference", () => {
   test("const binding emits varName: varName (direct reference)", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 5, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 5, [
       { name: "maxCount", kind: "const" },
     ]);
     const output = emitLogicNode(node);
@@ -137,7 +139,7 @@ describe("meta-captured-bindings CB-5: const binding emits direct reference", ()
 
 describe("meta-captured-bindings CB-6: mixed bindings", () => {
   test("mixed @var and let bindings emit correct forms for each", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 6, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 6, [
       { name: "count", kind: "reactive" },
       { name: "localVar", kind: "let" },
       { name: "MAX", kind: "const" },
@@ -158,7 +160,7 @@ describe("meta-captured-bindings CB-6: mixed bindings", () => {
 
 describe("meta-captured-bindings CB-7: Object.freeze wrapping", () => {
   test("capturedBindings object is wrapped in Object.freeze()", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 7, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 7, [
       { name: "count", kind: "reactive" },
     ]);
     const output = emitLogicNode(node);
@@ -166,7 +168,7 @@ describe("meta-captured-bindings CB-7: Object.freeze wrapping", () => {
   });
 
   test("Object.freeze appears in the third argument position", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 7, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 7, [
       { name: "x", kind: "let" },
     ]);
     const output = emitLogicNode(node);
@@ -186,7 +188,7 @@ describe("meta-captured-bindings CB-7: Object.freeze wrapping", () => {
 
 describe("meta-captured-bindings CB-9: multi-property output is valid JS", () => {
   test("two getters emit a comma between them", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 9, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 9, [
       { name: "count", kind: "reactive" },
       { name: "label", kind: "reactive" },
     ]);
@@ -196,7 +198,7 @@ describe("meta-captured-bindings CB-9: multi-property output is valid JS", () =>
   });
 
   test("mixed getter + let property emits comma between them", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 10, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 10, [
       { name: "count", kind: "reactive" },
       { name: "inc", kind: "let" },
     ]);
@@ -205,7 +207,7 @@ describe("meta-captured-bindings CB-9: multi-property output is valid JS", () =>
   });
 
   test("the emitted Object.freeze literal is parseable as JS", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 11, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 11, [
       { name: "count", kind: "reactive" },
       { name: "label", kind: "reactive" },
       { name: "inc", kind: "let" },
@@ -228,7 +230,7 @@ describe("meta-captured-bindings CB-9: multi-property output is valid JS", () =>
 
 describe("meta-captured-bindings CB-8: source name used in getter", () => {
   test("@var getter uses source variable name as key and as reactive_get argument", () => {
-    const node = makeMetaNodeWithScope([makeBareExpr("x()")], 8, [
+    const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 8, [
       { name: "myVar", kind: "reactive" },
     ]);
     const output = emitLogicNode(node);
