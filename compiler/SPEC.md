@@ -22527,6 +22527,93 @@ ${ export { UserRole } from './types.scrml' }
 
 Re-export follows standard ES module `export { name } from 'source'` syntax.
 
+A file MAY also re-export every name another file exports:
+
+```scrml
+// lib/index.scrml
+${
+    export * from './types.scrml'
+    export * from './utils.scrml'
+}
+
+// page.scrml
+${ import { UserRole, formatDate } from './lib/index.scrml' }
+```
+
+**Normative statements:**
+
+- A re-export (named, renamed `export { a as b } from`, or `export * from`) SHALL link
+  its source module exactly as an `import` of that specifier does (§21.3). The name it
+  binds is the same binding the source module exports: it resolves to the module that
+  DECLARES it.
+- `export * from './m.scrml'` SHALL re-export every name `./m.scrml` exports by name,
+  whatever the name binds — a `type` (enums included), a function (`function` / `fn`),
+  a `const` / `let`, a component, a channel, an engine — including names `./m.scrml`
+  itself re-exports. It SHALL NOT re-export `default`.
+- A name the file exports explicitly — a local export, or a named re-export of that
+  name — SHALL take precedence over every `export *` of the file; the stars are not
+  consulted for it.
+- A name that two or more `export *` sources of one file resolve to DIFFERENT
+  declarations is ambiguous: that file SHALL NOT export it (the ES module rule).
+  Importing it by name, or re-exporting it by name, from that file SHALL be a compile
+  error (E-IMPORT-004); the message SHALL say the name is ambiguous and name the stars
+  that disagree. An ambiguous name that is never imported or re-exported by name is
+  not an error. The SAME declaration reached through two or more paths (a diamond) is
+  not ambiguous.
+- Re-export edges, named and `export *` alike, are edges of the import graph, so a
+  cycle closed by a re-export SHALL be a compile error (E-IMPORT-002, §21.3).
+- A named re-export of a name its source module does not export SHALL be a compile
+  error (E-IMPORT-004), reported at the re-export — the error an `import` of that name
+  gets (§21.3).
+- A relative re-export (named or `export *`, other than of a `.js` file) whose target
+  file cannot be found SHALL be a compile error (E-IMPORT-006), reported at the
+  re-export. A name only that missing module could supply SHALL NOT be reported again
+  as E-IMPORT-004 at an importer.
+- An `export *` from a module outside the compilation — a stdlib `scrml:` module, a
+  `vendor:` module, a plain `.js` file — SHALL NOT be expanded: it exports no names
+  from the re-exporting file. Importing a name that file reaches only that way SHALL be
+  a compile error (E-IMPORT-004), and the message SHALL name the unexpanded star and
+  suggest re-exporting the name explicitly (`export { name } from "scrml:…"`) or
+  importing it from the source directly. A named re-export from such a module is not
+  checked against the source's exports by the compiler (as an `import` from outside
+  the compilation is not, §21.3).
+
+**Ambiguity example:**
+
+```scrml
+// c.scrml
+${ export fn w() -> string { return "c" } }
+
+// d.scrml
+${ export fn w() -> string { return "d" } }
+
+// b.scrml — exports neither `w`
+${
+    export * from './c.scrml'
+    export * from './d.scrml'
+}
+
+// page.scrml
+${ import { w } from './b.scrml' }   // E-IMPORT-004: `w` is ambiguous in `./b.scrml`
+
+// Fix — pick one in b.scrml (an explicit re-export wins over the stars)
+${
+    export { w } from './c.scrml'
+    export * from './c.scrml'
+    export * from './d.scrml'
+}
+```
+
+Implementation status (impl#1, S458): a component imported through a `.scrml`
+re-export (named or `export *`) is not expanded at its use site (E-COMPONENT-020 /
+E-COMPONENT-035) — `g-component-through-reexport-unexpanded-s458`; an enum reached
+through `export *` has no type in the importer (a parameter typed with it is `asIs`,
+and `match` on it is E-TYPE-025), while a named re-export of it types correctly —
+`g-enum-type-through-export-star-untyped-s458`. Both are impl#1 gaps against the
+statements above, not language rules.
+
+> **Provenance:** ruling:user-voice-scrml.md S458 "ratify 21.4" — *"`export * from` re-exports every name the source exports BY NAME; a name two `export *` sources bind to DIFFERENT declarations is ambiguous and refused (E-IMPORT-004, ES rule) while the same declaration reached twice (a diamond) is not; re-export edges are part of the import graph, so a cycle through re-exports is E-IMPORT-002 (§21.3); a named re-export of a name the source does not export is E-IMPORT-004; a re-export whose file cannot be found is E-IMPORT-006; an `export *` from a module outside the compilation (stdlib / vendor) is not expanded."* · supersedes: nothing written — §21.4 stated only the named form; `export *` resolution shipped in PR #1352 with no governing sentence (N-S458-1). Direction of change: **newly-accepting** for `export *` (a program importing through a star was refused with a false E-IMPORT-004 before s457), **newly-rejecting** for re-export cycles and named re-exports of missing names (accepted before S458); a missing re-export file was before S458 either accepted (named form) or reported only as an E-IMPORT-004 at the importer, naming the wrong file (`export *` form), and is now E-IMPORT-006 at the re-export. Implementation: `compiler/src/module-resolver.js` (`resolveExportedBinding`, `ambiguousStarSources`, `validateReExports`, `detectCircularImports`, `buildImportGraph`); conformance: `conformance/cases/module/e-import-00{2,4,6}-reexport-*`.
+
 ### 21.5 Pure-Type Files
 
 A `.scrml` file that contains only `${ export type ... }` and `${ export function ... }`
@@ -22605,11 +22692,11 @@ without `export`).
 | Code | Trigger | Severity |
 |---|---|---|
 | E-IMPORT-001 | `export` used outside a `${ }` context (exceptions: top-level `export <ComponentName ...>...</>` per §21.2 Form 1 and `export const Name = ...` per §21.2 Form 2) | Error |
-| E-IMPORT-002 | Circular import detected | Error |
+| E-IMPORT-002 | Circular import detected — including a cycle closed by a re-export (`export { … } from` / `export * from`, §21.4). (Emitted at `compiler/src/module-resolver.js` `detectCircularImports`.) | Error |
 | E-IMPORT-003 | `import` inside a function body (not file top-level) | Error |
-| E-IMPORT-004 | Imported name not found in target file's exports | Error |
+| E-IMPORT-004 | Imported name not found in target file's exports — also: a named re-export of a name its source does not export; importing or re-exporting by name a name two `export *` sources bind to different declarations (ambiguous); a name reached only through an unexpanded `export *` from outside the compilation (§21.4). (Emitted at `compiler/src/module-resolver.js` `validateImports` and `compiler/src/module-resolver.js` `validateReExports`.) | Error |
 | E-IMPORT-005 | Bare npm-style import specifier (must be `./`, `scrml:`, or `vendor:`) | Error |
-| E-IMPORT-006 | Import target file does not exist on disk | Error |
+| E-IMPORT-006 | Import target file does not exist on disk — also a relative re-export (`export { … } from` / `export * from`) whose target file does not exist (§21.4). (Emitted at `compiler/src/module-resolver.js` `buildImportGraph`.) | Error |
 | E-IMPORT-007 | Auto-gather closure exceeded sane-limit (5000 files) — W2 §21.7 | Error |
 | E-IMPORT-008 | (S114 — §21.3.1.) `import:host` used in a file outside the manifest's `[capabilities] host-import` allow-list. Default for adopter projects is `"disabled"`; the bootstrap stdlib sets `"self-host-only"` permitting `scrml/stdlib/compiler/**`. | Error |
 | E-IMPORT-009 | (S114 — §21.3.1.) `import:host` uses a host-tag other than `host`. v1 recognizes only `host`; future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment. | Error |
@@ -25779,9 +25866,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-RI-001~~ | — | **Retired 2026-04-21 (S37)**; `server pure` is now valid (§33.3, §48.10). | — |
 | E-RI-002 | §12 | Server-escalated function mutates `@` reactive variable | Error |
 | E-IMPORT-001 | §21.2 | `export` used outside a `${ }` context (exceptions: top-level `export <ComponentName ...>...</>` per §21.2 Form 1, `export const Name = ...` inside `${ }` per §21.2 Form 2) | Error |
-| E-IMPORT-002 | §21.3 | Circular import detected | Error |
+| E-IMPORT-002 | §21.3, §21.4 | Circular import detected — including a cycle closed by a re-export (`export { … } from` / `export * from`), since re-export edges are import-graph edges (§21.4). (Emitted at `compiler/src/module-resolver.js` `detectCircularImports`.) | Error |
 | E-IMPORT-003 | §21.3 | `import` inside a function body (not file top-level) | Error |
-| E-IMPORT-004 | §21.3 | Imported name not found in target file's exports | Error |
+| E-IMPORT-004 | §21.3, §21.4 | Imported name not found in target file's exports. Also (§21.4): a named re-export of a name its source does not export (reported at the re-export); importing or re-exporting by name a name two `export *` sources bind to different declarations (ambiguous — the message names the stars); a name the target reaches only through an `export *` from a module outside the compilation (stdlib / vendor / `.js`), which is not expanded. (Emitted at `compiler/src/module-resolver.js` `validateImports` — imports — and `compiler/src/module-resolver.js` `validateReExports` — named re-exports.) | Error |
 | E-EXPORT-001 | §21.2 | A reactive state cell (plain Shape-1 OR derived) is exported (`export { count }` / `export @count`). A reactive cell is not in the Form-2 exportable set (type / function / fn / const / let); it holds per-instance runtime state and has no cross-file export meaning. Keyed on the `state-decl` binding (not name-case) so component-as-const, `<channel>`, and engine (§21.8) exports stay valid. Fix-it: export a function returning the value, or wrap the cell in a component and export that. (S173 — ratified S171 (item) + S173 (severity/code/scope).) | Error |
 | E-EXPORT-002 | §21.2 | Form 1 component body is empty / text-only / multi-rooted (must be single-rooted markup) | Error |
 | E-EXPORT-003 | §21.2 | Form 1 outer attribute conflicts with body-root attribute name | Error |
@@ -26200,7 +26287,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-012 | §18.14 | `match` on a `T \| not` (optional) type lacks a `not` arm and lacks an `else` arm. Resolution: add a `<not>` arm or add a wildcard `<_>` / `else` arm so the absence case is handled. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | W-MATCH-003 | §18.16 | `partial` modifier applied to a `match` whose arms already cover every variant of the matched type. The `partial` is unnecessary — remove it to surface future non-exhaustiveness as an error. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Warning |
 | E-IMPORT-005 | §21.3 | `import` specifier uses an unrecognized protocol prefix or a bare npm-style specifier. Specifiers must begin with `scrml:`, `vendor:`, `./`, or `../` — scrml has no npm integration. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`.) | Error |
-| E-IMPORT-006 | §21.3 | `scrml:` (or relative) `import` specifier does not resolve to any module on disk. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`, and — for a `.js` / `.mjs` helper reaching client JavaScript, which must be copied into the build output (S440 item 16) — at `compiler/src/api.js` `createClientHelperRelocator`.) | Error |
+| E-IMPORT-006 | §21.3, §21.4 | `scrml:` (or relative) `import` specifier does not resolve to any module on disk; also a relative re-export (`export { … } from` / `export * from`, §21.4) whose target file does not exist, reported at the re-export. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`, and — for a `.js` / `.mjs` helper reaching client JavaScript, which must be copied into the build output (S440 item 16) — at `compiler/src/api.js` `createClientHelperRelocator`.) | Error |
 | E-IMPORT-007 | §21.7 | Auto-gather closure exceeded the sane-limit (5000 files). The `import` resolution traversal touched too many files — likely an accidental project-root inclusion or a cycle in directory traversal. (Catalog addition S78 audit; emitted at `compiler/src/api.js`. Fire-site line corrected S297 — the row read `:506`, which is not the fire site.) | Error |
 | E-IMPORT-008 | §21.3.1 | `import:host` used in a file outside the project manifest's `[capabilities] host-import` allow-list. The default value is `"disabled"` in adopter project manifests; the bootstrap stdlib's own manifest sets `"self-host-only"` permitting only files under `scrml/stdlib/compiler/**`. Resolution: either remove the `import:host` declaration (the canonical path — adopter code uses `import` from scrml-source modules, not host-language modules); or, if a host-language bridge is genuinely required, opt into the manifest entry explicitly. (Catalog addition S114 — Approach C ratification.) | Error |
 | E-IMPORT-009 | §21.3.1 | `import:host` uses a host-tag other than `host`. v1 recognizes only the `host` tag (TypeScript / JavaScript named-export bridge). Future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment + per-tag implementation. Resolution: use `import:host` for the v1 TS/JS bridge; defer other host languages until SPEC amendment. (Catalog addition S114 — Approach C ratification.) | Error |
