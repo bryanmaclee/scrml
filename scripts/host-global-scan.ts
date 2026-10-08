@@ -487,11 +487,11 @@ const keyOf = (line: string) => line.replace(/\s+#.*$/, "").trim();
 const known = new Set(knownLines.map(keyOf).filter((k) => k && !k.startsWith("#")));
 const thrownKeys = new Set(thrown.map((t) => t.key));
 const newThrows = thrown.filter((t) => !known.has(t.key));
-// "no longer throws" is only judged for keys this run covered (its modes, its enumerated units).
-const unitKeys = new Set(units.map((e) => relative(REPO, e.length === 1 ? e[0] : dirname(e[0]))));
+// "no longer throws" is only judged for keys this run covered: its modes, and a unit under one of
+// its roots (by path, so a pinned unit that was deleted or moved is reported too).
 const inScope = (k: string) => {
   const m = /^\[(\w+)\] (.+)$/.exec(k);
-  return !!m && (modes as string[]).includes(m[1]) && unitKeys.has(m[2]);
+  return !!m && (modes as string[]).includes(m[1]) && roots.some((r) => { const p = r.replace(/\/+$/, ""); return m[2] === p || m[2].startsWith(p + "/"); });
 };
 const fixedKeys = [...known].filter((k) => !thrownKeys.has(k) && inScope(k)).sort();
 if (fixedKeys.length > 0 && !shardFailed) {
