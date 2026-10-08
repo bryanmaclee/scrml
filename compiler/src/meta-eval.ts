@@ -43,6 +43,9 @@ import * as acorn from "acorn";
 import { checkExecutedMetaJs } from "./meta-allow-list.ts";
 import { isStandardMarkupElementName } from "./html-elements.js";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
+// The ONE reader of `match` arm syntax (§18) — shared with the runtime lowering, so a compile-time
+// `match` is read exactly as the same arms are read everywhere else.
+import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockBinding, type MatchArm } from "./codegen/emit-control-flow.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -265,9 +268,8 @@ export class MetaSerializeRefusal extends Error {
 
 /** The source form of a statement kind the serializer refuses — never the internal node name. */
 const SERIALIZE_REFUSED_FORM: Readonly<Record<string, string>> = {
-  "match-stmt": "a `match` statement (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)",
-  "match-arm-inline": "a `match` arm (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)",
-  "match-arm-block": "a `match` arm (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)",
+  "match-arm-inline": "a `match` arm outside a `match`",
+  "match-arm-block": "a `match` arm outside a `match`",
   "lift-expr": "a `lift`",
   "sql": "a `?{}` SQL block",
   "state-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
@@ -292,14 +294,18 @@ function serializeDecl(n: Record<string, unknown>, keyword: "let" | "const", loc
     throw new MetaSerializeRefusal("a destructuring declaration (impl#1 does not evaluate one in compile-time meta — " +
       "bind each value with its own `const`)");
   }
+  let matchValue: Record<string, unknown> | null = null;
   for (const [k, v] of Object.entries(n)) {
     if (v == null || k === "initExpr") continue;
     if (k === "sqlNode") throw new MetaSerializeRefusal("a `?{}` SQL block");
+    if (k === "matchExpr" && typeof v === "object") { matchValue = v as Record<string, unknown>; continue; }
     if (/Expr$/.test(k)) {
-      throw new MetaSerializeRefusal(k === "matchExpr"
-        ? "a `match` value (impl#1 does not lower `match` in compile-time meta — use `if` / `else if`)"
-        : "a declaration whose value is a statement form (a value-form `if` / `for` / …)");
+      throw new MetaSerializeRefusal("a declaration whose value is a statement form (a value-form `if` / `for` / …)");
     }
+  }
+  if (matchValue) {
+    if (n.initExpr) throw new MetaSerializeRefusal("a declaration carrying both a value and a `match`");
+    return `${keyword} ${n.name} = ${serializeMatchValue(matchValue, locals)};`;
   }
   const str = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null | undefined);
   return str != null && String(str).trim() !== ""
@@ -323,6 +329,141 @@ function serializeParams(params: unknown): string {
     out.push(dflt ? `${name} = ${dflt}` : name);
   }
   return out.join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// `match` in a compile-time body (§22.9: "`^{}` blocks MAY contain `match` expressions").
+// ---------------------------------------------------------------------------
+
+let metaMatchSeq = 0;
+
+/** An arm's expression text, prepared exactly as an expression statement is (bare-expr). */
+function metaArmExprText(text: string, locals: Set<string>): string {
+  return rewriteReflectCalls(restoreEmitBackticks(text), locals);
+}
+
+/**
+ * The arms of a `match` node, read by the shared arm reader (codegen/emit-control-flow.ts).
+ * Every child is either an arm the reader understands or the block is refused — an arm is
+ * never skipped. A payload-binding arm (`.Circle(r)`) is refused: binding a payload by
+ * position needs the subject enum's field order, and a compile-time body has no enum VALUE to
+ * match (§22.12: a type name is not a value there).
+ */
+function readMetaMatchArms(node: Record<string, unknown>): Array<MatchArm & { exprText?: string }> {
+  const scrutinees = (Array.isArray(node.scrutineeExprs) && node.scrutineeExprs.length >= 2)
+    || (Array.isArray(node.subjects) && node.subjects.length >= 2);
+  if (scrutinees) throw new MetaSerializeRefusal("a multi-subject `match` (impl#1 evaluates a single-subject `match` only)");
+  const arms: Array<MatchArm & { exprText?: string }> = [];
+  for (const c0 of Array.isArray(node.body) ? node.body : []) {
+    if (!c0 || typeof c0 !== "object") continue;
+    const child = c0 as Record<string, unknown>;
+    if (child.kind === "comment") continue;
+    if (child.kind === "match-arm-block") {
+      arms.push({
+        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
+        test: (child.variant as string | null) ?? null,
+        binding: matchArmBlockBinding(child),
+        result: "",
+        structuredBody: Array.isArray(child.body) ? child.body : [],
+      });
+      continue;
+    }
+    if (child.kind === "match-arm-inline") {
+      const arm = matchArmInlineToMatchArm(child);
+      if (!arm) throw new MetaSerializeRefusal("a `match` arm of a form impl#1 cannot read");
+      const exprText = child.resultExpr ? emitStringFromTree(child.resultExpr as ExprNode) : undefined;
+      arms.push(exprText !== undefined ? { ...arm, exprText } : arm);
+      continue;
+    }
+    // A literal block arm (`"a" :> { … }`) and a literal alternation (`"b" | "c" :> …`) reach
+    // here as raw arm text — the same text the runtime lowering reads with the same reader.
+    if (child.kind === "bare-expr" && typeof child.expr === "string" && child.expr.trim()) {
+      for (const armText of splitMultiArmString(child.expr.trim().replace(/-\s*>/g, "->"))) {
+        const arm = parseMatchArm(armText);
+        if (!arm) throw new MetaSerializeRefusal("a `match` arm of a form impl#1 cannot read");
+        arms.push(arm);
+      }
+      continue;
+    }
+    throw new MetaSerializeRefusal("a `match` arm of a form impl#1 cannot read");
+  }
+  if (arms.length === 0) throw new MetaSerializeRefusal("a `match` with no arm impl#1 can read");
+  for (const arm of arms) {
+    if (arm.binding) {
+      throw new MetaSerializeRefusal("a `match` arm that binds a variant payload (impl#1 does not bind payloads in compile-time meta)");
+    }
+    if ((arm as { failExpr?: unknown }).failExpr) throw new MetaSerializeRefusal("a `match` arm that re-`fail`s");
+  }
+  return arms;
+}
+
+/** `const <m> = (subject); const <t> = <m>'s variant tag (or <m> itself);` — the runtime's discriminator. */
+function metaMatchPrelude(node: Record<string, unknown>, mVar: string, tVar: string): string {
+  const header = node.headerExpr ? emitStringFromTree(node.headerExpr as ExprNode) : String(node.header ?? "").trim();
+  if (!header) throw new MetaSerializeRefusal("a `match` whose subject impl#1 cannot read");
+  return `const ${mVar} = (${header});\n` +
+    `const ${tVar} = (${mVar} != null && typeof ${mVar} === "object") ? ${mVar}.variant : ${mVar};`;
+}
+
+/** A raw arm result written as a `{ … }` block, without its braces — or null. */
+/**
+ * The shared arm condition (armCondition), except the `not` arm: the shared form reads the
+ * host global `undefined`, which the closed allow-list refuses in the evaluated text (§22.12),
+ * so absence is tested with a loose `== null` (true for both JS absence values, nothing else).
+ */
+function metaArmCondition(arm: MatchArm, mVar: string, tVar: string): string {
+  return arm.kind === "not" ? `${mVar} == null` : armCondition(arm, mVar, tVar);
+}
+
+function rawBlockInner(result: string): string | null {
+  const t = result.trim();
+  return t.startsWith("{") && t.endsWith("}") ? t.slice(1, -1) : null;
+}
+
+/**
+ * A `match` STATEMENT: an `if` / `else if` chain in a block of its own, so `break` / `continue`
+ * / `return` inside an arm act on the enclosing loop or function exactly as written. Arms after
+ * the first wildcard are unreachable and are not written.
+ */
+function serializeMatchStmt(node: Record<string, unknown>, locals: Set<string>): string {
+  const arms = readMetaMatchArms(node);
+  const seq = ++metaMatchSeq;
+  const mVar = `_scrml_meta_match_${seq}`;
+  const tVar = `_scrml_meta_tag_${seq}`;
+  const parts: string[] = [];
+  for (const arm of arms) {
+    let body: string;
+    if (arm.structuredBody) body = serializeBody(arm.structuredBody as LogicStatement[], locals);
+    else {
+      const inner = arm.exprText === undefined ? rawBlockInner(arm.result) : null;
+      body = inner !== null ? metaArmExprText(inner, locals) : `${metaArmExprText(arm.exprText ?? arm.result, locals)};`;
+    }
+    if (arm.kind === "wildcard") { parts.push(`{\n${body}\n}`); break; }
+    parts.push(`if (${metaArmCondition(arm, mVar, tVar)}) {\n${body}\n}`);
+  }
+  return `{\n${metaMatchPrelude(node, mVar, tVar)}\n${parts.join(" else ")}\n}`;
+}
+
+/**
+ * A `match` VALUE (`const x = match k { … }`): each arm's result is the value. An arm whose
+ * result is a block (a statement body) has no single value impl#1 can read — refused. No arm
+ * matching gives the absence value.
+ */
+function serializeMatchValue(node: Record<string, unknown>, locals: Set<string>): string {
+  const arms = readMetaMatchArms(node);
+  const seq = ++metaMatchSeq;
+  const mVar = `_scrml_meta_match_${seq}`;
+  const tVar = `_scrml_meta_tag_${seq}`;
+  const lines: string[] = [];
+  for (const arm of arms) {
+    if (arm.structuredBody || (arm.exprText === undefined && rawBlockInner(arm.result) !== null)) {
+      throw new MetaSerializeRefusal("a `match` value with a block arm (impl#1 evaluates `match` values whose arms are expressions)");
+    }
+    const value = metaArmExprText(arm.exprText ?? arm.result, locals);
+    if (arm.kind === "wildcard") { lines.push(`return (${value});`); break; }
+    lines.push(`if (${metaArmCondition(arm, mVar, tVar)}) return (${value});`);
+  }
+  return `(() => {\n${metaMatchPrelude(node, mVar, tVar)}\n${lines.join("\n")}\nreturn;\n})()`;
 }
 
 function serializeBody(nodes: LogicStatement[], locals: Set<string> = new Set()): string {
@@ -389,6 +530,9 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
 
     case "comment":
       return "";
+
+    case "match-stmt":
+      return serializeMatchStmt(n, locals);
 
     case "for-loop": {
       // Phase 4d: ExprNode-first, string fallback for iterable

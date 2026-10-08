@@ -4,9 +4,10 @@
  *
  *   1  (MED) a compile-time `^{}` dropped `while` / `function` / `match` statements: the
  *      serializer's `default:` returned "". Now every statement is EMITTED (while, plain
- *      function, break / continue, lin) or the block is REFUSED with E-META-EVAL-001 naming the
- *      form (match, destructuring, any kind the serializer does not write) — by construction:
- *      the default case throws.
+ *      function, break / continue, lin, and `match` per §22.9 — statement, or value with
+ *      expression arms) or the block is REFUSED with E-META-EVAL-001 naming the form (payload-
+ *      binding arm, block-arm match value, destructuring, any kind the serializer does not
+ *      write) — by construction: the default case throws.
  *   2  (LOW) `function wrap(){}` in a compile-time `^{}` was reported as "'wrap' is not available".
  *   3  (LOW) a runtime `^{}` reading `window` reported E-META-001 twice.
  *   4  (LOW) the plain-`=` reassignment message spliced its advice into the refused form.
@@ -14,7 +15,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { compileScrml } from "../../src/api.js";
 import { serializeNode, MetaSerializeRefusal } from "../../src/meta-eval.ts";
@@ -58,16 +59,42 @@ describe("nit 1 — no statement of a compile-time ^{} is dropped", () => {
     expect(r.html).toContain("<li>a</li>");
   });
 
-  test("a match statement is REFUSED with E-META-EVAL-001 naming `match` (was: silently dropped)", () => {
-    // The match node itself goes straight to the serializer (the front end also reports
-    // E-TYPE-025 on an untyped subject in a real program, so the serializer is pinned directly).
-    expect(() => serializeNode({ kind: "match-stmt", header: "v", body: [] })).toThrow(MetaSerializeRefusal);
-    expect(() => serializeNode({ kind: "match-stmt", header: "v", body: [] })).toThrow(/`match` statement/);
+  test("a match statement is EVALUATED (§22.9) — literal, alternation, not and else arms (was: silently dropped)", () => {
+    const r = compile(`<program>\n<ul>\n^{\n  const k = "b"\n  match k {\n    "a" :> { emit("<li>A</li>") }\n    "b" | "c" :> emit("<li>BC</li>")\n    else :> { emit("<li>other</li>") }\n  }\n  match k {\n    "a" :> { emit("<li>sa</li>") }\n    not :> { emit("<li>none</li>") }\n    else :> { emit("<li>so</li>") }\n  }\n}\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.html).toContain("<li>BC</li><li>so</li>");
+    expect(r.html).not.toContain("<li>A</li>");
+    expect(r.html).not.toContain("<li>other</li>");
   });
 
-  test("a match VALUE in a declaration is refused, never written as `const m;`", () => {
-    expect(() => serializeNode({ kind: "const-decl", name: "m", init: "", matchExpr: { kind: "match-expr" } }))
-      .toThrow(/`match` value/);
+  test("a match VALUE with expression arms is evaluated (was: `const m;`, i.e. never assigned)", () => {
+    const r = compile(`<program>\n<ul>\n^{\n  const k = "c"\n  const m = match k {\n    "a" :> "<li>A</li>"\n    "b" | "c" :> "<li>BC</li>"\n    else :> "<li>other</li>"\n  }\n  emit(m)\n}\n</ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.html).toContain("<li>BC</li>");
+  });
+
+  test("an arm's break / continue act on the enclosing loop (the match is an if-chain, not a closure)", () => {
+    const text = serializeNode({
+      kind: "for-stmt", variable: "v", iterable: "xs",
+      body: [{ kind: "match-stmt", header: "v", body: [{ kind: "match-arm-block", variant: null, isWildcard: true, body: [{ kind: "continue-stmt", label: null }] }] }],
+    });
+    expect(text).toContain("continue;");
+    expect(text).not.toMatch(/=>|function\s*\(/);
+  });
+
+  test("a payload-binding arm is REFUSED naming the cause, never skipped", () => {
+    expect(() => serializeNode({ kind: "match-stmt", header: "v", body: [{ kind: "match-arm-block", variant: "Circle", payloadBindings: ["r"], isWildcard: false, body: [] }] }))
+      .toThrow(/binds a variant payload/);
+  });
+
+  test("a match arm the reader cannot read is REFUSED, never skipped", () => {
+    expect(() => serializeNode({ kind: "match-stmt", header: "v", body: [{ kind: "some-future-arm" }] }))
+      .toThrow(/`match` arm of a form impl#1 cannot read/);
+  });
+
+  test("a match value with a block arm is refused", () => {
+    expect(() => serializeNode({ kind: "const-decl", name: "m", init: "", matchExpr: { kind: "match-expr", header: "k", body: [{ kind: "match-arm-block", variant: null, isWildcard: true, body: [] }] } }))
+      .toThrow(/block arm/);
   });
 
   test("a destructuring declaration is refused, never written as `const [object Object]`", () => {
@@ -79,11 +106,25 @@ describe("nit 1 — no statement of a compile-time ^{} is dropped", () => {
     expect(() => serializeNode({ kind: "some-future-stmt", exprNode: null, expr: "x" })).toThrow(MetaSerializeRefusal);
   });
 
-  test("in a program, the match refusal is an E-META-EVAL-001 at the ^{} and nothing is spliced", () => {
-    const r = compile(`<program>\ntype Color:enum = { Red, Green }\n<ul id="w">\n^{\n  const info = reflect(Color)\n  for (const v of info.variants) {\n    match v {\n      else :> { emit("<li>o</li>") }\n    }\n  }\n}\n</ul>\n</program>\n`);
-    expect(r.codes).toContain("E-META-EVAL-001");
-    expect(r.messages.some((m) => m.includes("a `match` statement"))).toBe(true);
-    expect(r.html).not.toContain("<li>o</li>");
+  test("the corpus sample meta-match-in-meta-001 still compiles clean (its match now runs)", () => {
+    // reflect(T).variants are variant NAMES (strings), so the sample's `match v.name` matches no
+    // arm and emits nothing — the same empty output as before S459, now because the match ran
+    // and matched nothing rather than because it was dropped.
+    const src = readFileSync(join(import.meta.dir, "../../../samples/compilation-tests/gauntlet-s20-meta/meta-match-in-meta-001.scrml"), "utf8");
+    const r = compile(src);
+    expect(r.codes).toEqual([]);
+  });
+
+  test("a match over reflect(T).variants evaluates each arm per variant, and `continue` still works after it", () => {
+    const text = serializeNode({ kind: "match-stmt", header: "v", body: [
+      { kind: "match-arm-inline", test: "\"Circle\"", result: "emit ( \"<li>Round</li>\" )" },
+      { kind: "bare-expr", expr: "\"Square\" | \"Triangle\" :> emit ( \"<li>Corners</li>\" )" },
+    ] });
+    // Evaluate the serialized statement in a plain function with a recording emit.
+    const out = [];
+    const run = new Function("emit", "xs", `for (const v of xs) {\n${text}\n}`);
+    run((s) => out.push(s), ["Circle", "Square", "Triangle", "Hex"]);
+    expect(out).toEqual(["<li>Round</li>", "<li>Corners</li>", "<li>Corners</li>"]);
   });
 });
 
