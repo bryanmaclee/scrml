@@ -1,6 +1,7 @@
 {
   "name": "scrml",
   "version": "0.8.0",
+  "private": true,
   "description": "A complete compiler for the web.",
   "type": "module",
   "license": "MIT",
