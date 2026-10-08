@@ -127,11 +127,12 @@ describe("S457 — runtime ^{} bodies are held to the same allow-list", () => {
     ["meta member outside the 12", `meta.unknownThing()`, "meta.unknownThing"],
     ["destructured constructor (no evaluator backstop at runtime)", `const { constructor: K } = meta.get`, "constructor"],
     ["JSON", `meta.emit(JSON.stringify(1))`, "JSON"],
+    ["markup value (attribute expressions not walked — fail closed)", `const el = <div class="a"/>`, "markup value"],
   ];
   for (const [label, stmt, name] of RUNTIME) {
     test(label, () => {
       const { errors } = compileSource(`<program>\n\${ <n> = 1 }\n<div>\n^{\n  ${stmt}\n  meta.set("n", 2)\n}\n</div>\n</program>\n`);
-      expect(meta001(errors).some((e) => e.message.includes(`'${name}'`))).toBe(true);
+      expect(meta001(errors).some((e) => e.message.includes(`'${name}'`) || e.message.includes(`a ${name}`))).toBe(true);
     });
   }
 });

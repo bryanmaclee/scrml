@@ -680,7 +680,10 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
       for (const en of e.entries ?? []) { X(en.key); X(en.value); }
       return;
     case "markup-value":
-      // Markup is not executed in the meta body; lift/markup inside ^{} has its own codes.
+      // A markup VALUE (`const el = <div …/>`) lowers to a DOM-building expression whose
+      // attribute expressions this reader does not walk — fail closed. (`lift <x/>` is a
+      // `lift-expr` statement and E-META-006's to report.)
+      report("[markup value]", constructMessage("a markup value (build markup with emit() / meta.emit())"), span);
       return;
     default:
       report(String(e.kind), constructMessage(`the expression form '${String(e.kind)}'`), span);
