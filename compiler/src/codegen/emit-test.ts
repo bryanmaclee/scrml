@@ -29,6 +29,7 @@
  */
 
 import { basename } from "path";
+import { withHostGlobalAlias } from "./host-global-alias.ts";
 import type { TestGroup, TestBindDecl, AssertStmt } from "./ir.ts";
 
 // ---------------------------------------------------------------------------
@@ -279,5 +280,6 @@ export function generateTestJs(
   lines.push(`});`);
   lines.push(``); // trailing newline
 
-  return lines.join("\n");
+  // S457 2a — the test module reads host globals through `_scrml_g` (`new _scrml_g.Error(…)`).
+  return withHostGlobalAlias(lines.join("\n")) as string;
 }

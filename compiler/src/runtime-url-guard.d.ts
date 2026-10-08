@@ -19,5 +19,7 @@ export declare function _scrml_read_url_scheme(text: unknown, decodesEscapes: bo
 export declare function _scrml_data_url_is_raster_image(rest: string): boolean;
 export declare function _scrml_url_scheme_admitted(lowerName: string, scheme: string, rest: string): boolean;
 export declare function _scrml_url_value_admitted(name: string, value: unknown): boolean;
-export declare function _scrml_safe_url(el: unknown, name: string, value: unknown): string;
+export declare const _SCRML_SVG_ANIMATION_ELEMENTS: Set<string>;
+export declare const _SCRML_SVG_ANIMATION_VALUE_ATTRS: Set<string>;
+export declare function _scrml_safe_url(el: unknown, name: string, value: unknown, target?: string): string;
 export declare function _scrml_url_shape_ok(value: unknown): boolean;

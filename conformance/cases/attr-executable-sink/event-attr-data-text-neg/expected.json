@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-event-attr-data-text-neg",
+  "description": "§5.2 rule 2, S457 bullet event-handler text from data: `ONCLICK=${@code}` is not a spelling the compiler wires as a listener, so it would be WRITTEN as handler text built from data — refused.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457): \"Where an emitter would instead WRITE an `on…` attribute (rule 1's name test) from data — a spelling it does not wire as a listener, such as `ONCLICK=${…}` … — the write SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE)\". Before S457 it compiled to `el.setAttribute(\"ONCLICK\", String(value))`, which the browser compiles as an onclick handler.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

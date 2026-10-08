@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `46ed1f8ff` — wrap(s457): injection sinks and SQL checks moved to the text the runtime executes, `__scrml_` reserved, failed compiles write nothing — 8 PRs, four branches in flight (#1349) — **pushed**
 - `9d1a633ff` — wrap(s456): tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting per-row-equivalent, flogence's silent null slice (#1338) — **pushed**
 - `d068cc145` — wrap(s455): the tenant schema boundary moved to allow-lists and one SQL subset, R11 migrated reads-only, the foreign slice sealed, #1305's lowering made whole, N+1 hoisting fail-closed (#1326) — **pushed**
 - `babb40672` — wrap(s454): three fail-open floors closed, U1b built end to end, the Types gate made blocking — and the hand-off rotated (509 KB → 43 KB) (#1306) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `b35593879` — wrap(s452): one pattern-arm spelling across the language, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary (#1294) — **pushed**
 - `54ba32715` — wrap(s451): the U1 rulings in the SPEC, the error model and U1a in the bootstrap, a wrong-database security fix in impl#1 (#1271) — **pushed**
 - `b490f3b75` — wrap(s449): 14 PRs landed under an S239 review each — <effect>, §6.15, opener keywords, the §55 gate in the bootstrap; the @session identity hole, protect r9, lost acknowledged writes fixed in impl#1; the bootstrap's honest number is 19 (#1252) — **pushed**
-- `fffc94b75` — wrap(s450-peter): bryan's "stamp all" built end to end — seven landings, two holes found live on main, aM pin bumped behind a deploy guard (#1245) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

@@ -24,7 +24,16 @@
  */
 
 /** The alias declaration every artifact (and the runtime) starts with. */
-const ALIAS_DECL = /^(const|var) _scrml_g = globalThis;.*$/m;
+const ALIAS_DECL = /^(?:(const|var) _scrml_g = globalThis;|import _scrml_g from "data:[^"]*";).*$/m;
+
+/**
+ * For a harness that evaluates a whole ES-module artifact with `new Function` / `vm.Script`
+ * (no module context, so no `import`): the artifact's alias import becomes a plain
+ * `const _scrml_g = globalThis;`. A no-op on text without the import.
+ */
+export function standInHostAlias(js) {
+  return String(js).replace(/^import _scrml_g from "data:[^"]*";.*$/m, "const _scrml_g = globalThis;");
+}
 
 /** A view of `globalThis` with `overrides` on top. */
 export function hostView(overrides = {}) {
@@ -43,5 +52,5 @@ export function hostView(overrides = {}) {
  */
 export function rebindHostAlias(js, binding = "__scrml_host__") {
   if (!ALIAS_DECL.test(js)) throw new Error("rebindHostAlias: no `const|var _scrml_g = globalThis;` declaration in this code");
-  return js.replace(ALIAS_DECL, (_m, kw) => `${kw} _scrml_g = ${binding};`);
+  return js.replace(ALIAS_DECL, (_m, kw) => `${kw ?? "const"} _scrml_g = ${binding};`);
 }

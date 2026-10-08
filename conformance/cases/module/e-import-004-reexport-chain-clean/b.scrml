@@ -1,0 +1,4 @@
+${
+    export { K } from './c.scrml'
+    export * from './d.scrml'
+}

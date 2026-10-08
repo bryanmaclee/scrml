@@ -1270,9 +1270,13 @@ const HOST_GLOBAL_IDS = new WeakSet<object>();
 function dealiasHostGlobals(root: any): any {
   if (Array.isArray(root?.body)) {
     root.body = root.body.filter((st: any) => !(
-      st?.type === "VariableDeclaration" && st.declarations?.length === 1
-      && st.declarations[0].id?.type === "Identifier" && st.declarations[0].id.name === HOST_GLOBAL_ALIAS
-      && st.declarations[0].init?.type === "Identifier" && st.declarations[0].init.name === "globalThis"
+      (st?.type === "VariableDeclaration" && st.declarations?.length === 1
+        && st.declarations[0].id?.type === "Identifier" && st.declarations[0].id.name === HOST_GLOBAL_ALIAS
+        && st.declarations[0].init?.type === "Identifier" && st.declarations[0].init.name === "globalThis")
+      // the module form: `import _scrml_g from "data:text/javascript,…"`
+      || (st?.type === "ImportDeclaration" && st.specifiers?.length === 1
+        && st.specifiers[0].local?.name === HOST_GLOBAL_ALIAS
+        && typeof st.source?.value === "string" && st.source.value.startsWith("data:text/javascript,"))
     ));
   }
   const markGlobalThis = (n: any) => {

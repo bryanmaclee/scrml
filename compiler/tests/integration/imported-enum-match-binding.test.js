@@ -60,7 +60,11 @@ function build(name, files) {
   const chunks = listClientJs(outDir).map((file) => {
     const src = readFileSync(file, "utf8");
     const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
-    const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);
+    // A chunk depends on every registry it READS: an import destructure
+    // (`= _scrml_modules["k"];`) and, s457 §21.4, a re-export pair in its footer
+    // (`Pair: _scrml_modules["k"].Pair`). A page loads them deps-first the same way.
+    const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];|:\s*_scrml_modules\["([^"]+)"\]\./g)]
+      .map((m) => m[1] ?? m[2]);
     return { src, name: reg ? reg[1] : null, deps };
   });
   const registry = {};
@@ -226,13 +230,15 @@ describe("F11 — re-exported enums (one and two hops)", () => {
   });
   test("compiles clean", () => { expect(errors).toEqual([]); });
   test("positional binding resolves through the re-export chain", () => {
-    // The value is built in the canonical tagged shape directly: a library
-    // chunk that only re-exports (`export { Pair } from …`) registers an EMPTY
-    // `_scrml_modules` entry, so the enum OBJECT is not reachable at runtime
-    // through the chain (a separate, pre-existing value-re-export gap). What
-    // this pins is the MATCH lowering, whose schema comes from the type chain.
+    // The value is built in the canonical tagged shape directly — what this pins
+    // is the MATCH lowering, whose schema comes from the type chain.
     expect(mods.use.viaHop({ variant: "P", data: { first: 3, second: 4 } })).toBe(34);
     expect(mods.use.viaHop("Q")).toBe(-1);
+  });
+  test("s457 (§21.4) — the enum OBJECT is reachable through both hops (it used to register as an empty entry)", () => {
+    expect(mods.hop.Pair).toBe(mods.core.Pair);
+    expect(mods.mid.Pair).toBe(mods.core.Pair);
+    expect(mods.use.viaHop(mods.hop.Pair.P(5, 6))).toBe(56);
   });
 });
 

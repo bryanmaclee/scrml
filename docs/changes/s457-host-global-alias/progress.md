@@ -104,3 +104,29 @@ Append-only. Times local (2026-10-07/08).
 - Browser tier name-set gate PASS (48 asserted); self-host-v2 slices green; root-level 2239/0;
   e2e-render-map 259/0; lsp+commands 718/0; bootstrap-conformance current; compile-floor PASS;
   snippet-gate 122/0; types-gate unchanged; SPEC-INDEX OK.
+
+## S458 fix round (review of 96b12e174: DO-NOT-LAND, small fixes)
+- Merged origin/main (#1351 sinks, #1352 re-export, #1353): 3 conflicts (emit-event-wiring,
+  emit-lift x3, FACTS) resolved as main's code with the `_scrml_g` spelling.
+- F5 — the alias's own `globalThis` read is now UNREACHABLE by construction instead of reserving
+  the name: every ES-module artifact (server bundle, value-only module, library, tool, test.js,
+  machine test) IMPORTS it — `import _scrml_g from "data:text/javascript,export default globalThis";`
+  (an import binding exists before module code runs; the module's own `globalThis` binding is not
+  in the data: module's scope). Classic scripts: runtime `var _scrml_g` (client chunks run in an
+  IIFE); worker: `var _scrml_g` first, worker code in an IIFE. ESM client: imported from the
+  runtime module. E-CG-016's `globalThis` reservation DROPPED (moot) — no newly-rejecting surface.
+  A default export (not `export const _scrml_g`): the build/dev route scanners match
+  `export const _scrml_…` in server text by pattern and tried to import `_scrml_g`.
+- F4 value-only server module and F6 inline-test `.test.js` (+ machine test) declare the alias.
+- F2 worker bundles: classic IIFE (not a module worker — the page builds a classic Worker and
+  needs no change). Chromium: worker with own `postMessage/self/onmessage` replies (7).
+- F3 ESM bridge writes `_scrml_g._scrml_lift_target` (alias imported from the runtime).
+- F1 foreign seal reads require / __dirname / __filename off `import.meta` (Bun .require/.dir/
+  .path; Node .dirname/.filename) — syntax, not names a user binding can own.
+- G: NEW scripts/host-global-scan.ts (CI gate step): corpus x {default, esm, embed, build+per-route,
+  testMode+machine tests}; R1 free host-global refs the author did not write, R2 alias declared/
+  imported, R3 no top-level binding in a classic script. 2459 units, 5972 compiles, 9157
+  artifacts, ~95-130 s at concurrency 6. Bite proven: F4 reverted -> R2 on models.server.js.
+  Fixture samples/compilation-tests/s457-host-global-alias/ (value-only + worker + user names).
+- The scan found the machine-test emitter's bare globals (aliased) and 6 pre-existing
+  un-parseable testMode `.test.js` (un-lowered `@cell` in asserts) — reported, not judged.

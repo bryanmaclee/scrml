@@ -1,0 +1,6 @@
+// S457 2a fixture — a value-only server module: its exported const lowers to the
+// structural-equality helper, which reaches host globals through `_scrml_g`.
+// Imported by page.scrml's server function. Scanned by scripts/host-global-scan.ts.
+${
+  export const SAME_SHAPE = { a: 1 } == { a: 1 }
+}

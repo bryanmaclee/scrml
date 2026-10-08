@@ -46,10 +46,19 @@
  * into its scope (and the rename pass fences it, emit-client.ts
  * joinAroundRuntimeSlot).
  *
- * The one name the alias itself reads is `globalThis`. On the client it is read in
- * the runtime's scope; in a server bundle a `server function globalThis` peer
- * callable would capture it, so that name is a reserved server binding (E-CG-016,
- * emit-server.ts).
+ * The alias's own read of `globalThis` must be out of reach too — a user binding
+ * named `globalThis` is legal scrml. So it happens only where no user binding lives:
+ *
+ *   - client classic script: the runtime script (user code runs in the chunk IIFE);
+ *   - client ES module: imported from the runtime module;
+ *   - worker bundle (a classic script): declared first, outside the IIFE the worker's
+ *     own code runs in (emit-worker.ts);
+ *   - every other ES module (server bundle, value-only server module, library, tool,
+ *     inline-test `.test.js`): IMPORTED from a one-line `data:` module
+ *     (`HOST_GLOBAL_ALIAS_DECL`) whose own text is the only reader. An import binding
+ *     is created before any module code runs, and the module's own top-level
+ *     `globalThis` (a user `const globalThis`, a hoisted `function globalThis`) is not
+ *     in that module's scope.
  */
 
 import { aliasFreeGlobalRefs } from "./fn-name-rename.ts";
@@ -116,28 +125,42 @@ export function aliasHostGlobalsInRuntimeText(src: string): string {
   return out;
 }
 
-/** The declaration placed at the top of a non-client artifact that uses the alias. */
+/**
+ * The alias in an ES-module artifact: an import from a one-line `data:` module, so the
+ * only text that reads `globalThis` is that module's (see the header). Bun resolves a
+ * `data:text/javascript` specifier natively; no file is written. A DEFAULT export, so the
+ * artifact's text never carries `export const _scrml_…` outside its own exports (the
+ * `scrml build` / `scrml dev` route scanners read those by pattern).
+ */
 export const HOST_GLOBAL_ALIAS_DECL =
-  "const _scrml_g = globalThis; // host globals, under a name no scrml binding can reach (SPEC §47.1.1)";
+  'import _scrml_g from "data:text/javascript,export default globalThis"; // host globals, under a name no scrml binding can reach (SPEC §47.1.1)';
+
+/** The alias in a classic-script artifact (a worker bundle): declared before, and outside, the IIFE the script's own code runs in. */
+export const HOST_GLOBAL_ALIAS_SCRIPT_DECL = "var _scrml_g = globalThis; // host globals; the worker's code runs in the IIFE below (SPEC §47.1.1)";
 
 const USES_ALIAS = /(?<![\w$.])_scrml_g\b(?!\s*=)/;
-const DECLARES_ALIAS = /(?:^|[\n;{])\s*(?:const|let|var)\s+_scrml_g\b/;
+const DECLARES_ALIAS = /(?:^|[\n;{])\s*(?:(?:const|let|var)\s+_scrml_g\b|import\s+_scrml_g\s+from\b)/;
 
 /**
- * Prepend `HOST_GLOBAL_ALIAS_DECL` to a module-shaped artifact that references the
- * alias and does not already declare it. The file's own header comment (its leading
- * `//` lines, up to the first `// --- … ---` banner of an inlined helper) and a `#!`
- * line stay first; the declaration goes right after them, above every statement —
- * helpers read the alias at load (`const _SCRML_MEDIATED = _scrml_g.Symbol.for(…)`).
- * `import` declarations are hoisted, so a `const` above them is still valid.
+ * Put the alias declaration at the top of an artifact that references the alias and
+ * does not already declare it: `HOST_GLOBAL_ALIAS_DECL` (an ES module, the default) or
+ * `HOST_GLOBAL_ALIAS_SCRIPT_DECL` (`{ script: true }`). The file's own header comment
+ * (its leading `//` lines, up to the first `// --- … ---` banner of an inlined helper)
+ * and a `#!` line stay first; the declaration goes right after them, above every
+ * statement — helpers read the alias at load (`const _SCRML_MEDIATED = _scrml_g.Symbol.for(…)`).
  */
-export function withHostGlobalAlias(js: string | null | undefined): string | null | undefined {
+export function withHostGlobalAlias(js: string | null | undefined, opts: { script?: boolean } = {}): string | null | undefined {
   if (!js || !USES_ALIAS.test(js) || DECLARES_ALIAS.test(js)) return js;
   const lines = js.split("\n");
   let i = 0;
   // The file's own header comment: leading `//` lines up to the first section
   // banner (`// --- … ---`, which opens an inlined helper's own comment block).
   while (i < lines.length && (i === 0 && lines[i].startsWith("#!") || (/^\s*\/\//.test(lines[i]) && !/^\s*\/\/ ---/.test(lines[i])))) i++;
-  lines.splice(i, 0, HOST_GLOBAL_ALIAS_DECL);
+  lines.splice(i, 0, opts.script ? HOST_GLOBAL_ALIAS_SCRIPT_DECL : HOST_GLOBAL_ALIAS_DECL);
   return lines.join("\n");
+}
+
+/** Does `js` declare or import the alias? */
+export function declaresHostGlobalAlias(js: string): boolean {
+  return DECLARES_ALIAS.test(js);
 }

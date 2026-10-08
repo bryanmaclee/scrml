@@ -18,6 +18,7 @@ import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { compileScrml, rewriteRelativeImportPaths } from "../../src/api.js";
+import { HOST_GLOBAL_ALIAS_DECL } from "../../src/codegen/host-global-alias.ts";
 import { generateToolJs } from "../../src/codegen/emit-tool.ts";
 import { Database } from "bun:sqlite";
 
@@ -542,8 +543,11 @@ function main(args: string[]): number {
     // no leading `import` line — the header is empty for a no-import tool. (The
     // slice's §23.2.4a seal helper is an inlined runtime helper, which the tool emit
     // places ahead of the banner like every other one — not an import.)
-    expect(out.toolJs.trimStart().startsWith("import ")).toBe(false);
-    expect(out.toolJs).not.toMatch(/^import /m);
+    // The one import is the host-global alias (S457 2a; codegen/host-global-alias.ts) —
+    // a compiler line, not a header for the tool's own imports.
+    const imports = out.toolJs.split("\n").filter((l) => l.startsWith("import "));
+    expect(imports).toEqual([HOST_GLOBAL_ALIAS_DECL]);
+    expect(out.toolJs.split("\n").filter((l) => /^import /.test(l) && l !== HOST_GLOBAL_ALIAS_DECL)).toEqual([]);
     expect(out.toolJs).toContain("// Generated standalone tool");
   });
 

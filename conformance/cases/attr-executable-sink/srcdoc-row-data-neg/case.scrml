@@ -1,0 +1,8 @@
+<program>
+<pages> = [{ id: 1, html: "hello" }]
+<ul>
+  <each in=@pages key=@.id as pg>
+    <li><iframe srcdoc=pg.html></iframe></li>
+  </each>
+</ul>
+</program>

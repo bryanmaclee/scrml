@@ -1,0 +1,4 @@
+<program>
+<u> = "x"
+<svg><a href="/x"><set attributeName="href" to="javascript:${@u}"/><text>t</text></a></svg>
+</program>

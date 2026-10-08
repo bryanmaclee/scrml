@@ -65,8 +65,10 @@ export const FOREIGN_SEAL_FN = "_scrml_foreign_seal";
  *
  * ⛔ Constraints on this text (shared with every server-module helper — sql-tx-guard.ts):
  * no `import`, no top-level `await` (the conformance adapter evaluates a server module with
- * `new Function`); `require` / `__dirname` / `__filename` are read through `typeof` because
- * that evaluation has no module context. No literal `undefined` either: the server-output
+ * `new Function`, rewriting `import.meta` to a plain object); `require` / `__dirname` /
+ * `__filename` are read off `import.meta` (Bun: `.require` / `.dir` / `.path`; Node:
+ * `.dirname` / `.filename`) and bound only when present — never by their bare names, which a
+ * user binding in this module's scope could own (S457 2a). No literal `undefined` either: the server-output
  * lint W-CG-UNDEFINED-INTERPOLATION flags it (scrml absence is `null`, §42) — so a host name
  * the module lacks is left UNBOUND in the slice rather than bound to an absent value.
  *
@@ -95,9 +97,16 @@ function _scrml_foreign_seal(site, source) {
     // evaluated without one leaves the name unbound, exactly as host code sees it).
     const hostNames = [];
     const hostValues = [];
-    if (typeof require === "function") { hostNames.push("require"); hostValues.push(require); }
-    if (typeof __dirname === "string") { hostNames.push("__dirname"); hostValues.push(__dirname); }
-    if (typeof __filename === "string") { hostNames.push("__filename"); hostValues.push(__filename); }
+    // Read off import.meta (syntax, not a name), never the bare names: this text sits in
+    // the module's own scope, where a server function or binding named require /
+    // __dirname / __filename would otherwise be what the slice receives (S457 2a).
+    const _scrml_meta = import.meta;
+    const _scrml_require = _scrml_meta.require;
+    const _scrml_dirname = _scrml_meta.dir ?? _scrml_meta.dirname;
+    const _scrml_filename = _scrml_meta.path ?? _scrml_meta.filename;
+    if (typeof _scrml_require === "function") { hostNames.push("require"); hostValues.push(_scrml_require); }
+    if (typeof _scrml_dirname === "string") { hostNames.push("__dirname"); hostValues.push(_scrml_dirname); }
+    if (typeof _scrml_filename === "string") { hostNames.push("__filename"); hostValues.push(_scrml_filename); }
     const build = new _scrml_g.Function(...hostNames,
       "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + site);
     const slice = build(...hostValues);

@@ -21,7 +21,8 @@ import {
   buildProtectContext,
   SERVER_PROTECT_HELPER,
 } from "../../src/codegen/protect-egress.ts";
-import { HOST_GLOBAL_ALIAS_DECL } from "../../src/codegen/host-global-alias.ts";
+// The bundle's host-global alias (S457 2a), stood in for under `new Function` (no module context).
+const ALIAS_STANDIN = "const _scrml_g = globalThis;";
 
 // --- helpers ----------------------------------------------------------------
 
@@ -44,7 +45,7 @@ const parseClean = (js) =>
 // Eval the SHIPPED helper block into three callables so we exercise the exact
 // runtime the server bundle ships (not a re-implementation).
 function loadHelper() {
-  const fn = new Function(HOST_GLOBAL_ALIAS_DECL + "\n" + SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal };");
+  const fn = new Function(ALIAS_STANDIN + "\n" + SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal };");
   return fn();
 }
 
@@ -465,7 +466,7 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
   test("the guard passes a NULL-body Response and refuses a body-carrying look-alike", async () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const refusal = new Function(
-      HOST_GLOBAL_ALIAS_DECL + "\n" + SERVER_PROTECT_HELPER + "\nreturn _scrml_protect_opaque_refusal;",
+      ALIAS_STANDIN + "\n" + SERVER_PROTECT_HELPER + "\nreturn _scrml_protect_opaque_refusal;",
     )();
     // The guard exactly as `_opaqueResultGuard` emits it.
     const guard = (r) => {
@@ -497,7 +498,7 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
 
   test("the compiler-owned refusal carries a 500 and NO application data", async () => {
     const fn = new Function(
-      HOST_GLOBAL_ALIAS_DECL + "\n" + SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_opaque_refusal };",
+      ALIAS_STANDIN + "\n" + SERVER_PROTECT_HELPER + "\nreturn { _scrml_protect_opaque_refusal };",
     );
     const { _scrml_protect_opaque_refusal } = fn();
     const res = _scrml_protect_opaque_refusal();
@@ -834,7 +835,7 @@ describe("§14.8.9 every client-egress sink redacts (enumerated over serializers
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
     const { _scrml_mountHydrate_handler } = new Function(`
-${HOST_GLOBAL_ALIAS_DECL}
+${ALIAS_STANDIN}
 ${helper}
 async function loadUsers() { return _scrml_protect_tag([{ id: 1, name: "ada", passwordHash: "s3cret" }], ["passwordHash"]); }
 async function loadNotes() { return [{ id: 9, body: "hi" }]; }
@@ -928,7 +929,7 @@ return { _scrml_mountHydrate_handler };`)();
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
     const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
-    const { probe } = new Function(`${HOST_GLOBAL_ALIAS_DECL}
+    const { probe } = new Function(`${ALIAS_STANDIN}
 ${helper}
 function probe(id) {
   const _scrml_result = (() => {
@@ -1169,7 +1170,7 @@ type Op:enum = {
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
     const { h } = new Function(`
-${HOST_GLOBAL_ALIAS_DECL}
+${ALIAS_STANDIN}
 ${helper}
 async function loadUsers() { return _scrml_protect_tag([{ id: 1, name: "ada", passwordHash: "s3cret" }], ["passwordHash"]); }
 async function loadNotes() { return Response.redirect("http://x/home", 302); }
@@ -1207,7 +1208,7 @@ return { h: _scrml_mountHydrate_handler };`)();
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
     const { h } = new Function(`
-${HOST_GLOBAL_ALIAS_DECL}
+${ALIAS_STANDIN}
 ${helper}
 async function loadUsers() { return _scrml_protect_tag([{ id: 1, name: "ada", passwordHash: "s3cret" }], ["passwordHash"]); }
 async function loadNotes() { return [{ id: 9, body: "hi" }]; }

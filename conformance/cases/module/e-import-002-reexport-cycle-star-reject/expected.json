@@ -1,0 +1,8 @@
+{
+  "id": "e-import-002-reexport-cycle-star-reject",
+  "description": "§21.3 / §21.4 — a cycle closed by `export *` (x.scrml `export * from './y.scrml'`; y.scrml `export * from './x.scrml'`) is a circular import and fires E-IMPORT-002. x.scrml and y.scrml are aux siblings (`files` convention).",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: \"Circular imports SHALL be a compile error (E-IMPORT-002).\" `export * from` links its source module like an import (§21.4, ES module semantics), so a star cycle is a cycle in the import graph (S458 review F1).",
+  "expect": { "codes": ["E-IMPORT-002"], "notCodes": [] }
+}

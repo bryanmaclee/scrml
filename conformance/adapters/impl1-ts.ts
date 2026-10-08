@@ -894,10 +894,13 @@ function evalServerModule(
     .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
     .replace(/^export\s+/gm, "")
     .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"))
-    // S457 2a — the bundle reaches host globals through `const _scrml_g = globalThis;`
+    // No module context under `new Function`: the remaining `import.meta` reads (the
+    // foreign-seal helper's require / __dirname / __filename) read a plain object.
+    .replace(/import\.meta\b/g, "({})")
+    // S457 2a — the bundle imports its host-global alias `_scrml_g` from a `data:` module
     // (compiler/src/codegen/host-global-alias.ts); point it at a view of the global
     // object whose `Bun` is the stub, so the compiler's `_scrml_g.Bun.file(…)` reads it.
-    .replace(/^const _scrml_g = globalThis;.*$/m, "const _scrml_g = __scrml_host;");
+    .replace(/^import _scrml_g from "data:[^"]*";.*$/m, "const _scrml_g = __scrml_host;");
   const BunStub = { file: () => ({ text: async () => html }) };
   // The global object itself, except that `Bun` reads as the stub. Reads AND writes go to
   // the real global (`_scrml_g.__scrml_session_store ??= …` must be the store this adapter

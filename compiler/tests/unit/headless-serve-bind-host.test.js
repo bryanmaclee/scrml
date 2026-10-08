@@ -132,11 +132,11 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     expect(hostAt).toBeGreaterThan(-1);
     expect(hostAt).toBeLessThan(js.indexOf("TOPLEVEL-RAN"));
     expect(hostAt).toBeLessThan(js.indexOf("await main("));
-    // Nothing but comments, the static imports, the host-global alias (S457 2a) and the
-    // _scrml_bind helper precede it.
+    // Nothing but comments, the static imports (the host-global alias is one, S457 2a)
+    // and the _scrml_bind helper precede it.
     const ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "module" });
     const before = ast.body.filter((n) => n.start < hostAt && n.type !== "ImportDeclaration");
-    expect(before.map((n) => n.declarations?.[0]?.id?.name ?? n.type)).toEqual(["_scrml_g", "_scrml_bind"]);
+    expect(before.map((n) => n.declarations?.[0]?.id?.name ?? n.type)).toEqual(["_scrml_bind"]);
   });
 });
 

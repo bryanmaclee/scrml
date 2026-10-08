@@ -353,9 +353,11 @@ async function runGetN(serverJs, tag) {
 }
 
 describe("§4 a server function named after a host global (a module-scope peer callable) leaves the route working (executed)", () => {
-  test("`globalThis` is a reserved server binding (E-CG-016): the alias reads it", () => {
-    const { errors } = compileOne(serverProgram("globalThis"), "srv-globalThis");
-    expect(errors.map((e) => e.code)).toContain("E-CG-016");
+  test("`server function globalThis` is legal and cannot capture the alias (it is IMPORTED, not read here)", async () => {
+    const { errors, serverJs } = compileOne(serverProgram("globalThis"), "srv-globalThis");
+    expect(errors).toEqual([]);
+    expect(serverJs).toContain("async function globalThis(");
+    expect(await runGetN(serverJs, "globalThis")).toEqual({ status: 200, body: "5" });
   });
 
   test("the reported shape: `server function Response` — the route still answers", async () => {
@@ -366,8 +368,8 @@ describe("§4 a server function named after a host global (a module-scope peer c
     expect(await runGetN(serverJs, "Response")).toEqual({ status: 200, body: "5" });
   });
 
-  // Every host global but the two reserved server bindings (`fetch` is the
-  // WinterCG handler export; `globalThis` is read by the alias) and `eval`, which
+  // Every host global but `fetch` (a reserved server binding: the WinterCG handler
+  // export) and `eval`, which
   // cannot name a binding in a module at all (strict mode) — refused at the
   // emitted-artifact gate, before and after this change.
   test("`server function eval` is refused (a module cannot bind `eval`)", () => {
@@ -375,7 +377,7 @@ describe("§4 a server function named after a host global (a module-scope peer c
     expect(errors.map((e) => e.code)).toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
-  for (const n of ALL.filter((x) => x !== "fetch" && x !== "globalThis" && x !== "eval")) {
+  for (const n of ALL.filter((x) => x !== "fetch" && x !== "eval")) {
     test(`server function ${n}`, async () => {
       const { errors, serverJs } = compileOne(serverProgram(n), `srv-${n}`);
       expect(errors).toEqual([]);
@@ -383,6 +385,137 @@ describe("§4 a server function named after a host global (a module-scope peer c
       expect({ n, ...(await runGetN(serverJs, n)) }).toEqual({ n, status: 200, body: "5" });
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// §5 — the alias's own read is out of every user binding's reach (S458 F5),
+//      value-only modules (F4) and worker bundles (F2)
+// ---------------------------------------------------------------------------
+
+async function runRouteFile(serverPath, fnName) {
+  const mod = await import(serverPath + `?n=${++modCounter}`);
+  const route = mod.routes.find((x) => x.path.includes(`_${fnName}_`));
+  const res = await route.handler(new Request("http://localhost" + route.path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: "scrml_csrf=t", "X-CSRF-Token": "t" },
+    body: "{}",
+  }));
+  return { status: res.status, body: await res.text() };
+}
+
+function compileDir(files, entry, tag) {
+  const dir = resolve(tmpdir(), `scrml-s457hga-${tag}-${Date.now().toString(36)}-${++modCounter}`);
+  mkdirSync(dir, { recursive: true });
+  for (const [name, src] of Object.entries(files)) writeFileSync(join(dir, name), src);
+  const out = join(dir, "dist");
+  const r = compileScrml({ inputFiles: [join(dir, entry)], outputDir: out, write: true, log: () => {} });
+  const errors = (r.errors ?? []).filter((e) => !e.severity || e.severity === "error");
+  return { dir, out, errors };
+}
+
+describe("§5 a user binding named `globalThis` captures nothing; value-only modules and workers carry the alias", () => {
+  test("server: a top-level `const globalThis` beside the bundle's own code — the route answers", async () => {
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    const src = `<program>
+<v> = 0
+const globalThis = 3
+server function getN() { return 5 + globalThis }
+function go() { @v = getN() }
+<div><button onclick=go()>g</button><p>\${@v}</p></div>
+</program>
+`;
+    const { dir, out, errors } = compileDir({ "app.scrml": src }, "app.scrml", "const-gt");
+    try {
+      expect(errors).toEqual([]);
+      const serverJs = readFileSync(join(out, "app.server.js"), "utf8");
+      expect(serverJs).toContain(HOST_GLOBAL_ALIAS_DECL);
+      expect(serverJs).toContain("const globalThis = 3;"); // the author's binding sits at module scope
+      expect(serverJs).not.toMatch(/^const _scrml_g = globalThis/m);
+      expect(await runRouteFile(join(out, "app.server.js"), "getN")).toEqual({ status: 200, body: "8" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("client: a top-level `const globalThis` captures no compiler reference", async () => {
+    const r = await driveClient(clientProgram("const globalThis = 1", (a) => `${a} * globalThis`), "const-globalThis-client");
+    expect({ count: r.count, srv: r.srv, calls: r.calls.length }).toEqual({ count: 63, srv: 5, calls: 1 });
+  });
+
+  test("value-only server module (F4): an exported `==` const lowers to the eq helper; the module imports the alias", async () => {
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    const { dir, out, errors } = compileDir({
+      "models.scrml": "${\n  export const SAME_SHAPE = { a: 1 } == { a: 1 }\n}\n",
+      "page.scrml": `<program>
+<v> = 0
+\${
+  import { SAME_SHAPE } from './models.scrml'
+}
+server function getN() { return SAME_SHAPE ? 5 : 0 }
+function go() { @v = getN() }
+<div><button onclick=go()>g</button><p>\${@v}</p></div>
+</program>
+`,
+    }, "page.scrml", "value-only");
+    try {
+      expect(errors).toEqual([]);
+      const modelsJs = readFileSync(join(out, "models.server.js"), "utf8");
+      expect(modelsJs).toContain("_scrml_g.");
+      expect(modelsJs).toContain(HOST_GLOBAL_ALIAS_DECL);
+      expect(await runRouteFile(join(out, "page.server.js"), "getN")).toEqual({ status: 200, body: "5" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("worker (F2): its own functions named postMessage / self / onmessage live in the IIFE; the worker still replies", async () => {
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    const { dir, out, errors } = compileDir({
+      "app.scrml": `<program>
+  <program name="echo">
+    \${
+        function postMessage(x) { return x }
+        function self(x) { return x }
+        function onmessage(x) { return x }
+        when message(n) {
+            send(postMessage(n) + self(1) + onmessage(1))
+        }
+    }
+  </>
+\${
+    <o> = 0
+    function go() { <#echo>.send(5) }
+    when message from <#echo> (d) { @o = d }
+}
+<button onclick=go()>go</>
+<p>\${@o}</p>
+</program>
+`,
+    }, "app.scrml", "worker");
+    try {
+      expect(errors).toEqual([]);
+      const workerPath = join(out, "app-echo.worker.js");
+      const workerJs = readFileSync(workerPath, "utf8");
+      // The classic script's top level holds only the alias and the IIFE.
+      const ast = acorn.parse(workerJs, { ecmaVersion: "latest", sourceType: "script" });
+      expect(ast.body.map((st) => st.type)).toEqual(["VariableDeclaration", "ExpressionStatement"]);
+      expect(ast.body[0].declarations[0].id.name).toBe(HOST_GLOBAL_ALIAS);
+      const w = new Worker(workerPath);
+      try {
+        const reply = await new Promise((res, rej) => {
+          w.onmessage = (e) => res(e.data);
+          w.onerror = (e) => rej(e);
+          w.postMessage({ id: 1, data: 5 });
+          setTimeout(() => rej(new Error("worker never replied")), 3000);
+        });
+        expect(reply).toEqual({ replyTo: 1, data: 7 });
+      } finally {
+        w.terminate();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // happy-dom replaces Request / Response / fetch globally; leaving it registered
