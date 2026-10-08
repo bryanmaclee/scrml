@@ -86,7 +86,7 @@ function compileAndExtractIIFE(filename, source) {
   // call it with our test inputs.
   const arrow = iifeMatch[0].replace(/\)\([^)]*\)$/, ")");
   // arrow is now `((_raw) => { ... })` — directly callable.
-  const fn = new Function(`return ${arrow};`)();
+  const fn = new Function(`const _scrml_g = globalThis;\nreturn ${arrow};`)();
   return { fn, jsSnippet: arrow, errs };
 }
 

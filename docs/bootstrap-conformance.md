@@ -7,16 +7,16 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1464 of 1464 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1472 of 1472 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 121 | 8.3% |
+| PASS | 121 | 8.2% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 559 | 38.2% |
-| UNSUPPORTED | 728 | 49.7% |
+| NOT-TWINNED | 559 | 38.0% |
+| UNSUPPORTED | 736 | 50.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,11 +26,11 @@ Scope: **1464 of 1464 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 515 · parse-reject 213.
+UNSUPPORTED by reason: bootstrap-unsupported 519 · parse-reject 217.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **666** — PASS 76 · FAIL 52 · UNSUPPORTED 538. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **674** — PASS 76 · FAIL 52 · UNSUPPORTED 546. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -126,7 +126,7 @@ NOT-TWINNED by reason (559 cases; a case counts once per distinct reason):
 | linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 77 | 6 | · | 3 | · | 36 | 32 | · | · |
+| markup-handler | 85 | 6 | · | 3 | · | 36 | 40 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
@@ -419,7 +419,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (728)
+### UNSUPPORTED (736)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -823,6 +823,14 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s450-attr-multi-statement-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `markup-handler/s450-attr-multi-statement-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `;`
+- `markup-handler/s457-event-arrow-parameter-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s457-event-unbound-bare-call-neg` — twin · bootstrap-unsupported: member access `.target` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `markup-handler/s457-event-unbound-inline-block-neg` — twin · bootstrap-unsupported: member access `.type` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `markup-handler/s457-handler-expression-spaced-gt-neg` — twin · parse-reject: E-PARSE-TAG: unexpected `=` in the tag `<button`
+- `markup-handler/s457-unquoted-assign-read-whole` — twin · parse-reject: E-PARSE-TAG: unexpected `=` in the tag `<button`
+- `markup-handler/s457-unquoted-member-chain-condition` — twin · bootstrap-unsupported: member access `.ok` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `markup-handler/s457-unquoted-operator-non-handler-neg` — twin · parse-reject: E-PARSE-TAG: unexpected `+` in the tag `<p`
+- `markup-handler/s457-user-function-named-event-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
 - `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/inline-markup-match` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `match-block/member-access-complete-clean` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 

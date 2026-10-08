@@ -140,7 +140,7 @@ describe("P3 — emission", () => {
       "</>",
     ].join("\n"));
     expect(js.match(/items\.splice\(0, 1\)/g)).toHaveLength(1);
-    expect(js).toMatch(/let (_scrml_batch_items_\d+) = \(items\.splice\(0, 1\)\);\n\s*if \(!Array\.isArray\(\1\)\) \1 = Array\.from\(\1\);/);
+    expect(js).toMatch(/let (_scrml_batch_items_\d+) = \(items\.splice\(0, 1\)\);\n\s*if \(!_scrml_g\.Array\.isArray\(\1\)\) \1 = _scrml_g\.Array\.from\(\1\);/);
     expect(js).toMatch(/for \(const it of _scrml_batch_items_\d+\) \{/);
   });
   test(".all(): each lookup is a fresh array of row copies", () => {

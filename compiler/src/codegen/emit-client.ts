@@ -16,7 +16,8 @@ import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments
 import { renameUserFnRefsScoped } from "./fn-name-rename.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
-import { setActiveClientAsync } from "./js-async-analysis.ts";
+import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.ts";
+import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
@@ -1978,7 +1979,7 @@ function emitThemeSwitchReflection(nodes: any[]): string[] {
     seen.add(cell);
     const attr = themeVariantAttr(cell); // data-scrml-theme-<cell> — MUST match the variant selector
     out.push(`_scrml_effect(function() {`);
-    out.push(`  document.documentElement.setAttribute(${JSON.stringify(attr)}, _scrml_reactive_get(${JSON.stringify(cell)}));`);
+    out.push(`  _scrml_g.document.documentElement.setAttribute(${JSON.stringify(attr)}, _scrml_reactive_get(${JSON.stringify(cell)}));`);
     out.push(`});`);
   }
   return out;
@@ -2024,6 +2025,8 @@ export function generateClientJs(ctx: CompileContext): string {
   const csrfEnabled = ctx.csrfEnabled;
   const filePath: string = fileAST.filePath;
   const lines: string[] = [];
+  // s457 3a — this file's listener → source-attribute registry (E-EVENT-UNBOUND).
+  resetListenerSources();
 
   // S22 §1a slice 2: publish the file's variant→payload-field lookup so that
   // emitMatchExpr can resolve positional bindings `.Circle(r)` to field names.
@@ -2471,9 +2474,9 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("// the .send() whose id it names. `when message from` hooks see every message.");
     for (const name of workerNames) {
       const w = `_scrml_worker_${name}`;
-      lines.push(`const ${w} = new Worker(${JSON.stringify(workerBundleFilename(ctx.filePath, name))});`);
+      lines.push(`const ${w} = new _scrml_g.Worker(${JSON.stringify(workerBundleFilename(ctx.filePath, name))});`);
       lines.push(`${w}._scrml_next_id = 0;`);
-      lines.push(`${w}._scrml_pending = new Map(); // id -> resolve of an unanswered .send()`);
+      lines.push(`${w}._scrml_pending = new _scrml_g.Map(); // id -> resolve of an unanswered .send()`);
       lines.push(`${w}.addEventListener("message", function(event) {`);
       lines.push(`  const resolve = ${w}._scrml_pending.get(event.data.replyTo);`);
       lines.push(`  if (resolve) {`);
@@ -2483,7 +2486,7 @@ export function generateClientJs(ctx: CompileContext): string {
       lines.push(`});`);
       lines.push(`${w}.send = function(data) {`);
       lines.push(`  const id = ++${w}._scrml_next_id;`);
-      lines.push(`  return new Promise(function(resolve) {`);
+      lines.push(`  return new _scrml_g.Promise(function(resolve) {`);
       lines.push(`    ${w}._scrml_pending.set(id, resolve);`);
       lines.push(`    ${w}.postMessage({ id: id, data: data });`);
       lines.push(`  });`);
@@ -2510,13 +2513,13 @@ export function generateClientJs(ctx: CompileContext): string {
     // `var session` is redeclarable across classic scripts (unlike `let`/`const`)
     // and is the only top-level name the lowered `@session` body reads.
     lines.push("// --- @session reactive projection (compiler-generated) ---");
-    lines.push("var session = (typeof window !== 'undefined' && window._scrml_session_projection)");
-    lines.push("  ? window._scrml_session_projection");
+    lines.push("var session = (typeof _scrml_g.window !== 'undefined' && _scrml_g.window._scrml_session_projection)");
+    lines.push("  ? _scrml_g.window._scrml_session_projection");
     lines.push("  : (function () {");
     lines.push("    let _scrml_session = null;");
     lines.push("    async function _scrml_session_init() {");
     lines.push("      try {");
-    lines.push("        const resp = await fetch('/_scrml/session', { credentials: 'include' });");
+    lines.push("        const resp = await _scrml_g.fetch('/_scrml/session', { credentials: 'include' });");
     lines.push("        if (resp.ok) {");
     lines.push("          _scrml_session = await resp.json();");
     lines.push("        } else {");
@@ -2541,9 +2544,9 @@ export function generateClientJs(ctx: CompileContext): string {
     // readable `scrml_csrf` cookie. Retry: the cookie the 403 just planted (the meta
     // may be stale), copied into the meta so later mutations agree.
     lines.push("      async destroy() {");
-    lines.push("        const _scrml_cookie_tok = () => { const m = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; };");
-    lines.push("        const _scrml_meta = document.querySelector ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
-    lines.push("        const _scrml_post = (tok) => fetch('/_scrml/session/destroy', {");
+    lines.push("        const _scrml_cookie_tok = () => { const m = _scrml_g.document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/); return m ? _scrml_g.decodeURIComponent(m[1]) : ''; };");
+    lines.push("        const _scrml_meta = _scrml_g.document.querySelector ? _scrml_g.document.querySelector('meta[name=\"csrf-token\"]') : null;");
+    lines.push("        const _scrml_post = (tok) => _scrml_g.fetch('/_scrml/session/destroy', {");
     lines.push("          method: 'POST',");
     lines.push("          credentials: 'include',");
     lines.push("          headers: tok ? { 'X-CSRF-Token': tok } : {},");
@@ -2572,16 +2575,16 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("          return false;");
     lines.push("        }");
     lines.push("        if (!_scrml_resp.ok) {");
-    lines.push("          _scrml_error_boundary_log('session.destroy', new Error('session.destroy() failed: the server answered ' + _scrml_resp.status + ' — the session was NOT ended'));");
+    lines.push("          _scrml_error_boundary_log('session.destroy', new _scrml_g.Error('session.destroy() failed: the server answered ' + _scrml_resp.status + ' — the session was NOT ended'));");
     lines.push("          return false;");
     lines.push("        }");
     lines.push("        _scrml_session = null;");
-    lines.push(`        window.location.href = ${JSON.stringify(loginRedirect)};`);
+    lines.push(`        _scrml_g.window.location.href = ${JSON.stringify(loginRedirect)};`);
     lines.push("        return true;");
     lines.push("      },");
     lines.push("    };");
     lines.push("    _scrml_session_init();");
-    lines.push("    if (typeof window !== 'undefined') window._scrml_session_projection = session;");
+    lines.push("    if (typeof _scrml_g.window !== 'undefined') _scrml_g.window._scrml_session_projection = session;");
     lines.push("    return session;");
     lines.push("  })();");
     lines.push("");
@@ -2610,11 +2613,11 @@ export function generateClientJs(ctx: CompileContext): string {
     // never leaks cross-site. Falls back to the cookie (baseline double-submit, or
     // the value planted by a 403 Set-Cookie) and finally to a fresh mint below —
     // the S238 403+retry stays as the fallback when the meta token is absent/stale.
-    lines.push("  const _scrml_meta = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+    lines.push("  const _scrml_meta = (typeof _scrml_g.document !== 'undefined' && _scrml_g.document.querySelector) ? _scrml_g.document.querySelector('meta[name=\"csrf-token\"]') : null;");
     lines.push("  const _scrml_meta_token = _scrml_meta && _scrml_meta.getAttribute('content');");
     lines.push("  if (_scrml_meta_token) return _scrml_meta_token;");
-    lines.push("  const match = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
-    lines.push("  if (match) return decodeURIComponent(match[1]);");
+    lines.push("  const match = _scrml_g.document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
+    lines.push("  if (match) return _scrml_g.decodeURIComponent(match[1]);");
     // Issue #2 (parent scrmlTS): bootstrap a same-origin double-submit token
     // when none is present so the FIRST request — read OR write — carries a
     // cookie that matches its X-CSRF-Token header. The baseline server gate only
@@ -2633,8 +2636,8 @@ export function generateClientJs(ctx: CompileContext): string {
     // server's 403 Set-Cookie plants the real session token, and the single-shot
     // `_scrml_fetch_with_csrf_retry` retry re-reads it here and succeeds. Once
     // planted, subsequent mutations this session validate on the first try.
-    lines.push("  const _scrml_t = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));");
-    lines.push("  document.cookie = `scrml_csrf=${_scrml_t}; Path=/; SameSite=Strict`;");
+    lines.push("  const _scrml_t = (typeof _scrml_g.crypto !== 'undefined' && _scrml_g.crypto.randomUUID) ? _scrml_g.crypto.randomUUID() : (_scrml_g.Date.now().toString(36) + _scrml_g.Math.random().toString(36).slice(2));");
+    lines.push("  _scrml_g.document.cookie = `scrml_csrf=${_scrml_t}; Path=/; SameSite=Strict`;");
     lines.push("  return _scrml_t;");
     lines.push("}");
     lines.push("");
@@ -2668,10 +2671,10 @@ export function generateClientJs(ctx: CompileContext): string {
       lines.push("// After a CSRF 403: the response planted the current session token in the");
       lines.push("// scrml_csrf cookie; make the meta tag agree so the retry does not resend a stale one.");
       lines.push("function _scrml_csrf_sync_meta_from_cookie() {");
-      lines.push("  const _scrml_meta = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+      lines.push("  const _scrml_meta = (typeof _scrml_g.document !== 'undefined' && _scrml_g.document.querySelector) ? _scrml_g.document.querySelector('meta[name=\"csrf-token\"]') : null;");
       lines.push("  if (!_scrml_meta) return;");
-      lines.push("  const _scrml_fresh = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
-      lines.push("  if (_scrml_fresh) _scrml_meta.setAttribute('content', decodeURIComponent(_scrml_fresh[1]));");
+      lines.push("  const _scrml_fresh = _scrml_g.document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
+      lines.push("  if (_scrml_fresh) _scrml_meta.setAttribute('content', _scrml_g.decodeURIComponent(_scrml_fresh[1]));");
       lines.push("}");
       lines.push("");
     }
@@ -2682,14 +2685,14 @@ export function generateClientJs(ctx: CompileContext): string {
       // attempt also 403s, it's a real mismatch (stale token, actual CSRF
       // attempt) and propagates to the caller.
       lines.push("async function _scrml_fetch_with_csrf_retry(path, method, body) {");
-      lines.push("  let _scrml_resp = await fetch(path, {");
+      lines.push("  let _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("    method,");
       lines.push('    headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("    body,");
       lines.push("  });");
       lines.push("  if (_scrml_resp.status === 403) {");
       if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
-      lines.push("    _scrml_resp = await fetch(path, {");
+      lines.push("    _scrml_resp = await _scrml_g.fetch(path, {");
       lines.push("      method,");
       lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
       lines.push("      body,");
@@ -2845,7 +2848,7 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("function _scrml_bind_rewire(_scrml_root) {");
     for (const line of bindingLines) lines.push(line);
     lines.push("}");
-    lines.push("_scrml_bind_rewire(document);");
+    lines.push("_scrml_bind_rewire(_scrml_g.document);");
     lines.push("");
   }
 
@@ -2879,7 +2882,7 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("// event.preventDefault() is visible to link-boost's defaultPrevented guard.");
     lines.push("// { once: true }: DOMContentLoaded fires once per document — auto-remove so");
     lines.push("// the registration can never re-fire stale on a longer-lived document.");
-    lines.push("document.addEventListener('DOMContentLoaded', function() { _scrml_link_ensure_click(); }, { once: true });");
+    lines.push("_scrml_g.document.addEventListener('DOMContentLoaded', function() { _scrml_link_ensure_click(); }, { once: true });");
   }
 
   // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. Emitted
@@ -3212,6 +3215,14 @@ export function generateClientJs(ctx: CompileContext): string {
   // reserved at the top of generateClientJs. By this point all emit-* walks
   // have run and tagged their AST-shape-derived chunks; the chunk set is now
   // final.
+  // s457 3a — E-EVENT-UNBOUND on the listeners of the FINAL text, run right
+  // after the user-fn rename (below): a reference to a user `function event`
+  // has been rewritten to its encoded name by then, in every position, so a
+  // free `event` that remains is unbound by definition — no file-wide
+  // stand-down (S458 review (c)). See codegen/listener-event-check.ts.
+  const runEventUnboundCheck = (code: string) => clientStage(ctx, "event-unbound-check", () => {
+    for (const e of eventUnboundErrors(code, filePath, fnNameMap)) errors.push(e);
+  });
   const runtimeSource = clientStage(ctx, "assemble-runtime", () => assembleRuntime(ctx.usedRuntimeChunks));
   let clientCode: string;
   if (fnNameMap && fnNameMap.size > 0) {
@@ -3367,6 +3378,7 @@ export function generateClientJs(ctx: CompileContext): string {
       // the identical assembled buffer it saw before.
       return joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, mangle);
     });
+    runEventUnboundCheck(clientCode);
 
     // GITI-001 (giti inbound 2026-04-20): `@data = serverFn(args)` emits
     // `_scrml_reactive_set("data", _scrml_fetch_serverFn_N(args));` — storing
@@ -3947,6 +3959,7 @@ export function generateClientJs(ctx: CompileContext): string {
     clientCode = clientStage(ctx, "lines-join", () =>
       joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, (s) => s),
     );
+    runEventUnboundCheck(clientCode);
   }
 
   // GITI-003 (giti inbound 2026-04-20): prune imports that are only used by
@@ -4843,7 +4856,7 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
       }
     }
     const variantsArray = info.map(v => `"${v.name}"`).join(", ");
-    lines.push(`const ${decl.name} = Object.freeze({ ${entries.join(", ")}, variants: [${variantsArray}] });`);
+    lines.push(`const ${decl.name} = _scrml_g.Object.freeze({ ${entries.join(", ")}, variants: [${variantsArray}] });`);
   }
 
   return lines;

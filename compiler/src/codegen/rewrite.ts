@@ -642,7 +642,7 @@ function lowerSqlMethodSite(
     }
     // Emit a compile-error marker so the JS still parses (defense in depth)
     // but any runtime execution surfaces the issue immediately.
-    return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})()`;
+    return `(()=>{throw new _scrml_g.Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})()`;
   }
 
   // §14.8.10 — a tenant-scoped READ (any terminator): the key column(s) are

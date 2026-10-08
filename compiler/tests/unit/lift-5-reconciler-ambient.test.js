@@ -219,7 +219,7 @@ describe("LIFT-5 §6 — _scrml_lift_target set and cleared around for block", (
     expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
 
     // The block-level lift setup: _scrml_lift_target set before the factory decl
-    expect(clientJs).toContain("_scrml_lift_target = document.querySelector(");
+    expect(clientJs).toContain("_scrml_lift_target = _scrml_g.document.querySelector(");
     expect(clientJs).toContain("_scrml_lift_target = null;");
     // The wrapper element is lifted to _scrml_lift_target
     expect(clientJs).toContain("_scrml_lift(");

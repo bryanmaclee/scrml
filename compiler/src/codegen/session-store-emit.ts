@@ -24,7 +24,7 @@ import { SQLITE_BUSY_TIMEOUT_MS } from "../sqlite-handle-defaults.ts";
 
 /** The SQLite-backed store declaration (one element per emitted line). */
 export const SESSION_STORE_SQLITE_LINES: readonly string[] = [
-  "const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {",
+  "const _scrml_session_store = (((_scrml_g.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {",
   "  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);",
   // §44 / operator ruling S385 A1 ("WAL + 5s busy-timeout as the safe default", #1234) —
   // the session store is the one emitted sqlite handle #1062's sweep did not reach
@@ -51,12 +51,12 @@ export const SESSION_STORE_SQLITE_LINES: readonly string[] = [
   "    get(key) {",
   "      const row = _stmtGet.get(_ns, key);",
   "      if (!row) return null;",
-  "      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }",
-  "      try { return JSON.parse(row.value); } catch { return row.value; }",
+  "      if (row.expires_at !== null && row.expires_at <= _scrml_g.Date.now()) { _stmtDel.run(_ns, key); return null; }",
+  "      try { return _scrml_g.JSON.parse(row.value); } catch { return row.value; }",
   "    },",
   "    set(key, value, ttl) {",
-  "      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;",
-  "      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);",
+  "      const expiresAt = ttl ? _scrml_g.Date.now() + ttl * 1000 : null;",
+  "      _stmtSet.run(_ns, key, _scrml_g.JSON.stringify(value), expiresAt);",
   "    },",
   "    delete(key) { _stmtDel.run(_ns, key); },",
   "  };",
@@ -64,7 +64,7 @@ export const SESSION_STORE_SQLITE_LINES: readonly string[] = [
 ];
 
 /** The in-memory (read-only app) store declaration. */
-export const SESSION_STORE_MEMORY_LINE = "const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());";
+export const SESSION_STORE_MEMORY_LINE = "const _scrml_session_store = (_scrml_g.__scrml_session_store ??= new _scrml_g.Map());";
 
 /** The exact source text of each variant's declaration, as the flow compares it. */
 export const SESSION_STORE_SQLITE_TEXT = SESSION_STORE_SQLITE_LINES.join("\n");

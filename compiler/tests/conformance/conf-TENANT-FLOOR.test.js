@@ -186,7 +186,8 @@ describe("CONF-TENANT-FLOOR (runtime-half): the compiled bundle wires + the ship
   // request a query runs for is supplied through the helper's own request store,
   // with a stub `_scrml_current_user` standing in for the session resolver.
   const H = new Function(
-    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    // `_scrml_g`: the bundle's host-global alias (S457 2a) the helper reads through.
+    "const _scrml_g = globalThis;\nfunction _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
     "\nreturn { _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
   )();

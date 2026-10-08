@@ -211,7 +211,7 @@ describe("§6: reactive <textarea> inside <each> binds .value per item", () => {
     const { clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('document.createElement("textarea")');
     // .value is set from the item, NOT appended as a child text node.
-    expect(clientJs).toMatch(/\.value\s*=\s*String\(/);
+    expect(clientJs).toMatch(/\.value\s*=\s*_scrml_g\.String\(/);
     expect(clientJs).not.toContain("data-scrml-logic");
     expect(nodeCheck(clientJs).ok).toBe(true);
   });

@@ -163,6 +163,11 @@ const PRE = `  type Doc:enum = { Empty, Note(note: string) }
     @x = a + n
     @after = "ran"
   }
+  function goNoEv() {
+    const a = netfail()
+    @x = a
+    @after = "ran"
+  }
 `;
 const program = (markup, pre = PRE) => `<program>\n${pre}  ${markup}\n  <p id="o">\${@x} \${@after}</p>\n</program>\n`;
 
@@ -211,7 +216,7 @@ test("S454 — the PA's reproducer (s441 handler-rejection-bypasses-logging.scrm
   ).replace(/^\/\/.*\n/gm, "");
   const app = mount(src);
   expect(app.errs).toEqual([]);
-  expect(app.clientJs).toMatch(/async function\(event\) \{ try \{ await _scrml_go2_\d+\(\); \}/);
+  expect(app.clientJs).toMatch(/async function\(_scrml_event\) \{ try \{ await _scrml_go2_\d+\(\); \}/);
   app.release();
 });
 
@@ -255,18 +260,24 @@ const EV_PRE = `  <x> = 0
     @x = a
     @after = "ran"
   }
+  function goNoEv() {
+    const a = netfail()
+    @x = a
+    @after = "ran"
+  }
 `;
 
 for (const [name, markup, id, type, Ctor] of [
-  ["call-ref callee calls event.preventDefault() before its server call", `<a id="l" href="#x" onclick=goEv(event)>l</a>`, "l", "click", "MouseEvent"],
+  // s457 3a — the call-ref form does not bind `event`; the callee that needs it is called from `${(e) => …}`.
+  ["callee called with the event calls event.preventDefault() before its server call", `<a id="l" href="#x" onclick=\${(e) => goEv(e)}>l</a>`, "l", "click", "MouseEvent"],
   ["bare-ref handler calls event.preventDefault() before its server call", `<a id="l" href="#x" onclick=goEv>l</a>`, "l", "click", "MouseEvent"],
-  ["submit — the auto-injected preventDefault()", `<form id="f" onsubmit=goEv(event)><button>go</button></form>`, "f", "submit", "Event"],
+  ["submit — the auto-injected preventDefault()", `<form id="f" onsubmit=goNoEv()><button>go</button></form>`, "f", "submit", "Event"],
 ]) {
   test(`S454 timing — ${name}: default prevented at dispatch return`, async () => {
     const app = mount(program(markup, EV_PRE));
     expect(app.errs).toEqual([]);
     // the listener really is async — otherwise this proves nothing about S454
-    expect(app.clientJs).toMatch(/async function\(event\) \{ try \{/);
+    expect(app.clientJs).toMatch(/async (?:function\(_scrml_event\)|\(?e\)? =>) \{ try \{/);
     await app.boot();
     const { preventedAtDispatch } = await app.fire(id, type, Ctor);
     expect(preventedAtDispatch).toBe(true);

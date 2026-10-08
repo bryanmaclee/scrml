@@ -123,7 +123,21 @@ const NotificationItem = <div props={ message: string, onDismiss: () => void }>
     expect(r.clientJs).toMatch(/handleDismiss[\w$]*\(\)/);
   });
 
-  test("onclick=onGo(event) with an expression-valued caller calls that value with the event", () => {
+  test("a handler that takes the event calls an expression-valued caller with it", () => {
+    // s457 3a (#1363): a bare handler does not bind `event` — the event is taken as a
+    // parameter of a function the author writes (`${(e) => onGo(e)}`).
+    const r = compile(`<program>
+<o> = ""
+const Go = <span props={ onGo: (e: asIs) => void }>
+    <button onclick=\${(e) => onGo(e)}>go</button>
+</>
+<Go onGo=\${(e) => @o = "x"}/>
+</program>`);
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).not.toMatch(/\bonGo\(/);
+  });
+
+  test("the bare form onclick=onGo(event) is E-EVENT-UNBOUND in a component body too (s457 3a)", () => {
     const r = compile(`<program>
 <o> = ""
 const Go = <span props={ onGo: (e: asIs) => void }>
@@ -131,8 +145,7 @@ const Go = <span props={ onGo: (e: asIs) => void }>
 </>
 <Go onGo=\${(e) => @o = "x"}/>
 </program>`);
-    expect(r.codes).toEqual([]);
-    expect(r.clientJs).not.toMatch(/\bonGo\(/);
+    expect(r.codes).toContain("E-EVENT-UNBOUND");
   });
 });
 

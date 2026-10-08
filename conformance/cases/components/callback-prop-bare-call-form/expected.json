@@ -1,6 +1,6 @@
 {
   "id": "components-callback-prop-bare-call-form",
-  "description": "§15.11.4 (S459 M2) — a function-typed prop called in the BARE event-attribute call form (`onclick=onDismiss()`, `onclick=onGo(event)`) calls the caller's value. The §15.11.4 worked example verbatim (NotificationItem, with and without the optional `onRead`), the `onGo(event)` form at top level, inside a `lift`, and with an expression-valued caller (a lambda). Before S459 the callee was never substituted: `function(event) { onDismiss(); }` -> ReferenceError on click.",
+  "description": "§15.11.4 (S459 M2) — a function-typed prop called in the BARE event-attribute call form (`onclick=onDismiss()`, `onclick=onGo(event)`) calls the caller's value. The §15.11.4 worked example verbatim (NotificationItem, with and without the optional `onRead`), a handler that takes the event and calls `onGo(e)` (`${(e) => onGo(e)}` — s457 3a: a bare handler does not bind `event`, so the bare `onGo(event)` form is E-EVENT-UNBOUND) at top level, inside a `lift`, and with an expression-valued caller (a lambda). Before S459 the callee was never substituted: `function(event) { onDismiss(); }` -> ReferenceError on click.",
   "language-version": "1.0",
   "spec": "§15.11.4",
   "rationale": "§15.10.1: the compiler SHALL replace every identifier reference that matches a declared prop name with the caller-side value; §15.11.4's own example writes `<button onclick=onDismiss()>` with `onDismiss=handleDismiss` at the call site.",

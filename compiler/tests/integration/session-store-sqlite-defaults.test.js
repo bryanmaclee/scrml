@@ -81,7 +81,7 @@ function load() {
 <button onclick=load()>who</button>
 </program>
 `);
-    expect(serverJs).toContain("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+    expect(serverJs).toContain("const _scrml_session_store = (_scrml_g.__scrml_session_store ??= new _scrml_g.Map());");
     expect(serverJs).not.toContain("PRAGMA busy_timeout");
   });
 });

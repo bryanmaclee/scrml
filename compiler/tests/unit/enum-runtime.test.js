@@ -21,7 +21,7 @@ describe("enum variant objects (§14.4)", () => {
     const ast = makeFileAST(src);
     const lines = emitEnumVariantObjects(ast);
     expect(lines.length).toBe(1);
-    expect(lines[0]).toContain("const Status = Object.freeze(");
+    expect(lines[0]).toContain("const Status = _scrml_g.Object.freeze(");
     expect(lines[0]).toContain('Loading: "Loading"');
     expect(lines[0]).toContain('Success: "Success"');
     expect(lines[0]).toContain('Error: "Error"');

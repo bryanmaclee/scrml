@@ -167,7 +167,8 @@ describe("§20.7 — server/tool inline helper", () => {
   });
 
   test("the helper writes its argument verbatim to process.stdout", () => {
-    const fn = new Function(SERVER_PRINT_HELPER + "\nreturn _scrml_print;")();
+    // `_scrml_g`: the bundle's host-global alias (S457 2a) the helper reads through.
+    const fn = new Function("const _scrml_g = globalThis;\n" + SERVER_PRINT_HELPER + "\nreturn _scrml_print;")();
     const orig = process.stdout.write.bind(process.stdout);
     let captured = "";
     // @ts-ignore — temporary spy

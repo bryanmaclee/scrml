@@ -66,7 +66,7 @@ describe("§1 for-of + .get() → pre-loop fetch + per-iteration read", () => {
     // S455: the iterable is evaluated once into `_scrml_batch_items_N`; keys + loop read it.
     expect(js).toMatch(/let _scrml_batch_items_\d+ = \(ids\);/);
     expect(js).toMatch(/for \(const _k of _scrml_batch_items_\d+\.map\(\(x\) => x\.id\)\) \{ if \(!_scrml_batch_slots_\d+\.has\(_k\)\) _scrml_batch_slots_\d+\.set\(_k, _scrml_batch_slots_\d+\.size\); \}/);
-    expect(js).toMatch(/const _scrml_batch_bySlot_\d+ = new Map\(\);/);
+    expect(js).toMatch(/const _scrml_batch_bySlot_\d+ = new _scrml_g\.Map\(\);/);
     expect(js).toMatch(/const _scrml_batch_fetch_\d+ = async \(_keys\) => \{/);
     // S455: each read is its own copy of the row (as each per-row query returns).
     expect(js).toContain("return _hit ? { ..._hit } : null;");

@@ -194,7 +194,7 @@ describe("CB5: baseline handler wraps result in new Response()", () => {
     const { serverJs } = makePostHandler("saveData", [
       makeReturnStmt('"ok"', span(110)),
     ]);
-    expect(serverJs).toContain("new Response(");
+    expect(serverJs).toContain("new _scrml_g.Response(");
     expect(serverJs).toContain("status: 200");
   });
 

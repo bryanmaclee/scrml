@@ -25,6 +25,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-request-refetch-s444");
 
@@ -134,18 +135,18 @@ describe("§B: refetch in an inline multi-statement handler", () => {
   test("a TRAILING refetch survives (was: only the write)", () => {
     const { fatal, clientJs } = compile(INLINE_SRC, "inline");
     expect(fatal).toEqual([]);
-    expect(clientJs).toContain('function(event) { _scrml_cs_reactive_set("n", 5); _scrml_request_rows.refetch(); }');
+    expect(clientJs).toContain('function(_scrml_event) { _scrml_cs_reactive_set("n", 5); _scrml_request_rows.refetch(); }');
   });
 
   test("a LEADING refetch compiles and keeps the write (was: E-CODEGEN-INVALID-LOGIC)", () => {
     const { fatal, clientJs } = compile(INLINE_SRC, "inline-lead");
     expect(fatal).toEqual([]);
-    expect(clientJs).toContain('function(event) { _scrml_request_rows.refetch(); _scrml_cs_reactive_set("n", 6); }');
+    expect(clientJs).toContain('function(_scrml_event) { _scrml_request_rows.refetch(); _scrml_cs_reactive_set("n", 6); }');
   });
 
   test("the single-expression form is unchanged (control)", () => {
     const { clientJs } = compile(INLINE_SRC, "inline-single");
-    expect(clientJs).toContain("function(event) { _scrml_request_rows.refetch(); }");
+    expect(clientJs).toContain("function(_scrml_event) { _scrml_request_rows.refetch(); }");
   });
 
   test("an <each> row handler keeps a trailing refetch", () => {
@@ -202,13 +203,15 @@ function mount(src, baseName) {
       return { ok: true, status: 200, json: async () => ({ n: calls.length }) };
     };
     const exec = new Function(
-      "window", "document", "fetch",
-      `${runtimeJs}\n` + captureInsideChunkScope(clientJs,
+      "window", "document", "fetch", "__scrml_host__",
+      `${rebindHostAlias(runtimeJs)}\n` + captureInsideChunkScope(clientJs,
         `if (typeof _scrml_boot === "function") { _scrml_boot(); }\n` +
         `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
         `globalThis.__get__ = _scrml_reactive_get;\n`),
     );
-    exec(window, document, fetchStub);
+    // The emitted code reaches host globals through the alias `_scrml_g` (S457 2a): the
+    // stubs reach it through a view of the global object, not by shadowing.
+    exec(window, document, fetchStub, hostView({ window, document, fetch: fetchStub }));
     document.dispatchEvent(new window.Event("DOMContentLoaded"));
     return { get: globalThis.__get__, calls };
   } finally {

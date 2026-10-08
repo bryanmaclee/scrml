@@ -171,7 +171,8 @@ describe("§40.2 — `scrml dev`'s parent-side Origin rule agrees with the emitt
   test("wsOriginAllowed (dev.js) and _scrml_ws_origin_ok (emitted) decide every case the same way", async () => {
     const v = compileApp("parity", CHANNEL_APP);
     const fnSrc = v.serverJs.match(/function _scrml_ws_origin_ok\(req\) \{[\s\S]+?\n\}/)[0];
-    const emitted = new Function(`${fnSrc}; return _scrml_ws_origin_ok;`)();
+    // `_scrml_g`: the bundle's host-global alias (S457 2a).
+    const emitted = new Function(`const _scrml_g = globalThis;\n${fnSrc}; return _scrml_ws_origin_ok;`)();
     const { wsOriginAllowed } = await import("../../src/commands/dev.js");
     const req = (url, h) => ({ url, headers: { get: (k) => h[String(k).toLowerCase()] ?? null } });
     const cases = [

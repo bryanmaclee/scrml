@@ -21,6 +21,7 @@
  * parent side lives in emit-client.ts ("worker instantiation").
  */
 
+import { HOST_GLOBAL_ALIAS_SCRIPT_DECL } from "./host-global-alias.ts";
 import { basename } from "path";
 import { emitLogicNode } from "./emit-logic.ts";
 import { needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
@@ -91,11 +92,14 @@ export function generateWorkerJs(
 
     lines.push(`// Reply to the parent. \`replyTo\` names the parent's \`.send()\` being answered.`);
     lines.push(`function _scrml_reply(replyTo, data) {`);
-    lines.push(`  self.postMessage({ replyTo: replyTo, data: data });`);
+    lines.push(`  _scrml_g.self.postMessage({ replyTo: replyTo, data: data });`);
     lines.push(`}`);
-    lines.push(`self.onmessage = function(event) {`);
-    lines.push(`  const _scrml_reply_to = event.data.id;`);
-    lines.push(`  var ${binding} = event.data.data;`);
+    // s457 3a — the listener's own parameter is `_scrml_event` (outside the
+    // user namespace): the `when message (binding)` body gets its data through
+    // `binding`, and a free `event` in it is E-EVENT-UNBOUND (listener-event-check).
+    lines.push(`_scrml_g.self.onmessage = function(_scrml_event) {`);
+    lines.push(`  const _scrml_reply_to = _scrml_event.data.id;`);
+    lines.push(`  var ${binding} = _scrml_event.data.data;`);
 
     // Indent body lines
     for (const bodyLine of body.split("\n")) {
@@ -105,16 +109,24 @@ export function generateWorkerJs(
     lines.push(`};`);
   }
 
+  // A worker bundle is a CLASSIC script: a top-level declaration in it becomes a property of the
+  // worker's global object, so a worker function named `postMessage` / `self` / `onmessage`
+  // would replace the host's own and the worker would never reply. The worker's code therefore
+  // runs inside a function scope (as a client chunk's does), and everything the compiler needs
+  // from the host is captured OUTSIDE that scope, first: the host-global alias (S457 2a), which
+  // every compiler reference reads through. A classic IIFE rather than a module worker
+  // (`new Worker(url, { type: "module" })`): the page constructs it as a classic worker today,
+  // and the IIFE needs no change to the page, the bundle's MIME or the browsers it runs on.
+  const [banner, ...rest] = lines;
+  const out: string[] = [banner, HOST_GLOBAL_ALIAS_SCRIPT_DECL];
   // §53.6.1 (S457 "6a") — a worker has no scrml runtime, so a `string(url)` boundary check in a
   // worker function would call an undefined `_scrml_url_shape_ok`. Inline the judge's source
-  // (runtime-url-guard.js) as a header, right after the banner line: a header, not a footer, because
-  // the source declares `const` sets the judge reads.
-  const body = lines.join("\n");
-  if (needsUrlShapeHelper(body)) {
-    const [banner, ...rest] = lines;
-    return [banner, SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "", ...rest].join("\n");
-  }
-  return body;
+  // (runtime-url-guard.js) ahead of the worker's code: compiler text, outside the IIFE.
+  if (needsUrlShapeHelper(rest.join("\n"))) out.push(SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "");
+  out.push("(function () {");
+  for (const l of rest) out.push(l);
+  out.push("})();");
+  return out.join("\n");
 }
 
 /**

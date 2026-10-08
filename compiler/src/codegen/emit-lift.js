@@ -636,7 +636,7 @@ export function maybeWrapLiftCallableHandler(arrowText) {
   // emits the arrow directly, byte-identical to pre-fix).
   const prelude = computeItemDerivedReplay(arrowText, null, 'return;');
   if (prelude.length === 0) return null;
-  return `function(event) { ${prelude.join(' ')} (${arrowText})(event); }`;
+  return `function(_scrml_event) { ${prelude.join(' ')} (${arrowText})(_scrml_event); }`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,7 +1326,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       if (engineLoweredAttr !== null) {
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         continue;
       }
       // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
@@ -1386,7 +1386,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
         }
       } else {
         // Bug 73 — per-item handler live-keying. Re-resolve the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
@@ -1462,7 +1462,7 @@ function emitSetContent(elVar, parts) {
   if (currentLiftReconcileCtx()) {
     const tnVar = genVar('lift_tn');
     const out = [];
-    out.push(`const ${tnVar} = document.createTextNode("");`);
+    out.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
     out.push(`${elVar}.appendChild(${tnVar});`);
     for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = ${tpl};`])) out.push(l);
     return out;
@@ -1473,12 +1473,12 @@ function emitSetContent(elVar, parts) {
   if (liftExprReadsRequestState(tpl)) {
     const tnVar = genVar('lift_tn');
     return [
-      `const ${tnVar} = document.createTextNode("");`,
+      `const ${tnVar} = _scrml_g.document.createTextNode("");`,
       `${elVar}.appendChild(${tnVar});`,
       `_scrml_effect(function() { ${tnVar}.textContent = ${tpl}; });`,
     ];
   }
-  return [`${elVar}.appendChild(document.createTextNode(${tpl}));`];
+  return [`${elVar}.appendChild(_scrml_g.document.createTextNode(${tpl}));`];
 }
 
 /**
@@ -1496,7 +1496,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   const isVoid = VOID_ELEMENTS.has(tag);
 
   const elVar = genVar(`lift_el`);
-  lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+  lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
   // g-lift-tier0-if-reactive-structural — the node this factory RETURNS. Normally
   // the element itself; for a SOLE reconciled item root carrying a per-item `if=`
@@ -1578,7 +1578,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (_isSoleItemRoot && !_isValueIndexed) {
           const phVar = `_scrml_ph_${genVar()}`;
           const curVar = `_scrml_cur_${genVar()}`;
-          lines.push(`const ${phVar} = document.createComment("scrml-if-row");`);
+          lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
           lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
           for (const l of maybeWrapLiftPerItemEffect([`${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`])) lines.push(l);
           _returnVar = curVar;
@@ -1705,7 +1705,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
         // does not read the item (the iter-scope scan gates it out → stays plain);
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(_scrml_event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       } else {
         // §5.2 (S457) — a srcdoc / an event attribute this path does not wire (`onClick=it.f`)
         // is never written from data.
@@ -1745,16 +1745,16 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredCall !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
-        const _cv = `String(${callExpr} ?? "")`;
+        const _cv = `_scrml_g.String(${callExpr} ?? "")`;
         // §5.2 (S457) — never write a srcdoc / an unwired event attribute from data.
         // §5.2 (S457) — a srcdoc is never written from data, wherever the write is emitted (a declared
         // component prop written onto an expanded root included). Every `on…` name is wired above.
@@ -1796,7 +1796,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           });
           // S446 (S439 #4) — await a server-call cell write in place so the next
           // statement sees the resolved value (js-async-analysis ColorOpts).
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` })});`);
           continue;
         }
         // Bug 65 (S157) — engine transition `${@engine.advance(.X)}` (CallExpr) /
@@ -1810,7 +1810,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredExpr !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
           continue;
         }
         // S140 Bug 59 — when this onevent value is a synth arrow-string with
@@ -1869,11 +1869,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           }
         } else {
           // Bug 73 — function-body per-item handler: re-resolve the live item at fire time.
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
-        const _ev = `String(${rewritten} ?? "")`;
+        const _ev = `_scrml_g.String(${rewritten} ?? "")`;
         // §5.2 (S457) — never write a srcdoc / an unwired event attribute (`ONCLICK=${…}`) from data.
         // §5.2 (S457) — a srcdoc is never written from data, wherever the write is emitted (a declared
         // component prop written onto an expanded root included). Every `on…` name is wired above.
@@ -1956,23 +1956,23 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 // reds in g-emit-lift-markup-text-interp.browser.test.js; NOT
                 // fixed here. See g-ast-markup-text-interp-adjacent-space-dropped.
                 const _tn = genVar('lift_tn');
-                lines.push(`const ${_tn} = document.createTextNode("");`);
+                lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
-                for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = String((${_rw}) ?? "");`])) lines.push(l);
+                for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = _scrml_g.String((${_rw}) ?? "");`])) lines.push(l);
               } else if (liftExprReadsRequestState(_rw)) {
                 const _tn = genVar('lift_tn');
-                lines.push(`const ${_tn} = document.createTextNode("");`);
+                lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
-                lines.push(`_scrml_effect(function() { ${_tn}.textContent = String((${_rw}) ?? ""); });`);
+                lines.push(`_scrml_effect(function() { ${_tn}.textContent = _scrml_g.String((${_rw}) ?? ""); });`);
               } else {
-                lines.push(`${elVar}.appendChild(document.createTextNode(String((${_rw}) ?? "")));`);
+                lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String((${_rw}) ?? "")));`);
               }
             } else if (_pt.value !== "") {
-              lines.push(`${elVar}.appendChild(document.createTextNode(${JSON.stringify(_pt.value)}));`);
+              lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(_pt.value)}));`);
             }
           }
         } else if (text.trim()) {
-          lines.push(`${elVar}.appendChild(document.createTextNode(${JSON.stringify(text)}));`);
+          lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(text)}));`);
         }
       } else if (child.kind === "markup") {
         // Bug 72 (S158) — a nested `<each>` child: route through the SHARED
@@ -2030,9 +2030,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
               // effect). Outside a reconcile ctx, unchanged static append.
               if (currentLiftReconcileCtx()) {
                 const tnVar = genVar('lift_tn');
-                lines.push(`const ${tnVar} = document.createTextNode("");`);
+                lines.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
-                for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = String((${rewritten}) ?? "");`])) lines.push(l);
+                for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = _scrml_g.String((${rewritten}) ?? "");`])) lines.push(l);
               } else if (liftExprReadsRequestState(rewritten)) {
                 // S213 ss15 items 3+4 (Seam 3) — the interpolation reads a
                 // `<request>` deep-reactive object; wrap the text-node write in
@@ -2040,11 +2040,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 // (loading → data). Stable text node + effect mirrors the
                 // inline-path render bridge.
                 const tnVar = genVar('lift_tn');
-                lines.push(`const ${tnVar} = document.createTextNode("");`);
+                lines.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
-                lines.push(`_scrml_effect(function() { ${tnVar}.textContent = String((${rewritten}) ?? ""); });`);
+                lines.push(`_scrml_effect(function() { ${tnVar}.textContent = _scrml_g.String((${rewritten}) ?? ""); });`);
               } else {
-                lines.push(`${elVar}.appendChild(document.createTextNode(String((${rewritten}) ?? "")));`);
+                lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String((${rewritten}) ?? "")));`);
               }
             } else if (logicChild.kind === "lift-expr") {
               // Nested ${ lift <inner/> } inside markup — route to current element
@@ -2204,7 +2204,7 @@ function emitCreateElementFromExprString(expr) {
   const lines = [];
   const elVar = genVar(`lift_el`);
 
-  lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+  lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
   // Parse and emit attributes
   if (attrsStr) {
@@ -2871,11 +2871,11 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     const createFnVar = genVar('create_item');
     const tmpContainerVar = genVar('tmp');
 
-    lines.push(`const ${wrapperVar} = document.createElement("div");`);
+    lines.push(`const ${wrapperVar} = _scrml_g.document.createElement("div");`);
     lines.push(`${containerElVar}.appendChild(${wrapperVar});`);
 
     lines.push(`function ${createFnVar}(${varName}, _scrml_idx) {`);
-    lines.push(`  const ${tmpContainerVar} = document.createDocumentFragment();`);
+    lines.push(`  const ${tmpContainerVar} = _scrml_g.document.createDocumentFragment();`);
     // Bug 64 (S159) — capture this node's create-time key so per-item bindings
     // (text / class:) can re-resolve the LIVE item by key on every reconcile.
     // MUST mirror the keyFn passed to _scrml_reconcile_list below (id-or-index).
@@ -3169,7 +3169,7 @@ export function emitConsolidatedLift(body, opts = {}) {
   function pushElement(tag, attrsStr) {
     pendingAttrName = null;
     const elVar = genVar(`lift_el`);
-    lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
+    lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
     // S457 — kept on the element-stack entry so a BLOCK_REF-split value (`to = ${x}`) can ask
     // whether it is an SVG animation value writing a URL attribute (`attributeName="href"`).
     let elementAttrs = [];
@@ -3337,9 +3337,9 @@ export function emitConsolidatedLift(body, opts = {}) {
                 if (liftEventName(attrName) !== null) {
                   const eventName = liftEventName(attrName);
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
-                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
+                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
                 } else {
-                  const _bv = `String(${rewritten} ?? "")`;
+                  const _bv = `_scrml_g.String(${rewritten} ?? "")`;
                   // §5.2 rule 3 (S457) — a BLOCK_REF-split `href=${expr}`: guard the URL write.
                   const _bEl = currentElement();
                   const _bt = _bEl ? _bEl.tag : "";
@@ -3622,9 +3622,9 @@ export function emitLiftExpr(node, opts = {}) {
     // No tag pattern at all — emit as text node
     const rewritten = emitExprField(liftExpr.exprNode, expr, liftExprCtx());
     if (containerVar) {
-      return `${containerVar}.appendChild(document.createTextNode(String(${rewritten} ?? "")));`;
+      return `${containerVar}.appendChild(_scrml_g.document.createTextNode(_scrml_g.String(${rewritten} ?? "")));`;
     }
-    return `_scrml_lift(() => document.createTextNode(String(${rewritten} ?? "")));`;
+    return `_scrml_lift(() => _scrml_g.document.createTextNode(_scrml_g.String(${rewritten} ?? "")));`;
   }
 
   return "";

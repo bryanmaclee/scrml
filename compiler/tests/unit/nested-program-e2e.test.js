@@ -63,7 +63,7 @@ describe("§A Inline worker round-trip (§4.12.4)", () => {
     const { cgOut } = fullPipeline(src);
     const workerJs = getOutput(cgOut).workerBundles.get("doubler");
     expect(workerJs).toContain("self.postMessage({ replyTo: replyTo, data: data })");
-    expect(workerJs).toContain("const _scrml_reply_to = event.data.id;");
+    expect(workerJs).toContain("const _scrml_reply_to = _scrml_event.data.id;");
     expect(workerJs).toContain("_scrml_reply(_scrml_reply_to, ");
     expect(workerJs).not.toMatch(/(?<![\w$.])send\s*\(/);
   });
@@ -92,7 +92,7 @@ describe("§A Inline worker round-trip (§4.12.4)", () => {
   test("parent client JS has worker instantiation", () => {
     const { cgOut } = fullPipeline(src);
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(getOutput(cgOut).clientJs ?? ""));
-    expect(clientJs).toContain('new Worker("test-doubler.worker.js")');
+    expect(clientJs).toContain('new _scrml_g.Worker("test-doubler.worker.js")');
     expect(clientJs).toContain("_scrml_worker_doubler.send");
   });
 });
@@ -170,7 +170,7 @@ describe("§D <#name>.send() in expressions (§4.12.4)", () => {
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? ""));
     // Worker instantiation + Promise wrapper should be in client JS
     expect(clientJs).toContain("_scrml_worker_doubler");
-    expect(clientJs).toContain('new Worker("test-doubler.worker.js")');
+    expect(clientJs).toContain('new _scrml_g.Worker("test-doubler.worker.js")');
     expect(clientJs).toContain("postMessage({ id: id, data: data })");
   });
 });

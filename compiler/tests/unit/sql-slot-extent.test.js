@@ -112,7 +112,8 @@ describe("compile + run on Bun.SQL sqlite (the reviewer's shapes)", () => {
       expect(m).not.toBe(null);
       const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
       let threw = null;
-      try { await new AsyncFunction("_scrml_sql", "x", `return ${m[0]};`)(db, "a"); } catch (e) { threw = String(e.message); }
+      // `_scrml_g`: the bundle's host-global alias (S457 2a).
+      try { await new AsyncFunction("_scrml_sql", "x", "_scrml_g", `return ${m[0]};`)(db, "a", globalThis); } catch (e) { threw = String(e.message); }
       const leak = (await db.unsafe("SELECT count(*) AS n FROM sqlite_master WHERE name = 'leak'"))[0].n;
       const invoices = (await db.unsafe("SELECT count(*) AS n FROM invoices"))[0].n;
       const notes = (await db.unsafe("SELECT v FROM notes")).map((r) => r.v);

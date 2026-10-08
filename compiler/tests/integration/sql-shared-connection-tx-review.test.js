@@ -290,8 +290,8 @@ describe("S449 review fix round", () => {
     if (typeof globalThis.document !== "undefined") return;
     expect(serverJs).toContain("async message(ws, raw) {");
     // re-review nit 4: only a malformed frame (JSON.parse) is swallowed
-    expect(serverJs).toContain("try { d = JSON.parse(raw); } catch (_e) { return; }");
-    expect(serverJs).not.toContain("instanceof SyntaxError");
+    expect(serverJs).toContain("try { d = _scrml_g.JSON.parse(raw); } catch (_e) { return; }");
+    expect(serverJs).not.toMatch(/instanceof (?:_scrml_g\.)?SyntaxError/);
     expect(serverJs).toContain("await onChat(msg);");
     expect(serverJs).toMatch(/_scrml_ws_handlers\[_scrml_ws_key\] = _scrml_db_request_scope\(_scrml_ws_handlers\[_scrml_ws_key\]\)/);
   });

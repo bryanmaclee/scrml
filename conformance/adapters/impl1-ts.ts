@@ -574,11 +574,12 @@ export async function run(
     // §37.5 SSE binding: happy-dom has no EventSource. Install a never-firing
     // stub for this run ONLY when the emitted client constructs one — models the
     // pre-first-event window (the cell shows its seed). See installNoopEventSource.
-    if (clientJs.includes("new EventSource")) {
+    // (spelled through the host-global alias, S457 2a: `new _scrml_g.EventSource(`)
+    if (/new (?:_scrml_g\.)?EventSource\b/.test(clientJs)) {
       restoreEventSource = installNoopEventSource();
     }
     // §38 `<channel>`: never let a run open a real socket (see installNoopWebSocket).
-    if (clientJs.includes("new WebSocket")) {
+    if (/new (?:_scrml_g\.)?WebSocket\b/.test(clientJs)) {
       restoreWebSocket = installNoopWebSocket();
     }
 
@@ -892,16 +893,31 @@ function evalServerModule(
     .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
     .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
     .replace(/^export\s+/gm, "")
-    .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
+    .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"))
+    // No module context under `new Function`: the remaining `import.meta` reads (the
+    // foreign-seal helper's require / __dirname / __filename) read a plain object.
+    .replace(/import\.meta\b/g, "({})")
+    // S457 2a — the bundle imports its host-global alias `_scrml_g` from a `data:` module
+    // (compiler/src/codegen/host-global-alias.ts); point it at a view of the global
+    // object whose `Bun` is the stub, so the compiler's `_scrml_g.Bun.file(…)` reads it.
+    .replace(/^import _scrml_g from "data:[^"]*";.*$/m, "const _scrml_g = __scrml_host;");
   const BunStub = { file: () => ({ text: async () => html }) };
+  // The global object itself, except that `Bun` reads as the stub. Reads AND writes go to
+  // the real global (`_scrml_g.__scrml_session_store ??= …` must be the store this adapter
+  // seeds below, exactly as in a deploy).
+  // (A view that inherits from the global object; `Bun` is read-only + non-configurable on
+  // the real one, so it is an own property of the view. Writes are forwarded.)
+  const view = Object.create(g);
+  Object.defineProperty(view, "Bun", { value: BunStub, writable: true, configurable: true, enumerable: true });
+  const host = new Proxy(view, { set: (_t, k, v) => Reflect.set(g, k, v) });
   const wrapper = new Function(
-    "_scrml_sql", "Bun", "Response", "crypto", "URL",
+    "_scrml_sql", "Bun", "Response", "crypto", "URL", "__scrml_host",
     `${runnable}\nreturn {` +
       ` fetch: typeof fetch !== "undefined" ? fetch : null,` +
       ` compose: typeof _scrml_ssr_compose_handler !== "undefined" ? _scrml_ssr_compose_handler : null` +
       ` };`,
   );
-  return wrapper(sqlBinding ?? makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL) as ServerModule;
+  return wrapper(sqlBinding ?? makeSqlStub(db), BunStub, g.Response, g.crypto, g.URL, host) as ServerModule;
 }
 
 /**

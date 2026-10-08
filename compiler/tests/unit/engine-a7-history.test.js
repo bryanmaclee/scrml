@@ -390,7 +390,7 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
     // (1) Per-engine history-map const emitted alongside the transitions
     //     table. Keyed by outer variant tag; value is inner-engine var name.
     expect(clientJs).toContain("__scrml_engine_appMode_history_map");
-    expect(clientJs).toMatch(/__scrml_engine_appMode_history_map\s*=\s*Object\.freeze\(\{[\s\S]*?"Playing":\s*"playMode"/);
+    expect(clientJs).toMatch(/__scrml_engine_appMode_history_map\s*=\s*_scrml_g\.Object\.freeze\(\{[\s\S]*?"Playing":\s*"playMode"/);
 
     // (2) Per-state-child synth-cell init line. Key shape:
     //     "_<outerVar>_<stateTag>_history" — null at module-init (empty-

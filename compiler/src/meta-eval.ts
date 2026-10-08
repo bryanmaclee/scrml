@@ -410,9 +410,15 @@ function reparseEmitted(emittedCode: string, errors: MetaEvalError[], raw: boole
         const code = (e as { code?: string }).code || "";
         if (code.startsWith("W-") || code.startsWith("I-")) continue;
 
+        // s457 4a — a refused unquoted attribute value in emitted markup is
+        // reported under its own code (the shared reader's refusal), not as a
+        // generic re-parse failure.
+        const isAttrRefusal = code === "E-ATTR-UNQUOTED-OPERATOR" || code === "E-ATTR-MULTI-STATEMENT";
         errors.push(new MetaEvalError(
-          "E-META-EVAL-002",
-          `Re-parsing emitted meta code failed: ${(e as { message?: string }).message || code}`,
+          isAttrRefusal ? code : "E-META-EVAL-002",
+          isAttrRefusal
+            ? `${(e as { message?: string }).message || code} (in markup emitted by \`^{ emit(…) }\`)`
+            : `Re-parsing emitted meta code failed: ${(e as { message?: string }).message || code}`,
           (e as { tabSpan?: Span }).tabSpan
             || (e as { span?: Span }).span
             || { file: "__meta_emit__", start: 0, end: 0, line: 1, col: 1 },

@@ -364,6 +364,16 @@ function walk(
   if (kind) {
     if (OPAQUE_KINDS.has(kind)) return;
 
+    if (n._handlerParamPrelude === true) {
+      // s457 3a — the AST builder's `const <param> = _scrml_event` prelude for an
+      // arrow-valued handler (`${(e) => …}`, ast-builder
+      // parseArrowHandlerStatements): its INIT is the compiler's own listener
+      // parameter, not author text. The declared binder IS the author's
+      // parameter and is checked like any other.
+      walk({ ...n, init: undefined, initExpr: undefined, _handlerParamPrelude: undefined }, c, seen, container, inherited, depth);
+      return;
+    }
+
     if (kind === "foreign" || kind === "Foreign") {
       // §23.2.3 — the foreign BODY is opaque and is not inspected. The `in: { … }`
       // crossing HEADER is scrml-side grammar (§23.2.4a): its names are scrml

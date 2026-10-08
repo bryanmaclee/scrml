@@ -91,7 +91,7 @@ function emitDurationLiteral(rule: TransitionRule): string {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { rewriteExpr } = require("./rewrite.ts");
     const rewritten = rewriteExpr(rule.afterExpr);
-    return `(function(){ var v = ${rewritten}; return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0; })()`;
+    return `(function(){ var v = ${rewritten}; return (typeof v === "number" && _scrml_g.isFinite(v) && v >= 0) ? _scrml_g.Math.round(v) : 0; })()`;
   }
   // Defensive — non-temporal rules are filtered before reaching this helper.
   return "0";
@@ -285,7 +285,7 @@ export function emitDerivedDeclaration(machine: DerivedMachineLike): string[] {
   lines.push(`// §51.9 derived machine: @${projected} projects @${source} through ${machine.name}`);
   lines.push(`_scrml_derived_fns[${JSON.stringify(projected)}] = function() { return ${fnName}(_scrml_reactive_get(${JSON.stringify(source)})); };`);
   lines.push(`_scrml_derived_dirty[${JSON.stringify(projected)}] = true;`);
-  lines.push(`(_scrml_derived_downstreams[${JSON.stringify(source)}] = _scrml_derived_downstreams[${JSON.stringify(source)}] || new Set()).add(${JSON.stringify(projected)});`);
+  lines.push(`(_scrml_derived_downstreams[${JSON.stringify(source)}] = _scrml_derived_downstreams[${JSON.stringify(source)}] || new _scrml_g.Set()).add(${JSON.stringify(projected)});`);
   return lines;
 }
 
@@ -522,7 +522,7 @@ function emitElidedTransition(
   if (hasAudit) {
     const labelLit = matchedRule.label ? JSON.stringify(matchedRule.label) : "null";
     lines.push(`  // §51.11 audit log push (matched key baked in)`);
-    lines.push(`  _scrml_reactive_set("${auditTarget}", (_scrml_reactive_get("${auditTarget}") || []).concat([Object.freeze({ from: __prev, to: __next, at: Date.now(), rule: ${JSON.stringify(matchedKey)}, label: ${labelLit} })]));`);
+    lines.push(`  _scrml_reactive_set("${auditTarget}", (_scrml_reactive_get("${auditTarget}") || []).concat([_scrml_g.Object.freeze({ from: __prev, to: __next, at: _scrml_g.Date.now(), rule: ${JSON.stringify(matchedKey)}, label: ${labelLit} })]));`);
   }
 
   if (hasTemporal) {
@@ -632,7 +632,7 @@ export function emitTransitionGuard(
   lines.push(`    : null;`);
   lines.push(`  var __rule = __matchedKey != null ? ${tableName}[__matchedKey] : null;`);
   lines.push(`  if (!__rule) {`);
-  lines.push(`    throw new Error("E-ENGINE-001-RT: Illegal transition. Variable: ${encodedVarName}, governed by: ${engineName}. Move: " + (__prev != null && __prev.variant != null ? "." + __prev.variant : String(__prev)) + " => " + (__next != null && __next.variant != null ? "." + __next.variant : String(__next)) + ". No rule permits this transition.");`);
+  lines.push(`    throw new _scrml_g.Error("E-ENGINE-001-RT: Illegal transition. Variable: ${encodedVarName}, governed by: ${engineName}. Move: " + (__prev != null && __prev.variant != null ? "." + __prev.variant : _scrml_g.String(__prev)) + " => " + (__next != null && __next.variant != null ? "." + __next.variant : _scrml_g.String(__next)) + ". No rule permits this transition.");`);
   lines.push(`  }`);
 
   // §51.3.2 (S22) — payload-binding prelude. Before guard and effect bodies,
@@ -670,12 +670,12 @@ export function emitTransitionGuard(
         lines.push(`  if (__matchedKey === "${guardKey}") {`);
         for (const p of prelude) lines.push(`    ${p}`);
         lines.push(`    if (!(${guardJs})) {`);
-        lines.push(`      throw new Error("E-ENGINE-001-RT: Transition guard failed${label}. Variable: ${encodedVarName}, governed by: ${engineName}. Move: .${rule.from} => .${rule.to}. Guard: ${guardDiag}");`);
+        lines.push(`      throw new _scrml_g.Error("E-ENGINE-001-RT: Transition guard failed${label}. Variable: ${encodedVarName}, governed by: ${engineName}. Move: .${rule.from} => .${rule.to}. Guard: ${guardDiag}");`);
         lines.push(`    }`);
         lines.push(`  }`);
       } else {
         lines.push(`  if (__matchedKey === "${guardKey}" && !(${guardJs})) {`);
-        lines.push(`    throw new Error("E-ENGINE-001-RT: Transition guard failed${label}. Variable: ${encodedVarName}, governed by: ${engineName}. Move: .${rule.from} => .${rule.to}. Guard: ${guardDiag}");`);
+        lines.push(`    throw new _scrml_g.Error("E-ENGINE-001-RT: Transition guard failed${label}. Variable: ${encodedVarName}, governed by: ${engineName}. Move: .${rule.from} => .${rule.to}. Guard: ${guardDiag}");`);
         lines.push(`  }`);
       }
     }
@@ -736,7 +736,7 @@ export function emitTransitionGuard(
     // §51.11.4 specifies audit entries are frozen objects so consumers
     // (replay, time-travel, server-side log aggregators) can safely hold
     // long-lived references without worrying about mutation.
-    lines.push(`  _scrml_reactive_set("${auditTarget}", (_scrml_reactive_get("${auditTarget}") || []).concat([Object.freeze({ from: __prev, to: __next, at: Date.now(), rule: __matchedKey, label: __auditLabel })]));`);
+    lines.push(`  _scrml_reactive_set("${auditTarget}", (_scrml_reactive_get("${auditTarget}") || []).concat([_scrml_g.Object.freeze({ from: __prev, to: __next, at: _scrml_g.Date.now(), rule: __matchedKey, label: __auditLabel })]));`);
   }
 
   // §51.12 (S25) — temporal transitions. After state commit, clear any

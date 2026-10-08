@@ -181,7 +181,7 @@ describe("test-bind A6-5 §2: E-TEST-006 — unbound server-fn call fails the te
 
     // Generated test JS should contain the thrower stub
     const testJs = readFileSync(testJsPath, "utf8");
-    expect(testJs).toContain("const sendEmail = (...args) => { throw new Error(");
+    expect(testJs).toContain("const sendEmail = (...args) => { throw new _scrml_g.Error(");
     expect(testJs).toContain("E-TEST-006");
 
     // Run under bun:test — MUST fail (non-zero exit; throw is caught
@@ -196,6 +196,11 @@ describe("test-bind A6-5 §2: E-TEST-006 — unbound server-fn call fails the te
     // E-TEST-006 should surface in the failure output (the thrown
     // Error message is the dispatch-hook diagnostic text).
     expect(combined).toContain("E-TEST-006");
+    // …as the THROWN error, not merely as source text in a code frame (S458 F6: with the
+    // module's host-global alias undeclared, the stub threw a ReferenceError instead and
+    // the diagnostic only appeared in the printed source line).
+    expect(combined).not.toContain("_scrml_g is not defined");
+    expect(combined).toMatch(/error: E-TEST-006: server function `sendEmail`/);
   });
 });
 

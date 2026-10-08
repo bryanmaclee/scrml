@@ -19,6 +19,7 @@ import { tmpdir } from "os";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 const _dirs = [];
 afterAll(() => { for (const d of _dirs) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
@@ -196,8 +197,10 @@ async function composeFirstPaint(serverJs, html, dbRows) {
     constructor(body, init) { this._body = body; this.status = init?.status; }
     async text() { return this._body; }
   }
-  const mod = new Function("_scrml_sql", "Bun", "Response", `${runnable}\nreturn { _scrml_ssr_compose_handler };`)(
-    _scrml_sql, BunStub, ResponseStub,
+  // The bundle reaches host globals through its alias `_scrml_g` (S457 2a): the stubs
+  // reach it through a view of the global object.
+  const mod = new Function("_scrml_sql", "Bun", "Response", "__scrml_host__", `${rebindHostAlias(runnable)}\nreturn { _scrml_ssr_compose_handler };`)(
+    _scrml_sql, BunStub, ResponseStub, hostView({ Bun: BunStub, Response: ResponseStub }),
   );
   const resp = await mod._scrml_ssr_compose_handler({});
   return await resp.text();

@@ -17,7 +17,7 @@ const NotificationItem = <div
     <button onclick=${ if (onRead) { onRead() } }>Mark read</>
 </>
 const Go = <span class="go" props={ onGo: (e: asIs) => void }>
-    <button class="g" onclick=onGo(event)>go</button>
+    <button class="g" onclick=${(e) => onGo(e)}>go</button>
 </>
 <div id="a"><NotificationItem message="New message" onDismiss=handleDismiss/></div>
 <div id="b"><NotificationItem message="Other" onDismiss=handleDismiss onRead=handleRead/></div>

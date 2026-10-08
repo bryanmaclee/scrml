@@ -1,0 +1,5 @@
+<msg> = ""
+${ function event(v) { @msg = "ev" + v } }
+
+<button id="b" onclick=event(5)>go</>
+<p id="out">${@msg}</p>

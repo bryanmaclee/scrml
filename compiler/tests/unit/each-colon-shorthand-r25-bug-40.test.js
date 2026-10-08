@@ -124,7 +124,7 @@ describe("R25-Bug-40 §1 — minimal repro <each in=@items><li : @.name></each>"
     // The per-item factory MUST create a <li> element.
     expect(clientJs).toMatch(/document\.createElement\("li"\)/);
     // The factory MUST wire @.name as textContent (iter-var.name).
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.name\)/);
     // Factory MUST append the element to the fragment.
     expect(clientJs).toMatch(/_scrml_item_frag\.appendChild\(/);
     // Pre-fix symptom: factory body was empty — only `return _scrml_item_frag.firstChild`.
@@ -157,7 +157,7 @@ describe("R25-Bug-40 §2 — `:`-shorthand body with leading attribute", () => {
     // The class attribute is wired via setAttribute.
     expect(clientJs).toMatch(/\.setAttribute\("class", "card"\)/);
     // The shorthand body is wired via textContent.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.title\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.title\)/);
     // No spurious setAttribute("@", ...) or setAttribute("title", ...) from
     // pre-fix mis-tokenization of the body as bareword attributes.
     expect(clientJs).not.toMatch(/setAttribute\("@",/);
@@ -182,11 +182,11 @@ describe("R25-Bug-40 §3 — count form with `:`-shorthand body", () => {
     const { errors, clientJs } = compileToOutputs(src, "bug40-of");
     expect(errors).toEqual([]);
     // Of-form generates Array.from for the range.
-    expect(clientJs).toMatch(/Array\.from\(\{length: Number/);
+    expect(clientJs).toMatch(/_scrml_g\.Array\.from\(\{length: _scrml_g\.Number/);
     // <li> is created.
     expect(clientJs).toMatch(/document\.createElement\("li"\)/);
     // The `:`-shorthand body `@.` = current iteration value (the index).
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\)/);
   });
 
   test("`<each of=N><li : 'Slot ' + @.></each>` — string-concat with index", () => {
@@ -201,7 +201,7 @@ describe("R25-Bug-40 §3 — count form with `:`-shorthand body", () => {
     const { errors, clientJs } = compileToOutputs(src, "bug40-of-concat");
     expect(errors).toEqual([]);
     // The body expression includes the literal + concat with iter var.
-    expect(clientJs).toMatch(/\.textContent = String\("Slot " \+ _scrml_each_item\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\("Slot " \+ _scrml_each_item\)/);
   });
 });
 
@@ -228,7 +228,7 @@ describe("R25-Bug-40 §4 — nested `:`-shorthand inside bare-body parent", () =
     // <h3> is created (shorthand child).
     expect(clientJs).toMatch(/document\.createElement\("h3"\)/);
     // The h3 receives @.title as textContent.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.title\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.title\)/);
   });
 });
 
@@ -253,7 +253,7 @@ describe("R25-Bug-40 §5 — mixed shorthand + bare-body siblings", () => {
     expect(clientJs).toMatch(/document\.createElement\("li"\)/);
     expect(clientJs).toMatch(/document\.createElement\("span"\)/);
     // <li> wired with shorthand body.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.name\)/);
     // <span> wired with bare-body text.
     expect(clientJs).toMatch(/createTextNode\("after"\)/);
   });
@@ -279,7 +279,7 @@ describe("R25-Bug-40 §6 — positive control (regression guard)", () => {
     // KEYED — a stable text node + `textContent = String(...)` inside the per-
     // item effect. The semantic invariant (@.name → _scrml_each_item.name) holds.
     expect(clientJs).toMatch(/document\.createElement\("li"\)/);
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.name\)/);
   });
 });
 
@@ -305,7 +305,7 @@ describe("R25-Bug-40 §7 — `<empty>` bare-body regression guard", () => {
     // The "No items" text is wired into the empty fragment.
     expect(clientJs).toMatch(/createTextNode\("No items"\)/);
     // The shorthand body STILL works alongside.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.name\)/);
   });
 });
 
@@ -337,7 +337,7 @@ describe("R25-Bug-40 §8 — `<empty : 'literal'>` shorthand on empty-state", ()
     // textContent assignment is the load-bearing assertion.
     // The empty fragment uses createTextNode + appendChild (no createElement
     // for <empty> — it is a structural sub-element, not a DOM element).
-    expect(clientJs).toMatch(/createTextNode\(String\("None"\)\)/);
+    expect(clientJs).toMatch(/createTextNode\(_scrml_g\.String\("None"\)\)/);
   });
 });
 
@@ -360,7 +360,7 @@ describe("R25-Bug-40 §9 — `as name` alias with `:`-shorthand body", () => {
     // Iter-var name is `item`, not the default.
     expect(clientJs).toMatch(/\(item, _scrml_each_idx\) =>/);
     // The shorthand body references `item.name` directly (no `@.` rewrite).
-    expect(clientJs).toMatch(/\.textContent = String\(item\.name\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(item\.name\)/);
   });
 });
 
@@ -400,7 +400,7 @@ describe("R25-Bug-40 §10 — key= inference with `:`-shorthand bodies", () => {
     // canonical internal name (gate fix-wave clash-avoidance).
     expect(clientJs).toMatch(/\(_scrml_each_item, _scrml_each_idx\) => _scrml_each_item\.email/);
     // Body wired correctly.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.name\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.name\)/);
   });
 });
 

@@ -50,12 +50,12 @@ function compileSource(source, filename = "test.scrml") {
 function executeClientJs(clientJs, invocation) {
   // This harness runs the chunk with NO runtime to probe pure lowering, so it
   // needs the chunk's declarations at top level and its cell-scope prologue gone.
-  const sanitized = unwrapChunkScope(clientJs)
+  const sanitized = unwrapChunkScope(clientJs, { hostAlias: true })
     .replace(/^\/\/ Requires:.*$/gm, "")
     .replace(/^import .*$/gm, "")
     // The emitted code includes a DOMContentLoaded listener we don't want to
     // trigger; replace with a no-op `window`/`document` shim.
-    .replace(/document\.addEventListener/g, "(function(){}).call.bind({})");
+    .replace(/(?:_scrml_g\.)?document\.addEventListener/g, "(function(){}).call.bind({})");
   const globals = "var document = { addEventListener: function(){} }; var window = {};";
   return new Function(globals + "\n" + sanitized + "\nreturn (" + invocation + ");")();
 }

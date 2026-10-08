@@ -23,7 +23,7 @@ import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
-import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
+import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
@@ -942,7 +942,7 @@ function emitCapturedBindings(node: any): string {
   // bindings: `meta.bindings.varName` SHALL return the value that was current when the
   // effect function was invoked for this run." An object literal evaluated once at the
   // `^{}` site froze the FIRST run's values for every later run (S458 review F4).
-  return ["() => Object.freeze({", props.join(",\n"), "})"].join("\n");
+  return ["() => _scrml_g.Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
 /**
@@ -958,7 +958,7 @@ function emitCapturedBindings(node: any): string {
  */
 function emitInternalCaptureObject(names: ReadonlySet<string>): string {
   const props = [...names].map((name) => `  get ${name}() { return ${name}; }`);
-  return ["Object.freeze({", props.join(",\n"), "})"].join("\n");
+  return ["_scrml_g.Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
 /**
@@ -2050,7 +2050,7 @@ function _emitReactiveSet(encodedName: string, valueExpr: string, opts: EmitLogi
         for (const r of computedTemporalRules) {
           const labelLit = (r as any).label ? JSON.stringify((r as any).label) : "null";
           const rewritten = rewriteExpr((r as any).afterExpr);
-          const durationExpr = `(function(){ var v = ${rewritten}; return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0; })()`;
+          const durationExpr = `(function(){ var v = ${rewritten}; return (typeof v === "number" && _scrml_g.isFinite(v) && v >= 0) ? _scrml_g.Math.round(v) : 0; })()`;
           out.push(`  if (__scrml_init_variant === ${JSON.stringify((r as any).from)}) {`);
           out.push(`    _scrml_machine_arm_timer(${JSON.stringify(encodedName)}, ${durationExpr}, ${JSON.stringify((r as any).to)}, { fromVariant: ${JSON.stringify((r as any).from)}, label: ${labelLit}, auditTarget: ${auditTargetLit}, rulesJson: ${JSON.stringify(rulesPayload)} });`);
           out.push(`  }`);
@@ -3850,7 +3850,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           // STILL emit the runtime-throwing IIFE (defense-in-depth — PINNED by
           // sql-params / sql-write-ops §5): the JS parses and any runtime execution
           // surfaces the issue immediately.
-          return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
+          return `(()=>{throw new _scrml_g.Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
         }
 
         // The terminator's value shape over the driver's row array `rowsExpr`:
@@ -4542,7 +4542,11 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // router and every other `when message from` hook on this worker coexist
       // with it (§46.2 source order, §46.6). Messages arrive as `{ replyTo, data }`
       // (emit-worker.ts wire format); the hook sees only `data`.
-      return `${workerVar}.addEventListener("message", function(event) { const ${binding} = event.data.data; ${body}; });`;
+      // s457 3a — the listener parameter is `_scrml_event` (outside the user
+      // namespace); the body sees `binding`, and a free `event` is E-EVENT-UNBOUND.
+      const listener = `function(_scrml_event) { const ${binding} = _scrml_event.data.data; ${body}; }`;
+      recordListenerSource(listener, node.span, "when message");
+      return `${workerVar}.addEventListener("message", ${listener});`;
     }
 
     case "when-worker-error": {
@@ -4560,7 +4564,11 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // future-proof; matches the pre-#693 string path, which never awaited).
       const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
       // A listener, not an `onerror` assignment, so several hooks all run (§46.2).
-      return `${workerVar}.addEventListener("error", function(${binding}) { ${body}; });`;
+      // s457 3a — as `when message`: the body sees `binding`; the listener's own
+      // parameter is `_scrml_event`, so a free `event` in the body is E-EVENT-UNBOUND.
+      const listener = `function(_scrml_event) { const ${binding} = _scrml_event; ${body}; }`;
+      recordListenerSource(listener, node.span, "when error");
+      return `${workerVar}.addEventListener("error", ${listener});`;
     }
 
     case "upload-call": {
@@ -4757,7 +4765,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // transaction open (autocommit) and persisted. The guard only stops a
       // COMMIT past a rollback (on Postgres a COMMIT with no open transaction
       // merely WARNS) if some other nested-function lowering reaches here.
-      lines.push(`  if (!${open}) throw new Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
+      lines.push(`  if (!${open}) throw new _scrml_g.Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
       lines.push(`  await ${db}.unsafe("COMMIT");`);
       lines.push(`  ${open} = false;`);
       lines.push(`} catch (_scrml_txn_err) {`);

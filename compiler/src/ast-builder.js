@@ -107,6 +107,7 @@ import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
 import { scanForTopLevelSemicolon, isEventHandlerAttrName, bareHandlerStatementsText, attrShapedTokenInStatements } from "./multi-statement-scan.ts";
+import { unquotedRejectDiagnostic, isUnquotedValueStart, readUnquotedAttrValue } from "./unquoted-attr-value.ts";
 import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -128,6 +129,63 @@ import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolu
  * Handles: \n \t \r \\ \" \' \0 \b \f \v \xHH \uHHHH \u{HHHHHH}
  * Unknown escape sequences pass through as literal backslash+char (conservative).
  */
+/**
+ * s457 4a (S458 (d)) — map the range [from, to) of a TOKEN-JOINED rendering
+ * `synth` (its whitespace synthetic) onto the verbatim `real` text, starting
+ * at `realFrom`. The two are aligned on their non-whitespace characters;
+ * string / template literals are compared by content (the rendering re-emits
+ * them double-quoted). Returns `{ start, end }` in `real`, or null when the
+ * texts do not align.
+ */
+function _alignToSourceText(synth, from, to, real, realFrom) {
+  if (typeof realFrom !== "number" || realFrom < 0 || realFrom > real.length) return null;
+  const isWs = (c) => c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f";
+  // Read a literal at p in s; returns { end, inner } (inner = decoded-ish content).
+  const lit = (s, p) => {
+    const q = s[p];
+    let k = p + 1;
+    let inner = "";
+    while (k < s.length && s[k] !== q) {
+      if (s[k] === "\\" && k + 1 < s.length) {
+        const n = s[k + 1];
+        inner += n === '"' || n === "'" || n === "`" ? n : "\\" + n;
+        k += 2;
+        continue;
+      }
+      inner += s[k];
+      k++;
+    }
+    return { end: k + 1, inner };
+  };
+  let i = 0;
+  let j = realFrom;
+  let start = -1;
+  while (i < synth.length) {
+    while (i < synth.length && isWs(synth[i])) i++;
+    while (j < real.length && isWs(real[j])) j++;
+    if (i >= synth.length || i >= to) break;
+    if (j >= real.length) return null;
+    const c = synth[i];
+    const isQ = (x) => x === '"' || x === "'" || x === "`";
+    if (isQ(c) && isQ(real[j])) {
+      const ls = lit(synth, i);
+      const lr = lit(real, j);
+      if (ls.inner !== lr.inner) return null;
+      if (i === from) start = j;
+      if (ls.end >= to && i < to) { if (start < 0) return null; return { start, end: lr.end }; }
+      i = ls.end;
+      j = lr.end;
+      continue;
+    }
+    if (c !== real[j]) return null;
+    if (i === from) start = j;
+    if (i === to - 1) { if (start < 0) return null; return { start, end: j + 1 }; }
+    i++;
+    j++;
+  }
+  return null;
+}
+
 function reemitJsStringLiteral(rawInner) {
   let out = "";
   for (let i = 0; i < rawInner.length; i++) {
@@ -4193,19 +4251,20 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // steering to parens/quotes, then recover the value as `absent` so
             // the rejected condition does not cascade into a misleading
             // E-CTX-001 / E-SCOPE-001 downstream.
-            let _rej;
-            try { _rej = JSON.parse(valTok.text); } catch { _rej = { name, value: valTok.text, op: "" }; }
-            const _opName = _rej.op || "an operator";
-            const _shown = (_rej.value || "").trim();
-            errors.push(new TABError(
-              "E-ATTR-UNQUOTED-OPERATOR",
-              `E-ATTR-UNQUOTED-OPERATOR: \`${name}=\` is an unquoted condition — it cannot contain ` +
-              `the operator \`${_opName}\`. An unquoted attribute condition admits only the atomic ` +
-              `forms (\`@var\`, \`obj.prop\`, \`fn()\`, or prefix \`!\`). Parenthesize or quote the ` +
-              `operator condition: \`${name}=(${_shown})\` or \`${name}="${_shown}"\`.`,
-              valSpan,
-            ));
-            value = { kind: "absent" };
+            //
+            // s457 4a — the same token carries every refusal of the ONE
+            // unquoted-value reader (unquoted-attr-value.ts, `reason`); the
+            // diagnostic text is the reader module's, shared with the native
+            // parser (one reader, one message).
+            const _d = unquotedRejectDiagnostic(name, valTok.text);
+            const _err = new TABError(_d.code, _d.message, valSpan);
+            // Kept so _forwardSubparseErrors can rebuild it with a file-true
+            // span when it fires inside an `<each>` / engine / `<match>` sub-build.
+            _err.baseMessage = _d.message;
+            errors.push(_err);
+            // `_refused`: the value WAS written and was refused above — later
+            // checks that read `absent` as "no value given" (E-ATTR-013) skip it.
+            value = { kind: "absent", _refused: true };
           } else {
             // E-ATTR-001: unexpected token type as attribute value
             errors.push(new TABError(
@@ -4294,7 +4353,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
                 `Valid forms: \`${name}=@myVar\`, \`${name}=obj.prop\`, \`${name}=(expr)\`, \`${name}=fn()\`.`,
                 attrSpan,
               ));
-            } else if (value.kind === "absent") {
+            } else if (value.kind === "absent" && !value._refused) {
               errors.push(new TABError(
                 "E-ATTR-013",
                 `E-ATTR-013: \`${name}\` requires a boolean expression. ` +
@@ -5347,14 +5406,52 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Attribute-position `${…}` (inside a `<…>` opener) is left to the
         // attribute tokenizer. Offsets are shifted by the `"lift "` prefix (5).
         const _LIFT_PREFIX = 5; // "lift ".length
-        const _interpChildren = collectTextInterpSpans(markupSrc).map(([s0, e0]) => ({
+        // s457 4a (S458 (d)) — `expr` can be the TOKEN-JOINED rendering of the
+        // source (`onclick = f ( node . name ) >`), whose whitespace is not the
+        // author's; the unquoted-value reader is whitespace-sensitive. Recover
+        // the markup value's VERBATIM text from the enclosing block's raw by
+        // aligning the two texts on their non-whitespace characters.
+        let _realStart = -1;
+        let _mvSrc = markupSrc;
+        if (parentBlock && typeof parentBlock.raw === "string" && parentBlock.span
+            && typeof parentBlock.span.start === "number" && typeof startOffset === "number") {
+          // `startOffset` can sit on a keyword before the expression (`lift <li …>`):
+          // start the alignment at the first occurrence of the expression's
+          // first character within a short window.
+          const rf0 = startOffset - parentBlock.span.start;
+          const firstCh = expr.trimStart().charAt(0);
+          let al = _alignToSourceText(expr, a, b, parentBlock.raw, rf0);
+          if (!al && firstCh && rf0 >= 0) {
+            const k = parentBlock.raw.indexOf(firstCh, rf0);
+            if (k >= 0 && k - rf0 <= 64) al = _alignToSourceText(expr, a, b, parentBlock.raw, k);
+          }
+          if (al) { _mvSrc = parentBlock.raw.slice(al.start, al.end); _realStart = parentBlock.span.start + al.start; }
+        }
+        const _interpChildren = collectTextInterpSpans(_mvSrc).map(([s0, e0]) => ({
           type: "logic",
-          raw: markupSrc.slice(s0, e0),
+          raw: _mvSrc.slice(s0, e0),
           span: { start: _LIFT_PREFIX + s0, end: _LIFT_PREFIX + e0 },
           children: [],
         }));
-        const liftToks = tokenizeLogic("lift " + markupSrc, 0, 1, 1, _interpChildren);
-        const liftNodes = parseLogicBody(liftToks, filePath, [], { type: "logic" }, counter, [], null);
+        const liftToks = tokenizeLogic("lift " + _mvSrc, 0, 1, 1, _interpChildren);
+        // s457 4a (S458 (d)) — the markup VALUE's tokens are offsets into
+        // `"lift " + markupSrc`; hand that text as the block's raw so the lift
+        // tag parser's attribute values are read by the ONE shared reader (it
+        // reads the text the offsets index), and FORWARD its refusals — a
+        // refused value recovers as absent, so a discarded diagnostic would
+        // silently drop the attribute.
+        const _mvErrors = [];
+        // When the verbatim text could not be recovered, the block carries NO raw:
+        // the token-joined text's whitespace is synthetic, so the lift tag parser
+        // rebuilds the value's text from token offsets — and refuses when it cannot.
+        const _mvBlock = _realStart >= 0
+          ? { type: "logic", raw: "lift " + _mvSrc, span: { start: 0, end: _LIFT_PREFIX + _mvSrc.length, line: 1, col: 1 } }
+          : { type: "logic" };
+        const liftNodes = parseLogicBody(liftToks, filePath, [], _mvBlock, counter, _mvErrors, null);
+        if (_mvErrors.length > 0) {
+          const _delta = _realStart >= 0 ? _realStart - _LIFT_PREFIX : (startOffset ?? 0) + a - _LIFT_PREFIX;
+          _forwardSubparseErrors(_mvErrors, errors, _delta, parentBlock);
+        }
         const lift = (liftNodes || []).find((n) => n.kind === "lift-expr");
         if (lift && lift.expr && lift.expr.kind === "markup" && lift.expr.node) {
           mkNode = lift.expr.node;
@@ -6886,6 +6983,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Parse attributes until > or /> or </> (malformed)
     const attrs = [];
     let selfClosing = false;
+    // s457 4a — the shared unquoted-value reader's per-opener state.
+    const liftUnquotedState = { inParenList: false, handlerSemicolonTail: false };
     while (true) {
       const t = peek();
       if (t.kind === "EOF") return null;
@@ -6908,7 +7007,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Check for =
         if (peek().kind === "PUNCT" && peek().text === "=") {
           consume(); // =
-          const value = _parseLiftAttrValue(attrSpan);
+          const value = _parseLiftAttrValue(attrSpan, attrName, liftUnquotedState, tag);
           if (value === null) return null;
           // S446 (S439 #4) — a `${…}` event handler on lifted markup carries its
           // §5.2.3 statement list (`value.handlerBlock`) exactly as top-level and
@@ -6927,7 +7026,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           if (value.kind === "expr") delete value._liftInnerOffset;
           // §5.2.4 (S450) — lifted / `for … lift` markup attributes are parsed
           // here, not in parseAttributes: the same non-handler check.
-          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, isEngineEffectSite(tag, null));
+          // (A value read by the shared unquoted-value reader was already judged
+          // by parseAttributes — `_sharedReader` — and is not judged twice.)
+          if (value._sharedReader) delete value._sharedReader;
+          else checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, isEngineEffectSite(tag, null));
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -7134,8 +7236,132 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return name;
   }
 
+  /**
+   * s457 4a — an unquoted value on lifted markup, read by THE shared reader
+   * (unquoted-attr-value.ts) from the logic block's own source text, then
+   * converted by parseAttributes exactly as the TAB path converts the same
+   * token. Returns undefined (cursor untouched) ONLY when the value is not an
+   * unquoted value (a quoted string, a `${…}`, a `{…}` block) or is the `<each>`
+   * contextual sigil `@.` (its own branch, Bug 72). When the block's raw text
+   * does not index the token offsets (a re-based / synthesized body), the text
+   * is rebuilt from the tokens at their offsets — whitespace preserved; when
+   * even that is impossible the value is REFUSED, never read by a second
+   * reader (S458 review (d): the lift parser had its own reader of this text,
+   * so the S457 rulings did not hold in lifted markup).
+   */
+  function _parseLiftAttrValueShared(attrSpan, attrName, liftState, liftTag = null) {
+    const t = peek();
+    if (!attrName || !liftState || !t || t.kind === "EOF" || !t.span || typeof t.span.start !== "number") return undefined;
+    // Only an unquoted value is this reader's (live parity: the TAB tokenizer's
+    // gate). Decided on the token, so it holds whichever text source is used.
+    const lead = typeof t.text === "string" ? t.text.charAt(0) : "";
+    if (t.kind === "STRING" || t.kind === "BLOCK_REF" || !isUnquotedValueStart(lead)) return undefined;
+    // The `<each>` contextual sigil `@.` keeps its dedicated branch (Bug 72).
+    if (t.kind === "PUNCT" && t.text === "@" && peek(1) && peek(1).text === ".") return undefined;
+    // The text the reader reads: the block's own raw when it indexes the token
+    // offsets (checked at the value AND at the attribute name) …
+    let raw = null;
+    let base = 0;
+    if (parentBlock && typeof parentBlock.raw === "string" && parentBlock.span && typeof parentBlock.span.start === "number") {
+      const pb = parentBlock.span.start;
+      const off = t.span.start - pb;
+      const nameOff = attrSpan && typeof attrSpan.start === "number" ? attrSpan.start - pb : -1;
+      if (off >= 0 && off < parentBlock.raw.length && parentBlock.raw.startsWith(t.text, off)
+          && nameOff >= 0 && parentBlock.raw.startsWith(attrName, nameOff)) {
+        raw = parentBlock.raw;
+        base = pb;
+      }
+    }
+    // … else the tokens laid out at their own offsets (whitespace preserved).
+    if (raw === null) {
+      const w = _liftTokenWindowText(i);
+      if (w !== null) { raw = w.raw; base = w.base; }
+    }
+    if (raw === null) {
+      // Neither text is available: refuse — no second reader decides it.
+      const sp = tokenSpan(t, filePath);
+      const msg = `E-ATTR-UNQUOTED-OPERATOR: the unquoted value of \`${attrName}=\` in this lifted markup cannot be read as written. Delimit it: \`${attrName}=(…)\`, \`${attrName}=\${…}\`, or a quoted value.`;
+      const err = new TABError("E-ATTR-UNQUOTED-OPERATOR", msg, sp);
+      err.baseMessage = msg;
+      errors.push(err);
+      // Skip the value's tokens to the next attribute / tag close.
+      while (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === ">" || (peek().text === "/" && peek(1)?.text === ">")))) {
+        consume();
+        if ((peek().kind === "IDENT" || peek().kind === "KEYWORD") && peek(1)?.text === "=") break;
+      }
+      return { kind: "absent", _refused: true, _sharedReader: true };
+    }
+    const saved = i;
+    const off = t.span.start - base;
+    const r = readUnquotedAttrValue(raw, off, attrName, liftState);
+    const absEnd = base + r.end;
+    while (peek().kind !== "EOF" && peek().span && peek().span.start < absEnd) {
+      if (peek().span.end > absEnd) {
+        // The reader ended inside a logic token (`>=` the logic tokenizer kept
+        // whole): the two readings disagree — refuse rather than pick one.
+        i = saved;
+        const sp = tokenSpan(t, filePath);
+        const msg = `E-ATTR-UNQUOTED-OPERATOR: the unquoted value of \`${attrName}=\` in this lifted markup ends inside an operator (\`${peek().text}\`), so where the tag closes is ambiguous. Delimit it: \`${attrName}=(…)\` or \`${attrName}=\${…}\`.`;
+        const err = new TABError("E-ATTR-UNQUOTED-OPERATOR", msg, sp);
+        err.baseMessage = msg;
+        errors.push(err);
+        while (peek().kind !== "EOF" && peek().span && peek().span.start < absEnd) consume();
+        if (peek().kind !== "EOF" && peek().span && peek().span.start < absEnd + 2 && !(peek().kind === "PUNCT" && peek().text === ">")) consume();
+        return { kind: "absent", _refused: true, _sharedReader: true };
+      }
+      consume();
+    }
+    const tokSpan = (start, end) => ({ start, end, line: t.span.line, col: t.span.col });
+    const toks = [
+      { kind: "ATTR_NAME", text: attrName, span: tokSpan(attrSpan.start, attrSpan.end) },
+      { kind: "ATTR_EQ", text: "=", span: tokSpan(t.span.start, t.span.start) },
+      { kind: r.kind, text: r.text, span: tokSpan(t.span.start, absEnd) },
+    ];
+    // A lifted COMPONENT use (`lift <li><Counter bind:count=@x/></li>`, an uppercase tag) is
+    // converted as a component call site, exactly as the TAB path converts it: its
+    // `bind:prop=@cell` belongs to the expander (§15.11.1), not the element bind table.
+    const parsed = parseAttributes(toks, filePath, errors, typeof liftTag === "string" && /^[A-Z]/.test(liftTag));
+    const value = parsed.length > 0 ? parsed[0].value : { kind: "absent" };
+    if (value && typeof value === "object") value._sharedReader = true;
+    return value;
+  }
+
+  /**
+   * s457 4a — the source text of a run of logic tokens rebuilt at their own
+   * offsets (from token `fromIdx` on, a bounded window), whitespace preserved;
+   * `null` when the offsets are not monotonic or a token's text does not fill
+   * its span (then the text cannot be rebuilt faithfully).
+   */
+  function _liftTokenWindowText(fromIdx) {
+    const t0 = tokens[fromIdx];
+    if (!t0 || !t0.span || typeof t0.span.start !== "number") return null;
+    const base = t0.span.start;
+    let out = "";
+    for (let j = fromIdx; j < tokens.length && j < fromIdx + 512; j++) {
+      const tk = tokens[j];
+      if (!tk || tk.kind === "EOF") break;
+      if (!tk.span || typeof tk.span.start !== "number" || typeof tk.span.end !== "number") return null;
+      const rel = tk.span.start - base;
+      if (rel < out.length) return null;
+      const txt = tk.kind === "STRING"
+        ? (tk.isTemplate ? "`" + tk.text + "`" : reemitJsStringLiteral(tk.text))
+        : (tk.kind === "BLOCK_REF" && tk.block && typeof tk.block.raw === "string" ? tk.block.raw : tk.text);
+      if (typeof txt !== "string" || tk.span.end - tk.span.start !== txt.length) {
+        // A token whose text does not fill its span ends the faithful window.
+        // The window is still usable when it already holds the whole opener.
+        if (/>/.test(out.slice(Math.max(0, t0.text.length)))) break;
+        return null;
+      }
+      out += " ".repeat(rel - out.length) + txt;
+      if (tk.kind === "PUNCT" && tk.text === ">" && j > fromIdx) break;
+    }
+    return { raw: out, base };
+  }
+
   /** Parse one attribute value after `=` into a structured value object. */
-  function _parseLiftAttrValue(attrSpan) {
+  function _parseLiftAttrValue(attrSpan, attrName, liftState, liftTag = null) {
+    const _shared = _parseLiftAttrValueShared(attrSpan, attrName, liftState, liftTag);
+    if (_shared !== undefined) return _shared;
     // C10 fix (gate-found-tail) — when collecting the tokens of a lift markup
     // attribute value into a `parts` array, STRING tokens carry their content
     // WITHOUT delimiters (the tokenizer strips quotes — see readString). A
@@ -18058,7 +18284,11 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // can never be silently read the wrong way").
 // E-ATTR-MULTI-STATEMENT (§5.2.4, S450) qualifies the same way: decided only in
 // parseAttributes / parseLiftTag, re-derived by nothing downstream.
-const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT"]);
+// E-ATTR-UNQUOTED-OPERATOR (§5.2, s457 4a) too: a refused unquoted value
+// recovers as `absent`, so in an `<each>` row / engine arm / `<match>` arm a
+// DISCARDED diagnostic would leave the attribute — a handler included —
+// silently missing.
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR"]);
 
 /**
  * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
@@ -18299,8 +18529,10 @@ function splitArrowHandlerValue(raw) {
  * the statement list of an ARROW-valued handler's body, parsed with the same
  * function-body statement grammar as an inline block. The arrow's parameter
  * receives the event, so a single parameter `p` becomes a leading
- * `const p = event` statement (binding it for the checker and for the
- * statement-list emitter). Returns `undefined` when the value is not an
+ * `const p = _scrml_event` statement (binding it for the checker and for the
+ * statement-list emitter; `_scrml_event` is the parameter of the listener the
+ * statement-list emitter writes — s457 3a moved it out of the user namespace,
+ * so a parameter named `event` gets the prelude too). Returns `undefined` when the value is not an
  * arrow-valued handler this view models (not an arrow; an arrow that is only the
  * first statement of a sequence; more than one parameter), else
  * `{ stmts, fatal, nonFatal }`.
@@ -18339,9 +18571,9 @@ function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, ba
   if (!split.braced && bodyRes.stmts.length !== 1) return undefined;
   let prelude = [];
   const param = paramText.replace(/\s*:\s*[A-Za-z_$][\w$.<>\[\]| ]*$/, "").trim(); // drop a type annotation
-  if (param !== "" && param !== "event") {
+  if (param !== "") {
     const preRes = parseHandlerStatementListCore(
-      { raw: `const ${param} = event`, span: value.span }, filePath, idCounter, parentBlock,
+      { raw: `const ${param} = _scrml_event`, span: value.span }, filePath, idCounter, parentBlock,
       baseOffset, baseLine, baseCol,
     );
     if (!preRes || !Array.isArray(preRes.stmts) || preRes.parseErrors.some(isFatalHandlerParseError)) {

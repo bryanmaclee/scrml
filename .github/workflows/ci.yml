@@ -214,6 +214,15 @@ jobs:
       # baseline entry — fails.
       - name: Compile-floor gate (every showcase program still builds on HEAD)
         run: bun scripts/corpus-compile-floor.ts --check
+      # S457 2a / S458 — compiler references to host globals go through the `_scrml_g` alias, so no
+      # user binding can capture them. The guarantee is only as good as this gate: the whole corpus
+      # (samples, examples incl. multi-file programs, conformance, stdlib, benchmarks) compiled in
+      # every emission mode (default, esm, embed, build/per-route, testMode), every emitted artifact
+      # scope-analysed — no free host-global reference the author did not write, every `_scrml_g`
+      # reader declares/imports it, no binding at a classic script's top level. ~2 min; too slow for
+      # the pre-commit hook, which carries the executed per-name tests instead.
+      - name: Host-global alias gate (S457 2a — no user binding can capture a compiler reference)
+        run: bun scripts/host-global-scan.ts --check
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
       # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
