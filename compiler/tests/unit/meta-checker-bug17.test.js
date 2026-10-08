@@ -51,10 +51,22 @@ import { compileScrml } from "../../src/api.js";
 import { parseExprToNode } from "../../src/expression-parser.ts";
 import {
   runMetaChecker,
-  checkMetaBlockForJsHostGlobals,
-  JS_HOST_FORBIDDEN,
+  checkMetaBlockAllowList,
   MetaError,
 } from "../../src/meta-checker.ts";
+
+// S457 — the S134 deny list (`JS_HOST_FORBIDDEN` + `checkMetaBlockForJsHostGlobals`)
+// is superseded by the §22.12 CLOSED allow-list (`checkMetaBlockAllowList`,
+// meta-allow-list.ts). These tests keep guarding Bug 17: each of the nine names the
+// deny list carried is still refused, now because it is NOT on the allow-list.
+const JS_HOST_FORBIDDEN = new Set([
+  "bun", "Bun", "process", "console",
+  "setInterval", "setTimeout", "clearInterval", "clearTimeout",
+  "fetch",
+]);
+function checkMetaBlockForJsHostGlobals(meta, filePath, errors) {
+  checkMetaBlockAllowList(meta, filePath, errors, { captured: new Set(), typeNames: new Set() });
+}
 
 // ---------------------------------------------------------------------------
 // Fixture setup (end-to-end suite)
