@@ -1,0 +1,9 @@
+// S458 fixture (s458-alias-r3) — a library module whose emitted code reaches host globals
+// (the enum rep's Object.freeze, the inlined structural-equality helper) through `_scrml_g`.
+// Under `--mode library` the written `lib.js` must import the alias from the same-origin
+// `_scrml/_global.js`, never a `data:` module (a browser refuses that under a
+// `script-src 'self'` CSP). Scanned by scripts/host-global-scan.ts (R2, R4).
+${
+  export fn f(a) { return { s: `${a}`, same: { a: 1 } == { a: 1 } } }
+  export type Color:enum = { Red, Green }
+}

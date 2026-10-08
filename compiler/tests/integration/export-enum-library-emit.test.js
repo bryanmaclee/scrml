@@ -87,7 +87,7 @@ describe("export-enum-library-emit §1: exported enum emits an exported runtime 
       `\${ export type Color:enum = { Red, Green(shade: int) } }`,
     );
     expect(errorCodes).toHaveLength(0);
-    expect(libraryJs).toContain("export const Color = Object.freeze(");
+    expect(libraryJs).toContain("export const Color = _scrml_g.Object.freeze(");
     // The payload variant is a constructor; the unit variant is a bare string.
     expect(libraryJs).toContain('Green: function(shade)');
     expect(libraryJs).toContain('Red: "Red"');
@@ -107,7 +107,7 @@ describe("export-enum-library-emit §2: non-exported enum stays module-local", (
       `\${ type Internal:enum = { Lo, Hi } }`,
     );
     expect(errorCodes).toHaveLength(0);
-    expect(libraryJs).toContain("const Internal = Object.freeze(");
+    expect(libraryJs).toContain("const Internal = _scrml_g.Object.freeze(");
     expect(libraryJs).not.toContain("export const Internal");
     nodeCheck(libPath);
   });
@@ -162,7 +162,7 @@ describe("export-enum-library-emit §5: minimal repro compiles (no dangling expo
     );
     expect(errorCodes).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(errorCodes).toHaveLength(0);
-    expect(libraryJs).toContain("export const Foo = Object.freeze(");
+    expect(libraryJs).toContain("export const Foo = _scrml_g.Object.freeze(");
     nodeCheck(libPath);
   });
 });

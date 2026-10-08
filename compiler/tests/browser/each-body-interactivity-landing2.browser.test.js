@@ -99,7 +99,7 @@ describe("each-body-interactivity L2 §1 — emitted wiring", () => {
 
   test("${@.id} interpolation lowers to the VALUE (not the literal source string)", () => {
     const { clientJs } = compileToOutputs(REPRO_SRC);
-    expect(clientJs).toContain('.setAttribute("data-id", String(_scrml_each_item.id));');
+    expect(clientJs).toContain('.setAttribute("data-id", _scrml_g.String(_scrml_each_item.id));');
     expect(clientJs).not.toContain('setAttribute("data-id", "_scrml_each_item.id")');
   });
 });

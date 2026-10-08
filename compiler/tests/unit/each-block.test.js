@@ -169,7 +169,7 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
     const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "of-literal"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
-    expect(clientJs).toMatch(/Array\.from\(\{length: Number\(5\) \|\| 0\}/);
+    expect(clientJs).toMatch(/_scrml_g\.Array\.from\(\{length: _scrml_g\.Number\(5\) \|\| 0\}/);
     // Default key for of= form is the index itself (positional), named with the
     // canonical internal index var (gate fix-wave clash-avoidance).
     expect(clientJs).toMatch(/\(_scrml_each_item, _scrml_each_idx\) => _scrml_each_idx,/);
@@ -187,7 +187,7 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
     const { errors, clientJs: __cjRaw } = compileToOutputs(src, "of-cell"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_get("rowCount")');
-    expect(clientJs).toMatch(/Array\.from\(\{length: Number\(_scrml_reactive_get\("rowCount"\)\) \|\| 0\}/);
+    expect(clientJs).toMatch(/_scrml_g\.Array\.from\(\{length: _scrml_g\.Number\(_scrml_reactive_get\("rowCount"\)\) \|\| 0\}/);
   });
 });
 
@@ -678,7 +678,7 @@ function handle(id) {
     // The ${@.id} interpolation lowers to setAttribute("data-id", String(<expr>))
     // where <expr> is the iter-var field — NOT the literalized source string
     // "_scrml_each_item.id" (the Landing 1 bug) and NOT "@.id".
-    expect(clientJs).toContain('.setAttribute("data-id", String(_scrml_each_item.id));');
+    expect(clientJs).toContain('.setAttribute("data-id", _scrml_g.String(_scrml_each_item.id));');
     expect(clientJs).not.toContain('setAttribute("data-id", "_scrml_each_item.id")');
     expect(clientJs).not.toContain('setAttribute("data-id", "@.id")');
   });
@@ -698,7 +698,7 @@ function handle(id) {
     expect(errors).toEqual([]);
     // href=@.email lowers to the value, not a literal — through the §5.2 rule 3 (S457)
     // runtime URL guard, since the row data supplies the scheme.
-    expect(clientJs).toMatch(/\.setAttribute\("href", _scrml_safe_url\([A-Za-z_0-9]+, "href", String\(_scrml_each_item\.email\)\)\);/);
+    expect(clientJs).toMatch(/\.setAttribute\("href", _scrml_safe_url\([A-Za-z_0-9]+, "href", _scrml_g\.String\(_scrml_each_item\.email\)\)\);/);
   });
 
   test("class:/onclick/${} compose on a single per-item opener (the reproducer)", () => {
@@ -723,7 +723,7 @@ function toggle(id) {
     expect(errors).toEqual([]);
     expect(clientJs).toContain('.classList.toggle("done", !!(_scrml_each_item.done));');
     expect(clientJs).toMatch(/_scrml_toggle_\d+\(_scrml_each_item\.id\);/);
-    expect(clientJs).toContain('.setAttribute("data-id", String(_scrml_each_item.id));');
+    expect(clientJs).toContain('.setAttribute("data-id", _scrml_g.String(_scrml_each_item.id));');
     expect(clientJs).toContain("String(_scrml_each_item.name)");
   });
 
@@ -761,7 +761,7 @@ function clk(i) {
     // handler with live data, not the create-time snapshot. The iter-var read in
     // the handler arg is preserved (it now resolves to the re-bound `let`).
     expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
-    expect(clientJs).toContain('.setAttribute("data-i", String(_scrml_each_item));');
+    expect(clientJs).toContain('.setAttribute("data-i", _scrml_g.String(_scrml_each_item));');
   });
 });
 
@@ -882,7 +882,7 @@ describe("g-class-attr-expr-not-lowered — <each>-body class: operator lowering
     const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toMatch(/classList\.toggle\("done", !!\(.*!== null && .*!== undefined.*\)\)/);
-    expect(clientJs).toMatch(/setAttribute\("data-done", String\(.*!== null && .*!== undefined.*\)\)/);
+    expect(clientJs).toMatch(/setAttribute\("data-done", _scrml_g\.String\(.*!== null && .*!== undefined.*\)\)/);
     expect(clientJs).not.toMatch(/\bis\s+some\b/);
   });
 

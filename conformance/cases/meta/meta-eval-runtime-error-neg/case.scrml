@@ -1,3 +1,4 @@
 ^{
-  emit(JSON.parse("{"))
+  const n = 1
+  emit(n.toFixed(-1))
 }

@@ -92,6 +92,7 @@
  */
 
 import { basename } from "path";
+import { withHostGlobalAlias } from "./host-global-alias.ts";
 
 interface RuleBinding { localName: string; fieldName: string; }
 
@@ -251,10 +252,10 @@ function emitHarnessPrelude(engineName: string, tableName: string): string[] {
     `  const VAR = ${JSON.stringify(varName)};`,
     `  function tryTransition(from, to, guardResults) {`,
     `    guardResults = guardResults || {};`,
-    `    globalThis._scrml_reactive_store = globalThis._scrml_reactive_store || {};`,
-    `    globalThis._scrml_reactive_store[VAR] = from;`,
+    `    _scrml_g._scrml_reactive_store = _scrml_g._scrml_reactive_store || {};`,
+    `    _scrml_g._scrml_reactive_store[VAR] = from;`,
     `    try {`,
-    `      var __prev = globalThis._scrml_reactive_store[VAR];`,
+    `      var __prev = _scrml_g._scrml_reactive_store[VAR];`,
     `      var __next = to;`,
     `      var __vFrom = (__prev != null && __prev.variant != null ? __prev.variant : "*");`,
     `      var __vTo = (__next != null && __next.variant != null ? __next.variant : "*");`,
@@ -268,12 +269,12 @@ function emitHarnessPrelude(engineName: string, tableName: string): string[] {
     `      else if (${tableName}[__anyTo] != null)   { __rule = ${tableName}[__anyTo]; __matchKey = __anyTo; }`,
     `      else if (${tableName}[__anyAny] != null)  { __rule = ${tableName}[__anyAny]; __matchKey = __anyAny; }`,
     `      if (__rule == null) {`,
-    `        return new Error("E-ENGINE-001-RT: Illegal transition");`,
+    `        return new _scrml_g.Error("E-ENGINE-001-RT: Illegal transition");`,
     `      }`,
     `      if (typeof __rule === "object" && __rule.guard) {`,
     `        var __guardPass = guardResults.hasOwnProperty(__matchKey) ? guardResults[__matchKey] : true;`,
     `        if (!__guardPass) {`,
-    `          return new Error("E-ENGINE-001-RT: Transition guard failed");`,
+    `          return new _scrml_g.Error("E-ENGINE-001-RT: Transition guard failed");`,
     `        }`,
     `      }`,
     `      return null;`,
@@ -331,7 +332,7 @@ function emitMachineDescribe(m: MachineLike, initial: string | null): string[] {
         const title = `undeclared .${v} => .${w} rejected`;
         lines.push(`  test(${JSON.stringify(title)}, () => {`);
         lines.push(`    const result = tryTransition(${variantLiteral(v)}, ${variantLiteral(w)});`);
-        lines.push(`    expect(result).toBeInstanceOf(Error);`);
+        lines.push(`    expect(result).toBeInstanceOf(_scrml_g.Error);`);
         lines.push(`    expect(result.message).toMatch(/E-ENGINE-001-RT/);`);
         lines.push(`  });`);
       }
@@ -373,7 +374,7 @@ function emitMachineDescribe(m: MachineLike, initial: string | null): string[] {
     const failTitle = `guard [${r.label}] on .${r.from} => .${r.to}${wildcardNote}${temporal}: rejected when guard falsy`;
     lines.push(`  test(${JSON.stringify(failTitle)}, () => {`);
     lines.push(`    const result = tryTransition(${variantLiteral(repV)}, ${variantLiteral(repW)}, { ${JSON.stringify(ruleKey)}: false });`);
-    lines.push(`    expect(result).toBeInstanceOf(Error);`);
+    lines.push(`    expect(result).toBeInstanceOf(_scrml_g.Error);`);
     lines.push(`    expect(result.message).toMatch(/Transition guard failed/);`);
     lines.push(`  });`);
   }
@@ -651,7 +652,7 @@ export function generateMachineTestJs(
     lines.push(`  test.skip(${JSON.stringify(`no qualifying engines — ${why}`)}, () => {});`);
     lines.push(`});`);
     lines.push(``);
-    return lines.join("\n");
+    return withHostGlobalAlias(lines.join("\n")) as string;
   }
 
   for (const block of emittedBlocks) {
@@ -659,5 +660,6 @@ export function generateMachineTestJs(
     lines.push(``);
   }
 
-  return lines.join("\n");
+  // S457 2a — host globals through the `_scrml_g` alias.
+  return withHostGlobalAlias(lines.join("\n")) as string;
 }

@@ -105,7 +105,7 @@ describe("g-batch-reorder: a client side-effect between two server calls keeps s
     const fn = fnBody(code, "caseInterleaved");
     expect(fn).toBeTruthy();
     // The bug: `const [a, b] = await Promise.all([...])` batching E1+E2.
-    expect(fn).not.toMatch(/const \[a, b\] = await Promise\.all/);
+    expect(fn).not.toMatch(/const \[a, b\] = await (?:_scrml_g\.)?Promise\.all/);
     // Source order preserved: E1 fetch, then the "midway" write, then E2 fetch.
     const e1 = fn.indexOf('_scrml_fetch_bump_' );
     const midway = fn.indexOf('"midway"');
@@ -117,7 +117,7 @@ describe("g-batch-reorder: a client side-effect between two server calls keeps s
 
   test("adjacent (no-regression): two server calls with no intervening statement STILL batch", () => {
     const fn = fnBody(code, "caseAdjacent");
-    expect(fn).toMatch(/const \[a, b\] = await Promise\.all\(\[/);
+    expect(fn).toMatch(/const \[a, b\] = await _scrml_g\.Promise\.all\(\[/);
     expect(fn).toMatch(/_scrml_fetch_bump_\d+\("D1"\)/);
     expect(fn).toMatch(/_scrml_fetch_bump_\d+\("D2"\)/);
   });

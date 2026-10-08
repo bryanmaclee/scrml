@@ -750,10 +750,10 @@ describe("§25.5 / §65.3.1 — component-scoped reactive CSS var bridge (no _sc
     expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
     // The setProperty (mount) + effect (subscription) both target :root.
     expect(client).toContain(
-      `document.documentElement.style.setProperty("--scrml-accent", _scrml_reactive_get("accent"))`,
+      `_scrml_g.document.documentElement.style.setProperty("--scrml-accent", _scrml_reactive_get("accent"))`,
     );
     expect(client).toContain(
-      `_scrml_effect(() => document.documentElement.style.setProperty("--scrml-accent", _scrml_reactive_get("accent")))`,
+      `_scrml_effect(() => _scrml_g.document.documentElement.style.setProperty("--scrml-accent", _scrml_reactive_get("accent")))`,
     );
     // Regression guard: the undefined per-instance stub must NEVER appear.
     expect(client).not.toContain("_scrml_el");

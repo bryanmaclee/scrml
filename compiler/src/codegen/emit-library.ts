@@ -1,4 +1,5 @@
 import { CGError } from "./errors.ts";
+import { withHostGlobalAlias } from "./host-global-alias.ts";
 import { getNodes } from "./collect.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
@@ -1531,7 +1532,8 @@ function finishLibraryModule(
       ));
     }
   }
-  return src;
+  // S457 2a — host globals are spelled `_scrml_g.<name>`; declare the alias.
+  return withHostGlobalAlias(src) as string;
 }
 
 /** The identifier each emitted enum runtime rep line binds. */

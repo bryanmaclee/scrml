@@ -300,7 +300,11 @@ const fetch = async (path, init) => {
 };
 let code = grab("_scrml_get_csrf_token") + "\\n" + grab("_scrml_fetch_with_csrf_retry");
 code += "\\n" + (mode === "no-sync" ? "function _scrml_csrf_sync_meta_from_cookie() {}" : grab("_scrml_csrf_sync_meta_from_cookie"));
-const retry = new Function("document", "fetch", "crypto", code + "\\nreturn _scrml_fetch_with_csrf_retry;")(document, fetch, crypto);
+// The emitted helpers reach host globals through the alias \`_scrml_g\` (S457 2a): give it a
+// view of the global object carrying this probe's document / fetch.
+const __host = Object.create(globalThis);
+for (const [k, v] of Object.entries({ document, fetch, crypto })) Object.defineProperty(__host, k, { value: v, writable: true, configurable: true });
+const retry = new Function("_scrml_g", code + "\\nreturn _scrml_fetch_with_csrf_retry;")(__host);
 const route = mod.routes.find((r) => r.method === "POST" && r.path.includes("route_add")).path;
 const res = await retry(route, "POST", JSON.stringify({ body: "legit" }));
 console.log(JSON.stringify({ statuses, final: res.status, metaNow: meta.content, sessionToken: store.get("sid-bob").csrfToken }));

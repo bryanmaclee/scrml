@@ -21,6 +21,7 @@ import { tmpdir } from "os";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
+import { standInHostAlias, hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 const _dirs = [];
 afterAll(() => { for (const d of _dirs) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
@@ -229,7 +230,7 @@ describe("§4 an SVG animation value writing a URL attribute is guarded at every
   test("`to=${@u}` on <set> is no longer dropped from the emitted HTML", () => {
     const { html, client } = compile("anim-notdropped", POS.top(ANIM.setToExpr[0]));
     expect(html).toContain('data-scrml-bind-attr-to="');
-    expect(client).toContain('_scrml_el.setAttribute("to", _scrml_safe_url(_scrml_el, "to", String(_scrml_x), "href"))');
+    expect(client).toContain('_scrml_el.setAttribute("to", _scrml_safe_url(_scrml_el, "to", _scrml_g.String(_scrml_x), "href"))');
   });
 
   test("a computed attributeName fails closed — the value is guarded with target \"\"", () => {
@@ -237,7 +238,7 @@ describe("§4 an SVG animation value writing a URL attribute is guarded at every
     expect(codes).toEqual([]);
     const writes = writesOf(client, "to");
     expect(writes.length).toBeGreaterThan(0);
-    for (const w of writes) expect(w).toContain(`_scrml_safe_url(_scrml_el, "to", String(_scrml_x), "")`);
+    for (const w of writes) expect(w).toContain(`_scrml_safe_url(_scrml_el, "to", _scrml_g.String(_scrml_x), "")`);
   });
 });
 
@@ -312,7 +313,7 @@ function compileBundles(source, filePath = "/test/app.scrml") {
 }
 
 async function composeFirstPaint(serverJs, html, dbRows) {
-  const runnable = serverJs
+  const runnable = rebindHostAlias(serverJs)
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
     .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
     .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
@@ -324,8 +325,9 @@ async function composeFirstPaint(serverJs, html, dbRows) {
     constructor(body, init) { this._body = body; this.status = init?.status; }
     async text() { return this._body; }
   }
-  const mod = new Function("_scrml_sql", "Bun", "Response", `${runnable}\nreturn { _scrml_ssr_compose_handler };`)(
-    _scrml_sql, BunStub, ResponseStub,
+  // The bundle reaches host globals through its alias (S457 2a): stubs via a view of the global object.
+  const mod = new Function("_scrml_sql", "Bun", "Response", "__scrml_host__", `${runnable}\nreturn { _scrml_ssr_compose_handler };`)(
+    _scrml_sql, BunStub, ResponseStub, hostView({ Bun: BunStub, Response: ResponseStub }),
   );
   const resp = await mod._scrml_ssr_compose_handler({});
   return await resp.text();

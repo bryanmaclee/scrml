@@ -168,6 +168,6 @@ describe("CONF-DBAUTH-P2 (A1-wrapper compile-shape): the capability GUC injectio
     expect(js).toContain("set_config('scrml.principal.caps', ${_scrml_active_caps(_scrml_req)}, true)");
     expect(js).toContain("function _scrml_active_caps(req)");
     // server-resolved, never client-supplied (fail-closed default).
-    expect(js).toContain("(_cu && Array.isArray(_cu.caps)) ? _cu.caps : []");
+    expect(js).toContain("(_cu && _scrml_g.Array.isArray(_cu.caps)) ? _cu.caps : []");
   });
 });

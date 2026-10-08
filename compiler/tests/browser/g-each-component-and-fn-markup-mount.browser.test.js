@@ -86,8 +86,8 @@ describe("g-each-component-and-fn-markup-mount — compile", () => {
   test("(B) fn-markup-in-each is not String()-stringified to textContent", () => {
     const { clientJs } = compileRepro();
     // The standalone interpolation mounts through the data-scrml-mv guard.
-    expect(/textContent = String\(_scrml_rowMarkup/.test(clientJs)).toBe(false);
-    expect(/instanceof Node/.test(clientJs)).toBe(true);
+    expect(/textContent = (?:_scrml_g\.)?String\(_scrml_rowMarkup/.test(clientJs)).toBe(false);
+    expect(/instanceof _scrml_g\.Node/.test(clientJs)).toBe(true);
   });
 });
 

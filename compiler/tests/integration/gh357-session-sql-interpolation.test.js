@@ -109,7 +109,7 @@ describe("GH #357 — session inside a ?{} SQL interpolation", () => {
       // (a) the prologue Proxy binding is emitted...
       expect(src).toContain("const session = _scrml_session_bind(_scrml_req._scrml_sess);");
       expect(src).toContain("function _scrml_session_bind(_s) {");
-      expect(src).toContain("return new Proxy(_s, {");
+      expect(src).toContain("return new _scrml_g.Proxy(_s, {");
       // ...and it is a Proxy that routes non-canonical keys through `.get()` (NOT a
       // raw property read) — the confidentiality-preserving shape.
       expect(src).toContain("return t.get(k);");

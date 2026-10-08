@@ -40,6 +40,7 @@ import { runCG } from "../../src/code-generator.js";
 // execute it (the runtime helpers/imports aren't wired here) — we only compile
 // the SourceText, which throws SyntaxError on `export const /fsp/deltas`.
 import vm from "node:vm";
+import { standInHostAlias } from "../helpers/host-view.js";
 
 function span(start, file = "/test/app.scrml") {
   return { file, start, end: start + 10, line: 1, col: start + 1 };
@@ -94,7 +95,8 @@ function assertParsesAsModule(src) {
   // We strip the `export ` keyword to parse as a Script (top-level export is
   // illegal in a Script, but the IDENTIFIER-vs-path bug surfaces identically:
   // `const /fsp/deltas = {...}` is a SyntaxError as a Script too).
-  const asScript = src.replace(/^export /gm, "");
+  // (the host-global alias import, S457 2a, becomes a plain const under a Script parse)
+  const asScript = standInHostAlias(src).replace(/^export /gm, "");
   // Throws SyntaxError if invalid — that is the assertion.
   new vm.Script(asScript, { filename: "emitted.server.js" });
 }

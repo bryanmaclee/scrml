@@ -73,10 +73,10 @@ function emitTypeGuard(varName: string, fieldType: any): string {
   if (kind === "primitive") {
     const name = fieldType.name as string | undefined;
     if (name === "string") return `typeof ${varName} === "string"`;
-    if (name === "number") return `typeof ${varName} === "number" && !Number.isNaN(${varName})`;
-    if (name === "integer") return `typeof ${varName} === "number" && Number.isInteger(${varName})`;
+    if (name === "number") return `typeof ${varName} === "number" && !_scrml_g.Number.isNaN(${varName})`;
+    if (name === "integer") return `typeof ${varName} === "number" && _scrml_g.Number.isInteger(${varName})`;
     if (name === "boolean") return `typeof ${varName} === "boolean"`;
-    if (name === "int") return `typeof ${varName} === "number" && Number.isInteger(${varName})`;
+    if (name === "int") return `typeof ${varName} === "number" && _scrml_g.Number.isInteger(${varName})`;
   }
   if (kind === "predicated") {
     // Predicated types are runtime-refined elsewhere (§53 SPARK boundaries);
@@ -85,8 +85,8 @@ function emitTypeGuard(varName: string, fieldType: any): string {
     // dictates as the predicate-enforcement point).
     const base = fieldType.baseType as string | undefined;
     if (base === "string") return `typeof ${varName} === "string"`;
-    if (base === "number") return `typeof ${varName} === "number" && !Number.isNaN(${varName})`;
-    if (base === "integer") return `typeof ${varName} === "number" && Number.isInteger(${varName})`;
+    if (base === "number") return `typeof ${varName} === "number" && !_scrml_g.Number.isNaN(${varName})`;
+    if (base === "integer") return `typeof ${varName} === "number" && _scrml_g.Number.isInteger(${varName})`;
     if (base === "boolean") return `typeof ${varName} === "boolean"`;
   }
   // Complex type: accept any non-null/non-undefined value. The user must
@@ -207,8 +207,8 @@ export function emitParseVariantDecodeIIFE(
   lines.push(`  let _v;`);
   // 1. JSON-parse if string, else pass through.
   lines.push(`  if (typeof _raw === "string") {`);
-  lines.push(`    try { _v = JSON.parse(_raw); }`);
-  lines.push(`    catch (e) { return ${emitParseErrorFail("Malformed", `{ reason: String(e && e.message || e) }`)}; }`);
+  lines.push(`    try { _v = _scrml_g.JSON.parse(_raw); }`);
+  lines.push(`    catch (e) { return ${emitParseErrorFail("Malformed", `{ reason: _scrml_g.String(e && e.message || e) }`)}; }`);
   lines.push(`  } else {`);
   lines.push(`    _v = _raw;`);
   lines.push(`  }`);

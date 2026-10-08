@@ -172,9 +172,9 @@ describe("§38.13.7 (ii) LISTEN bridge server JS", () => {
     // re-SELECT by PK (parameterized), variant map, publish frame
     expect(s).toContain('_scrml_sql.unsafe("SELECT * FROM \\"orders\\" WHERE \\"id\\" = $1", [_p.key])');
     expect(s).toContain('_p.op === "INSERT" ? "Inserted" : "Updated"');
-    expect(s).toContain('_server.publish("orders-feed", JSON.stringify({ __type: "__change", op: _variant, row: _row }))');
+    expect(s).toContain('_server.publish("orders-feed", _scrml_g.JSON.stringify({ __type: "__change", op: _variant, row: _row }))');
     // DELETE → forward key, no re-SELECT
-    expect(s).toContain('_server.publish("orders-feed", JSON.stringify({ __type: "__change", op: "Deleted", key: _p.key }))');
+    expect(s).toContain('_server.publish("orders-feed", _scrml_g.JSON.stringify({ __type: "__change", op: "Deleted", key: _p.key }))');
     // reconnect-on-drop
     expect(s).toContain("setTimeout(_scrml_watches_listen_orders_feed, _SCRML_WATCHES_RECONNECT_MS)");
     rr.cleanup();
@@ -356,7 +356,9 @@ describe("§38.13.7 (v) mock-SQL notification → re-SELECT → publish", () => 
     // test of the bridge LOGIC (the `import("pg")` shape itself is asserted above).
     const block = boot.join("\n").replace(/import\("pg"\)/g, "Promise.resolve(globalThis.__MOCK_PG)");
 
+    // `_scrml_g`: the server bundle's host-global alias (S457 2a) the boot block reads through.
     const harness = `
+      const _scrml_g = globalThis;
       return (async () => {
         const published = [];
         const selectCalls = [];
@@ -568,7 +570,9 @@ describe("§14.8.9 (viii) protected-column egress on the watches feed", () => {
     const block = boot.replace(/import\("pg"\)/g, "Promise.resolve(globalThis.__MOCK_PG)");
 
     // Inject the REAL server protect helper so _scrml_protect_tag/redact are defined.
+    // `_scrml_g`: the server bundle's host-global alias (S457 2a).
     const harness = `
+      const _scrml_g = globalThis;
       ${SERVER_PROTECT_HELPER}
       return (async () => {
         const published = [];

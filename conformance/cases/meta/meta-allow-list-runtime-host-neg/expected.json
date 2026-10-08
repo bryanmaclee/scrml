@@ -1,0 +1,11 @@
+{
+  "id": "meta-allow-list-runtime-host-neg",
+  "description": "§22.12 closed allow-list (S457) — a RUNTIME `^{}` body (no emit / reflect; it uses the `meta` API) referencing `globalThis`. The allow-list applies to every `^{}` body whatever its classification: `globalThis` is not a scrml construct, a local or captured binding, or a meta primitive, so it is E-META-001. (The S134 deny list named nine host globals and let this one through.)",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "expect": {
+    "codes": ["E-META-001"],
+    "notCodes": [],
+    "severity": { "E-META-001": "error" }
+  }
+}

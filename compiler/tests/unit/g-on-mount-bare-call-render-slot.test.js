@@ -187,7 +187,7 @@ fn val() { return 42 }
 }
 </program>`, "default-logic-lift-keeps-wiring");
     expect(clientJs).toBeTruthy();
-    expect(clientJs).toContain("_scrml_lift_target = document.querySelector(");
+    expect(clientJs).toContain("_scrml_lift_target = _scrml_g.document.querySelector(");
     expect(clientJs).toContain("_scrml_lift(");
   });
 });

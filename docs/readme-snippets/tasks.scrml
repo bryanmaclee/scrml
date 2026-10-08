@@ -1,0 +1,133 @@
+// tasks.scrml — the README flagship, as one compiling program.
+// A SQLite-backed task list, live-synced across browser tabs, whose status
+// line is a state machine. CI compiles this file on every push
+// (scripts/snippet-gate.js); README.md shows it in pieces, each piece linked here.
+//
+// Run it:
+//   scrml db-migrate tasks.scrml --db tasks.db   # create the table from <schema>
+//   scrml dev tasks.scrml                        # then open http://localhost:3000 in two tabs
+
+<program db="tasks.db">
+
+<schema>
+    tasks {
+        id:           integer primary key
+        text:         text not null
+        completed_at: integer
+    }
+</>
+
+type Task:struct = {
+    id: number,
+    text: string,
+    completed_at: number | not
+}
+
+type TaskError:enum = { Duplicate }
+
+fn isActive(t) -> boolean {
+    return t.completed_at is not
+}
+
+function loadTasks() {
+    return ?{`SELECT id, text, completed_at FROM tasks ORDER BY id`}.all() !{ _ :> [] }
+}
+
+function insertTask(text: string)! -> TaskError {
+    const same = ?{`SELECT id FROM tasks WHERE text = ${text}`}.get()
+    if (same is some) fail .Duplicate
+    return ?{`INSERT INTO tasks (text, completed_at) VALUES (${text}, ${not})
+              RETURNING id, text, completed_at`}.get()
+}
+
+function flipTask(id) {
+    return ?{`UPDATE tasks SET completed_at =
+                CASE WHEN completed_at IS NULL THEN ${Date.now()} ELSE NULL END
+              WHERE id = ${id}
+              RETURNING id, text, completed_at`}.get()
+}
+
+<channel name="tasks">
+    <tasks>: Task[] = []
+
+    function addRow(row) { @tasks = [...@tasks, row] }
+    function replaceRow(row) { @tasks = @tasks.map(t => t.id == row.id ? row : t) }
+</>
+
+type Filter:enum = { All, Active, Done }
+
+<filter>: Filter = .All
+<newTask req length(>=1)> = <input placeholder="What needs doing?"/>
+
+const <visible> = match @filter {
+    .All    :> @tasks
+    .Active :> @tasks.filter(isActive)
+    .Done   :> @tasks.filter(t => !isActive(t))
+}
+const <left> = @tasks.filter(isActive).length
+
+type Phase:enum = { Loading, Editing, Saving, Saved, Rejected(msg: string) }
+
+function load() {
+    @tasks = loadTasks() !{ .Transport(_) :> { return } }
+    @phase = .Editing
+}
+
+function submit() {
+    @phase = .Saving
+    const row: Task = insertTask(@newTask) !{
+        ::Duplicate :> { @phase = .Rejected("That task is already on the list."); return }
+    }
+    addRow(row)
+    @newTask = ""
+    @phase = .Saved
+}
+
+function toggle(id) {
+    replaceRow(flipTask(id))
+}
+
+<form onsubmit=submit()>
+    <newTask/>
+    <button>Add</button>
+</form>
+
+<nav>
+    <button onclick=${@filter = .All}    class:on=${@filter == .All}>All</button>
+    <button onclick=${@filter = .Active} class:on=${@filter == .Active}>Active</button>
+    <button onclick=${@filter = .Done}   class:on=${@filter == .Done}>Done</button>
+</nav>
+
+<ul>
+    <each in=@visible key=@.id>
+        <li class:done=${!isActive(@.)} onclick=${toggle(@.id)}>${@.text}</li>
+        <empty><li>Nothing here.</li></empty>
+    </each>
+</ul>
+
+<engine for=Phase initial=.Loading effect=${ load() }>
+    <Loading rule=.Editing>
+        <p>Loading…</p>
+    </>
+    <Editing rule=.Saving>
+        <p>${@left} left</p>
+    </>
+    <Saving rule=(.Saved | .Rejected)>
+        <p>Saving…</p>
+    </>
+    <Saved rule=(.Editing | .Saving)>
+        <p>Saved.</p>
+        <onTimeout after=1.5s to=.Editing/>
+    </>
+    <Rejected msg rule=.Saving>
+        <p class="err">${msg}</p>
+    </>
+</>
+
+#{
+    .done { text-decoration: line-through; opacity: 0.6; }
+    .on   { font-weight: bold; }
+    .err  { color: #b91c1c; }
+}
+
+</program>

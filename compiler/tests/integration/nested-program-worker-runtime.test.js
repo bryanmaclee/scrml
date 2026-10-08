@@ -25,6 +25,7 @@ import { fileURLToPath } from "url";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { rawGet } from "../helpers/raw-http-get.js";
 import { CLIENT_ASSET_MANIFEST } from "../../src/static-serve-policy.js";
+import { hostView } from "../helpers/host-view.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(testDir, "../../src/cli.js");
@@ -113,7 +114,7 @@ describe("§1 scrml compile writes every worker bundle (D1)", () => {
 
   test("the page instantiates exactly the files that were written", () => {
     const client = readFileSync(join(fx.dist, "app.client.js"), "utf8");
-    const urls = [...client.matchAll(/new Worker\("([^"]+)"\)/g)].map((m) => m[1]).sort();
+    const urls = [...client.matchAll(/new _scrml_g\.Worker\("([^"]+)"\)/g)].map((m) => m[1]).sort();
     expect(urls).toEqual(["app-sq.worker.js", "app-twice.worker.js"]);
     for (const u of urls) expect(existsSync(join(fx.dist, u))).toBe(true);
   });
@@ -144,7 +145,7 @@ describe("§1 scrml compile writes every worker bundle (D1)", () => {
 function bootWorkers(dist) {
   const client = readFileSync(join(dist, "app.client.js"), "utf8");
   const blocks = [...client.matchAll(
-    /const (_scrml_worker_\w+) = new Worker\([\s\S]*?\n\1\.send = function\(data\) \{[\s\S]*?\n\};\n/g,
+    /const (_scrml_worker_\w+) = new _scrml_g\.Worker\([\s\S]*?\n\1\.send = function\(data\) \{[\s\S]*?\n\};\n/g,
   )].map((m) => m[0]);
   const hooks = client.split("\n").filter((l) => /^_scrml_worker_\w+\.addEventListener\(".*\}\);$/.test(l));
   const cells = new Map([["log", ""], ["errs", 0]]);
@@ -157,9 +158,11 @@ function bootWorkers(dist) {
   }
   const body = blocks.join("\n") + "\n" + hooks.join("\n") +
     "\nreturn { twice: _scrml_worker_twice, sq: _scrml_worker_sq };";
+  // The page reaches `Worker` through the runtime's host-global alias (S457 2a): a view
+  // of the global object whose `Worker` loads the written bundles.
   const handles = new Function(
-    "Worker", "_scrml_cs_reactive_get", "_scrml_cs_reactive_set", body,
-  )(PageWorker, (k) => cells.get(k), (k, v) => cells.set(k, v));
+    "_scrml_g", "_scrml_cs_reactive_get", "_scrml_cs_reactive_set", body,
+  )(hostView({ Worker: PageWorker }), (k) => cells.get(k), (k, v) => cells.set(k, v));
   return { ...handles, cells, blocks, hooks, stop: () => created.forEach((w) => w.terminate()) };
 }
 

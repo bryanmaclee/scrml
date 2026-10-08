@@ -202,7 +202,7 @@ function refresh() {
 `;
     const code = compileSource("bug-56-b-mixed.scrml", src);
     // a and b are independent const-decls with async RHS — these MAY group.
-    expect(code).toMatch(/const \[a, b\] = await Promise\.all\(\[/);
+    expect(code).toMatch(/const \[a, b\] = await _scrml_g\.Promise\.all\(\[/);
     // The reactive writes (@head = a, @tail = b) must come AFTER the Promise.all.
     expect(code).toMatch(/_scrml_reactive_set\("head", a\)/);
     expect(code).toMatch(/_scrml_reactive_set\("tail", b\)/);
@@ -246,7 +246,7 @@ function refresh() {
 `;
     const code = compileSource("bug-56-composition.scrml", src);
     // Two independent const-decls → Promise.all batch.
-    expect(code).toMatch(/const \[currentSha, items\] = await Promise\.all\(\[/);
+    expect(code).toMatch(/const \[currentSha, items\] = await _scrml_g\.Promise\.all\(\[/);
     // Three reactive writes follow sequentially after destructure.
     expect(code).toMatch(/_scrml_reactive_set\("head"/);
     expect(code).toMatch(/_scrml_reactive_set\("rows", items\)/);

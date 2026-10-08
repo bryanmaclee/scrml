@@ -74,7 +74,8 @@ function build(name, files) {
     const i = pending.findIndex((c) => c.deps.every((d) => d in registry));
     if (i === -1) throw new Error("unresolvable chunk deps: " + pending.map((c) => c.name).join(", "));
     const [c] = pending.splice(i, 1);
-    new Function("_scrml_modules", "_scrml_structural_eq", c.src)(registry, eq);
+    // `_scrml_g`: the runtime's host-global alias (S457 2a), which this no-runtime harness stands in for.
+    new Function("_scrml_modules", "_scrml_structural_eq", "_scrml_g", c.src)(registry, eq, globalThis);
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;

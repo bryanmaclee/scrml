@@ -808,7 +808,7 @@ function _emitForStmtInner(
     const rewrittenIterable = emitExprField(node.iterExpr, iterable, _forExprCtx);
     const body: any[] = node.body ?? [];
 
-    lines.push(`const ${wrapperVar} = document.createElement("div");`);
+    lines.push(`const ${wrapperVar} = _scrml_g.document.createElement("div");`);
     lines.push(`_scrml_lift(${wrapperVar});`);
 
     lines.push(`function ${createFnVar}(${varName}, _scrml_idx) {`);
@@ -836,7 +836,7 @@ function _emitForStmtInner(
       }
     } else {
       // Fallback: use DocumentFragment for non-consolidated lift bodies
-      lines.push(`  const ${tmpContainerVar} = document.createDocumentFragment();`);
+      lines.push(`  const ${tmpContainerVar} = _scrml_g.document.createDocumentFragment();`);
       // #141 — SPEC §10.8: "In accumulation mode, `lift` MAY appear multiple
       // times in a single logic block; each call appends one item." Track where
       // the per-item build starts so the root count can be read off the emission
@@ -1273,12 +1273,12 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   // items (it was evaluated twice: `items.splice(0, 1)` looped over nothing). A
   // non-array iterable (a Set, a generator) is materialized so both can read it.
   lines.push(`let ${itemsVar} = (${iterable});`);
-  lines.push(`if (!Array.isArray(${itemsVar})) ${itemsVar} = Array.from(${itemsVar});`);
+  lines.push(`if (!_scrml_g.Array.isArray(${itemsVar})) ${itemsVar} = _scrml_g.Array.from(${itemsVar});`);
   lines.push(`// One slot per distinct key; SQL matches each slot's key to rows with the query's own \`=\` (§8.10.2).`);
-  lines.push(`const ${slotsVar} = new Map();`);
+  lines.push(`const ${slotsVar} = new _scrml_g.Map();`);
   lines.push(`for (const _k of ${itemsVar}.map((${loopVar}) => ${_key})) { if (!${slotsVar}.has(_k)) ${slotsVar}.set(_k, ${slotsVar}.size); }`);
-  lines.push(`const ${bySlotVar} = new Map();`);
-  lines.push(`const ${loadedVar} = new Set();`);
+  lines.push(`const ${bySlotVar} = new _scrml_g.Map();`);
+  lines.push(`const ${loadedVar} = new _scrml_g.Set();`);
   lines.push(`// Fetch the rows of _keys in chunks of at most ${batchCap} bound keys (§8.10.6); a chunk's keys are loaded when its query succeeds.`);
   lines.push(`const ${fetchVar} = async (_keys) => {`);
   lines.push(`  for (let _at = 0; _at < _keys.length; _at += ${batchCap}) {`);

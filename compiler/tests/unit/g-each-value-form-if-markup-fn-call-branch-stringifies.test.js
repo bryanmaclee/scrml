@@ -47,9 +47,9 @@ const HEAD = `type Row:struct = { id: string, name: string }
 <rows>: Row[] = [{ id: "1", name: "alpha" }]
 fn badge(n: string) { return <span class="b">\${n}</span> }`;
 
-const mountsNode = (cj) => /instanceof\s+Node/.test(cj) && /_scrml_each_mv_/.test(cj);
+const mountsNode = (cj) => /instanceof\s+_scrml_g\.Node/.test(cj) && /_scrml_each_mv_/.test(cj);
 const stringifiesInto = (cj, name) =>
-  new RegExp(`_scrml_each_tn_\\d+\\.textContent\\s*=\\s*String\\([^;]*${name}`).test(cj);
+  new RegExp(`_scrml_each_tn_\\d+\\.textContent\\s*=\\s*_scrml_g\\.String\\([^;]*${name}`).test(cj);
 
 function nodeCheckOk(clientJs) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-nc-"));

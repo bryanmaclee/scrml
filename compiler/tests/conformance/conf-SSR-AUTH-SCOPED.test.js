@@ -28,6 +28,7 @@ import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { standInHostAlias } from "../helpers/host-view.js";
 
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
@@ -134,7 +135,7 @@ describe("CONF-SSR-AUTH-SCOPED (runtime-half): the compiled bundle omits the see
     };
     // Strip imports + the real SQL handle; inject the stub as `_scrml_sql`; resolve
     // `import.meta.url` to the emitted app.server.js so the compose reads app.html.
-    const src = serverJs
+    const src = standInHostAlias(serverJs)
       .replace(/import\s+\{[^}]*\}\s+from\s+["'][^"']+["'];?/g, "")
       .replace(/const _scrml_sql = .*;/g, "")
       .replace(/import\.meta\.url/g, JSON.stringify("file://" + join(outDir, "app.server.js")))

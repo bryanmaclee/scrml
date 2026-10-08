@@ -54,13 +54,14 @@
  * the caller then keeps the regex pass, so an already-invalid buffer compiles
  * exactly as it did before.
  *
- * ## Not covered here (named so nobody assumes it)
+ * ## Host globals
  *
- * A compiler-emitted reference to a HOST GLOBAL (`document`, `fetch`, `String`,
- * `setTimeout`, ...) is free, exactly like a reference to the user's function, so
- * a user function named after a host global the emitted code uses still captures
- * that use. Scope cannot separate the two; that needs the compiler's global
- * references spelled in a form no user binding can reach. It is filed separately.
+ * A compiler reference to a HOST GLOBAL would be free exactly like a reference
+ * to the user's function, and scope cannot separate the two. So the compiler
+ * never writes one bare: it spells it `_scrml_g.document`, `_scrml_g.fetch(…)`,
+ * … (codegen/host-global-alias.ts), a member access this pass never renames.
+ * `aliasFreeGlobalRefs` below is the same scope walk, used to give runtime text
+ * that is inlined into a user-reachable artifact that spelling.
  */
 
 import * as acorn from "acorn";
@@ -80,6 +81,19 @@ interface Edit {
 }
 
 /**
+ * What to put in place of a FREE reference (one no enclosing scope binds).
+ * Each method returns the replacement text, or `null` to leave the site alone.
+ */
+interface FreeRefRewrite {
+  /** An identifier in reference position. `end` is its end offset in the code. */
+  ref(name: string, end: number): string | null;
+  /** A shorthand property `{ name }` (object literal or assignment pattern). */
+  shorthand(name: string): string | null;
+  /** The local name of an `export { name }` (aliased=false) / `export { name as x }` specifier. */
+  exportLocal(name: string, aliased: boolean): string | null;
+}
+
+/**
  * Rename every free reference to a user function in `code`, in the positions
  * the legacy regex renamed. Returns `null` when `code` does not parse.
  */
@@ -94,17 +108,6 @@ export function renameUserFnRefsScoped(
     if (code.includes(n)) { any = true; break; }
   }
   if (!any) return code;
-
-  const ast = parse(code) ?? parse(neutralizeAwait(code));
-  if (ast === null) return null;
-
-  const edits: Edit[] = [];
-
-  const declare = (scope: Scope, name: string) => { scope.names.add(name); };
-  const isBound = (scope: Scope, name: string): boolean => {
-    for (let s: Scope | null = scope; s; s = s.parent) if (s.names.has(name)) return true;
-    return false;
-  };
 
   /** The text after a reference ends in a position the legacy regex renamed. */
   const inRenamedPosition = (end: number): boolean => {
@@ -127,24 +130,78 @@ export function renameUserFnRefsScoped(
     return false;
   };
 
-  /** Rename one reference when it is free and named in the map. */
+  return rewriteFreeRefs(code, {
+    ref: (name, end) => {
+      const mangled = fnNameMap.get(name);
+      if (mangled === undefined) return null;
+      // s457 3a (S458 review (c)) — a free reference to the user's function is
+      // renamed in EVERY position (a member root `event.x`, a bare value
+      // `cb = event`), not only the call-like positions the legacy regex knew:
+      // with the handler wrapper no longer binding `event`, `event.preventDefault()`
+      // beside a user `function event` is that function, and left as written it
+      // was a dangling `event` after the rename. EXCEPT a host-global name
+      // (`document`, `Math`, `console`, …): compiler-emitted code references those
+      // as free member roots, and a user function that shadows one keeps the
+      // legacy positions until host-global references are spelled through an
+      // alias (g-user-fn-named-host-global-hijacks-compiler-refs-s457).
+      if (!inRenamedPosition(end) && isHostGlobalName(name)) return null;
+      return mangled;
+    },
+    shorthand: (name) => {
+      const mangled = fnNameMap.get(name);
+      if (mangled === undefined) return null;
+      const key = name === "__proto__" ? `["__proto__"]` : name;
+      return `${key}: ${mangled}`;
+    },
+    exportLocal: (name, aliased) => {
+      const mangled = fnNameMap.get(name);
+      if (mangled === undefined) return null;
+      return aliased ? mangled : `${mangled} as ${name}`;
+    },
+  });
+}
+
+/**
+ * Prefix every FREE reference to one of `names` with `<alias>.` — a reference no
+ * enclosing scope binds, i.e. one that means the host global. A shorthand
+ * `{ name }` becomes `{ name: <alias>.name }`; a bare `globalThis` becomes the
+ * alias itself. Used to inline runtime text into an artifact that also holds user
+ * bindings (codegen/host-global-alias.ts). Returns `null` when `code` does not parse.
+ */
+export function aliasFreeGlobalRefs(
+  code: string,
+  names: ReadonlySet<string>,
+  alias: string,
+): string | null {
+  const spelled = (name: string) => (name === "globalThis" ? alias : `${alias}.${name}`);
+  return rewriteFreeRefs(code, {
+    ref: (name) => (names.has(name) ? spelled(name) : null),
+    shorthand: (name) => (names.has(name) ? `${name}: ${spelled(name)}` : null),
+    // An exported local is the module's own binding, never a host global.
+    exportLocal: () => null,
+  });
+}
+
+/** The scope walk shared by the two rewrites above. */
+function rewriteFreeRefs(code: string, rw: FreeRefRewrite): string | null {
+  const ast = parse(code) ?? parse(neutralizeAwait(code));
+  if (ast === null) return null;
+
+  const edits: Edit[] = [];
+
+  const declare = (scope: Scope, name: string) => { scope.names.add(name); };
+  const isBound = (scope: Scope, name: string): boolean => {
+    for (let s: Scope | null = scope; s; s = s.parent) if (s.names.has(name)) return true;
+    return false;
+  };
+
+  /** Rewrite one reference when it is free and the rewrite asks for it. */
   const ref = (id: AnyNode, scope: Scope) => {
     const name = id.name as string;
-    const mangled = fnNameMap.get(name);
-    if (mangled === undefined) return;
     if (isBound(scope, name)) return;
-    // s457 3a (S458 review (c)) — a free reference to the user's function is
-    // renamed in EVERY position (a member root `event.x`, a bare value
-    // `cb = event`), not only the call-like positions the legacy regex knew:
-    // with the handler wrapper no longer binding `event`, `event.preventDefault()`
-    // beside a user `function event` is that function, and left as written it
-    // was a dangling `event` after the rename. EXCEPT a host-global name
-    // (`document`, `Math`, `console`, …): compiler-emitted code references those
-    // as free member roots, and a user function that shadows one keeps the
-    // legacy positions until host-global references are spelled through an
-    // alias (g-user-fn-named-host-global-hijacks-compiler-refs-s457).
-    if (!inRenamedPosition(id.end) && isHostGlobalName(name)) return;
-    edits.push({ start: id.start, end: id.end, text: mangled });
+    const text = rw.ref(name, id.end);
+    if (text === null) return;
+    edits.push({ start: id.start, end: id.end, text });
   };
 
   // ---------------------------------------------------------------------------
@@ -275,13 +332,12 @@ export function renameUserFnRefsScoped(
    * plain `__proto__: x` form would set the prototype instead (ECMA-262 B.3.1).
    * In an assignment pattern the computed key reads the same property.
    */
-  const shorthand = (prop: AnyNode, id: AnyNode, scope: Scope) => {
+  const shorthand = (_prop: AnyNode, id: AnyNode, scope: Scope) => {
     const name = id.name as string;
-    const mangled = fnNameMap.get(name);
-    if (mangled === undefined) return;
     if (isBound(scope, name)) return;
-    const key = name === "__proto__" ? `["__proto__"]` : name;
-    edits.push({ start: id.start, end: id.end, text: `${key}: ${mangled}` });
+    const text = rw.shorthand(name);
+    if (text === null) return;
+    edits.push({ start: id.start, end: id.end, text });
   };
 
   const fn = (node: AnyNode, outer: Scope) => {
@@ -388,14 +444,13 @@ export function renameUserFnRefsScoped(
           for (const sp of node.specifiers) {
             const local = sp.local;
             if (local.type !== "Identifier") continue;
-            const mangled = fnNameMap.get(local.name);
-            if (mangled === undefined || isBound(scope, local.name)) continue;
+            if (isBound(scope, local.name)) continue;
             const exportedName = sp.exported.type === "Identifier" ? sp.exported.name : null;
-            if (sp.exported.start === local.start && exportedName !== null) {
-              edits.push({ start: local.start, end: local.end, text: `${mangled} as ${exportedName}` });
-            } else {
-              edits.push({ start: local.start, end: local.end, text: mangled });
-            }
+            // `export { name }` (the exported name IS the local, same offset) vs `export { name as x }`.
+            const aliased = !(sp.exported.start === local.start && exportedName !== null);
+            const text = rw.exportLocal(local.name, aliased);
+            if (text === null) continue;
+            edits.push({ start: local.start, end: local.end, text });
           }
         }
         return;

@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { aliasHostGlobalsInRuntimeText } from "./codegen/host-global-alias.ts";
 
 /**
  * Phase A1c Step C7 — pull the validator predicate runtime catalog into
@@ -555,22 +556,29 @@ const _STDLIB_TIME_CHUNK     = _loadStdlibChunk("time");
  *     Infinite loop guard: MAX_RUNS = 100. Scope cleanup registered with _scrml_register_cleanup.
  */
 
+// The runtime's first binding, `var _scrml_g = globalThis;`, is the host-global
+// alias (S457 2a, codegen/host-global-alias.ts): compiler-emitted code outside the
+// runtime spells every host global through it (`_scrml_g.document`,
+// `_scrml_g.fetch(…)`), so a user binding named after a host global cannot capture
+// a compiler reference. `var`, like `_scrml_modules`: chunk scripts read it across
+// script boundaries. The explanation lives here, not in the shipped text: the
+// client runtime's gzip size is gated (runtime-size-ratchet, the SPA-counter <16 KB).
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
-const _scrml_state = {};
-const _scrml_subscribers = {};
-// S103 Phase 3 select-row chip-away (Candidate A) — value-indexed sub-registry
-// parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
+var _scrml_g = globalThis;
+const _scrml_state = Object.create(null);
+const _scrml_subscribers = Object.create(null);
+// Value-indexed sub-registry (S103) parallel to _scrml_subscribers. Predicate-shape binds emitted by emit-lift.js
 // register here under their static valueKey (the constant they compare the cell
 // to). At write time _scrml_reactive_set fires only the OLD-value bucket and
 // the NEW-value bucket — O(2) per write instead of O(N) over all rows.
 // Shape: { [name]: { [valueKey]: [fn, ...] } }
 // TDZ-safe: declared next to _scrml_subscribers since state-decl substrates
 // may write to cells during module-init before the helper functions resolve.
-const _scrml_value_indexed_subscribers = {};
+const _scrml_value_indexed_subscribers = Object.create(null);
 // scrml: stdlib registry — populated by per-stdlib chunks (see end of runtime).
 // Client-emitted code rewrites \`import { x } from "scrml:NAME"\` to
 // \`const { x } = _scrml_stdlib.NAME;\` (browser cannot resolve bare specifiers).
-const _scrml_stdlib = {};
+const _scrml_stdlib = Object.create(null);
 
 // ---------------------------------------------------------------------------
 // P1.B — Per-op runtime instrumentation (SCOPING §2.2, S103).
@@ -660,10 +668,10 @@ const _scrml_throttle_state = Object.create(null);
 // _scrml_derived_cache: name → cached value
 // _scrml_derived_dirty: name → boolean  (true = needs re-evaluation on next read)
 // _scrml_derived_downstreams: upstream_name → Set of derived names  (dirty propagation edges)
-const _scrml_derived_fns = {};
-const _scrml_derived_cache = {};
-const _scrml_derived_dirty = {};
-const _scrml_derived_downstreams = {};
+const _scrml_derived_fns = Object.create(null);
+const _scrml_derived_cache = Object.create(null);
+const _scrml_derived_dirty = Object.create(null);
+const _scrml_derived_downstreams = Object.create(null);
 
 // --- default= storage (§6.8) ---
 // _scrml_default_fns: name → () => default-value
@@ -678,7 +686,7 @@ const _scrml_derived_downstreams = {};
 // NOTE: this declaration LIVES in the 'core' chunk (no marker) so file-init
 // _scrml_default_set(...) calls always resolve. The runtime helper that
 // USES this map (_scrml_reset) lives in the 'reset' chunk further down.
-const _scrml_default_fns = {};
+const _scrml_default_fns = Object.create(null);
 function _scrml_default_set(name, fn) {
   _scrml_default_fns[name] = fn;
 }
@@ -692,7 +700,7 @@ function _scrml_default_set(name, fn) {
 // file-init _scrml_init_set(...) calls always resolve. The using helper
 // (_scrml_reset) lives in 'reset' and is tree-shaken when no reset(@cell)
 // occurs in the source.
-const _scrml_init_fns = {};
+const _scrml_init_fns = Object.create(null);
 function _scrml_init_set(name, fn) {
   _scrml_init_fns[name] = fn;
 }
@@ -703,7 +711,7 @@ function _scrml_init_set(name, fn) {
 // state commit and arms a new one if the destination variant has outgoing
 // temporal rules. Re-entering the same variant clears and re-arms (reset
 // semantics per the deep-dive default).
-const _scrml_machine_timers = {};
+const _scrml_machine_timers = Object.create(null);
 function _scrml_machine_clear_timer(name) {
   const id = _scrml_machine_timers[name];
   if (id !== undefined) {
@@ -1612,7 +1620,7 @@ function _scrml_self_scope(el) {
  * down and rebuilds rather than layering, so no handler double-attaches and no
  * per-dispatch wiring leaks.
  */
-const _scrml_dispatch_remounts = {};
+const _scrml_dispatch_remounts = Object.create(null);
 
 function _scrml_register_dispatch_remount(mountId, fn) {
   if (mountId) _scrml_dispatch_remounts[mountId] = fn;
@@ -2476,7 +2484,7 @@ function _scrml_lis(arr) {
 // The SHOW_COMMENT walk in _scrml_remount_each finds each fence anchor at any
 // depth inside the arm body (top-level each within the arm). Reusable by any
 // dynamic-HTML insertion site (engine arm-entry today; match-block dispatch too).
-const _scrml_each_renderers = {};
+const _scrml_each_renderers = Object.create(null);
 
 function _scrml_remount_each(root) {
   if (!root) return;
@@ -3631,7 +3639,12 @@ const _scrml_tracking_stack = [];
  * @param {object|null} capturedBindings — frozen object of lexical bindings at ^{} breakout point
  * @param {object|null} typeRegistry — plain object mapping type names to reflection data
  */
-function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
+function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry, cellKey) {
+  // A cell NAME given to meta.get / meta.set / meta.subscribe is an author name; the
+  // store holds it under the chunk's namespaced key. cellKey is the chunk's own
+  // _scrml_cs_key (passed by the chunk cell-scope wrapper), so these resolve through
+  // the same mapping every compiled cell read uses (S458 review F4).
+  const key = typeof cellKey === "function" ? cellKey : String;
   let cleanupFns = [];
   let currentDeps = new Set();
   let unsubscribers = [];
@@ -3652,6 +3665,64 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
     : 100;
   const MAX_RUNS = _scrml_runtime_max_runs; // infinite loop guard (overridable; see globalThis.__scrml_max_meta_runs)
 
+  // §22.5.1 timer primitives (meta.interval / meta.timeout / meta.clearInterval /
+  // meta.clearTimeout). Every timer is bound to THIS meta block's scope: the
+  // registry maps an opaque id (a fresh frozen token object — never a host
+  // timer handle or a number, so meta.clearInterval cannot cancel a timer this
+  // scope did not register, including another scope's) to { kind, handle }.
+  // clearScopeTimers() clears every still-active
+  // timer in LIFO registration order; it runs before each re-run and on scope
+  // destroy, BEFORE the meta.cleanup callbacks (§22.5.1 "Timer primitives
+  // lifetime").
+  const timers = new Map();
+  let nextTimerId = 0;
+  // A timer may be registered only while the scope is live and not discharging: one
+  // registered by a meta.cleanup callback (which runs as the scope is torn down or
+  // before a re-run) or through a meta object retained past _scrml_destroy_scope would
+  // otherwise outlive every clear (S458 review F5). Such a registration is a no-op that
+  // returns an id no clear will ever match.
+  let timersClosed = false;
+  let discharging = false;
+
+  function clearScopeTimers() {
+    const live = Array.from(timers.values());
+    timers.clear();
+    for (let i = live.length - 1; i >= 0; i--) {
+      if (live[i].kind === "interval") clearInterval(live[i].handle);
+      else clearTimeout(live[i].handle);
+    }
+  }
+
+  function startTimer(kind, ms, callback) {
+    // A host timer given a string evaluates it as code; only a function is admitted.
+    if (typeof callback !== "function") {
+      throw new TypeError("meta." + kind + "(ms, callback): callback must be a function");
+    }
+    // ms is a number (§22.5.1); a non-number, NaN, Infinity or negative delay is refused,
+    // never coerced to a 0 ms busy timer.
+    if (typeof ms !== "number" || !(ms >= 0) || ms === Infinity) {
+      throw new TypeError("meta." + kind + "(ms, callback): ms must be a finite number >= 0, got " + ms);
+    }
+    const id = Object.freeze({ scope: scopeId, timer: ++nextTimerId });
+    if (timersClosed || discharging) return id;
+    function run() {
+      if (kind === "timeout") timers.delete(id);
+      try { callback(); } catch(e) { console.error("[scrml] meta " + kind + " callback error in " + scopeId + ":", e); }
+    }
+    const handle = kind === "interval" ? setInterval(run, ms) : setTimeout(run, ms);
+    timers.set(id, { kind: kind, handle: handle });
+    return id;
+  }
+
+  function stopTimer(kind, id) {
+    const entry = timers.get(id);
+    // Already cleared / already fired / another kind's id: a no-op (§22.5.1).
+    if (entry === undefined || entry.kind !== kind) return;
+    timers.delete(id);
+    if (kind === "interval") clearInterval(entry.handle);
+    else clearTimeout(entry.handle);
+  }
+
   function trackingGet(name) {
     // Record dependency if we are inside a tracking context
     if (_scrml_tracking_stack.length > 0) {
@@ -3666,13 +3737,26 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
     runCount++;
     if (runCount > MAX_RUNS) {
       console.error("[scrml] meta effect " + scopeId + " exceeded " + MAX_RUNS + " re-runs — possible infinite loop");
+      // No timer clear here (S458 review round 3): this guard is not reachable with a
+      // live timer. runCount only climbs across re-runs that are NOT reset to 0, and
+      // every re-run is driven by a reactive subscriber whose callback sets runCount = 0
+      // before calling runEffect; a synchronous self-trigger within a run is stopped by
+      // the isRunning re-entrancy guard above. Two independent reviews could not reach
+      // this line with an active timer, so a clear here would be dead code in a security
+      // path. If a reaching path is ever found, restore the clearScopeTimers() call here.
       isRunning = false;
       return;
     }
 
-    // Run cleanup callbacks from the previous execution (LIFO order)
-    for (let i = cleanupFns.length - 1; i >= 0; i--) {
-      try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect cleanup error:", e); }
+    // Clear the previous execution's timers, then run its cleanup callbacks (LIFO order)
+    clearScopeTimers();
+    discharging = true;
+    try {
+      for (let i = cleanupFns.length - 1; i >= 0; i--) {
+        try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect cleanup error:", e); }
+      }
+    } finally {
+      discharging = false;
     }
     cleanupFns = [];
 
@@ -3697,21 +3781,39 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
       globalThis._scrml_reactive_get = trackingGet;
     }
 
+    // meta.bindings for this run. A function is a per-run snapshot: non-reactive entries
+    // are the values current when this run starts (§22.5.2); reactive entries are live
+    // getters. (A plain object is the pre-S458 shape, kept for already-compiled output.)
+    let runBindings = null;
+    try {
+      runBindings = typeof capturedBindings === "function" ? capturedBindings()
+        : capturedBindings != null ? capturedBindings : null;
+    } catch(e) {
+      console.error("[scrml] meta effect bindings error in " + scopeId + ":", e);
+    }
+
     // Build the meta API object for this run.
     // meta.cleanup() collects cleanup callbacks for the current run (not scope-level).
     // meta.get uses trackingGet so reads inside fn body are auto-tracked.
     const meta = {
-      get: trackingGet,
-      set: _scrml_reactive_set,
-      subscribe: _scrml_reactive_subscribe,
+      get: function(name) { return trackingGet(key(name)); },
+      set: function(name, value) { return _scrml_reactive_set(key(name), value); },
+      subscribe: function(name, callback) { return _scrml_reactive_subscribe(key(name), callback); },
       emit: function(htmlString) { _scrml_meta_emit(scopeId, htmlString); },
       cleanup: function(cleanupFn) { cleanupFns.push(cleanupFn); },
+      interval: function(ms, callback) { return startTimer("interval", ms, callback); },
+      timeout: function(ms, callback) { return startTimer("timeout", ms, callback); },
+      clearInterval: function(id) { stopTimer("interval", id); },
+      clearTimeout: function(id) { stopTimer("timeout", id); },
       scopeId: scopeId,
-      bindings: capturedBindings != null ? capturedBindings : null,
+      bindings: runBindings,
       types: {
         reflect: function(name) {
           if (!name || typeof name !== "string") return null;
           if (typeRegistry == null) return null;
+          // Own-property only (S458 F-A): a type name is an author string; a plain-object
+          // typeRegistry would return Object/Function off the prototype for reflect("constructor").
+          if (!Object.prototype.hasOwnProperty.call(typeRegistry, name)) return null;
           const entry = typeRegistry[name];
           return entry != null ? entry : null;
         }
@@ -3753,6 +3855,8 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
   // Register scope-level cleanup: runs when _scrml_destroy_scope(scopeId) is called.
   // Fires all accumulated per-run cleanups and unsubscribes all reactive dependencies.
   _scrml_register_cleanup(function() {
+    timersClosed = true;
+    clearScopeTimers();
     for (let i = cleanupFns.length - 1; i >= 0; i--) {
       try { cleanupFns[i](); } catch(e) { console.error("[scrml] meta effect final cleanup error:", e); }
     }
@@ -4840,11 +4944,11 @@ function _scrml_computed(fn) {
 
 // Level-1 storage: keys are "<cellName>::<validatorName>"; values are
 // override strings. \`::\` is collision-safe (cell names cannot contain it).
-const _scrml_messages_inline = {};
+const _scrml_messages_inline = Object.create(null);
 
 // Level-2 storage: keys are ValidationError enum tags ("Required",
 // "MinFailed", "Custom", etc.); values are (fieldName, ...payload) => string.
-const _scrml_messages_registered = {};
+const _scrml_messages_registered = Object.create(null);
 
 // Tag → validator name mapping for Level-1 inline override lookup. Mirrors
 // the validator-catalog at compile time but lives here so Level-1 lookup
@@ -5044,7 +5148,7 @@ function _scrml_message_for(error, fieldName, cellName) {
 // 4-level chain consultation will share the formFor / errors emission paths
 // that already pull \`messages\`. Tree-shaken with \`messages\`.
 
-const _scrml_labels_registered = {};
+const _scrml_labels_registered = Object.create(null);
 
 /**
  * Level-2 label registration — public facade for \`registerLabels\` (stdlib re-export).
@@ -5189,7 +5293,7 @@ function _scrml_engine_variant_tag(value) {
 // the codegen-emitted 8th arg (isHistoryRestore) is true. The flag is CLEARED
 // by the dispatcher (postMountJs) immediately after consumption so subsequent
 // non-history-form writes don't accidentally restore.
-const _scrml_engine_pending_history_restore = {};
+const _scrml_engine_pending_history_restore = Object.create(null);
 
 // §51.11 audit — S307 port to the modern <engine>.
 //
@@ -5204,7 +5308,7 @@ const _scrml_engine_pending_history_restore = {};
 //
 // Tree-shaken by construction: codegen emits a registration ONLY for an engine
 // that declares an audit clause, so an app without one carries an empty object.
-const _scrml_engine_audit_targets = {};
+const _scrml_engine_audit_targets = Object.create(null);
 
 // Registration takes a CLOSURE, not a cell name. The recorder is built inside
 // the chunk scope, so its reactive get/set are the chunk-namespaced wrappers and
@@ -6641,9 +6745,12 @@ export const SERVER_VALUE_NATIVE_MAP_HELPER = (() => {
   // carried into the server bundle.
   const bodyStart = SCRML_RUNTIME.indexOf("\n", s + startTag.length);
   const body = SCRML_RUNTIME.slice(bodyStart, e);
+  // S457 2a — the server copy shares its module scope with user bindings (a server
+  // function called by another is a module-scope `async function <name>`), so its
+  // host-global references go through the `_scrml_g` alias (codegen/host-global-alias.ts).
   return (
     "\n// --- §59 value-native map/set runtime (inlined for server, no client runtime here) ---\n" +
-    body.trim() +
+    aliasHostGlobalsInRuntimeText(body.trim()) +
     "\n\n"
   );
 })();
@@ -6677,7 +6784,8 @@ export const SERVER_STRUCTURAL_EQ_SOURCE = (() => {
   }
   // Skip the START marker's line and the note under it; begin at the function.
   const fnStart = SCRML_RUNTIME.indexOf("function _scrml_structural_eq(", s);
-  return SCRML_RUNTIME.slice(fnStart, e).trim();
+  // S457 2a — host globals through the `_scrml_g` alias, as for the map helper above.
+  return aliasHostGlobalsInRuntimeText(SCRML_RUNTIME.slice(fnStart, e).trim());
 })();
 
 /**

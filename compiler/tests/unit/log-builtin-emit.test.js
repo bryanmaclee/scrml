@@ -203,7 +203,7 @@ describe("§20.6 — server inline helper", () => {
 
   test("the inlined render produces a readable value-faithful string", () => {
     // Exercise the actual server-inlined render over representative values.
-    const mod = new Function(SERVER_LOG_HELPER + "\nreturn _scrml_log_render;")();
+    const mod = new Function("const _scrml_g = globalThis;\n" + SERVER_LOG_HELPER + "\nreturn _scrml_log_render;")();
     expect(mod("hello")).toBe("hello");
     expect(mod(42)).toBe("42");
     expect(mod(true)).toBe("true");

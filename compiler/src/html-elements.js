@@ -1141,6 +1141,26 @@ export function isKnownElementName(name) {
 }
 
 /**
+ * True when `name` is a STANDARD markup element name — WHATWG HTML (lowercase, as
+ * written in scrml source), SVG, MathML, or a custom element — and NOT one of the
+ * scrml structural forms the curated REGISTRY also carries (`program`, `each`, …).
+ * Consulted by meta-eval's emit() output gate (§22.4.1, S457): emitted markup re-enters
+ * the pipeline after the stages that lower scrml structural elements, so only plain
+ * markup is admitted there.
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isStandardMarkupElementName(name) {
+  if (typeof name !== "string" || name.length === 0) return false;
+  if (isCustomElementName(name)) return true;
+  if (STANDARD_HTML_ELEMENTS.has(name)) return true;
+  if (SVG_ELEMENTS.has(name)) return true;
+  if (MATHML_ELEMENTS.has(name)) return true;
+  return false;
+}
+
+/**
  * The CANONICAL spelling of `name` when `name` is a markup element name in any
  * namespace, matched CASE-INSENSITIVELY; `null` when it is not.
  *

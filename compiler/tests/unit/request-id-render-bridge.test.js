@@ -385,7 +385,7 @@ describe("§8: lift-path <#id> request refs route + reactive (items 3+4)", () =>
   test("item 3: the lift-body request read is _scrml_effect-wrapped (Seam 3)", () => {
     const result = compile(liftForInterpFx);
     const js = clientJs(result, liftForInterpFx);
-    expect(js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent = String\(\(_scrml_request_feed\.data\) \?\? ""\); \}\)/);
+    expect(js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent = _scrml_g\.String\(\(_scrml_request_feed\.data\) \?\? ""\); \}\)/);
   });
 
   test("item 4: bare ${ if(<#feed>.loading){ lift } } condition routes to _scrml_request_feed", () => {

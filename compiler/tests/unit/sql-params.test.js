@@ -334,7 +334,7 @@ describe("§14 .prepare() emits E-SQL-006 (§44.3)", () => {
     const input = "?{`INSERT INTO users (n) VALUES (${n})`}.prepare()";
     const output = rewriteSqlRefs(input);
     expect(output).toContain("E-SQL-006");
-    expect(output).toContain("throw new Error");
+    expect(output).toContain("throw new _scrml_g.Error");
     // No bun:sqlite-shaped emission leaks
     expect(output).not.toContain("_scrml_sql.prepare(");
     expect(output).not.toContain("_scrml_db.prepare(");

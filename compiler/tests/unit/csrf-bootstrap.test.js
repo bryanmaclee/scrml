@@ -115,7 +115,7 @@ describe("GITI-010 — CSRF bootstrap", () => {
       const helperBody = helperMatch[0];
       expect(helperBody).toContain("status === 403");
       // Exactly two fetch calls — original + single retry.
-      const fetchCount = (helperBody.match(/await fetch\(/g) || []).length;
+      const fetchCount = (helperBody.match(/await _scrml_g\.fetch\(/g) || []).length;
       expect(fetchCount).toBe(2);
     });
 
@@ -135,7 +135,7 @@ describe("GITI-010 — CSRF bootstrap", () => {
       const stubBody = stubMatch[0];
       expect(stubBody).toContain("_scrml_fetch_with_csrf_retry(");
       // Should NOT contain a direct fetch() — that's the helper's job now.
-      expect(stubBody).not.toMatch(/await fetch\(/);
+      expect(stubBody).not.toMatch(/await (?:_scrml_g\.)?fetch\(/);
     });
 
     test("stub passes path, method, and body to helper in that order", () => {

@@ -227,7 +227,7 @@ describe("§4 3a — the wrapper does not bind `event`; a free `event` is E-EVEN
   // s457 3a (S458 fix round) — judged on the EMITTED listener with Acorn's scope
   // model (codegen/listener-event-check.ts), so every front end and every binder
   // position is covered: component bodies (native re-parse), `<match>` arms,
-  // lifted markup, `^{ emit() }` markup; a binder elsewhere in the handler or the
+  // lifted markup (`^{ emit() }` markup is refused upstream, §22.4.1); a binder elsewhere in the handler or the
   // file does not silence it (review F3 / F4).
   const refused = [
     [`<input oninput=f(event.target.value)>`, "`oninput=${(e) => …}`"],
@@ -245,7 +245,6 @@ describe("§4 3a — the wrapper does not bind `event`; a free `event` is E-EVEN
     [`\${ const Btn = <button props={ label: string } onclick={ f(event.type) }>\${label}</> }\n<Btn label="a"/>`, "(e) =>"],
     [`\${ const Btn = <button props={ label: string } onclick=@msg = event.type>\${label}</> }\n<Btn label="a"/>`, "(e) =>"],
     [`type Ph:enum = { A }\n<ph>: Ph = .A\n<match for=Ph on=@ph><A><button onclick=f(event.type)>x</button></A></match>`, "(e) =>"],
-    [`^{ emit("<button onclick=f(event.type)>e</button>") }`, "(e) =>"],
     [`<div>\${ lift <button onclick=f(event.type)>x</button> }</div>`, "(e) =>"],
   ];
   for (const [markup, fix] of refused) {
@@ -342,13 +341,27 @@ describe("§5 4a — ONE reader: the native re-parse paths and lifted markup rea
     ["component body", COMP(`onclick=@count = @count + 1`)],
     ["<match> arm", ARM(`<button onclick=@count = @count + 1>x</button>`)],
     ["lifted markup", `<div>\${ lift <button onclick=@count = @count + 1>x</button> }</div>`],
-    ["^{ emit() } markup", `^{ emit("<button onclick=@count = @count + 1>e</button>") }`],
   ];
   for (const [where, markup] of read) {
     test(`${where}: \`onclick=@count = @count + 1\` keeps its \`+ 1\``, () => {
       const { codes, clientJs } = compileToOutputs(page(markup));
       expect(codes).toEqual([]);
       expect(clientJs).toMatch(/_scrml_cs_reactive_set\("count", _scrml_cs_reactive_get\("count"\) \+ 1\)/);
+    });
+  }
+
+  // `^{ emit() }` markup: §22.4.1 (S458, #1359) admits only plain attribute values
+  // in emit() output, so an unquoted handler EXPRESSION there is refused whole —
+  // never wired, never truncated. (Was a "keeps its `+ 1`" / E-EVENT-UNBOUND
+  // vehicle before the allow-list landed.)
+  for (const markup of [
+    `^{ emit("<button onclick=@count = @count + 1>e</button>") }`,
+    `^{ emit("<button onclick=f(event.type)>e</button>") }`,
+  ]) {
+    test(`^{ emit() } markup: \`${markup}\` is refused (E-META-EVAL-002), no listener emitted`, () => {
+      const { codes, clientJs } = compileToOutputs(page(markup));
+      expect(codes).toContain("E-META-EVAL-002");
+      expect(clientJs).not.toMatch(/_scrml_cs_reactive_set\("count", _scrml_cs_reactive_get\("count"\)\)/);
     });
   }
 
@@ -378,7 +391,7 @@ describe("§5 4a — ONE reader: the native re-parse paths and lifted markup rea
   test("lifted markup: `title=fmt(1).trim()` is the attribute value", () => {
     const { codes, clientJs } = compileToOutputs(page(`<div>\${ lift <p id="t" title=fmt(1).trim()>x</p> }</div>`));
     expect(codes).toEqual([]);
-    expect(clientJs).toMatch(/setAttribute\("title", String\(_scrml_fmt_\d+\(1\)\.trim\(\)/);
+    expect(clientJs).toMatch(/setAttribute\("title", _scrml_g\.String\(_scrml_fmt_\d+\(1\)\.trim\(\)/);
   });
 
   test("F5 — literal text after an unquoted value is pointed at the quoted form", () => {

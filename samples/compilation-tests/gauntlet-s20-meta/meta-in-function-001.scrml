@@ -1,5 +1,9 @@
 // Phase 5 gauntlet: ^{} placement — inside function body
-// Should compile clean.
+// REFUSED (E-META-EVAL-002, S458 final review F3). A compile-time ^{} inlines its
+// emit() markup where markup sits (§22.4); a function body has no markup position, so
+// the <option>s had nowhere to go — impl#1 emitted an EMPTY function and the page
+// rendered nothing, with no diagnostic. It is now refused naming that cause. (To build
+// the options, put the ^{} inside the markup that shows them, e.g. in a <select>.)
 
 <program>
 

@@ -237,7 +237,7 @@ describe("§5 emitRuntimeCheck — boundary check emission", () => {
     const code = lines.join("\n");
     expect(code).toContain("if (!(");
     expect(code).toContain("amount > 0");
-    expect(code).toContain("throw new Error");
+    expect(code).toContain("throw new _scrml_g.Error");
   });
 
   test("guard condition is the negation of the predicate expression", () => {
@@ -331,7 +331,7 @@ describe("§9 emitServerParamCheck — emits server-side validation", () => {
     const pred = mkAnd(mkComparison(">", 0), mkComparison("<", 10000));
     const lines = emitServerParamCheck("amount", pred, null, "submitPayment");
     const code = lines.join("\n");
-    expect(code).toContain("return new Response");
+    expect(code).toContain("return new _scrml_g.Response");
     expect(code).toContain("400");
   });
 

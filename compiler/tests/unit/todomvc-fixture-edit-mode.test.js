@@ -236,8 +236,8 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
     // LIFT-1 FIX verified: the lift element (_scrml_lift_el_N) is now "li", not the
     // broken "div" fallback that occurred when parseLiftTag returned null and the
     // rootTag default was used.
-    expect(js).toMatch(/_scrml_lift_el_\d+\s*=\s*document\.createElement\("li"\)/);
-    expect(js).not.toMatch(/_scrml_lift_el_\d+\s*=\s*document\.createElement\("div"\)/);
+    expect(js).toMatch(/_scrml_lift_el_\d+\s*=\s*_scrml_g\.document\.createElement\("li"\)/);
+    expect(js).not.toMatch(/_scrml_lift_el_\d+\s*=\s*_scrml_g\.document\.createElement\("div"\)/);
     // Single text node for \${item.id} — no duplicate from the broken string-fallback path.
     // (The list wrapper createElement("div") is a separate variable and not a regression.)
     const textNodeMatches = js.match(/createTextNode/g);

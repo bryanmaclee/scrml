@@ -6,7 +6,7 @@
 ^{
   const colors = ["red", "green", "blue"]
   for (const color of colors) {
-    emit("<li class=color-" + color + ">" + color + "</li>")
+    emit("<li class=\"color-" + color + "\">" + color + "</li>")
   }
 }
 

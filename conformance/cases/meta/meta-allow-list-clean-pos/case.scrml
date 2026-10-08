@@ -1,0 +1,10 @@
+type Color:enum = { Red, Green }
+
+^{
+  const info = reflect(Color)
+  const names = info.variants.map(v => v.toLowerCase())
+  for (const name of names) {
+    emit("<p>" + name + " of " + names.length + "</p>")
+  }
+  emit.raw("<pre>" + names.join(", ") + "</pre>")
+}

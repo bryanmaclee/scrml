@@ -18,6 +18,7 @@ import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { compileScrml, rewriteRelativeImportPaths } from "../../src/api.js";
+import { HOST_GLOBAL_ALIAS_DECL } from "../../src/codegen/host-global-alias.ts";
 import { generateToolJs } from "../../src/codegen/emit-tool.ts";
 import { Database } from "bun:sqlite";
 
@@ -88,13 +89,13 @@ describe("§64 tool target — emit shape", () => {
 
   test("numeric-return main → exit-harness (process.exit)", () => {
     const { out } = compileSource(CLI_TOOL);
-    expect(out.toolJs).toMatch(/const _scrml_exit_code = await main\(process\.argv\.slice\(2\)\);/);
+    expect(out.toolJs).toMatch(/const _scrml_exit_code = await main\(_scrml_g\.process\.argv\.slice\(2\)\);/);
     expect(out.toolJs).toMatch(/process\.exit\(_scrml_exit_code\);/);
   });
 
   test("no-return main → invoke-only harness (await, NO process.exit)", () => {
     const { out } = compileSource(SERVER_TOOL);
-    expect(out.toolJs).toMatch(/await main\(process\.argv\.slice\(2\)\);/);
+    expect(out.toolJs).toMatch(/await main\(_scrml_g\.process\.argv\.slice\(2\)\);/);
     expect(out.toolJs).not.toMatch(/process\.exit/);
     expect(parsesClean(out.toolJs)).toBe(true);
   });
@@ -124,7 +125,7 @@ describe("§64 tool target — emit shape", () => {
       }
     </program>`);
     expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
-    expect(out.toolJs).toMatch(/const Cmd = Object\.freeze\(/);
+    expect(out.toolJs).toMatch(/const Cmd = _scrml_g\.Object\.freeze\(/);
     expect(out.toolJs).toMatch(/const c = Cmd\.List;/);
     expect(parsesClean(out.toolJs)).toBe(true);
   });
@@ -542,8 +543,11 @@ function main(args: string[]): number {
     // no leading `import` line — the header is empty for a no-import tool. (The
     // slice's §23.2.4a seal helper is an inlined runtime helper, which the tool emit
     // places ahead of the banner like every other one — not an import.)
-    expect(out.toolJs.trimStart().startsWith("import ")).toBe(false);
-    expect(out.toolJs).not.toMatch(/^import /m);
+    // The one import is the host-global alias (S457 2a; codegen/host-global-alias.ts) —
+    // a compiler line, not a header for the tool's own imports.
+    const imports = out.toolJs.split("\n").filter((l) => l.startsWith("import "));
+    expect(imports).toEqual([HOST_GLOBAL_ALIAS_DECL]);
+    expect(out.toolJs.split("\n").filter((l) => /^import /.test(l) && l !== HOST_GLOBAL_ALIAS_DECL)).toEqual([]);
     expect(out.toolJs).toContain("// Generated standalone tool");
   });
 
