@@ -1,0 +1,14 @@
+{
+  "id": "refinement-enum-subset-param-accept-neg",
+  "description": "S458 one reader — the negative twin of enum-subset-param-reject-rt: promote(r: Role oneOf([.Admin, .Editor])) called with .Editor (in the subset) passes the entry check, so @shown becomes \"promoted\". Pins that the new parameter check refuses only out-of-subset values.",
+  "language-version": "1.0",
+  "spec": "§53.15.2",
+  "rationale": "§53.15.2: a value in the subset satisfies the membership predicate; no E-CONTRACT-001-RT.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#ok" }],
+    "state": { "shown": "promoted" },
+    "domAnchored": [{ "selector": "#out", "text": "promoted" }]
+  }
+}

@@ -1,0 +1,8 @@
+<program>
+${
+  function take(n: number(>0)) {
+    return n
+  }
+}
+<p>${take(-5)}</p>
+</program>

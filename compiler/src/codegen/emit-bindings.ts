@@ -8,7 +8,7 @@ import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
 import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
-import { parsePredicateAnnotation, predicateToJsExpr, deriveHtmlAttrs } from "./emit-predicates.ts";
+import { refinementOf, predicateToJsExpr, deriveHtmlAttrs, type Refinement } from "./emit-predicates.ts";
 import { collectCompoundLeafTargets, collectRequestIds } from "./reactive-deps.ts";
 
 /** A loosely-typed AST node from the pipeline. */
@@ -175,14 +175,29 @@ function collectEnumVariantNames(decl: any): string[] {
  *
  * Exported (C16) for emit-html.ts to derive HTML validation attrs (§53.7.1).
  */
-export function buildReactiveTypeMap(fileAST: any): Map<string, string> {
-  const result = new Map<string, string>();
+/**
+ * reactive var → typeAnnotation, plus (S458 one reader) `refinements`:
+ * reactive var → the TS-resolved refinement stamped on its declaration
+ * (`stmt.predicateCheck`). The §53.7 bind:value check and HTML attrs read
+ * `refinements`; nothing re-parses the annotation string.
+ */
+export type ReactiveTypeMap = Map<string, string> & { refinements?: Map<string, Refinement> };
+
+/** The TS-resolved refinement of reactive cell `name`, or null. */
+export function cellRefinement(map: Map<string, string> | null | undefined, name: string): Refinement | null {
+  const r = (map as ReactiveTypeMap | null | undefined)?.refinements?.get(name);
+  return r ?? null;
+}
+
+export function buildReactiveTypeMap(fileAST: any): ReactiveTypeMap {
+  const result = new Map<string, string>() as ReactiveTypeMap;
+  result.refinements = new Map();
   const topNodes: any[] = fileAST.nodes ?? (fileAST.ast ? fileAST.ast.nodes : []);
   walkForReactiveTypes(topNodes, result);
   return result;
 }
 
-function walkForReactiveTypes(nodes: any[], result: Map<string, string>): void {
+function walkForReactiveTypes(nodes: any[], result: ReactiveTypeMap): void {
   for (const node of nodes) {
     if (!node || typeof node !== "object") continue;
     if (node.kind === "logic" && Array.isArray(node.body)) {
@@ -190,6 +205,8 @@ function walkForReactiveTypes(nodes: any[], result: Map<string, string>): void {
         if (!stmt) continue;
         if ((stmt.kind === "state-decl") && stmt.name && stmt.typeAnnotation) {
           result.set(stmt.name, stmt.typeAnnotation as string);
+          const ref = refinementOf(stmt.predicateCheck);
+          if (ref) result.refinements!.set(stmt.name, ref);
         }
       }
     }
@@ -627,7 +644,7 @@ export function emitBindDirectiveBody(
     // §53.7.2: predicated-type write-gating (also drives the <select> cell-type
     // coercion below — a numeric refinement's base type is read off _bvPredInfo).
     const _bvTypeAnnotation = reactiveTypeMap.get(rootKey);
-    const _bvPredInfo = _bvTypeAnnotation ? parsePredicateAnnotation(_bvTypeAnnotation) : null;
+    const _bvPredInfo = _bvTypeAnnotation ? cellRefinement(reactiveTypeMap, rootKey) : null;
 
     // §5.4 (D-FORM-5): a <select> carries no `type=` attr, so `isNumericInput`
     // never fires for it. When the bound cell is number/boolean-typed — and NOT
@@ -1075,7 +1092,7 @@ export function emitBindings(ctx: CompileContext): string[] {
     // checked/files/group flavours produce DOM-typed values that don't carry
     // refinement constraints in v0.next). Mirrors the source-level path.
     const typeAnnotation = reactiveTypeMap.get(cellName);
-    const predInfo = typeAnnotation ? parsePredicateAnnotation(typeAnnotation) : null;
+    const predInfo = typeAnnotation ? cellRefinement(reactiveTypeMap, cellName) : null;
 
     // §5.4 / §14.4.1 enum coercion for <select> + enum-typed cell.
     const enumTypeName = renderSpecTag === "select" ? enumVarMap.get(cellName) : undefined;

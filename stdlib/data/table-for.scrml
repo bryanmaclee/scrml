@@ -109,7 +109,7 @@ ${
      *   - Re-clicking the same column toggles direction asc↔desc.
      *   - Clicking a different sortable column switches to that column at asc.
      */
-    type TableSort:struct = {
+    export type TableSort:struct = {
         field:     string req
         direction: string req
     }

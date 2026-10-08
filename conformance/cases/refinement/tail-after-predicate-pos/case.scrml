@@ -1,0 +1,8 @@
+${
+    <raw>: number = 3
+    function keep(x) {
+        let q: number(>0) foo = x
+        return q
+    }
+}
+<program><p>${keep(@raw)}</p></program>

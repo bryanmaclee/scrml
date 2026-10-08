@@ -1,0 +1,13 @@
+${
+    <num>: number = 7
+    <text>: string = "9"
+    <shown>: number = 0
+    function take(n: number(>0)) {
+        @shown = n
+    }
+}
+<program>
+<button id="num" onclick=${take(@num)}>Number</button>
+<button id="text" onclick=${take(@text)}>Text</button>
+<p id="out">${@shown}</p>
+</program>

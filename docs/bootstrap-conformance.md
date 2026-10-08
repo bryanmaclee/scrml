@@ -7,16 +7,16 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1408 of 1408 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1433 of 1433 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 121 | 8.6% |
+| PASS | 121 | 8.4% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 56 | 4.0% |
+| FAIL | 56 | 3.9% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 529 | 37.6% |
-| UNSUPPORTED | 702 | 49.9% |
+| NOT-TWINNED | 536 | 37.4% |
+| UNSUPPORTED | 720 | 50.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,18 +26,18 @@ Scope: **1408 of 1408 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 502 · parse-reject 200.
+UNSUPPORTED by reason: bootstrap-unsupported 512 · parse-reject 208.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **642** — PASS 76 · FAIL 52 · UNSUPPORTED 514. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **660** — PASS 76 · FAIL 52 · UNSUPPORTED 532. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (529 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (536 cases; a case counts once per distinct reason):
 
-- 68 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 66 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 73 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 67 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 46 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 40 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
@@ -80,6 +80,8 @@ NOT-TWINNED by reason (529 cases; a case counts once per distinct reason):
 - 1 — const-cell: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 1 — engine-simple: `…` impl#1's front end did not surface as an engine declaration (left untouched)
 - 1 — engine-simple: engine surface beyond the simple rule: derived, effect (⚑ O5 surface)
+- 1 — program-move: impl#1 reads the restructured file differently (+E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `…` unwrapped
+- 1 — program-move: impl#1 reads the restructured file differently (-E-CONTRACT-001, +E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-LIFECYCLE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-STATE-UNDECLARED) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-DECL-RHS-INTERP-WRAPPED, +W-DERIVED-001) — not restructured, no `…` unwrapped
@@ -102,7 +104,7 @@ NOT-TWINNED by reason (529 cases; a case counts once per distinct reason):
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
-| components | 37 | · | · | 2 | · | 34 | 1 | · | · |
+| components | 42 | · | · | 2 | · | 39 | 1 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -130,7 +132,7 @@ NOT-TWINNED by reason (529 cases; a case counts once per distinct reason):
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | meta | 17 | · | · | · | · | 1 | 16 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 32 | · | · | 10 | · | 8 | 14 | · | · |
+| module | 40 | · | · | 10 | · | 8 | 22 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | page | 1 | · | · | · | · | 1 | · | · | · |
@@ -140,7 +142,7 @@ NOT-TWINNED by reason (529 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | reactive | 89 | 25 | · | 3 | · | 40 | 21 | · | · |
-| refinement | 12 | · | · | · | · | 3 | 9 | · | · |
+| refinement | 24 | · | · | · | · | 5 | 19 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
@@ -417,7 +419,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (702)
+### UNSUPPORTED (720)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -880,8 +882,16 @@ none
 - `module/e-import-001-export-inside-logic-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-002-acyclic-import-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-002-circular-import-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-reexport-cycle-named-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-reexport-cycle-star-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-reexport-import-cycle-mixed-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-003-host-import-inside-logic-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `module/e-import-003-import-inside-fn-reject` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `module/e-import-004-reexport-ambiguous-star-reject` — twin · bootstrap-unsupported: function `w` is also declared in `c.scrml` — the bootstrap links one namespace, so every use of `w` would resolve to the first one (a silent mis-link); it is refused instead (a bootstrap slice limit, 
+- `module/e-import-004-reexport-chain-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-004-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-006-reexport-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-006-reexport-star-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `*` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-008-plain-import-clean` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
 - `module/e-import-pinned-const-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-scope-010-filescope-distinct-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
@@ -958,12 +968,22 @@ none
 - `reactive/throttle-trailing-commit` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
 - `reactive/write-not-in-logic-context-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `reactive/write-not-in-logic-context-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `refinement/array-literal-element-pos` — twin · bootstrap-unsupported: `<links>` has an own value (or an own type) AND attributes — what `@links` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
+- `refinement/base-type-literal-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<count`
+- `refinement/base-type-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
 - `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/enum-subset-param-accept-neg` — twin · bootstrap-unsupported: an unannotated parameter `oneOf` — bootstrap slice M2 needs `oneOf: Type` (Core parameters are typed)
+- `refinement/enum-subset-param-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `oneOf` — bootstrap slice M2 needs `oneOf: Type` (Core parameters are typed)
 - `refinement/external-ref-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<hp`
 - `refinement/inhabit-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
 - `refinement/literal-violation-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<amount`
+- `refinement/malformed-predicate-param-pos` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/sharedcore-inparen-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/string-operand-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
 - `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
 - `refinement/string-shape-literal-violation-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<email`
+- `refinement/tail-after-predicate-pos` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `refinement/unknown-shape-boundary-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
 - `refinement/unknown-shape-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<s`
 - `refinement/url-executable-scheme-literal-pos` — twin · bootstrap-unsupported: `<link>` has an own value (or an own type) AND attributes — what `@link` then names is ⚑ O19 (not ruled); the bootstrap does not decide it
 - `refinement/url-executable-scheme-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
@@ -1122,7 +1142,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (529)
+### NOT-TWINNED (536)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1175,6 +1195,7 @@ none
 - `components/bind-non-primitive-type-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-prop-forwarded-to-input` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-prop-write-back` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-prop-write-back-block-arrows` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-prop-write-back-positions` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `components/declared-prop-explicit-root-write` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `components/declared-prop-not-root-attr` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1193,6 +1214,10 @@ none
 - `components/multiple-spreads-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/multiple-spreads-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/post-ce-residual-component-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/prop-substitution-loop-binder-shadows` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/prop-substitution-scope-in-block-arrows` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `components/prop-substitution-string-escapes` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/prop-substitution-structural` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/props-render` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/slot-on-parametric-snippet-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/slot-on-parametric-snippet-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
@@ -1562,6 +1587,8 @@ none
 - `reactive/shape4-refinement-no-default` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - `reactive/shape4-refinement-satisfied-neg` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - `reactive/shape4-struct-not-lifecycle` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- `refinement/range-form-literal-pos` — not mechanical: program-move: impl#1 reads the restructured file differently (-E-CONTRACT-001, +E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `${}` unwrapped
+- `refinement/range-form-neg` — not mechanical: program-move: impl#1 reads the restructured file differently (+E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `${}` unwrapped
 - `refinement/subset-dead-arm-pos` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified 
 - `refinement/subset-narrowed-exhaustive-neg` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified 
 - `refinement/subset-notin-dead-arm-pos` — not mechanical: rhs-decl: type `Role notIn([.Guest])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against i

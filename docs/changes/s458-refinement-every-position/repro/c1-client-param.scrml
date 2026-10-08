@@ -1,0 +1,11 @@
+<program>
+${
+  function take(u: string(url)) {
+    return u
+  }
+  function relay(v) {
+    return take(v)
+  }
+}
+<p>${relay("https://example.com")}</p>
+</program>

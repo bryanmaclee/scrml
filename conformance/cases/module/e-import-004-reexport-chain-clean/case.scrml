@@ -1,0 +1,4 @@
+${
+    import { K, L } from './b.scrml'
+}
+<p>${K + L}</>

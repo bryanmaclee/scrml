@@ -1,0 +1,12 @@
+{
+  "id": "refinement-tail-after-predicate-pos",
+  "description": "S458: text after a refinement's closing parenthesis that is not exactly one `[label]` (nor array suffixes `[]`, nor `?`) makes the annotation malformed. `number(>0) foo` is refused with E-CONTRACT-002 — it is neither silently untyped (no check) nor silently read as `number(>0)` with the tail ignored.",
+  "language-version": "1.0",
+  "spec": "§53.2.1",
+  "rationale": "§53.2.1: `inline-predicate = base-type \"(\" predicate-expr \")\"`, optionally followed by `\"[\" identifier \"]\"` (named-constraint). Any other tail is outside the grammar; §53.11 E-CONTRACT-002 covers a malformed predicate.",
+  "expect": {
+    "codes": ["E-CONTRACT-002"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-002": "error" }
+  }
+}
