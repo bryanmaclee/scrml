@@ -124,3 +124,19 @@
   -star-missing-file-reject), 1354/1404 + 50 xfail; unit file 19 tests; types OK; browser-baseline PASS.
   Corpus by compile base 46ed1f8ff vs head 93d6366c3: 0 newly failing / 0 newly passing; 60 diagnostic-code changes,
   ALL `-W-STDLIB-SEED-FAILCLOSED` (the TableSort export); artifacts: only the 38 ex23 diffs (unchanged).
+- [2026-10-08] Landing merge: `git merge origin/main` (08adefc4c: #1345 scope-aware rename + `_scrml_` locals, #1350 maps,
+  #1351 srcdoc/SVG sinks) -> 112d5a399, NO textual conflicts. Overlap with this branch: compiler/SPEC.md (main: §5.2
+  sink bullets + E-ATTR-INTERP-EXECUTABLE row; branch: §14.8.10/§34/§47.14 dev tenant text — disjoint hunks),
+  compiler/src/api.js (main: attr-sink nameKey dedupe in collectErrors ~L1564; branch: re-export reconcile + server-
+  import invariant suppression ~L3500-3700 — disjoint), codegen/emit-client.ts (main: renameUserFnRefsScoped mangle +
+  `_scrml_bind_rewire(_scrml_root)`; branch: re-export registry footer pairs — disjoint; footer pairs are property
+  reads/object keys, which the scope-aware rename never touches, confirmed by the probes below).
+  Generated docs: SPEC-INDEX --check OK (no regen needed); docs/bootstrap-conformance.md STALE -> `--write` (3403ba337;
+  only the +8 S458 module cases); docs/FACTS.md + docs/known-gaps.md identical to origin/main.
+  Gates on 3403ba337: core suite `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance`
+  30216 pass / 58 skip / 12 todo / 0 fail (30286 tests, 1480 files; run directly — the merge + docs commits skip the
+  hook); conformance 1361/1411 + 50 xfail exit 0; browser-baseline PASS (48); types OK 186/119.
+  Probes re-run on the merged tree: A — build + run, app.html out="from-c|app" lab is-red->is-green, star.html
+  out="from-c|star", card rendered, 0 page errors, b/b2.server.js re-export lines as before. B — dirty: dev and built
+  both health 503 / app.html 503 / route 503 + E-DEPLOY-DB-TENANT-UNDECLARED; clean: both 200/200/403-CSRF; no db: dev
+  serves (health 404 under dev as before), built health 200; Postgres-down: no crash, both 503 + "could not be checked".
