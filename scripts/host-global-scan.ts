@@ -39,7 +39,7 @@
  *
  * MODES (every .scrml under the roots is compiled in each):
  *   default · esm (moduleFormat:"esm") · embed (embedRuntime) · build (contentHashAssets +
- *   emitPerRoute — the `scrml build` compile, per-route chunks included) · test
+ *   emitPerRoute + stripShippedJs — the `scrml build` compile, per-route chunks included, stripped) · test
  *   (testMode + emitMachineTests; only sources with `~{` or `<engine`) · library
  *   (`--mode library`; only sources with an `export`).
  * Tool / worker / value-only modules arise in every mode from the sources that produce them. Each multi-file program directory (examples/<dir>/, benchmarks/<dir>/) is
@@ -73,7 +73,9 @@ const MODE_OPTS: Record<Mode, Record<string, unknown>> = {
   default: {},
   esm: { moduleFormat: "esm" },
   embed: { embedRuntime: true },
-  build: { contentHashAssets: true, emitPerRoute: true },
+  // S459 (§47.9.9) — `scrml build` ships STRIPPED browser JS, so the build mode scans the
+  // stripped bytes (the gate must read what ships).
+  build: { contentHashAssets: true, emitPerRoute: true, stripShippedJs: true },
   test: { testMode: true, emitMachineTests: true },
   library: { mode: "library" },
 };

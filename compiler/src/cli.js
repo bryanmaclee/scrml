@@ -64,6 +64,8 @@ Options (compile / dev):
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --debug-perf            Sub-stage timing for CG / RS / DG (PGO instrumentation)
   --watch, -w             Watch for changes and recompile (compile command only)
+  --minify                Strip comments + indentation from the browser JS (compile only;
+                          dev output always stays readable; build strips by default)
 
 Options (dev):
   --port <n>            HTTP port for dev server (default: 3000)
@@ -73,7 +75,10 @@ Options (dev):
 Options (build):
   --output <dir>        Output directory (default: dist/ next to input)
   --embed-runtime       Embed runtime inline instead of writing a separate file
-  --minify              Enable minification (Phase 2 — accepted but no-op in v1)
+  --keep-comments       Ship browser JS as emitted. By default build strips comments +
+                        indentation from the runtime, page bundles, chunks and workers
+                        (no renaming or rewriting; SPEC §47.9.9). Server code is never stripped.
+  --minify              Accepted; the strip is already the build default
 
 Options (serve):
   --port <n>            HTTP port for compiler server (default: 3100, or SCRML_PORT env)

@@ -155,7 +155,9 @@ function reprint(src: string, s: Scan, collapse: boolean): string {
       return sep + kept.join(sep) + (lineBreak || nextRaw === null ? "\n" : " ");
     }
     if (lineBreak) return "\n";
-    if (prevRaw !== null && nextRaw !== null && needsSpace(tail, prevLabel, nextRaw)) return " ";
+    // Look AHEAD past the next token too: tokens the source already wrote adjacent are copied
+    // adjacent, so `a < !--b` must see `!--` after the `<`, not just `!`.
+    if (prevRaw !== null && nextRaw !== null && needsSpace(tail, prevLabel, src.slice(to, to + 4))) return " ";
     return "";
   };
   let prevRaw: string | null = null;
@@ -207,21 +209,37 @@ export interface ShipStripResult {
   mode: "full" | "comments" | "none";
   /** Why a less-stripped form shipped (absent when mode is "full"). */
   reason?: string;
+  /**
+   * False when the INPUT parses in neither goal. Nothing is stripped then, and it is not a
+   * strip fallback to warn about: an unparseable artifact is the §2.2.1 emit gate's finding.
+   */
+  inputParses: boolean;
+}
+
+/**
+ * Test-only seams: transform a candidate between reprint and verification, to prove that a
+ * candidate that is NOT token-identical never ships (the fail-closed path).
+ */
+export interface ShipStripTestHooks {
+  corruptFull?: (text: string) => string;
+  corruptComments?: (text: string) => string;
 }
 
 /**
  * Strip comments + non-required whitespace from browser JS, proven token-identical.
  * Never throws; never returns text it did not verify.
  */
-export function shipStrip(src: string): ShipStripResult {
-  if (typeof src !== "string" || src.length === 0) return { text: src, mode: "none", reason: "empty input" };
+export function shipStrip(src: string, hooks: ShipStripTestHooks = {}): ShipStripResult {
+  if (typeof src !== "string" || src.length === 0) return { text: src, mode: "none", reason: "empty input", inputParses: true };
   const goals: Goal[] = ["script", "module"];
   const scans = new Map<Goal, Scan>();
   for (const g of goals) {
     const s = scan(src, g);
     if (s) scans.set(g, s);
   }
-  if (scans.size === 0) return { text: src, mode: "none", reason: "input does not parse as script or module" };
+  if (scans.size === 0) {
+    return { text: src, mode: "none", reason: "input does not parse as script or module", inputParses: false };
+  }
   const ref = scans.values().next().value as Scan;
 
   const verify = (candidate: string): string | null => {
@@ -235,15 +253,38 @@ export function shipStrip(src: string): ShipStripResult {
     return null;
   };
 
-  const full = reprint(src, ref, true);
+  let full = reprint(src, ref, true);
+  if (hooks.corruptFull) full = hooks.corruptFull(full);
   const fullErr = verify(full);
-  if (fullErr === null) return { text: full, mode: "full" };
+  if (fullErr === null) return { text: full, mode: "full", inputParses: true };
 
-  const commentsOnly = reprint(src, ref, false);
+  let commentsOnly = reprint(src, ref, false);
+  if (hooks.corruptComments) commentsOnly = hooks.corruptComments(commentsOnly);
   const comErr = verify(commentsOnly);
-  if (comErr === null) return { text: commentsOnly, mode: "comments", reason: fullErr };
+  if (comErr === null) return { text: commentsOnly, mode: "comments", reason: fullErr, inputParses: true };
 
-  return { text: src, mode: "none", reason: `${fullErr}; comment-only fallback: ${comErr}` };
+  return { text: src, mode: "none", reason: `${fullErr}; comment-only fallback: ${comErr}`, inputParses: true };
+}
+
+/**
+ * `W-CG-SHIP-STRIP-FALLBACK` (§34, §47.9.9) — the production strip could not prove its full
+ * output token-identical to the input, so the artifact shipped in a less-stripped PROVEN form
+ * (comment-only, or unchanged). The build is correct; it is bigger than it should be, and the
+ * reason names a strip defect to report.
+ */
+export function shipStripFallbackWarning(
+  artifact: string,
+  mode: ShipStripResult["mode"],
+  reason: string,
+): { code: string; message: string } {
+  const shipped = mode === "comments" ? "with its comments removed but its whitespace kept" : "unstripped";
+  return {
+    code: "W-CG-SHIP-STRIP-FALLBACK",
+    message:
+      `W-CG-SHIP-STRIP-FALLBACK: \`${artifact}\` shipped ${shipped} — the production strip could not ` +
+      `prove its output equivalent to the emitted JavaScript (${reason}). The artifact is correct ` +
+      `but larger than it should be. This is a compiler defect; please report it.`,
+  };
 }
 
 /** Test hook: the collapse-mode reprint WITHOUT verification (never ship this directly). */
@@ -264,6 +305,6 @@ export function shipText(
 ): string {
   if (!enabled || typeof src !== "string" || src.length === 0) return src;
   const r = shipStrip(src);
-  if (r.mode !== "full" && onFallback) onFallback(artifact, r.mode, r.reason ?? "");
+  if (r.mode !== "full" && r.inputParses && onFallback) onFallback(artifact, r.mode, r.reason ?? "");
   return r.text;
 }

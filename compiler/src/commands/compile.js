@@ -63,6 +63,11 @@ Options:
   --convert-legacy-css    Convert <style> blocks to #{...}
   --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output (§2.2.1)
   --no-validate-emit      Opt out of the emitted-JS parse gate (dev/CI escape hatch)
+  --minify                Strip comments + indentation from the browser JavaScript
+                          (runtime, page bundles, per-route chunks, workers), as
+                          \`scrml build\` does by default. Behaviour-neutral: no renaming,
+                          no rewriting, line structure kept (SPEC §47.9.9). Off by
+                          default: \`compile\` and \`dev\` output stays readable.
   --mode <mode>           Output mode: browser (default) or library
   --module-format=<fmt>   Client runtime module format: classic (default) or esm.
                           classic emits the shared runtime as a <script src> body
@@ -117,6 +122,8 @@ function parseArgs(args) {
   // builtin to 0 bytes (the dev-only convenience is removed from release
   // artefacts). Default false (development — log() active).
   let production = false;
+  // S459 (§47.9.9) — `--minify` strips comments + indentation from the shipped browser JS.
+  let minify = false;
   // Q-OPEN-5 — `--chunk-size-budget=<bytes>` CLI flag value. When
   // undefined, compileScrml / runCG / emitPerRouteChunks all fall back
   // to the route-splitter default (CHUNK_LARGE_SOFT_BUDGET_BYTES =
@@ -185,6 +192,10 @@ function parseArgs(args) {
     } else if (arg === "--production" || arg === "--prod") {
       // §20.6 (F4=A) — production strip for the log() builtin.
       production = true;
+    } else if (arg === "--minify") {
+      // S459 (§47.9.9) — strip comments + indentation from the shipped browser JS, as
+      // `scrml build` does by default. Off by default here: `compile` output stays readable.
+      minify = true;
     } else if (arg === "--emit-per-route") {
       // S91 A-4.1 — opt-in per-route artifact splitter (SPEC §40.9.7).
       // Default-off during A-4 wave development per OQ-A4-F; default-on
@@ -294,7 +305,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, validateEmit, production, moduleFormat };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, validateEmit, production, moduleFormat, minify };
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +467,7 @@ export function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, validateEmit, production, moduleFormat } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, validateEmit, production, moduleFormat, minify } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -519,6 +530,8 @@ function runOnce(opts, selfHostModules = null) {
       // `classic` is byte-identical to pre-arc output; `esm` emits the shared
       // runtime as an ES module.
       moduleFormat,
+      // S459 (§47.9.9) — `--minify`: ship stripped browser JS, as `scrml build` does.
+      stripShippedJs: minify === true,
     });
   } catch (err) {
     // ENOENT — file not found, not a compiler bug
