@@ -1107,8 +1107,15 @@ const SVG_CANONICAL_BY_LC = new Map(
  * @returns {boolean}
  */
 export function isCustomElementName(name) {
-  return typeof name === "string" && /^[a-z][a-z0-9._]*-[a-z0-9._-]*$/.test(name);
+  return typeof name === "string" && CUSTOM_ELEMENT_NAME_PATTERN.test(name);
 }
+
+/**
+ * The custom-element name grammar `isCustomElementName` tests. Exported so the
+ * runtime `meta.emit` gate (runtime-meta-emit-gate.js, §22.4.1, S458) is built from
+ * this same pattern rather than a hand copy.
+ */
+export const CUSTOM_ELEMENT_NAME_PATTERN = /^[a-z][a-z0-9._]*-[a-z0-9._-]*$/;
 
 /**
  * Complete valid-element predicate for the E-MARKUP-001 gate (SPEC §4.1):
@@ -1158,6 +1165,25 @@ export function isStandardMarkupElementName(name) {
   if (SVG_ELEMENTS.has(name)) return true;
   if (MATHML_ELEMENTS.has(name)) return true;
   return false;
+}
+
+/**
+ * Every standard markup element name — WHATWG HTML, SVG and MathML, the sets
+ * `isStandardMarkupElementName` reads — LOWERCASED, sorted. The runtime `meta.emit`
+ * gate (runtime-meta-emit-gate.js, §22.4.1, S458) is built from this list, so the
+ * element allow-list compile-time `emit()` output is judged against and the one runtime
+ * `meta.emit` output is judged against are the same list. (A parsed DOM reports an SVG
+ * element's local name in its canonical case — `foreignObject` — and the gate lowercases
+ * before it looks the name up.)
+ *
+ * @returns {string[]}
+ */
+export function standardMarkupElementNamesLowercase() {
+  const out = new Set();
+  for (const n of STANDARD_HTML_ELEMENTS) out.add(n);
+  for (const n of SVG_ELEMENTS_LC) out.add(n);
+  for (const n of MATHML_ELEMENTS_LC) out.add(n);
+  return [...out].sort();
 }
 
 /**

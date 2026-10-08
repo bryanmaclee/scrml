@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { standardMarkupElementNamesLowercase, CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
 
 /**
  * Phase A1c Step C7 — pull the validator predicate runtime catalog into
@@ -36,6 +37,18 @@ export const URL_GUARD_RUNTIME_SOURCE = readFileSync(
   join(__runtime_template_dir, "runtime-url-guard.js"),
   "utf8",
 ).replace(/^export /gm, "");
+
+/**
+ * SPEC §22.4.1 (S458 "a") — the runtime `meta.emit(html)` gate. `runtime-meta-emit-gate.js` is inlined
+ * verbatim (chunk 'metaemit', `export ` stripped), preceded by the two element tables it reads, built
+ * here from the compiler's ONE element list (html-elements.js) — the list compile-time `emit()` output
+ * is judged against — so the runtime gate never carries a hand-copied element list.
+ */
+export const META_EMIT_GATE_RUNTIME_SOURCE =
+  "const _SCRML_META_EMIT_KNOWN_ELEMENTS = new Set(" +
+  JSON.stringify(standardMarkupElementNamesLowercase()) + ");\n" +
+  "const _SCRML_CUSTOM_ELEMENT_NAME = " + String(CUSTOM_ELEMENT_NAME_PATTERN) + ";\n" +
+  readFileSync(join(__runtime_template_dir, "runtime-meta-emit-gate.js"), "utf8").replace(/^export /gm, "");
 
 /**
  * Stdlib shim loader. Reads a hand-written `compiler/runtime/stdlib/<name>.js`
@@ -3582,17 +3595,20 @@ var _scrml_modules = (typeof _scrml_modules !== "undefined")
  */
 function _scrml_meta_emit(scopeId, htmlString) {
   if (typeof document === "undefined") return;
-  const placeholder = document.querySelector('[data-scrml-meta="' + scopeId + '"]');
-  if (placeholder) {
-    placeholder.innerHTML = htmlString;
-  } else {
+  // §22.4.1 (S458 "a"): the string is parsed once, inertly, and judged by the 'metaemit' gate; a
+  // refused string writes nothing (the gate reports it). The nodes inserted are the nodes judged.
+  let placeholder = document.querySelector('[data-scrml-meta="' + scopeId + '"]');
+  const judged = _scrml_meta_emit_checked(scopeId, htmlString, placeholder ? placeholder.localName : "span");
+  if (judged === null) return;
+  if (!placeholder) {
     // Fallback: if no placeholder found (e.g. meta block not in markup context),
     // append a new element to the document body with the scopeId marker.
-    const el = document.createElement("span");
-    el.setAttribute("data-scrml-meta", scopeId);
-    el.innerHTML = htmlString;
-    document.body.appendChild(el);
+    placeholder = document.createElement("span");
+    placeholder.setAttribute("data-scrml-meta", scopeId);
+    document.body.appendChild(placeholder);
   }
+  while (placeholder.firstChild) placeholder.removeChild(placeholder.firstChild);
+  while (judged.firstChild) placeholder.appendChild(judged.firstChild);
 }
 
 // ---------------------------------------------------------------------------
@@ -6677,6 +6693,14 @@ function _scrml_log(side, loc) {
 // goes through it. Inlined verbatim from compiler/src/runtime-url-guard.js — the same reader the
 // compile-time rule uses. Activated by a POST-EMIT scan for "_scrml_safe_url(" (emit-client.ts).
 ${URL_GUARD_RUNTIME_SOURCE}
+// §22.4.1 runtime meta.emit gate (chunk: 'metaemit')
+//
+// _scrml_meta_emit_checked(scopeId, html, tag) — parses runtime meta.emit() output inertly (a document
+// with no browsing context),
+// judges the parsed tree (elements, event-handler attributes, srcdoc, URL schemes via the 'urlguard'
+// reader above) and returns the SAME nodes for insertion, or null + one §19.6.8 report. Inlined from
+// compiler/src/runtime-meta-emit-gate.js. Pulled with the 'meta' chunk (CHUNK_DEPENDENCIES).
+${META_EMIT_GATE_RUNTIME_SOURCE}
 ${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**
