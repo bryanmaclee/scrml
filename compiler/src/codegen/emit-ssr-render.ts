@@ -45,7 +45,7 @@ import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
 import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 import { nsId } from "./chunk-namespace.ts";
-import { quotedUrlAttrNeedsGuard, wrapUrlGuard } from "./url-attr-guard.ts";
+import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
 
 /**
@@ -186,7 +186,7 @@ function interpText(logicNode: any): string {
  * `string-literal` values are supported — a `variable-ref`/`expr` attr value is a
  * reactive binding the renderer cannot evaluate.
  */
-function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name = ""): string[] {
+function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name = "", attrs: any[] = []): string[] {
   if (valNode == null) return [JSON.stringify("")];
   if (typeof valNode !== "object" || valNode.kind !== "string-literal" || typeof valNode.value !== "string") {
     throw new SsrUnsupported("non-literal attribute value");
@@ -200,7 +200,8 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
   // (`href="${@.url}"`): the row data supplies the scheme, so the WHOLE value is built raw,
   // passed through the guard, and escaped once — the guard must read the URL the browser
   // will parse, not its escaped spelling.
-  if (name && quotedUrlAttrNeedsGuard(tag, name, raw)) {
+  // S457 — an SVG animation value (`to="${@.url}"` on `<set attributeName="href">`) likewise.
+  if (name && quotedUrlAttrNeedsGuard(tag, name, raw, attrs)) {
     const segs: string[] = [];
     let j = 0;
     while (j < raw.length) {
@@ -214,7 +215,7 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
       segs.push(`String(${resolveRowRead(inner, iterVarName)})`);
       j = close + 1;
     }
-    return [`_scrml_esc_attr(${wrapUrlGuard("null", name, segs.join(" + "))})`];
+    return [`_scrml_esc_attr(${wrapUrlGuard("null", name, segs.join(" + "), urlGuardTarget(tag, name, attrs))})`];
   }
   // Split `${...}` interpolations out of the literal.
   const parts: string[] = [];
@@ -260,7 +261,7 @@ function attrsToParts(attrs: any[], iterVarName: string | null, tag = ""): strin
       throw new SsrUnsupported(`unsupported attribute: ${name}`);
     }
     parts.push(JSON.stringify(` ${name}="`));
-    for (const p of attrValueParts(attr.value, iterVarName, tag, name)) parts.push(p);
+    for (const p of attrValueParts(attr.value, iterVarName, tag, name, attrs)) parts.push(p);
     parts.push(JSON.stringify(`"`));
   }
   return parts;

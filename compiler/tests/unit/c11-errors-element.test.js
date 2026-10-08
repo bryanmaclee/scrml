@@ -291,7 +291,7 @@ describe("C11 §C11.5 — Empty errors → no DOM", () => {
     const { registry } = runEmit([node]);
     const wiring = runEventWiring(registry);
     // Empty-array branch: !Array.isArray(src) || src.length === 0 → innerHTML = "".
-    expect(wiring).toMatch(/if\s*\(\s*!Array\.isArray\(src\)\s*\|\|\s*src\.length\s*===\s*0\s*\)\s*\{\s*el\.innerHTML\s*=\s*""/);
+    expect(wiring).toMatch(/if\s*\(\s*!Array\.isArray\(src\)\s*\|\|\s*src\.length\s*===\s*0\s*\)\s*\{\s*_scrml_el\.innerHTML\s*=\s*""/);
   });
 
   test("compound-rollup render path sets innerHTML='' when source is null/non-object", () => {
@@ -299,7 +299,7 @@ describe("C11 §C11.5 — Empty errors → no DOM", () => {
     const { registry } = runEmit([node]);
     const wiring = runEventWiring(registry);
     // Empty-map branch.
-    expect(wiring).toMatch(/if\s*\(\s*!src\s*\|\|\s*typeof\s+src\s*!==\s*"object"\s*\)\s*\{\s*el\.innerHTML\s*=\s*""/);
+    expect(wiring).toMatch(/if\s*\(\s*!src\s*\|\|\s*typeof\s+src\s*!==\s*"object"\s*\)\s*\{\s*_scrml_el\.innerHTML\s*=\s*""/);
   });
 
   test("compound-rollup skips fields whose error-array is empty", () => {

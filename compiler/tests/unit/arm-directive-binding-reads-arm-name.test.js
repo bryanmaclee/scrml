@@ -95,8 +95,8 @@ describe("arm-bound logic bindings — hoisted factory, bound per arm entry", ()
     // the effect's disposer is collected by the factory, not region-tracked globally
     expect(f.body).toContain("const _scrml_region_track = function(_scrml_e, _scrml_d) { _scrml_arm_ds.push(_scrml_d); return _scrml_d; };");
     const wire = fnSource(js, /_scrml_match_\w+_wire_Note/);
-    expect(wire.params).toBe("_root, note");
-    expect(wire.body).toContain(`{ const _d = ${f.name}(_root, note); if (_d) _disposers.push(_d); }`);
+    expect(wire.params).toBe("_scrml_arm_root, note");
+    expect(wire.body).toContain(`{ const _scrml_arm_d = ${f.name}(_scrml_arm_root, note); if (_scrml_arm_d) _scrml_arm_disposers.push(_scrml_arm_d); }`);
     expect(navRewire(js)).not.toContain("note");
   });
 

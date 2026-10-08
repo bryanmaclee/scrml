@@ -381,6 +381,32 @@ function isBareExprContinuation(raw: string, pos: number): boolean {
 }
 
 /**
+ * s457 (g-onclick-unquoted-call-chain-drops-callback-s457) — whether the char at
+ * `pos`, IMMEDIATELY after an unquoted event-handler value's identifier or call
+ * (no whitespace between), continues that expression as a postfix operation:
+ * a member access `.name`, an optional chain `?.`, an index `[…]`, or a further
+ * call `(…)`.
+ *
+ * SPEC §5.2.3: a bare handler value is exactly one expression ("calls,
+ * assignments, compound updates, method invocations"), and "a bare attribute
+ * value has no closing delimiter of its own; its extent is found by scanning
+ * forward, and an attribute boundary is whitespace at depth 0". So
+ * `onclick=Promise.resolve(5).then(function (v) { … })` is ONE expression whose
+ * whitespace all sits inside the parentheses. Before this the reader stopped at
+ * the first call's `)`: the handler ran `Promise.resolve(5)` alone and the rest
+ * (`.then(…)`) leaked into the element as junk attributes — silently, at exit 0.
+ */
+function isPostfixContinuation(raw: string, pos: number): boolean {
+  if (pos >= raw.length) return false;
+  const c = raw[pos];
+  const n = pos + 1 < raw.length ? raw[pos + 1] : "";
+  if (c === ".") return /[A-Za-z_$]/.test(n);
+  // `?.` but not the conditional `? .5`
+  if (c === "?" && n === ".") return !/[0-9]/.test(pos + 2 < raw.length ? raw[pos + 2] : "");
+  return c === "[" || c === "(";
+}
+
+/**
  * S188 follow-up — detect whether the chars at `pos` (immediately AFTER the
  * keyword `not` in an unquoted attribute value) begin a prefix-`not`-as-negation
  * operand, e.g. the `@y` in `if=not @y` or the `obj.ok` in `show=not obj.ok`.
@@ -942,6 +968,48 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             ident += raw[pos];
             advance();
           }
+          const isHandlerAttr = isEventHandlerAttrName(name);
+          // s457 (g-onclick-unquoted-call-chain-drops-callback-s457) — the rest
+          // of a bare handler value, read to its SPEC §5.2.3 boundary: whitespace
+          // at depth 0 outside strings, or the tag close (`>` / `/>`) at depth 0.
+          // Same depth/string tracking as the bare `not` and bare-assignment
+          // readers below. Called only when isPostfixContinuation() holds, i.e.
+          // the value continues past its first identifier or call without a
+          // break — the shape the readers above used to cut short.
+          const readBareValueTail = (): string => {
+            let tail = "";
+            let parenDepth = 0;
+            let braceDepth = 0;
+            let bracketDepth = 0;
+            let stringCh: string | null = null;
+            while (pos < raw.length) {
+              const c2 = raw[pos];
+              if (stringCh !== null) {
+                if (c2 === "\\" && pos + 1 < raw.length) { tail += c2 + raw[pos + 1]; advance(2); continue; }
+                if (c2 === stringCh) stringCh = null;
+                tail += c2; advance(); continue;
+              }
+              if (parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
+                if (c2 === "/" && raw[pos + 1] === ">") break;
+                if (c2 === ">") break;
+                if (/[ \t\r\n\f]/.test(c2)) break;
+              }
+              if (c2 === '"' || c2 === "'" || c2 === "`") { stringCh = c2; tail += c2; advance(); continue; }
+              if (c2 === "(") parenDepth++;
+              else if (c2 === ")") parenDepth--;
+              else if (c2 === "[") bracketDepth++;
+              else if (c2 === "]") bracketDepth--;
+              else if (c2 === "{") braceDepth++;
+              else if (c2 === "}") braceDepth--;
+              tail += c2; advance();
+            }
+            return tail;
+          };
+          // Set when a postfix continuation extended the value past its first
+          // identifier or call; the value is then ONE expression (ATTR_EXPR),
+          // or the left-hand side of a bare assignment that follows it.
+          let bareLhs: string | null = null;
+          let emitted = false;
           if (ch() === "(") {
             // Call form: collect everything up to matching `)`
             let args = "";
@@ -959,10 +1027,23 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             // committed here and the trailing operator run was silently dropped.
             if (isConditionAttrName(name) && attrConditionOperatorAhead(raw, pos) !== null) {
               pushConditionOpReject(name, `${ident}(${args})`, vs, vl, vc);
+              emitted = true;
+            } else if (isHandlerAttr && isPostfixContinuation(raw, pos)) {
+              // `onclick=fn(1).then(g)`, `onclick=fn()(2)`, `onclick=fn()?.x()`
+              bareLhs = `${ident}(${args})` + readBareValueTail();
             } else {
               tokens.push(makeToken("ATTR_CALL", JSON.stringify({ name: ident, args }), vs, absOff(), vl, vc));
+              emitted = true;
             }
-          } else if (ident === "not" && isPrefixNotOperandAhead(raw, pos)) {
+          } else if (isHandlerAttr && isPostfixContinuation(raw, pos)) {
+            // `onclick=handlers[0]()`, `onclick=@list[0].go()`, `onclick=obj?.go()`
+            bareLhs = ident + readBareValueTail();
+          }
+          if (emitted) {
+            // the call path above already pushed its token
+          } else if (bareLhs !== null && !isBareExprContinuation(raw, pos)) {
+            tokens.push(makeToken("ATTR_EXPR", bareLhs, vs, absOff(), vl, vc));
+          } else if (bareLhs === null && ident === "not" && isPrefixNotOperandAhead(raw, pos)) {
             // S188 follow-up (g-not-negation-enforce attr-bare hole) — bare
             // prefix-`not`-as-negation in an UNQUOTED attribute value, e.g.
             // `<p if=not @y>` / `<p show=not @y>`. SPEC §42.10 forbids prefix
@@ -1022,7 +1103,7 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
               expr += c2; advance();
             }
             tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
-          } else if (isEventHandlerAttrName(name) && isBareExprContinuation(raw, pos)) {
+          } else if (isHandlerAttr && isBareExprContinuation(raw, pos)) {
             // S97 — SPEC §5.2.3 bare-assignment event handler.
             //
             // L19 normatively recognizes three bare-form shapes:
@@ -1061,7 +1142,8 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             //   - Assignment / compound assignment: consume the op then read
             //     RHS until the next attribute boundary (whitespace at depth
             //     0 outside strings) or tag close (`>` / `/>`).
-            let expr = ident;
+            // s457 — the LHS may be a postfix chain (`onclick=@list[0] = 1`).
+            let expr = bareLhs ?? ident;
             // Skip whitespace between LHS ident and the operator.
             while (pos < raw.length && (raw[pos] === " " || raw[pos] === "\t")) {
               expr += raw[pos];

@@ -41,6 +41,7 @@ import { getElementAttrSchema } from "../attribute-registry.js";
 import { walkFileAst } from "./ast-walk.ts";
 import {
   classifyInterpolatedAttrSink,
+  executableDataWriteSink,
   interpolatedAttrSinkMessage,
   ATTR_INTERP_EXECUTABLE_CODE,
   attrSinkKey,
@@ -201,6 +202,21 @@ function walkEveryMarkupNode(
 }
 
 /**
+ * Is `name` on `node` an attribute of a rendered ELEMENT (so a data value reaches the DOM)? A
+ * component call (`<Frame srcdoc=@x/>`, uppercase tag) passes a prop, and a DECLARED prop merged
+ * onto an expanded component root (`_componentPropNames`) is consumed by the component — neither is
+ * an element attribute (§5.2 rule 3's element scope). What the expanded body writes onto an element
+ * is judged where it is written.
+ */
+function dataValueReachesElementAttr(node: MarkupNode, name: string): boolean {
+  const tag = String(node.tag ?? "");
+  if (/^[A-Z]/.test(tag)) return false;
+  const declared = (node as { _componentPropNames?: unknown })._componentPropNames;
+  if (Array.isArray(declared) && declared.includes(name)) return false;
+  return true;
+}
+
+/**
  * §5.2 executable-sink rule — every quoted attribute under `root` whose `${…}` lands in an executable sink.
  * `where` qualifies the message (e.g. "in component `Card`"); `spanOverride`, when given,
  * anchors every diagnostic there (a component body is re-parsed from text whose offsets are
@@ -222,12 +238,25 @@ export function collectExecutableSinkErrors(
     for (const attr of node.attrs ?? []) {
       if (!attr || typeof attr.name !== "string") continue;
       const v = attr.value as { kind?: string; value?: unknown } | undefined;
-      if (!v || v.kind !== "string-literal" || typeof v.value !== "string") continue;
+      if (!v) continue;
       // Already reported at the component DEFINITION (the def check stamps the attribute it
       // refused; prop substitution copies the attribute with `{...attr}`, so the stamp travels
       // with every expanded copy whose definition text was itself a sink).
       if ((attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef === true) continue;
-      const sink = classifyInterpolatedAttrSink(attr.name, v.value);
+      let sink: ReturnType<typeof classifyInterpolatedAttrSink> = null;
+      let form: "quoted" | "data" = "quoted";
+      if (v.kind === "string-literal" && typeof v.value === "string") {
+        // The element is passed so an SVG animation value (`<set attributeName="href" to="…">`) is
+        // judged as the URL it writes (S457).
+        sink = classifyInterpolatedAttrSink(attr.name, v.value, { tag: node.tag, attrs: node.attrs });
+      } else if (v.kind !== "absent" && dataValueReachesElementAttr(node, attr.name)) {
+        // S457 — a `srcdoc` whose value is data in any unquoted form (`srcdoc=${…}`, `=@cell`,
+        // `=fn()`, a row's `=it.html`, a prop reaching it). Event-handler names are not judged
+        // here: their unquoted forms are the sanctioned listener forms, and an emitter that would
+        // write one as text refuses at the write (`executableDataWriteSink`).
+        const s = executableDataWriteSink(attr.name);
+        if (s && s.kind === "srcdoc") { sink = s; form = "data"; }
+      }
       if (!sink) continue;
       if (opts.markReported) (attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef = true;
       const own: Span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -249,13 +278,14 @@ export function collectExecutableSinkErrors(
       reported.add(key);
       const err: AttrInterpError = {
         code: ATTR_INTERP_EXECUTABLE_CODE,
-        message: interpolatedAttrSinkMessage(sink, attr.name, node.tag ?? "", where),
+        message: interpolatedAttrSinkMessage(sink, attr.name, node.tag ?? "", where, form),
         span,
         severity: "error",
       };
       // The attribute's identity for cross-stage dedupe (api.js): the `<each>` row backstop
       // reports the same attribute at its own span.
       (err as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(own, attr.name, filePath);
+      (err as { attrSinkName?: string }).attrSinkName = attr.name.toLowerCase();
       errors.push(err);
     }
   });

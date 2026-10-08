@@ -14,12 +14,12 @@
  *
  * Fix (emit-event-wiring.ts Phase 1):
  *   - Added the missing else-branch: `varRefs.length === 0 && !exprUsesServerFn(...)`
- *   - Emits a one-shot `el.textContent = ${rewrittenExpr};` at DOMContentLoaded.
+ *   - Emits a one-shot `_scrml_el.textContent = ${rewrittenExpr};` at DOMContentLoaded.
  *   - No `_scrml_effect` subscription (nothing reactive to track).
  *   - Tilde-guard: skip the wiring when expression has `~` as a standalone token.
  *     Pre-existing tilde-rewriter (`emit-reactive-wiring.ts:372`) hoists tilde
  *     vars to file-scope but its context isn't threaded into the binding's
- *     stored expr — emitting `el.textContent = ~;` would produce invalid JS
+ *     stored expr — emitting `_scrml_el.textContent = ~;` would produce invalid JS
  *     (bitwise-NOT with no operand). Phase 2 will properly thread tilde context.
  *
  * Coverage:
@@ -259,15 +259,15 @@ describe("§5: regression — `${@var}` interpolation still uses synchronous rea
     expect(result.errors).toEqual([]);
   });
 
-  test("client.js still wires `_scrml_effect(function() { _scrml_render_value(el, _scrml_reactive_get(\"count\")) })`", () => {
+  test("client.js still wires `_scrml_effect(function() { _scrml_render_value(_scrml_el, _scrml_reactive_get(\"count\")) })`", () => {
     const result = compile(atVarFx);
     const js = result.outputs.get(atVarFx).clientJs;
     // markup-value-in-expression-2026-06-17: the interpolation display now
-    // routes through the node-aware `_scrml_render_value(el, expr)` helper
+    // routes through the node-aware `_scrml_render_value(_scrml_el, expr)` helper
     // (a markup-typed value renders as a node; a primitive keeps textContent)
     // instead of the bare `el.textContent = expr`. Same reactive `_scrml_effect`
     // subscription; the display call is the only shape change.
-    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_cs_reactive_get\("count"\)\)/);
+    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(_scrml_el,\s*_scrml_cs_reactive_get\("count"\)\)/);
   });
 });
 
@@ -286,7 +286,7 @@ describe("§6: regression — `${serverFn()}` still uses async IIFE wrapper", ()
     const js = result.outputs.get(serverFnFx).clientJs;
     // GITI-005 shape preserved
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{[^}]*await\s*\(_scrml_fetch_loadGreeting_\d+\(\)\)/);
-    expect(js).toContain("el.textContent = await");
+    expect(js).toContain("_scrml_el.textContent = await");
   });
 });
 
@@ -300,7 +300,7 @@ describe("§7: tilde guard — `${ initializer; ~ }` does NOT emit invalid bitwi
     expect(result.errors).toEqual([]);
   });
 
-  test("client.js contains NO `el.textContent = ~;` (invalid JS)", () => {
+  test("client.js contains NO `_scrml_el.textContent = ~;` (invalid JS)", () => {
     const result = compile(tildeFx);
     const js = result.outputs.get(tildeFx).clientJs;
     expect(js).not.toMatch(/el\.textContent\s*=\s*~\s*;/);
@@ -455,7 +455,7 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
   test("the render-effect inside DOMContentLoaded is STILL emitted (correct rendering preserved)", () => {
     const result = compile(pathReadFx);
     const js = result.outputs.get(pathReadFx).clientJs;
-    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_cs_reactive_get\("data"\)\.name\)/);
+    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(_scrml_el,\s*_scrml_cs_reactive_get\("data"\)\.name\)/);
   });
 
   test("emitted client.js parses as JS (node --check equivalent)", () => {

@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-srcdoc-data-forms-neg",
+  "description": "§5.2 rule 2, S457 bullet `srcdoc` in every form: the UNQUOTED expression form `srcdoc=${@doc}` puts data into an HTML document and is refused, exactly as the quoted `srcdoc=\"${…}\"` form is.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457): \"A `srcdoc` attribute (any case) on an element whose value is not a static string — the expression form `srcdoc=${…}`, a variable …, a call …, a value a component prop supplies — SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE)\". Before S457 it compiled clean and wrote `setAttribute(\"srcdoc\", String(value))` — the data ran as HTML (g-srcdoc-unquoted-expression-not-refused-s457).",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

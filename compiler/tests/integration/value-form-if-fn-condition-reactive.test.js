@@ -41,8 +41,8 @@ function compileApp(source, name = "app") {
 
 // The value-form-if for a `<p class="X">` interp lowers to a `_scrml_cf_<logic>`
 // render fn RE-RUN under `_scrml_effect` when reactive, or a one-shot
-// `_scrml_render_value(el, <ternary>)` with no effect when static.
-const reactiveWiring = (js) => /const _scrml_cf__scrml_logic_\d+ = function\(\) \{ return \([\s\S]*?\); \};[\s\S]*?_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_cf__scrml_logic_\d+\(\)\);/.test(js);
+// `_scrml_render_value(_scrml_el, <ternary>)` with no effect when static.
+const reactiveWiring = (js) => /const _scrml_cf__scrml_logic_\d+ = function\(\) \{ return \([\s\S]*?\); \};[\s\S]*?_scrml_effect\(function\(\) \{ _scrml_render_value\(_scrml_el, _scrml_cf__scrml_logic_\d+\(\)\);/.test(js);
 
 describe("value-form if with a fn-call condition is reactive (g-value-form-if-fn-condition-not-reactive)", () => {
   test("the gap repro: `${ if isOn() { … } else { … } }` (isOn reads @c) is wrapped in a reactive effect", () => {

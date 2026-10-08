@@ -1,0 +1,22 @@
+<program>
+<bad> = "javascript:alert(1)"
+<good> = "/ok"
+<list> = "/a;javascript:alert(2)"
+<w> = "javascript:7"
+<u> = "/start"
+<rows> = [{ id: 1, url: "JaVaScRiPt:alert(3)" }, { id: 2, url: "https://example.com/" }]
+<svg>
+  <a href="/x"><set id="e" attributeName="href" to=${@bad}/><text>e</text></a>
+  <a href="/x"><set id="q" attributeName="href" to="${@bad}"/><text>q</text></a>
+  <a href="/x"><set id="g" attributeName="href" to=${@good}/><text>g</text></a>
+  <a href="/x"><animate id="v" attributeName="xlink:href" values="${@list}"/><text>v</text></a>
+  <a href="/x"><set id="d" attributeName="href" to=${@u}/><text>d</text></a>
+  <rect width="1" height="1"><set id="n" attributeName="width" to=${@w}/></rect>
+</svg>
+<button id="flip" onclick=${@u = "vbscript:x"}>flip</button>
+<svg>
+  <each in=@rows key=@.id as row>
+    <a href="/x"><set class="row" id="row-${row.id}" attributeName="href" to=row.url/><text>r</text></a>
+  </each>
+</svg>
+</program>

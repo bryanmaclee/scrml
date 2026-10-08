@@ -112,7 +112,7 @@ describe("emit — the lifted each binds its alias exactly as its non-lifted twi
       expect(js).toContain("(c, _scrml_each_idx) => c.id,");
       expect(js).toContain("(c, _scrml_each_idx) => {");
       // Per-item effects re-resolve the LIVE row under the alias name.
-      expect(js).toMatch(/let c = _scrml_resolve_item\(_scrml_each_mount_\d+|let c = _scrml_resolve_item\(_mount/);
+      expect(js).toMatch(/let c = _scrml_resolve_item\(_scrml_each_mount_\d+|let c = _scrml_resolve_item\(_scrml_mount/);
       expect(js).toContain("String(c.n)");
     }
   });

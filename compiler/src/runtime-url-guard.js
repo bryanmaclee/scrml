@@ -199,18 +199,56 @@ export function _scrml_url_value_admitted(name, value) {
   return _scrml_one_url_admitted(lowerName, value);
 }
 
+// SVG animation elements (SMIL). Each one writes the value of ANOTHER attribute — the one its
+// `attributeName` names, on its target element (the parent, or the element its `href` points at) — over
+// time: `<a><set attributeName="href" to="javascript:…"/>…</a>` animates the link's href to that value,
+// and a click then runs it (Chromium-confirmed, S457). So a value attribute of one of these elements
+// whose `attributeName` names a URL-valued attribute IS a URL-attribute write (§5.2 rules 2 and 3).
+// Lowercased (`animateTransform` is matched as `animatetransform`).
+export const _SCRML_SVG_ANIMATION_ELEMENTS = new Set([
+  "set", "animate", "animatecolor", "animatemotion", "animatetransform",
+]);
+
+// The animation attributes that carry the value written to the animated attribute. `values` is a
+// `;`-separated list (SMIL splits it on `;`); `to`, `from` and `by` hold one value each.
+export const _SCRML_SVG_ANIMATION_VALUE_ATTRS = new Set(["to", "from", "by", "values"]);
+
+// Is the animation value `value` (already a string) admitted, when written to the animation attribute
+// `lowerName` (`to` / `from` / `by` / `values`) of an element animating the attribute `target`? `target`
+// is the lowercased URL-valued attribute `attributeName` names when the author wrote it literally, and ""
+// when it is computed at runtime — then each value is judged as a URL on an unknown attribute (a raster
+// `data:image` is not admitted, since the animated attribute may not be an image source).
+function _scrml_animation_value_admitted(lowerName, value, target) {
+  const entries = lowerName === "values" ? value.split(";") : [value];
+  for (let i = 0; i < entries.length; i++) {
+    if (!_scrml_url_value_admitted(target, entries[i])) return false;
+  }
+  return true;
+}
+
 // The runtime guard (SPEC §5.2 rule 3). The compiler routes every URL-attribute write it cannot prove
 // safe through this call: `el.setAttribute("href", _scrml_safe_url(el, "href", value))`. Returns the
 // value as `setAttribute` would write it (`String(value)`) when its scheme is admitted, and otherwise
 // `"about:blank"` plus one report to scrml's logging surface (§19.6.8) naming the attribute and the
 // element — never the value, which may carry data the page should not echo to a log. `el` may be null
 // (the server's first-paint row renderer has no element).
-export function _scrml_safe_url(el, name, value) {
+//
+// `target` is passed only for an SVG animation value attribute (`to` / `from` / `by` / `values` on
+// `<set>`, `<animate>`, …): it names the URL-valued attribute being animated ("" when `attributeName` is
+// computed at runtime), and every `;`-separated entry of `values` is judged.
+export function _scrml_safe_url(el, name, value, target) {
   const text = String(value);
-  if (_scrml_url_value_admitted(name, text)) return text;
+  const animated = typeof target === "string";
+  const admitted = animated
+    ? _scrml_animation_value_admitted(String(name).toLowerCase(), text, target)
+    : _scrml_url_value_admitted(name, text);
+  if (admitted) return text;
   const tag = el && typeof el.tagName === "string" ? "<" + el.tagName.toLowerCase() + "> " : "";
+  const what = animated
+    ? String(name) + "= value animating " + (target ? target + "=" : "a URL attribute named at runtime")
+    : String(name) + "=";
   const err = new Error(
-    "blocked a " + tag + String(name) + "= URL whose scheme is not admitted (SPEC §5.2): only http:, " +
+    "blocked a " + tag + what + " URL whose scheme is not admitted (SPEC §5.2): only http:, " +
     "https:, ftp:, mailto:, tel:, sms:, a relative URL, or a raster data:image on an image source may be " +
     "written from data. The attribute was set to about:blank.",
   );
