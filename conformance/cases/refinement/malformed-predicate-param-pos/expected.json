@@ -1,0 +1,12 @@
+{
+  "id": "refinement-malformed-predicate-param-pos",
+  "description": "S458 F1: a predicate the §53.2.1 grammar cannot read whole is refused. `number(>0 foo)` used to keep its first primary (`>0`) and silently drop `foo`; a predicate unreadable as a whole used to fall through to an UNTYPED annotation (no check, no diagnostic). It is now E-CONTRACT-002 at the parameter.",
+  "language-version": "1.0",
+  "spec": "§53.2.1",
+  "rationale": "§53.2.1 defines the predicate grammar; §53.3.1 evaluates the predicate at every binding site, which requires it to be read. An annotation the compiler cannot read cannot be enforced, so it is refused rather than silently unenforced (E-CONTRACT-002 is already the refinement family's unreadable-refinement code for a malformed enum subset, §53.15.1).",
+  "expect": {
+    "codes": ["E-CONTRACT-002"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-002": "error" }
+  }
+}

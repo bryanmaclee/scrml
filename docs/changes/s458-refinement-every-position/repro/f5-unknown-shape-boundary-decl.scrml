@@ -1,0 +1,9 @@
+<program>
+${
+  function pick(v) {
+    let e: string(ssn) = v
+    return e
+  }
+}
+<p>${pick("a")}</p>
+</program>

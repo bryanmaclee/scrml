@@ -1,0 +1,11 @@
+<program>
+${
+  type Link:struct = { u: string(url) }
+  function mk(v) {
+    let l: Link = { u: "https://example.com" }
+    l.u = v
+    return l
+  }
+}
+<p>${mk("https://example.com").u}</p>
+</program>

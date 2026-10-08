@@ -321,7 +321,13 @@ describe("§3 scrml dev run from the project root", () => {
     expect(again.stdout.toString() + again.stderr.toString()).not.toContain("E-PA-004");
   }, 90_000);
 
-  test("REFERENCING program, missing database: loads fine, first use is a loud 500 naming the path, nothing created", async () => {
+  // s457 — `scrml dev` now runs the §14.8.10 undeclared-tenant-table gate, the one `_server.js`
+  // runs. A missing referenced database "cannot be inspected", and §14.8.10 item 3 says a server
+  // SHALL NOT serve while one cannot: every request answers 503 (as a built server has since
+  // S456), where dev used to serve the page and 500 at the first use. The S445 contract this test
+  // pins is unchanged: the module LOADS, the server log names the path and the declaring file,
+  // the client answer names nothing, and no database file is created.
+  test("REFERENCING program, missing database: loads fine, refused (503) with the path in the log, nothing created", async () => {
     const root = join(_tmp.root, "missing");
     mkdirSync(join(root, "src"), { recursive: true });
     writeFileSync(join(root, "src", "app.scrml"), REFERENCE_APP);
@@ -343,14 +349,14 @@ describe("§3 scrml dev run from the project root", () => {
     } finally {
       await stopDev(dev);
     }
-    expect(rpc.status).toBe(500);
-    // S447 round 7 (§14.8.9 error egress): the CLIENT gets the fixed, value-free 500 —
-    // a server filesystem path is server data (cf. §47 "the health body SHALL NOT name
-    // the paths"), exactly as the prod entry answers. "Fails loudly" is the server log,
-    // asserted below.
-    expect(JSON.parse(rpc.body)).toEqual({ error: "Internal server error" });
+    expect(rpc.status).toBe(503);
+    // The CLIENT gets the fixed, value-free refusal — a server filesystem path is server
+    // data (cf. §47 "the health body SHALL NOT name the paths"), exactly as the prod entry
+    // answers. "Fails loudly" is the server log, asserted below.
+    expect(rpc.body).toBe("Service Unavailable");
     expect(rpc.body).not.toContain("ref.db");
     expect(dbFilesUnder(root)).toEqual([]);
+    expect(log).toContain("E-DEPLOY-DB-TENANT-UNDECLARED: database ./ref.db could not be checked");
     expect(log).toContain("database file not found: " + join(root, "src", "ref.db"));
     expect(log).toContain('declared as "./ref.db" in app.scrml');
     // The next compile is unaffected — no stub appeared to poison the schema read.

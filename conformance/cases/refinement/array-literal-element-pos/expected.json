@@ -1,0 +1,12 @@
+{
+  "id": "refinement-array-literal-element-pos",
+  "description": "S458: an array of a refinement (`string(url)[]`) is judged element by element. A literal initializer is judged statically: the second element `javascript:alert(1)` fails `url`, so E-CONTRACT-001. (On base the `[]` was read as an empty label and the whole array was judged as one string; during S458 slice 1 the array was briefly unchecked.)",
+  "language-version": "1.0",
+  "spec": "§53.4.2",
+  "rationale": "§53.3.1: the predicate is evaluated over the incoming value at every binding site — for an array of `string(url)`, every element is such a value; §53.4.2 rule 2 + §53.11: a string literal that fails a named shape is E-CONTRACT-001.",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": ["E-CONTRACT-002"],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

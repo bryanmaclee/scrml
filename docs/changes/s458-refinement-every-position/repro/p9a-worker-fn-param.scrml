@@ -1,0 +1,14 @@
+<program>
+<out> = ""
+<program name="wk">
+  ${
+    function check(u: string(url)) {
+      return u
+    }
+    when message(data) {
+      send(check(data))
+    }
+  }
+</program>
+<p>${@out}</p>
+</program>

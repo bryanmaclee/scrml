@@ -1,0 +1,11 @@
+{
+  "id": "refinement-range-form-neg",
+  "description": "S458: the §53.2.1 range form `number(0 < value < 10)` with an in-range literal (5) is statically proven — no diagnostic.",
+  "language-version": "1.0",
+  "spec": "§53.2.1",
+  "rationale": "§53.4.2 rule 1: a numeric literal that satisfies the predicate is statically proven.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"]
+  }
+}

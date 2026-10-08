@@ -1,0 +1,14 @@
+{
+  "id": "refinement-string-operand-reject-rt",
+  "description": "S458: a string-literal operand in a refinement predicate is compared as that literal. confirm(answer: string(eq(\"yes\"))) is called with \"yes\" (passes; @shown becomes \"yes\") and then \"no\" (fails: the entry check throws E-CONTRACT-001-RT and @shown keeps \"yes\"). A string operand used to be emitted as bare text — a ReferenceError at the check.",
+  "language-version": "1.0",
+  "spec": "§53.2.1",
+  "rationale": "§53.2.1 `value-literal = numeric-literal | string-literal`; §55.1 `eq(expr)`; §53.6.1 shared-core vocabulary in refinement-type position.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#yes" }, { "click": "#no" }],
+    "state": { "shown": "yes" },
+    "domAnchored": [{ "selector": "#out", "text": "yes" }]
+  }
+}
