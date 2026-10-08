@@ -1,0 +1,20 @@
+{
+  "id": "refinement-shared-collection-delta-reject-rt",
+  "description": "S459 LOW-4 + MED-1: a write into a refined collection is judged by what it changes, against EVERY position that holds the changed object. (1) `@x = @y` then `@y.push(3)` — the array is held by @y (`number(>5)[]`) and @x (`number(>0)[]`); 3 is refused by @y's type and the array is left unchanged (before the fix the owner map named only @x, the push was admitted, and the trailing setter's refusal never undid it: @y = [6, 7, 3]). (2) the same push through @x. (3) a copy-on-write field write `@rows[1].n = -5` and (4) a row write `@rows[0] = { …, n: -5 }` are judged at the path. (5) an array held at two positions of one struct value (`@p.b = @p.a`) refuses a push that one position's type refuses. (6) a push into a nested array `@mm[1].push(-5)`. Every refused write throws E-CONTRACT-001-RT and every cell keeps its prior value.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"the compiler-generated check SHALL throw a runtime error with code E-CONTRACT-001-RT before the assignment is applied. The variable retains its prior value.\" §53.1: the check is \"an O(1) boolean expression\" over the incoming value — the element or field written, not the whole collection.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#shared" }, { "click": "#sharedx" }, { "click": "#field" }, { "click": "#row" }, { "click": "#two" }, { "click": "#nested" }],
+    "state": {
+      "y": [6, 7],
+      "x": [6, 7],
+      "rows": [{ "u": "a", "n": 1 }, { "u": "b", "n": 2 }],
+      "p": { "a": [6, 7], "b": [6, 7] },
+      "mm": [[1], [2]]
+    },
+    "domAnchored": [{ "selector": "#out", "text": "2 2 2 2" }]
+  }
+}

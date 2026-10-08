@@ -12,7 +12,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHead
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeTypeExpr, describeJudgeType } from "./emit-predicates.ts";
+import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -2650,7 +2650,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const _ref = refinementOf((node as any).predicateCheck);
         if (!_ref) return "";
         const _key = opts.encodingCtx ? opts.encodingCtx.encode(_qualifiedName) : _qualifiedName;
-        return `_scrml_refine_register(${JSON.stringify(_key)}, (v) => ${judgeTypeExpr(_ref.judge, "v")}, ` +
+        return `_scrml_refine_register(${JSON.stringify(_key)}, ${judgeDescriptorExpr(_ref.judge)}, ` +
           `${JSON.stringify(describeJudgeType(_ref.judge) + (_ref.label ? ` [${_ref.label}]` : ""))}, ${JSON.stringify(_qualifiedName)});`;
       })();
       const _appendSidecar = (mainStmt: string): string => {

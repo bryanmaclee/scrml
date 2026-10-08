@@ -6611,9 +6611,26 @@ function _scrml_log(side, loc) {
 // (_scrml_reactive_set, the engine's direct writes, an in-place mutation through
 // the deep-reactive proxy) is judged first. A refused write throws
 // E-CONTRACT-001-RT and the cell keeps its prior value (§53.3.3).
+//
+// The judge is a DESCRIPTOR of the cell's declared type: { ok, el?, fields? }.
+// ok judges a whole value at that position; el (an array) describes one element;
+// fields() (a struct) returns { field: descriptor } for the refined fields. A
+// change is judged by what it changes — the elements a push inserts, the element
+// or field a write replaces (in place, or by a copy-on-write path update) —
+// against the descriptor of the position it changes, not by re-judging the whole
+// collection (§53.1: an O(1) check per value written). A position with no el /
+// fields (a union, an enum) is not described further: a change inside it
+// re-judges the whole cell.
 const _scrml_refine_judges = Object.create(null);
-// A refined cell's object / array (raw, unproxied) -> the cell key it belongs to,
-// so an in-place mutation through the proxy can re-judge the whole cell value.
+// Each refined cell's EPOCH: bumped whenever a whole new value is committed to it.
+const _scrml_refine_epochs = Object.create(null);
+let _scrml_refine_epoch_next = 0;
+// raw (unproxied) object -> [{ key, d, epoch }]: every refined cell that holds the
+// object, the descriptor of the position it is held at (null = not described:
+// re-judge the whole cell), and the cell's epoch when it was recorded. An entry
+// from an older epoch is stale (the cell has since been given a whole new value)
+// and is skipped. An object held by two cells (@x = @y), or at two positions of
+// one value, is judged at every one.
 const _scrml_refine_owner = new WeakMap();
 // The setter, wrapped: a refined cell's value is judged BEFORE anything is
 // committed (before a debounce / throttle rule, before the store write). This
@@ -6624,8 +6641,8 @@ _scrml_reactive_set = function (name, value) {
   if (_scrml_refine_judges[name] !== undefined) value = _scrml_refine_check(name, value);
   return _scrml_reactive_set_unjudged(name, value);
 };
-function _scrml_refine_register(name, ok, type, cell) {
-  _scrml_refine_judges[name] = { ok: ok, type: type, cell: cell };
+function _scrml_refine_register(name, d, type, cell) {
+  _scrml_refine_judges[name] = { key: name, d: d, type: type, cell: cell };
 }
 function _scrml_refine_raw(v) {
   if (v === null || typeof v !== "object" || typeof _scrml_proxy_targets === "undefined") return v;
@@ -6640,55 +6657,192 @@ function _scrml_refine_error(j, v) {
     "  Value: " + shown + "\\n" +
     "  Location: a write to @" + j.cell);
 }
+// Record that cell \`key\` holds raw object \`raw\` at a position described by \`d\`.
+function _scrml_refine_adopt(raw, key, d) {
+  const epoch = _scrml_refine_epochs[key];
+  let es = _scrml_refine_owner.get(raw);
+  if (es === undefined) _scrml_refine_owner.set(raw, es = []);
+  for (const e of es) if (e.key === key && e.d === d) { e.epoch = epoch; return; }
+  es.push({ key: key, d: d, epoch: epoch });
+}
+// Does cell \`key\` currently hold raw object \`raw\` at a position described by \`d\`?
+function _scrml_refine_holds(raw, key, d) {
+  const es = _scrml_refine_owner.get(raw);
+  if (es === undefined) return false;
+  for (const e of es) if (e.key === key && e.d === d && e.epoch === _scrml_refine_epochs[key]) return true;
+  return false;
+}
+// Record every object inside raw value \`v\` written into cell \`key\` at position \`d\`
+// (an object reached twice, at two positions, is recorded at both).
+function _scrml_refine_adopt_all(v, key, d, seen) {
+  if (v === null || typeof v !== "object") return;
+  let ds = seen.get(v);
+  if (ds === undefined) seen.set(v, ds = []);
+  else if (ds.indexOf(d) !== -1) return;
+  ds.push(d);
+  _scrml_refine_adopt(v, key, d);
+  if (Array.isArray(v)) {
+    const cd = _scrml_refine_child(d, v, "0");
+    for (const x of v) _scrml_refine_adopt_all(_scrml_refine_raw(x), key, cd, seen);
+    return;
+  }
+  for (const k of Object.keys(v)) {
+    const cd = _scrml_refine_child(d, v, k);
+    if (cd !== undefined) _scrml_refine_adopt_all(_scrml_refine_raw(v[k]), key, cd, seen);
+  }
+}
+// The { field: descriptor } map of a struct descriptor (built once per struct type), or null.
+const _scrml_refine_fieldmaps = new WeakMap();
+function _scrml_refine_fields(d) {
+  if (typeof d.fields !== "function") return null;
+  let fm = _scrml_refine_fieldmaps.get(d.fields);
+  if (fm === undefined) _scrml_refine_fieldmaps.set(d.fields, fm = d.fields());
+  return fm;
+}
+// The descriptor of raw[prop] given raw's descriptor d: null = not described (the
+// whole cell decides), undefined = an unrefined field (nothing to judge).
+function _scrml_refine_child(d, raw, prop) {
+  if (d === null) return null;
+  if (Array.isArray(raw)) return d.el !== undefined ? d.el : null;
+  const fm = _scrml_refine_fields(d);
+  if (fm === null) return null;
+  return Object.prototype.hasOwnProperty.call(fm, prop) ? fm[prop] : undefined;
+}
+// _scrml_deep_set, wrapped: the last copy-on-write path update (\`@a[i].f = v\`
+// lowers to a set of _scrml_deep_set(@a, [i, "f"], v)) is remembered, so the set
+// that commits it judges only the value written at the path.
+let _scrml_refine_last_path = null;
+if (typeof _scrml_deep_set === "function") {
+  const _scrml_deep_set_unjudged = _scrml_deep_set;
+  _scrml_deep_set = function (obj, path, value) {
+    // a refined cell's value is copied from its raw object (not read element by element through its proxies)
+    const raw = _scrml_refine_raw(obj);
+    const result = _scrml_deep_set_unjudged(_scrml_refine_owner.has(raw) ? raw : obj, path, value);
+    _scrml_refine_last_path = { result: result, from: obj, path: path };
+    return result;
+  };
+}
+// \`raw\` is _scrml_deep_set(cur, path, value) and \`cur\` is cell \`j\`'s current
+// value: every container on the path is a fresh copy and everything off it is
+// unchanged, so only the value written at the end of the path is judged.
+// true = admitted (the copies on the path are recorded), { bad: v } = refused,
+// null = a position on the path is not described (judge the whole value).
+function _scrml_refine_path(j, raw, path) {
+  const held = [raw, j.d]; // the copies on the path, each followed by its descriptor
+  let d = j.d, c = raw;
+  for (let i = 0; i < path.length; i++) {
+    const cd = _scrml_refine_child(d, c, path[i]);
+    if (cd === null) return null;
+    if (cd === undefined) break; // an unrefined field: nothing below it is judged
+    const next = _scrml_refine_raw(c[path[i]]);
+    if (i === path.length - 1) {
+      if (!cd.ok(next)) return { bad: next };
+      _scrml_refine_adopt_all(next, j.key, cd, new Map());
+      break;
+    }
+    if (next === null || typeof next !== "object") return null;
+    held.push(next, cd);
+    d = cd;
+    c = next;
+  }
+  for (let i = 0; i < held.length; i += 2) _scrml_refine_adopt(held[i], j.key, held[i + 1]);
+  return true;
+}
 // Judge \`value\` before it is committed to refined cell \`name\` (throws; nothing is written).
 function _scrml_refine_check(name, value) {
   const j = _scrml_refine_judges[name];
   const raw = _scrml_refine_raw(value);
-  if (!j.ok(raw)) throw _scrml_refine_error(j, raw);
+  const last = _scrml_refine_last_path;
+  _scrml_refine_last_path = null;
   if (raw !== null && typeof raw === "object") {
-    _scrml_refine_owner.set(raw, name);
-    // held behind the proxy, so a later in-place mutation is re-judged too
-    if (typeof _scrml_deep_reactive === "function") return _scrml_deep_reactive(value);
+    const cur = _scrml_refine_raw(_scrml_state[name]);
+    // The cell's own value written back to it through its judging proxy (the set
+    // that follows an in-place push): every change made through that proxy was
+    // judged when it was made, so the whole value is not judged again.
+    if (_scrml_refine_inner.has(value) && raw === cur && _scrml_refine_holds(raw, name, j.d)) return value;
+    // A copy-on-write path update of the cell's current (judged) value: judge the path.
+    if (last !== null && last.result === raw && last.path.length > 0 && _scrml_refine_raw(last.from) === cur &&
+        _scrml_refine_holds(cur, name, j.d)) {
+      const r = _scrml_refine_path(j, raw, last.path);
+      if (r !== null && r !== true) throw _scrml_refine_error(j, r.bad);
+      if (r === true) return typeof _scrml_deep_reactive === "function" ? _scrml_deep_reactive(value) : value;
+    }
+    if (!j.d.ok(raw)) throw _scrml_refine_error(j, raw);
+    _scrml_refine_epochs[name] = ++_scrml_refine_epoch_next; // a whole new value
+    _scrml_refine_adopt_all(raw, name, j.d, new Map());
+    // held behind the proxy, so a later in-place mutation is judged too
+    return typeof _scrml_deep_reactive === "function" ? _scrml_deep_reactive(value) : value;
   }
+  if (!j.d.ok(raw)) throw _scrml_refine_error(j, raw);
+  _scrml_refine_epochs[name] = ++_scrml_refine_epoch_next;
   return value;
 }
-// After an in-place mutation of an object owned by refined cell \`owner\`: re-judge
-// the cell's whole value; on refusal undo the mutation, then throw.
-function _scrml_refine_recheck(owner, undo) {
-  const j = _scrml_refine_judges[owner];
-  if (j === undefined) return;
-  const v = _scrml_refine_raw(_scrml_state[owner]);
-  if (!j.ok(v)) {
-    undo();
-    throw _scrml_refine_error(j, v);
+// One in-place change to raw object \`raw\`, judged for every cell that holds it.
+// delta(d) judges the change alone against the descriptor d of raw's position:
+// true = admitted, { bad: v } = refused (v is the value refused), null = the
+// change cannot be judged alone -> it is applied, the cell's whole value is
+// judged, and it is undone (refused -> thrown). Nothing is triggered here; the
+// caller performs an admitted change through the deep-reactive proxy. Admitted:
+// the values \`written\` (raw) at \`prop\` are recorded for every holder.
+function _scrml_refine_change(raw, delta, apply, restore, written, prop) {
+  const es = _scrml_refine_owner.get(raw);
+  if (es === undefined) return;
+  const live = [];
+  let whole = null;
+  for (const e of es) {
+    const j = _scrml_refine_judges[e.key];
+    if (j === undefined || e.epoch !== _scrml_refine_epochs[e.key]) continue; // stale
+    live.push(e);
+    const r = e.d === null ? null : delta(e.d);
+    if (r === null) { if (whole === null) whole = []; if (whole.indexOf(j) === -1) whole.push(j); }
+    else if (r !== true) throw _scrml_refine_error(j, r.bad);
   }
+  if (whole !== null) {
+    apply();
+    for (const j of whole) {
+      const v = _scrml_refine_raw(_scrml_state[j.key]);
+      if (!j.d.ok(v)) {
+        restore();
+        throw _scrml_refine_error(j, v);
+      }
+    }
+    restore();
+  }
+  for (const x of written) {
+    if (x === null || typeof x !== "object") continue;
+    for (const e of live) {
+      const cd = _scrml_refine_child(e.d, raw, prop);
+      if (cd !== undefined) _scrml_refine_adopt_all(x, e.key, cd, new Map());
+    }
+  }
+}
+// An array index ("0", "1", …) — the only property an element judge covers.
+function _scrml_refine_is_index(prop) {
+  return typeof prop === "string" && /^(0|[1-9][0-9]*)$/.test(prop) && Number(prop) < 4294967295;
 }
 // In-place mutation. A refined cell's object / array is held behind a second,
 // judging proxy layered over its deep-reactive proxy (built here, so a page
-// with no refined cell pays nothing). A write / delete / array mutation is first
-// tried on the raw object and the whole cell value re-judged: refused -> undone
-// and thrown (nothing was triggered); admitted -> performed through the
-// deep-reactive proxy, which triggers as usual. An object read through it
-// belongs to the same cell and is held the same way.
+// with no refined cell pays nothing). A write / delete / array mutation is
+// judged first (_scrml_refine_change): refused -> thrown (nothing was changed or
+// triggered); admitted -> performed through the deep-reactive proxy, which
+// triggers as usual.
 const _scrml_refine_inner = new WeakMap(); // judging proxy -> deep-reactive proxy
 const _scrml_refine_proxies = new WeakMap(); // raw object -> judging proxy
-function _scrml_refine_trial(owner, apply, restore) {
-  apply();
-  _scrml_refine_recheck(owner, restore);
-  restore();
-}
 const _scrml_refine_handler = {
   get(inner, prop) {
     const raw = _scrml_proxy_targets.get(inner);
-    const owner = _scrml_refine_owner.get(raw);
-    const v = raw[prop];
-    if (v !== null && typeof v === "object") _scrml_refine_owner.set(_scrml_refine_raw(v), owner);
     const r = Reflect.get(inner, prop, inner);
     if (typeof r === "function" && Array.isArray(raw) && _scrml_array_mutators.has(prop)) {
       return function (...args) {
-        const before = raw.slice();
-        _scrml_refine_trial(owner, function () { Array.prototype[prop].apply(raw, args); },
-          function () { raw.length = 0; Array.prototype.push.apply(raw, before); });
+        // the values the call inserts; fill's range is not worked out (judged whole)
+        const inserted = (prop === "push" || prop === "unshift" ? args : prop === "splice" ? args.slice(2) : prop === "fill" ? args.slice(0, 1) : []).map(_scrml_refine_raw);
+        let before;
+        _scrml_refine_change(raw, function (d) {
+          if (d.el === undefined || prop === "fill") return null;
+          for (const x of inserted) if (!d.el.ok(x)) return { bad: x };
+          return true;
+        }, function () { before = raw.slice(); Array.prototype[prop].apply(raw, args); },
+          function () { raw.length = 0; Array.prototype.push.apply(raw, before); }, inserted, "0");
         return r.apply(inner, args);
       };
     }
@@ -6696,20 +6850,39 @@ const _scrml_refine_handler = {
   },
   set(inner, prop, value) {
     const raw = _scrml_proxy_targets.get(inner);
+    const nv = _scrml_refine_raw(value);
     const had = Object.prototype.hasOwnProperty.call(raw, prop);
     const old = raw[prop];
     const len = Array.isArray(raw) ? raw.length : -1;
-    _scrml_refine_trial(_scrml_refine_owner.get(raw), function () { raw[prop] = _scrml_refine_raw(value); }, function () {
+    _scrml_refine_change(raw, function (d) {
+      if (Array.isArray(raw)) {
+        if (d.el === undefined) return null;
+        // shortening drops elements and lengthening leaves holes (which the judge skips): nothing is written
+        if (prop === "length") return true;
+        if (!_scrml_refine_is_index(prop)) return null;
+        return d.el.ok(nv) ? true : { bad: nv };
+      }
+      const fm = _scrml_refine_fields(d);
+      if (fm === null) return null;
+      if (!Object.prototype.hasOwnProperty.call(fm, prop)) return true; // an unrefined field
+      return fm[prop].ok(nv) ? true : { bad: nv };
+    }, function () { raw[prop] = nv; }, function () {
       if (had) raw[prop] = old; else delete raw[prop];
       if (len >= 0) raw.length = len;
-    });
+    }, [nv], prop);
     return Reflect.set(inner, prop, value, inner);
   },
   deleteProperty(inner, prop) {
     const raw = _scrml_proxy_targets.get(inner);
     if (Object.prototype.hasOwnProperty.call(raw, prop)) {
       const old = raw[prop];
-      _scrml_refine_trial(_scrml_refine_owner.get(raw), function () { delete raw[prop]; }, function () { raw[prop] = old; });
+      _scrml_refine_change(raw, function (d) {
+        if (Array.isArray(raw)) return d.el !== undefined ? true : null; // a hole: nothing is written
+        const fm = _scrml_refine_fields(d);
+        if (fm === null) return null;
+        if (!Object.prototype.hasOwnProperty.call(fm, prop)) return true;
+        return fm[prop].ok(undefined) ? true : { bad: undefined };
+      }, function () { delete raw[prop]; }, function () { raw[prop] = old; }, [], prop);
     }
     return Reflect.deleteProperty(inner, prop);
   },
@@ -6718,6 +6891,8 @@ if (typeof _scrml_deep_reactive === "function") {
   const _scrml_deep_reactive_unjudged = _scrml_deep_reactive;
   _scrml_deep_reactive = function (value) {
     if (_scrml_refine_inner.has(value)) return value;
+    const held = value !== null && typeof value === "object" ? _scrml_refine_proxies.get(value) : undefined;
+    if (held !== undefined) return held; // a raw object already held behind its judging proxy
     const inner = _scrml_deep_reactive_unjudged(value);
     const raw = inner !== null && typeof inner === "object" ? _scrml_proxy_targets.get(inner) : undefined;
     if (raw === undefined || !_scrml_refine_owner.has(raw)) return inner;

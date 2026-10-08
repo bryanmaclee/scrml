@@ -98,7 +98,12 @@ describe("F3 — hoisted struct judges", () => {
     const b = compileClient(stress(6, 10), "k6");
     expect(a.errors).toEqual([]);
     expect(b.errors).toEqual([]);
-    expect(Math.abs(b.js.length - a.js.length) / a.js.length).toBeLessThan(0.05);
+    // S459 MED-1: the refined cell's descriptor lists each struct-typed field once
+    // (`cN: { ok: _scrml_judge_S…, fields: _scrml_judge_parts_S… }`), so k=3 -> k=6
+    // adds 3 levels x 3 fields of ~100 B — linear in k. A k^depth copy would be x6.
+    expect(Math.abs(b.js.length - a.js.length) / a.js.length).toBeLessThan(0.08);
+    const c = compileClient(stress(12, 10), "k12");
+    expect((c.js.length - b.js.length) / (b.js.length - a.js.length)).toBeLessThan(2.5); // 6 more fields per level vs 3: ~2x
     for (const lvl of [0, 1, 2, 3]) {
       expect((b.js.match(new RegExp(`function _scrml_judge_S${lvl}_[a-z0-9]+\\(`, "g")) ?? []).length).toBe(1);
     }

@@ -53,7 +53,7 @@
 
 import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
-import { judgeTypeExpr, describeJudgeType } from "./emit-predicates.ts";
+import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -2213,7 +2213,7 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
     {
       const _rj = (decl as any).refineJudge;
       if (_rj) {
-        lines.push(`_scrml_refine_register(${JSON.stringify(meta.varName)}, (v) => ${judgeTypeExpr(_rj, "v")}, ${JSON.stringify(describeJudgeType(_rj))}, ${JSON.stringify(stripNsName(meta.varName))});`);
+        lines.push(`_scrml_refine_register(${JSON.stringify(meta.varName)}, ${judgeDescriptorExpr(_rj)}, ${JSON.stringify(describeJudgeType(_rj))}, ${JSON.stringify(stripNsName(meta.varName))});`);
       }
     }
     for (const l of cellLines) lines.push(l);

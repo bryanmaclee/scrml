@@ -1,0 +1,20 @@
+{
+  "id": "refinement-shared-collection-delta-accept-neg",
+  "description": "S459 LOW-4 + MED-1 legitimate twin of shared-collection-delta-reject-rt: every write here satisfies every position that holds what it changes, so each is applied. (1) `@x = @y` then `@x = [8]` releases the alias, so @x's tighter type (`number(>5)[]`) no longer constrains @y's array and `@y.push(3)` is admitted. (2) copy-on-write field / row writes with valid values, and a write of an unrefined field. (3) a push both positions of one struct value admit. (4) a valid push into a nested array.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"The assignment is applied if and only if the predicate evaluates to true.\" A released alias is no longer a binding site of the released cell's type.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#released" }, { "click": "#field" }, { "click": "#row" }, { "click": "#unref" }, { "click": "#two" }, { "click": "#nested" }],
+    "state": {
+      "y": [6, 7, 3],
+      "x": [8],
+      "rows": [{ "u": "q", "n": 4 }, { "u": "zz", "n": 9 }],
+      "p": { "a": [6, 7, 9], "b": [6, 7, 9] },
+      "mm": [[1], [2, 3]]
+    },
+    "domAnchored": [{ "selector": "#out", "text": "3 2 3 2" }]
+  }
+}

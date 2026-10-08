@@ -303,7 +303,59 @@ function enumJudgeName(j: Extract<JudgeType, { k: "enum" }>): string {
   return name;
 }
 
-const JUDGE_REF = /\b(_scrml_judge_[A-Za-z0-9_]+)\(/g;
+// ---------------------------------------------------------------------------
+// S459 MED-1 — the runtime DESCRIPTOR of a refined cell's declared type.
+//
+// A refined cell registers `{ ok, el?, fields? }` with the runtime:
+//   ok     — the whole judge of a value at this position (judgeTypeExpr);
+//   el     — (an array) the descriptor of one element;
+//   fields — (a struct) a hoisted function returning `{ field: descriptor }`
+//            for the struct's refined fields (unlisted fields carry no
+//            refinement). A function, so a struct reached along many paths
+//            is described once, lazily.
+// The runtime judges an in-place change by what it changes — a pushed
+// element, a written element, a written field — against the descriptor of
+// the object it changes, instead of re-judging the whole collection (§53.1:
+// "an O(1) boolean expression"). A position with no `el` / `fields` (a union,
+// an enum, …) is not described below its own `ok`: a change inside it
+// re-judges the whole cell. Built from the same JudgeType as the judge — one
+// reader.
+// ---------------------------------------------------------------------------
+
+/** The descriptor object literal of judge `j` (see above), as JS text. */
+export function judgeDescriptorExpr(j: JudgeType): string {
+  // a struct / enum is judged by its hoisted function: name it, no wrapper
+  const parts = [j.k === "struct" ? `ok: ${structJudgeName(j)}` : j.k === "enum" ? `ok: ${enumJudgeName(j)}` : `ok: (v) => ${judgeTypeExpr(j, "v")}`];
+  // `T | not`: when the value is an object it is a `T`, so it is described as one.
+  let inner: JudgeType = j;
+  while (inner.k === "nullable") inner = inner.of;
+  if (inner.k === "array") parts.push(`el: ${judgeDescriptorExpr(inner.of)}`);
+  else if (inner.k === "struct") parts.push(`fields: ${structPartsName(inner)}`);
+  return `{ ${parts.join(", ")} }`;
+}
+
+/** The hoisted `{ field: descriptor }` function of struct judge `j` (registered on first use). */
+function structPartsName(j: Extract<JudgeType, { k: "struct" }>): string {
+  const judge = structJudgeName(j);
+  const name = judge.replace(/^_scrml_judge_/, "_scrml_judge_parts_");
+  if (_judgeDefs.has(name)) return name;
+  _judgeDefs.set(name, ""); // a recursive reference resolves to the name
+  const fields = structJudgeDef(j.id).fields.map(([field, f]) =>
+    `    ${/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(field) ? field : JSON.stringify(field)}: ${judgeDescriptorExpr(f)},`);
+  _judgeDefs.set(name, [
+    `// §53 the refined fields of ${String(j.name).replace(/[\n\r]/g, " ")}, each with its descriptor (judging one field write)`,
+    `function ${name}() {`,
+    `  return {`,
+    ...fields,
+    `  };`,
+    `}`,
+  ].join("\n"));
+  return name;
+}
+
+// A judge is referenced by a call, a parts function by its bare name (`fields: _scrml_judge_parts_…`),
+// so a reference is any occurrence of the name; one that is not a registered judge is ignored.
+const JUDGE_REF = /\b(_scrml_judge_[A-Za-z0-9_]+)/g;
 const JUDGE_DEF = /\bfunction (_scrml_judge_[A-Za-z0-9_]+)\(/g;
 
 /**
