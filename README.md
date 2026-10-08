@@ -341,6 +341,34 @@ Ruled: *"arithmetic and relational operators take NUMBERS only; `+` takes two nu
 
 ---
 
+## Quick start
+
+scrml is not on npm. You run it from a clone.
+
+```bash
+# Install Bun if you don't have it — https://bun.sh
+curl -fsSL https://bun.sh/install | bash
+
+# Get the compiler and its dependencies
+git clone https://github.com/bryanmaclee/scrml.git
+cd scrml
+bun install
+
+# Put the `scrml` command on your PATH (one-time, from the repo root)
+bun link
+
+# Scaffold a new project, then run it
+scrml init my-app
+cd my-app
+scrml dev src/app.scrml   # compile, watch and serve
+
+# Or use the CLI directly on any .scrml file or directory
+scrml compile <file|dir>
+scrml build <dir>         # production build
+```
+
+---
+
 ## More
 
 - [A note from the dev](docs/readme/note-from-the-dev.md)
@@ -348,7 +376,6 @@ Ruled: *"arithmetic and relational operators take NUMBERS only; `+` takes two nu
 - [Everything scrml does](docs/readme/features.md)
 - [Language contexts](docs/readme/language-contexts.md)
 - [Examples](docs/readme/examples.md)
-- [Quick start](docs/readme/quick-start.md)
 - [Terms](docs/readme/terms.md)
 - [Documentation](docs/readme/documentation.md)
 - [License](LICENSE)
