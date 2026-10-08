@@ -130,3 +130,18 @@ Append-only. Times local (2026-10-07/08).
   Fixture samples/compilation-tests/s457-host-global-alias/ (value-only + worker + user names).
 - The scan found the machine-test emitter's bare globals (aliased) and 6 pre-existing
   un-parseable testMode `.test.js` (un-lowered `@cell` in asserts) — reported, not judged.
+
+## second merge + final verification (2026-10-08)
+- origin/main moved to c4eb2c589 (#1354 refinement slice 1) mid-round; merged (9311d5408). The
+  gate flagged #1354's new judge emissions (`Number.isNaN`, `Number.isInteger`, `Array.isArray`:
+  7 R1 violations) — spelled through the alias; 0 after.
+- Corpus differential vs origin/main c4eb2c589 (2468 base / 2470 head sources; +2 = the fixture):
+  4367 identical, 1336 alias-spelling-only, 1434 runtime files (+`var _scrml_g` line, one comment
+  shortened), 9 foreign-seal `import.meta` (F1), 4 worker IIFE (F2), 11 fixture-only, 0 other;
+  compile status identical (1466 / 1468 incl. fixture).
+- Chromium (`scrml dev`): user `const globalThis = 2` + `function fetch/document` + server peers
+  `Response/JSON`: HEAD count 6, server call 13; origin/main: broken (`_scrml_document_12`, server
+  call runs the user's fetch). Worker with own postMessage/self/onmessage: HEAD replies 7, main 0.
+- SPA-counter runtime gzip 16382 B (main 16375 B; gate < 16384) — the fix round added no runtime bytes.
+- Browser-tier name-set gate: PASS; under load several runs hit the script's own "parser disagrees"
+  guard (bun 48 vs 47 markers) — not reproducible per file, 3 clean consecutive tier runs after.
