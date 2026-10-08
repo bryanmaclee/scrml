@@ -42,7 +42,7 @@ ${
                     id=addressId
                     type="text"
                     value=addressValue
-                    oninput=onAddressInput(event)
+                    oninput=${(e) => onAddressInput(e)}
                     class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
                 />
             </div>
@@ -53,7 +53,7 @@ ${
                     id=cityId
                     type="text"
                     value=cityValue
-                    oninput=onCityInput(event)
+                    oninput=${(e) => onCityInput(e)}
                     class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
                 />
             </div>
@@ -64,7 +64,7 @@ ${
                     id=stateId
                     type="text"
                     value=stateValue
-                    oninput=onStateInput(event)
+                    oninput=${(e) => onStateInput(e)}
                     maxlength="2"
                     class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm uppercase"
                 />

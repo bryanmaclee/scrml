@@ -2,6 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitExprField } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
+import { recordListenerSource } from "./js-async-analysis.ts";
 import { quoteIdent as pgQuoteIdent } from "./sql-ident.ts";
 
 /**
@@ -727,6 +728,26 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   const { name, safeName, topic, reconnectMs } = extractChannelAttrs(node, projectReconnectDefault);
   // Bug 4 fix: use onclient:* handlers for client-side browser WebSocket events.
   const { open: clientOpenHandler, close: clientCloseHandler, error: clientErrorHandler } = extractClientHandlers(node);
+  // §38.10.1 — the parameter NAME in the call expression is bound to the event
+  // object (`onclient:error=onError(err)` → `(err) => { onError(err) }`). With no
+  // plain-identifier first argument the listener's parameter is `_scrml_event`,
+  // outside the user namespace (s457 3a), so a free `event` in the call is
+  // E-EVENT-UNBOUND (codegen/listener-event-check.ts).
+  const clientParamOf = (attrName: string): string => {
+    const attrs: any[] = node.attrs ?? node.attributes ?? [];
+    const p = channelAttrParam(attrs.find((a: any) => a && a.name === attrName));
+    return p && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(p) && !p.startsWith("_scrml_") ? p : "_scrml_event";
+  };
+  const clientOpenParam = clientParamOf("onclient:open");
+  // The listener → attribute registry the E-EVENT-UNBOUND check reports through.
+  const recordClient = (attrName: string, param: string, handler: string | null, tail = "") => {
+    if (!handler) return;
+    const attrs: any[] = node.attrs ?? node.attributes ?? [];
+    const a = attrs.find((x: any) => x && x.name === attrName);
+    recordListenerSource(`(${param}) => { ${handler}; ${tail}}`, a?.span ?? node?.span, attrName);
+  };
+  const clientCloseParam = clientParamOf("onclient:close");
+  const clientErrorParam = clientParamOf("onclient:error");
   const sharedVars = extractSharedVars(node);
 
   const varName = `_scrml_ws_${safeName}`;
@@ -760,7 +781,8 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`    ${wsVar} = new _scrml_g.WebSocket(\`\${_scrml_g.location.protocol === 'https:' ? 'wss' : 'ws'}://\${_scrml_g.location.host}/_scrml_ws/${safeName}\`);`);
 
   if (clientOpenHandler) {
-    lines.push(`    ${wsVar}.onopen = () => { ${clientOpenHandler}; };`);
+    recordClient("onclient:open", clientOpenParam, clientOpenHandler);
+    lines.push(`    ${wsVar}.onopen = (${clientOpenParam}) => { ${clientOpenHandler}; };`);
   } else {
     lines.push(`    ${wsVar}.onopen = () => {};`);
   }
@@ -795,18 +817,22 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`    };`);
 
   if (clientErrorHandler) {
-    lines.push(`    ${wsVar}.onerror = (err) => { ${clientErrorHandler}; };`);
+    recordClient("onclient:error", clientErrorParam, clientErrorHandler);
+    lines.push(`    ${wsVar}.onerror = (${clientErrorParam}) => { ${clientErrorHandler}; };`);
   }
 
   if (reconnectMs > 0) {
     if (clientCloseHandler) {
-      lines.push(`    ${wsVar}.onclose = () => { ${clientCloseHandler}; ${reconnVar} = _scrml_g.setTimeout(${connectFn}, ${reconnectMs}); };`);
+      const closeTail = `${reconnVar} = _scrml_g.setTimeout(${connectFn}, ${reconnectMs}); `;
+      recordClient("onclient:close", clientCloseParam, clientCloseHandler, closeTail);
+      lines.push(`    ${wsVar}.onclose = (${clientCloseParam}) => { ${clientCloseHandler}; ${closeTail}};`);
     } else {
       lines.push(`    ${wsVar}.onclose = () => { ${reconnVar} = _scrml_g.setTimeout(${connectFn}, ${reconnectMs}); };`);
     }
   } else {
     if (clientCloseHandler) {
-      lines.push(`    ${wsVar}.onclose = () => { ${clientCloseHandler}; };`);
+      recordClient("onclient:close", clientCloseParam, clientCloseHandler);
+      lines.push(`    ${wsVar}.onclose = (${clientCloseParam}) => { ${clientCloseHandler}; };`);
     } else {
       lines.push(`    ${wsVar}.onclose = () => {};`);
     }

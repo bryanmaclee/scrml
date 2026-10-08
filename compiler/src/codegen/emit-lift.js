@@ -636,7 +636,7 @@ export function maybeWrapLiftCallableHandler(arrowText) {
   // emits the arrow directly, byte-identical to pre-fix).
   const prelude = computeItemDerivedReplay(arrowText, null, 'return;');
   if (prelude.length === 0) return null;
-  return `function(event) { ${prelude.join(' ')} (${arrowText})(event); }`;
+  return `function(_scrml_event) { ${prelude.join(' ')} (${arrowText})(_scrml_event); }`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,7 +1326,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       if (engineLoweredAttr !== null) {
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         continue;
       }
       // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
@@ -1386,7 +1386,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
         }
       } else {
         // Bug 73 — per-item handler live-keying. Re-resolve the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
@@ -1705,7 +1705,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
         // does not read the item (the iter-scope scan gates it out → stays plain);
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(_scrml_event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
       } else {
         // §5.2 (S457) — a srcdoc / an event attribute this path does not wire (`onClick=it.f`)
         // is never written from data.
@@ -1745,12 +1745,12 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredCall !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
@@ -1796,7 +1796,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           });
           // S446 (S439 #4) — await a server-call cell write in place so the next
           // statement sees the resolved value (js-async-analysis ColorOpts).
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` })});`);
           continue;
         }
         // Bug 65 (S157) — engine transition `${@engine.advance(.X)}` (CallExpr) /
@@ -1810,7 +1810,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredExpr !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
           continue;
         }
         // S140 Bug 59 — when this onevent value is a synth arrow-string with
@@ -1869,7 +1869,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           }
         } else {
           // Bug 73 — function-body per-item handler: re-resolve the live item at fire time.
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
@@ -3337,7 +3337,7 @@ export function emitConsolidatedLift(body, opts = {}) {
                 if (liftEventName(attrName) !== null) {
                   const eventName = liftEventName(attrName);
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
-                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
+                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
                 } else {
                   const _bv = `_scrml_g.String(${rewritten} ?? "")`;
                   // §5.2 rule 3 (S457) — a BLOCK_REF-split `href=${expr}`: guard the URL write.

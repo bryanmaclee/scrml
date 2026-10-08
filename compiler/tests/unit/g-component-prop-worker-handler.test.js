@@ -194,7 +194,7 @@ function compileToClient(src) {
 // `const m = event.data.data` anchor skips the `.send()` reply router, which
 // is also a "message" listener but binds no hook variable.
 function parentOnmessageBody(clientJs) {
-  const m = clientJs.match(/addEventListener\("message", function\(event\)\s*\{(\s*const \w+ = event\.data\.data;[\s\S]*?)\}\);/);
+  const m = clientJs.match(/addEventListener\("message", function\(_scrml_event\)\s*\{(\s*const \w+ = _scrml_event\.data\.data;[\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 function onerrorBody(clientJs) {
@@ -249,8 +249,8 @@ describe("g-component-prop-substitution-skips-when-worker-handler-bodies (emit)"
     const { clientJs } = compileToClient(src);
     // Parse-check: a SyntaxError would throw here. Identifiers may be unbound
     // (that is a runtime concern) — we only assert the body PARSES.
-    expect(() => new Function("event", parentOnmessageBody(clientJs))).not.toThrow();
-    expect(() => new Function("e", onerrorBody(clientJs))).not.toThrow();
+    expect(() => new Function("_scrml_event", parentOnmessageBody(clientJs))).not.toThrow();
+    expect(() => new Function("_scrml_event", onerrorBody(clientJs))).not.toThrow();
   });
 });
 

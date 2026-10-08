@@ -1,0 +1,126 @@
+# host-global-scan.ts — the compiles KNOWN to throw, pinned by name (S459).
+# One `[mode] <unit>` key per line (sorted); the error class after `#` is informational.
+# A throw NOT listed here fails the gate (exit 2): its artifacts went unchecked.
+# A listed key that no longer throws is reported as fixed — delete it (or run the scan with --prune).
+# Adding a key is a deliberate edit: it accepts that unit's artifacts going unchecked.
+# Seeded from a full `--check` run on main 6fcde7f7e: 119 keys (115 emit-client-esm parse throws on
+# sources that carry a compile error; 4 nested-comments.scrml stack overflows).
+[build] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
+[default] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
+[embed] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
+[esm] conformance/cases/body-top/template-cell-renders/case.scrml  # emit-client-esm: Unexpected character '@'
+[esm] conformance/cases/channel/dup-name-cross-file/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
+[esm] conformance/cases/channel/same-source-two-aliases/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
+[esm] conformance/cases/control-flow/ctrl-001-orphan-else-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/control-flow/ctrl-002-orphan-else-if-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/control-flow/ctrl-003-extend-past-else-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/control-flow/ctrl-005-else-and-if-same-element-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/control-flow/ctrl-010-else-on-for-in-if-chain-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/control-flow/ctrl-010-else-on-for-without-lift-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/control-flow/ctrl-010-for-lift-in-match-arm-neg/case.scrml  # emit-client-esm: Unterminated regular expression
+[esm] conformance/cases/control-flow/ctrl-switch-forbidden-attr-expr-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/control-flow/ctrl-switch-forbidden-fn-body-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/control-flow/ctrl-switch-forbidden-logic-block-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/control-flow/if-chain-program-first-true-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/control-flow/loop-007-while-as-expr-no-lift-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/control-flow/loop-007-while-as-expr-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/defer/ambiguous-lead-neg/case.scrml  # emit-client-esm: Assigning to rvalue
+[esm] conformance/cases/defer/control-flow-neg/case.scrml  # emit-client-esm: Unsyntactic break
+[esm] conformance/cases/defer/duplicate-function-neg/case.scrml  # emit-client-esm: Identifier 'g' has already been declared
+[esm] conformance/cases/defer/unsupported-site-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/defer/yield-in-defer-neg/case.scrml  # emit-client-esm: The keyword 'yield' is reserved
+[esm] conformance/cases/error/await-not-in-scrml/case.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] conformance/cases/fn/arrow-body-reject/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/fn/scope-redeclare-neg/case.scrml  # emit-client-esm: Identifier 'x' has already been declared
+[esm] conformance/cases/forms/errors-top-level-renders/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/forms/gate-child-field-blocks-submit/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/forms/gate-invalid-blocks-submit/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/forms/gate-valid-submits/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/forms/surface-top-level-no-validators-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/forms/surface-top-level-validated-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/forms/validator-live-let-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/lifecycle/effect-on-derived-engine/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/loop/loop-001-break-outside/case.scrml  # emit-client-esm: Unsyntactic break
+[esm] conformance/cases/loop/loop-002-continue-outside/case.scrml  # emit-client-esm: Unsyntactic continue
+[esm] conformance/cases/loop/loop-005-break-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/markup-handler/s437-r4-dangling-else-each-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/markup-handler/s437-r4-dangling-else-engine-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/markup-handler/s437-r4-dangling-else-match-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/markup-handler/s437-r4-dangling-else-top-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/markup-handler/s437-r5-template-cell-read-first-multiline/case.scrml  # emit-client-esm: Unexpected character '@'
+[esm] conformance/cases/markup-handler/s437-r5-template-cell-read-second/case.scrml  # emit-client-esm: Unexpected character '@'
+[esm] conformance/cases/match-codes/e-match-arm-markup-in-value-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-codes/e-syntax-010-else-not-last-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/module/e-import-003-import-inside-fn-reject/case.scrml  # emit-client-esm: 'import' and 'export' may only appear at the top level
+[esm] conformance/cases/module/e-scope-010-filescope-duplicate-reject/case.scrml  # emit-client-esm: Identifier 'dup' has already been declared
+[esm] conformance/cases/persist/counter-persist-local-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/persist/prepaint-without-persist-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/persist/storage-unknown-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/is-literal-rhs-reject/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/reactive/no-write-attr-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-attr-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-derived-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-derived-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-field-init-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-field-init-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-handler-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-if-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-if-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-interp-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-interp-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-own-init-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-own-init-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/no-write-unproven-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/s437-r5-template-cell-read-function-body/case.scrml  # emit-client-esm: Unexpected character '@'
+[esm] samples/compilation-tests/error-004-in-logic.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-no-init-002.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-async-008.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-import-inside-function-007.scrml  # emit-client-esm: 'import' and 'export' may only appear at the top level
+[esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-let-duplicate-binding-010.scrml  # emit-client-esm: Identifier 'label' has already been declared
+[esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-using-keyword-001.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-with-keyword-001.scrml  # emit-client-esm: 'with' in strict mode
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-break-outside-loop-056.scrml  # emit-client-esm: Unsyntactic break
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-continue-outside-loop-057.scrml  # emit-client-esm: Unsyntactic continue
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-else-no-lift-050.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-arm-after-else-extra-101.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-else-not-last-029.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-asIs-103.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-on-struct-037.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-partial-match-in-lift-043.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-return-top-level-080.scrml  # emit-client-esm: 'return' outside of function
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-fallthrough-072.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-switch-statement-071.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-when-nested-086.scrml  # emit-client-esm: Unexpected character '@'
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-as-expr-bare-063.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-crosses-fn-068.scrml  # emit-client-esm: Unsyntactic break
+[esm] samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-while-break-missing-label-066.scrml  # emit-client-esm: Unsyntactic break
+[esm] samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-declaration-083.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-assign-expr-to-const-081.scrml  # emit-client-esm: Identifier 'x' has already been declared
+[esm] samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-none-bare-008.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-lowercase-ghost-058.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-extract-keyword-051.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/gauntlet-s79-signup-form.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/helpers/dnd-setup.scrml  # emit-client-esm: Unexpected character '@'
+[esm] samples/compilation-tests/match-001-nested-with-call.scrml  # emit-client-esm: Unexpected token
+[esm] samples/compilation-tests/modern-007-dnd-with-helpers.scrml  # emit-client-esm: Unexpected character '@'
+[esm] samples/debate-lin-lift-edge-cases.scrml  # emit-client-esm: Unexpected token
+[esm] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
+[esm] samples/login.scrml  # emit-client-esm: Unexpected token
+[esm] samples/quiz-app.scrml  # emit-client-esm: Unexpected token
+[esm] samples/react-dev-lin-lift-edge-cases.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/auth/flows.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/auth/index.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/auth/jwt.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/auth/password.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/crypto/index.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/data/index.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/data/transform.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/data/validate.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/host/index.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/http/index.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/oauth/index.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/oauth/pkce.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
+[esm] stdlib/store/index.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/store/kv.scrml  # emit-client-esm: Unexpected token
+[esm] stdlib/time/index.scrml  # emit-client-esm: Unexpected token

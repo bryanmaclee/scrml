@@ -62,7 +62,7 @@ function compileToOutputs(source, suffix = "bug65") {
 // factory (handler bodies are where the silent-miscompile defect surfaced).
 function liftHandlerBodies(clientJs) {
   const out = [];
-  const re = /addEventListener\([^,]+,\s*function\(event\)\s*\{([\s\S]*?)\}\);/g;
+  const re = /addEventListener\([^,]+,\s*function\(_scrml_event\)\s*\{([\s\S]*?)\}\);/g;
   let m;
   while ((m = re.exec(clientJs)) !== null) out.push(m[1]);
   return out;

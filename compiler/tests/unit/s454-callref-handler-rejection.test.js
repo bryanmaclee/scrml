@@ -13,7 +13,7 @@
  * callee name (`fnNameMap.get(handlerName)`) into the wrapper BEFORE
  * `colorHandlerAsync` ran, and the colouring resolves callees by AUTHOR name
  * (`outerAsyncRootFromFacts`), so `_scrml_fetch_save_4()` matched nothing and the
- * listener stayed a sync `function(event) { _scrml_fetch_save_4(); }` whose
+ * listener stayed a sync `function(_scrml_event) { _scrml_fetch_save_4(); }` whose
  * rejection escaped as a bare `unhandledrejection`. The `${fn()}` form carries the
  * author name through colouring and is mangled afterwards by emit-client's
  * post-fn-name-mangle pass. The root fix builds the call-ref wrapper with the
@@ -93,7 +93,7 @@ describe("S454 — `onclick=fn()` and `onclick=${fn()}` emit the SAME listener",
     // identical modulo the per-site boundary id
     const strip = (s) => s.replace(/"onclick _scrml_attr_onclick_\d+"/, '"<id>"');
     expect(strip(a)).toBe(strip(b));
-    expect(a).toMatch(/^async function\(event\) \{ try \{ await _scrml_go_\d+\(\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("onclick _scrml_attr_onclick_\d+", _scrml_async_err\); \} \}$/);
+    expect(a).toMatch(/^async function\(_scrml_event\) \{ try \{ await _scrml_go_\d+\(\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("onclick _scrml_attr_onclick_\d+", _scrml_async_err\); \} \}$/);
   });
 
   test("server fn called directly, with a literal arg (`onclick=fn(1)`)", () => {
@@ -109,8 +109,8 @@ describe("S454 — `onclick=fn()` and `onclick=${fn()}` emit the SAME listener",
     const r = emit(`<button id="a" onclick=syncFn()>a</button>`);
     expect(r.errs).toEqual([]);
     // exactly what b35593879 emitted: the mangled name, no async, no arm
-    expect(r.js).toMatch(/"_scrml_attr_onclick_\d+": function\(event\) \{ _scrml_syncFn_\d+\(\); \},\n/);
-    expect(r.js).not.toContain("async function(event)");
+    expect(r.js).toMatch(/"_scrml_attr_onclick_\d+": function\(_scrml_event\) \{ _scrml_syncFn_\d+\(\); \},\n/);
+    expect(r.js).not.toContain("async function(_scrml_event)");
     expect(r.js).not.toContain("_scrml_error_boundary_log");
   });
 
@@ -141,7 +141,7 @@ describe("S454 — every call-ref registration path colours an async callee", ()
     const r = emit(`<form id="f" onsubmit=go()><button>go</button></form>`);
     expect(r.errs).toEqual([]);
     const e = entry(r.js, "_scrml_attr_onsubmit");
-    expect(e.text).toMatch(/^async function\(event\) \{ try \{ event\.preventDefault\(\); await _scrml_go_\d+\(\); \} catch/);
+    expect(e.text).toMatch(/^async function\(_scrml_event\) \{ try \{ _scrml_event\.preventDefault\(\); await _scrml_go_\d+\(\); \} catch/);
   });
 
   test("match arm at page level (registry entry)", () => {
@@ -153,7 +153,7 @@ describe("S454 — every call-ref registration path colours an async callee", ()
   test("arm-bound factory (call-ref reading a payload binding)", () => {
     const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><button id="m" onclick=goArg(note.length)>b</button></></match>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/function _scrml_armh_\w+\(note\) \{ return async function\(event\) \{ try \{ await _scrml_goArg_\d+\(note\.length\);/);
+    expect(r.js).toMatch(/function _scrml_armh_\w+\(note\) \{ return async function\(_scrml_event\) \{ try \{ await _scrml_goArg_\d+\(note\.length\);/);
     expect(catchArms(r.js).length).toBe(1);
   });
 
@@ -162,13 +162,13 @@ describe("S454 — every call-ref registration path colours an async callee", ()
     expect(r.errs).toEqual([]);
     // `(event)` here is a carried divergence from §5.2.2 ("with no arguments"), pre-existing:
     // g-inarm-callref-handler-passes-event-s454. Pinned as current behaviour, not as the rule.
-    expect(r.js).toMatch(/const _scrml_arm_h = async function\(event\) \{ try \{ await _scrml_go_\d+\(event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("oninput _scrml_attr_oninput_\d+"/);
+    expect(r.js).toMatch(/const _scrml_arm_h = async function\(_scrml_event\) \{ try \{ await _scrml_go_\d+\(_scrml_event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("oninput _scrml_attr_oninput_\d+"/);
   });
 
   test("in-arm NON-delegable listener with a SYNC callee is unchanged", () => {
     const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=syncFn() /></></match>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_arm_h = function\(event\) \{ _scrml_syncFn_\d+\(event\); \};/);
+    expect(r.js).toMatch(/const _scrml_arm_h = function\(_scrml_event\) \{ _scrml_syncFn_\d+\(_scrml_event\); \};/);
     expect(r.js).not.toContain("_scrml_error_boundary_log");
   });
 
@@ -183,16 +183,16 @@ describe("S454 — every call-ref registration path colours an async callee", ()
       pre,
     );
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_arm_h = async function\(event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
+    expect(r.js).toMatch(/const _scrml_arm_h = async function\(_scrml_event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
     // the page-level twin is the oracle
-    expect(r.js).toMatch(/"_scrml_attr_oninput_\d+": async function\(event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
+    expect(r.js).toMatch(/"_scrml_attr_oninput_\d+": async function\(_scrml_event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
     expect(catchArms(r.js).length).toBe(2);
   });
 
   test("in-arm NON-delegable `${…}` handler with no async call is unchanged", () => {
     const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=\${@y = 1} /></></match>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_arm_h = function\(event\) \{ _scrml_cs_reactive_set\("y", 1\); \};/);
+    expect(r.js).toMatch(/const _scrml_arm_h = function\(_scrml_event\) \{ _scrml_cs_reactive_set\("y", 1\); \};/);
     expect(r.js).not.toContain("_scrml_error_boundary_log");
   });
 
@@ -226,7 +226,7 @@ describe("S454 — every call-ref registration path colours an async callee", ()
       writeFileSync(input, src);
       compileScrml({ inputFiles: [input], write: true, outputDir: resolve(tmpDir, "out"), log: () => {} });
       const js = readFileSync(resolve(tmpDir, "out", "app.client.js"), "utf8");
-      expect(js).toMatch(/async function\(event\) \{ try \{ event\.preventDefault\(\); _scrml_cs_reactive_set\("signup\.submitted", true\); await _scrml_fetch_persist_\d+\(/);
+      expect(js).toMatch(/async function\(_scrml_event\) \{ try \{ _scrml_event\.preventDefault\(\); _scrml_cs_reactive_set\("signup\.submitted", true\); await _scrml_fetch_persist_\d+\(/);
       expect(catchArms(js)).toEqual([expect.stringMatching(/^onsubmit /)]);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
@@ -238,7 +238,7 @@ describe("S454 — the bare-ref form `onclick=handler`", () => {
   test("an async handler is wrapped, still handed the DOM event, and logs", () => {
     const r = emit(`<button id="b" onclick=go>b</button>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/"_scrml_attr_onclick_\d+": async function\(event\) \{ try \{ await _scrml_go_\d+\(event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("onclick _scrml_attr_onclick_\d+"/);
+    expect(r.js).toMatch(/"_scrml_attr_onclick_\d+": async function\(_scrml_event\) \{ try \{ await _scrml_go_\d+\(_scrml_event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("onclick _scrml_attr_onclick_\d+"/);
   });
 
   test("a SYNC handler stays the DIRECT reference (no wrapper) — byte-identical", () => {
@@ -260,7 +260,7 @@ describe("S454 — the bare-ref form `onclick=handler`", () => {
 // ---------------------------------------------------------------------------
 describe("S454 — the wrapper is thenable-safe", () => {
   const facts = (n) => (n === "f" ? { root: { kind: "server", via: "f" }, local: false } : null);
-  const listenerSrc = colorAsyncFunctionExpr(`function(event) { f(); }`, facts, { boundaryId: "onclick X" }).code;
+  const listenerSrc = colorAsyncFunctionExpr(`function(_scrml_event) { f(); }`, facts, { boundaryId: "onclick X" }).code;
 
   function build(f) {
     const logged = [];

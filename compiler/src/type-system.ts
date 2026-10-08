@@ -15173,7 +15173,6 @@ function annotateNodes(
         // CPS-implicit W-CPS-NEEDS-FAILABLE is out of this ruling's scope.
         const before = errors.length;
         scopeChain.push(`handler-check:${attr.name as string}`);
-        scopeChain.bind("event", { kind: "variable", resolvedType: tAsIs() });
         withHandlerCheckContext(() => {
           for (const stmt of checkStmts) {
             if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
@@ -15397,15 +15396,17 @@ function annotateNodes(
       // below never saw statements 2..n (`{ @n = 2; nope(1) }` compiled at exit
       // 0, and in an `<each>` row the unchecked statement RAN once the row
       // handler stopped dropping it). Walk the statements exactly as a function
-      // body's are walked (`visitLogicNode`), in a handler scope that binds
-      // `event` (§5.2.2) on top of the current chain — which already carries the
+      // body's are walked (`visitLogicNode`), in a handler scope (which binds no
+      // `event` — s457 3a) on top of the current chain — which already carries the
       // `<each>` item alias / engine-arm payload bindings of this position. The
       // statement list supersedes `exprNode` (it includes statement 1), so the
       // expression-only check is skipped to avoid a duplicate diagnostic.
       const handlerBlock = (value as Record<string, unknown>).handlerBlock as { stmts?: unknown[] } | undefined;
       if (handlerBlock && Array.isArray(handlerBlock.stmts)) {
         scopeChain.push(`handler:${attr.name as string}`);
-        scopeChain.bind("event", { kind: "variable", resolvedType: tAsIs() });
+        // s457 3a — the handler scope binds no `event` (§5.2 / §5.2.3); a free
+        // `event` in a compiler-written listener is E-EVENT-UNBOUND, judged on
+        // the emitted text (codegen/listener-event-check.ts).
         // WRITE targets. A function body's `@x = …` is write-checked by SYM B3,
         // which never descends into `<each>` / `<match>` bodies (SPEC §34: SYM is
         // the wrong layer there — it over-fires on loop locals). This walk

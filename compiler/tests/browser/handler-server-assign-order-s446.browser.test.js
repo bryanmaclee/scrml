@@ -249,8 +249,8 @@ for (const pos of Object.keys(POSITIONS)) {
       test(name, () => {
         const app = mount(program(pos, handler));
         expect(app.errs).toEqual([]);
-        expect(app.clientJs).not.toMatch(/async function\(event\)/);
-        expect(app.clientJs).toMatch(/function\(event\) \{ \(async \(\) =>/);
+        expect(app.clientJs).not.toMatch(/async function\(_scrml_event\)/);
+        expect(app.clientJs).toMatch(/function\(_scrml_event\) \{ \(async \(\) =>/);
         expect(app.clientJs).toContain('.catch(_scrml_async_err => _scrml_error_boundary_log("x", _scrml_async_err))');
       });
     }
@@ -263,7 +263,7 @@ describe("S446 — a 1-statement `${@x = save()}` handler keeps its emit (fire-a
     expect(app.errs).toEqual([]);
     const line = app.clientJs.split("\n").find((l) => /_scrml_attr_onclick/.test(l) && /save/.test(l));
     expect(line).toBeDefined();
-    expect(line).toContain(": function(event) { (async () => _scrml_cs_reactive_set(\"x\", await _scrml_fetch_save_");
+    expect(line).toContain(": function(_scrml_event) { (async () => _scrml_cs_reactive_set(\"x\", await _scrml_fetch_save_");
     expect(line).toContain(".catch(_scrml_async_err => _scrml_error_boundary_log(\"x\", _scrml_async_err));");
   });
   test("statement list: `async` listener, the write awaited in place", () => {
@@ -274,7 +274,7 @@ describe("S446 — a 1-statement `${@x = save()}` handler keeps its emit (fire-a
     // S453 — `try {` now opens the async listener's body (bryan S449 ruling A3,
     // the rejection log). The await-in-place is what this pin is for and is
     // unchanged; the `try {` is threaded through so the pin still bites.
-    expect(line).toContain(": async function(event) { try { _scrml_cs_reactive_set(\"x\", await _scrml_fetch_save_");
+    expect(line).toContain(": async function(_scrml_event) { try { _scrml_cs_reactive_set(\"x\", await _scrml_fetch_save_");
     expect(line).not.toContain("(async () =>");
   });
 });

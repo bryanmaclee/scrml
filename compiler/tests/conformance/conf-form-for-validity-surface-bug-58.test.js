@@ -165,7 +165,7 @@ describe("Bug 58 — formFor validity surface IS emitted into client.js", () => 
     // try opens first, then preventDefault + the submitted flag run in the
     // synchronous prefix, and the call is awaited after them.
     expect(clientJs).toMatch(
-      /async function\(event\) \{ try \{ event\.preventDefault\(\); _scrml_reactive_set\("signup\.submitted", true\); await _scrml_fetch_persistSignup_\d+\(/,
+      /async function\(_scrml_event\) \{ try \{ _scrml_event\.preventDefault\(\); _scrml_reactive_set\("signup\.submitted", true\); await _scrml_fetch_persistSignup_\d+\(/,
     );
   });
 

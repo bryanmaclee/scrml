@@ -1,0 +1,16 @@
+{
+  "id": "markup-handler-s457-event-unbound-bare-call-neg",
+  "description": "S457 3a — a bare call handler does not bind `event`: `oninput=setV(event.target.value)` is E-EVENT-UNBOUND, pointing at `oninput=${(e) => setV(e.target.value)}`.",
+  "language-version": "1.0",
+  "spec": "§5.2, §5.2.3",
+  "source-test": "compiler/tests/unit/s457-unquoted-values-and-event.test.js",
+  "rationale": "§5.2 \"Handler values do not bind `event`\" (ruling:user-voice-scrml.md S457 \"1a 2a 3a 4a 5 dd it 6a\", item 3): \"A reference to `event` in such a value that no binding of the author's resolves … SHALL be compile error E-EVENT-UNBOUND\".",
+  "expect": {
+    "codes": [
+      "E-EVENT-UNBOUND"
+    ],
+    "severity": {
+      "E-EVENT-UNBOUND": "error"
+    }
+  }
+}

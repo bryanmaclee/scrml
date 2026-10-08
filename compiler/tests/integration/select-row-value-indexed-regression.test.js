@@ -44,8 +44,8 @@ const FIXTURE = `<program title="select-row regression">
 <ul>\${
   for (item of @items) {
     lift <li data-id=\${item.id}>
-      <span class="view" if=@editingId != item.id>view-\${item.id}</span>
-      <span class="edit" if=@editingId == item.id>edit-\${item.id}</span>
+      <span class="view" if=(@editingId != item.id)>view-\${item.id}</span>
+      <span class="edit" if=(@editingId == item.id)>edit-\${item.id}</span>
     </li>
   }
 }</ul>

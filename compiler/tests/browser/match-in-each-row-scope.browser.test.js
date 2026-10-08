@@ -393,8 +393,8 @@ const ROW_CASES = [
   ["both arm-bound", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer1;"],
   ["inner delegated + outer arm-bound", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner")>x</button></div>`, "inner;outer1;"],
   ["inner arm-bound + outer delegated", (n) => `<div class="o" onclick=lg("outer")><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer;"],
-  ["stopPropagation in the inner", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=stp("inner", event)>x</button></div>`, "inner;"],
-  ["stopPropagation in the outer", (n) => `<div class="o" onclick=stp("outer", event)><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer;"],
+  ["stopPropagation in the inner", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=\${(e) => stp("inner", e)}>x</button></div>`, "inner;"],
+  ["stopPropagation in the outer", (n) => `<div class="o" onclick=\${(e) => stp("outer", e)}><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer;"],
 ];
 
 function rowProgram(inner, asArm, rowAttr = "") {
@@ -414,7 +414,7 @@ const PAGE_CASES = [
   ["both arm-bound", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "innerhi;"],
   ["inner delegated + outer arm-bound (the review's t2)", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner")>x</button></div>`, "inner;"],
   ["inner arm-bound + outer delegated", (n) => `<div class="o" onclick=lg("outer")><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "innerhi;"],
-  ["stopPropagation in the inner", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=stp("inner", event)>x</button></div>`, "inner;"],
+  ["stopPropagation in the inner", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=\${(e) => stp("inner", e)}>x</button></div>`, "inner;"],
 ];
 
 function pageProgram(inner, asArm) {
@@ -458,10 +458,10 @@ describe("round 2 — click order inside an arm in an <each> row matches the sam
     expect(clickLog(rowProgram(`<button class="i" onclick=lg("btn" + g.id)>x</button>`, false, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn1;row1;");
   });
   test("row-level onclick + stopPropagation in the arm button — in a <match> arm", () => {
-    expect(clickLog(rowProgram(`<button class="i" onclick=stp("btn", event)>x</button>`, true, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
+    expect(clickLog(rowProgram(`<button class="i" onclick=\${(e) => stp("btn", e)}>x</button>`, true, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
   });
   test("row-level onclick + stopPropagation in the button — twin (no match)", () => {
-    expect(clickLog(rowProgram(`<button class="i" onclick=stp("btn", event)>x</button>`, false, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
+    expect(clickLog(rowProgram(`<button class="i" onclick=\${(e) => stp("btn", e)}>x</button>`, false, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
   });
   // INTENTIONAL behaviour change (review of e0c02544, PA-accepted): a row-arm
   // handler that reads no arm name is now an element listener like the row's

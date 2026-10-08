@@ -178,7 +178,7 @@ for (const [name, markup, id, type, idPattern] of CASES) {
     // The listener really is async-coloured — otherwise this case proves nothing
     // about the ruling (the truncated-probe rule: a probe that resolves to a
     // different artifact than the obligation measures nothing).
-    expect(app.clientJs).toContain("async function(event)");
+    expect(app.clientJs).toContain("async function(_scrml_event)");
     // The SHIPPED pruned runtime carries the sink (the always-included `errors`
     // chunk) — checked here rather than taken from a source comment.
     expect(app.runtimeJs).toContain("function _scrml_error_boundary_log");
@@ -205,7 +205,7 @@ test("S453 (fix round) — a handler with a DIRECTIVE PROLOGUE still routes its 
   const app = mount(program(`<button id="b" onclick=\${"use strict"; ${H}}>b</button>`));
   expect(app.errs).toEqual([]);
   expect(app.initError).toBeNull();
-  expect(app.clientJs).toMatch(/async function\(event\) \{ "use strict"; try \{/);
+  expect(app.clientJs).toMatch(/async function\(_scrml_event\) \{ "use strict"; try \{/);
   await app.fire("b", "click");
   const logged = app.consoleErrors.filter((m) => m.includes("[scrml errorBoundary"));
   expect(logged.length).toBe(1);
@@ -239,7 +239,7 @@ test("S453 — a SYNC listener is untouched: no log, and the awaited write still
   // coloured it async, and must not have added a second arm.
   const app = mount(program(`<button id="b" onclick=\${@x = netfail()}>b</button>`));
   expect(app.errs).toEqual([]);
-  expect(app.clientJs).not.toContain("async function(event)");
+  expect(app.clientJs).not.toContain("async function(_scrml_event)");
   await app.fire("b", "click");
   // the pre-existing detached arm logs it — once
   const logged = app.consoleErrors.filter((m) => m.includes("[scrml errorBoundary"));
@@ -256,7 +256,7 @@ test("S453 — an async listener that does NOT reject behaves exactly as before"
     `  <button id="b" onclick=\${if (@c) { @x = save(); @y = @x + 1 }}>b</button>\n  <p id="o">\${@x}</p>\n</program>\n`,
   );
   expect(app.errs).toEqual([]);
-  expect(app.clientJs).toContain("async function(event)");
+  expect(app.clientJs).toContain("async function(_scrml_event)");
   await app.fire("b", "click");
   expect({ x: app.get("x"), y: app.get("y") }).toEqual({ x: 10, y: 11 });
   expect(app.consoleErrors).toEqual([]);

@@ -64,7 +64,7 @@ function compileFile(src) {
 
 /** The emitted handler function texts, in source order. */
 function handlers(js) {
-  return [...js.matchAll(/"_scrml_attr_on[a-z]+_\d+": ((?:async )?(?:function\(event\)|\([^)]*\) =>|[a-z]+ =>)[\s\S]*?)\n?,\n(?=\s*"_scrml_attr_|\s*\};)/g)].map((m) => m[1]);
+  return [...js.matchAll(/"_scrml_attr_on[a-z]+_\d+": ((?:async )?(?:function\(_scrml_event\)|\([^)]*\) =>|[a-z]+ =>)[\s\S]*?)\n?,\n(?=\s*"_scrml_attr_|\s*\};)/g)].map((m) => m[1]);
 }
 
 const AUTH_IMPORT = "${\n  import { verifyPassword } from 'scrml:auth'\n}\n";
@@ -87,7 +87,7 @@ function m(n) { return isOk(n) }
     const o = app(`onclick=\${ if (isOk(1)) { @v = "yes" } else { @v = "no" } }`);
     expect(o.codes).toEqual([]);
     const h = handlers(o.clientJs)[0];
-    expect(h).toMatch(/^async function\(event\)/);
+    expect(h).toMatch(/^async function\(_scrml_event\)/);
     expect(h).toMatch(/if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
   });
 
@@ -135,14 +135,14 @@ function m(n) { return isOk(n) }
     const o = app(`onclick=\${ @v = isOk(1) }`);
     expect(o.codes).toEqual([]);
     const h = handlers(o.clientJs)[0];
-    expect(h).toMatch(/^function\(event\)/);
+    expect(h).toMatch(/^function\(_scrml_event\)/);
     expect(h).not.toContain("await await");
   });
 
   test("regression: a handler with no async call is byte-for-byte sync", () => {
     const o = app(`onclick=\${ @v = "plain" }`);
     expect(o.codes).toEqual([]);
-    expect(handlers(o.clientJs)[0]).toMatch(/^function\(event\)/);
+    expect(handlers(o.clientJs)[0]).toMatch(/^function\(_scrml_event\)/);
   });
 
   test("EXECUTED — the awaited handler takes the DENY branch when the server says false", async () => {
@@ -178,7 +178,7 @@ server function isOk(n) { return n > 100 }
 </program>
 `);
     expect(o.codes).toEqual([]);
-    expect(o.clientJs).toMatch(/addEventListener\("click", async function\(event\) \{[^\n]*if \(await _scrml_fetch_isOk_\d+\(x\)\)/);
+    expect(o.clientJs).toMatch(/addEventListener\("click", async function\(_scrml_event\) \{[^\n]*if \(await _scrml_fetch_isOk_\d+\(x\)\)/);
   });
 
   test("a `lift` handler awaits its server-call condition", () => {
@@ -194,7 +194,7 @@ server function isOk(n) { return n > 100 }
 </program>
 `);
     expect(o.codes).toEqual([]);
-    expect(o.clientJs).toMatch(/addEventListener\("click", async function\(event\)/);
+    expect(o.clientJs).toMatch(/addEventListener\("click", async function\(_scrml_event\)/);
     expect(o.clientJs).toMatch(/if \(await _scrml_fetch_isOk_\d+\(x\)\)/);
     expect(o.clientJs).not.toMatch(/if \(_scrml_fetch_isOk_\d+\(x\)\)/);
   });
@@ -222,7 +222,7 @@ function submit() {
 `);
     expect(o.codes).toEqual([]);
     expect(o.clientJs).not.toMatch(/await \(async function\(\) \{/);
-    expect(o.clientJs).toMatch(/addEventListener\("submit", async function\(event\)/);
+    expect(o.clientJs).toMatch(/addEventListener\("submit", async function\(_scrml_event\)/);
   });
 
   test("an async fn used as a value in a row handler is E-ASYNC-FN-ESCAPES-AS-VALUE", () => {
@@ -749,6 +749,9 @@ function go() {
 });
 
 describe("fix round 2 — event control after the first await", () => {
+  // s457 3a — a handler the compiler wraps does not bind `event` (E-EVENT-UNBOUND);
+  // these cases take the event as the parameter of a `${(event) => { … }}` listener,
+  // the form §5.2.1 names for it. The E-EVENT-CONTROL-AFTER-AWAIT check is the same.
   const app = (attr) => compileFile(`<program>
 <v> = "unset"
 server function isOk(n) { return n > 100 }
@@ -756,20 +759,20 @@ ${attr}
 </program>
 `);
   test("`preventDefault()` after an awaited call → E-EVENT-CONTROL-AFTER-AWAIT", () => {
-    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; event.preventDefault() }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; event.preventDefault() }}><button>s</button></form>`);
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
     expect(o.errors.find((e) => e.code === "E-EVENT-CONTROL-AFTER-AWAIT").message).toContain("preventDefault");
   });
   test("`stopPropagation()` after an awaited call → error", () => {
-    const o = app(`<div><button onclick=\${ @v = isOk(1) ? "a" : "r"; event.stopPropagation() }>b</button></div>`);
+    const o = app(`<div><button onclick=\${(event) => { @v = isOk(1) ? "a" : "r"; event.stopPropagation() }}>b</button></div>`);
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("a CONDITIONAL preventDefault in the branch of an awaited test → error (not auto-hoisted)", () => {
-    const o = app(`<a href="/x" onclick=\${ if (isOk(1)) { @v = "a" } else { event.preventDefault(); @v = "r" } }>l</a>`);
+    const o = app(`<a href="/x" onclick=\${(event) => { if (isOk(1)) { @v = "a" } else { event.preventDefault(); @v = "r" } }}>l</a>`);
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("control: preventDefault BEFORE the first await compiles and runs synchronously", () => {
-    const o = app(`<form onsubmit=\${ event.preventDefault(); @v = isOk(1) ? "a" : "r" }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { event.preventDefault(); @v = isOk(1) ? "a" : "r" }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
     // S453 (bryan S449 ruling A3) — `try {` now opens the async listener's body
     // for the rejection log. What this control pins is that `preventDefault()`
@@ -777,26 +780,26 @@ ${attr}
     // exactly why S453 wraps in place rather than wrapping the listener in an
     // async IIFE (that would push preventDefault past a microtask boundary,
     // after the browser committed the submit).
-    expect(handlers(o.clientJs)[0]).toMatch(/^async function\(event\) \{ try \{ event\.preventDefault\(\);/);
+    expect(handlers(o.clientJs)[0]).toMatch(/^async \(?event\)? => \{ try \{\s*event\.preventDefault\(\);/);
   });
   test("round 3 (N2): a `const ev = event` alias after the await → error", () => {
-    const o = app(`<form onsubmit=\${ const ev = event; @v = isOk(1) ? "a" : "r"; ev.preventDefault() }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { const ev = event; @v = isOk(1) ? "a" : "r"; ev.preventDefault() }}><button>s</button></form>`);
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("round 3 (N2): `event[\"preventDefault\"]()` after the await → error", () => {
-    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; event["preventDefault"]() }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; event["preventDefault"]() }}><button>s</button></form>`);
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("round 3 (N2): a closure that calls preventDefault, invoked after the await → error", () => {
-    const o = app(`<form onsubmit=\${ const stop = () => event.preventDefault(); @v = isOk(1) ? "a" : "r"; stop() }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { const stop = () => event.preventDefault(); @v = isOk(1) ? "a" : "r"; stop() }}><button>s</button></form>`);
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("round 3 (N3): an inner `(event) => event.preventDefault()` parameter is not the handler's event", () => {
-    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; const objs = [{ preventDefault: () => 0 }]; objs.forEach((event) => event.preventDefault()) }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; const objs = [{ preventDefault: () => 0 }]; objs.forEach((event) => event.preventDefault()) }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
   test("round 3 (N3): a block-local `const event` is not the handler's event", () => {
-    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; if (true) { const event = { preventDefault: () => 0 }; event.preventDefault() } }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; if (true) { const event = { preventDefault: () => 0 }; event.preventDefault() } }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
   // round 4 — the event binding is POISONED after the first await (review round 3, finding 3)
@@ -817,20 +820,20 @@ ${attr}
     ["cancelBubble write", `@v = isOk(1) ? "a" : "r"; event.cancelBubble = true`],
   ]) {
     test(`round 4: ${label} after the await → error`, () => {
-      const o = app(`<form onsubmit=\${ ${body} }><button>s</button></form>`);
+      const o = app(`<form onsubmit=\${(event) => { ${body} }}><button>s</button></form>`);
       expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
     });
   }
   test("round 4: plain non-control reads after the await are allowed (`event.target`, alias `.key`)", () => {
-    const o = app(`<form onsubmit=\${ event.preventDefault(); const ev = event; @v = isOk(1) ? "a" : "r"; @v = ev.type + event.target.id }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { event.preventDefault(); const ev = event; @v = isOk(1) ? "a" : "r"; @v = ev.type + event.target.id }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
   test("round 4: a destructure of non-control fields is clean", () => {
-    const o = app(`<form onsubmit=\${ event.preventDefault(); const { target, type } = event; @v = isOk(1) ? "a" : "r"; @v = type + target.id }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { event.preventDefault(); const { target, type } = event; @v = isOk(1) ? "a" : "r"; @v = type + target.id }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
   test("control: a handler with no await may call preventDefault anywhere", () => {
-    const o = app(`<form onsubmit=\${ @v = "x"; event.preventDefault() }><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = "x"; event.preventDefault() }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
 });
@@ -873,11 +876,11 @@ server function isOk(n) { return { ok: n > 100 } }
 describe("fix round 4 — an unanalysable handler fails closed", () => {
   const facts = (n) => (n === "isOk" ? { root: { kind: "server", via: "isOk" }, local: false } : null);
   test("unparseable text that names an async fn → reported", () => {
-    const u = unanalyzableHandlerUses(`function(event) { if (isOk(1) { go() } }`, facts);
+    const u = unanalyzableHandlerUses(`function(_scrml_event) { if (isOk(1) { go() } }`, facts);
     expect(u.unanalyzable.map((x) => x.name)).toEqual(["isOk"]);
   });
   test("unparseable text with no async name → nothing", () => {
-    expect(unanalyzableHandlerUses(`function(event) { if (x { go() } }`, facts)).toBeNull();
+    expect(unanalyzableHandlerUses(`function(_scrml_event) { if (x { go() } }`, facts)).toBeNull();
   });
   test("parseable text (a bare reference / non-function expression) is not this case", () => {
     expect(unanalyzableHandlerUses(`isOk`, facts)).toBeNull();
@@ -886,8 +889,8 @@ describe("fix round 4 — an unanalysable handler fails closed", () => {
     const reported = [];
     const prev = setActiveClientAsync({ resolveFree: facts, report: (u) => reported.push(u) });
     try {
-      const out = colorActiveHandler(`function(event) { if (isOk(1) { go() } }`);
-      expect(out).toBe(`function(event) { if (isOk(1) { go() } }`);
+      const out = colorActiveHandler(`function(_scrml_event) { if (isOk(1) { go() } }`);
+      expect(out).toBe(`function(_scrml_event) { if (isOk(1) { go() } }`);
     } finally { setActiveClientAsync(prev); }
     expect(reported.length).toBe(1);
     expect(reported[0].unanalyzable[0].name).toBe("isOk");

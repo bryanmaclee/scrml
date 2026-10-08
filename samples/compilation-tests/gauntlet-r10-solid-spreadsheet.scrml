@@ -261,7 +261,7 @@ ${ evaluateAll() }
             class="formula-input"
             type="text"
             value=@formulaBar
-            oninput=updateFormulaBar(event.target.value)
+            oninput=${(e) => updateFormulaBar(e.target.value)}
         />
         <button onclick=commitFormula()>OK</>
     </div>
@@ -316,7 +316,7 @@ ${ evaluateAll() }
                                         class="cell-input"
                                         type="text"
                                         value=dispVal
-                                        oninput=updateCell(cellIdx, event.target.value)
+                                        oninput=${(e) => updateCell(cellIdx, e.target.value)}
                                     />
                                 </td>
                             }
