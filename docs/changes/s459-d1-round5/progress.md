@@ -47,3 +47,26 @@
 - destructured-param / param defaults dropped (`{ n = 5 }`, `k = 2`); destructuring assignment unsupported; C-style
   `for` in component fns; `<each>` in lifted components (reviewer probe lf still fails); block-arrow handler in `<each>`
   never invoked; `<Card id=…>` E-COMPONENT-011 vs §15.5.
+
+## 2026-10-08 — step 4: gates + corpus differential (base 8e7bd4a2c compiler vs head b70717a8f, same corpus)
+- Method: `git archive HEAD` -> headtree; same + `git archive 8e7bd4a2c compiler/src compiler/native-parser` overlaid
+  -> basetree (no stash, no flip in the worktree); `scripts/corpus-emit-differential.ts capture` on each, then `diff`
+  (exit 2 = INCOMPARABLE only because neither scratch tree is a git checkout: revision `<unknown>`; enumeration agrees,
+  2493 = 2493 sources).
+- Compile outcome: 1 newly failing = single-quoted-attr-in-component-reject (the INTENDED new E-ATTR-001); 3 newly
+  passing = component-scope-by-value-local-shadows, rest-param-named-like-prop, **stdlib/math/index.scrml** (its
+  rest params were E-SCOPE-001). Code deltas: those 4 only. Text-only: prop-write-unbound-reject (L4 wording),
+  stdlib/path + stdlib/time (their rest-param E-SCOPE-001s gone; other errors unchanged). syntax-failing 0 / 0.
+- Artifacts: 7260 compared, 7091 identical, 169 differing; 162 differ ONLY by `_scrml_project_root` (the scratch
+  tree path, basetree vs headtree — harness artifact, verified by normalizing the path). The 7 real deltas: the 4 new
+  component-scope / callback cases (base miscompiles them) and **example 23**: load-new.client.js now wires
+  `onAddressInput/onCityInput/onStateInput(event)` to `_scrml_setOrigin*/_scrml_setDestination*` (was a bare
+  `onAddressInput(event)` -> ReferenceError on input); load-detail.client.js `onAssign(event)` -> the async
+  `_scrml_saveAssignment_68(event)`. StatusPicker's `onTransition(target)` sits in an `<each>` inside a lifted
+  component — the carried each-in-lifted-component gap (the button never renders on base or head).
+- Gates: core suite (pre-commit, every code commit) 32667 pass / 0 fail; conformance/run.ts 1398/1448 + 50 xfail,
+  0 fail (+7 new cases, no new xfail); browser-baseline.ts --check PASS (48 asserted); e2e-render-map 259/0;
+  compiler/tests/*.test.js 2239/0; bootstrap-conformance regenerated (--check was stale from the new cases).
+- Found, pre-existing, NOT fixed (outside scope): a bare assignment to ANY parameter inside a function body
+  (`function g(n) { n = 6; return n }`, top level, no component) emits `const n = 6` -> E-CODEGEN-INVALID-LOGIC
+  ("Identifier 'n' has already been declared"): codegen's tilde-decl rebind test does not see parameters.
