@@ -1,0 +1,4 @@
+<program>
+<link>: string(url) = "javascript:alert(1)"
+<p id="p">${@link}</p>
+</program>

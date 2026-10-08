@@ -12,6 +12,11 @@
  * @module expression-parser
  */
 
+import {
+  PH_IS_SOME, PH_IS_NOT, PH_IS_NOT_NOT, PH_IS_VARIANT, PH_MATCH, PH_MAP_LIT, PH_TILDE,
+  PH_SQL_PLACEHOLDER, PH_SQL_REF, PH_GUARD,
+  PHP_BARE_VARIANT, PHP_RENDER, PHP_INPUT, PHP_WORKER, placeholderParam,
+} from "./placeholder-nonce.ts";
 // @ts-ignore — acorn ships its own types but the plugin API is untyped
 import * as acorn from "acorn";
 // @ts-ignore — astring ships its own types
@@ -215,7 +220,7 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
           };
         }
       }
-      out += "__scrml_sql_placeholder__";
+      out += PH_SQL_PLACEHOLDER();
       continue;
     }
     out += ch;
@@ -256,9 +261,11 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
 // diagnostic (E-SQL-008) still fires from replaceSqlBlockPlaceholder.
 
 /** Placeholder callee for an expression-position `?{…}` query. */
-export const SQL_REF_MARKER = "__scrml_sql_ref__";
+/** The current compilation's `?{}` operand marker (unforgeable — placeholder-nonce.ts). */
+export const SQL_REF_MARKER = (): string => PH_SQL_REF();
 /** Placeholder member-call name for an expression-position `!{…}` handler. */
-export const GUARD_MARKER = "__scrml_guard__";
+/** The current compilation's `!{}` handler marker (unforgeable — placeholder-nonce.ts). */
+export const GUARD_MARKER = (): string => PH_GUARD();
 
 /**
  * Scan a `{ … }` block whose `{` is at `openIdx`. Template-literal / string
@@ -389,7 +396,7 @@ export function extractHandledOperands(input: string): string {
     if (c === "?" && input[i + 1] === "{") {
       const end = scanBalancedBraceBlock(input, i + 1);
       if (end < 0) return input;
-      out += `${SQL_REF_MARKER}(${markerLiteral(input.slice(i, end))})`;
+      out += `${SQL_REF_MARKER()}(${markerLiteral(input.slice(i, end))})`;
       i = end;
       changed = true;
       continue;
@@ -397,7 +404,7 @@ export function extractHandledOperands(input: string): string {
     if (c === "!" && input[i + 1] === "{" && /[A-Za-z0-9_$)\]}`'"]/.test(lastNonWs(out))) {
       const end = scanBalancedBraceBlock(input, i + 1);
       if (end < 0) return input;
-      out += ` .${GUARD_MARKER}(${markerLiteral(input.slice(i, end))})`;
+      out += ` .${GUARD_MARKER()}(${markerLiteral(input.slice(i, end))})`;
       i = end;
       changed = true;
       continue;
@@ -424,8 +431,8 @@ export function extractHandledOperands(input: string): string {
  * text rewriters) were written against — never a placeholder.
  */
 export function restoreHandledOperands(text: string): string {
-  if (!text || (text.indexOf(SQL_REF_MARKER) === -1 && text.indexOf(GUARD_MARKER) === -1)) return text;
-  const re = new RegExp(`(\\s*\\.\\s*${GUARD_MARKER}|${SQL_REF_MARKER})\\s*\\(\\s*"`, "g");
+  if (!text || (text.indexOf(SQL_REF_MARKER()) === -1 && text.indexOf(GUARD_MARKER()) === -1)) return text;
+  const re = new RegExp(`(\\s*\\.\\s*${GUARD_MARKER()}|${SQL_REF_MARKER()})\\s*\\(\\s*"`, "g");
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
@@ -438,7 +445,7 @@ export function restoreHandledOperands(text: string): string {
     if (j >= text.length || text[close] !== ")") continue;
     let value: string;
     try { value = JSON.parse(text.slice(litStart, j + 1)); } catch { continue; }
-    out += text.slice(last, m.index) + (m[1] === SQL_REF_MARKER ? value : ` ${value}`);
+    out += text.slice(last, m.index) + (m[1] === SQL_REF_MARKER() ? value : ` ${value}`);
     last = close + 1;
     re.lastIndex = last;
   }
@@ -453,7 +460,7 @@ export function restoreHandledOperands(text: string): string {
 export function guardCallArmsRaw(node: ExprNode | null | undefined): string | null {
   if (!node || node.kind !== "call") return null;
   const callee = node.callee;
-  if (!callee || callee.kind !== "member" || callee.property !== GUARD_MARKER || callee.optional) return null;
+  if (!callee || callee.kind !== "member" || callee.property !== GUARD_MARKER() || callee.optional) return null;
   if (node.args.length !== 1) return null;
   const arg = node.args[0] as ExprNode;
   if (!arg || arg.kind !== "lit" || typeof arg.value !== "string") return null;
@@ -626,9 +633,9 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
   processed = sqlScan.result;
 
   // Handle <#id>.send() worker refs — replace with placeholder before input state refs
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, "__scrml_worker_$1__.send(");
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
   // Handle <#id> input state refs — replace with placeholder
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, "__scrml_input_$1__");
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
 
   // F-SQL-001: if the SQL scanner found an unbalanced `?{` opener, surface
   // it as a hard error (E-SQL-008). Callers (parseExprToNode, ast-builder)
@@ -677,8 +684,8 @@ export function parseStatements(raw: string, opts: { tolerant?: boolean } = {}):
   const sqlScan = replaceSqlBlockPlaceholder(processed);
   processed = sqlScan.result;
   // Handle <#id>.send() worker refs — replace with placeholder before input state refs
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, "__scrml_worker_$1__.send(");
-  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, "__scrml_input_$1__");
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>\s*\.\s*send\s*\(/g, `${PHP_WORKER()}$1__.send(`);
+  processed = processed.replace(/<#([A-Za-z_$][A-Za-z0-9_$]*)>/g, `${PHP_INPUT()}$1__`);
 
   const sqlDiag = sqlScan.unbalanced
     ? { code: "E-SQL-008", message: sqlScan.unbalanced.message, offset: sqlScan.unbalanced.offset }
@@ -1281,7 +1288,6 @@ function spanFromEstree(node: ESNode, filePath: string, baseOffset: number): Exp
 // where each arm is a quoted string. The arm content is preserved verbatim.
 // ---------------------------------------------------------------------------
 
-const SCRML_PLACEHOLDER_PREFIX = "__scrml_";
 
 // ---------------------------------------------------------------------------
 // rewriteIsPredicates — structural scanner for `is some|given|not|not not|.V|T.V`
@@ -1595,10 +1601,10 @@ function matchIsPredicateSuffix(s: string, start: number): IsPredicateSuffix | n
 /** Format a placeholder call for the matched predicate. */
 function formatIsPredicate(lhs: string, suffix: IsPredicateSuffix): string {
   switch (suffix.kind) {
-    case "is-not-not": return `__scrml_is_not_not__(${lhs})`;
-    case "is-not":     return `__scrml_is_not__(${lhs})`;
-    case "is-some":    return `__scrml_is_some__(${lhs})`;
-    case "is-variant": return `__scrml_is_variant__(${lhs}, "${suffix.variant}")`;
+    case "is-not-not": return `${PH_IS_NOT_NOT()}(${lhs})`;
+    case "is-not":     return `${PH_IS_NOT()}(${lhs})`;
+    case "is-some":    return `${PH_IS_SOME()}(${lhs})`;
+    case "is-variant": return `${PH_IS_VARIANT()}(${lhs}, "${suffix.variant}")`;
   }
 }
 
@@ -1959,7 +1965,7 @@ function preprocessForAcorn(
   s = rewriteCodeSegments(s, (code) =>
     code.replace(
       /(?<![A-Za-z0-9_$\)\]"'`|]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
-      '__scrml_bare_variant_$1__'
+      `${PHP_BARE_VARIANT()}$1__`
     )
   );
 
@@ -2084,7 +2090,7 @@ function preprocessForAcorn(
   s = rewriteCodeSegments(s, (code) =>
     code.replace(
       /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
-      '__scrml_render_$1__('
+      `${PHP_RENDER()}$1__(`
     )
   );
 
@@ -2122,7 +2128,7 @@ function preprocessForAcorn(
   // fires only on an acorn Identifier node — so a user string literal that
   // contains the text `__scrml_tilde__` is never turned into `~`.
   s = rewriteCodeSegments(s, (code) =>
-    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__")
+    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, PH_TILDE())
   );
 
   return s;
@@ -2316,7 +2322,7 @@ function preprocessMapLiterals(s: string): string {
 
     // Empty-map literal `[:]` (exactly a single colon, possibly padded).
     if (innerTrim === ":") {
-      rewrites.push({ start: i, end: closeIdx + 1, replacement: `__scrml_map_lit__(${JSON.stringify(JSON.stringify([]))})` });
+      rewrites.push({ start: i, end: closeIdx + 1, replacement: `${PH_MAP_LIT()}(${JSON.stringify(JSON.stringify([]))})` });
       i = closeIdx;                                       // skip past — no nested re-scan of this bracket
       continue;
     }
@@ -2383,7 +2389,7 @@ function preprocessMapLiterals(s: string): string {
 
     const diagArg = JSON.stringify(JSON.stringify(diags));
     const allArgs = [diagArg, ...pairArgs].join(", ");
-    rewrites.push({ start: i, end: closeIdx + 1, replacement: `__scrml_map_lit__(${allArgs})` });
+    rewrites.push({ start: i, end: closeIdx + 1, replacement: `${PH_MAP_LIT()}(${allArgs})` });
     i = closeIdx;
   }
 
@@ -2495,7 +2501,7 @@ function preprocessMatchExprs(s: string): string {
     const armStrings = splitMatchArms(armsContent);
     const armsQuoted = armStrings.map(a => JSON.stringify(a.trim())).join(", ");
 
-    const replacement = `__scrml_match__(${subject}, ${armsQuoted})`;
+    const replacement = `${PH_MATCH()}(${subject}, ${armsQuoted})`;
     result = result.slice(0, index) + replacement + result.slice(end);
   }
 
@@ -2649,16 +2655,16 @@ export function esTreeToExprNode(
     case "Identifier": {
       const name = node.name as string;
       // Handle __scrml_input_<id>__ placeholders back to input-state-ref
-      if (name.startsWith("__scrml_input_") && name.endsWith("__")) {
-        const inputName = name.slice("__scrml_input_".length, -2);
+      const inputName = placeholderParam(name, "input");
+      if (inputName !== null) {
         return { kind: "input-state-ref", span, name: inputName } satisfies InputStateRefExpr;
       }
       // Handle __scrml_sql_placeholder__
-      if (name === "__scrml_sql_placeholder__") {
+      if (name === PH_SQL_PLACEHOLDER()) {
         return { kind: "sql-ref", span, nodeId: -1 } satisfies SqlRefExpr;
       }
       // Handle worker refs __scrml_worker_<id>__
-      if (name.startsWith("__scrml_worker_") && name.endsWith("__")) {
+      if (placeholderParam(name, "worker") !== null) {
         // Worker refs are handled at a higher level; emit as ident for now
         return { kind: "ident", span, name } satisfies IdentExpr;
       }
@@ -2669,12 +2675,13 @@ export function esTreeToExprNode(
       // `__scrml_is_variant__` consumer (which also produces IdentExpr with
       // name `.Variant`). Downstream M9 bare-variant inference resolves the
       // type from context (LHS annotation, parameter type, match for=, etc.).
-      if (name.startsWith("__scrml_bare_variant_") && name.endsWith("__")) {
-        const variantName = "." + name.slice("__scrml_bare_variant_".length, -2);
+      const bareVariant = placeholderParam(name, "bare_variant");
+      if (bareVariant !== null) {
+        const variantName = "." + bareVariant;
         return { kind: "ident", span, name: variantName } satisfies IdentExpr;
       }
       // §32 tilde accumulator: convert placeholder back to ~ ident
-      if (name === "__scrml_tilde__") {
+      if (name === PH_TILDE()) {
         return { kind: "ident", span, name: "~" } satisfies IdentExpr;
       }
       // §42 absence value: `not` keyword → null literal
@@ -2965,32 +2972,32 @@ export function esTreeToExprNode(
         // synthetic RHS is never inspected as a forbidden-source-token.
         // §19.8.3 — an expression-position `?{…}` (extractHandledOperands). The
         // sql-ref keeps its source text so codegen can lower it to a real query.
-        if (calleeName === SQL_REF_MARKER && rawArgs.length === 1 && (rawArgs[0] as ESNode).type === "Literal" && typeof (rawArgs[0] as ESNode).value === "string") {
+        if (calleeName === SQL_REF_MARKER() && rawArgs.length === 1 && (rawArgs[0] as ESNode).type === "Literal" && typeof (rawArgs[0] as ESNode).value === "string") {
           return { kind: "sql-ref", span, nodeId: -1, raw: (rawArgs[0] as ESNode).value as string } satisfies SqlRefExpr;
         }
-        if (calleeName === "__scrml_is_not_not__") {
+        if (calleeName === PH_IS_NOT_NOT()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
           return { kind: "binary", span, op: "is-not-not", left, right: absentNode } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_is_not__") {
+        if (calleeName === PH_IS_NOT()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
           return { kind: "binary", span, op: "is-not", left, right: absentNode } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_is_some__") {
+        if (calleeName === PH_IS_SOME()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const absentNode: LitExpr = { kind: "lit", span, raw: "not", value: null, litType: "not" };
           return { kind: "binary", span, op: "is-some", left, right: absentNode } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_is_variant__") {
+        if (calleeName === PH_IS_VARIANT()) {
           const left = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           const variantLit = rawArgs[1] as ESNode;
           const variantName = variantLit.value as string ?? "";
           const right: IdentExpr = { kind: "ident", span, name: variantName };
           return { kind: "binary", span, op: "is", left, right } satisfies BinaryExpr;
         }
-        if (calleeName === "__scrml_match__") {
+        if (calleeName === PH_MATCH()) {
           // First arg is subject, rest are arm strings
           const arg0 = rawArgs[0] as ESNode;
           const rawArmNodes = rawArgs.slice(1) as ESNode[];
@@ -3017,7 +3024,7 @@ export function esTreeToExprNode(
         // slices, each re-parsed through the full pipeline (so nested map
         // literals, bare variants, etc. inside a key/value are handled). An
         // empty `[:]` map carries only the diag arg → zero entries.
-        if (calleeName === "__scrml_map_lit__") {
+        if (calleeName === PH_MAP_LIT()) {
           const diagRaw = (rawArgs[0] as ESNode | undefined)?.value as string ?? "[]";
           let diagnostics: { code: string; message: string }[] = [];
           try {
@@ -3199,12 +3206,9 @@ export function esTreeToExprNode(
         let rawKeyName = computed
           ? null
           : ((keyNode.name as string) ?? (keyNode.value != null ? String(keyNode.value) : ""));
-        if (
-          typeof rawKeyName === "string" &&
-          rawKeyName.startsWith("__scrml_bare_variant_") &&
-          rawKeyName.endsWith("__")
-        ) {
-          rawKeyName = rawKeyName.slice("__scrml_bare_variant_".length, -2);
+        const maskedKey = placeholderParam(rawKeyName, "bare_variant");
+        if (maskedKey !== null) {
+          rawKeyName = maskedKey;
         }
         const key: string | ExprNode = computed
           ? esTreeToExprNode(keyNode, filePath, baseOffset, rawSource)
@@ -3924,7 +3928,7 @@ export function blankLiteralTextInSource(raw: string): string {
   } catch {
     return raw;
   }
-  return chars.join("").replace(/__scrml_sql_placeholder__/g, "?{}");
+  return chars.join("").split(PH_SQL_PLACEHOLDER()).join("?{}");
 }
 
 /** Deep-copy an ExprNode with every literal's text blanked (see section header). */

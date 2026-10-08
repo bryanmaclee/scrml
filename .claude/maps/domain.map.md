@@ -1,6 +1,20 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -885,6 +899,14 @@
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
+
+## S457 — DOMAIN DELTA (`ba2712973..125486345`)
+
+- **§2.2.1 invariant (now implemented in impl#1):** a compile that reports an Error produces no artifact; an existing output dir is neither overwritten in part nor deleted. One decision point before the first byte (`api.js:3718`).
+- **§5.2 rule 3:** admitted URL schemes from data = `http`, `https`, `ftp`, `mailto`, `tel`, `sms`, a relative URL, or a raster `data:image/*` on an image-source attribute (`src`, `srcset`, `imagesrcset`, `poster`). Everything else -> `about:blank`.
+- **§53.6.1 `url` shape:** absolute URL AND a safe scheme; no `data:` form; relative URLs do not inhabit it.
+- **§47.1.1:** both `_scrml_` and `__scrml_` are reserved author-name prefixes.
+- **§42:** `is` predicates have one lowering definition (`codegen/is-predicate-lowering.ts`).
 
 ## S456 — DOMAIN DELTA (`9c556dc74..ba2712973`)
 - **Program-body SQL** (§8.1.2 / §14.8.10) — in a compilation with a database, every program-body `?{}` holds exactly ONE statement, of an admitted kind, inside a closed lexical subset; one token walk (`schema-differ.js` `programSqlTokens`) and one `${}` slot reader (`codegen/sql-lex.ts` `jsInterpolationEnd`) serve every SQL reader.

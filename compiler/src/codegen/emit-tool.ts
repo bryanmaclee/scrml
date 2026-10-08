@@ -39,6 +39,7 @@ import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
+import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 // s445 — THE SQLite-file handle emission, shared with emit-server.ts.
@@ -384,6 +385,9 @@ const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   // §23.2.4a — a `_{}` slice (main's host I/O, or an inline value-returning
   // block) is built in its sealed scope by this helper (foreign-seal.ts).
   { sig: `${FOREIGN_SEAL_FN}(`, src: SERVER_FOREIGN_SEAL_HELPER },
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls the `url` shape judge
+  // (runtime-url-guard.js). A header, so its `const` sets initialize before any top-level check.
+  { sig: `${URL_SHAPE_FN}(`, src: SERVER_URL_SHAPE_HELPER },
 ];
 
 // Runtime-helper identifiers the tool module legitimately DEFINES itself (the

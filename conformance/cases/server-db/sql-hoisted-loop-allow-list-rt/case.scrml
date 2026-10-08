@@ -99,7 +99,8 @@
         let out = []
         for (const it of items) {
             const row = ?{`SELECT body AS __scrml_batch_key FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.__scrml_batch_key)
+            // `__scrml_` names are reserved (§47.1.1, S457), and `row["…"]` trips E-ROUTE-001 — read the one column positionally; the SQL alias still collides with the hoist key alias under test
+            out.push(row is not ? "none" : Object.values(row)[0])
         }
         return out.join(",")
     }

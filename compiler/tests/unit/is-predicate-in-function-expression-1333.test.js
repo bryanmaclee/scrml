@@ -23,9 +23,12 @@
  *
  * Sections:
  *   A  lowerIsPlaceholders — the string-path lowering (unit)
+ *   B  the emit gate refuses any `__scrml_<name>__` identifier (pure shape test, S457)
  *   C  every position: no placeholder in the artifact, the §42 lowering present
  *   D  run it: the issue's reproducer and its siblings answer correctly in happy-dom
+ *   E  the gate end to end — a placeholder that is still not lowered is refused
  *   F  the paren-operand sibling defect (`(f(n)) is not` lost its `undefined` half)
+ *   G  operand-scan regressions + the S457 `__scrml_` reservation
  */
 
 import { describe, test, expect } from "bun:test";
@@ -36,6 +39,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { lowerIsPlaceholders } from "../../src/codegen/is-predicate-lowering.ts";
+import { PH_IS_SOME, PH_IS_NOT, PH_IS_NOT_NOT, PH_IS_VARIANT } from "../../src/placeholder-nonce.ts";
+import { validateEmittedArtifact } from "../../src/codegen/validate-emit.ts";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -118,23 +123,33 @@ async function boot(source, label) {
 // ---------------------------------------------------------------------------
 
 describe("A — lowerIsPlaceholders (string-path lowering of the parser's placeholders)", () => {
+  // The parser's placeholders carry the per-process nonce (placeholder-nonce.ts,
+  // S457); `N` spells a test input with the real, nonce'd names.
+  const N = (str) => str.replace(/__scrml_(is_not_not|is_not|is_some|is_variant)__/g,
+    (_, base) => ({ is_some: PH_IS_SOME(), is_not: PH_IS_NOT(), is_not_not: PH_IS_NOT_NOT(), is_variant: PH_IS_VARIANT() })[base]);
+
+  test("A0 S457 — an author-typed (un-nonced) placeholder name is NOT lowered: it is an ordinary identifier", () => {
+    expect(lowerIsPlaceholders("__scrml_is_some__(v)")).toBe("__scrml_is_some__(v)");
+    expect(lowerIsPlaceholders('__scrml_is_variant__(v, ".On")')).toBe('__scrml_is_variant__(v, ".On")');
+  });
+
   test("A1 each placeholder lowers to its §42 form; a bare name needs no IIFE", () => {
-    expect(lowerIsPlaceholders("if (__scrml_is_some__(v)) {}")).toBe("if ((v !== null && v !== undefined)) {}");
-    expect(lowerIsPlaceholders("__scrml_is_not__(v)")).toBe("(v === null || v === undefined)");
-    expect(lowerIsPlaceholders("__scrml_is_not_not__(@x)")).toBe("(@x !== null && @x !== undefined)");
+    expect(lowerIsPlaceholders(N("if (__scrml_is_some__(v)) {}"))).toBe("if ((v !== null && v !== undefined)) {}");
+    expect(lowerIsPlaceholders(N("__scrml_is_not__(v)"))).toBe("(v === null || v === undefined)");
+    expect(lowerIsPlaceholders(N("__scrml_is_not_not__(@x)"))).toBe("(@x !== null && @x !== undefined)");
   });
 
   test("A2 a compound operand is bound once (§42.2.4)", () => {
-    expect(lowerIsPlaceholders("return __scrml_is_some__(f(n))")).toBe("return " + PRESENT("f(n)"));
-    expect(lowerIsPlaceholders("__scrml_is_not__(o . a)")).toBe(ABSENT("o . a"));
-    const out = lowerIsPlaceholders("__scrml_is_not__(sideEffect())");
+    expect(lowerIsPlaceholders(N("return __scrml_is_some__(f(n))"))).toBe("return " + PRESENT("f(n)"));
+    expect(lowerIsPlaceholders(N("__scrml_is_not__(o . a)"))).toBe(ABSENT("o . a"));
+    const out = lowerIsPlaceholders(N("__scrml_is_not__(sideEffect())"));
     expect(out.indexOf("sideEffect()")).toBe(out.lastIndexOf("sideEffect()"));
   });
 
   test("A3 the variant placeholder lowers to the tag-normalized test the structured path emits", () => {
-    const out = lowerIsPlaceholders('__scrml_is_variant__(v, ".On")');
+    const out = lowerIsPlaceholders(N('__scrml_is_variant__(v, ".On")'));
     expect(out).toBe('(function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "On";})(v)');
-    expect(lowerIsPlaceholders('__scrml_is_variant__(v, "Mode.On")')).toBe(out);
+    expect(lowerIsPlaceholders(N('__scrml_is_variant__(v, "Mode.On")'))).toBe(out);
     const run = (val) => new Function("v", `return ${out};`)(val);
     expect(run("On")).toBe(true);
     expect(run({ variant: "On", data: 1 })).toBe(true);
@@ -142,26 +157,69 @@ describe("A — lowerIsPlaceholders (string-path lowering of the parser's placeh
   });
 
   test("A4 nested placeholders lower inside-out", () => {
-    const out = lowerIsPlaceholders("__scrml_is_some__(g(__scrml_is_not__(v)))");
+    const out = lowerIsPlaceholders(N("__scrml_is_some__(g(__scrml_is_not__(v)))"));
     expect(out).toBe(PRESENT("g((v === null || v === undefined))"));
     expect(out).not.toMatch(PLACEHOLDER);
   });
 
   test("A5 string, comment and regex interiors are left alone; template interpolations are lowered", () => {
-    expect(lowerIsPlaceholders('"__scrml_is_some__(v)"')).toBe('"__scrml_is_some__(v)"');
-    expect(lowerIsPlaceholders("// __scrml_is_some__(v)\nx")).toBe("// __scrml_is_some__(v)\nx");
-    expect(lowerIsPlaceholders("/__scrml_is_some__(v)/.test(s)")).toBe("/__scrml_is_some__(v)/.test(s)");
-    expect(lowerIsPlaceholders("`a ${__scrml_is_some__(v)} __scrml_is_not__(w)`"))
-      .toBe("`a ${(v !== null && v !== undefined)} __scrml_is_not__(w)`");
-    expect(lowerIsPlaceholders('f(")", __scrml_is_some__(v))')).toBe('f(")", (v !== null && v !== undefined))');
+    expect(lowerIsPlaceholders(N('"__scrml_is_some__(v)"'))).toBe(N('"__scrml_is_some__(v)"'));
+    expect(lowerIsPlaceholders(N("// __scrml_is_some__(v)\nx"))).toBe(N("// __scrml_is_some__(v)\nx"));
+    expect(lowerIsPlaceholders(N("/__scrml_is_some__(v)/.test(s)"))).toBe(N("/__scrml_is_some__(v)/.test(s)"));
+    expect(lowerIsPlaceholders(N("`a ${__scrml_is_some__(v)} __scrml_is_not__(w)`")))
+      .toBe(N("`a ${(v !== null && v !== undefined)} __scrml_is_not__(w)`"));
+    expect(lowerIsPlaceholders(N('f(")", __scrml_is_some__(v))'))).toBe('f(")", (v !== null && v !== undefined))');
   });
 
   test("A6 identity when there is no placeholder; a member name or a malformed call is left in place", () => {
     const plain = "function (v) { return v + 1 }";
-    expect(lowerIsPlaceholders(plain)).toBe(plain);
-    expect(lowerIsPlaceholders("o.__scrml_is_some__(v)")).toBe("o.__scrml_is_some__(v)");
-    expect(lowerIsPlaceholders("__scrml_is_some__(a, b)")).toBe("__scrml_is_some__(a, b)");
-    expect(lowerIsPlaceholders("__scrml_is_some__")).toBe("__scrml_is_some__");
+    expect(lowerIsPlaceholders(N(plain))).toBe(plain);
+    expect(lowerIsPlaceholders(N("o.__scrml_is_some__(v)"))).toBe(N("o.__scrml_is_some__(v)"));
+    expect(lowerIsPlaceholders(N("__scrml_is_some__(a, b)"))).toBe(N("__scrml_is_some__(a, b)"));
+    expect(lowerIsPlaceholders(N("__scrml_is_some__"))).toBe(N("__scrml_is_some__"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B — the emit gate (S457: `__scrml_` is reserved, so the gate is a pure shape test)
+// ---------------------------------------------------------------------------
+
+describe("B — the emit gate refuses any `__scrml_<name>__` identifier", () => {
+  const gate = (contents) => validateEmittedArtifact({ sourceFile: "/x/app.scrml", artifact: "app.client.js", contents });
+
+  test("B1 the issue's emitted line is refused, naming the placeholder and the position", () => {
+    const err = gate('Promise.resolve(5).then(function (v) { if (__scrml_is_some__(v)) { x = "some"; } });');
+    expect(err?.code).toBe("E-CODEGEN-INVALID-LOGIC");
+    expect(err.message).toContain("`__scrml_is_some__`");
+    expect(err.message).toContain("line 1, column 43");
+  });
+
+  test("B2 by SHAPE, in every identifier position — reference, binding, property, key", () => {
+    for (const name of ["__scrml_is_not__", "__scrml_map_lit__", "__scrml_render_header__", "__scrml_tilde__", "__scrml_some_future_thing__"]) {
+      expect(gate(`const a = ${name};`)?.message).toContain(name);
+    }
+    expect(gate("const __scrml_x__ = 1;")).not.toBeNull();
+    expect(gate("o.__scrml_is_some__(v);")).not.toBeNull();
+    expect(gate("const o = { __scrml_k__: 1 };")).not.toBeNull();
+  });
+
+  test("B3 compiler locals (`__scrml_<name>` without the trailing `__`) and text in strings/comments pass", () => {
+    expect(gate("((__scrml_is_v) => __scrml_is_v !== null)(f());")).toBeNull();
+    expect(gate("if (r && r.__scrml_error === true) {}")).toBeNull();
+    expect(gate('const s = "__scrml_is_some__(v)"; // __scrml_is_not__\n')).toBeNull();
+    expect(gate("const t = `__scrml_is_some__`;")).toBeNull();
+  });
+
+  test("B4 a syntax error still reports as the parse failure it is", () => {
+    const err = gate("if (");
+    expect(err?.code).toBe("E-CODEGEN-INVALID-LOGIC");
+    expect(err.message).not.toContain("compiler-internal placeholder");
+  });
+
+  test("B5 the value-attr lowerability probe opts out (syntax only)", () => {
+    const art = { sourceFile: "", artifact: "probe.js", contents: "const v = (__scrml_map_lit__());" };
+    expect(validateEmittedArtifact(art, { checkPlaceholders: false })).toBeNull();
+    expect(validateEmittedArtifact(art)).not.toBeNull();
   });
 });
 
@@ -376,6 +434,25 @@ describe("D — run it: the code that used to throw ReferenceError now answers",
 });
 
 // ---------------------------------------------------------------------------
+// E — the gate end to end
+// ---------------------------------------------------------------------------
+
+describe("E — the gate end to end", () => {
+  test("E1 a placeholder that is still not lowered (`[:]` in a callback body) is refused, nothing written", () => {
+    // `[:]` becomes `__scrml_map_lit__(…)` by the same preprocess-then-slice
+    // route #1333 fixed for `is`; on main it compiled CLEAN and shipped a
+    // ReferenceError. If that lowering is fixed, swap in any other still-
+    // unlowered shape — the assertion is about the gate, not map literals.
+    const out = compileSource(page(`      function probe() {
+        Promise.resolve(1).then(function (v) { const m = [:]; @msg = "some" })
+      }`), "e1");
+    const gateErr = out.errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
+    expect(gateErr?.message).toContain("`__scrml_map_lit__`");
+    expect(out.wroteAnything).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // F — the parenthesised-operand sibling
 // ---------------------------------------------------------------------------
 
@@ -471,22 +548,48 @@ describe("G — review round: the operand scan does not change legal programs", 
     expect(p.pageErrors).toEqual([]);
   });
 
-  // Author-written `__scrml_<name>__` identifiers (§47.1.1 reserves `_scrml_`
-  // only) in markup positions compile and run, as on main.
-  const ROUND3 = {
-    "onclick lambda parameter": [`<program>\n  <page>\n    <msg> = ""\n    <button onclick=\${(__scrml_ev__) => { @msg = "" + (__scrml_ev__ is some) }}>go</button>\n    <p id="out">\${@msg}</p>\n  </page>\n</program>\n`, "true"],
-    "title=\"${…}\"": [page(`      const __scrml_t__ = "tt"\n      function probe() { @msg = document.querySelector("#t").getAttribute("title") }`).replace(`<p id="out">`, `<p id="t" title="\${__scrml_t__}">x</p>\n    <p id="out">`), "tt"],
-    "if=(…)": [page(`      const __scrml_t__ = "tt"\n      function probe() { @msg = document.querySelector("#c") ? "shown" : "hidden" }`).replace(`<p id="out">`, `<p id="c" if=(__scrml_t__ == "tt")>x</p>\n    <p id="out">`), "shown"],
-    "each … as + body": [page(`      <items> = [{ id: 1, n: "one" }]\n      function probe() { @msg = document.querySelector(".r").textContent }`).replace(`<p id="out">`, `<each in=@items key=@.id as __scrml_it__>\n      <span class="r">\${__scrml_it__.n}</span>\n    </each>\n    <p id="out">`), "one"],
-    "each-row attribute": [page(`      <items> = [{ id: 1, n: "one" }]\n      function probe() { @msg = document.querySelector(".r").getAttribute("title") }`).replace(`<p id="out">`, `<each in=@items key=@.id as __scrml_it__>\n      <span class="r" title=\${__scrml_it__.n}>x</span>\n    </each>\n    <p id="out">`), "one"],
+  // S457 ruling "a for __scrml_" — `__scrml_` is RESERVED like `_scrml_`
+  // (§47.1.1, E-NAME-COLLIDES-RESERVED-PREFIX). Every position an author could
+  // write such a name is refused at compile time; a mention in a string, a
+  // comment or markup text is not a name and compiles.
+  const RESERVED = {
+    "declaration": [`      const __scrml_t__ = "tt"\n      function probe() { @msg = __scrml_t__ }`, ``],
+    "function parameter": [`      function probe() { g(1) }\n      function g(__scrml_a__) { @msg = "" + __scrml_a__ }`, ``],
+    "onclick lambda parameter": [``, `    <button id="b2" onclick=\${(__scrml_ev__) => { @msg = "" + (__scrml_ev__ is some) }}>go</button>`],
+    "title=\"${…}\"": [`      const tt = "tt"\n      function probe() { }`, `    <p title="\${__scrml_t__}">x</p>`],
+    "if=(…)": [`      function probe() { }`, `    <p if=(__scrml_t__ == "tt")>x</p>`],
+    "each … as + body": [`      <items> = [{ id: 1, n: "one" }]\n      function probe() { }`, `    <each in=@items key=@.id as __scrml_it__>\n      <span>\${__scrml_it__.n}</span>\n    </each>`],
+    "member property read": [`      function probe() { const o = { a: 1 }\n        @msg = "" + o.__scrml_k__ }`, ``],
   };
-  for (const [name, [source, expected]] of Object.entries(ROUND3)) {
-    test(`G9 round 3 — author name in ${name} compiles and runs`, async () => {
-      const p = await boot(source, "g9");
-      await p.click();
-      expect(p.text()).toBe(expected);
-      expect(p.pageErrors).toEqual([]);
+  for (const [name, [logic, markup]] of Object.entries(RESERVED)) {
+    test(`G9 S457 — an author \`__scrml_\` name in ${name} is E-NAME-COLLIDES-RESERVED-PREFIX`, () => {
+      const src = page(logic).replace(`<p id="out">`, `${markup}\n    <p id="out">`);
+      const out = compileSource(src, "g9");
+      const hit = out.errors.find((e) => e.code === "E-NAME-COLLIDES-RESERVED-PREFIX");
+      expect(hit?.message).toContain("`__scrml_");
+      // (Artifacts are still written on a non-gate error — impl#1 divergence
+      // g-impl1-artifacts-written-on-error-s451; the compile fails by exit status.)
     });
   }
 
+  test("G9b S457 — `__scrml_` text in a string, a comment or markup text is not a name", async () => {
+    const p = await boot(page(`      // see __scrml_note__ in the docs
+      const label = "__scrml_s__"
+      function probe() { @msg = label }`).replace(`<p id="out">`, `<p>prose __scrml_text__ and "__scrml_q__"</p>\n    <p id="out">`), "g9b");
+    await p.click();
+    expect(p.text()).toBe("__scrml_s__");
+    expect(p.pageErrors).toEqual([]);
+  });
+
+  test("G9c S457 — the parser's own placeholders in the author tree are not the author's (#1333 shapes still compile)", () => {
+    // escape-hatch raw carrying `__scrml_is_some__`, a `!{}` handler's
+    // `__scrml_guard__` marker, and a masked `.A` variant in an arrow param.
+    for (const logic of [
+      `      function probe() { Promise.resolve(5).then(function (v) { if (v is some) { @msg = "some" } }) }`,
+      `      type D:enum = { A, B }\n      <d>: D = .A\n      let r: string = match @d {\n        .A /* alpha */ => "a"\n        .B => "b"\n      }\n      function probe() { @msg = r }`,
+    ]) {
+      const out = compileSource(page(logic), "g9c");
+      expect(out.errors.map((e) => e.code)).toEqual([]);
+    }
+  });
 });

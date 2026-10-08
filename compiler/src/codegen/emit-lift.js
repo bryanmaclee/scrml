@@ -1,5 +1,6 @@
 // s441 — §13.2 for per-element event handlers (see colorActiveHandler).
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
+import { PHP_RENDER } from "../placeholder-nonce.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -825,8 +826,11 @@ function rewriteRenderCall(expr) {
  * @returns {string} — cleaned code
  */
 function cleanRenderPlaceholder(code) {
-  if (!code || typeof code !== 'string' || !code.includes('__scrml_render_')) return code;
-  return code.replace(/__scrml_render_([A-Za-z_$][A-Za-z0-9_$]*)__/g, '$1');
+  // Only the parser's unforgeable placeholder (placeholder-nonce.ts): an
+  // author-typed `__scrml_render_x__` is left alone (and refused by the
+  // §47.1.1 reservation / the §2.2.1 emit gate).
+  if (!code || typeof code !== 'string' || !code.includes(PHP_RENDER())) return code;
+  return code.replace(new RegExp(PHP_RENDER() + '([A-Za-z_$][A-Za-z0-9_$]*)__', 'g'), '$1');
 }
 
 // ---------------------------------------------------------------------------

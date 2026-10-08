@@ -30,11 +30,12 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 243 | 6 |
-| MED | 533 | 4 |
-| LOW | 292 | 0 |
-| Nominal (spec-ahead-of-impl) | 8 | 0 |
+| HIGH | 245 | 6 |
+| MED | 532 | 4 |
+| LOW | 295 | 0 |
+| Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
 
 ### g-unquoted-handler-assignment-rhs-dropped-s457 — `onclick=@count = @count + 1` compiles to `count = count`: the `+ 1` is silently dropped — `NEW S457; HIGH; open (silent)`
 
@@ -83,6 +84,43 @@ Same fix as 0c84f5038: rename at emission into `_scrml_`. Enumeration method in 
 ### g-client-buffer-scope-rename-compile-cost-s457 — the S457 scope-aware rename parses the client buffer with Acorn: ~12-17% longer compiles on large examples — `NEW S457; LOW; open (perf)`
 
 <!-- @gap id=g-client-buffer-scope-rename-compile-cost-s457 sev=LOW status=open locus=compiler/src/codegen/fn-name-rename.ts prov=review:s457-rename-differential(unprofiled) -->
+### g-compile-write-not-atomic-on-io-failure-s457 — the S457 no-artifacts-on-error gate decides on DIAGNOSTICS before the first byte; an I/O failure mid-write (EACCES, disk full) still leaves a mixed old/new build — `NEW S457; LOW; open`
+
+<!-- @gap id=g-compile-write-not-atomic-on-io-failure-s457 sev=LOW status=open locus=compiler/src/api.js(staged write loop; per-route chunks / chunks.json / asset manifest written after the main flush) prov=review:S457-no-artifacts(executed: chmod 444 app.css → crash, app.html v2 + app.css v1) -->
+
+§2.2.1 "neither overwritten in part" is not guaranteed under I/O failure. Fix: write to a temp dir and rename. Pre-existing (base was worse).
+
+### g-refinement-checks-absent-in-n-positions-s457 — §53 refinement checks are not emitted in nine positions (any refinement type) — `NEW S457; HIGH; open`
+
+<!-- @gap id=g-refinement-checks-absent-in-n-positions-s457 sev=HIGH status=open locus=searched:emit-logic.ts,emit-functions.ts,emit-server.ts,emit-worker.ts,emit-library.ts,emit-tool.ts,emit-parse-variant.ts prov=review:S457-differential-d48abd3f2(executed on base and head) -->
+
+§53.4.3 / §53.9 say these SHALL be checked; none are: (1) reassignment of a refined cell (`@u = v` with `v = "javascript:x"` accepted); (2) struct fields (`type T:struct = { u: string(url) }`); (3) top-level `const X: string(url) = f()`; (4) `<endpoint>` payload fields (parseVariant defers — a `javascript:` field returns 200; `<api>` responses likely the same); (5) schema/table fields; (6) a server function's refined return type; (7) library / tool / value-export function parameters; (8) a literal call argument (throws at runtime, not judged statically); (9) a refined parameter on a nested worker `<program>` function. SPEC §53.6.1 now lists these under impl#1 status. Silent: a refinement type promises a property the program does not have.
+
+### g-worker-bundle-runtime-helpers-not-inlined-s457 — a worker `<program>` bundle inlines only `_scrml_reply`; `==` on structs (`_scrml_structural_eq`) or a map literal (`_scrml_map_from_entries`) in a worker function throw ReferenceError at runtime, clean compile — `NEW S457; MED; open`
+
+<!-- @gap id=g-worker-bundle-runtime-helpers-not-inlined-s457 sev=MED status=open locus=compiler/src/codegen/emit-worker.ts(generateWorkerJs) prov=empirical:s457-string-url-agent -->
+
+The S457 `url` judge is now inlined (6a review N1). Fix: the sig→source table emit-tool / emit-library use, plus a fail-closed scan for unmet `_scrml_*(` refs.
+
+### g-server-param-contract-400-string-coercion-throws-s457 — the refined-parameter 400 response builds `value: String(param)`; `{"link":{"toString":1}}` makes `String()` throw and the handler crashes instead of 400 — `NEW S457; LOW; open`
+
+<!-- @gap id=g-server-param-contract-400-string-coercion-throws-s457 sev=LOW status=open locus=compiler/src/codegen/emit-predicates.ts(emitServerParamCheck, emitRuntimeCheck) prov=review:S457-differential-d48abd3f2 -->
+
+### g-stdlib-data-url-validator-admits-executable-schemes-s457 — `scrml:data` `url()` validator checks only that `new URL()` parses, so it accepts `javascript:`; its scrml source still uses try/catch — `NEW S457; LOW; open (ruling: follow string(url)?)`
+
+<!-- @gap id=g-stdlib-data-url-validator-admits-executable-schemes-s457 sev=LOW status=open locus=stdlib/data/validate.scrml(:200)+compiler/runtime/stdlib/data.js(:536) prov=empirical:s457-string-url-agent -->
+
+### g-meta-code-runs-unsandboxed-in-the-compiler-process-s457 — `^{}` meta bodies are lowered to JS and run via `new Function` in the compiler process; Approach C is enforced by a fail-open name DENY list — `emit.constructor` reaches `Function` → `process`/`Bun` — `NEW S457; HIGH; open (security; fix dispatched: s457-meta-allow-list)`
+
+<!-- @gap id=g-meta-code-runs-unsandboxed-in-the-compiler-process-s457 sev=HIGH status=open locus=compiler/src/meta-eval.ts(:479 new Function)+compiler/src/meta-checker.ts(META_BUILTINS deny list) prov=spec:§22.12-"The general-developer `^{}` body parser SHALL accept only scrml-native + this enumerated primitive set" -->
+
+CONFIRMED by two S457 reviewers: a compile-time `^{}` body compiled that emitted `typeof process` via `emit.constructor`; built-in prototypes patched via `"".constructor.prototype`; reaches `process.getBuiltinModule('node:async_hooks')`. bryan S457: "I don't want JS there. I would prefer scrml." — §22.2 / §22.12 (S114 Approach C) already ratify a scrml-native body + a closed primitive set. Fix: a closed ALLOW-LIST over the parsed body (+ refuse constructor/prototype reach), `emit()` output through every ordinary source check. Until it lands, the placeholder unforgeability (§47.1.1) holds only against non-meta source.
+
+### g-compile-crash-path-not-token-scrubbed-s457 — a thrown internal error's stack (printed by `compile`, returned by `serve`) is redacted but not placeholder-token-scrubbed; Set members / Map keys not visited by the deep scrub — `NEW S457; LOW; open (harmless: the token is dead once its compile ends)`
+
+<!-- @gap id=g-compile-crash-path-not-token-scrubbed-s457 sev=LOW status=open locus=compiler/src/api.js(_compileScrmlChokepoint redactThrown)+compiler/src/commands/serve.js(err.stack)+compiler/src/placeholder-nonce.ts(scrubPlaceholderTokenDeep) prov=review:S457-prefix-r4 -->
+
+Also: stale bare-variant placeholder regexes at `codegen/rewrite.ts` (~:2299) and `codegen/emit-expr.ts` (~:4482) match only author spellings now — delete or point at the token form.
 
 ### g-template-sql-ref-marker-unrestored-client-s457 — a `?{}` in a template literal that also holds `<#name>`, in a function with no other `?{}`, stays client-side and ships `__scrml_sql_ref__("?{`…SQL…`}")` — `NEW S457; MED; open`
 
@@ -136,7 +174,7 @@ PA-reproduced at `0d8e9d8ce`: exit 0; only diagnostics W-LINT-013 (Vue shorthand
 
 <!-- @gap id=g-map-literal-in-function-expression-emits-undefined-helper-s457 sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts(escape-hatch raw route; no map-literal lowering) prov=empirical:s457-is-some-function-expression-agent -->
 
-Same preprocess-then-slice route as #1333. Silent (ReferenceError at run time) — still UNGUARDED: the S457 placeholder gate that refuses it is held pending the `__scrml_` prefix ruling (gate branch worktree-agent-a4d6f8b53831fd9ee @ 934ac062c). Needs its own lowering either way.
+Same preprocess-then-slice route as #1333. S457 (s457-scrml-prefix-gate): no longer silent — the placeholder gate refuses the artifact (E-CODEGEN-INVALID-LOGIC), nothing written. The lowering is still owed: `[:]` in a block-bodied callback cannot compile until it is written.
 
 ### g-match-in-function-expression-mangled-s457 — `match` inside a function-expression body emits `__scrml_match__(v, ""On" :> …)` — `NEW S457; MED; open (fails loud)`
 
@@ -196,7 +234,9 @@ artifact — the top-level case is E-COMPONENT-035, so the arm case is a conform
 
 ### g-string-url-refinement-admits-executable-schemes — the `string(url)` refinement admits `javascript:` / `data:` and refuses relative URLs — `NEW S457; MED; open (needs a ruling)`
 
-<!-- @gap id=g-string-url-refinement-admits-executable-schemes sev=MED status=open locus=searched:§53 url predicate (check = new URL() parses) prov=dd:scrml-support/docs/deep-dives/url-refinement-type-2026-10-07.md -->
+<!-- @gap id=g-string-url-refinement-admits-executable-schemes sev=MED status=resolved resolved-by=S457-fix/s457-string-url-executable-schemes locus=searched:§53 url predicate (check = new URL() parses) prov=dd:scrml-support/docs/deep-dives/url-refinement-type-2026-10-07.md -->
+
+RESOLVED S457 (ruling "6a"): `string(url)` = absolute URL + a §5.2 safe scheme (http/https/ftp/mailto/tel/sms) — one judge `_scrml_url_shape_ok` in runtime-url-guard.js at the static zone (type-system) and the runtime zone (client urlguard chunk; server / value-only / tool / library / worker inline). Refuses javascript:/vbscript:/data:/blob:/file:/ws: (PA reading: the full §5.2 safe set, fail closed). Relative URLs unchanged (still refused).
 
 From the S457 url-type deep-dive (Q2), agent-measured: `<u>: string(url) = "javascript:alert(1)"` compiles clean as
 statically proven; `"/users/1"` fails E-CONTRACT-001. The check is "does `new URL()` parse it", a form-input shape tied to
@@ -3412,7 +3452,7 @@ those is the real follow-on. **The 150-site count is now produced by the harness
 future change to this class has a measurable before/after rather than an argument.
 
 ### g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001 — the §14.8.9 confidentiality backstop correctly refuses to certify an unparseable bundle, and the compiler writes it anyway — `NEW S322-bryan; MED; open`
-<!-- @gap id=g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001 sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/api.js prov=rationale:a-security-backstop-that-fails-closed-in-its-verdict-but-not-in-its-side-effect-still-ships-the-artifact-it-refused-to-certify -->
+<!-- @gap id=g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001 sev=MED status=resolved resolved-by=S457-fix/s457-no-artifacts-on-error locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/api.js prov=rationale:a-security-backstop-that-fails-closed-in-its-verdict-but-not-in-its-side-effect-still-ships-the-artifact-it-refused-to-certify -->
 
 Observed while attributing a transient diagnostic during the U1 review. At the U1 round-1 tip, a
 stranded `await` made a client bundle unparseable and `E-CG-001` fired:
@@ -20731,7 +20771,7 @@ Three normative-looking artifacts disagree. (1) SPEC §20.5.1 "`session-secure=`
 
 ### g-session-config-refusal-still-writes-dist — `E-MW-008` (and `E-MW-007`) fail the build by exit code but `scrml build` / `scrml compile --output-dir` still write a complete `dist/`, including the split-cookie server units
 So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" holds only for callers that honour the exit code; a deploy script that ignores it ships the split. Reviewer-executed on the A+B two-program fixture (S437 post-merge review of #1094); `scrml dev` behaviour UNVERIFIED. Shared posture with E-MW-007, not new to #1094. Direction is a ruling: fail-closed = do not write artifacts on a hard session-config refusal. — `NEW S437-bryan (relayed from reviewer)`; **LOW**; open
-<!-- @gap id=g-session-config-refusal-still-writes-dist sev=LOW status=open locus=compiler/src/commands/build.js+compile.js(write phase does not gate on E-MW-007/008; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-cli-build-exit-1-dist-written -->
+<!-- @gap id=g-session-config-refusal-still-writes-dist sev=LOW status=resolved resolved-by=S457-fix/s457-no-artifacts-on-error locus=compiler/src/commands/build.js+compile.js(write phase does not gate on E-MW-007/008; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-cli-build-exit-1-dist-written -->
 **S438-peter:** a pre-built fail-closed fix sits on **`hold/s438-refusal-writes-no-dist` @ `074f1630`** (three S239 rounds: the refusal is decided before ANY write via a `beforeWrite` hook, E-MW-007 judged over the post-write unit set, success paths byte-identical, 15 tests) — awaiting bryan's ruling (note in `handOffs/incoming/`). ⚑ **Re-grade proposed LOW → MED:** measured on `072741ca`, a refused REBUILD overwrites the split units in place beside the previous `_server.js`, which boots and serves **200** on the split.
 
 ### g-ghost-lint-false-fires-on-canonical-block-handler — the canonical inline block handler `onclick={ s1; s2 }` (L19 REVERSED S435, §5.2.3) fires `W-LINT-007` ("`<Comp prop={val}>` — scrml uses `<Comp prop=val>`") and `W-LINT-013` twice ("`@click=` Vue event shorthand") on a correct program
@@ -23148,7 +23188,7 @@ Governing: SPEC §6.7.7 "Settled state (failure)" + §19.4.3 item 5 + §19.6.1 S
 Governing: SPEC §52.6.8 (S451 item 2: a hydration load is exempt from E-ERROR-002, never silent — server log line, placeholder kept, `@x.error`) + §19.8.3. Compiled on `2fb41d8b7` (`<driver server> : Driver = ?{`SELECT * FROM drivers WHERE id = 1`}.get()` + `<p>${@driver.error}</p>`, emitted JS read, not run): exit 0, no diagnostic; the client load is `const _scrml_sl_res = await fetch("/__serverLoad/driver", …); _scrml_cs_reactive_set("driver", await _scrml_sl_res.json());` — no status check, so a failed load's JSON body would be written into the cell in place of the placeholder (rule 3), and a non-JSON body rejects the un-caught async IIFE; `@driver.error` lowers to a plain member read of the cell's value. The server handler `(await _scrml_sql`…`)[0] ?? null` has no catch of its own. Also not emitted: E-SERVER-CELL-RESERVED-NAME, and E-SYNTHESIZED-WRITE on `@x.error`. impl#1 frozen for semantics (S447); the bootstrap builds §52.6.8.
 
 ### g-impl1-artifacts-written-on-error-s451 — impl#1 DIVERGENCE (filed, not fixed): a compile that reports an error-severity diagnostic still writes its output artifacts, except for the ten application-scope codes the refusal gate covers — `NEW S451; NOMINAL; nominal`
-<!-- @gap id=g-impl1-artifacts-written-on-error-s451 sev=NOMINAL status=nominal locus=compiler/src/commands/refusal-gate.js(APPLICATION_SCOPE_REFUSALS — only E-MW-007/008, E-PROGRAM-002, E-PROGRAM-NESTED-AUTH/-SESSION/-ATTR, E-PROGRAM-CONFIG-UNREAD, E-AUTH-ATTR-INVALID, E-SESSION-AMBIENT-SERVER, E-INTERNAL-SESSION-AMBIENT-SERVER refuse the write; its header: "Every other hard error keeps the pre-existing posture (artifacts land, exit 1); widening it is an open ruling")+compiler/src/codegen/validate-emit.ts(E-CODEGEN-INVALID-LOGIC — the parse gate, which already writes no artifacts) prov=ruling:user-voice-scrml.md-S451-"your-recs-on-all-five"-item-5b -->
+<!-- @gap id=g-impl1-artifacts-written-on-error-s451 sev=NOMINAL status=resolved resolved-by=S457-fix/s457-no-artifacts-on-error locus=compiler/src/commands/refusal-gate.js(APPLICATION_SCOPE_REFUSALS — only E-MW-007/008, E-PROGRAM-002, E-PROGRAM-NESTED-AUTH/-SESSION/-ATTR, E-PROGRAM-CONFIG-UNREAD, E-AUTH-ATTR-INVALID, E-SESSION-AMBIENT-SERVER, E-INTERNAL-SESSION-AMBIENT-SERVER refuse the write; its header: "Every other hard error keeps the pre-existing posture (artifacts land, exit 1); widening it is an open ruling")+compiler/src/codegen/validate-emit.ts(E-CODEGEN-INVALID-LOGIC — the parse gate, which already writes no artifacts) prov=ruling:user-voice-scrml.md-S451-"your-recs-on-all-five"-item-5b -->
 Governing: SPEC §2.2.1 (S451 item 5(b): *"a compile that reports any error SHALL NOT produce a runnable artifact (the bootstrap's #1255 gate becomes the rule; impl#1 divergence filed)"*). By code reading on `2fb41d8b7`: `refusal-gate.js` names the "open ruling" this ruling closes; outside its set and the §2.2.1 parse gate, `compile` / `build` exit 1 and write the units. The other two pre-existing instances, E-REACTIVE-005 (§6.6) and E-COMPONENT-035 (§15.14.2), say "SHALL NOT produce code outputs" and are not in the gate's set. Measured on `2fb41d8b7` with `bun compiler/bin/scrml.js compile <f> --output-dir <d>`: `const <a> = @b + 1` / `const <b> = @a + 1` reports `E-DERIVED-CIRCULAR-DEP` (impl#1's code for the §6.6 cycle, not E-REACTIVE-005) and still writes `cyc.client.js`, `cyc.html`, `cyc.css` and the runtime; a bare `@x` read reports `E-STATE-UNDECLARED`, prints `FAILED — 1 error`, and writes the same four files. Nominal on impl#1 per the PA's filing instruction: the rule is spec-ahead of impl#1 and the bootstrap gate implements it.
 
 ## §S451b — impl#1 divergences from the S451 U1 tightenings R2 / R3 / R5 / R6 / R8 / R9 / R10 (2026-10-03; ruling:user-voice-scrml.md S451 "yes on all seven"; SPEC §12.4 / §34 E-ROUTE-001, E-ROUTE-002 / §19.10.6 / §19.9.1 + §57.8 / §8.9.2 + §19.10.5 / §57.4–§57.5 + §12.5.1 — change `docs/changes/s451-spec-u1-rulings/`. impl#1 is frozen for semantics (S447): FILED, not scheduled. R3: the existing `g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires` (SPEC side now settled: Error). R5: impl#1 conforms — `compiler/src/codegen/sql-tx-guard.ts` already routes every SQLite statement, inside a transaction or not, through the one mutex; nothing filed. R9: a `server function f()! -> SqlError` with a dependent SELECT→UPDATE pair, compiled on `b490f3b75`, already gets `BEGIN DEFERRED`; impl#1's envelope holes against the restated trigger are the existing `g-implicit-envelope-requires-explicit-server-modifier` and `g-implicit-envelope-only-on-baseline-csrf-arm`; nothing new filed)

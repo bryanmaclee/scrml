@@ -45,8 +45,9 @@ function compileToClient(source, suffix = "qarms") {
   writeFileSync(tmpInput, source);
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
-    const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+    // in-memory output (a clean compile writes the same codegen).
+    const clientJs = result.outputs.get(tmpInput)?.clientJs ?? "";
     return {
       errors: result.errors ?? [],
       clientJs,

@@ -1,6 +1,20 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -1035,6 +1049,18 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S457 — DIAGNOSTIC DELTA (`ba2712973..125486345`)
+
+No new diagnostic code (grep of `"[EWI]-…"` literals added in the `compiler/src` diff: every one pre-existed).
+| change | where |
+|---|---|
+| ANY Error-severity diagnostic now cancels the whole write (was: ten application-scope codes + the parse gate) | `api.js` `hasFatalBeforeWrite` :3718; `commands/refusal-gate.js` list retired |
+| `E-CODEGEN-INVALID-LOGIC` also fires for an un-lowered `__scrml_`-shaped placeholder NAME token in an artifact | `codegen/validate-emit.ts` `validateEmittedArtifact` :82 (message :141, token scrubbed :152) |
+| `E-NAME-COLLIDES-RESERVED-PREFIX` now covers `__scrml_` | `validators/reserved-prefix.ts` :94 |
+| `E-SQL-MULTIPLE-STATEMENTS` / `E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED` / `E-TENANT-UNDECLARED` raised at codegen too, from the emitted driver call | `codegen/sql-one-statement-guard.ts` `recordProgramStatementRefusal` :241 -> `drainProgramStatementRefusals` :263 (`codegen/index.ts` :3292/:4344) |
+| runtime URL refusal is a LOG report (not a diagnostic code): label `url-guard` via `_scrml_error_boundary_log`, else `console.error("[scrml url-guard] …")` | `runtime-url-guard.js` `_scrml_safe_url` :208 |
+| `W-STDLIB-COMPILER-DEFERRED` / `W-STDLIB-SHIM-MISSING` builders hoisted to module scope (text unchanged) | `api.js` :383 / :403 |
 
 ## S456 — DIAGNOSTIC DELTA (`9c556dc74..ba2712973`)
 

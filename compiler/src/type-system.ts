@@ -104,6 +104,9 @@ import {
   readLiteralIdentAttr,
   isWatchesChannel,
 } from "./channel-watches.ts";
+// §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
+// boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
+import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -1555,7 +1558,9 @@ const NAMED_SHAPES: Map<string, NamedShape> = new Map([
 // in the other.
 const SHAPE_STATIC_PREDICATES: Map<string, (v: string) => boolean> = new Map([
   ["email", (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)],
-  ["url",   (v) => { try { new URL(v); return true; } catch { return false; } }],
+  // `url` is not a copy: the static and runtime zones call the same function (runtime-url-guard.js),
+  // which refuses every scheme outside §5.2's safe set (S457 "6a").
+  ["url",   (v) => _scrml_url_shape_ok(v)],
   ["uuid",  (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)],
   ["phone", (v) => /^[+]?[0-9\s\-().]{7,15}$/.test(v)],
   ["date",  (v) => /^\d{4}-\d{2}-\d{2}$/.test(v)],

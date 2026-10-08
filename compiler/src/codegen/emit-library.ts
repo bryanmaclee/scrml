@@ -22,6 +22,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { SERVER_STRUCTURAL_EQ_HELPER } from "./emit-server.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
+import { URL_SHAPE_FN, SERVER_URL_SHAPE_HELPER, needsUrlShapeHelper } from "./emit-predicates.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER } from "./sql-attempt.ts";
 // §59 value-native map/set runtime — the SAME marker-delimited slice of
 // `runtime-template.js` that `emit-server.ts` injects (g-value-native-map-set-
@@ -422,6 +423,8 @@ function unmetRuntimeHelperRefs(emitted: string): string[] {
     // §59 map/set runtime — appended as one family by `withRuntimeHelpers` when
     // the assembled module references it, so every name the slice defines is MET.
     if (MAP_RUNTIME_PROVIDED_NAMES.has(name)) continue;
+    // §53.6.1 — the `url` shape judge, inlined (as a header) by `withRuntimeHelpers`.
+    if (name === URL_SHAPE_FN) continue;
 
     unmet.add(name);
   }
@@ -448,6 +451,11 @@ function withRuntimeHelpers(moduleSrc: string): string {
   // so probing `out` after appending would be self-satisfying. One append for the
   // whole family; a module that lowers no map literal is byte-unchanged.
   if (MAP_RUNTIME_REFERENCED.test(moduleSrc)) out += "\n" + SERVER_VALUE_NATIVE_MAP_HELPER;
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls the `url` shape judge. Unlike the
+  // footer entries above, runtime-url-guard.js declares `const` sets the judge reads, so it is placed
+  // as a HEADER: a top-level boundary check runs at module evaluation, before a footer `const` would
+  // be initialized. (`import` declarations hoist, so a leading helper block is legal module text.)
+  if (needsUrlShapeHelper(moduleSrc)) out = SERVER_URL_SHAPE_HELPER.replace(/^\n/, "") + "\n\n" + out;
   return out;
 }
 

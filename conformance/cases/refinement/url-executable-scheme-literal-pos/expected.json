@@ -1,0 +1,12 @@
+{
+  "id": "refinement-url-executable-scheme-literal-pos",
+  "description": "S457 \"6a\": the `url` named shape refuses a non-safe scheme in the STATIC zone. `string(url)` initialized with the literal \"javascript:alert(1)\" — a string the URL parser accepts, whose scheme `javascript` is outside the §5.2 safe set — fails the shape, so the compiler proves the violation at compile time and fires E-CONTRACT-001. (Before S457 the shape was only \"URL.canParse passes\" and this literal was statically proven.)",
+  "language-version": "1.0",
+  "spec": "§53.6.1",
+  "rationale": "§53.6.1: \"A value SHALL satisfy `url` only when (1) it is a string that the WHATWG URL parser accepts as an absolute URL … AND (2) the scheme it commits to … is one of the §5.2 safe schemes\"; \"a string literal that fails it is a compile-time `E-CONTRACT-001` (static zone, §53.4.2 rule 2)\".",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

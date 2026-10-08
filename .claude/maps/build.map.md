@@ -1,6 +1,20 @@
 # build.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -953,6 +967,13 @@
 # `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
 # See the CI section and invariant 87 in primary.map.md.
 #
+
+## S457 — CI + BUILD DELTA (`ba2712973..125486345`)
+
+- **CI `gate` (blocking, PR-only):** NEW step "Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)" — runs `bun scripts/bootstrap-conformance.ts --check` only when `git diff <base>...HEAD -- conformance/cases compiler/self-host-v2` is non-empty (a diff error counts as touched). Staleness blocks; FAIL count does not. Remedy `bun scripts/bootstrap-conformance.ts --write` (~60 s). `tracking` still reports it on every run. [`.github/workflows/ci.yml`]
+- **`scrml compile` / `build` / `dev` / `serve`:** a compile with any Error leaves the output dir untouched; `compile`/`build` print `noFilesWrittenLine` (`commands/refusal-gate.js:38`) when `!result.artifactsWritten`; `dev` keeps serving the last good build and answers every request with the error; `serve` returns `outputs: {}` + `artifactsWritten: false`. `build`'s E-MW-007 check over the post-write unit set still goes through `beforeWrite`.
+- **`scrml fix --help`:** sql-failable text now says reads rewritten, writes listed (#1340).
+- `docs/bootstrap-conformance.md` is **current** at `125486345` (`--check` executed).
 
 ## S456 — CI + BUILD DELTA (`9c556dc74..ba2712973`)
 - No `package.json` / `.github/` / `scripts/` change.
