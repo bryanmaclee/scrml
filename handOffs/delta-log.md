@@ -4314,3 +4314,5 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3777] ruling · S457 "1a 2a 3a 4a 5 dd it 6a" + "^{} … I would prefer scrml" (§22.12 already ratifies; impl#1 deny-list → allow-list dispatched) · → user-voice §S457
 [3778] land · s457-string-url-executable-schemes (6a) — string(url) = absolute URL + §5.2 safe scheme, one judge; worker bundle inlines it; review LAND-WITH-NITS · @adv:g-string-url-refinement-admits-executable-schemes
 [3779] land · s457-no-artifacts-on-error (1a) — any Error → no artifact, every entry point; differential review LAND-WITH-NITS (no writing path found; successes byte-identical); PA fixed 2 nits · @adv:g-impl1-artifacts-written-on-error-s451
+[3780] land · #1348 s457-no-artifacts-on-error (1a) · @adv:g-impl1-artifacts-written-on-error-s451
+[3781] state · S457 WRAP — 8 PRs (#1340–#1344, #1346–#1348) + #1333 closed; in flight: #1345 (CI pins), sinks branch, re-export/dev-tenant branch, meta allow-list (held on bryan (a)/(b)); briefs 2a / 3a+4a queued; 11 rulings + 2 PA readings · → hand-off §S457
