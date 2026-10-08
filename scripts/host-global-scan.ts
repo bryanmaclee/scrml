@@ -41,7 +41,7 @@
  *
  * MODES (every .scrml under the roots is compiled in each):
  *   default · esm (moduleFormat:"esm") · embed (embedRuntime) · build (contentHashAssets +
- *   emitPerRoute — the `scrml build` compile, per-route chunks included) · test
+ *   emitPerRoute + stripShippedJs — the `scrml build` compile, per-route chunks included, stripped) · test
  *   (testMode + emitMachineTests; only sources with `~{` or `<engine`) · library
  *   (`--mode library`; only sources with an `export`).
  * Tool / worker / value-only modules arise in every mode from the sources that produce them. Each multi-file program directory (examples/<dir>/, benchmarks/<dir>/) is
@@ -77,7 +77,9 @@ const MODE_OPTS: Record<Mode, Record<string, unknown>> = {
   default: {},
   esm: { moduleFormat: "esm" },
   embed: { embedRuntime: true },
-  build: { contentHashAssets: true, emitPerRoute: true },
+  // S459 (§47.9.9) — `scrml build` ships STRIPPED browser JS, so the build mode scans the
+  // stripped bytes (the gate must read what ships).
+  build: { contentHashAssets: true, emitPerRoute: true, stripShippedJs: true },
   test: { testMode: true, emitMachineTests: true },
   library: { mode: "library" },
 };
@@ -294,7 +296,9 @@ async function runShard(units: string[][], modes: Mode[]) {
         // tool modules (kind="tool") run under Bun, like server bundles: not browser-reachable
         const toolFiles = new Set<string>();
         for (const [src, o] of (r.outputs ?? new Map()) as Map<string, any>) if (o && o.toolJs) toolFiles.add(src.split("/").pop()!.replace(/\.scrml$/, ".js"));
-        const runtimeDeclares = files.some((f) => /scrml-runtime[^/]*\.js$/.test(f) && /^var _scrml_g = globalThis;/m.test(readFileSync(f, "utf8")));
+        // S459 — the `build` mode reads STRIPPED browser JS (`var _scrml_g=globalThis;`,
+        // `import{…}from"…"`), so every shape test below is whitespace-tolerant.
+        const runtimeDeclares = files.some((f) => /scrml-runtime[^/]*\.js$/.test(f) && /^var\s+_scrml_g\s*=\s*globalThis\s*;/m.test(readFileSync(f, "utf8")));
         for (const f of files) {
           const rel = relative(out, f);
           const base = rel.split("/").pop()!;
@@ -320,14 +324,14 @@ async function runShard(units: string[][], modes: Mode[]) {
           // the embedded runtime region: compiler-only, exempt
           let embedded = false;
           const a = js.indexOf(RT_START), b = js.indexOf(RT_END);
-          if (a !== -1 && b > a) { js = blank(js, a, b + RT_END.length); embedded = /^var _scrml_g = globalThis;/m.test(readFileSync(f, "utf8").slice(a, b)); }
+          if (a !== -1 && b > a) { js = blank(js, a, b + RT_END.length); embedded = /^var\s+_scrml_g\s*=\s*globalThis\s*;/m.test(readFileSync(f, "utf8").slice(a, b)); }
           // the classic-script alias line reads `globalThis` at the top level, before any author code
           let declaresScript = false;
-          js = js.replace(/^var _scrml_g = globalThis;.*$/m, (m) => { declaresScript = true; return " ".repeat(m.length); });
+          js = js.replace(/^var\s+_scrml_g\s*=\s*globalThis\s*;.*$/m, (m) => { declaresScript = true; return " ".repeat(m.length); });
           // the data: module (server / tool / test modules) or, for a written library module,
           // the compiler's same-origin `_scrml/_global.js` (host-global-alias.ts HOST_GLOBAL_MODULE_PATH)
-          const declaresModule = /^import _scrml_g from "(?:data:text\/javascript,export default globalThis|(?:\.\.?\/)+_scrml\/_global\.js)";/m.test(js);
-          const importsFromRuntime = /^import \{[^}]*\b_scrml_g\b[^}]*\} from "[^"]*scrml-runtime[^"]*";/m.test(js);
+          const declaresModule = /^import\s+_scrml_g\s+from\s*"(?:data:text\/javascript,export default globalThis|(?:\.\.?\/)+_scrml\/_global\.js)";/m.test(js);
+          const importsFromRuntime = /^import\s*\{[^}]*\b_scrml_g\b[^}]*\}\s*from\s*"[^"]*scrml-runtime[^"]*"\s*;/m.test(js);
           // R1 + R2
           const marker = "__HGS__";
           const aliased = aliasFreeGlobalRefs(js, new Set([...NAMES].filter((n) => n !== "globalThis").concat("_scrml_g")), marker);

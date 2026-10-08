@@ -386,6 +386,8 @@ describe("§6 U3 — build+esm content-hash rewrites the in-chunk ES import URLs
   // `rewriteChunkImportRefs`) now also rewrites the in-chunk ES `import`
   // specifiers so a cross-chunk `import * as __scrml_dep_0 from "./x.client.js"`
   // points at the ON-DISK hashed name instead of the 404-ing pre-hash name.
+  // S459 (§47.9.9): `scrml build` ships stripped JS (`import*as x from"./y.js"`),
+  // so the specifier readers below are whitespace-tolerant.
   test("every cross-chunk import specifier in a build+esm chunk resolves on disk", () => {
     const src = MF_EXAMPLE;
     const out = freshDir("scrml-u3-build-esm-");
@@ -400,7 +402,7 @@ describe("§6 U3 — build+esm content-hash rewrites the in-chunk ES import URLs
     for (const chunk of chunks) {
       const dir = dirname(chunk);
       const srcText = readFileSync(chunk, "utf8");
-      for (const m of srcText.matchAll(/import (?:\* as \w+|\{[^}]*\}) from "(\.\.?\/[^"]+)"/g)) {
+      for (const m of srcText.matchAll(/import\s*(?:\*\s*as\s+\w+|\{[^}]*\})\s*from\s*"(\.\.?\/[^"]+)"/g)) {
         importsChecked++;
         const resolved = join(dir, m[1]);
         expect(existsSync(resolved)).toBe(true);
@@ -418,7 +420,7 @@ describe("§6 U3 — build+esm content-hash rewrites the in-chunk ES import URLs
     expect(r.status).toBe(0);
     let sawCrossChunkImport = false;
     for (const chunk of buildClientChunks(out)) {
-      for (const m of readFileSync(chunk, "utf8").matchAll(/import \* as \w+ from "(\.\.?\/[^"]+\.client\.[^"]+)"/g)) {
+      for (const m of readFileSync(chunk, "utf8").matchAll(/import\s*\*\s*as\s+\w+\s*from\s*"(\.\.?\/[^"]+\.client\.[^"]+)"/g)) {
         sawCrossChunkImport = true;
         // The rewritten specifier carries an 8-char content hash before `.js`.
         expect(m[1]).toMatch(/\.client\.[0-9a-z]{8}\.js$/);

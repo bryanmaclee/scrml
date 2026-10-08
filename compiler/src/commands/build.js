@@ -13,7 +13,7 @@
  *  - Respects the PORT env var (default 3000)
  *  - Wires WebSocket channels (_scrml_ws_handlers) into Bun.serve() websocket: option
  *
- * Usage: scrml build <dir> [--output dist/] [--embed-runtime] [--minify] [--target <platform>]
+ * Usage: scrml build <dir> [--output dist/] [--embed-runtime] [--keep-comments] [--target <platform>]
  */
 
 import { statSync, readdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from "fs";
@@ -49,7 +49,13 @@ Options:
                             a browser, but is experimental/opt-in; classic is the
                             only conformance-tested path)
   --embed-runtime           Embed runtime inline instead of writing a separate file
-  --minify                  Accepted flag (minification is a Phase 2 feature)
+  --keep-comments           Ship the browser JavaScript as emitted, comments and
+                            indentation included. By default \`build\` strips them from
+                            the runtime, page bundles, per-route chunks and workers
+                            (behaviour-neutral: no renaming, no rewriting, line
+                            structure kept; SPEC §47.9.9). Server code is never stripped.
+  --minify                  Accepted; the strip above is already the build default
+                            (no identifier renaming or syntax rewriting is done)
   --verbose, -v             Per-stage timing and counts
   --validate-emit           Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output
   --no-validate-emit        Opt out of the emitted-JS parse gate (dev/CI escape hatch)
@@ -70,13 +76,15 @@ Examples:
  * Parse build-command arguments.
  *
  * @param {string[]} args
- * @returns {{ inputDir: string|null, outputDir: string|null, embedRuntime: boolean, minify: boolean, verbose: boolean, target: string|null, idleTimeout: number }}
+ * @returns {{ inputDir: string|null, outputDir: string|null, embedRuntime: boolean, minify: boolean, keepComments: boolean, verbose: boolean, target: string|null, idleTimeout: number }}
  */
 export function parseArgs(args) {
   let inputDir = null;
   let outputDir = null;
   let embedRuntime = false;
   let minify = false;
+  // S459 (§47.9.9) — `--keep-comments` turns the default shipped-JS strip off.
+  let keepComments = false;
   let verbose = false;
   let target = null;
   // ss33 item 3 (g-dev-server-idletimeout-not-configurable): the S221 raise to
@@ -120,8 +128,11 @@ export function parseArgs(args) {
     } else if (arg === "--embed-runtime") {
       embedRuntime = true;
     } else if (arg === "--minify") {
-      // Accepted flag — minification is a no-op in v1 but the flag is recognized
+      // S459 — accepted; the shipped-JS strip (§47.9.9) is already the build default.
       minify = true;
+    } else if (arg === "--keep-comments") {
+      // S459 (§47.9.9) — the escape hatch: ship the browser JS as emitted.
+      keepComments = true;
     } else if (arg === "--verbose" || arg === "-v") {
       verbose = true;
     } else if (arg === "--target") {
@@ -158,7 +169,7 @@ export function parseArgs(args) {
     }
   }
 
-  return { inputDir, outputDir, embedRuntime, minify, verbose, target, idleTimeout, validateEmit, moduleFormat };
+  return { inputDir, outputDir, embedRuntime, minify, keepComments, verbose, target, idleTimeout, validateEmit, moduleFormat };
 }
 
 /**
@@ -1310,6 +1321,10 @@ export async function runBuild(args) {
     // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
     // `classic` keeps the shared runtime byte-identical to pre-arc output.
     moduleFormat: opts.moduleFormat,
+    // S459 (§47.9.9) — the deploy path ships stripped browser JS (comments + indentation
+    // out, tokens and line structure untouched, proven token-identical). `--keep-comments`
+    // ships it as emitted. Server code is never stripped.
+    stripShippedJs: !opts.keepComments,
   });
 
   if (result.errors.length > 0) {

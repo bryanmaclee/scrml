@@ -135,7 +135,7 @@ function compileMulti(sources /* { name: source } */, opts = {}) {
 
 describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
   test("SPA shape produces a shared runtime under 16 KB gzip", () => {
-    const { result, outDir } = compileSingle(SPA_COUNTER);
+    const { result, outDir } = compileSingle(SPA_COUNTER, { stripShippedJs: true });
     expect(result.errors.length).toBe(0);
     expect(result.runtimeFilename).toBeTruthy();
     const runtimeBytes = readFileSync(join(outDir, result.runtimeFilename));
@@ -169,6 +169,20 @@ describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
     // which is worth ~38 B here and ~141 B on the shell. Do not compare
     // numbers across the two files without accounting for it.
     // See docs/known-gaps.md → `g-spa-runtime-gzip-budget-knife-edge`.
+    //
+    // ⚑ S459 — this line now measures the PRODUCTION shape
+    // (`stripShippedJs: true`, SPEC §47.9.9: what `scrml build` ships —
+    // comments + indentation stripped, tokens and line structure unchanged).
+    // Measured at `6fcde7f7e` + the strip, zlib default level:
+    //
+    //     SPA_COUNTER   dev 57,017 B raw / 16,383 B   (1 B under — the knife edge)
+    //                   shipped 22,579 B raw / 5,129 B
+    //     shell         dev 82,730 B raw / 26,379 B
+    //                   shipped 28,845 B raw / 7,475 B
+    //
+    // The 16 KB aspiration now passes with ~11 KB of margin on the counter
+    // and is met by the shell too; the binding gate on the shipped shell is
+    // the ratchet (ceiling 7,630 B at gzip -9) in runtime-size-ratchet.test.js.
   });
 
   test("SPA shape excludes prefetch + mount + vendor-ref + wire chunks from runtime", () => {

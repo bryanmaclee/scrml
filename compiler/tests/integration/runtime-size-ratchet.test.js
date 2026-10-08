@@ -123,20 +123,35 @@ const RUNTIME_GZIP_TOLERANCE_BAND = 188;
  *   operator ruling, recorded in `docs/known-gaps.md`. Do not bump it to
  *   make a red build green.
  *
- * Measured 26,080 B at `36ed3d05` on 2026-08-19, plus the 188 B band.
+ * HISTORY: first recorded at 26,080 B (`36ed3d05`, 2026-08-19, unstripped —
+ * then the only shape there was), plus the 188 B band. Lowered S459 to the
+ * production (stripped) shape — see the block directly below.
  *
- * ⚑ ASPIRATION, recorded so the next reader sees a decision and not an
- *   oversight: 16,384 B (16 KB) is the aspirational gzip budget for the
- *   client runtime, and it is asserted for real — as a `<` gate — on the
- *   COUNTER shape at `v0-3-x-spa-tree-shake-phase-b.test.js:145`, where it
- *   passes at 15,495 B (`gzip -9`) / 15,562 B (this file's pinned
- *   compressor). The SHELL shape does NOT meet it and never has: 26,080 B
- *   is 1.59x the aspiration, 9,696 B over. That gap is deliberate, known,
- *   and tracked; it is not something this ratchet is trying to hide. The
- *   ratchet's job is to stop the gap WIDENING while the aspiration is
- *   worked toward.
+ * ⚑ ASPIRATION: 16,384 B (16 KB) is the aspirational gzip budget for the
+ *   client runtime, asserted as a `<` gate on the COUNTER shape at
+ *   `v0-3-x-spa-tree-shake-phase-b.test.js:145`. Until S459 the SHELL shape
+ *   never met it (26,080 B unstripped, 1.59x). The shipped (stripped) shell
+ *   runtime is 7,442 B — under half the aspiration — and §3 below now asserts
+ *   that instead of the old "does NOT meet it" record.
  */
-const SHELL_RUNTIME_GZIP_CEILING = 26080 + RUNTIME_GZIP_TOLERANCE_BAND; // 26,268 B
+//
+// ⚑ LOWERED S459 — 26,268 B -> 7,630 B. `scrml build` now ships the runtime
+//   STRIPPED (SPEC §47.9.9: comments + indentation removed, tokens and line
+//   structure untouched, proven token-identical before it ships), so this file
+//   measures the PRODUCTION shape (`stripShippedJs: true` in
+//   `compileAndReadRuntime`) — the bytes a deployed app actually serves.
+//   Measured at `6fcde7f7e` + the strip, this file's pinned compressor:
+//
+//       shape     emitted (dev)           shipped (build)
+//       shell     82,730 raw / 26,211 B   28,845 raw / 7,442 B
+//       counter   57,017 raw / 16,328 B   22,579 raw / 5,101 B
+//
+//   GNU gzip 1.12 `-9` on the shipped shell runtime: 7,439 B (spread 3 B).
+//   The band stays 188 B (re-derive it before lowering it further).
+//   The dev (unstripped) runtime is deliberately NOT ratcheted: comments in
+//   the runtime template cost a deployed app nothing, and a gate on them
+//   would tax documentation.
+const SHELL_RUNTIME_GZIP_CEILING = 7442 + RUNTIME_GZIP_TOLERANCE_BAND; // 7,630 B
 
 /** The counter shape's aspiration, for the §3 cross-check. Not a ratchet. */
 const COUNTER_RUNTIME_GZIP_ASPIRATION = 16 * 1024;
@@ -181,7 +196,10 @@ afterAll(() => {
   if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true });
 });
 
-/** Compile one source to disk and hand back the assembled shared runtime. */
+/**
+ * Compile one source to disk and hand back the assembled shared runtime — in the
+ * PRODUCTION shape `scrml build` ships (S459, §47.9.9: `stripShippedJs`).
+ */
 function compileAndReadRuntime(source) {
   const inputDir = mkdtempSync(join(TMP, "in-"));
   const outDir = join(inputDir, "dist");
@@ -192,6 +210,7 @@ function compileAndReadRuntime(source) {
     outputDir: outDir,
     write: true,
     log: () => {},
+    stripShippedJs: true,
   });
   expect(result.errors.length).toBe(0);
   expect(result.runtimeFilename).toBeTruthy();
@@ -215,7 +234,7 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
           "CLIENT-RUNTIME SIZE REGRESSION — outlet-bearing shell shape.",
           "",
           `  measured : ${gzipped} B gzip (level ${RUNTIME_GZIP_LEVEL}), ${runtimeBytes.length} B raw`,
-          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (26,080 recorded + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
+          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (7,442 recorded S459, stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
           `  over by  : ${gzipped - SHELL_RUNTIME_GZIP_CEILING} B`,
           "",
           "SHELL_RUNTIME_GZIP_CEILING is a RATCHET. It may be LOWERED freely.",
@@ -224,8 +243,9 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
           "have — do not bump the constant to make this green.",
           "",
           "The band already absorbs every compressor difference measured on",
-          "this artifact (235 B across all levels and implementations), so a",
-          "failure here is code, not compression.",
+          "this artifact (3 B, bun zlib vs GNU gzip, both -9, on the stripped",
+          "runtime; 235 B on the old unstripped one), so a failure here is",
+          "code, not compression.",
         ].join("\n"),
       );
     }
@@ -237,9 +257,9 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
     // Guards the failure mode where the ratchet passes because it is
     // measuring nothing — an empty or truncated runtime would sail under
     // any ceiling. The shell must assemble a substantial runtime and must
-    // parse as JS.
+    // parse as JS. (S459: 28,845 B raw stripped; was > 50,000 unstripped.)
     const runtimeBytes = compileAndReadRuntime(SPA_SHELL);
-    expect(runtimeBytes.length).toBeGreaterThan(50_000);
+    expect(runtimeBytes.length).toBeGreaterThan(20_000);
     const runtime = runtimeBytes.toString("utf8");
     expect(() => new Function(runtime)).not.toThrow();
   });
@@ -299,33 +319,15 @@ describe("§3 the 16 KB aspiration, measured on both shapes", () => {
     expect(counter).toBeLessThan(COUNTER_RUNTIME_GZIP_ASPIRATION);
   });
 
-  test("the SHELL shape does NOT meet the 16 KB aspiration — recorded, not hidden", () => {
-    // The fact the whole ruling turns on, asserted rather than commented so
-    // that it cannot quietly stop being true without anyone noticing.
-    //
-    // This is the ONE assertion in this file that can go red on an
-    // IMPROVEMENT, and that is deliberate: getting the shell under 16 KB is
-    // a 37% reduction, not an accident, and it should force this file to be
-    // revisited rather than sail past unnoticed.
+  // S459 — the "SHELL shape does NOT meet the 16 KB aspiration" record was
+  // retired by its own instructions (lower the ceiling, delete the test,
+  // update g-spa-runtime-gzip-budget-knife-edge): the shipped (stripped)
+  // shell runtime is 7,442 B. The ratchet in §1 (ceiling 7,630 B) is now the
+  // binding gate and is far tighter than the aspiration; this records the
+  // aspiration as MET on the shell shape too.
+  test("the SHELL shape meets the 16 KB aspiration in its shipped (stripped) form", () => {
     const shell = gzipSize(compileAndReadRuntime(SPA_SHELL));
-
-    if (shell <= COUNTER_RUNTIME_GZIP_ASPIRATION) {
-      throw new Error(
-        [
-          "THIS IS GOOD NEWS, NOT A BUG.",
-          "",
-          `The outlet-bearing shell runtime is now ${shell} B gzip — at or under`,
-          `the ${COUNTER_RUNTIME_GZIP_ASPIRATION} B aspiration it has never met before (it was`,
-          "26,080 B when this ratchet was recorded).",
-          "",
-          "Do this:",
-          `  1. Lower SHELL_RUNTIME_GZIP_CEILING to ${shell} + the band.`,
-          "  2. Delete this test — its premise is retired.",
-          "  3. Update docs/known-gaps.md → g-spa-runtime-gzip-budget-knife-edge.",
-        ].join("\n"),
-      );
-    }
-
-    expect(shell).toBeGreaterThan(COUNTER_RUNTIME_GZIP_ASPIRATION);
+    expect(shell).toBeLessThan(COUNTER_RUNTIME_GZIP_ASPIRATION);
+    expect(SHELL_RUNTIME_GZIP_CEILING).toBeLessThan(COUNTER_RUNTIME_GZIP_ASPIRATION);
   });
 });
