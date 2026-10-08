@@ -1,0 +1,10 @@
+{
+  "id": "refinement-block-arrow-refined-local-pos",
+  "description": "S458 2a-fix F2: a block-bodied arrow (or function expression) is opaque to the type stage — the compiler keeps its body as text — so no check can be placed inside it. A write it makes into an OUTER refined local (`k = @m` with `k: number(>0)`) would ship unchecked; it is refused at compile time with E-CONTRACT-002 instead. (A write into a reactive cell from the same arrow is fine: the runtime setter judges it.)",
+  "language-version": "1.0",
+  "spec": "§53.11",
+  "rationale": "§53.11 E-CONTRACT-001-RT: \"The compiler SHALL emit a runtime check for every boundary-zone assignment that it cannot statically elide.\" A write the compiler cannot place a check on is refused rather than admitted unchecked (the E-CONTRACT-002 \"cannot be judged\" sense, §53.11: \"its runtime check SHALL NOT admit values it cannot judge\").",
+  "expect": {
+    "codes": ["E-CONTRACT-002"]
+  }
+}

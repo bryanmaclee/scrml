@@ -1,0 +1,14 @@
+{
+  "id": "refinement-cell-write-origins-accept-neg",
+  "description": "S458 2a-fix F2, the negative twin: the runtime write-path judge does not refuse legitimate updates of a refined cell — a field write of 7, a `push` of 7, `@n++`, and writing `not` into `number(>0) | not` all apply.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"The assignment is applied if and only if the predicate evaluates to true.\" `not` inhabits `T | not`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#field" }, { "click": "#push" }, { "click": "#inc" }, { "click": "#clear" }],
+    "state": { "n": 2, "l": { "u": "a", "n": 7 }, "ls": [1, 2, 7], "o": null },
+    "domAnchored": [{ "selector": "#out", "text": "2 7 3" }]
+  }
+}

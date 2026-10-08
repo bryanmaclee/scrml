@@ -1,0 +1,14 @@
+{
+  "id": "refinement-local-write-forms-reject-rt",
+  "description": "S458 2a-fix F2: writes into refined LOCAL bindings (no runtime setter) are judged by the obligations desugared into the AST — an element write `a[0] = v`, `a.push(v)` on a `number(>0)[]`, `k--` from 1, `Object.assign(l, { n: v })` into a refined struct, an annotated destructure `let { n }: L = …`, and a write from an expression-bodied arrow. Each throws E-CONTRACT-001-RT before the write, so no function reaches its `@done` append. In slice 2a all six were admitted.",
+  "language-version": "1.0",
+  "spec": "§53.3.1",
+  "rationale": "§53.3.1: the predicate \"is evaluated as a pure boolean expression over the incoming value at every assignment or binding site\". §53.3.3: the check throws before the assignment is applied.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#e" }, { "click": "#p" }, { "click": "#d" }, { "click": "#a" }, { "click": "#s" }, { "click": "#x" }],
+    "state": { "done": "" },
+    "domAnchored": [{ "selector": "#out", "text": "[]" }]
+  }
+}

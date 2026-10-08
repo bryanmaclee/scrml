@@ -12,7 +12,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHead
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr } from "./emit-predicates.ts";
+import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeTypeExpr, describeJudgeType } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -2387,16 +2387,16 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
         const rhs = emitExpr(node.initExpr, _makeExprCtx(opts));
-        // predicateCheck is bare-ident only (§53.4 predicated types don't apply
-        // to destructured LHS) — gate on string-name shape.
-        if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
+        // S458 2a-fix F2 — a DESTRUCTURED annotated let (`let { n }: Link = v`) judges
+        // the whole value against the annotation before binding from it.
+        if (node.predicateCheck && node.predicateCheck.zone === "boundary") {
           const _pc = node.predicateCheck;
-          const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });
+          const _checkTmpVar = genVar(`_scrml_chk_${typeof node.name === "string" ? node.name : "destructure"}`);
+          const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, _letDeclLhs, { noValue: opts.boundary === "server" });
           return [
             `const ${_checkTmpVar} = ${rhs};`,
             ..._checkLines,
-            `let ${node.name} = ${_checkTmpVar};`,
+            `let ${_letDeclLhs} = ${_checkTmpVar};`,
           ].join("\n");
         }
         return `let ${_letDeclLhs} = ${rhs};`;
@@ -2513,12 +2513,14 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // `const x: string(url) = f()` — top level or in a function — was unchecked.
       const _constChecked = (rhs: string): string => {
         const _pc = node.predicateCheck;
-        if (!(_pc && _pc.zone === "boundary" && typeof node.name === "string")) {
+        if (!(_pc && _pc.zone === "boundary")) {
           return `const ${_constDeclLhs} = ${rhs};`;
         }
-        const _tmp = genVar(`_scrml_chk_${node.name}`);
-        const _lines = emitRefinementCheck(refinementOf(_pc)!, _tmp, node.name, { noValue: opts.boundary === "server" });
-        return [`const ${_tmp} = ${rhs};`, ..._lines, `const ${node.name} = ${_tmp};`].join("\n");
+        // S458 2a-fix F2 — a DESTRUCTURED annotated const (`const { n }: Link = v`)
+        // judges the whole value against the annotation before binding from it.
+        const _tmp = genVar(`_scrml_chk_${typeof node.name === "string" ? node.name : "destructure"}`);
+        const _lines = emitRefinementCheck(refinementOf(_pc)!, _tmp, _constDeclLhs, { noValue: opts.boundary === "server" });
+        return [`const ${_tmp} = ${rhs};`, ..._lines, `const ${_constDeclLhs} = ${_tmp};`].join("\n");
       };
       // If-as-expression: `const a = if (cond) { lift val }`
       if (node.ifExpr) {
@@ -2637,8 +2639,22 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         boundary: opts.boundary,
         insideFunctionBody: opts.insideFunctionBody,
       });
+      // §53 (S458 2a-fix F2) — a refined cell registers its judge with the runtime
+      // BEFORE its first write, so every write that commits a value of the cell
+      // (the declaration's own init included) is judged at the one commit point
+      // (_scrml_reactive_set / the engine's direct write / an in-place mutation
+      // through the deep-reactive proxy) — wherever the write comes from. Client
+      // only: a server bundle holds no reactive cells.
+      const _refineRegistration = ((): string => {
+        if (!(node as any).typeAnnotation || opts.boundary === "server") return "";
+        const _ref = refinementOf((node as any).predicateCheck);
+        if (!_ref) return "";
+        const _key = opts.encodingCtx ? opts.encodingCtx.encode(_qualifiedName) : _qualifiedName;
+        return `_scrml_refine_register(${JSON.stringify(_key)}, (v) => ${judgeTypeExpr(_ref.judge, "v")}, ` +
+          `${JSON.stringify(describeJudgeType(_ref.judge) + (_ref.label ? ` [${_ref.label}]` : ""))}, ${JSON.stringify(_qualifiedName)});`;
+      })();
       const _appendSidecar = (mainStmt: string): string => {
-        const parts = [mainStmt];
+        const parts = _refineRegistration ? [_refineRegistration, mainStmt] : [mainStmt];
         if (_initSidecar) parts.push(_initSidecar);
         if (_defaultSidecar) parts.push(_defaultSidecar);
         if (_validatorSidecar) parts.push(_validatorSidecar);
@@ -3142,7 +3158,12 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const rewrittenInit = emitExpr(_effectiveInitExpr, _initExprCtx(opts));
         const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr, _effectiveInitExpr);
         // M-7C-D-12 Track 3: lockstep with L1844 sentinel — `"null"` means "no init"
-        if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
+        // §53 (S458 2a-fix F2) — a CLIENT cell write is judged by the runtime setter
+        // (the cell registered its judge, _refineRegistration above), at the moment the
+        // value is committed: after an async value resolves, whatever wrote it. An
+        // inline check here judged the un-awaited value (`@n = serverFn()` in a
+        // <request> judged a Promise and refused every write).
+        if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null" && opts.boundary === "server") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
           const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });
@@ -3158,7 +3179,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const rewrittenInit = emitExprField(node.initExpr, initStr, _initExprCtx(opts));
       const wrappedInit = _wrapDeepReactive(rewrittenInit, initStr);
       // M-7C-D-12 Track 3: lockstep with L1844 sentinel — `"null"` means "no init"
-      if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
+      if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null" && opts.boundary === "server") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
         const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });

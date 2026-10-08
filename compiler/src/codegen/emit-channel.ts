@@ -791,7 +791,9 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
     lines.push(`        }`);
   }
 
-  lines.push(`      } catch (_e) {}`);
+  // §53 (S458) — a sync frame whose value a refined cell refuses (E-CONTRACT-001-RT
+  // from the setter) is not applied; report it rather than swallow it.
+  lines.push(`      } catch (_e) { if (_e && String(_e.message).startsWith("E-CONTRACT-")) console.error("scrml channel sync:", _e); }`);
   lines.push(`    };`);
 
   if (clientErrorHandler) {

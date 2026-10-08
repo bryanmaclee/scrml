@@ -146,8 +146,8 @@ describe("C10 §C10.0 — Chunk wiring", () => {
     expect(RUNTIME_CHUNKS.messages).toContain("_SCRML_TAG_TO_VALIDATOR");
   });
 
-  test("RUNTIME_CHUNK_ORDER has 39 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 13 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\" + 'urlguard' added by §5.2 rule 3 S457)", () => {
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(40);
+  test("RUNTIME_CHUNK_ORDER has 41 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 13 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\" + 'urlguard' added by §5.2 rule 3 S457 + 'refine' added by §53 S458 2a-fix)", () => {
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(41);
   });
 
   // S368 — the stdlib slice of the order is the CLIENT CONTRACT: a client-side

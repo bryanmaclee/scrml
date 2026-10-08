@@ -359,6 +359,43 @@ export function emitRefineExpr(valueJs: string, judge: JudgeType, where: { kind:
   return `((${v}) => { if (!${check}) throw new Error(${msg}); return ${v}; })(${valueJs})`;
 }
 
+/** The E-CONTRACT-001-RT message expression for a refine lowering over value name `v`. */
+function refineMessage(v: string, judge: JudgeType, where: { kind: string; name: string; fn?: string }, server: boolean): string {
+  const loc = where.fn ? `${where.kind} '${where.name}' in ${where.fn}` : `${where.kind} '${where.name}'`;
+  return `"E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" + ` +
+    `"  Location: " + ${JSON.stringify(loc)} + "\\n" + ` +
+    `"  Constraint: (" + ${JSON.stringify(describeJudgeType(judge))} + ")"` +
+    (server ? "" : ` + "\\n  Value: " + ${safeValueText(v)}`);
+}
+
+/**
+ * S458 2a-fix F2 — the lowering of a refine-UPDATE placeholder (`x++` / `--x`
+ * on a refined local): compute the new value, judge it, assign it, and yield
+ * the prefix (new) or postfix (old) value. `targetJs` is a side-effect-free
+ * reference, written twice (read, then assigned).
+ */
+export function emitRefineUpdate(targetJs: string, judge: JudgeType, where: { kind: string; name: string; fn?: string }, update: { op: "+" | "-"; prefix: boolean }, server: boolean): string {
+  const v = "_scrml_rv";
+  return `((_scrml_ro) => { const ${v} = _scrml_ro ${update.op} 1; ` +
+    `if (!${judgeTypeExpr(judge, v)}) throw new Error(${refineMessage(v, judge, where, server)}); ` +
+    `${targetJs} = ${v}; return ${update.prefix ? v : "_scrml_ro"}; })(${targetJs})`;
+}
+
+/**
+ * S458 2a-fix F2 — the lowering of a refine-MERGE placeholder (the sources of
+ * `Object.assign(x, …src)` into a refined local struct): merge the sources,
+ * judge `{ ...x, ...merged }` BEFORE anything is copied into `x`, and yield the
+ * merged object for the assign to copy. `argsJs[0]` is the target, the rest the
+ * sources (each evaluated once, in order).
+ */
+export function emitRefineMerge(argsJs: string[], judge: JudgeType, where: { kind: string; name: string; fn?: string }, server: boolean): string {
+  const v = "_scrml_rv";
+  return `((_scrml_rb, ..._scrml_rs) => { const _scrml_rm = Object.assign({}, ..._scrml_rs); ` +
+    `const ${v} = Object.assign({}, _scrml_rb, _scrml_rm); ` +
+    `if (!${judgeTypeExpr(judge, v)}) throw new Error(${refineMessage(v, judge, where, server)}); ` +
+    `return _scrml_rm; })(${argsJs.join(", ")})`;
+}
+
 /**
  * S458 slice 2 — a parameter guard STATEMENT (the body-prepended obligation for
  * a refined parameter). `response400` — inside a server route handler body: the

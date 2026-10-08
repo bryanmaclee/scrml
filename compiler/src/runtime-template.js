@@ -655,6 +655,7 @@ const _scrml_reactivity_rules = Object.create(null);
 const _scrml_reactivity_bypass = Object.create(null);
 const _scrml_throttle_state = Object.create(null);
 
+
 // --- derived reactive state (§6.6) ---
 // _scrml_derived_fns: name → () => value  (evaluation function for each derived node)
 // _scrml_derived_cache: name → cached value
@@ -5326,6 +5327,7 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
     //   - SKIP history-cell write (§51.0.N — internal does not write history).
     //   - DO reset the idle watchdog: §51.0.R counts ANY transition as
     //     engine activity, internal included.
+    if (typeof _scrml_refine_judges !== "undefined" && _scrml_refine_judges[varName] !== undefined) _scrml_refine_check(varName, target); // §53.3.3
     _scrml_state[varName] = target;
     if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
     return false;
@@ -5405,6 +5407,7 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
     // rationale. Side-effect-free write: update cell value, do NOT fire
     // subscribers, do NOT touch timers, do NOT touch history. Idle watchdog
     // resets per §51.0.R (internal IS engine activity).
+    if (typeof _scrml_refine_judges !== "undefined" && _scrml_refine_judges[varName] !== undefined) _scrml_refine_check(varName, target); // §53.3.3
     _scrml_state[varName] = target;
     if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table, timersTable, internalTable, historyMap);
     return false;
@@ -6593,6 +6596,131 @@ function _scrml_log(side, loc) {
       }).catch(function () { /* dev server absent / offline — ignore */ });
     } catch (e) { /* never throw */ }
   }
+}
+
+// §53 refined-cell write judges (chunk: 'refine')
+// A refined cell registers its judge once; every write that commits a value of it
+// (_scrml_reactive_set, the engine's direct writes, an in-place mutation through
+// the deep-reactive proxy) is judged first. A refused write throws
+// E-CONTRACT-001-RT and the cell keeps its prior value (§53.3.3).
+const _scrml_refine_judges = Object.create(null);
+// A refined cell's object / array (raw, unproxied) -> the cell key it belongs to,
+// so an in-place mutation through the proxy can re-judge the whole cell value.
+const _scrml_refine_owner = new WeakMap();
+// The setter, wrapped: a refined cell's value is judged BEFORE anything is
+// committed (before a debounce / throttle rule, before the store write). This
+// chunk ships only with a page that registers a refined cell, so an unrefined
+// page's setter is untouched.
+const _scrml_reactive_set_unjudged = _scrml_reactive_set;
+_scrml_reactive_set = function (name, value) {
+  if (_scrml_refine_judges[name] !== undefined) value = _scrml_refine_check(name, value);
+  return _scrml_reactive_set_unjudged(name, value);
+};
+function _scrml_refine_register(name, ok, type, cell) {
+  _scrml_refine_judges[name] = { ok: ok, type: type, cell: cell };
+}
+function _scrml_refine_raw(v) {
+  if (v === null || typeof v !== "object" || typeof _scrml_proxy_targets === "undefined") return v;
+  if (_scrml_refine_inner.has(v)) v = _scrml_refine_inner.get(v); // a judging proxy -> its deep-reactive proxy
+  return _scrml_proxy_targets.get(v) || v;
+}
+function _scrml_refine_error(j, v) {
+  const shown = (typeof v === "string" || typeof v === "number" || typeof v === "boolean") ? String(v) : typeof v;
+  return new Error("E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +
+    "  Variable: @" + j.cell + "\\n" +
+    "  Constraint: (" + j.type + ")\\n" +
+    "  Value: " + shown + "\\n" +
+    "  Location: a write to @" + j.cell);
+}
+// Judge \`value\` before it is committed to refined cell \`name\` (throws; nothing is written).
+function _scrml_refine_check(name, value) {
+  const j = _scrml_refine_judges[name];
+  const raw = _scrml_refine_raw(value);
+  if (!j.ok(raw)) throw _scrml_refine_error(j, raw);
+  if (raw !== null && typeof raw === "object") {
+    _scrml_refine_owner.set(raw, name);
+    // held behind the proxy, so a later in-place mutation is re-judged too
+    if (typeof _scrml_deep_reactive === "function") return _scrml_deep_reactive(value);
+  }
+  return value;
+}
+// After an in-place mutation of an object owned by refined cell \`owner\`: re-judge
+// the cell's whole value; on refusal undo the mutation, then throw.
+function _scrml_refine_recheck(owner, undo) {
+  const j = _scrml_refine_judges[owner];
+  if (j === undefined) return;
+  const v = _scrml_refine_raw(_scrml_state[owner]);
+  if (!j.ok(v)) {
+    undo();
+    throw _scrml_refine_error(j, v);
+  }
+}
+// In-place mutation. A refined cell's object / array is held behind a second,
+// judging proxy layered over its deep-reactive proxy (built here, so a page
+// with no refined cell pays nothing). A write / delete / array mutation is first
+// tried on the raw object and the whole cell value re-judged: refused -> undone
+// and thrown (nothing was triggered); admitted -> performed through the
+// deep-reactive proxy, which triggers as usual. An object read through it
+// belongs to the same cell and is held the same way.
+const _scrml_refine_inner = new WeakMap(); // judging proxy -> deep-reactive proxy
+const _scrml_refine_proxies = new WeakMap(); // raw object -> judging proxy
+function _scrml_refine_trial(owner, apply, restore) {
+  apply();
+  _scrml_refine_recheck(owner, restore);
+  restore();
+}
+const _scrml_refine_handler = {
+  get(inner, prop) {
+    const raw = _scrml_proxy_targets.get(inner);
+    const owner = _scrml_refine_owner.get(raw);
+    const v = raw[prop];
+    if (v !== null && typeof v === "object") _scrml_refine_owner.set(_scrml_refine_raw(v), owner);
+    const r = Reflect.get(inner, prop, inner);
+    if (typeof r === "function" && Array.isArray(raw) && _scrml_array_mutators.has(prop)) {
+      return function (...args) {
+        const before = raw.slice();
+        _scrml_refine_trial(owner, function () { Array.prototype[prop].apply(raw, args); },
+          function () { raw.length = 0; Array.prototype.push.apply(raw, before); });
+        return r.apply(inner, args);
+      };
+    }
+    return r;
+  },
+  set(inner, prop, value) {
+    const raw = _scrml_proxy_targets.get(inner);
+    const had = Object.prototype.hasOwnProperty.call(raw, prop);
+    const old = raw[prop];
+    const len = Array.isArray(raw) ? raw.length : -1;
+    _scrml_refine_trial(_scrml_refine_owner.get(raw), function () { raw[prop] = _scrml_refine_raw(value); }, function () {
+      if (had) raw[prop] = old; else delete raw[prop];
+      if (len >= 0) raw.length = len;
+    });
+    return Reflect.set(inner, prop, value, inner);
+  },
+  deleteProperty(inner, prop) {
+    const raw = _scrml_proxy_targets.get(inner);
+    if (Object.prototype.hasOwnProperty.call(raw, prop)) {
+      const old = raw[prop];
+      _scrml_refine_trial(_scrml_refine_owner.get(raw), function () { delete raw[prop]; }, function () { raw[prop] = old; });
+    }
+    return Reflect.deleteProperty(inner, prop);
+  },
+};
+if (typeof _scrml_deep_reactive === "function") {
+  const _scrml_deep_reactive_unjudged = _scrml_deep_reactive;
+  _scrml_deep_reactive = function (value) {
+    if (_scrml_refine_inner.has(value)) return value;
+    const inner = _scrml_deep_reactive_unjudged(value);
+    const raw = inner !== null && typeof inner === "object" ? _scrml_proxy_targets.get(inner) : undefined;
+    if (raw === undefined || !_scrml_refine_owner.has(raw)) return inner;
+    let outer = _scrml_refine_proxies.get(raw);
+    if (outer === undefined) {
+      outer = new Proxy(inner, _scrml_refine_handler);
+      _scrml_refine_proxies.set(raw, outer);
+      _scrml_refine_inner.set(outer, inner);
+    }
+    return outer;
+  };
 }
 
 // §5.2 URL-attribute scheme guard runtime (chunk: 'urlguard')

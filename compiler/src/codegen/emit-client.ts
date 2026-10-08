@@ -3109,6 +3109,11 @@ export function generateClientJs(ctx: CompileContext): string {
     // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text
     // is the one exact signal.
     ["_scrml_url_shape_ok(", "urlguard"],
+    // §53 (S458 2a-fix F2) — a refined cell holds its object / array behind the
+    // deep-reactive proxy (`_scrml_deep_reactive`), whose traps re-judge an in-place
+    // mutation; the registration call gates that chunk.
+    ["_scrml_refine_register(", "deep_reactive"],
+    ["_scrml_refine_register(", "refine"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;

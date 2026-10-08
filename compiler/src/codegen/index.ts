@@ -604,6 +604,7 @@ const CELL_SCOPE_ACCESSORS = [
   "_scrml_engine_audit_register",
   "_scrml_reactive_get",
   "_scrml_reactive_set",
+  "_scrml_refine_register",
   "_scrml_init_set",
   "_scrml_default_set",
   "_scrml_reset",

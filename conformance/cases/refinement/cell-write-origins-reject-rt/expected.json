@@ -1,0 +1,14 @@
+{
+  "id": "refinement-cell-write-origins-reject-rt",
+  "description": "S458 2a-fix F2: a refined CELL is judged at the runtime write path, so every write is checked wherever it originates — an inline handler (`onclick=${@n = @m}`), a field write (`@l.n = -5`), an in-place `push`, `@n--` from 1, `Object.assign(@l, …)`, a block-bodied arrow in a function, and an `<each>` row handler. Each write throws E-CONTRACT-001-RT and the cell keeps its prior value. In slice 2a every one of these was admitted (the obligations were patched into AST positions, and these positions were missed).",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"the compiler-generated check SHALL throw a runtime error with code E-CONTRACT-001-RT before the assignment is applied. The variable retains its prior value.\" §53.6.2: \"the type predicate fires at every assignment\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#inline" }, { "click": "#field" }, { "click": "#push" }, { "click": "#dec" }, { "click": "#assign" }, { "click": "#arrow" }, { "click": ".row" }],
+    "state": { "n": 1, "l": { "u": "a", "n": 1 }, "ls": [1, 2] },
+    "domAnchored": [{ "selector": "#out", "text": "1 1 2" }]
+  }
+}

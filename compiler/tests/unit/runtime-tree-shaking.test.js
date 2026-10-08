@@ -267,7 +267,9 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 40 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 41 chunks", () => {
+    // 41 chunks since S458 2a-fix: 'refine' (§53 refined-cell write judges, gated on a
+    // _scrml_refine_register call) joined the 40 below.
     // 40 chunks since S457: 'urlguard' (§5.2 rule 3 — the runtime URL-attribute scheme
     // guard `_scrml_safe_url`, post-emit gated) joined the 39 below.
     // 39 chunks post-S368 (stdlib-client-registry): 9 client-safe 'stdlib-<name>'
@@ -355,6 +357,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(40);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(41);
   });
 });

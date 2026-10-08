@@ -149,6 +149,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'map',
   'ssr',
   'log',
+  'refine',
   'urlguard',
   // ---------------------------------------------------------------------
   // Stdlib registry chunks — inlined from compiler/runtime/stdlib/<name>.js
@@ -315,6 +316,8 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // (emit-client.ts POST_EMIT_HELPER_CHUNK_GATES) for a `_scrml_safe_url(` call, so a page that writes
   // no data-derived URL attribute ships without it.
   urlguard:       "§5.2 URL-attribute scheme guard runtime (chunk: 'urlguard')",
+  // §53 (S458 2a-fix) — the refined-cell write judges; gated on a registration call.
+  refine:         "§53 refined-cell write judges (chunk: 'refine')",
 
   // Function definition markers — 'function _name' starts at a line boundary.
   // Previous chunk ends after the preceding function/IIFE closing brace.

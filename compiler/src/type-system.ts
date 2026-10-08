@@ -107,7 +107,8 @@ import {
 // §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
 // boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
-import { judgeTypeOf, wrapRefine, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
+import { judgeTypeOf, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
+import * as acorn from "acorn";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -3857,8 +3858,9 @@ function desugarFnRefinements(n: ASTNodeLike): void {
 
 /**
  * S458 slice 2 — the declared type of an assignment target: a local / parameter
- * (`x`), a cell (`@x`), or a field chain over either (`l.u`, `@link.u.v`) read
- * through struct field types. null when not statically known.
+ * (`x`), a cell (`@x`), a field chain over either (`l.u`, `@link.u.v`) read
+ * through struct field types, or an element of an array-typed one (`a[i]`,
+ * S458 2a-fix). null when not statically known.
  */
 function declaredTypeOfTarget(target: unknown, scopeChain: ScopeChain): ResolvedType | null {
   const t = target as { kind?: string; name?: unknown; object?: unknown; property?: unknown; computed?: unknown } | null;
@@ -3868,14 +3870,22 @@ function declaredTypeOfTarget(target: unknown, scopeChain: ScopeChain): Resolved
     if (!e || (e.kind !== "variable" && e.kind !== "reactive")) return null;
     return e.resolvedType ?? null;
   }
-  if (t.kind === "member" && typeof t.property === "string" && t.computed !== true) {
+  const container = (): ResolvedType | null => {
     let objT = declaredTypeOfTarget(t.object, scopeChain);
-    // a nullable struct (`T | not`) — the field of its non-absent member
+    // a nullable container (`T | not`) — its non-absent member
     if (objT && objT.kind === "union") {
       const nn = ((objT as UnionType).members ?? []).filter((m) => m.kind !== "not");
       objT = nn.length === 1 ? nn[0] : null;
     }
+    return objT;
+  };
+  if (t.kind === "member" && typeof t.property === "string" && t.computed !== true) {
+    const objT = container();
     if (objT && objT.kind === "struct") return (objT as StructType).fields.get(t.property) ?? null;
+  }
+  if (t.kind === "index") {
+    const objT = container();
+    if (objT && objT.kind === "array") return (objT as ArrayType).element ?? null;
   }
   return null;
 }
@@ -3886,28 +3896,71 @@ const _COMPOUND_ASSIGN: Record<string, string> = {
   "&&=": "&&", "||=": "||", "??=": "??", "&=": "&", "|=": "|", "^=": "^", "<<=": "<<", ">>=": ">>", ">>>=": ">>>",
 };
 
-/** Is `t` a side-effect-free target (ident or a static member chain over one)? */
+/** Is `t` a side-effect-free target (ident, or a static member / literal-or-ident index chain over one)? */
 function _isPlainTarget(t: unknown): boolean {
-  const n = t as { kind?: string; object?: unknown; computed?: unknown } | null;
+  const n = t as { kind?: string; object?: unknown; computed?: unknown; index?: { kind?: string } } | null;
   if (!n) return false;
   if (n.kind === "ident") return true;
+  if (n.kind === "index") return !!n.index && (n.index.kind === "lit" || n.index.kind === "ident") && _isPlainTarget(n.object);
   return n.kind === "member" && n.computed !== true && _isPlainTarget(n.object);
 }
 
-function desugarRefinedAssignExprs(node: unknown, scopeChain: ScopeChain, span: Span, errors: TSError[], depth = 0): void {
+/** Array methods that put NEW values into the array, and the index of the first such argument. */
+const _ARRAY_INSERTERS: Record<string, number> = { push: 0, unshift: 0, splice: 2, fill: 0 };
+
+/** Replace node `o` in place by `next` (its parent keeps the same object). */
+function _replaceNode(o: Record<string, unknown>, next: Record<string, unknown>): void {
+  for (const k of Object.keys(o)) if (k !== "span") delete o[k];
+  Object.assign(o, next);
+}
+
+/**
+ * S458 slice 2 + 2a-fix F2 — the writes a statement makes into a REFINED target
+ * are judged:
+ *   - an assignment `x = v` / `x op= v` / `l.u = v` / `a[i] = v` (the value
+ *     written; a compound op is folded to `x = x op v`);
+ *   - `x++` / `--x` (the updated value; refine-update placeholder);
+ *   - `a.push(v)` / `unshift` / `splice(i, n, …v)` / `fill(v)` on a refined
+ *     array (each new element; a spread is judged as an array);
+ *   - `Object.assign(l, …src)` into a refined struct (the merged result,
+ *     before anything is copied; refine-merge placeholder).
+ * A literal is decided now (E-CONTRACT-001); anything else is wrapped in the
+ * refine placeholder, judged where it is written. A target rooted at a reactive
+ * CELL is left to the runtime setter (the cell registers its judge; every
+ * write that commits a value of it is judged there, by construction).
+ */
+function desugarRefinedAssignExprs(node: unknown, scopeChain: ScopeChain, span: Span, errors: TSError[], depth = 0, shadow: ReadonlySet<string> = _NO_SHADOW): void {
   if (!node || typeof node !== "object" || depth > 200) return;
-  if (Array.isArray(node)) { for (const c of node) desugarRefinedAssignExprs(c, scopeChain, span, errors, depth + 1); return; }
+  if (Array.isArray(node)) { for (const c of node) desugarRefinedAssignExprs(c, scopeChain, span, errors, depth + 1, shadow); return; }
   const o = node as Record<string, unknown>;
-  if (o.kind === "lambda" || isRefineCall(o)) return; // a lambda body is its own scope; never re-wrap
+  if (isRefineCall(o)) return; // never re-wrap
+  if (o.kind === "lambda") {
+    // S458 2a-fix F2 — an expression-bodied arrow: its body's writes into an
+    // OUTER refined binding are judged; its own parameters shadow outer names.
+    const inner = new Set(shadow);
+    for (const p of (o.params as Array<{ name?: unknown }> | undefined) ?? []) if (p && typeof p.name === "string") inner.add(p.name);
+    desugarRefinedAssignExprs(o.body, scopeChain, span, errors, depth + 1, inner);
+    return;
+  }
+  if (_isOpaqueFnValue(o)) { checkOpaqueFnWrites(String(o.raw ?? ""), scopeChain, shadow, span, errors); return; }
   for (const k of Object.keys(o)) {
     if (k === "span" || k === "target") continue;
     const v = o[k];
-    if (v && typeof v === "object") desugarRefinedAssignExprs(v, scopeChain, span, errors, depth + 1);
+    if (v && typeof v === "object") desugarRefinedAssignExprs(v, scopeChain, span, errors, depth + 1, shadow);
   }
-  if (o.kind !== "assign") return;
+  if (o.kind === "unary" && (o.op === "++" || o.op === "--")) {
+    if (!shadow.has(_targetRootName(o.argument))) desugarRefinedUpdate(o, scopeChain, span, errors);
+    return;
+  }
+  if (o.kind === "call") { desugarRefinedMutatorCall(o, scopeChain, span, errors, shadow); return; }
+  if (o.kind !== "assign" || shadow.has(_targetRootName(o.target))) return;
   const judge = judgeTypeOf(declaredTypeOfTarget(o.target, scopeChain) as never);
   if (!judge) return;
   const op = typeof o.op === "string" ? o.op : "=";
+  if (_targetRootIsCell(o.target, scopeChain)) {
+    if (op === "=") staticJudge(judge, o.value, span, errors); // a literal is still decided at compile time
+    return;
+  }
   if (op !== "=") {
     // `x += v` writes `x + v`: judge THAT. Only a side-effect-free target can be
     // re-read; anything else stays as written and is reported below.
@@ -3926,15 +3979,197 @@ function desugarRefinedAssignExprs(node: unknown, scopeChain: ScopeChain, span: 
   }
   const proven = staticJudge(judge, o.value, span, errors);
   if (proven !== null) return;
-  const name = _targetText(o.target);
-  o.value = wrapRefine(o.value, judge, { kind: "assign", name });
+  o.value = wrapRefine(o.value, judge, { kind: "assign", name: _targetText(o.target) });
+}
+
+function desugarRefinedUpdate(o: Record<string, unknown>, scopeChain: ScopeChain, span: Span, errors: TSError[]): void {
+  const target = o.argument;
+  const judge = judgeTypeOf(declaredTypeOfTarget(target, scopeChain) as never);
+  if (!judge || _targetRootIsCell(target, scopeChain)) return;
+  if (!_isPlainTarget(target)) {
+    errors.push(new TSError(
+      "E-CONTRACT-002",
+      `E-CONTRACT-002: \`${String(o.op)}\` on a refined target whose value the compiler cannot re-read cannot be judged. ` +
+        "Write it as a plain assignment (`x = x + 1`).",
+      span,
+    ));
+    return;
+  }
+  _replaceNode(o, wrapRefineUpdate(target, judge, { kind: "assign", name: _targetText(target) }, o.op === "++" ? "+" : "-", o.prefix === true) as Record<string, unknown>);
+}
+
+function desugarRefinedMutatorCall(o: Record<string, unknown>, scopeChain: ScopeChain, span: Span, errors: TSError[], shadow: ReadonlySet<string>): void {
+  const callee = o.callee as { kind?: string; object?: { kind?: string; name?: unknown }; property?: unknown; computed?: unknown } | null;
+  const args = o.args as unknown[] | undefined;
+  if (!callee || callee.kind !== "member" || callee.computed === true || typeof callee.property !== "string" || !Array.isArray(args)) return;
+  if (shadow.has(_targetRootName(callee.object))) return;
+  // `Object.assign(l, …src)` into a refined struct.
+  if (callee.object?.kind === "ident" && callee.object.name === "Object" && callee.property === "assign" && args.length >= 2) {
+    const target = args[0];
+    if (shadow.has(_targetRootName(target))) return;
+    const judge = judgeTypeOf(declaredTypeOfTarget(target, scopeChain) as never);
+    if (!judge || _targetRootIsCell(target, scopeChain)) return;
+    if (!_isPlainTarget(target)) {
+      errors.push(new TSError(
+        "E-CONTRACT-002",
+        "E-CONTRACT-002: `Object.assign` into a refined target the compiler cannot re-read cannot be judged. " +
+          "Assign the whole value (`x = { ...x, field: v }`).",
+        span,
+      ));
+      return;
+    }
+    o.args = [target, wrapRefineMerge(JSON.parse(JSON.stringify(target)), args.slice(1), judge, { kind: "assign", name: _targetText(target) })];
+    return;
+  }
+  // `a.push(v)` & co. on a refined array.
+  const first = _ARRAY_INSERTERS[callee.property];
+  if (first === undefined) return;
+  const arrT = declaredTypeOfTarget(callee.object, scopeChain);
+  const elJudge = arrT && arrT.kind === "array" ? judgeTypeOf((arrT as ArrayType).element as never) : null;
+  if (!elJudge || _targetRootIsCell(callee.object, scopeChain)) return;
+  const name = `${_targetText(callee.object)}.${callee.property}`;
+  for (let i = first; i < args.length; i++) {
+    const a = args[i] as { kind?: string; argument?: unknown } | null;
+    if (!a) continue;
+    if (a.kind === "spread") {
+      a.argument = wrapRefine(a.argument, { k: "array", of: elJudge }, { kind: "assign", name });
+      continue;
+    }
+    if (staticJudge(elJudge, a, span, errors) !== null) continue;
+    args[i] = wrapRefine(a, elJudge, { kind: "assign", name });
+  }
+}
+
+const _NO_SHADOW: ReadonlySet<string> = new Set();
+
+/** The root identifier name of a target chain (`a` of `a.b[0]`), or "". */
+function _targetRootName(t: unknown): string {
+  let n = t as { kind?: string; name?: unknown; object?: unknown } | null;
+  while (n && (n.kind === "member" || n.kind === "index")) n = n.object as typeof n;
+  return n && n.kind === "ident" && typeof n.name === "string" ? n.name : "";
+}
+
+/** A block-bodied arrow / function expression the expression parser kept as raw text. */
+function _isOpaqueFnValue(o: Record<string, unknown>): boolean {
+  if (o.kind === "Arrow" || o.kind === "Function") return typeof o.raw === "string";
+  return o.kind === "escape-hatch" && typeof o.raw === "string"
+    && (o.nativeKind === "ArrowFunctionExpression" || o.nativeKind === "FunctionExpression");
+}
+
+/**
+ * S458 2a-fix F2 — a block-bodied arrow / function expression is opaque to this
+ * stage (the expression parser keeps it as raw text; codegen string-rewrites
+ * it), so no obligation can be desugared into it. A write it makes into an
+ * OUTER refined local — which has no runtime setter — would ship unchecked, so
+ * it is refused (E-CONTRACT-002), never silently admitted. Writes into reactive
+ * cells are fine (the runtime setter judges them). The body is read with acorn
+ * (`@` spelled as an identifier character) to find assignment / update /
+ * array-insert / `Object.assign` targets whose root is not declared inside the
+ * function; when the text is not parseable JS (scrml-only operators), any
+ * update-shaped token sequence over a refined outer name is refused.
+ */
+function checkOpaqueFnWrites(raw: string, scopeChain: ScopeChain, shadow: ReadonlySet<string>, span: Span, errors: TSError[]): void {
+  const refinedOuter = (name: string): boolean => {
+    if (!name || shadow.has(name) || name.startsWith("@")) return false;
+    const e = scopeChain.lookup(name) as { kind?: string; resolvedType?: ResolvedType } | undefined;
+    return !!e && e.kind === "variable" && !!judgeTypeOf(e.resolvedType as never);
+  };
+  const refuse = (name: string): void => {
+    errors.push(new TSError(
+      "E-CONTRACT-002",
+      `E-CONTRACT-002: \`${name}\` has a refined type, and this arrow / function expression writes it. ` +
+        "The compiler cannot check a write made inside a block-bodied arrow or function expression (§53.3.1: " +
+        "every assignment is checked), so the write is refused rather than left unchecked. Move the write into a " +
+        "named `function`, or write the arrow with an expression body.",
+      span,
+    ));
+  };
+  const src = raw.replace(/@/g, "_");
+  const found = new Set<string>();
+  let ast: acorn.Node | null = null;
+  try { ast = acorn.parseExpressionAt(src, 0, { ecmaVersion: "latest" }); } catch { ast = null; }
+  if (ast) {
+    const declared = new Set<string>();
+    const writes: string[] = [];
+    const rootOf = (n: any): string => { while (n && n.type === "MemberExpression") n = n.object; return n && n.type === "Identifier" ? n.name : ""; };
+    const declare = (p: any): void => {
+      if (!p) return;
+      if (p.type === "Identifier") declared.add(p.name);
+      else if (p.type === "ObjectPattern") for (const q of p.properties) declare(q.type === "RestElement" ? q.argument : q.value);
+      else if (p.type === "ArrayPattern") for (const q of p.elements) declare(q);
+      else if (p.type === "AssignmentPattern") declare(p.left);
+      else if (p.type === "RestElement") declare(p.argument);
+    };
+    const walk = (n: any): void => {
+      if (!n || typeof n.type !== "string") return;
+      if (n.type === "VariableDeclarator") declare(n.id);
+      if (n.type === "FunctionDeclaration" && n.id) declared.add(n.id.name);
+      if (Array.isArray(n.params)) for (const p of n.params) declare(p);
+      if (n.type === "AssignmentExpression") writes.push(rootOf(n.left));
+      if (n.type === "UpdateExpression") writes.push(rootOf(n.argument));
+      if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression" && !n.callee.computed) {
+        const prop = n.callee.property && n.callee.property.name;
+        if (prop in _ARRAY_INSERTERS) writes.push(rootOf(n.callee.object));
+        if (prop === "assign" && rootOf(n.callee.object) === "Object" && n.arguments[0]) writes.push(rootOf(n.arguments[0]));
+      }
+      for (const k of Object.keys(n)) {
+        const v = n[k];
+        if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === "string") walk(c); }
+        else if (v && typeof v === "object" && typeof v.type === "string") walk(v);
+      }
+    };
+    walk(ast);
+    for (const w of writes) if (w && !declared.has(w) && refinedOuter(w)) found.add(w);
+  } else {
+    // Not parseable as JS: a token-level reading, refusing on any update shape.
+    let toks: acorn.Token[] = [];
+    try { toks = [...acorn.tokenizer(src, { ecmaVersion: "latest" })]; } catch { toks = []; }
+    const val = (t: acorn.Token | undefined): string => (t ? String((t as { value?: unknown }).value ?? t.type.label) : "");
+    const ASSIGN = /^(=|\+=|-=|\*=|\/=|%=|\*\*=|&&=|\|\|=|\?\?=|&=|\|=|\^=|<<=|>>=|>>>=|\+\+|--)$/;
+    for (let i = 0; i < toks.length; i++) {
+      if (toks[i].type.label !== "name") continue;
+      const name = String((toks[i] as { value?: unknown }).value);
+      if (!refinedOuter(name) || val(toks[i - 1]) === ".") continue;
+      if (val(toks[i - 1]) === "++" || val(toks[i - 1]) === "--") { found.add(name); continue; }
+      let j = i + 1;
+      // skip a member / index chain
+      while (j < toks.length) {
+        if (val(toks[j]) === "." && toks[j + 1]?.type.label === "name") { j += 2; continue; }
+        if (val(toks[j]) === "[") {
+          let d = 0;
+          for (; j < toks.length; j++) { if (val(toks[j]) === "[") d++; else if (val(toks[j]) === "]" && --d === 0) { j++; break; } }
+          continue;
+        }
+        break;
+      }
+      const prev = toks[j - 1];
+      if (ASSIGN.test(val(toks[j])) && val(toks[j]) !== "==") { found.add(name); continue; }
+      if (val(toks[j]) === "(" && prev && prev.type.label === "name" && String((prev as { value?: unknown }).value) in _ARRAY_INSERTERS && j - 1 > i) found.add(name);
+    }
+    if (toks.length === 0) {
+      // Not even tokenizable: refuse any refined outer name the text mentions.
+      for (const m of src.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) if (refinedOuter(m[0])) found.add(m[0]);
+    }
+  }
+  for (const name of found) refuse(name);
+}
+
+/** Is the root of assignment target `t` a reactive cell (`@x`, `@x.f`, `@x[i]`)? */
+function _targetRootIsCell(t: unknown, scopeChain: ScopeChain): boolean {
+  let n = t as { kind?: string; name?: unknown; object?: unknown } | null;
+  while (n && (n.kind === "member" || n.kind === "index")) n = n.object as typeof n;
+  if (!n || n.kind !== "ident" || typeof n.name !== "string") return false;
+  if (n.name.startsWith("@")) return true;
+  const e = scopeChain.lookup(n.name) as { kind?: string } | undefined;
+  return !!e && e.kind === "reactive";
 }
 
 function _targetText(t: unknown): string {
-  const n = t as { kind?: string; name?: unknown; object?: unknown; property?: unknown } | null;
+  const n = t as { kind?: string; name?: unknown; object?: unknown; property?: unknown; index?: { kind?: string; value?: unknown; name?: unknown } } | null;
   if (!n) return "?";
   if (n.kind === "ident") return String(n.name);
   if (n.kind === "member") return `${_targetText(n.object)}.${String(n.property)}`;
+  if (n.kind === "index") return `${_targetText(n.object)}[${String(n.index?.kind === "lit" ? n.index.value : n.index?.name ?? "…")}]`;
   return "?";
 }
 
@@ -12166,6 +12401,15 @@ function annotateNodes(
           if (letAnnot) stampArmResultVariants(mxn, resolvedType);
           visitNode(mxn);
         }
+        // S458 2a-fix F2 — writes into refined bindings INSIDE the initializer
+        // (an arrow / function value that assigns an outer refined local, a
+        // `k--` in value position) are judged too.
+        {
+          const _ldInit = (n as Record<string, unknown>).initExpr;
+          if (_ldInit && typeof _ldInit === "object") {
+            desugarRefinedAssignExprs(_ldInit, scopeChain, (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }, errors);
+          }
+        }
         break;
       }
 
@@ -14758,6 +15002,16 @@ function annotateNodes(
       // Bare-identifier refs (`${msg}`) are TS territory and require the
       // body-walk re-enablement landing here.
       case "engine-decl": {
+        // §53 (S458 2a-fix F2) — the engine's variant cell holds values of its
+        // `for=` type; when that enum carries a refined payload field the cell is
+        // a refined cell: codegen registers this judge for it (emit-engine), so
+        // every transition that commits a payload is judged at the runtime setter.
+        {
+          const _gt = (n as { governedType?: unknown }).governedType;
+          const _et = typeof _gt === "string" ? typeRegistry.get(_gt) : undefined;
+          const _ej = _et ? judgeTypeOf(_et as never) : null;
+          if (_ej) (n as Record<string, unknown>).refineJudge = _ej;
+        }
         // §17.1.2 — scope-check the opener `if=` render gate (see
         // `visitStructuralIfAttr`). Deliberately outside any arm scope: the gate
         // decides whether the engine's mount subtree renders, and reads nothing

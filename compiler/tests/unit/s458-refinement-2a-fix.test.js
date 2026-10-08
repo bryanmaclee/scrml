@@ -69,8 +69,10 @@ function compileClient(source, label) {
   const r = compileScrml({ inputFiles: [input], write: true, outputDir: resolve(dir, "out"), log: () => {} });
   const p = resolve(dir, "out", "app.client.js");
   const js = existsSync(p) ? readFileSync(p, "utf8") : "";
+  const rtName = existsSync(resolve(dir, "out")) ? readdirSync(resolve(dir, "out")).find((f) => /^scrml-runtime\..*\.js$/.test(f)) : undefined;
+  const runtime = rtName ? readFileSync(resolve(dir, "out", rtName), "utf8") : "";
   rmSync(dir, { recursive: true, force: true });
-  return { js, errors: (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error" && !/^[WI]-/.test(e.code ?? "")) };
+  return { js, runtime, errors: (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error" && !/^[WI]-/.test(e.code ?? "")) };
 }
 
 /** 4 struct levels, each reusing the level below `k` times, 40 refined fields, `fns` functions taking the top. */
@@ -112,5 +114,41 @@ describe("F3 — hoisted struct judges", () => {
     expect(bDef).toMatch(/_scrml_judge_A_[a-z0-9]+\(v\.b\) &&/);
     expect(js).toContain(`"  Constraint: (" + "B" + ")"`);
     expect(js).toContain("// §53 judge — B { a: A, b: A, m: string(.length >= 1) }");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 — the judge at the runtime cell write path (executed grid:
+// docs/changes/s458-refinement-2a-fix/repro/grid.mjs; conformance
+// refinement/cell-write-origins-*, local-write-forms-*, engine-payload-*)
+// ---------------------------------------------------------------------------
+
+describe("F2 — refined cells register their judge; the shipped runtime carries the guarded setter", () => {
+  test("a refined cell registers before its first write; no inline check at its writes; the pruned runtime has the registry + proxy", () => {
+    const { js, runtime, errors } = compileClient(`\${\n  <n>: number(>0) = 1\n  <ls>: number(>0)[] = [1]\n  function g(v) { @n = v }\n  function h(v) { @ls.push(v) }\n}\n<program>\n<button onclick=g(-1)>g</button><button onclick=h(1)>h</button>\n<p>\${@n} \${@ls.length}</p>\n</program>\n`, "reg");
+    expect(errors).toEqual([]);
+    const reg = js.indexOf(`_scrml_cs_refine_register("n", `);
+    expect(reg).toBeGreaterThan(-1);
+    expect(reg).toBeLessThan(js.indexOf(`_scrml_cs_reactive_set("n", 1)`));
+    expect(js).not.toContain("E-CONTRACT-001-RT boundary check for 'n'");
+    expect(runtime).toContain("function _scrml_refine_register(");
+    expect(runtime).toContain("function _scrml_refine_check(");
+    expect(runtime).toContain("function _scrml_deep_reactive(");
+    // the setter judges FIRST (before any timing rule / commit), and the proxy hooks are installed
+    expect(runtime).toMatch(/_scrml_reactive_set = function \(name, value\) \{\n\s*if \(_scrml_refine_judges\[name\] !== undefined\) value = _scrml_refine_check\(name, value\);/);
+    expect(runtime).toContain("_scrml_deep_reactive = function (value) {");
+  });
+
+  test("a page with no refined cell ships no registration", () => {
+    const { js, runtime } = compileClient(`<program>\n  <n> = 1\n  <p>\${@n}</p>\n</program>\n`, "noreg");
+    expect(js).not.toContain("refine_register");
+    expect(runtime).not.toContain("_scrml_refine_");
+  });
+
+  test("a block-bodied arrow writing an outer refined LOCAL is refused; a shadowing parameter is not", () => {
+    const bad = compileClient(`\${\n  function g(v) {\n    let k: number(>0) = 1\n    const f = () => { k = v }\n    f()\n    return k\n  }\n}\n<program><p>\${g(2)}</p></program>\n`, "arrow-bad");
+    expect(bad.errors.map((e) => e.code)).toContain("E-CONTRACT-002");
+    const ok = compileClient(`\${\n  function g(v) {\n    let k: number(>0) = 1\n    const f = (k) => { k = v }\n    f(1)\n    const h = () => { let k = 0\n k = v }\n    h()\n    return k\n  }\n}\n<program><p>\${g(2)}</p></program>\n`, "arrow-ok");
+    expect(ok.errors).toEqual([]);
   });
 });

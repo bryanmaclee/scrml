@@ -119,15 +119,12 @@ describe("(1) reassignment of a refined binding", () => {
 `, "reassign");
     try {
       expect(out.errors).toHaveLength(0);
-      const setCell = clientFn(out.clientJs, "setCell");
-      expect(refused(setCell, BAD)).toBe(true);
-      expect(setCell.cells.has("u")).toBe(false); // the cell is never written: it keeps its prior value
-      expect(refused(setCell, GOOD)).toBe(false);
+      // S458 2a-fix F2 — a CELL write is judged by the runtime setter the cell
+      // registers its judge with (executed: conformance refinement/reassign-cell-*
+      // and docs/changes/s458-refinement-2a-fix/repro/grid.mjs); no inline check.
+      expect(out.clientJs).toMatch(/_scrml_cs_refine_register\("u", \(v\) => \(typeof v === "string" && _scrml_url_shape_ok\(v\)\)/);
+      expect(out.clientJs).toMatch(/_scrml_cs_refine_register\("n", /);
       expect(refused(clientFn(out.clientJs, "setLocal"), BAD)).toBe(true);
-      const bump = clientFn(out.clientJs, "bump");
-      bump.cells.set("n", 5);
-      expect(refused(bump, 2)).toBe(false);
-      expect(refused(bump, 20)).toBe(true);
       expect(refused(clientFn(out.clientJs, "setField"), BAD)).toBe(true);
     } finally {
       out.cleanup();

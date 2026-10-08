@@ -280,6 +280,39 @@ export function wrapRefine(expr: unknown, judge: JudgeType, where: RefineWhere):
 }
 
 /**
+ * S458 2a-fix F2 — `x++` / `--x` on a refined LOCAL target: a placeholder call
+ * over the target whose lowering computes `x ± 1`, judges it, assigns it, and
+ * yields the prefix / postfix value. `target` is a side-effect-free reference.
+ */
+export function wrapRefineUpdate(target: unknown, judge: JudgeType, where: RefineWhere, op: "+" | "-", prefix: boolean): unknown {
+  const span = (target as { span?: unknown } | null)?.span;
+  return {
+    kind: "call",
+    callee: { kind: "ident", name: refinePlaceholder(), ...(span ? { span } : {}) },
+    args: [target],
+    refine: { judge, where, update: { op, prefix } },
+    ...(span ? { span } : {}),
+  };
+}
+
+/**
+ * S458 2a-fix F2 — `Object.assign(x, …src)` into a refined LOCAL struct: the
+ * sources are merged first and the result `{ ...x, ...merged }` is judged
+ * BEFORE anything is copied into `x`; the call then copies the merged object.
+ * `base` is a second (side-effect-free) reference to the target.
+ */
+export function wrapRefineMerge(base: unknown, sources: unknown[], judge: JudgeType, where: RefineWhere): unknown {
+  const span = (base as { span?: unknown } | null)?.span;
+  return {
+    kind: "call",
+    callee: { kind: "ident", name: refinePlaceholder(), ...(span ? { span } : {}) },
+    args: [base, ...sources],
+    refine: { judge, where, merge: true },
+    ...(span ? { span } : {}),
+  };
+}
+
+/**
  * A guard statement for parameter `name` of function `fn`: an expression
  * statement `__scrml_refine__(name)`. Prepended to the function body.
  */

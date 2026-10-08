@@ -1,0 +1,13 @@
+${
+    type Drag:enum = { Idle, Dragging(id: number(>0)) }
+    <m>: number = -5
+    <p>: number = 7
+}
+<engine for=Drag initial=.Idle>
+    <Idle rule=.Dragging></>
+    <Dragging id rule=.Idle : "Dragging ${id}"></>
+</>
+<program>
+<button id="bad" onclick=${@drag = .Dragging(@m)}>bad</button>
+<p id="s">${@drag}</p>
+</program>
