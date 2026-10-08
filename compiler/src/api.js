@@ -1564,6 +1564,15 @@ function _compileScrmlImpl(options = {}) {
           const attrKey = e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
+          // S457 — a codegen backstop that re-lowers markup from a COPY (a `<match>` arm body is
+          // re-parsed in codegen, with its own span file) cannot share the attribute's identity.
+          // Its refusal is dropped when an EARLIER stage (VP-3 / CE) already refused the same-named
+          // attribute in the same file: the compile fails either way. Only those stages record the
+          // name — codegen refusals never shadow each other, so two distinct `<button ONCLICK=${…}>`
+          // the backstop alone refuses are two reports (identity = their own spans, `attrKey`).
+          const nameKey = e.attrSinkName ? `${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
+          if (stageName === "CG" && nameKey !== null && _attrInterpExecutableSeen.has(nameKey)) continue;
+          if (stageName !== "CG" && nameKey !== null) _attrInterpExecutableSeen.add(nameKey);
           _attrInterpExecutableSeen.add(attrKey);
           _attrInterpExecutableSeen.add(fullKey);
         }

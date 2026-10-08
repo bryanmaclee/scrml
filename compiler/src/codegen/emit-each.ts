@@ -51,7 +51,7 @@ import {
   ATTR_INTERP_EXECUTABLE_CODE,
   attrSinkKey,
 } from "../attr-injection-sink.ts";
-import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, wrapUrlGuard } from "./url-attr-guard.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2700,8 +2700,23 @@ function renderTemplateAttrToJs(
   // an attr value bound to item data refreshes on reconcile (matches Tier-0).
   // §5.2 rule 3 (S457) — a URL attribute on this element takes its scheme from the
   // row data, so its write goes through the runtime guard `_scrml_safe_url`.
+  // S457 — an SVG animation value (`<set attributeName="href" to=it.url>`) writes the
+  // animated URL attribute: guarded with that attribute as the target.
   const _urlValue = (valueJs: string): string =>
-    dynamicUrlAttrNeedsGuard(_elTag, aName) ? wrapUrlGuard(elVar, aName, valueJs) : valueJs;
+    dynamicUrlAttrNeedsGuard(_elTag, aName, _elAttrs as unknown[])
+      ? wrapUrlGuard(elVar, aName, valueJs, urlGuardTarget(_elTag, aName, _elAttrs as unknown[]))
+      : valueJs;
+  // §5.2 (S457) — a `srcdoc` (an HTML document) or an event-handler attribute is never
+  // written from row data: refused here (VP-3 refuses the srcdoc forms first; event names
+  // are wired as listeners above, so this is the backstop).
+  if (valKind === "expr" || valKind === "variable-ref" || valKind === "call-ref") {
+    // (Wherever the write is emitted — a declared component prop written onto an expanded root too.)
+    const _refused = refuseExecutableDataWrite(aName, _elTag, (attr && attr.span) || (val && val.span), attr, "inside an `<each>` row");
+    if (_refused !== null) {
+      lines.push(`${indent}${_refused}`);
+      return;
+    }
+  }
   if (valKind === "expr") {
     const expr = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
@@ -2743,7 +2758,7 @@ function renderTemplateAttrToJs(
     // `javascript:`) is refused. VP-3 refuses it for every markup position before codegen;
     // this is the backstop for a row template that reaches here without VP-3 having seen it,
     // and it asks the SAME reader (`classifyInterpolatedAttrSink`) — never a second test.
-    const sink = tpl !== null ? classifyInterpolatedAttrSink(aName, sv) : null;
+    const sink = tpl !== null ? classifyInterpolatedAttrSink(aName, sv, { tag: _elTag, attrs: _elAttrs as unknown[] }) : null;
     if (sink !== null) {
       const refusal = new CGError(
         ATTR_INTERP_EXECUTABLE_CODE,
@@ -2760,7 +2775,9 @@ function renderTemplateAttrToJs(
       // §5.2 rule 3 (S457) — `href="${it.url}"`: a literal prefix that commits to no scheme
       // lets the row data supply it; guard the write. A literal relative path / safe scheme
       // (`href="/u/${it.id}"`) is proven and stays byte-identical.
-      const _tplValue = quotedUrlAttrNeedsGuard(_elTag, aName, sv) ? wrapUrlGuard(elVar, aName, tpl) : tpl;
+      const _tplValue = quotedUrlAttrNeedsGuard(_elTag, aName, sv, _elAttrs as unknown[])
+        ? wrapUrlGuard(elVar, aName, tpl, urlGuardTarget(_elTag, aName, _elAttrs as unknown[]))
+        : tpl;
       for (const _l of maybeWrapEachPerItemEffect(
         [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_tplValue});`], iterVarName, indent,
       )) lines.push(_l);

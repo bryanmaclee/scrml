@@ -1,0 +1,5 @@
+<program>
+<items> = [{ id: 1, d: "hello" }]
+const Fr = <iframe props={ srcdoc: string }></iframe>
+<ul>${ for (const it of @items) { lift <li><Fr srcdoc=it.d/></li> } }</ul>
+</program>
