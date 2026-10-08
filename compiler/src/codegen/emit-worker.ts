@@ -141,7 +141,9 @@ export function generateWorkerJs(
   if (footer.length) inner = inner + "\n" + footer.join("\n");
   const out: string[] = [banner, HOST_GLOBAL_ALIAS_SCRIPT_DECL];
   if (needsUrlShapeHelper(inner)) out.push(SERVER_URL_SHAPE_HELPER.replace(/^\n/, ""), "");
-  out.push("(function () {", inner, "})();");
+  out.push("(function () {");
+  if (rest.length > 0 || inner !== "") out.push(inner); // an empty worker body adds no line
+  out.push("})();");
   const body = out.join("\n");
   if (errors) {
     for (const name of unmetWorkerHelperRefs(body)) {
