@@ -95,7 +95,8 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     // names: items (reactive getter), tick (reactive getter), init (function).
     expect(clientJs).toMatch(/get items\(\)/);
     expect(clientJs).toMatch(/get tick\(\)/);
-    expect(clientJs).toMatch(/init:\s*\w+/);
+    // S458 r3: a captured function is a getter over the (renamed) binding.
+    expect(clientJs).toMatch(/get init\(\)\s*\{\s*return \w+;/);
   });
 
   test("for-lift alone (no ^{} meta-effect): compiles cleanly", () => {

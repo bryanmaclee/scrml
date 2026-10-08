@@ -112,11 +112,6 @@ function hintFor(name: string): string {
     case "fetch":
       return " Hint: move network calls behind a server-fn boundary.";
     default:
-      if (META_HOST_GLOBAL_NAMES.has(name)) {
-        return ` Hint: '${name}' is a host global and is never reachable from a ^{} body; ` +
-          "if you declared a cell or function with this name, rename it — the emitted reference " +
-          "cannot be told apart from the global (§22.12, S458).";
-      }
       return "";
   }
 }
@@ -161,30 +156,6 @@ type Resolution =
   | { kind: "plain" }
   | { kind: "refused" };
 
-/**
- * Host-global names a `^{}` body may NOT reference as a bare identifier even when the
- * file declares a binding of that name (S458 review round 3, HIGH-2). The emitted body
- * is a plain function in the client/module scope; a bare reference to a name like
- * `window` or `location` resolves to the BROWSER GLOBAL, and the compiler cannot
- * reliably rewrite it to the author's binding (the scope-aware function rename leaves a
- * member-access root alone — `window.eval(…)` — precisely so it does not rename a
- * compiler reference to a real host global). A cell named `location` reached `location`
- * the global; a `function window()` reached `window` the global. So, inside a `^{}`
- * body, a name that is a host global is admitted ONLY as a body-LOCAL (a real lexical
- * binding the emitted function itself declares, which shadows the global) or, for a
- * cell, as `@name` / `meta.get`. A captured / file-scope binding of that name is refused.
- */
-export const META_HOST_GLOBAL_NAMES: ReadonlySet<string> = new Set([
-  "window", "document", "globalThis", "self", "top", "parent", "frames", "opener",
-  "location", "navigator", "history", "screen", "localStorage", "sessionStorage",
-  "indexedDB", "caches", "crypto", "performance", "console", "fetch", "XMLHttpRequest",
-  "WebSocket", "EventSource", "Worker", "SharedWorker", "importScripts", "postMessage",
-  "eval", "Function", "setTimeout", "setInterval", "clearTimeout", "clearInterval",
-  "setImmediate", "queueMicrotask", "requestAnimationFrame", "requestIdleCallback",
-  "process", "Bun", "Deno", "require", "module", "exports", "__dirname", "__filename",
-  "global", "alert", "confirm", "prompt", "open",
-]);
-
 /** Context shared by both readers. */
 export interface MetaAllowListContext {
   /** Names bound in the enclosing scope (§22.3) — captured / injected bindings. */
@@ -198,10 +169,6 @@ export interface MetaAllowListContext {
 function resolve(name: string, scope: Scope, ctx: MetaAllowListContext): Resolution {
   if (scope.has(name)) return { kind: "local" };               // (b) a real body-local shadows a global
   if (name.startsWith("@")) return { kind: "local" };          // (a) @cell read
-  // (HIGH-2) A host-global name reaches the global in the emitted body — a captured or
-  // file-scope binding of that name cannot be told apart from it. Refused (a body-local
-  // of that name was already admitted above; `@name` too).
-  if (META_HOST_GLOBAL_NAMES.has(name)) return { kind: "refused" };
   // (§22.5.2) A reactive cell is a store key, not a JS binding — bare it resolves to a
   // free global, not the cell. Admitted only as `@name` (above) or via `meta.get`.
   if (ctx.cells && ctx.cells.has(name)) return { kind: "refused" };

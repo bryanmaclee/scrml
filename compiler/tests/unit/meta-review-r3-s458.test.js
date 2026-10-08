@@ -10,10 +10,12 @@
  *          wherever it sits. Before: a `^{ meta.emit.constructor(…)() }` in an if-branch
  *          ran in the browser; a compile-time `^{ emit(…) }` in an if-branch was emitted
  *          as a runtime effect (`emit is not defined`).
- *   HIGH-2 a name that is a host global (`window`, `location`, …) is refused inside a
- *          `^{}` body even when the file declares a cell or function of that name — the
- *          emitted body cannot tell the author's binding from the global. A reactive
- *          cell is admitted only as `@name` / `meta.get`, never bare.
+ *   HIGH-2 (revised) every captured binding in an emitted runtime `^{}` effect body is
+ *          read as `_scrml_cap.<name>` through the capture object (author name -> the
+ *          real, possibly renamed, binding), and the EMITTED text is then scope-checked:
+ *          a free identifier other than a compiler `_scrml_*` name or `undefined`/`NaN`/
+ *          `Infinity` is E-META-001. No host-name list exists; a cell is never captured
+ *          bare (`@name` / `meta.get` only, §22.5.2).
  *   MED    the enclosing-scope binder covers every binding form: C-style `for`,
  *          destructured for-of, destructured params, match-arm payloads.
  *   LOW    a body-local shadowing an outer decl no longer prepends the outer (parse
@@ -29,6 +31,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { compileScrml } from "../../src/api.js";
+import * as acorn from "acorn";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/meta-review-r3-s458");
 beforeAll(() => { mkdirSync(FIXTURE_DIR, { recursive: true }); });
@@ -82,28 +85,92 @@ describe("S458 r3 HIGH-1 — a ^{} is checked wherever it sits (total descent)",
   });
 });
 
-describe("S458 r3 HIGH-2 — a host-global name is not reachable from a ^{} body", () => {
-  test("a cell named `location` is refused as a bare reference", () => {
-    const r = compile(`<program>\n<location> = ""\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  location.href = "javascript:1"\n  meta.emit("<p>r</p>")\n}\n</div>\n</program>\n`);
-    expect(r.messages.some((m) => m.includes("'location' is not available"))).toBe(true);
+describe("S458 r3 HIGH-2 — the emitted runtime ^{} body reads captures only through the capture object", () => {
+  // Independent reader: the free identifiers of each `_scrml_meta_effect` effect FUNCTION
+  // in the emitted client text (a plain acorn scope walk, separate from codegen's).
+  function effectFreeIdents(clientJs) {
+    const ast = acorn.parse(clientJs, { ecmaVersion: 2025, sourceType: "script" });
+    const effects = [];
+    const find = (n) => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { n.forEach(find); return; }
+      if (n.type === "CallExpression" && n.callee?.type === "Identifier" && n.callee.name === "_scrml_meta_effect") effects.push(n.arguments[1]);
+      for (const k of Object.keys(n)) if (!["type", "start", "end", "loc"].includes(k)) find(n[k]);
+    };
+    find(ast);
+    const free = new Set();
+    const add = (p, s) => {
+      if (!p) return;
+      if (p.type === "Identifier") s.add(p.name);
+      else if (p.type === "ObjectPattern") p.properties.forEach((q) => add(q.value ?? q.argument, s));
+      else if (p.type === "ArrayPattern") p.elements.forEach((e) => add(e, s));
+      else if (p.type === "AssignmentPattern") add(p.left, s);
+      else if (p.type === "RestElement") add(p.argument, s);
+    };
+    const walk = (n, scope) => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { n.forEach((x) => walk(x, scope)); return; }
+      if (typeof n.type !== "string") return;
+      if (n.type === "Identifier") { if (!scope.has(n.name)) free.add(n.name); return; }
+      if (/Function/.test(n.type)) {
+        const s = new Set(scope); n.params.forEach((p) => add(p, s));
+        if (n.body.type === "BlockStatement") for (const st of n.body.body) {
+          if (st.type === "VariableDeclaration") st.declarations.forEach((d) => add(d.id, s));
+          if (st.type === "FunctionDeclaration") s.add(st.id.name);
+        }
+        walk(n.body, s); return;
+      }
+      if (n.type === "BlockStatement") {
+        const s = new Set(scope);
+        for (const st of n.body) if (st.type === "VariableDeclaration") st.declarations.forEach((d) => add(d.id, s));
+        n.body.forEach((st) => walk(st, s)); return;
+      }
+      if (n.type === "MemberExpression") { walk(n.object, scope); if (n.computed) walk(n.property, scope); return; }
+      if (n.type === "Property") { if (n.computed) walk(n.key, scope); walk(n.value, scope); return; }
+      if (n.type === "VariableDeclarator") { walk(n.init, scope); return; }
+      for (const k of Object.keys(n)) if (!["type", "start", "end", "loc"].includes(k)) walk(n[k], scope);
+    };
+    effects.forEach((e) => walk(e, new Set()));
+    return { count: effects.length, free: [...free].filter((x) => !x.startsWith("_scrml_")) };
+  }
+
+  const HOST = ["location", "window", "top", "opener", "parent", "XMLHttpRequest", "postMessage"];
+
+  for (const name of HOST) {
+    test(`a CELL named \`${name}\` read bare is E-META-001`, () => {
+      const r = compile(`<program>\n<${name}> = ""\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  const v = ${name}\n  meta.emit("<p>" + v + "</p>")\n}\n</div>\n</program>\n`);
+      expect(r.codes).toContain("E-META-001");
+    });
+
+    test(`a FUNCTION named \`${name}\` is reached as _scrml_cap.${name} — no bare host name in the emitted effect`, () => {
+      const r = compile(`<program>\n<x> = 0\n\${\n  function ${name}(a) { return a }\n}\n<div>\n^{\n  meta.get("x")\n  ${name}.eval("1")\n  meta.emit("<p>" + ${name}(2) + "</p>")\n}\n</div>\n</program>\n`);
+      expect(r.codes).toEqual([]);
+      const { count, free } = effectFreeIdents(r.clientJs);
+      expect(count).toBe(1);
+      expect(free).toEqual([]);
+      expect(r.clientJs).toContain(`_scrml_cap.${name}.eval("1")`);
+      // The capture object maps the author name to the user's (renamed) function.
+      expect(r.clientJs).toMatch(new RegExp(`get ${name}\\(\\) \\{ return _scrml_${name}_\\d+; \\}`));
+    });
+  }
+
+  test("controls: @location, meta.get, a body-local shadow and a captured const all compile", () => {
+    for (const src of [
+      `<program>\n<location> = "a"\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  meta.emit("<p>" + @location + "</p>")\n}\n</div>\n</program>\n`,
+      `<program>\n<location> = "a"\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  meta.emit("<p>" + meta.get("location") + "</p>")\n}\n</div>\n</program>\n`,
+      `<program>\n<x> = 0\n<div>\n^{\n  meta.get("x")\n  const location = "here"\n  meta.emit("<p>" + location + "</p>")\n}\n</div>\n</program>\n`,
+      `<program>\n<x> = 0\n\${\n  const label = "hi"\n}\n<div>\n^{\n  meta.get("x")\n  meta.emit("<p>" + label + "</p>")\n}\n</div>\n</program>\n`,
+    ]) {
+      const r = compile(src);
+      expect(r.codes).toEqual([]);
+      expect(effectFreeIdents(r.clientJs).free).toEqual([]);
+    }
   });
 
-  test("a function named `window` is refused — the emitted ref cannot be told from the global", () => {
-    const r = compile(`<program>\n<x> = 0\n\${ function window(n) { return n } }\n<div>\n^{\n  meta.get("x")\n  window.eval("1")\n  meta.emit("<p>r</p>")\n}\n</div>\n</program>\n`);
-    expect(r.messages.some((m) => m.includes("'window' is not available"))).toBe(true);
-  });
-
-  test("a cell named `document` used bare is refused; @document / meta.get reaches it", () => {
-    const bare = compile(`<program>\n<document> = ""\n<x> = 0\n<div>\n^{ meta.get("x"); meta.emit("<p>" + document + "</p>") }\n</div>\n</program>\n`);
-    expect(bare.messages.some((m) => m.includes("'document' is not available"))).toBe(true);
-    const viaGet = compile(`<program>\n<document> = "a"\n<x> = 0\n<div>\n^{ meta.get("x"); meta.emit("<p>" + meta.get("document") + "</p>") }\n</div>\n</program>\n`);
-    expect(viaGet.codes).toEqual([]);
-  });
-
-  test("a real body-LOCAL shadowing a global name is allowed (it is a lexical binding)", () => {
-    const r = compile(`<program>\n^{\n  const location = "x"\n  emit("<p>" + location + "</p>")\n}\n</program>\n`);
-    expect(r.codes).toEqual([]);
-    expect(r.html).toContain("<p>x</p>");
+  test("a captured const is read through the capture object as a live getter", () => {
+    const r = compile(`<program>\n<x> = 0\n\${\n  const label = "hi"\n}\n<div>\n^{\n  meta.get("x")\n  meta.emit("<p>" + label + "</p>")\n}\n</div>\n</program>\n`);
+    expect(r.clientJs).toContain("_scrml_cap.label");
+    expect(r.clientJs).toMatch(/get label\(\) \{ return label; \}/);
   });
 });
 

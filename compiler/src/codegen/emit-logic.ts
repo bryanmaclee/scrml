@@ -20,6 +20,7 @@ import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
 import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax, scanForeignSliceShape, scanForeignSliceTopLevelBindings } from "./foreign-seal.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
@@ -913,21 +914,30 @@ function emitGuardedArmBinding(
  * @var entries produce getter functions (live reactive reads).
  * let/const/function entries produce direct value references.
  */
-function emitCapturedBindings(node: any): string {
-  const scope: ScopeVarEntry[] | undefined = node.capturedScope;
-  if (!Array.isArray(scope) || scope.length === 0) return "null";
-
+function emitCapturedBindings(node: any, extraNames: ReadonlySet<string> = new Set()): string {
+  const scope: ScopeVarEntry[] = Array.isArray(node.capturedScope) ? node.capturedScope : [];
   const props: string[] = [];
+  const seen = new Set<string>();
   for (const entry of scope) {
     const { name, kind } = entry;
     if (!name || typeof name !== "string") continue;
+    seen.add(name);
     if (kind === "reactive") {
       // Getter returns live reactive value; auto-tracking intercepts the read
       props.push(`  get ${name}() { return _scrml_reactive_get("${name}"); }`);
     } else {
-      // let/const/function — direct reference to the compiled JS variable
-      props.push(`  ${name}: ${name}`);
+      // let/const/function — a getter over the compiled JS binding (S458 r3): the body
+      // reaches it as `_scrml_cap.<name>`, so it must read the LIVE binding (as the bare
+      // closure reference it replaces did) and must not throw a TDZ error at creation.
+      // A renamed user function is renamed inside the getter by the fn-name pass.
+      props.push(`  get ${name}() { return ${name}; }`);
     }
+  }
+  // Bindings the body routes through the capture object that are not module-scope
+  // runtime vars (an enclosing loop variable / parameter / import, S458 r3).
+  for (const name of extraNames) {
+    if (seen.has(name)) continue;
+    props.push(`  get ${name}() { return ${name}; }`);
   }
 
   if (props.length === 0) return "null";
@@ -4786,6 +4796,11 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     case "meta": {
       const metaBody: any[] | undefined = node.body;
       if (!Array.isArray(metaBody) || metaBody.length === 0) return "";
+      // A compile-time `^{}` (meta-checker classification) is never a runtime effect: it
+      // was evaluated and spliced away, or its evaluation failed and that is already an
+      // error. Emitting it as `_scrml_meta_effect` shipped a body calling an undefined
+      // `emit` (S458 review round 3, HIGH-1 side bug).
+      if (node._metaCompileTime === true) return "";
 
       const metaScopeId = node.id != null
         ? `"_scrml_meta_${nsId(node.id)}"`
@@ -4806,10 +4821,6 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
 
       if (bodyLines.length === 0) return "";
 
-      // §22.5: emit 4-argument form with capturedBindings and typeRegistry
-      const capturedBindings = emitCapturedBindings(node);
-      const typeRegistryLiteral = emitTypeRegistryLiteral(node);
-
       // The meta-effect body may contain `await` (e.g. `await import(...)` for
       // dynamic stdlib loading at meta-eval time). A bare `function(meta)`
       // wrapper would make `await` a SyntaxError ("await outside async"); emit
@@ -4819,9 +4830,35 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       );
       const _metaFnKw = _metaBodyHasAwait ? "async function(meta)" : "function(meta)";
 
+      // §22.12 (S458 review round 3, HIGH-2) — route every captured binding through the
+      // capture object and verify the EXACT emitted text (codegen/meta-capture-rewrite.ts).
+      const capturedNames = new Set<string>(Array.isArray(node.capturedNames) ? node.capturedNames : []);
+      const capture = rewriteMetaBodyCaptures(bodyLines.join("\n"), capturedNames, _metaBodyHasAwait);
+      if (!capture.ok) {
+        const parseFail = capture.refused.length === 1 && capture.refused[0].startsWith("[parse: ");
+        recordRefusedLowering(new CGError(
+          "E-META-001",
+          parseFail
+            ? `E-META-001: the runtime ^{} body does not parse as JavaScript once lowered ` +
+              `(${capture.refused[0].slice(8, -1)}), so its free names cannot be checked — refused (§22.12).`
+            : `E-META-001: the runtime ^{} body, as emitted, reads ${capture.refused.map((n) => `'${n}'`).join(", ")} ` +
+              `— not a body-local, a meta primitive, or a binding captured at the ^{} site. A runtime ^{} body ` +
+              `reaches an enclosing binding only through the capture object, and a cell only as @name / meta.get ` +
+              `(§22.5.2, §22.12).`,
+          node.span ?? { start: 0, end: 0 },
+        ), node);
+        return `/* E-META-001: runtime ^{} body refused */`;
+      }
+      const effectLines = capture.text.split("\n");
+      if (capture.used.size > 0) effectLines.unshift(`  const ${META_CAPTURE_VAR} = meta.bindings;`);
+
+      // §22.5: emit 4-argument form with capturedBindings and typeRegistry
+      const capturedBindings = emitCapturedBindings(node, capture.used);
+      const typeRegistryLiteral = emitTypeRegistryLiteral(node);
+
       return [
         `_scrml_meta_effect(${metaScopeId}, ${_metaFnKw} {`,
-        ...bodyLines,
+        ...effectLines,
         `}, ${capturedBindings}, ${typeRegistryLiteral});`
       ].join("\n");
     }

@@ -1953,11 +1953,22 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
         }
       }
 
+      // The classification codegen relies on: a COMPILE-TIME body never reaches the client
+      // (meta-eval splices it away; if its evaluation failed, that failure is already an
+      // error). Codegen emits a `_scrml_meta_effect` only for a body marked runtime here.
+      metaNode._metaCompileTime = isCompileTime;
+
       // §22.5: Annotate runtime meta nodes with scope and type registry for CG stage.
       // Runtime meta blocks are those that do NOT use compile-time API patterns.
       if (!isCompileTime) {
         metaNode.capturedScope = buildCapturedScope(runtimeVars);
         metaNode.typeRegistrySnapshot = serializeTypeRegistry(typeRegistry);
+        // §22.12 (S458 review round 3, HIGH-2) — the names codegen may route through the
+        // capture object: everything in scope at the `^{}` site per the ONE scope analysis
+        // (file scope + imports + enclosing bindings), cells excluded (a cell is reached
+        // only as `@name` / `meta.get`, §22.5.2). codegen rewrites a body reference to one
+        // of these to `_scrml_cap.<name>` and refuses any other free identifier.
+        metaNode.capturedNames = [...captured].filter((n) => !n.startsWith("@") && !metaCellNames.has(n));
       }
     });
 
