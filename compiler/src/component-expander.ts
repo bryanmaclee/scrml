@@ -2984,14 +2984,15 @@ function substituteProps(
       }
     }
     // Recurse into the structural child node lists + the optional <empty> child. An
-    // each body / match arm is its OWN scope: it sees the component scope so far, and a
-    // declaration inside it does not escape to later siblings (a copy, not the set).
-    const eachScope = new Set<string>(bodyScope ?? []);
+    // each body / each match arm is its OWN scope (S459 H1): it sees the component scope
+    // so far, and a declaration inside it does not escape to later siblings — a copy of
+    // the set per body (and per arm), never the set itself.
     for (const key of ["templateChildren", "bodyChildren", "arms"]) {
       if (Array.isArray(cloned[key])) {
+        const listScope = new Set<string>(bodyScope ?? []);
         cloned[key] = (cloned[key] as unknown[]).map((item: unknown) =>
           item && typeof item === "object" && (item as Record<string, unknown>).kind
-            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap, eachScope)
+            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap, key === "arms" ? new Set(bodyScope ?? []) : listScope)
             : item,
         );
       }
@@ -4002,7 +4003,10 @@ function _injectChildrenWalk(
               try { argNode = parseExprToNode(renderParamMatch.argExpr, filePath ?? "", child.span?.start ?? 0); } catch { argNode = null; }
               if (argNode) {
                 const paramMap = new Map<string, ExprNode>([[snippet.paramName, argNode]]);
-                nodes = nodes.map((n) => substituteProps(n, new Map<string, string>(), paramMap));
+                // S459 H1 — one scope across the snippet body, in source order (a body
+                // declaration named like the param shadows it for what follows).
+                const snippetScope = new Set<string>();
+                nodes = nodes.map((n) => substituteProps(n, new Map<string, string>(), paramMap, snippetScope));
               }
             }
             result.push(...nodes);
