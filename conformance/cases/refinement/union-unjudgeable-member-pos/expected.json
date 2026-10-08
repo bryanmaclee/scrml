@@ -1,0 +1,10 @@
+{
+  "id": "refinement-union-unjudgeable-member-pos",
+  "description": "S459 LOW-MED-3: a union with a refined member is judged member by member, so every member needs a runtime test. A map whose values are refined (`[string: number(>0)]`) would need every entry judged, which the union judge cannot express, so the annotation is refused at the declaration with E-CONTRACT-002 — it is not compiled to a check that admits every map (before the fix the member judged `true`, so `@m = -5` was admitted too).",
+  "language-version": "1.0",
+  "spec": "§53.11",
+  "rationale": "§53.11: \"The compiler SHALL emit a runtime check for every boundary-zone assignment that it cannot statically elide\"; a check the compiler cannot write is refused rather than admitted (the E-CONTRACT-002 \"cannot be judged\" sense, §53.11).",
+  "expect": {
+    "codes": ["E-CONTRACT-002"]
+  }
+}

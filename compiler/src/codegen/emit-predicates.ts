@@ -159,6 +159,8 @@ function baseTypeGuard(baseType: string | undefined, v: string): string | null {
     case "number": return `typeof ${v} === "number" && !Number.isNaN(${v})`;
     case "integer": return `Number.isInteger(${v})`;
     case "string": return `typeof ${v} === "string"`;
+    // registered string-shaped primitives (ISO-8601 text)
+    case "date": case "timestamp": return `typeof ${v} === "string"`;
     case "boolean": return `typeof ${v} === "boolean"`;
     default: return null;
   }
@@ -216,8 +218,14 @@ export function judgeTypeExpr(j: JudgeType, valueExpr: string, depth = 0): strin
       return `(${j.of.map((m) => judgeTypeExpr(m, v, depth)).join(" || ")})`;
     case "prim":
       return baseTypeGuard(j.baseType, v) ?? FAIL_CLOSED;
+    case "shape":
+      return j.shape === "map"
+        ? `(${v} !== null && typeof ${v} === "object" && ${v}.__scrml_map === true)`
+        : `typeof ${v} === "function"`;
     case "any":
-      return "true /* a union member of a kind with no runtime shape test (a map, a function) */";
+      return "true /* asIs: a developer-signed untyped value — every value inhabits it (§7.5.2) */";
+    case "unjudgeable": // refused at the declaration (E-CONTRACT-002); never admits
+      return FAIL_CLOSED;
     default:
       return FAIL_CLOSED;
   }

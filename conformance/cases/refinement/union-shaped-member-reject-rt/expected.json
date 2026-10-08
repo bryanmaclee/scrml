@@ -1,0 +1,14 @@
+{
+  "id": "refinement-union-shaped-member-reject-rt",
+  "description": "S459 LOW-MED-3: a union with a refined member judges EVERY member — none is admitted wholesale. `date` / `timestamp` are registered string-shaped primitives and are judged as strings; a value-native map member is judged by its map shape. -5 inhabits none of `number(>0)`, `date`, `timestamp`, `[string: number]`, so each cell write (and the `pick(v: number(>0) | date)` parameter) throws E-CONTRACT-001-RT and the cells keep 1. Before the fix each of those members judged `true`, and -5 was admitted.",
+  "language-version": "1.0",
+  "spec": "§53.11, §53.3.1",
+  "rationale": "§53.11: \"The compiler SHALL emit a runtime check for every boundary-zone assignment that it cannot statically elide.\" A check whose member arm is `true` admits every value. SPEC (the canonical-empty list): \"`date` / `timestamp` (registered string-shaped primitives)\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#d" }, { "click": "#t" }, { "click": "#mp" }, { "click": "#p" }],
+    "state": { "d": 1, "t": 1, "mp": 1, "shown": "none" },
+    "domAnchored": [{ "selector": "#out", "text": "1 1 1 none" }]
+  }
+}

@@ -107,7 +107,7 @@ import {
 // §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
 // boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
-import { judgeTypeOf, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
+import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 
 // ---------------------------------------------------------------------------
@@ -3677,6 +3677,21 @@ function checkRefinementJudgeable(
   if (t.kind === "union") {
     let ok = true;
     for (const m of (t as UnionType).members ?? []) ok = checkRefinementJudgeable(m, span, errors, annotText) && ok;
+    // S459 LOW-MED-3 (§53.11, fail closed) — a union with a refined member is judged
+    // by testing each member, so every member needs a runtime test. A member none
+    // can decide used to be admitted wholesale (`number(>0) | date` admitted -5).
+    const unjudgeable = ok ? unjudgeableIn(judgeTypeOf(t as never)) : null;
+    if (unjudgeable !== null && !_judgeabilityReported.has(t)) {
+      _judgeabilityReported.add(t);
+      const shown = annotText ? `\`${annotText.trim()}\`` : "this union";
+      errors.push(new TSError("E-CONTRACT-002",
+        `E-CONTRACT-002: ${shown} has a refined member, so every member is checked at runtime — ` +
+        `but ${unjudgeable} has no runtime test, so the annotation cannot be enforced. ` +
+        "Use members a value can be checked against (number, integer, string, boolean, date, timestamp, " +
+        "a struct, an enum, an array, a map or set of unrefined entries, a function, asIs), or keep the refinement " +
+        "out of the union.", span));
+      ok = false;
+    }
     return ok;
   }
   if (t.kind === "array") {

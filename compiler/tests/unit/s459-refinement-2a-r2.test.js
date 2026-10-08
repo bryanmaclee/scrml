@@ -21,6 +21,8 @@ import { resolve } from "path";
 import { readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { judgeTypeOf, unjudgeableIn } from "../../src/refinement-obligations.ts";
+import { judgeTypeExpr, judgeDescriptorExpr } from "../../src/codegen/emit-predicates.ts";
 
 function compile(source, label) {
   const dir = resolve(tmpdir(), `scrml-s459-r2-${label}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
@@ -175,5 +177,49 @@ describe("LOW-4 — an array shared by two refined cells", () => {
     rt.set(x, [8]);
     rt.state[y].push(3);
     expect(JSON.parse(JSON.stringify(rt.state[y]))).toEqual([6, 7, 3]);
+  });
+});
+
+describe("LOW-MED-3 — a union member is never admitted wholesale", () => {
+  const P = (op, value) => ({ kind: "predicated", baseType: "number", predicate: { kind: "comparison", op, value }, label: null });
+  const U = (...members) => ({ kind: "union", members });
+
+  test("date / timestamp are judged as the string-shaped primitives they are; a map / function by shape; asIs admits by meaning", () => {
+    const judge = (m) => judgeTypeOf(U(P(">", 0), m));
+    const date = judge({ kind: "primitive", name: "date" });
+    expect(date.of[1]).toEqual({ k: "prim", baseType: "date" });
+    expect(judgeTypeExpr(date, "v")).toContain(`typeof v === "string"`);
+    expect(judge({ kind: "primitive", name: "timestamp" }).of[1]).toEqual({ k: "prim", baseType: "timestamp" });
+    const map = judge({ kind: "map", key: { kind: "primitive", name: "string" }, value: { kind: "primitive", name: "number" }, ordered: false });
+    expect(map.of[1]).toEqual({ k: "shape", shape: "map" });
+    expect(judgeTypeExpr(map, "v")).toContain("v.__scrml_map === true");
+    const fn = judge({ kind: "function", name: "f", params: [], returnType: { kind: "asIs" } });
+    expect(judgeTypeExpr(fn, "v")).toContain(`typeof v === "function"`);
+    expect(judge({ kind: "asIs", constraint: null }).of[1]).toEqual({ k: "any" });
+    for (const j of [date, map, fn]) {
+      expect(unjudgeableIn(j)).toBeNull();
+      expect(judgeTypeExpr(j, "v")).not.toMatch(/\|\| true/);
+    }
+  });
+
+  test("a member no runtime test can decide is unjudgeable, and its judge fails closed", () => {
+    const refinedMap = judgeTypeOf(U(P(">", 0), { kind: "map", key: { kind: "primitive", name: "string" }, value: P(">", 0), ordered: false }));
+    expect(unjudgeableIn(refinedMap)).toContain("map");
+    expect(judgeTypeExpr(refinedMap, "v")).toContain("false /* §53 S458: unjudgeable predicate — refused */");
+    expect(unjudgeableIn(judgeTypeOf(U(P(">", 0), { kind: "unknown" })))).toBe("an unresolved type");
+    expect(unjudgeableIn(judgeTypeOf(U(P(">", 0), { kind: "html-element" })))).toContain("html-element");
+  });
+
+  test("the type stage refuses such a union at its declaration (E-CONTRACT-002); a shaped union compiles", () => {
+    const bad = compile(page(`<m>: number(>0) | [string: number(>0)] = 1`), "unjudgeable");
+    expect(bad.errors.map((e) => e.code)).toContain("E-CONTRACT-002");
+    expect(bad.errors.find((e) => e.code === "E-CONTRACT-002").message).toContain("has no runtime test");
+    const ok = compile(page(`<d>: number(>0) | date = 1\n  <a>: number(>0) | asIs = 1\n  <mp>: number(>0) | [string: number] = 1`), "shaped");
+    expect(ok.errors).toEqual([]);
+  });
+
+  test("a nullable array is described as the array it is when present", () => {
+    const d = judgeDescriptorExpr(judgeTypeOf(U({ kind: "array", element: P(">", 0) }, { kind: "not" })));
+    expect(d).toMatch(/^\{ ok: \(v\) => \(v === null \|\| v === undefined \|\| .*\), el: \{ ok: \(v\) => .*v > 0.* \} \}$/);
   });
 });

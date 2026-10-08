@@ -25961,7 +25961,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-AUTH-ATTR-INVALID | §52.13.2, §52.13.1 | An `auth=` attribute on a `<program>` or `<page>` whose value is not exactly `"required"`, `"optional"` or `"none"`: any other literal (another case `"Required"`, padding `" required"`, the empty string `""`, `"role:admin"`, `"true"`) or any non-literal (a bare `auth`, `auth=${…}`, `auth=@x`). The message names the value written, lists the three legal values (with a did-you-mean when the value differs only in case or spaces, and the role-gate route for `role:X`). Before S449 these compiled to an application with no login gate (W-ATTR-002 for a literal, nothing at all for a non-literal or `""`). Does NOT fire on a nested `<program>` (E-PROGRAM-NESTED-AUTH is that declaration's one diagnostic) nor on `<channel>` (any `auth=` there gates; an unrecognized literal is W-ATTR-002). The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/validators/attribute-allowlist.ts` (VP-1). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2") · supersedes: spec:§52.13.2 (W-ATTR-002 + no gate). | Error |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
-| E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
+| E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed, or a union with a refined member has a member with no runtime test (S459) (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
 | E-CONTRACT-003 | §53.11 | Predicate references external state — use `<machine>` instead | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
@@ -40510,10 +40510,25 @@ Normative statements:
 > unrefined annotation, and its runtime check SHALL NOT admit values it cannot judge.
 > Both forms of E-CONTRACT-002 SHALL be emitted where the refinement is declared, whatever zone
 > its value is in — not only when the value is a literal.
+> A union with a refined member is checked by testing the value against each member, so every
+> member SHALL have a runtime test. The compiler SHALL emit E-CONTRACT-002 where such a union is
+> declared when a member has none — an unresolved type, markup, an engine, a map or set whose keys
+> or values are refined, and the like. A member SHALL NOT be admitted without a test. Members with
+> a runtime test are: the primitives, including `date` and `timestamp` (registered string-shaped
+> primitives, tested as strings); a struct; an enum; an array; a map or set of unrefined entries
+> (tested by its map shape); a function; and `asIs`, which every value inhabits (§7.5.2).
 
 > **Provenance:** spec:§53.2.1 grammar (conformance restoration, S458) · the malformed-predicate
 > sense extends the code's prior "named shape not found" meaning; the malformed enum subset (§53.15.1)
 > already reported under this code.
+>
+> **Provenance (the union-member sentence, S459):** spec:§53.11 ("The compiler SHALL emit a runtime
+> check for every boundary-zone assignment that it cannot statically elide") and the statement above
+> ("its runtime check SHALL NOT admit values it cannot judge") · review:S459 differential review
+> LOW-MED-3 (executed: `number(>0) | date` admitted -5) · supersedes: nothing struck · **Direction of
+> change: newly-rejecting** for a union with a refined member and an untestable member (corpus impact
+> measured: 0 sources across samples / examples / conformance / stdlib); **semantics-changed** for a
+> `date` / `timestamp` / map / function member, whose arm now tests the value instead of admitting it.
 
 ### E-CONTRACT-002-RT: Named shape registry lookup at runtime
 

@@ -39,9 +39,17 @@ import { placeholderName, isCompilerPlaceholderName } from "./placeholder-nonce.
  *   enum     — a REFERENCE to an enum judge (`enumJudgeDef(id)`): one of the
  *              enum's variants, a payload variant's refined fields judged.
  *   anyOf    — a union with a refined member: the value satisfies one member.
- *   prim     — an unrefined primitive union member (number/integer/string/boolean).
- *   any      — a union member of a kind with no runtime shape test (a map, a
- *              function, …): admitted.
+ *   prim     — an unrefined primitive union member (number/integer/string/boolean,
+ *              and the string-shaped date/timestamp).
+ *   shape    — an unrefined union member judged by its runtime shape: a §59
+ *              value-native map (or set), a function.
+ *   any      — an `asIs` union member: a developer-signed untyped value, which
+ *              every value inhabits (§7.5.2) — `true` is its exact judge.
+ *   unjudgeable — a union member no runtime test can decide (an unresolved
+ *              type, markup, an engine, a map whose keys / values are refined,
+ *              …). The type stage refuses the annotation (E-CONTRACT-002); the
+ *              judge, if ever reached, fails closed. S459 LOW-MED-3: these used
+ *              to be `any` — `number(>0) | date` admitted -5.
  *
  * S458 2a-fix F3 — a struct / enum is a reference, never an inline copy: a
  * struct reused k times per level used to be copied k^depth times into every
@@ -57,7 +65,9 @@ export type JudgeType =
   | { k: "enum"; name: string; id: string }
   | { k: "anyOf"; of: JudgeType[] }
   | { k: "prim"; baseType: string }
-  | { k: "any" };
+  | { k: "shape"; shape: "map" | "function" }
+  | { k: "any" }
+  | { k: "unjudgeable"; what: string };
 
 /** A struct judge: the refined fields (only those carrying a refinement are listed). */
 export interface StructJudgeDef { name: string; fields: Array<[string, JudgeType]> }
@@ -100,7 +110,8 @@ export interface RefineWhere {
 
 type AnyType = { kind?: string; [k: string]: unknown } | null | undefined;
 
-const PRIMS = new Set(["number", "integer", "int", "string", "boolean", "bool"]);
+// date / timestamp: "registered string-shaped primitives" (SPEC §7, the canonical-empty list).
+const PRIMS = new Set(["number", "integer", "int", "string", "boolean", "bool", "date", "timestamp"]);
 
 // Memo per resolved type object: a type reached along many paths is judged once.
 // Only results computed with no recursion cut below them are memoized.
@@ -230,9 +241,24 @@ function shapeJudgeOf(m: NonNullable<AnyType>, seen: Set<unknown>, cuts: { n: nu
       const n = (m as { name?: unknown }).name;
       r = typeof n === "string" && PRIMS.has(n)
         ? { k: "prim", baseType: n === "int" ? "integer" : n === "bool" ? "boolean" : n }
-        : { k: "any" };
+        : { k: "unjudgeable", what: `the primitive type '${String(n)}'` };
       break;
     }
+    case "asIs":
+      r = { k: "any" };
+      break;
+    case "map": {
+      // a refined key / value type inside the map would need every entry judged: not expressible here
+      const mt = m as { key?: AnyType; value?: AnyType; set?: boolean };
+      const refinedInside = judgeTypeOf(mt.key, seen) !== null || judgeTypeOf(mt.value, seen) !== null;
+      r = refinedInside
+        ? { k: "unjudgeable", what: `a ${mt.set ? "set" : "map"} whose ${mt.set ? "members" : "keys or values"} are refined` }
+        : { k: "shape", shape: "map" };
+      break;
+    }
+    case "function":
+      r = { k: "shape", shape: "function" };
+      break;
     case "struct":
       r = registerStruct(String((m as { name?: unknown }).name ?? "struct"), []);
       break;
@@ -242,11 +268,11 @@ function shapeJudgeOf(m: NonNullable<AnyType>, seen: Set<unknown>, cuts: { n: nu
       break;
     case "array": {
       const el = (m as { element?: AnyType }).element;
-      r = { k: "array", of: el && typeof el === "object" ? (judgeTypeOf(el, seen) ?? shapeJudgeOf(el, seen, cuts)) : { k: "any" } };
+      r = { k: "array", of: el && typeof el === "object" ? (judgeTypeOf(el, seen) ?? shapeJudgeOf(el, seen, cuts)) : { k: "unjudgeable", what: "an array of an unresolved element type" } };
       break;
     }
     default:
-      r = { k: "any" };
+      r = { k: "unjudgeable", what: m.kind === "unknown" ? "an unresolved type" : `a member of kind '${String(m.kind)}'` };
   }
   _shapeMemo.set(m, r);
   return r;
@@ -327,6 +353,21 @@ export function paramGuardStatement(name: string, judge: JudgeType, fn: string, 
   };
 }
 
+/**
+ * The first member of `j` no runtime test can decide (a union arm, through
+ * arrays and `not`), or null. Struct / enum references are not entered: their
+ * fields are checked at their own declaration.
+ */
+export function unjudgeableIn(j: JudgeType | null): string | null {
+  if (!j) return null;
+  switch (j.k) {
+    case "unjudgeable": return j.what;
+    case "array": case "nullable": return unjudgeableIn(j.of);
+    case "anyOf": for (const m of j.of) { const w = unjudgeableIn(m); if (w) return w; } return null;
+    default: return null;
+  }
+}
+
 /** A short human description of a judge, for the failure report. */
 export function describeJudge(j: JudgeType, fmtPred: (p: unknown) => string, nested = false, expand = false): string {
   switch (j.k) {
@@ -348,6 +389,8 @@ export function describeJudge(j: JudgeType, fmtPred: (p: unknown) => string, nes
     }
     case "anyOf": return j.of.map((m) => describeJudge(m, fmtPred, nested)).join(" | ");
     case "prim": return j.baseType;
-    case "any": return "…";
+    case "shape": return j.shape;
+    case "any": return "asIs";
+    case "unjudgeable": return "…";
   }
 }
