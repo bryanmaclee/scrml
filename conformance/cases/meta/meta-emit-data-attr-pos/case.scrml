@@ -1,6 +1,6 @@
 <program>
 <label> = "hi"
-^{ emit("<p id=\"ct\" data-x=\"1\">ct</p>") }
+^{ emit("<p id=\"ct\" data-x=\"1\" data-scrmlx=\"2\" x-data-scrml-y=\"3\">ct</p>") }
 <div id="host">
 ^{
   meta.emit("<p id=\"rt\" data-k=\"v\">" + meta.get("label") + "</p>")

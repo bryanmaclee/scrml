@@ -74,6 +74,9 @@ const REFUSED = [
   ["data-scrml-* unquoted", "<p data-scrml-x=SECRETX>p</p>", "SECRETX"],
   ["data-scrml-* on svg (foreign content)", '<svg><rect Data-Scrml-X="SECRETX"/></svg>', "SECRETX"],
   ["data-scrml-* nested", '<ul><li><b data-scrml-x="SECRETX">b</b></li></ul>', "SECRETX"],
+  // PA-ruled S459 consequence: bare `data-scrml` is the component CSS scope root.
+  ["bare data-scrml", '<div data-scrml="Card"><p>SECRETX</p></div>', "SECRETX"],
+  ["bare DATA-SCRML, no value", "<div DATA-SCRML>SECRETX</div>", "SECRETX"],
 ];
 
 describe("S458 'a' — runtime meta.emit refuses, writes nothing, logs once", () => {

@@ -45,12 +45,15 @@ describe("S458 item 3 — data-scrml-* in compile-time emit() output is E-META-E
     ["after a /", '<p/data-scrml-each-mount="m">p</p>', "data-scrml-each-mount"],
     ["nested element", '<ul><li><b data-scrml-x="1">b</b></li></ul>', "data-scrml-x"],
     ["on svg", '<svg><rect data-scrml-x="1"></rect></svg>', "data-scrml-x"],
+    // PA-ruled S459 consequence: bare `data-scrml` is the component CSS scope root.
+    ["bare data-scrml (component scope root)", '<div data-scrml="Card"><p>x</p></div>', "data-scrml"],
+    ["bare DATA-SCRML, no value", "<div DATA-SCRML>x</div>", "DATA-SCRML"],
   ];
   for (const [label, markup, name] of REFUSED) {
     test(`refused: ${label}`, () => {
       const r = compile(emitOf(markup));
       expect(r.codes).toContain("E-META-EVAL-002");
-      const m = r.messages.find((x) => x.includes("data-scrml-` attribute namespace is reserved"));
+      const m = r.messages.find((x) => x.includes("`data-scrml` attribute namespace"));
       expect(m).toBeDefined();
       expect(m).toContain(`'${name}'`);
     });
@@ -70,6 +73,7 @@ describe("S458 item 3 — ordinary data-* attributes still pass", () => {
     expect(r.codes).toEqual([]);
     expect(r.html).toContain('data-x="1"');
     expect(r.html).toContain('data-scrmlx="3"');
+    expect(r.html).toContain('x-data-scrml-y="4"');
   });
 
   test("a compiler marker in the SAME page is not the author's (the runtime-meta placeholder is unaffected)", () => {

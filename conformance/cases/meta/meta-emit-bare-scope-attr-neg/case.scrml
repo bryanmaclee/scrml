@@ -1,0 +1,3 @@
+<program>
+^{ emit("<div data-scrml=\"Card\"><p>author</p></div>") }
+</program>

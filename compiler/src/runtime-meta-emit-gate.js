@@ -45,14 +45,18 @@ const _SCRML_META_EMIT_REFUSED_ELEMENTS = new Set([
 // never the events, so an event handler no list knows yet is refused too.
 const _SCRML_META_EMIT_NON_EVENT_ON_WORDS = new Set(["one", "online", "onboarding"]);
 
-// The compiler-owned attribute namespace (ruling S458 "your recs on all four", item 3): the
-// runtime's own markers (`data-scrml-meta`, `data-scrml-outlet`, `data-scrml-each-mount`,
-// `data-scrml-gated`, …) live under it, so an attribute whose name begins with it is refused —
-// a prefix rule, never a list of marker names. Matched against the name the parse produced (the
-// HTML tokenizer has already folded ASCII upper case and does not decode character references in
-// attribute names), lowercased once more for names an SVG / MathML adjustment re-cased. Compile-time
-// `emit()` output is held to the same prefix (meta-eval.ts `isCompilerOwnedAttrName`).
-const _SCRML_META_EMIT_RESERVED_ATTR_PREFIX = "data-scrml-";
+// The compiler-owned attribute namespace (ruling S458 "your recs on all four", item 3; PA-ruled
+// S459 consequence): the runtime's own markers (`data-scrml-meta`, `data-scrml-outlet`,
+// `data-scrml-each-mount`, `data-scrml-gated`, …) and the bare `data-scrml` component CSS scope
+// root (`@scope ([data-scrml="Name"])`) live under it, so an attribute whose name IS `data-scrml`
+// or begins with `data-scrml-` is refused — a namespace rule, never a list of marker names.
+// `name` is the name the parse produced (the HTML tokenizer has already folded ASCII upper case
+// and does not decode character references in attribute names), lowercased once more by the
+// caller for names an SVG / MathML adjustment re-cased. Compile-time `emit()` output is held to
+// the same rule (meta-eval.ts `isCompilerOwnedAttrName`).
+function _scrml_meta_emit_reserved_attr_name(name) {
+  return name === "data-scrml" || name.slice(0, 11) === "data-scrml-";
+}
 
 // The violation the tree rooted at `root` carries, as a short description naming the element and the
 // attribute but NEVER the value (it is data, and may be sensitive) — or "" when it carries none.
@@ -74,9 +78,9 @@ function _scrml_meta_emit_violation(root) {
           return "an event-handler attribute " + name + "= on <" + tag + ">";
         }
         if (name === "srcdoc") return "a srcdoc= attribute on <" + tag + ">";
-        if (name.slice(0, _SCRML_META_EMIT_RESERVED_ATTR_PREFIX.length) === _SCRML_META_EMIT_RESERVED_ATTR_PREFIX) {
-          return "a " + name + "= attribute on <" + tag + "> (the data-scrml- attribute namespace is reserved " +
-            "for the compiler's runtime markers)";
+        if (_scrml_meta_emit_reserved_attr_name(name)) {
+          return "a " + name + "= attribute on <" + tag + "> (the data-scrml attribute namespace is reserved " +
+            "for the compiler's own markers)";
         }
         if (_scrml_is_url_attr(tag, name) && !_scrml_url_value_admitted(name, String(attrs[i].value))) {
           return "a " + name + "= URL on <" + tag + "> whose scheme is not admitted";
@@ -105,7 +109,7 @@ function _scrml_meta_emit_checked(scopeId, htmlString, contextTag) {
   const err = new Error(
     "refused meta.emit() output for ^{} block " + scopeId + ": it contains " + violation + " (SPEC " +
     "§22.4.1). Runtime meta.emit() admits plain markup only — no event-handler attributes, no srcdoc, " +
-    "no data-scrml-* attribute (a compiler-reserved name), " +
+    "no data-scrml or data-scrml-* attribute (a compiler-reserved name), " +
     "and URL attributes with http:, https:, ftp:, mailto:, tel:, sms:, a relative URL, or a raster " +
     "data:image on an image source. Nothing was written.",
   );
