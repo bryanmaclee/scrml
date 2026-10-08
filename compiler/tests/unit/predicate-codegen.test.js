@@ -551,15 +551,15 @@ describe("§21 readRefinement — number range", () => {
   test("number(>0 && <10000) returns and-predicate with two comparisons", () => {
     const result = readRefinement("number(>0 && <10000)");
     expect(result).not.toBeNull();
-    expect(result.baseType).toBe("number");
+    expect(result.judge.baseType).toBe("number");
     expect(result.label).toBeNull();
-    expect(result.predicate.kind).toBe("and");
-    expect(result.predicate.left.kind).toBe("comparison");
-    expect(result.predicate.left.op).toBe(">");
-    expect(result.predicate.left.value).toBe(0);
-    expect(result.predicate.right.kind).toBe("comparison");
-    expect(result.predicate.right.op).toBe("<");
-    expect(result.predicate.right.value).toBe(10000);
+    expect(result.judge.predicate.kind).toBe("and");
+    expect(result.judge.predicate.left.kind).toBe("comparison");
+    expect(result.judge.predicate.left.op).toBe(">");
+    expect(result.judge.predicate.left.value).toBe(0);
+    expect(result.judge.predicate.right.kind).toBe("comparison");
+    expect(result.judge.predicate.right.op).toBe("<");
+    expect(result.judge.predicate.right.value).toBe(10000);
   });
 });
 
@@ -571,9 +571,9 @@ describe("§22 readRefinement — string(email)", () => {
   test("string(email) returns named-shape predicate", () => {
     const result = readRefinement("string(email)");
     expect(result).not.toBeNull();
-    expect(result.baseType).toBe("string");
-    expect(result.predicate.kind).toBe("named-shape");
-    expect(result.predicate.name).toBe("email");
+    expect(result.judge.baseType).toBe("string");
+    expect(result.judge.predicate.kind).toBe("named-shape");
+    expect(result.judge.predicate.name).toBe("email");
   });
 });
 
@@ -585,12 +585,12 @@ describe("§23 readRefinement — string(.length > 2 && .length < 32)", () => {
   test("parses property predicates from annotation string", () => {
     const result = readRefinement("string(.length > 2 && .length < 32)");
     expect(result).not.toBeNull();
-    expect(result.baseType).toBe("string");
-    expect(result.predicate.kind).toBe("and");
-    expect(result.predicate.left.kind).toBe("property");
-    expect(result.predicate.left.prop).toBe("length");
-    expect(result.predicate.left.op).toBe(">");
-    expect(result.predicate.left.value).toBe(2);
+    expect(result.judge.baseType).toBe("string");
+    expect(result.judge.predicate.kind).toBe("and");
+    expect(result.judge.predicate.left.kind).toBe("property");
+    expect(result.judge.predicate.left.prop).toBe("length");
+    expect(result.judge.predicate.left.op).toBe(">");
+    expect(result.judge.predicate.left.value).toBe(2);
   });
 });
 
@@ -603,7 +603,7 @@ describe("§24 readRefinement — label parsing", () => {
     const result = readRefinement("number(>0 && <10000) [invoice_amount]");
     expect(result).not.toBeNull();
     expect(result.label).toBe("invoice_amount");
-    expect(result.predicate.kind).toBe("and");
+    expect(result.judge.predicate.kind).toBe("and");
   });
 });
 

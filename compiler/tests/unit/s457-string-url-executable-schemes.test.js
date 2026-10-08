@@ -212,7 +212,8 @@ describe("C — runtime zone: every boundary check calls the one judge", () => {
       expect(out.errors).toHaveLength(0);
       // client: decl boundary check + bind:value handler
       expect(out.clientJs).toContain("_scrml_url_shape_ok(");
-      expect(out.clientJs).toContain("_scrml_url_shape_ok(event.target.value)");
+      // S458 2a-fix — the bind:value check judges the value it writes (`_scrml_bv`)
+      expect(out.clientJs).toContain("_scrml_url_shape_ok(_scrml_bv)");
       expect(out.clientJs).not.toContain("new URL(");
       // the shipped runtime carries the 'urlguard' chunk (gated on the call)
       expect((out.runtimeJs.match(/function _scrml_url_shape_ok\(/g) ?? []).length).toBe(1);

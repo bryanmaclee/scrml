@@ -8,7 +8,7 @@ import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
 import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
-import { refinementOf, predicateToJsExpr, deriveHtmlAttrs, type Refinement } from "./emit-predicates.ts";
+import { refinementOf, refinementAtPath, judgeBaseType, judgeTypeExpr, type Refinement } from "./emit-predicates.ts";
 import { collectCompoundLeafTargets, collectRequestIds } from "./reactive-deps.ts";
 
 /** A loosely-typed AST node from the pipeline. */
@@ -643,8 +643,14 @@ export function emitBindDirectiveBody(
 
     // §53.7.2: predicated-type write-gating (also drives the <select> cell-type
     // coercion below — a numeric refinement's base type is read off _bvPredInfo).
+    // S458 2a-fix F1 — the judge of the BOUND POSITION, not of the root cell:
+    // `bind:value=@p.name` is judged by field `name`'s own refinement (none
+    // when the field is unrefined), never by the struct's whole-type judge.
     const _bvTypeAnnotation = reactiveTypeMap.get(rootKey);
-    const _bvPredInfo = _bvTypeAnnotation ? cellRefinement(reactiveTypeMap, rootKey) : null;
+    const _bvPredInfo = leafRetarget
+      ? refinementAtPath(cellRefinement(reactiveTypeMap, leafRetarget.leafKey), leafRetarget.residual)
+      : _bvTypeAnnotation ? refinementAtPath(cellRefinement(reactiveTypeMap, rootKey), pathSegs) : null;
+    const _bvBase = _bvPredInfo ? judgeBaseType(_bvPredInfo.judge) : "";
 
     // §5.4 (D-FORM-5): a <select> carries no `type=` attr, so `isNumericInput`
     // never fires for it. When the bound cell is number/boolean-typed — and NOT
@@ -654,14 +660,18 @@ export function emitBindDirectiveBody(
     //   boolean                               → event.target.value === "true"
     //   string / unannotated                  → no coercion (raw string)
     const _selectBaseType = elementTag === "select" && !enumTypeName && _bvTypeAnnotation
-      ? (_bvPredInfo ? _bvPredInfo.baseType : _bvTypeAnnotation.trim())
+      ? (_bvPredInfo ? _bvBase : _bvTypeAnnotation.trim())
       : "";
     const isNumericSelectCell = _selectBaseType === "number" || _selectBaseType === "integer";
     const isBooleanSelectCell = _selectBaseType === "boolean";
+    // §53.7.1 — a numeric refinement renders `type="number"`, so its input value
+    // is the number the field holds, not the raw text (the judge checks the
+    // base type, and the cell must hold a number).
+    const isNumericRefinement = _bvBase === "number" || _bvBase === "integer";
 
     const writeValue = enumTypeName
       ? `(${enumTypeName}_toEnum[event.target.value] ?? event.target.value)`
-      : isNumericInput || isNumericSelectCell
+      : isNumericInput || isNumericSelectCell || isNumericRefinement
         ? "Number(event.target.value)"
         : isBooleanSelectCell
           ? `event.target.value === "true"`
@@ -673,10 +683,11 @@ export function emitBindDirectiveBody(
     lines.push(`  if (${bElemId}) {`);
     lines.push(`    ${bElemId}.value = ${readExpr};`);
     if (_bvPredInfo) {
-      const _bvCheckExpr = predicateToJsExpr(_bvPredInfo.predicate, "event.target.value");
+      // §53.7.2 — the check judges the value that is WRITTEN (after coercion).
       lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => {`);
       lines.push(`      // §53.7.2 runtime predicate check before reactive assignment`);
-      lines.push(`      if (${_bvCheckExpr}) { ${writeExpr(writeValue)}; }`);
+      lines.push(`      const _scrml_bv = ${writeValue};`);
+      lines.push(`      if (${judgeTypeExpr(_bvPredInfo.judge, "_scrml_bv")}) { ${writeExpr("_scrml_bv")}; }`);
       lines.push(`    });`);
     } else {
       lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr(writeValue)});`);
@@ -1103,7 +1114,7 @@ export function emitBindings(ctx: CompileContext): string[] {
       case "value":
         if (enumTypeName) {
           writeValueExpr = `(${enumTypeName}_toEnum[event.target.value] ?? event.target.value)`;
-        } else if (dispatch.isNumeric) {
+        } else if (dispatch.isNumeric || (predInfo && (judgeBaseType(predInfo.judge) === "number" || judgeBaseType(predInfo.judge) === "integer"))) {
           writeValueExpr = "Number(event.target.value)";
         } else {
           writeValueExpr = "event.target.value";
@@ -1142,12 +1153,12 @@ export function emitBindings(ctx: CompileContext): string[] {
     // Event listener — write back to the cell. Predicate-gate when the
     // cell is refinement-typed (§53.7.2; only for bind:value).
     if (predInfo && dispatch.flavour === "value") {
-      const checkExpr = predicateToJsExpr(predInfo.predicate, "event.target.value");
       lines.push(
         `    ${elemId}.addEventListener(${JSON.stringify(dispatch.inputEvent)}, (event) => {`,
       );
       lines.push(`      // §53.7.2 runtime predicate check before reactive assignment`);
-      lines.push(`      if (${checkExpr}) { ${writeExpr(writeValueExpr)}; }`);
+      lines.push(`      const _scrml_bv = ${writeValueExpr};`);
+      lines.push(`      if (${judgeTypeExpr(predInfo.judge, "_scrml_bv")}) { ${writeExpr("_scrml_bv")}; }`);
       lines.push(`    });`);
     } else {
       lines.push(

@@ -655,38 +655,92 @@ function collectHtmlAttrs(
 // an unreadable predicate silently produced no check.)
 // ---------------------------------------------------------------------------
 
+/**
+ * A refinement as codegen sees it: the WHOLE declared type's judge, plus an
+ * optional label. There is deliberately no `predicate` here (S458 2a-fix F1).
+ * A stamp whose type needs the whole-type judge (a struct with a refined field,
+ * a union) has no single top-level predicate, and a consumer that read one off
+ * it judged the wrong thing: the bind:value gate of `bind:value=@p.name`
+ * (`name` unrefined) became `if (false)` and never wrote the cell. Every
+ * consumer judges `judge`. The only way to a raw predicate is
+ * `htmlPredicateOf` (§53.7.1 attributes), which answers only for a plain
+ * refinement.
+ */
 export interface Refinement {
-  baseType: string;
-  predicate: PredicateExpr;
-  label: string | null;
-  /** Containers around the refined value, outermost first (`T[]`, `T | not`). */
-  wrap?: Array<"array" | "nullable">;
-  /** S458 slice 2 — the whole declared type's judge (preferred when present). */
-  judge?: JudgeType;
+  readonly judge: JudgeType;
+  readonly label: string | null;
 }
 
 /** The refinement carried by a TS stamp (param / fn return / decl), or null. */
 export function refinementOf(stamp: unknown): Refinement | null {
   if (!stamp || typeof stamp !== "object") return null;
   const r = stamp as { predicate?: unknown; baseType?: unknown; label?: unknown; wrap?: unknown; judge?: unknown };
-  // S458 slice 2 — a stamp carrying the whole declared type's judge (structs,
-  // unions) need not have a top-level predicate.
-  if (r.judge && typeof r.judge === "object") {
-    return {
-      baseType: typeof r.baseType === "string" ? r.baseType : "",
-      predicate: (r.predicate && typeof r.predicate === "object" ? r.predicate : { kind: "error" }) as PredicateExpr,
-      label: typeof r.label === "string" ? r.label : null,
-      judge: r.judge as JudgeType,
-    };
-  }
+  const label = typeof r.label === "string" ? r.label : null;
+  // S458 slice 2 — a stamp carrying the whole declared type's judge.
+  if (r.judge && typeof r.judge === "object") return { judge: r.judge as JudgeType, label };
   if (!r.predicate || typeof r.predicate !== "object") return null;
-  const wrap = Array.isArray(r.wrap)
-    ? (r.wrap as unknown[]).filter((w): w is "array" | "nullable" => w === "array" || w === "nullable")
-    : [];
-  return {
-    baseType: typeof r.baseType === "string" ? r.baseType : "",
-    predicate: r.predicate as PredicateExpr,
-    label: typeof r.label === "string" ? r.label : null,
-    ...(wrap.length ? { wrap } : {}),
-  };
+  // A plain refinement (`T(pred)`), possibly inside containers (outermost first).
+  let judge: JudgeType = { k: "pred", baseType: typeof r.baseType === "string" ? r.baseType : "", predicate: r.predicate, label };
+  const wrap = Array.isArray(r.wrap) ? (r.wrap as unknown[]) : [];
+  for (let i = wrap.length - 1; i >= 0; i--) {
+    if (wrap[i] === "array") judge = { k: "array", of: judge };
+    else if (wrap[i] === "nullable") judge = { k: "nullable", of: judge };
+  }
+  return { judge, label };
+}
+
+/**
+ * The refinement of the value at `path` inside a refined value (`bind:value=@p.name`
+ * → the judge of field `name`), or null when that position carries no refinement
+ * (an unrefined struct field). The absence arm of `T | not` is looked through.
+ */
+export function refinementAtPath(r: Refinement | null, path: readonly string[]): Refinement | null {
+  if (!r) return null;
+  let j: JudgeType | null = r.judge;
+  for (const seg of path) {
+    while (j && j.k === "nullable") j = j.of;
+    if (!j) return null;
+    if (j.k === "struct") {
+      const f = j.fields.find(([n]) => n === seg);
+      j = f ? f[1] : null;
+    } else if (j.k === "array" && /^\d+$/.test(seg)) {
+      j = j.of;
+    } else {
+      return null;
+    }
+  }
+  return j ? { judge: j, label: path.length ? null : r.label } : null;
+}
+
+/** The primitive base a judged value must have ("" when it is not exactly one primitive). */
+export function judgeBaseType(j: JudgeType | null | undefined): string {
+  if (!j) return "";
+  if (j.k === "nullable") return judgeBaseType(j.of);
+  if (j.k === "pred" || j.k === "prim") return j.baseType;
+  return "";
+}
+
+/**
+ * §53.7.1 — the plain refinement behind HTML attribute derivation, or null. The
+ * ONE accessor that hands out a raw predicate, and only for a judge that is
+ * exactly one refinement (or `T(pred) | not`). A struct / union / array has none.
+ */
+export function htmlPredicateOf(r: Refinement | null): { predicate: PredicateExpr; baseType: string } | null {
+  let j: JudgeType | null = r ? r.judge : null;
+  while (j && j.k === "nullable") j = j.of;
+  return j && j.k === "pred" ? { predicate: j.predicate as PredicateExpr, baseType: j.baseType } : null;
+}
+
+/**
+ * A boundary check of `valueExpr` against refinement `r` (§53.4.5): the lines
+ * `if (!judge) throw E-CONTRACT-001-RT`. `noValue` — a server-side report
+ * omits the value (§53 R2).
+ */
+export function emitRefinementCheck(r: Refinement, valueExpr: string, varName: string, opts: { noValue?: boolean; location?: string } = {}): string[] {
+  return emitRuntimeCheck({ kind: "error" }, valueExpr, varName, r.label, opts.location ?? "", { judge: r.judge, noValue: opts.noValue });
+}
+
+/** The §53.9.4 server parameter check (400) of `paramName` against refinement `r`. */
+export function emitServerRefinementCheck(r: Refinement, paramName: string, fnName: string, indent = "  "): string[] {
+  return emitServerParamCheck(paramName, { kind: "error" }, r.label, fnName, indent, { judge: r.judge });
 }

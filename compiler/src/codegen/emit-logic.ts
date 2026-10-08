@@ -12,7 +12,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHead
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRuntimeCheck, refinementOf, emitParamGuardStatement, emitRefineExpr } from "./emit-predicates.ts";
+import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -2392,7 +2392,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
+          const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });
           return [
             `const ${_checkTmpVar} = ${rhs};`,
             ..._checkLines,
@@ -2411,7 +2411,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
+        const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });
         return [`const ${_checkTmpVar} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`, ..._checkLines, `let ${node.name} = ${_checkTmpVar};`].join("\n");
       }
       return `let ${_letDeclLhs} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`;
@@ -2432,7 +2432,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const ra = (node as any).refineAssign as { judge: any; name: string } | undefined;
         if (!ra) return `${name} = ${rhs};`;
         const _tmp = genVar(`_scrml_chk_${name}`);
-        const _lines = emitRuntimeCheck({ kind: "error" } as any, _tmp, name, null, undefined, { judge: ra.judge, noValue: opts.boundary === "server" });
+        const _lines = emitRefinementCheck({ judge: ra.judge, label: null }, _tmp, name, { noValue: opts.boundary === "server" });
         return [`const ${_tmp} = ${rhs};`, ..._lines, `${name} = ${_tmp};`].join("\n");
       };
       // For tilde-decl: if name was already declared by let-decl, emit as reassignment
@@ -2517,7 +2517,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           return `const ${_constDeclLhs} = ${rhs};`;
         }
         const _tmp = genVar(`_scrml_chk_${node.name}`);
-        const _lines = emitRuntimeCheck(_pc.predicate, _tmp, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
+        const _lines = emitRefinementCheck(refinementOf(_pc)!, _tmp, node.name, { noValue: opts.boundary === "server" });
         return [`const ${_tmp} = ${rhs};`, ..._lines, `const ${node.name} = ${_tmp};`].join("\n");
       };
       // If-as-expression: `const a = if (cond) { lift val }`
@@ -3145,7 +3145,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
+          const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });
           return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
@@ -3161,7 +3161,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, { ..._pc, noValue: opts.boundary === "server" });
+        const _checkLines = emitRefinementCheck(refinementOf(_pc)!, _checkTmpVar, node.name, { noValue: opts.boundary === "server" });
         return _appendSidecar([`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n"));
       }
       return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
@@ -3186,16 +3186,11 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const _wrapReturnWithCheck = (retExprStr: string): string => {
         if (!_retPredInfo) return `return ${retExprStr};`;
         const _tmpVar = genVar(`_scrml_chk_ret`);
-        const _label = _retPredInfo.label;
         const _fnName = _rr?.fn ?? opts.enclosingFnName ?? "<anonymous>";
-        const _checkLines = emitRuntimeCheck(
-          _retPredInfo.predicate,
-          _tmpVar,
-          `<return value of ${_fnName}>`,
-          _label,
-          `fn ${_fnName}, return statement`,
-          { ..._retPredInfo, noValue: opts.boundary === "server" },
-        );
+        const _checkLines = emitRefinementCheck(_retPredInfo, _tmpVar, `<return value of ${_fnName}>`, {
+          location: `fn ${_fnName}, return statement`,
+          noValue: opts.boundary === "server",
+        });
         return [
           `const ${_tmpVar} = ${retExprStr};`,
           ..._checkLines,
