@@ -12,6 +12,7 @@
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { parseExprToNode, emitStringFromTree } from "../../src/expression-parser.ts";
+import { substitutePropsInJsSource } from "../../src/component-prop-js-substitute.ts";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -163,5 +164,73 @@ describe("emitStringFromTree — a unary operator keeps its compound operand gro
     const out = emitStringFromTree(parseExprToNode("not (x is not)", "t", 0));
     expect(out).toBe("!(x is not)");
     expect(emitStringFromTree(parseExprToNode(out, "t", 0))).toBe(out);
+  });
+});
+
+describe("third round — substitution in unstructured JS text is scope-aware (substitutePropsInJsSource)", () => {
+  const hooks = (props, writes = []) => ({
+    replacementFor: (n) => (n in props ? props[n] : null),
+    onWrite: (n) => writes.push(n),
+  });
+  const sub = (src, props, writes) => substitutePropsInJsSource(src, false, new Set(), hooks(props, writes));
+  const P = { label: '"L"', n: "@v" };
+
+  test("object KEYS, member names, regex / string / comment content are never references", () => {
+    expect(sub("x => { const o = { label: 2 }; return o.label }", P)).toBe("x => { const o = { label: 2 }; return o.label }");
+    expect(sub("x => { /* label */ return /label/.test('label') }", P)).toBe("x => { /* label */ return /label/.test('label') }");
+    expect(sub("it => { return { label: it.name, id: it.id } }", P)).toBe("it => { return { label: it.name, id: it.id } }");
+  });
+
+  test("a shorthand `{ label }` is a READ: the key is kept, the value substituted", () => {
+    expect(sub("x => { return { label } }", P)).toBe('x => { return { label: "L" } }');
+  });
+
+  test("locals, nested params (plain / arrow / destructured), catch and loop binders shadow the prop", () => {
+    const w = [];
+    expect(sub("x => { let label = 10; label = label + 1; return label }", P, w)).toBe("x => { let label = 10; label = label + 1; return label }");
+    expect(sub("x => { function g(label) { return label } const h = (label) => label; const d = ({ label }) => label; return g(1) }", P, w))
+      .toBe("x => { function g(label) { return label } const h = (label) => label; const d = ({ label }) => label; return g(1) }");
+    expect(sub("x => { for (let n = 0; n < 3; n++) {} for (const n of [1]) { n } }", P, w)).toBe("x => { for (let n = 0; n < 3; n++) {} for (const n of [1]) { n } }");
+    expect(w).toEqual([]);
+  });
+
+  test("a READ outside every shadow is substituted; a WRITE is reported", () => {
+    const w = [];
+    expect(sub("x => { n = n + label; n++ }", P, w)).toBe('x => { @v = @v + "L"; @v++ }');
+    expect(w).toEqual(["n", "n"]);
+  });
+
+  test("text that does not parse is returned as null (never text-rewritten)", () => {
+    expect(sub("x => { label +", P)).toBe(null);
+  });
+});
+
+describe("third round — refusals instead of text rewrites", () => {
+  test("`bind:n=${@w + 1}` names the bad right-hand side (E-ATTR-010)", () => {
+    const { codes } = compile(`<program>
+<w> = 1
+const C = <div props={ bind n: number }><span>\${n}</span></div>
+<C bind:n=\${@w + 1}/>
+</program>`);
+    expect(codes).toContain("E-ATTR-010");
+  });
+
+  test("a C-style `for (let n …)` in a body function is never a write to the prop, nor a write to the caller's cell", () => {
+    const { codes, clientJs } = compile(`<program>
+<v> = 1
+<out> = 0
+const C = <div props={ n: number }>
+  \${ function run() { let t = 0
+    for (let n = 0; n < 3; n++) { t = t + n }
+    @out = t } }
+  <button onclick=run()>r</button>
+</div>
+<C n=@v/>
+</program>`);
+    expect(codes).not.toContain("E-ASSIGN-004");
+    // Pre-existing (main too): a declaration-form C-style init is dropped by the component
+    // re-parse, so the loop variable is unresolved — loud, never the caller's cell.
+    // only the cell's own initialisation writes @v
+    expect(clientJs.split('_reactive_set("v"').length - 1).toBe(1);
   });
 });

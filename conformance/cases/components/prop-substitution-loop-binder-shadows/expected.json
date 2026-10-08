@@ -1,0 +1,14 @@
+{
+  "id": "components-prop-substitution-loop-binder-shadows",
+  "description": "§15.10.1 (S458 third round, N2) — a loop binder named like a by-value prop (`for (const n of …)`, in a function body and inside a block-bodied arrow) is the loop's variable, not the prop: it is neither substituted nor reported as a write to the prop, and the caller's cell `@v` is never written. Outside the loop `n` is the prop (7). Total 6 + 10 + 20 + 7 = 43. (A C-style `for (let n = 0; …)` STATEMENT directly in a component-body function fails E-SCOPE-001 on main as well (the component re-parse drops a declaration-form C-style init), and inside a block arrow it emits an EMPTY arrow body (`/* block body */`) on main and head alike — both pre-existing — so the C-style header is pinned in the unit suite, not executed here.)",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1 Shadowing: 'A `for-stmt` loop variable … shadows props within their respective scopes.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ASSIGN-004", "E-SCOPE-001"],
+    "input": [{ "click": ".c .r" }],
+    "state": { "out": 43, "v": 7 },
+    "domAnchored": [{ "selector": "#o", "text": "43" }]
+  }
+}

@@ -3328,8 +3328,20 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
       const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
       return { name: left.name as string ?? "", defaultValue };
     }
-    // Destructured patterns — not yet structured
-    return { name: "__destructured__" };
+    // Destructured patterns — not yet structured. S458: the names the pattern BINDS are
+    // recorded (`boundNames`) so a consumer that resolves names in the body (component
+    // prop substitution) sees `({ label }) => label` read the PARAMETER, not a prop.
+    const boundNames: string[] = [];
+    const collect = (q: ESNode | null | undefined): void => {
+      if (!q) return;
+      if (q.type === "Identifier") boundNames.push(q.name as string);
+      else if (q.type === "ObjectPattern") for (const pr of (q.properties as ESNode[]) ?? []) collect((pr.type === "RestElement" ? pr.argument : pr.value) as ESNode);
+      else if (q.type === "ArrayPattern") for (const el of (q.elements as ESNode[]) ?? []) collect(el);
+      else if (q.type === "RestElement") collect(q.argument as ESNode);
+      else if (q.type === "AssignmentPattern") collect(q.left as ESNode);
+    };
+    collect(p);
+    return { name: "__destructured__", boundNames };
   });
 }
 

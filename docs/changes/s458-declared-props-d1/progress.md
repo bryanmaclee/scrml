@@ -119,3 +119,38 @@ Resumed after a network-outage kill (tip b4994a7fc + 1 uncommitted edit, express
   content / no capture, executed) and bind-prop-write-back-block-arrows (executed). Gate 30203 pass / 0 fail.
 - Found, not fixed (pre-existing): a component whose body declares `const`s cannot be instantiated twice (module-scope
   `const` redeclared → SyntaxError at load) and cannot be used inside `<each>` (E-EACH-BODY-DECL-UNSUPPORTED).
+
+## 2026-10-08 — step 6: review round 3 (89dd1278d DO-NOT-LAND) — the text fallback is gone
+- Boundary changed: `rewriteIdentsInRawExpr` (the scanner) is DELETED. Text the expression tree does not structure
+  — a block-bodied arrow / function expression (an escape hatch codegen emits from `raw`; emit-expr has no
+  block-lambda path: it prints `/* block body */`), a `when …` handler `bodyRaw`, a `!{}` arm `handler`, a statement
+  handler value (`if (@r > 0) act()`) — is substituted on its PARSED tree: new leaf module
+  `compiler/src/component-prop-js-substitute.ts` (`substitutePropsInJsSource`) parses with the expression parser's
+  own acorn + `@`/`::` plugins, builds a scope model (let/const/var/function/class declarations, params incl.
+  destructured and defaulted, `for (let …)` / `for (const … of)` binders, catch params, switch-case blocks) and
+  replaces only Identifier REFERENCES at their exact node offsets. Object keys, member names, labels, string /
+  template / regex / comment content are never references; a shorthand `{ label }` becomes `{ label: <value> }`;
+  writes (assignment / update / destructuring-assignment targets) are reported. Text that does not parse is never
+  rewritten: a prop it references is refused (E-SCOPE-001 — ROUTED; detection reads the acorn token stream).
+- Structured paths: a destructured lambda param now records `boundNames` (expression-parser `convertParams`,
+  `LambdaParam.boundNames`); function-decl string params are parsed for every bound name; a C-style for header's
+  binder shadows in header + body.
+- N3 root cause (pre-CE): `collectExpr` cooked every STRING token's escapes then re-quoted it, so a component
+  definition's raw markup lost `\'` (and doubled `\d`) BEFORE the expander re-parsed it. The tokenizer now records a
+  quoted STRING's delimiter; `collectExpr` returns `exprSource` (strings as written) and the component-def uses it.
+- Substituted values keep their precedence: a primary (ident / member / call / index / array / non-number literal)
+  is spliced as-is, anything else parenthesized.
+- `substituteExprText`: a parse that LOST trailing content (`n + 'it's'` → `n + 'it'`) is treated as unparsed.
+- F5 residual: `bind:n=${@w + 1}` / `bind:n=f()` → E-ATTR-010 naming the expression.
+- Remaining text rewrites of a prop name in the expander (grep): `applyPropSubstitutions` — a WHOLE `${name}`
+  segment whose entire content is the prop identifier, spliced with the prop's LITERAL text only (quoted attrs and
+  text nodes; literal props only — justified: the segment IS the identifier); `substitutePropsInRawExpr` for the
+  `<each as x>` BINDER NAME only (non-expression text, byte-identical). `rewriteTemplateInterpolations` only
+  SEGMENTS `${…}`; each segment is substituted structurally.
+- Found, pre-existing, not fixed: a declaration-form C-style `for (let n = 0; …)` statement in a component-body
+  function drops its init in the native re-parse (translate-stmt.js `makeForStmtCStyle`, documented there) → the
+  loop variable is unresolved (E-SCOPE-001 on main too); a block arrow containing one becomes a structured lambda
+  whose body emits as `/* block body */` — an EMPTY callback, silently (main too).
+- Tests: conformance prop-substitution-scope-in-block-arrows (N1, executed), prop-substitution-loop-binder-shadows
+  (N2 for-of shapes, executed), prop-substitution-string-escapes (N3, executed); unit +7 (JS-substitute scope cases,
+  bind expr E-ATTR-010, C-style never writes the caller cell). Gate 30213 pass / 0 fail.

@@ -49,7 +49,10 @@ import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
-import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
+import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
+import {
+  substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader, bindingNamesOfParamText,
+} from "./component-prop-js-substitute.ts";
 import type {
   Span,
   FileAST,
@@ -1581,11 +1584,12 @@ function substituteInterpSegments(
  * from the tree, so precedence is structural (`n * 2` with `n=${@a + 1}` →
  * `(@a + 1) * 2`). Unchanged text is returned verbatim (no re-formatting churn).
  *
- * Fallback — ONLY when the text does not parse to a structured expression (the
- * parser's escape hatch: a block-bodied arrow `() => { … }`, an `@.field is some`
- * sigil predicate): `rewriteIdentsInRawExpr`, which is single-pass, skips string
- * literals, recurses into template interpolations, and PARENTHESIZES a substituted
- * compound expression.
+ * When the expression parser leaves the WHOLE text as an escape hatch (a block-bodied
+ * arrow `() => { … }`), the text is substituted on its parsed JS tree with a scope model
+ * (`substitutePropsInJsSource`). Text that parses neither way — or that the expression
+ * parser read only a PREFIX of (`n + 'it's'` stops at `'it'`) — is never rewritten: a
+ * prop it references is refused (`noteUnsubstitutable`), the rest is returned verbatim.
+ * There is no text-scanning substitution.
  */
 function substituteExprText(
   text: string,
@@ -1595,19 +1599,66 @@ function substituteExprText(
   if (!text || propExprMap.size === 0) return text;
   let parsed: ExprNode | null = null;
   try { parsed = parseExprToNode(text, "", 0); } catch { parsed = null; }
+  if (parsed && hasLostTrailingContent(parsed)) parsed = null;
   if (parsed && parsed.kind !== "escape-hatch") {
     try {
       const before = emitStringFromTree(parsed);
       const after = emitStringFromTree(substitutePropsInExprNode(parsed, propExprMap, shadowed));
       return after === before ? text : after;
-    } catch { /* fall through to the text fallback */ }
+    } catch { parsed = null; }
   }
-  // A block-bodied arrow: its own parameters shadow same-named props.
-  const inner = parsed && parsed.kind === "escape-hatch"
-    && (parsed as EscapeHatchExpr).nativeKind === "ArrowFunctionExpression"
-    ? new Set([...shadowed, ...arrowParamNames(text)])
-    : shadowed;
-  return rewriteIdentsInRawExpr(text, propExprMap, inner);
+  return substituteJsTextOrRefuse(text, false, propExprMap, shadowed);
+}
+
+/**
+ * S458 (third round) — substitute props in JS-shaped source text on its PARSED tree
+ * (`substitutePropsInJsSource`: scope model, Identifier references only, exact node
+ * offsets). A text that does not parse is returned unchanged, and every prop it
+ * references is recorded as UNSUBSTITUTABLE (refused at the end of the expansion).
+ */
+/** Every identifier NAME an ExprNode tree references (lambda parameters not excluded). */
+function exprNodeIdentNames(node: unknown, out: string[] = []): string[] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) { for (const x of node) exprNodeIdentNames(x, out); return out; }
+  const r = node as Record<string, unknown>;
+  if (r.kind === "ident" && typeof r.name === "string") out.push(r.name);
+  for (const k of Object.keys(r)) {
+    if (k === "span") continue;
+    const v = r[k];
+    if (v && typeof v === "object") exprNodeIdentNames(v, out);
+  }
+  return out;
+}
+
+function substituteJsTextOrRefuse(
+  text: string,
+  asProgram: boolean,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): string {
+  if (!text || propExprMap.size === 0) return text;
+  const hooks = {
+    replacementFor: (name: string) => {
+      const node = propExprMap.get(name);
+      if (!node) return null;
+      const s = emitStringFromTree(node);
+      // A PRIMARY expression keeps its own shape (an assignment target `@cell = …` must
+      // stay one); every other value — an operator expression, a number (`5.x` would not
+      // parse) — is grouped so it keeps its own precedence where it lands.
+      const primary = node.kind === "ident" || node.kind === "member" || node.kind === "call"
+        || node.kind === "index" || node.kind === "array"
+        || (node.kind === "lit" && (node as LitExpr).litType !== "number");
+      return primary ? s : `(${s})`;
+    },
+    onWrite: (name: string) => notePropWrite(name),
+  };
+  // A handler value may be a STATEMENT (`if (@r > 0) act()`), not an expression.
+  const out = substitutePropsInJsSource(text, asProgram, shadowed, hooks)
+    ?? (asProgram ? null : substitutePropsInJsSource(text, true, shadowed, hooks));
+  if (out !== null) return out;
+  const referenced = propNamesReferencedInUnparsedText(text, (n) => !shadowed.has(n) && propExprMap.has(n));
+  for (const name of referenced) noteUnsubstitutable(name, text);
+  return text;
 }
 
 /**
@@ -1782,26 +1833,26 @@ function buildPropExprMap(
  * and `expandComponentNode` refuses it. Set only while `expandComponentNode`
  * substitutes (CE is single-file, non-reentrant per expansion); `null` elsewhere.
  */
-let _propWriteCtx: { declared: Set<string>; bound: Set<string>; written: Set<string> } | null = null;
+let _propWriteCtx: {
+  declared: Set<string>;
+  bound: Set<string>;
+  written: Set<string>;
+  /** S458 third round — props referenced in text that could not be parsed (prop → that text). */
+  unsubstitutable: Map<string, string>;
+} | null = null;
 function notePropWrite(name: string): void {
   if (!_propWriteCtx) return;
   if (_propWriteCtx.declared.has(name) && !_propWriteCtx.bound.has(name)) _propWriteCtx.written.add(name);
+}
+function noteUnsubstitutable(name: string, text: string): void {
+  if (!_propWriteCtx) return;
+  if (!_propWriteCtx.unsubstitutable.has(name)) _propWriteCtx.unsubstitutable.set(name, text);
 }
 function noteWriteTarget(target: ExprNode, propExprMap: Map<string, ExprNode>, shadowed: Set<string>): void {
   if (target && target.kind === "ident") {
     const nm = (target as IdentExpr).name;
     if (!shadowed.has(nm) && propExprMap.has(nm)) notePropWrite(nm);
   }
-}
-
-/** S458 F4 — the parameter names of a raw arrow-function text (`(a, b) => …`, `a => …`). */
-function arrowParamNames(raw: string): string[] {
-  const m = /^\s*(?:async\s+)?(?:\(([^)]*)\)|([A-Za-z_$][\w$]*))\s*=>/.exec(raw);
-  if (!m) return [];
-  if (m[2]) return [m[2]];
-  return (m[1] ?? "").split(",")
-    .map((p) => /^\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)/.exec(p)?.[1])
-    .filter((x): x is string => !!x);
 }
 
 function substitutePropsInExprNode(
@@ -1843,15 +1894,14 @@ function substitutePropsInExprNode(
           return { ...eh, raw: rewritten } satisfies EscapeHatchExpr;
         }
       }
-      // S458 F4 — a block-bodied arrow (`() => { n = 200 }`, a `.forEach(x => { … })`
-      // callback) is an escape hatch the codegen emits from `raw`. Substitute in the
-      // raw text (single pass, string literals skipped), with the arrow's own
-      // parameters shadowing same-named props. Without this a prop read there was
-      // an unbound name and a bind-prop write a bare global write.
-      if (eh.nativeKind === "ArrowFunctionExpression" && typeof eh.raw === "string") {
-        const inner = new Set(shadowed);
-        for (const p of arrowParamNames(eh.raw)) inner.add(p);
-        const rewritten = rewriteIdentsInRawExpr(eh.raw, propExprMap, inner);
+      // S458 F4 (third round) — every other escape hatch (a block-bodied arrow or function
+      // expression `x => { … }`, which codegen emits from `raw`; a text the parser could not
+      // structure) is substituted on its PARSED JS tree with a scope model — locals,
+      // parameters (destructured too), `for (let …)` binders, object keys, member names,
+      // string / regex / comment content are never rewritten. A raw that does not parse is
+      // left as written and a prop it references is refused.
+      if (eh.nativeKind !== "TemplateLiteral" && typeof eh.raw === "string" && eh.raw.trim() !== "") {
+        const rewritten = substituteJsTextOrRefuse(eh.raw, false, propExprMap, shadowed);
         if (rewritten !== eh.raw) return { ...eh, raw: rewritten } satisfies EscapeHatchExpr;
       }
       return eh;
@@ -1967,7 +2017,11 @@ function substitutePropsInExprNode(
         return p;
       });
       const innerShadowed = new Set(shadowed);
-      for (const p of n.params) innerShadowed.add(p.name);
+      for (const p of n.params) {
+        innerShadowed.add(p.name);
+        // S458 — a destructured parameter binds every name in its pattern.
+        for (const b of (p as { boundNames?: string[] }).boundNames ?? []) innerShadowed.add(b);
+      }
       let newBody: LambdaExpr["body"];
       if (n.body.kind === "expr") {
         newBody = { kind: "expr", value: substitutePropsInExprNode(n.body.value, propExprMap, innerShadowed) };
@@ -2000,16 +2054,12 @@ function substitutePropsInExprNode(
 
 /**
  * F-COMPONENT-004: Rewrite the contents of `${...}` interpolations inside a
- * raw template-literal source text, applying prop-name substitutions to
- * identifier references. The substitution is text-level for simplicity
- * (templates carry raw text); we replace bare identifier reads only.
+ * raw template-literal (or quoted-attribute) source text.
  *
- * Heuristic: for each `${...}` segment, we apply a regex-based substitution
- * that replaces identifier-shaped tokens matching declared props with the
- * emitStringFromTree() of the substituted ExprNode. This is a best-effort
- * rewrite — complex expressions inside `${...}` (e.g. with their own lambdas
- * and shadowing) are not perfectly handled; the substitution is conservative
- * and only replaces bare identifier reads not preceded by `.` (member access).
+ * The scan below only SEGMENTS the text: it finds each top-level `${…}` (respecting
+ * nested braces, quotes and escapes) and leaves the literal spans verbatim. Each
+ * segment's expression is substituted by the structural substituter
+ * (`substituteExprText`, S458) — never by matching prop names in the text.
  */
 function rewriteTemplateInterpolations(
   raw: string,
@@ -2066,135 +2116,6 @@ function rewriteTemplateInterpolations(
     i++;
   }
   return out.join("");
-}
-
-/**
- * Rewrite identifier references in a raw expression-text fragment. Replaces
- * bare identifier tokens matching declared props (and not shadowed, not
- * preceded by `.`) with the emit-string form of the substituted ExprNode.
- * This is a token-level pass suitable for template-interpolation contents
- * where re-parse-and-re-emit would risk altering whitespace and semantics.
- *
- * KNOWN HEURISTIC LIMITS (leading-identifier scan, not a full parser — shared
- * with the long-standing template-interpolation caller, so PRE-EXISTING, not new
- * to the when-handler callers; filed as
- * g-component-prop-rawexpr-heuristic-substitution-edges):
- *   - an object-literal KEY equal to a prop name is rewritten (`{label: v}` →
- *     `{<value>: v}`; shorthand `{label}` becomes invalid). It is not
- *     distinguished from a value read.
- *   - a `` ` `` / `"` / `'` inside a REGEX literal (`/["`]/`) is mis-scanned as a
- *     string/template opener.
- *   - an unterminated `${` in the backtick branch appends one spurious `}`.
- * The common cases (`prop`, `x.prop`, `mylabel`, plain-string contents, and a
- * `${prop}` interpolation) are handled correctly. Full parse-hardening is out of
- * scope for the substitution fix.
- */
-function rewriteIdentsInRawExpr(
-  text: string,
-  propExprMap: Map<string, ExprNode>,
-  shadowed: Set<string>,
-): string {
-  // Empty-map early-out (mirrors rewriteTemplateInterpolations): no prop can
-  // match, so the text is returned verbatim.
-  if (!text || propExprMap.size === 0) return text;
-  // \b(name)\b but ensure not preceded by `.` (member access) and not inside a
-  // plain string literal. A backtick TEMPLATE is NOT skipped wholesale — its
-  // `${…}` interpolations carry live expressions we must recurse into.
-  let out = "";
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const ch = text[i];
-    // Skip plain (single/double-quoted) string-literal contents verbatim.
-    if (ch === '"' || ch === "'") {
-      const q = ch;
-      out += ch;
-      i++;
-      while (i < n) {
-        const c = text[i];
-        if (c === "\\") { out += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-        out += c;
-        i++;
-        if (c === q) break;
-      }
-      continue;
-    }
-    // Backtick TEMPLATE: literal spans stay verbatim, but each `${…}`
-    // interpolation is an expression — recurse prop substitution into it.
-    // Without this, a prop referenced ONLY inside a template interpolation in a
-    // handler body (e.g. `send(\`done: ${label}\`)`) leaked as a bare identifier.
-    if (ch === "`") {
-      out += ch;
-      i++;
-      while (i < n) {
-        const c = text[i];
-        if (c === "\\") { out += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-        if (c === "`") { out += c; i++; break; }
-        if (c === "$" && text[i + 1] === "{") {
-          // Collect the interpolation expression, respecting nested braces,
-          // string literals and nested templates, then recurse into it.
-          out += "${";
-          i += 2;
-          let depth = 1;
-          let seg = "";
-          while (i < n && depth > 0) {
-            const d = text[i];
-            if (d === "\\") { seg += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-            if (d === "{") { depth++; seg += d; i++; continue; }
-            if (d === "}") { depth--; if (depth === 0) { i++; break; } seg += d; i++; continue; }
-            if (d === '"' || d === "'" || d === "`") {
-              const q = d; seg += d; i++;
-              while (i < n) {
-                const s = text[i];
-                if (s === "\\") { seg += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-                seg += s; i++;
-                if (s === q) break;
-              }
-              continue;
-            }
-            seg += d; i++;
-          }
-          out += rewriteIdentsInRawExpr(seg, propExprMap, shadowed) + "}";
-          continue;
-        }
-        out += c;
-        i++;
-      }
-      continue;
-    }
-    // Identifier start (incl. @ for reactive vars)
-    if (/[A-Za-z_$@]/.test(ch)) {
-      let j = i;
-      // Allow leading @ then ident chars
-      if (ch === "@") j++;
-      while (j < n && /[A-Za-z0-9_$]/.test(text[j])) j++;
-      const word = text.slice(i, j);
-      // Check predecessor: skip if preceded by `.` (member access)
-      let k = out.length - 1;
-      while (k >= 0 && /\s/.test(out[k])) k--;
-      const precededByDot = k >= 0 && out[k] === ".";
-      if (!precededByDot && !shadowed.has(word) && propExprMap.has(word)) {
-        const sub = propExprMap.get(word) as ExprNode;
-        // S458 F2 — a WRITE to the prop (`word = …`, `word += …`, `word++`, `++word`).
-        const after = text.slice(j).replace(/^\s+/, "");
-        const isWrite = /^(=(?![=>])|\+=|-=|\*\*=|\*=|\/=|%=|&&=|\|\|=|\?\?=|\+\+|--)/.test(after)
-          || /(\+\+|--)\s*$/.test(out);
-        if (isWrite) notePropWrite(word);
-        // S458 F1 — a compound caller expression keeps its own precedence.
-        const s = emitStringFromTree(sub);
-        const compound = sub.kind === "binary" || sub.kind === "ternary" || sub.kind === "assign"
-          || sub.kind === "lambda" || sub.kind === "unary";
-        out += compound ? `(${s})` : s;
-      } else {
-        out += word;
-      }
-      i = j;
-      continue;
-    }
-    out += ch;
-    i++;
-  }
-  return out;
 }
 
 /**
@@ -2269,10 +2190,10 @@ const WHEN_HANDLER_DEFAULT_BINDING: Record<string, string | undefined> = {
 
 /**
  * Substitute component prop refs into a bodyRaw-emitting `when …` handler node.
- * Rewrites `bodyRaw` (the string codegen actually emits) via
- * `rewriteIdentsInRawExpr` — leading-identifier discipline (`label`→caller
- * value; `x.label` / `mylabel` / plain-string contents untouched; `${…}`
- * template interpolations recursed into). The handler binding shadows a
+ * Rewrites `bodyRaw` (the string codegen actually emits) on its PARSED tree
+ * (`substituteJsTextOrRefuse`, S458: scope model, Identifier references only; a body
+ * that does not parse is left as written and a prop it references is refused). The
+ * handler binding shadows a
  * same-named prop — the EXPLICIT binding when present, else the default name
  * codegen will synthesize (WHEN_HANDLER_DEFAULT_BINDING), so a prop named
  * `data` / `e` under an omitted binding does not clobber the handler parameter.
@@ -2290,7 +2211,7 @@ function substitutePropsInWhenHandler(
   const boundName = n.binding ?? WHEN_HANDLER_DEFAULT_BINDING[n.kind];
   if (boundName) inner.add(boundName);
   const nextRaw = typeof n.bodyRaw === "string"
-    ? rewriteIdentsInRawExpr(n.bodyRaw, propExprMap, inner)
+    ? substituteJsTextOrRefuse(n.bodyRaw, true, propExprMap, inner)
     : n.bodyRaw;
   const nextExpr = n.bodyExpr ? substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) : n.bodyExpr;
   return { ...(stmt as object), bodyRaw: nextRaw, bodyExpr: nextExpr } as unknown as LogicStatement;
@@ -2360,9 +2281,10 @@ function substitutePropsInLogicStmt(
       // Function params shadow props inside the body.
       const innerShadowed = new Set(shadowed);
       for (const p of n.params ?? []) {
-        // Param strings may be "name" or "name: Type" or "name = default"
-        const m = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(p);
-        if (m) innerShadowed.add(m[1]);
+        // Param strings may be "name", "name: Type", "name = default" or a destructuring
+        // pattern ("{ label, id }") — S458: every name the parameter binds, from its parse.
+        const typeless = String(p).replace(/^(\s*[A-Za-z_$][\w$]*)\s*:\s*[^=]*?(=|$)/, "$1 $2");
+        for (const b of bindingNamesOfParamText(typeless)) innerShadowed.add(b);
       }
       const newBody = substitutePropsInLogicStmts(n.body, propExprMap, innerShadowed);
       // The function name shadows props in subsequent statements.
@@ -2385,9 +2307,13 @@ function substitutePropsInLogicStmt(
       // Loop variable shadows props inside the body.
       const innerShadowed = new Set(shadowed);
       if ((n as ForStmtNode).variable) innerShadowed.add((n as ForStmtNode).variable);
+      // S458 N2 — a C-style header's own binder (`for (let n = 0; n < 3; n++)`) shadows
+      // the prop in the header and the body; read from the parsed header.
+      const header = (n as ForStmtNode).iterable;
+      if (typeof header === "string") for (const b of bindingNamesOfForHeader(header)) innerShadowed.add(b);
       const cStyle = (n as ForStmtNode).cStyleParts;
       const newCStyle = cStyle ? {
-        initExpr: substitutePropsInExprNode(cStyle.initExpr, propExprMap, shadowed),
+        initExpr: substitutePropsInExprNode(cStyle.initExpr, propExprMap, innerShadowed),
         condExpr: substitutePropsInExprNode(cStyle.condExpr, propExprMap, innerShadowed),
         updateExpr: substitutePropsInExprNode(cStyle.updateExpr, propExprMap, innerShadowed),
       } : undefined;
@@ -2506,7 +2432,7 @@ function substitutePropsInLogicStmt(
             }
             return {
               ...(arm as object),
-              ...(typeof a.handler === "string" ? { handler: rewriteIdentsInRawExpr(a.handler, propExprMap, armShadowed) } : {}),
+              ...(typeof a.handler === "string" ? { handler: substituteJsTextOrRefuse(a.handler, true, propExprMap, armShadowed) } : {}),
               ...(a.handlerExpr ? { handlerExpr: substitutePropsInExprNode(a.handlerExpr, propExprMap, armShadowed) } : {}),
             } as typeof arm;
           })
@@ -2603,7 +2529,9 @@ function substituteProps(
 
   // Text nodes: substitute in value
   if (cloned.kind === "text") {
-    const newVal = applyPropSubstitutions((cloned.value as string) ?? "", props);
+    // A whole `${name}` segment is spliced as TEXT only for a LITERAL prop value (S458): a
+    // reactive / expression value spliced as text would be its source spelling.
+    const newVal = applyPropSubstitutions((cloned.value as string) ?? "", attrTextPropMaps(props, propExprMap).literal);
     if (newVal !== cloned.value) {
       cloned.value = newVal;
     }
@@ -2800,9 +2728,8 @@ function substituteProps(
           if (!exprVal.exprNode && typeof exprVal.raw === "string") {
             // S458 F1 — ONE structural substituter (`substituteExprText`): parsed with
             // scrml's §42-aware parser, identifier nodes replaced in one simultaneous
-            // pass, string-literal content untouched, precedence structural; the text
-            // fallback (single pass, literals skipped, compound values parenthesized)
-            // only when the raw does not parse (an `@.field` sigil raw).
+            // pass, string-literal content untouched, precedence structural; a raw that
+            // does not parse is left as written and a prop it references is refused.
             //
             // g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot (S378-peter):
             // when a STRING-LITERAL prop is referenced, the substituted exprNode is
@@ -2812,18 +2739,16 @@ function substituteProps(
             // which the loop emitters consume as before.
             const subbed = substituteExprText(exprVal.raw, propExprMap, new Set());
             if (subbed !== exprVal.raw) {
-              const stringPropInRaw = (() => {
-                for (const [name, node] of propExprMap.entries()) {
-                  if (!name || !node || node.kind !== "lit" || (node as LitExpr).litType !== "string") continue;
-                  const re = new RegExp(`(^|[^.A-Za-z0-9_$])(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![A-Za-z0-9_$])`);
-                  if (re.test(exprVal.raw)) return true;
-                }
-                return false;
-              })();
-              if (stringPropInRaw) {
-                let parsed: ExprNode | null = null;
-                try { parsed = parseExprToNode(exprVal.raw, exprVal.span?.file ?? "", exprVal.span?.start ?? 0); } catch { parsed = null; }
-                if (parsed && parsed.kind !== "escape-hatch") {
+              // Does the raw REFERENCE a string-literal prop? Answered from the parsed
+              // tree's identifier nodes, not from the text.
+              let parsed: ExprNode | null = null;
+              try { parsed = parseExprToNode(exprVal.raw, exprVal.span?.file ?? "", exprVal.span?.start ?? 0); } catch { parsed = null; }
+              if (parsed && parsed.kind !== "escape-hatch" && !hasLostTrailingContent(parsed)) {
+                const refsStringProp = exprNodeIdentNames(parsed).some((name) => {
+                  const v = propExprMap.get(name);
+                  return !!v && v.kind === "lit" && (v as LitExpr).litType === "string";
+                });
+                if (refsStringProp) {
                   const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
                   return { ...attr, value: { ...exprVal, raw: subbed, exprNode: replaced } };
                 }
@@ -2890,11 +2815,13 @@ function substituteProps(
       if (typeof cur === "string" && cur.length > 0) {
         // S458 F1: the expression fields go through the structural substituter
         // (an expression-valued caller `items=${@list}` is in `propExprMap` only).
-        // `asName` is a BINDER name, not an expression; it keeps the legacy
-        // leading-identifier rewrite unchanged.
-        const sub = field !== "asName" && propExprMap && propExprMap.size > 0
-          ? substituteExprText(cur, propExprMap, new Set())
-          : substitutePropsInRawExpr(cur, props);
+        // `asName` is a BINDER NAME, not an expression — the one remaining text
+        // rewrite of a prop name in the expander, kept byte-identical (whether a
+        // binder named like a prop should shadow it in the body is a separate
+        // question, not changed here).
+        const sub = field === "asName"
+          ? substitutePropsInRawExpr(cur, props)
+          : (propExprMap && propExprMap.size > 0 ? substituteExprText(cur, propExprMap, new Set()) : cur);
         if (sub !== cur) cloned[field] = sub;
       }
     }
@@ -3358,6 +3285,17 @@ function expandComponentNode(
               `\`${propName}=${attr.value.name}\` by value.`,
               attrSpan,
             ));
+          } else if (attr.value.kind === "expr" || attr.value.kind === "call-ref") {
+            // S458 — `bind:n=${@w + 1}` / `bind:n=f()`: an expression has no cell to write.
+            const shown = attr.value.kind === "expr" ? String(attr.value.raw ?? "") : `${attr.value.name}(…)`;
+            ceErrors.push(makeCEError(
+              "E-ATTR-010",
+              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
+              `\`bind:${propName}=@cell\`). \`${shown}\` is an expression, not a cell — a \`bind:\` ` +
+              `prop is written back, and an expression cannot be. Bind a cell, or pass the value ` +
+              `without \`bind:\`.`,
+              attrSpan,
+            ));
           } else if (attr.value.kind === "string-literal") {
             ceErrors.push(makeCEError(
               "E-ATTR-010",
@@ -3409,6 +3347,7 @@ function expandComponentNode(
         .map((a: AttrNode) => a.name.slice(5)),
     ),
     written: new Set<string>(),
+    unsubstitutable: new Map<string, string>(),
   };
   _propWriteCtx = writeCtx;
 
@@ -3620,6 +3559,22 @@ function expandComponentNode(
       `E-ASSIGN-004: the body of \`<${componentName}>\` writes its prop \`${name}\`. ${why} ` +
       `Declare \`bind ${name}: T\` and bind it at the call site (\`<${componentName} ` +
       `bind:${name}=@cell/>\`), or copy the prop into a cell the component owns.`,
+      node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+
+  // S458 (third round) — a prop referenced in text the compiler cannot parse is NOT
+  // text-substituted; the identifier would reach the page unbound, so it is refused.
+  // E-SCOPE-001 ("Unquoted identifier not resolvable in scope") is the closest §34 text:
+  // the prop's binding does not reach unparsed text. ROUTED with the S458 report.
+  for (const [name, text] of writeCtx.unsubstitutable) {
+    const shown = text.length > 80 ? text.slice(0, 77) + "..." : text;
+    ceErrors.push(makeCEError(
+      "E-SCOPE-001",
+      `E-SCOPE-001: the body of \`<${componentName}>\` uses its prop \`${name}\` inside an ` +
+      `expression the compiler could not parse (\`${shown}\`), so the prop cannot be ` +
+      `substituted there and \`${name}\` would be unbound at runtime. Rewrite the expression ` +
+      `(check its quotes and operators), or move it into a function in the component body.`,
       node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
     ));
   }

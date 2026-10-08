@@ -147,6 +147,8 @@ export interface Token {
    * descend into them.)
    */
   isTemplate?: boolean;
+  /** S458 — a quoted STRING token's source delimiter (`"` or `'`). */
+  delim?: string;
   /**
    * S450 (§5.2.4) — set on an ATTR_EXPR token read from the `${…}` attribute
    * value form (the token text holds only the interior). ast-builder's
@@ -1492,7 +1494,11 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
       }
     }
     if (pos < content.length) advance(); // consume closing delimiter
-    tokens.push(makeToken("STRING", str, start, absOff(), l, c));
+    const tok = makeToken("STRING", str, start, absOff(), l, c);
+    // S458 — the source delimiter, so a consumer that must reproduce the literal AS
+    // WRITTEN (a component definition's markup text, re-parsed by the expander) can.
+    tok.delim = delim;
+    tokens.push(tok);
   }
 
   // ss39 #2 (g-nested-template-raw-mangle) — scan a `${...}` interpolation body

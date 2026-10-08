@@ -1,0 +1,16 @@
+{
+  "id": "components-prop-substitution-scope-in-block-arrows",
+  "description": "§15.10.1 (S458 third round, N1) — inside BLOCK-bodied arrows in a component body, prop substitution resolves names like the language does: an object-literal key named like the prop (`{ label: 2 }`, and the realistic `items.map(it => { return { label: …, id: … } })`), regex / string / comment content, a local `let label` / `const label` (then written), and nested parameters (`function g(label)`, `(label) => …`, destructured `({ label }) => …`) are NOT the prop; a shorthand `{ label }` IS a read of it (`{ label: <value> }`). Executed: the joined result proves every value.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1 Shadowing: 'Prop substitution SHALL be shadowing-aware … A `lambda` parameter with the same name is in scope … A local `let`, `const` … with the same name appears earlier in the same lexical scope'; 'Member-access expressions SHALL substitute only the leftmost identifier'. An object key is a property NAME, not an identifier reference.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ASSIGN-004", "E-SCOPE-001", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": ".c .r" }],
+    "state": { "out": "2|true|11|inner|9|P1|AB+CD" },
+    "domAnchored": [
+      { "selector": "#o", "text": "2|true|11|inner|9|P1|AB+CD" }
+    ]
+  }
+}
