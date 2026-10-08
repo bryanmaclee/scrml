@@ -105,3 +105,11 @@
   Effective syntax delta 0; script-goggle +12 = library chunks of the new conformance sources (module syntax). Artifact
   diffs after path normalization: 38, all examples/23-trucking-dispatch (the s457 re-export change, identical to the
   pre-fix measurement) — the F-round itself changes no emitted artifact.
+- [2026-10-07] PA follow-up: `export type TableSort:struct` in stdlib/data/table-for.scrml (94788dac0; hook 32180 pass /
+  58 skip / 0 fail). stdlib/data/index.scrml: E-IMPORT-004 gone; it still fails on the PRE-EXISTING base diagnostics,
+  E-CODEGEN-INVALID-LOGIC ×2 — validate.client.js byte 4276 line 143 (`…t = function ( value , data ) if ( result ===
+  true ) return…`, from stdlib/data/validate.scrml) and transform.client.js byte 1609 line 69 (`…{ const va = function
+  ( a ) const vb = function ( b ) if (…`, from stdlib/data/transform.scrml): function-expression bodies emitted without
+  braces. Not chased. App `import { TableSort, tableFor } from "scrml:data"`: before and after both compile (exit 0);
+  emitted artifacts byte-identical (diff -r); the W-STDLIB-SEED-FAILCLOSED warning ("server-only re-export `TableSort`
+  … could not be resolved to a terminal") no longer fires (3 -> 2 warnings).
