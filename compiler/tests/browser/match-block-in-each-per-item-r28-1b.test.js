@@ -134,7 +134,7 @@ describe("R28-1b §1 — match-in-each emits per-item dispatch, NOT a dropped ch
 
   test("the match dispatch fn is item-scoped (takes the mount as a parameter)", () => {
     const { clientJs } = compileToOutputs(SRC);
-    expect(clientJs).toMatch(/function __scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_mount, _v\)/);
+    expect(clientJs).toMatch(/function __scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_arm_mount, _scrml_arm_v\)/);
   });
 });
 

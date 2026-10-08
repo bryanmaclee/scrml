@@ -135,7 +135,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
     const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // Capture the cascade predicate for the if= head (between `_next === null && `
     // and ` _next = "..._b0"`) and assert that exact predicate is the gate.
-    const m = clientJs.match(/if \(_next === null && (\(\(_scrml_reactive_get\("x"\) !== null && _scrml_reactive_get\("x"\) !== undefined\)\))\) _next = "[^"]*_b0";/);
+    const m = clientJs.match(/if \(_scrml_next === null && (\(\(_scrml_reactive_get\("x"\) !== null && _scrml_reactive_get\("x"\) !== undefined\)\))\) _scrml_next = "[^"]*_b0";/);
     expect(m).not.toBeNull();
     const cascadeCore = m[1]; // ((@x is some))
     // The b0 inner-effect gate negates exactly this core.
