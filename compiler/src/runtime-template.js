@@ -6658,12 +6658,20 @@ function _scrml_refine_error(j, v) {
     "  Location: a write to @" + j.cell);
 }
 // Record that cell \`key\` holds raw object \`raw\` at a position described by \`d\`.
+// false = already recorded in the cell's current epoch (nothing changed).
 function _scrml_refine_adopt(raw, key, d) {
   const epoch = _scrml_refine_epochs[key];
   let es = _scrml_refine_owner.get(raw);
   if (es === undefined) _scrml_refine_owner.set(raw, es = []);
-  for (const e of es) if (e.key === key && e.d === d) { e.epoch = epoch; return; }
+  for (const e of es) {
+    if (e.key === key && e.d === d) {
+      if (e.epoch === epoch) return false;
+      e.epoch = epoch;
+      return true;
+    }
+  }
   es.push({ key: key, d: d, epoch: epoch });
+  return true;
 }
 // Does cell \`key\` currently hold raw object \`raw\` at a position described by \`d\`?
 function _scrml_refine_holds(raw, key, d) {
@@ -6673,22 +6681,18 @@ function _scrml_refine_holds(raw, key, d) {
   return false;
 }
 // Record every object inside raw value \`v\` written into cell \`key\` at position \`d\`
-// (an object reached twice, at two positions, is recorded at both).
-function _scrml_refine_adopt_all(v, key, d, seen) {
-  if (v === null || typeof v !== "object") return;
-  let ds = seen.get(v);
-  if (ds === undefined) seen.set(v, ds = []);
-  else if (ds.indexOf(d) !== -1) return;
-  ds.push(d);
-  _scrml_refine_adopt(v, key, d);
+// (an object reached twice, at two positions, is recorded at both). An object
+// already recorded at \`d\` in this epoch had its contents recorded with it.
+function _scrml_refine_adopt_all(v, key, d) {
+  if (v === null || typeof v !== "object" || !_scrml_refine_adopt(v, key, d)) return;
   if (Array.isArray(v)) {
     const cd = _scrml_refine_child(d, v, "0");
-    for (const x of v) _scrml_refine_adopt_all(_scrml_refine_raw(x), key, cd, seen);
+    for (const x of v) _scrml_refine_adopt_all(_scrml_refine_raw(x), key, cd);
     return;
   }
   for (const k of Object.keys(v)) {
     const cd = _scrml_refine_child(d, v, k);
-    if (cd !== undefined) _scrml_refine_adopt_all(_scrml_refine_raw(v[k]), key, cd, seen);
+    if (cd !== undefined) _scrml_refine_adopt_all(_scrml_refine_raw(v[k]), key, cd);
   }
 }
 // The { field: descriptor } map of a struct descriptor (built once per struct type), or null.
@@ -6737,7 +6741,7 @@ function _scrml_refine_path(j, raw, path) {
     const next = _scrml_refine_raw(c[path[i]]);
     if (i === path.length - 1) {
       if (!cd.ok(next)) return { bad: next };
-      _scrml_refine_adopt_all(next, j.key, cd, new Map());
+      _scrml_refine_adopt_all(next, j.key, cd);
       break;
     }
     if (next === null || typeof next !== "object") return null;
@@ -6769,7 +6773,7 @@ function _scrml_refine_check(name, value) {
     }
     if (!j.d.ok(raw)) throw _scrml_refine_error(j, raw);
     _scrml_refine_epochs[name] = ++_scrml_refine_epoch_next; // a whole new value
-    _scrml_refine_adopt_all(raw, name, j.d, new Map());
+    _scrml_refine_adopt_all(raw, name, j.d);
     // held behind the proxy, so a later in-place mutation is judged too
     return typeof _scrml_deep_reactive === "function" ? _scrml_deep_reactive(value) : value;
   }
@@ -6812,7 +6816,7 @@ function _scrml_refine_change(raw, delta, apply, restore, written, prop) {
     if (x === null || typeof x !== "object") continue;
     for (const e of live) {
       const cd = _scrml_refine_child(e.d, raw, prop);
-      if (cd !== undefined) _scrml_refine_adopt_all(x, e.key, cd, new Map());
+      if (cd !== undefined) _scrml_refine_adopt_all(x, e.key, cd);
     }
   }
 }
