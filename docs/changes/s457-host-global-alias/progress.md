@@ -73,3 +73,17 @@ Append-only. Times local (2026-10-07/08).
   explanatory comment moved out of the shipped runtime text into runtime-template.js source;
   the shipped cost is the one line `const _scrml_g = globalThis;`.
 - Gate at this point: 30426 pass / 0 fail / 0 errors (unit+integration+conformance).
+
+## verification after 4d4710091 (2026-10-08)
+- Chromium (puppeteer, `scrml dev`): program with user `function fetch`, `function document`,
+  top-level `const location`, server peers `Response` / `JSON`. HEAD: count 7, server call 11,
+  location "user-location", no page errors (a favicon 404 only). BASE 0c1a1b081: count "", srv "",
+  `TypeError: (_scrml_root || _scrml_document_14).querySelector is not a function`,
+  `_scrml_resp.json is not a function` (the server call ran the user's `fetch`).
+- Corpus differential (2425 sources, 7084 artifacts each side): 4320 byte-identical, 2764 identical
+  once the alias spelling is undone, 0 other, 0 compile-status changes (1450 compiled both sides).
+- Free host-global references left in emitted artifacts (runtime + `_scrml/` shim modules excluded):
+  only author-written ones (entry + imported module sources), `undefined`, the alias line's own
+  `globalThis`, and the foreign-seal helper's `typeof require` (module context, not a global).
+- Root-level tests 2239/0, e2e-render-map 259/0, self-host-v2 slices m1/m2/m3/m4/codec + lowered m1
+  green after re-pinning two slice-codec emitted-shape reads.
