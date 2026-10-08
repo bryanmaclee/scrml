@@ -94,7 +94,7 @@ describe("S458 r3 HIGH-2 — the emitted runtime ^{} body reads captures only th
     const find = (n) => {
       if (!n || typeof n !== "object") return;
       if (Array.isArray(n)) { n.forEach(find); return; }
-      if (n.type === "CallExpression" && n.callee?.type === "Identifier" && n.callee.name === "_scrml_meta_effect") effects.push(n.arguments[1]);
+      if (n.type === "CallExpression" && n.callee?.type === "Identifier" && /^_scrml_(cs_)?meta_effect$/.test(n.callee.name) && /Function/.test(n.arguments[1]?.type ?? "")) effects.push(n.arguments[1]);
       for (const k of Object.keys(n)) if (!["type", "start", "end", "loc"].includes(k)) find(n[k]);
     };
     find(ast);
@@ -208,17 +208,21 @@ describe("S458 r3 LOW", () => {
   });
 });
 
-describe("S458 r3b — meta.bindings stays the §22.5.2 snapshot; the internal _scrml_cap is live", () => {
-  // §22.5.2: "Non-reactive bindings are captured as plain values." The body's rewritten
-  // references go through a SEPARATE internal object (`_scrml_cap`, live getters), so
-  // author code reading `meta.bindings.x` keeps the snapshot semantics it had on base.
-  test("executed: after the binding changes, meta.bindings.counter is unchanged and _scrml_cap.counter is live", async () => {
+describe("S458 r3b/final F4 — meta.bindings is the §22.5.2 per-run snapshot; the internal _scrml_cap is live", () => {
+  // §22.5.2: "For non-`@var` bindings: `meta.bindings.varName` SHALL return the value that
+  // was current when the effect function was invoked for this run." The bindings argument
+  // is a thunk the runtime calls at the start of every run (an object literal evaluated
+  // once at the ^{} site froze the FIRST run's values — S458 final review F4). The body's
+  // own references go through the SEPARATE internal object (`_scrml_cap`, live getters).
+  test("executed on the real runtime: a re-run sees the binding's value at that run's start", async () => {
     const { emitLogicNode } = await import("../../src/codegen/emit-logic.ts");
+    const { SCRML_RUNTIME } = await import("../../src/runtime-template.js");
     const node = {
       kind: "meta",
       id: 1,
       span: { file: "/t.scrml", start: 0, end: 1, line: 1, col: 1 },
       body: [
+        { kind: "bare-expr", expr: "meta.get(\"tick\")" },
         { kind: "bare-expr", expr: "meta.emit(counter)" },
         { kind: "bare-expr", expr: "meta.emit(meta.bindings.counter)" },
       ],
@@ -226,27 +230,23 @@ describe("S458 r3b — meta.bindings stays the §22.5.2 snapshot; the internal _
       capturedNames: ["counter"],
     };
     const emitted = emitLogicNode(node);
-    // meta.bindings is emitted exactly as before S458: a plain-value entry.
-    expect(emitted).toContain("counter: counter");
+    // meta.bindings: a per-run thunk over plain-value entries.
+    expect(emitted).toMatch(/\(\) => Object\.freeze\(\{\s*counter: counter/);
     // The body's own reference goes through the internal object, not meta.bindings.
     expect(emitted).toContain("_scrml_cap.counter");
     expect(emitted).toMatch(/const _scrml_cap = Object\.freeze\(\{\s*get counter\(\) \{ return counter; \}/);
     // eslint-disable-next-line no-new-func
     const harness = new Function(`
-      let counter = 1;
-      let rerun = null;
+      ${SCRML_RUNTIME}
       const out = [];
-      function _scrml_meta_effect(id, fn, capturedBindings) {
-        const meta = { bindings: capturedBindings, emit: (v) => out.push(v) };
-        rerun = () => fn(meta);
-        rerun();
-      }
+      _scrml_meta_emit = (id, v) => out.push(v);
+      let counter = 1;
       ${emitted}
       counter = 2;
-      rerun();
+      _scrml_reactive_set("tick", 1);
       return out;
     `);
-    // run 1: [live, snapshot] = [1, 1]; run 2 after counter = 2: [2, 1]
-    expect(harness()).toEqual([1, 1, 2, 1]);
+    // run 1: [live, snapshot] = [1, 1]; run 2 (re-run by the tick change) after counter = 2: [2, 2]
+    expect(harness()).toEqual([1, 1, 2, 2]);
   });
 });

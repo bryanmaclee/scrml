@@ -938,7 +938,11 @@ function emitCapturedBindings(node: any): string {
   }
 
   if (props.length === 0) return "null";
-  return ["Object.freeze({", props.join(",\n"), "})"].join("\n");
+  // A thunk, called by the runtime at the start of EVERY run: §22.5.2 "For non-`@var`
+  // bindings: `meta.bindings.varName` SHALL return the value that was current when the
+  // effect function was invoked for this run." An object literal evaluated once at the
+  // `^{}` site froze the FIRST run's values for every later run (S458 review F4).
+  return ["() => Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
 /**
@@ -4850,15 +4854,25 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const capture = rewriteMetaBodyCaptures(bodyLines.join("\n"), capturedNames, _metaBodyHasAwait);
       if (!capture.ok) {
         const parseFail = capture.refused.length === 1 && capture.refused[0].startsWith("[parse: ");
+        const assigned = capture.assigned ?? [];
+        const parts: string[] = [];
+        if (capture.refused.length > 0) {
+          parts.push(`reads ${capture.refused.map((n) => `'${n}'`).join(", ")} ` +
+            `— not a body-local, a meta primitive, or a binding captured at the ^{} site. A runtime ^{} body ` +
+            `reaches an enclosing binding only through the capture object, and a cell only as @name / meta.get`);
+        }
+        if (assigned.length > 0) {
+          parts.push(`assigns to the captured binding${assigned.length > 1 ? "s" : ""} ` +
+            `${assigned.map((n) => `\`${n}\``).join(", ")} — a runtime ^{} body reads the bindings captured at ` +
+            `its site but cannot reassign them; write a cell with @name = … / meta.set(…), or declare a ` +
+            `body-local`);
+        }
         recordRefusedLowering(new CGError(
           "E-META-001",
           parseFail
             ? `E-META-001: the runtime ^{} body does not parse as JavaScript once lowered ` +
               `(${capture.refused[0].slice(8, -1)}), so its free names cannot be checked — refused (§22.12).`
-            : `E-META-001: the runtime ^{} body, as emitted, reads ${capture.refused.map((n) => `'${n}'`).join(", ")} ` +
-              `— not a body-local, a meta primitive, or a binding captured at the ^{} site. A runtime ^{} body ` +
-              `reaches an enclosing binding only through the capture object, and a cell only as @name / meta.get ` +
-              `(§22.5.2, §22.12).`,
+            : `E-META-001: the runtime ^{} body, as emitted, ${parts.join("; and ")} (§22.5.2, §22.12).`,
           node.span ?? { start: 0, end: 0 },
         ), node);
         return `/* E-META-001: runtime ^{} body refused */`;
@@ -4872,6 +4886,10 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
 
       const call = [
         `_scrml_meta_effect(${metaScopeId}, ${_metaFnKw} {`,
+        // Strict mode for the effect body (S458 final F2): no sloppy-mode `.caller` /
+        // `.arguments` reach, no implicit globals. A function-level directive — the shared
+        // runtime is unchanged.
+        `  "use strict";`,
         ...effectLines,
         `}, ${capturedBindings}, ${typeRegistryLiteral});`
       ];

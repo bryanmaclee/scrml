@@ -22527,6 +22527,93 @@ ${ export { UserRole } from './types.scrml' }
 
 Re-export follows standard ES module `export { name } from 'source'` syntax.
 
+A file MAY also re-export every name another file exports:
+
+```scrml
+// lib/index.scrml
+${
+    export * from './types.scrml'
+    export * from './utils.scrml'
+}
+
+// page.scrml
+${ import { UserRole, formatDate } from './lib/index.scrml' }
+```
+
+**Normative statements:**
+
+- A re-export (named, renamed `export { a as b } from`, or `export * from`) SHALL link
+  its source module exactly as an `import` of that specifier does (§21.3). The name it
+  binds is the same binding the source module exports: it resolves to the module that
+  DECLARES it.
+- `export * from './m.scrml'` SHALL re-export every name `./m.scrml` exports by name,
+  whatever the name binds — a `type` (enums included), a function (`function` / `fn`),
+  a `const` / `let`, a component, a channel, an engine — including names `./m.scrml`
+  itself re-exports. It SHALL NOT re-export `default`.
+- A name the file exports explicitly — a local export, or a named re-export of that
+  name — SHALL take precedence over every `export *` of the file; the stars are not
+  consulted for it.
+- A name that two or more `export *` sources of one file resolve to DIFFERENT
+  declarations is ambiguous: that file SHALL NOT export it (the ES module rule).
+  Importing it by name, or re-exporting it by name, from that file SHALL be a compile
+  error (E-IMPORT-004); the message SHALL say the name is ambiguous and name the stars
+  that disagree. An ambiguous name that is never imported or re-exported by name is
+  not an error. The SAME declaration reached through two or more paths (a diamond) is
+  not ambiguous.
+- Re-export edges, named and `export *` alike, are edges of the import graph, so a
+  cycle closed by a re-export SHALL be a compile error (E-IMPORT-002, §21.3).
+- A named re-export of a name its source module does not export SHALL be a compile
+  error (E-IMPORT-004), reported at the re-export — the error an `import` of that name
+  gets (§21.3).
+- A relative re-export (named or `export *`, other than of a `.js` file) whose target
+  file cannot be found SHALL be a compile error (E-IMPORT-006), reported at the
+  re-export. A name only that missing module could supply SHALL NOT be reported again
+  as E-IMPORT-004 at an importer.
+- An `export *` from a module outside the compilation — a stdlib `scrml:` module, a
+  `vendor:` module, a plain `.js` file — SHALL NOT be expanded: it exports no names
+  from the re-exporting file. Importing a name that file reaches only that way SHALL be
+  a compile error (E-IMPORT-004), and the message SHALL name the unexpanded star and
+  suggest re-exporting the name explicitly (`export { name } from "scrml:…"`) or
+  importing it from the source directly. A named re-export from such a module is not
+  checked against the source's exports by the compiler (as an `import` from outside
+  the compilation is not, §21.3).
+
+**Ambiguity example:**
+
+```scrml
+// c.scrml
+${ export fn w() -> string { return "c" } }
+
+// d.scrml
+${ export fn w() -> string { return "d" } }
+
+// b.scrml — exports neither `w`
+${
+    export * from './c.scrml'
+    export * from './d.scrml'
+}
+
+// page.scrml
+${ import { w } from './b.scrml' }   // E-IMPORT-004: `w` is ambiguous in `./b.scrml`
+
+// Fix — pick one in b.scrml (an explicit re-export wins over the stars)
+${
+    export { w } from './c.scrml'
+    export * from './c.scrml'
+    export * from './d.scrml'
+}
+```
+
+Implementation status (impl#1, S458): a component imported through a `.scrml`
+re-export (named or `export *`) is not expanded at its use site (E-COMPONENT-020 /
+E-COMPONENT-035) — `g-component-through-reexport-unexpanded-s458`; an enum reached
+through `export *` has no type in the importer (a parameter typed with it is `asIs`,
+and `match` on it is E-TYPE-025), while a named re-export of it types correctly —
+`g-enum-type-through-export-star-untyped-s458`. Both are impl#1 gaps against the
+statements above, not language rules.
+
+> **Provenance:** ruling:user-voice-scrml.md S458 "ratify 21.4" — *"`export * from` re-exports every name the source exports BY NAME; a name two `export *` sources bind to DIFFERENT declarations is ambiguous and refused (E-IMPORT-004, ES rule) while the same declaration reached twice (a diamond) is not; re-export edges are part of the import graph, so a cycle through re-exports is E-IMPORT-002 (§21.3); a named re-export of a name the source does not export is E-IMPORT-004; a re-export whose file cannot be found is E-IMPORT-006; an `export *` from a module outside the compilation (stdlib / vendor) is not expanded."* · supersedes: nothing written — §21.4 stated only the named form; `export *` resolution shipped in PR #1352 with no governing sentence (N-S458-1). Direction of change: **newly-accepting** for `export *` (a program importing through a star was refused with a false E-IMPORT-004 before s457), **newly-rejecting** for re-export cycles and named re-exports of missing names (accepted before S458); a missing re-export file was before S458 either accepted (named form) or reported only as an E-IMPORT-004 at the importer, naming the wrong file (`export *` form), and is now E-IMPORT-006 at the re-export. Implementation: `compiler/src/module-resolver.js` (`resolveExportedBinding`, `ambiguousStarSources`, `validateReExports`, `detectCircularImports`, `buildImportGraph`); conformance: `conformance/cases/module/e-import-00{2,4,6}-reexport-*`.
+
 ### 21.5 Pure-Type Files
 
 A `.scrml` file that contains only `${ export type ... }` and `${ export function ... }`
@@ -22605,11 +22692,11 @@ without `export`).
 | Code | Trigger | Severity |
 |---|---|---|
 | E-IMPORT-001 | `export` used outside a `${ }` context (exceptions: top-level `export <ComponentName ...>...</>` per §21.2 Form 1 and `export const Name = ...` per §21.2 Form 2) | Error |
-| E-IMPORT-002 | Circular import detected | Error |
+| E-IMPORT-002 | Circular import detected — including a cycle closed by a re-export (`export { … } from` / `export * from`, §21.4). (Emitted at `compiler/src/module-resolver.js` `detectCircularImports`.) | Error |
 | E-IMPORT-003 | `import` inside a function body (not file top-level) | Error |
-| E-IMPORT-004 | Imported name not found in target file's exports | Error |
+| E-IMPORT-004 | Imported name not found in target file's exports — also: a named re-export of a name its source does not export; importing or re-exporting by name a name two `export *` sources bind to different declarations (ambiguous); a name reached only through an unexpanded `export *` from outside the compilation (§21.4). (Emitted at `compiler/src/module-resolver.js` `validateImports` and `compiler/src/module-resolver.js` `validateReExports`.) | Error |
 | E-IMPORT-005 | Bare npm-style import specifier (must be `./`, `scrml:`, or `vendor:`) | Error |
-| E-IMPORT-006 | Import target file does not exist on disk | Error |
+| E-IMPORT-006 | Import target file does not exist on disk — also a relative re-export (`export { … } from` / `export * from`) whose target file does not exist (§21.4). (Emitted at `compiler/src/module-resolver.js` `buildImportGraph`.) | Error |
 | E-IMPORT-007 | Auto-gather closure exceeded sane-limit (5000 files) — W2 §21.7 | Error |
 | E-IMPORT-008 | (S114 — §21.3.1.) `import:host` used in a file outside the manifest's `[capabilities] host-import` allow-list. Default for adopter projects is `"disabled"`; the bootstrap stdlib sets `"self-host-only"` permitting `scrml/stdlib/compiler/**`. | Error |
 | E-IMPORT-009 | (S114 — §21.3.1.) `import:host` uses a host-tag other than `host`. v1 recognizes only `host`; future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment. | Error |
@@ -22888,6 +22975,16 @@ escape-sequence normalization.
   > `<script>` reached the HTML). This describes an implementation, not the language;
   > running meta evaluation before the type system would lift it.
   >
+  > **Where emitted output lands (S458 final review F3).** §22.4 "inline the result" places
+  > `emit()` output — markup — where markup sits: the file's top level, a markup element's
+  > children, an `<each>` row template. A compile-time `^{}` that emits markup from inside a `${}` logic body (its
+  > statement list, an `if` / `else` branch, a loop, a `match` arm, a function body) has no
+  > markup position to receive it — the branch exists only at run time — and is
+  > `E-META-EVAL-002` naming that cause; it is never silently dropped (impl#1 had spliced the
+  > markup into the statement list, where codegen discarded it). A body there that emits
+  > nothing is unaffected. Output that depends on a run-time condition is a runtime `^{}`
+  > (`meta.emit`, §22.5.1).
+  >
   > **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." (the S457 meta allow-list arc)
   > **Provenance:** ruling:user-voice-scrml.md S458 "1a" (land the allow-list; migrate the one newly-refused corpus file to the §22.5.1 timers)
 - If a string passed to `emit.raw(html)` contains no real newline characters (U+000A), the
@@ -23110,6 +23207,17 @@ The `capturedBindings` and `typeRegistry` arguments are OPTIONAL in the runtime 
 signature only to preserve backward compatibility with existing compiled output. When both
 are absent, behavior is identical to the pre-Option-D implementation. New compilations SHALL
 always pass all four arguments.
+
+> **impl#1 (S458 final review F4).** (a) A cell name given to `meta.get` / `meta.set` /
+> `meta.subscribe` is the AUTHOR name; impl#1 stores a cell under a per-chunk namespaced
+> key, so the runtime SHALL resolve the name through the same key mapping the chunk's
+> compiled cell reads use. impl#1 routes the call through the chunk's cell-scope wrapper
+> (`_scrml_cs_meta_effect`), which passes the chunk's key function as an optional fifth
+> argument; absent, a name is its own key. (b) The `capturedBindings` argument MAY be a
+> function returning the frozen bindings object; the runtime calls it at the start of
+> every run, which is how §22.5.2's per-run value ("the value that was current when the
+> effect function was invoked for this run") is met. impl#1 emits that form; an object
+> evaluated once at the `^{}` site held the FIRST run's values for every later run.
 
 #### 22.5.1 The `meta` API Object
 
@@ -23470,7 +23578,7 @@ Where:
 
 | Code | Condition | Severity |
 |---|---|---|
-| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) anything outside the §22.12 closed allow-list inside any `^{}` body (compile-time OR runtime) — a free identifier that is not a scrml construct, a local or captured binding, or a primitive (JS-host globals such as `bun`, `Bun`, `process`, `console`, `globalThis`, `Reflect`, `Function`, `eval`, `setInterval`, `fetch`, `document`, `Object`, `JSON`, `Math`, `String` are all in this class); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter) (S457). The message names the identifier, member or construct and the allowed set. (Condition (3) emitted at `compiler/src/meta-checker.ts` and `compiler/src/meta-eval.ts` via `compiler/src/meta-allow-list.ts`.) **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + ruling:user-voice-scrml.md S458 "1a". | Error |
+| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) anything outside the §22.12 closed allow-list inside any `^{}` body (compile-time OR runtime) — a free identifier that is not a scrml construct, a local or captured binding, or a primitive (JS-host globals such as `bun`, `Bun`, `process`, `console`, `globalThis`, `Reflect`, `Function`, `eval`, `setInterval`, `fetch`, `document`, `Object`, `JSON`, `Math`, `String` are all in this class); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter) (S457). The message names the identifier, member or construct and the allowed set. (Condition (3) emitted at `compiler/src/meta-checker.ts` and `compiler/src/meta-eval.ts` via `compiler/src/meta-allow-list.ts`.) **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + ruling:user-voice-scrml.md S458 "1a". ALSO (S458 final review F7, impl#1 status): a RUNTIME `^{}` inside an `<each>` row template — impl#1 emits no per-row `^{}` effect, so the row's `as` binding cannot be captured per row and the block would never run; refused with that cause (a compile-time `^{}` there is spliced into every row). | Error |
 | E-META-002 | Invalid token inside `^{}` meta block (existing) | Error |
 | E-META-003 | `reflect()` called on unknown type in compile-time meta (existing) | Error |
 | E-META-004 | *Reserved.* Number unallocated; do not reuse — preserved for forensic search-hit stability against historical bug reports and design notes that may reference E-META-004. Future codes SHOULD start at E-META-011. | — |
@@ -23490,9 +23598,9 @@ Where:
 1. scrml constructs — `@cell` reads, the absence value `not`, and a declared type name as the argument of `reflect(T)` (§22.4.2). A type name is NOT a value inside a `^{}` body: no value is bound under it there, so in any other position it is a free identifier like any other (S458 — a `type Function:enum` read as `Function(…)` reached the host `Function`);
 2. its own local bindings, resolved lexically (a name bound in one scope does not admit the same name in another);
 3. the bindings captured from the enclosing scope at the breakout point (§22.3);
-4. the closed primitive set — `emit` / `emit.raw` / `reflect` (§22.4) and the twelve `meta` members of §22.5.1 (`meta.get`, `meta.set`, `meta.subscribe`, `meta.emit`, `meta.cleanup`, `meta.scopeId`, `meta.bindings`, `meta.types`, `meta.interval`, `meta.timeout`, `meta.clearInterval`, `meta.clearTimeout`). A primitive's member outside this list (`emit.call`, `meta.unknown`) is outside the allow-list.
+4. the closed primitive set — `emit` / `emit.raw` / `reflect` (§22.4) and the twelve `meta` members of §22.5.1 (`meta.get`, `meta.set`, `meta.subscribe`, `meta.emit`, `meta.cleanup`, `meta.scopeId`, `meta.bindings`, `meta.types`, `meta.interval`, `meta.timeout`, `meta.clearInterval`, `meta.clearTimeout`). A primitive's member outside this list (`emit.call`, `meta.unknown`) is outside the allow-list. A primitive that is a function is admitted ONLY as the callee of a direct call — `emit(…)`, `emit.raw(…)`, `reflect(…)`, `meta.get(…)` (and the other function members), `meta.types.reflect(…)`; it SHALL NOT be read as a value, aliased (`const e = meta.emit`), destructured (`const { emit } = meta`), passed (`f(meta)`), constructed (`new meta.emit(…)`), or have a member taken (`meta.emit.apply`, `meta.get.bind`, `meta.set.toString`, `meta.types.foo`) — each is `E-META-001` (S458 final review F1). `meta.scopeId` and `meta.bindings` are the data members and are read like any value.
 
-Any other free identifier SHALL be `E-META-001`, with a message naming the identifier and the allowed set. This includes every JS value builtin — `Object`, `Array`, `JSON`, `Math`, `String`, `Number`, `Date`, `Map`, `Set`, `parseInt`, `undefined`, `NaN` — which are JS-host ambient globals, not scrml (§41.5: there is no ambient `Math` in scrml). Methods on values (`s.toUpperCase()`, `xs.map(f)`, `xs.at(i)`, `info.fields.length`) are not free identifiers and remain available, subject to the member rule below. Independently of names, these SHALL be `E-META-001` on ANY value, the primitives included (`emit.constructor` is the host `Function`): a member access — dotted, bracketed with a literal key, or destructured — to `constructor`, `__proto__`, `prototype`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` or `__lookupSetter__`; a computed member key that is not a literal (`x[k]` — read an element with `x.at(i)`, iterate with `for … of`, or look a key up in a `Map` with `.get(k)`); `this`; `import(…)`, `import.meta`, `new.target`, `super`; a class; a tagged template; an object-literal getter or setter; a destructured function parameter whose pattern the checker cannot see; a markup value (`const el = <div …/>` — build markup with `emit()` / `meta.emit()`); and an assignment, update or `delete` whose target is rooted at a primitive. A `^{}` body that fails the allow-list SHALL NOT be evaluated.
+Any other free identifier SHALL be `E-META-001`, with a message naming the identifier and the allowed set. This includes every JS value builtin — `Object`, `Array`, `JSON`, `Math`, `String`, `Number`, `Date`, `Map`, `Set`, `parseInt`, `undefined`, `NaN` — which are JS-host ambient globals, not scrml (§41.5: there is no ambient `Math` in scrml). Methods on values (`s.toUpperCase()`, `xs.map(f)`, `xs.at(i)`, `info.fields.length`) are not free identifiers and remain available, subject to the member rule below. Independently of names, these SHALL be `E-META-001` on ANY value, the primitives included (`emit.constructor` is the host `Function`): a member access — dotted, bracketed with a literal key, or destructured — to `constructor`, `__proto__`, `prototype`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` or `__lookupSetter__`, or to `caller`, `arguments` or `callee` (sloppy-mode reach to a caller and its live arguments; S458 final F2 — a runtime body's effect function is also emitted under a `"use strict"` directive); a computed member key that is not a literal (`x[k]` — read an element with `x.at(i)`, iterate with `for … of`, or look a key up in a `Map` with `.get(k)`); `this`; `import(…)`, `import.meta`, `new.target`, `super`; a class; a tagged template; an object-literal getter or setter; a destructured function parameter whose pattern the checker cannot see; a markup value (`const el = <div …/>` — build markup with `emit()` / `meta.emit()`); and an assignment, update or `delete` whose target is rooted at a primitive. A `^{}` body that fails the allow-list SHALL NOT be evaluated.
 
 The check binds the text that runs. A compile-time body is evaluated together with the enclosing declarations it captures — those it reads, and transitively those their initializers read (S458; a declaration the body does not read is not evaluated with it); the allow-list SHALL hold over that whole evaluated text (a violation in a captured declaration is reported at the `^{}` site), so a transformation between the checked tree and the evaluated text cannot admit what the tree did not show. impl#1 additionally evaluates compile-time bodies in a fresh realm with no host objects in reach (defence in depth; the allow-list is the authority), with the realm's microtasks drained inside the bounded call, under a wall-clock bound (5 s; S458): a body that does not finish within it is `E-META-EVAL-001`, so a non-terminating body — including a strict-mode tail call, which loops rather than overflowing the stack — fails the compile instead of hanging it. The bound is an implementation limit, not a language rule. The names a body captures (§22.3) are the names in scope at the `^{}` site; a declaration inside a block (`while`, `if`, a match arm, …) is not in scope outside it (S458). The allow-list SHALL be applied to a `^{}` body WHEREVER it sits — the body of an `if` / `else` branch, a `match` arm, a loop of any shape, a function — not only a direct child of a markup element or `${}` block (S458 review round 3; a block the finder did not descend into was emitted unchecked).
 
@@ -25781,9 +25889,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-RI-001~~ | — | **Retired 2026-04-21 (S37)**; `server pure` is now valid (§33.3, §48.10). | — |
 | E-RI-002 | §12 | Server-escalated function mutates `@` reactive variable | Error |
 | E-IMPORT-001 | §21.2 | `export` used outside a `${ }` context (exceptions: top-level `export <ComponentName ...>...</>` per §21.2 Form 1, `export const Name = ...` inside `${ }` per §21.2 Form 2) | Error |
-| E-IMPORT-002 | §21.3 | Circular import detected | Error |
+| E-IMPORT-002 | §21.3, §21.4 | Circular import detected — including a cycle closed by a re-export (`export { … } from` / `export * from`), since re-export edges are import-graph edges (§21.4). (Emitted at `compiler/src/module-resolver.js` `detectCircularImports`.) | Error |
 | E-IMPORT-003 | §21.3 | `import` inside a function body (not file top-level) | Error |
-| E-IMPORT-004 | §21.3 | Imported name not found in target file's exports | Error |
+| E-IMPORT-004 | §21.3, §21.4 | Imported name not found in target file's exports. Also (§21.4): a named re-export of a name its source does not export (reported at the re-export); importing or re-exporting by name a name two `export *` sources bind to different declarations (ambiguous — the message names the stars); a name the target reaches only through an `export *` from a module outside the compilation (stdlib / vendor / `.js`), which is not expanded. (Emitted at `compiler/src/module-resolver.js` `validateImports` — imports — and `compiler/src/module-resolver.js` `validateReExports` — named re-exports.) | Error |
 | E-EXPORT-001 | §21.2 | A reactive state cell (plain Shape-1 OR derived) is exported (`export { count }` / `export @count`). A reactive cell is not in the Form-2 exportable set (type / function / fn / const / let); it holds per-instance runtime state and has no cross-file export meaning. Keyed on the `state-decl` binding (not name-case) so component-as-const, `<channel>`, and engine (§21.8) exports stay valid. Fix-it: export a function returning the value, or wrap the cell in a component and export that. (S173 — ratified S171 (item) + S173 (severity/code/scope).) | Error |
 | E-EXPORT-002 | §21.2 | Form 1 component body is empty / text-only / multi-rooted (must be single-rooted markup) | Error |
 | E-EXPORT-003 | §21.2 | Form 1 outer attribute conflicts with body-root attribute name | Error |
@@ -25801,7 +25909,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIN-001 | §35.5 | `lin` variable not consumed before scope exit | Error |
 | E-LIN-002 | §35.5 | `lin` variable consumed more than once | Error |
 | E-LIN-003 | §35.5 | `lin` variable consumed in some branches but not all | Error |
-| E-META-001 | §22.6, §22.12 | `^{ }` block requires runtime but `meta.runtime` is `false`; OR (S457) a `^{}` body — compile-time or runtime — reaches outside the §22.12 closed allow-list: a free identifier that is not a scrml construct, a local or captured binding, or a primitive (every JS-host global, `Object` / `JSON` / `Math` / `String` included); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter, a destructured parameter). The message names the identifier, member or construct and the allowed set; a refused body is never evaluated. Emitted at `compiler/src/meta-checker.ts` (`checkMetaBlockAllowList`, over the scrml AST) and `compiler/src/meta-eval.ts` (over the exact text a compile-time body is evaluated as, captured declarations included), both via `compiler/src/meta-allow-list.ts`. Provenance: ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + S114 Approach C. **Provenance:** ruling:user-voice-scrml.md S458 "1a". | Error |
+| E-META-001 | §22.6, §22.12 | `^{ }` block requires runtime but `meta.runtime` is `false`; OR (S457) a `^{}` body — compile-time or runtime — reaches outside the §22.12 closed allow-list: a free identifier that is not a scrml construct, a local or captured binding, or a primitive (every JS-host global, `Object` / `JSON` / `Math` / `String` included); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter, a destructured parameter). The message names the identifier, member or construct and the allowed set; a refused body is never evaluated. Emitted at `compiler/src/meta-checker.ts` (`checkMetaBlockAllowList`, over the scrml AST) and `compiler/src/meta-eval.ts` (over the exact text a compile-time body is evaluated as, captured declarations included), both via `compiler/src/meta-allow-list.ts`. Provenance: ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + S114 Approach C. **Provenance:** ruling:user-voice-scrml.md S458 "1a". ALSO (S458 final review F7, impl#1 status): a RUNTIME `^{}` inside an `<each>` row template — impl#1 emits no per-row `^{}` effect, so the row's `as` binding cannot be captured per row and the block would never run; refused with that cause (a compile-time `^{}` there is spliced into every row). | Error |
 | E-META-004 | §22.11 | *Reserved* — number unallocated; preserved for search-hit stability. Do not reuse. | — |
 | E-META-009 | §22.11 | Nested `^{}` inside a compile-time `^{}` block | Error |
 | E-META-010 | §22.4, §22.11 | Reference to the reserved `compiler.*` namespace in a `^{}` block | Error |
@@ -26117,7 +26225,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-EACH-BODY-DECL-UNSUPPORTED | §17.7.3, §17.7.2 | A `let` / `const` / `function` DECLARATION appears in an `<each>` body interpolation (`${ let nm = @.name }`). The each-body scope (§17.7.3) is the `@.` contextual sigil plus an optional `as` alias — NOT author-declared locals. The decl has no `exprNode`/`raw`, so codegen dropped it silently, while a later `${nm}` still lowered to a bare `String(nm)`: a dangling reference that throws inside the per-item render factory and renders the WHOLE list empty, at exit-0 with no diagnostic (a silent-broken bundle). **Reject (fail-closed), user ruling S339:** fires once per offending decl and returns, so no broken render is emitted. **Does NOT fire:** a bare field-read interpolation (`${@.field}`, or `${x.field}` with `as x`); a declaration OUTSIDE the `<each>` (the ordinary lift); a non-declaration `${expr}`. Supporting author locals in an each body (replay the binding into the per-item factory closure, like the for-lift path) is a separate §17.7.3 language-surface ruling — this row REJECTS until such a ruling lands; it does not forbid the feature. (Catalog addition S339 (peter); emitted at `compiler/src/codegen/emit-each.ts` in the logic-child handler; partitions into `result.errors`.) | Error |
 | E-EACH-NOT-SEQUENCE | §17.7.2 | `<each in=expr>` over a value that is not a sequence (§66.12.1: arrays and tuples; a map iterates through its `.entries()` / `.keys()` / `.values()` array views, §59.8). Fires only when the value is PROVABLY not a sequence: `S | not` over a sequence `S` is admitted (`not` renders `<empty>`, §17.7.4), and an unresolved `in=` type is silent (provable-or-silent). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 3; the three SPEC-text OPEN items, #3). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `<each in=@n>` over a `number` cell at exit 0); impl#1 carries it (§34.0). | Error |
 | E-META-EVAL-001 | §22.4 | Compile-time meta evaluation failed at runtime — the `^{}` block body threw an exception when evaluated by the meta interpreter. The error message includes the underlying runtime error. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts`) | Error |
-| E-META-EVAL-002 | §22.4 | Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. ALSO (S457, impl#1 status per §22.4.1): the emitted output contains something other than standard markup elements, text and comments with plain attribute values — a `${}` logic block, a `?{}`, a function, a declaration, a component or a scrml structural element, which would reach code generation without the type system and route inference. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `reparseEmitted` and `checkEmittedNodes`) **Provenance:** ruling:user-voice-scrml.md S457 (the S457 meta allow-list arc) + ruling:user-voice-scrml.md S458 "1a". | Error |
+| E-META-EVAL-002 | §22.4 | (S458 final review F3) a compile-time `^{}` emits markup from inside a `${}` logic body — a statement list, branch, loop, match arm or function body has no markup position to receive it (§22.4.1). Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. ALSO (S457, impl#1 status per §22.4.1): the emitted output contains something other than standard markup elements, text and comments with plain attribute values — a `${}` logic block, a `?{}`, a function, a declaration, a component or a scrml structural element, which would reach code generation without the type system and route inference. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `reparseEmitted` and `checkEmittedNodes`) **Provenance:** ruling:user-voice-scrml.md S457 (the S457 meta allow-list arc) + ruling:user-voice-scrml.md S458 "1a". | Error |
 | E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js`) | Error |
 | E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0, §40.8 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), a `:`-shorthand body (§4.14), or (S441) a `<program>` / `<page>` / `<channel>` body (§40.8; valid code there is a statement sequence, and a markup element is a second declared-text form; one diagnostic per maximal run of invalid statements, which raise nothing else) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (**Wired S441** at the `<program>` / `<page>` / `<channel>` locus in both front ends — `compiler/src/ast-builder.js` `rejectBodyTopProse` and `compiler/native-parser/parse-markup.js` `rejectBodyTopProseNative`; immediate error, no §63 window, per ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (*"yes to all four, your recs on the rest"*). The three code-bearing loci remain spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires them. Authority: `scrml-support/archive/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
 | W-DISPLAY-TEXT-OVERQUOTE | §4.18.7, §4.18.1, §4.18.3, §18.0.1, §51.0 | (S181 — the inverse of E-UNQUOTED-DISPLAY-TEXT.) A `"..."` display-text literal is the **sole content** of a **plain-markup element** (an HTML element — NOT a component, NOT a scrml structural element) that is **nested inside a code-default body** (an engine state-child body §51.0, a match block-form arm body §18.0.1, or a `:`-shorthand body §4.14). The nested plain-markup element opens a **free-text body** (§4.18.1 — body modes nest), so the `"..."` the adopter wrote (correct in the enclosing code-default body) renders **literally** — the quote marks appear in the output. This surfaces the over-quoting footgun: the mirror of E-UNQUOTED-DISPLAY-TEXT, which is the UNDER-quoting case (bare prose in the code-default body itself, where a literal is required). **Fire condition:** a plain-markup element (`getElementShape(tag) !== null`) nested in one of the three code-default-body loci whose body, after ignoring whitespace-only formatting, is exactly one display-text literal (`"..."` with no interior unescaped `"`). **Does NOT fire:** a `"..."` directly in the code-default body (the CORRECT §4.18.3 display-text literal); bare free text in a plain-markup body; a `"..."` in plain markup OUTSIDE any code-default-body context; a NON-sole-content quoted string (`<p>"a" and "b"</p>` — the adopter clearly intends literal quotes); a `:`-shorthand body that IS a display-text literal (the quotes are stripped per §4.18.3 — correct, no footgun). The diagnostic SHALL suggest bare free text (`<p>On the way.</p>`). Partitions into `result.warnings` (non-fatal). Fire site: `type-system.ts` `checkDisplayTextOverquote` (the type pass — the FileAST carries the engine `bodyChildren` / match arm bodies and the wired W-/I- diagnostic stream). Reserved for promotion to a hard reject only if the under-quoting E-UNQUOTED-DISPLAY-TEXT is wired (they share the code-default-body boundary). | Info |
@@ -26202,7 +26310,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-012 | §18.14 | `match` on a `T \| not` (optional) type lacks a `not` arm and lacks an `else` arm. Resolution: add a `<not>` arm or add a wildcard `<_>` / `else` arm so the absence case is handled. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | W-MATCH-003 | §18.16 | `partial` modifier applied to a `match` whose arms already cover every variant of the matched type. The `partial` is unnecessary — remove it to surface future non-exhaustiveness as an error. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Warning |
 | E-IMPORT-005 | §21.3 | `import` specifier uses an unrecognized protocol prefix or a bare npm-style specifier. Specifiers must begin with `scrml:`, `vendor:`, `./`, or `../` — scrml has no npm integration. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`.) | Error |
-| E-IMPORT-006 | §21.3 | `scrml:` (or relative) `import` specifier does not resolve to any module on disk. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`, and — for a `.js` / `.mjs` helper reaching client JavaScript, which must be copied into the build output (S440 item 16) — at `compiler/src/api.js` `createClientHelperRelocator`.) | Error |
+| E-IMPORT-006 | §21.3, §21.4 | `scrml:` (or relative) `import` specifier does not resolve to any module on disk; also a relative re-export (`export { … } from` / `export * from`, §21.4) whose target file does not exist, reported at the re-export. (Catalog addition S78 audit; emitted at `compiler/src/module-resolver.js`, and — for a `.js` / `.mjs` helper reaching client JavaScript, which must be copied into the build output (S440 item 16) — at `compiler/src/api.js` `createClientHelperRelocator`.) | Error |
 | E-IMPORT-007 | §21.7 | Auto-gather closure exceeded the sane-limit (5000 files). The `import` resolution traversal touched too many files — likely an accidental project-root inclusion or a cycle in directory traversal. (Catalog addition S78 audit; emitted at `compiler/src/api.js`. Fire-site line corrected S297 — the row read `:506`, which is not the fire site.) | Error |
 | E-IMPORT-008 | §21.3.1 | `import:host` used in a file outside the project manifest's `[capabilities] host-import` allow-list. The default value is `"disabled"` in adopter project manifests; the bootstrap stdlib's own manifest sets `"self-host-only"` permitting only files under `scrml/stdlib/compiler/**`. Resolution: either remove the `import:host` declaration (the canonical path — adopter code uses `import` from scrml-source modules, not host-language modules); or, if a host-language bridge is genuinely required, opt into the manifest entry explicitly. (Catalog addition S114 — Approach C ratification.) | Error |
 | E-IMPORT-009 | §21.3.1 | `import:host` uses a host-tag other than `host`. v1 recognizes only the `host` tag (TypeScript / JavaScript named-export bridge). Future-reserved tags (`wasm` / `wat` / `c` / `zig` / etc.) require SPEC amendment + per-tag implementation. Resolution: use `import:host` for the v1 TS/JS bridge; defer other host languages until SPEC amendment. (Catalog addition S114 — Approach C ratification.) | Error |
