@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 245 | 6 |
-| MED | 545 | 4 |
-| LOW | 307 | 0 |
+| MED | 554 | 4 |
+| LOW | 312 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -23840,3 +23840,58 @@ The S456 write scan (§8.10.3 — hoist only a body proven not to write) accepts
 ### g-impl1-match-arm-sql-server-boundary-s455 — `?{}` inside a `match` block arm in a server function → E-CG-006 + a SyntaxError, with or without `.nobatch()` — `NEW S455; MED; open (pre-existing)`
 <!-- @gap id=g-impl1-match-arm-sql-server-boundary-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(match-arm structured-body emission ~:2796, PA-located-verify) prov=review:s455-hoist-dev -->
 Found while fixing #1325; not hoist-root.
+
+### g-splice-multi-arg-comma-expression-s459 — `@ls.splice(0, 0, @p)` compiles to `.splice((0, 0, x))`, a comma expression: the insert is silently lost (and with some values the array emptied) — `NEW S459; MED; open (pre-existing, data loss)`
+PA-verified on main 3a4a3639a: `<ls>: number[] = [1,2]; <p> = 9; function ins() { @ls.splice(0, 0, @p) }` emits `splice((0, 0, _scrml_cs_reactive_get("p")))`. The literal-argument form `splice(0, 0, p)` emits correctly; an argument that reads a cell triggers it. Found by the S459 refinement-2a review.
+<!-- @gap id=g-splice-multi-arg-comma-expression-s459 sev=MED status=open locus=searched:reactive array-mutation lowering (emit-expr.ts / rewrite.ts) — not traced prov=empirical:S459-PA-reproduced -->
+
+### g-push-object-literal-string-scope-s459 — `@rows.push({ u: "b", n: @m })` fails E-SCOPE-001 "Undeclared identifier `b`" — `NEW S459; LOW; open (pre-existing)`
+Reviewer- and builder-executed (S459 refinement rounds); PA-unverified.
+<!-- @gap id=g-push-object-literal-string-scope-s459 sev=LOW status=open locus=searched:reactive array-mutation argument lowering prov=review:s459-refinement-2a -->
+
+### g-bare-assign-to-param-emits-const-redeclaration-s459 — `function g(n) { n = 6; return n }` emits `const n = 6` → E-CODEGEN-INVALID-LOGIC ("Identifier 'n' has already been declared") — `NEW S459; MED; open (pre-existing, loud)`
+`tildeDeclIsRebind` never sees parameters. Found by the D1 round-5 agent; agent-executed.
+<!-- @gap id=g-bare-assign-to-param-emits-const-redeclaration-s459 sev=MED status=open locus=compiler/src/codegen(tildeDeclIsRebind — PA-located-verify) prov=empirical:s459-d1-r5-agent -->
+
+### g-function-value-reference-not-mangled-s459 — a top-level function used as a VALUE (not called) is never renamed: `${() => h && h()}` emits `h && _scrml_h_3()` → ReferenceError — `NEW S459; MED; open (pre-existing, silent)`
+Breaks §15.11.4's guarded-callback idiom when the caller passes a named function. Found by the D1 round-6 agent; agent-executed.
+<!-- @gap id=g-function-value-reference-not-mangled-s459 sev=MED status=open locus=compiler/src/codegen/fn-name-rename.ts(PA-located-verify) prov=empirical:s459-d1-r6-agent -->
+
+### g-component-multi-instance-body-decl-collision-s459 — two instances of a component whose body declares a `let`/`const`/`function` crash at runtime ("Cannot declare a let variable twice") — `NEW S459; MED; open (pre-existing)`
+Body-level declarations are emitted once under a shared name. Related to the §66.15.1 carried divergence (component-local state shares one global key). Reviewer-executed on main (S459 D1 reviews).
+<!-- @gap id=g-component-multi-instance-body-decl-collision-s459 sev=MED status=open locus=compiler/src/component-expander.ts(PA-located-verify) prov=review:s459-d1-r5 -->
+
+### g-component-body-given-match-unusable-s459 — `given` / `match` on a prop inside a component body fail E-COMPONENT-020/021/035, so §42.3.5's canonical narrowing forms are unusable in components — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 D1 round-6 review), same on base and head.
+<!-- @gap id=g-component-body-given-match-unusable-s459 sev=MED status=open locus=compiler/src/component-expander.ts(parseComponentDef re-parse — PA-located-verify) prov=review:s459-d1-r6 -->
+
+### g-each-block-arrow-handler-never-invoked-s459 — `onclick=${() => { … }}` inside `<each>` emits an arrow that is never invoked (silent; also outside components) — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 D1 review, `q/eachblk.scrml`).
+<!-- @gap id=g-each-block-arrow-handler-never-invoked-s459 sev=MED status=open locus=compiler/src/codegen/emit-each.ts(PA-located-verify) prov=review:s459-d1-r4 -->
+
+### g-each-in-lifted-component-renders-nothing-s459 — an `<each>` inside a lifted component renders nothing on main — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 D1 reviews, probe `lf`); example 23's AssignmentPicker / StatusPicker hit it (E-DG-002 on @currentDriverId etc. is the honest symptom after D1).
+<!-- @gap id=g-each-in-lifted-component-renders-nothing-s459 sev=MED status=open locus=searched:emit-lift.js,emit-each.ts — not traced prov=review:s459-d1-r4 -->
+
+### g-misc-component-pre-existing-s459 — component odds and ends found by the S459 D1 reviews — `NEW S459; LOW; open (pre-existing)`
+(1) destructured-parameter / parameter defaults dropped in component functions (`function f2({ n = 5 })` emits `({ n })`); (2) C-style `for (let i = 0; …)` in a component function → E-SCOPE-001; (3) `<Card id=…>` on a props component → E-COMPONENT-011, contradicting §15.5 "Adding `id=` at a call site is allowed"; (4) `<C bind:n=@v + 1/>` — the tokenizer silently splits off `+ 1`; (5) E-TYPE-031 lenient-model misses `run(onGo)` (passing a `fn | not` to a parameter — needs §7.5.1 argument typing).
+<!-- @gap id=g-misc-component-pre-existing-s459 sev=LOW status=open locus=compiler/src/component-expander.ts prov=review:s459-d1-r4..r7 -->
+
+### g-worker-when-message-separate-block-undeclared-s459 — `when message from <#w>` placed in a separate `${}` block emits an undeclared `_scrml_worker__scrml_input_<id>_` → ReferenceError at load — `NEW S459; MED; open (pre-existing)`
+Reviewer-executed (S459 unquoted-values review); the working sample keeps the handler in the same block as the functions.
+<!-- @gap id=g-worker-when-message-separate-block-undeclared-s459 sev=MED status=open locus=compiler/src/codegen/emit-worker.ts(PA-located-verify) prov=review:s459-uq-merge -->
+
+### g-esm-chunk-parse-throws-on-errored-source-s459 — 115 esm-mode `emit-client-esm failed to parse a client chunk` throws on sources that carry compile errors, + 4 stack overflows on `nested-comments.scrml` (all pinned by name in `scripts/host-global-scan.known-throws.txt`) — `NEW S459; MED; open (pre-existing)`
+<!-- @gap id=g-esm-chunk-parse-throws-on-errored-source-s459 sev=MED status=open locus=compiler/src/codegen/emit-client-esm.ts prov=empirical:s459-host-global-scan -->
+
+### g-host-global-scan-blind-spots-s459 — the host-global alias gate (R1) exempts host names the author uses, so it cannot see a bare compiler reference in a unit that declares that same name; known-throws match the key only, not the error class — `NEW S459; LOW; open`
+Fix: a no-exemption mode over synthetic units declaring one user function per host name (or p2-style executed tests); match the error class too.
+<!-- @gap id=g-host-global-scan-blind-spots-s459 sev=LOW status=open locus=scripts/host-global-scan.ts prov=review:s459-uq-merge+s459-hgs-thrown -->
+
+### g-flaky-timing-tests-s459 — cloud-only timing flakes: §59 HAMT "large-N S94 insert loop — sub-quadratic" (Expected < 12) on the `gate` job; `scrml dev` "SIGTERM while the respawned child is starting" on `tracking` — `NEW S459; LOW; open`
+Both failed on unrelated PRs (#1176 docs-only, #1361) and passed on re-run.
+<!-- @gap id=g-flaky-timing-tests-s459 sev=LOW status=open locus=compiler/tests(the two named tests) prov=empirical:s459-ci -->
+
+### g-chunk-mount-id-nondeterminism-s459 — `_scrml_chunk_mount` node ids drift between runs in one long-lived process (`12-snippets-slots`, `gauntlet-r10-odin-filebrowser`) — `NEW S459; LOW; open (pre-existing on main)`
+Fresh-process compiles agree. Could matter for long-lived `scrml dev` / `serve`. Reviewer-executed (S459 ship-strip review).
+<!-- @gap id=g-chunk-mount-id-nondeterminism-s459 sev=LOW status=open locus=searched:route-splitter.ts,emit-client.ts — not traced prov=review:s459-ship-strip -->
