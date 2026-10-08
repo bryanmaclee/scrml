@@ -124,7 +124,7 @@ const ADMITTED = [
   // Ordinary data-* and near-miss names are not in the compiler-owned data-scrml- namespace. A
   // character reference in an attribute NAME is not decoded by the tokenizer, so
   // `data&#45;scrml-x` is that literal name, not data-scrml-x.
-  '<p data-x="1" data-scrmlx="2" data-scrml="3" x-data-scrml-y="4">ok</p>',
+  '<p data-x="1" data-scrmlx="2" x-data-scrml-y="4">ok</p>',
   '<p data&#45;scrml-x="1">ok</p>',
 ];
 

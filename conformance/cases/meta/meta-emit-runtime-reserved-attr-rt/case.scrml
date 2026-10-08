@@ -1,0 +1,8 @@
+<program>
+<label> = "hi"
+<div id="host">
+^{
+  meta.emit("<p data-scrml-gated=\"1\">" + meta.get("label") + "</p>")
+}
+</div>
+</program>

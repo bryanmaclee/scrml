@@ -1,0 +1,9 @@
+<program>
+<label> = "hi"
+^{ emit("<p id=\"ct\" data-x=\"1\">ct</p>") }
+<div id="host">
+^{
+  meta.emit("<p id=\"rt\" data-k=\"v\">" + meta.get("label") + "</p>")
+}
+</div>
+</program>

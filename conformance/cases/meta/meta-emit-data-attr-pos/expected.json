@@ -1,0 +1,17 @@
+{
+  "id": "meta-emit-data-attr-pos",
+  "description": "§22.4.1 / §22.12 (S458 \"your recs on all four\", item 3) positive — only the `data-scrml-` PREFIX is compiler-owned. An ordinary `data-*` attribute passes in compile-time `emit()` output (`data-x`) and in runtime `meta.emit` output (`data-k`), and both reach the rendered DOM.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: the refusal is \"a prefix over the attribute name\" `data-scrml-`; every other attribute name is judged as before.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [
+      { "selector": "#ct", "text": "ct", "attr": { "data-x": "1" } },
+      { "selector": "#rt", "text": "hi", "attr": { "data-k": "v" } }
+    ]
+  }
+}

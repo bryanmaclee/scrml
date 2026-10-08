@@ -1,0 +1,3 @@
+<program>
+^{ emit("<p DATA-SCRML-OUTLET=\"x\">p</p>") }
+</program>

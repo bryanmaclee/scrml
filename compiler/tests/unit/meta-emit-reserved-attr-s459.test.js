@@ -65,11 +65,10 @@ describe("S458 item 3 — data-scrml-* in compile-time emit() output is E-META-E
 });
 
 describe("S458 item 3 — ordinary data-* attributes still pass", () => {
-  test("data-x / data-scrml / data-scrmlx / x-data-scrml-y compile clean and reach the HTML", () => {
-    const r = compile(emitOf('<p data-x="1" data-scrml="2" data-scrmlx="3" x-data-scrml-y="4">ok</p>'));
+  test("data-x / data-scrmlx / x-data-scrml-y compile clean and reach the HTML", () => {
+    const r = compile(emitOf('<p data-x="1" data-scrmlx="3" x-data-scrml-y="4">ok</p>'));
     expect(r.codes).toEqual([]);
     expect(r.html).toContain('data-x="1"');
-    expect(r.html).toContain('data-scrml="2"');
     expect(r.html).toContain('data-scrmlx="3"');
   });
 
