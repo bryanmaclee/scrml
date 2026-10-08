@@ -1,0 +1,12 @@
+{
+  "id": "refinement-sharedcore-inparen-unjudgeable-pos",
+  "description": "S458 F1: the §55.1 shared-core vocabulary inside a refinement predicate (`number(min(0) && max(100))`, the §55.3 example form) is not yet read by impl#1 in refinement-type position. Before S458 it read as the unknown shape `min` and compiled to a runtime check of `(true && true)`; it is now refused with E-CONTRACT-002 rather than silently unenforced. How shared-core vocabulary is read in type position is an open ruling (R4 in docs/changes/s458-refinement-every-position/PLAN.md); this case pins today's fail-closed behaviour and migrates with that ruling.",
+  "language-version": "1.0",
+  "spec": "§53.6.1",
+  "rationale": "§53.6.1: a refinement-position predicate is a \"Compile-time + runtime boundary check\" — a predicate the compiler cannot evaluate cannot be that check, so it fails closed until R4 is ruled.",
+  "expect": {
+    "codes": ["E-CONTRACT-002"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-002": "error" }
+  }
+}

@@ -112,8 +112,16 @@ const NAMED_SHAPE_HTML: Record<string, Record<string, string>> = {
 // is satisfied, `false` when violated.
 // ---------------------------------------------------------------------------
 
+// S458 F1 — the judge FAILS CLOSED. A predicate it cannot judge (an `error`
+// node, an unregistered shape, an unknown kind) yields `false` — the value is
+// refused — never `true`. The type-system stage refuses every such annotation at
+// its declaration (E-CONTRACT-002 / -003, `checkRefinementJudgeable`), so a
+// clean compile never reaches these arms; they exist so that a path which
+// somehow does cannot ship a check that admits everything.
+const FAIL_CLOSED = "false /* §53 S458: unjudgeable predicate — refused */";
+
 export function predicateToJsExpr(pred: PredicateExpr, valueExpr: string): string {
-  if (!pred || !pred.kind) return "true";
+  if (!pred || !pred.kind) return FAIL_CLOSED;
 
   switch (pred.kind) {
     case "comparison": {
@@ -137,9 +145,8 @@ export function predicateToJsExpr(pred: PredicateExpr, valueExpr: string): strin
       if (template) {
         return template.replaceAll("__V__", valueExpr);
       }
-      // Unknown shape — TS would have caught this as E-CONTRACT-002.
-      // Emit a pass-through (defensive).
-      return "true";
+      // Unknown shape — TS refuses it as E-CONTRACT-002 at the declaration.
+      return FAIL_CLOSED;
     }
 
     case "and": {
@@ -165,15 +172,19 @@ export function predicateToJsExpr(pred: PredicateExpr, valueExpr: string): strin
       // emit-enums), so the check is a string-array `.includes`. `variants` is
       // the resolved IN-SET (notIn was complemented at type-resolution time),
       // so the test is uniformly positive regardless of surface form.
+      // S458 — a PAYLOAD variant lowers to `{ variant, data }` (emit-enums), not
+      // a bare string, and §53.15.5 admits payload variants in a subset: the
+      // membership is read off the TAG. (`.includes(obj)` refused every payload
+      // variant, in-subset or not.)
       const set = Array.isArray(pred.variants) ? pred.variants : [];
       const literal = JSON.stringify(set);
-      return `(${literal}.includes(${valueExpr}))`;
+      return `(${literal}.includes(typeof ${valueExpr} === "object" && ${valueExpr} !== null ? ${valueExpr}.variant : ${valueExpr}))`;
     }
 
     case "error":
     default:
-      // Malformed predicate — TS would have reported this.
-      return "true";
+      // Malformed predicate — TS refuses it as E-CONTRACT-002 at the declaration.
+      return FAIL_CLOSED;
   }
 }
 
@@ -433,114 +444,33 @@ function collectHtmlAttrs(
 }
 
 // ---------------------------------------------------------------------------
-// parsePredicateAnnotation
+// Refinement — the ONE reader's output, as codegen sees it (S458)
 //
-// Parse a scrml type annotation string and extract the predicate if it is a
-// predicated type (§53.2). Used by emit-server.ts to detect predicated params
-// without importing type-system.ts.
-//
-// @param annotation — e.g. "number(>0 && <10000)" or "number(>0 && <10000) [label]"
-// @returns { predicate, baseType, label } if predicated, null otherwise.
+// The type-system stage resolves every refinement annotation (one reader:
+// type-system.ts `resolveTypeExpr`) and stamps the result as plain data:
+//   - a function parameter:   `param.refinement`
+//   - a function:             `fnNode.returnRefinement`
+//   - a let/const/state decl: `node.predicateCheck` ({ predicate, baseType, label, zone })
+// Codegen never re-parses an annotation string. (Before S458 a regex "mirror"
+// parser here re-read parameter / return / bind:value annotations and dropped
+// every form it did not know — enum-subset parameters were never checked, and
+// an unreadable predicate silently produced no check.)
 // ---------------------------------------------------------------------------
 
-export function parsePredicateAnnotation(annotation: string): {
-  predicate: PredicateExpr;
+export interface Refinement {
   baseType: string;
+  predicate: PredicateExpr;
   label: string | null;
-} | null {
-  if (!annotation || typeof annotation !== "string") return null;
-
-  const trimmed = annotation.trim();
-
-  // Match: baseType "(" predicateStr ")" [ "[" label "]" ]
-  const m = trimmed.match(/^(number|string|integer|boolean)\s*\((.+)\)\s*(?:\[([A-Za-z_][A-Za-z0-9_]*)\])?$/s);
-  if (!m) return null;
-
-  const baseType = m[1];
-  const predicateStr = m[2].trim();
-  const label = m[3] ?? null;
-
-  const predicate = parsePredicateExprInternal(predicateStr);
-  if (!predicate || predicate.kind === "error") return null;
-
-  return { predicate, baseType, label };
 }
 
-// ---------------------------------------------------------------------------
-// Minimal predicate expression parser (mirrors type-system.ts parsePredicateExpr)
-//
-// Supports: comparison (>N, >=N, <N, <=N), property (.length > N),
-// named-shape (email, url...), and/or/not composition.
-// Does NOT validate external references (TS already rejected those).
-// ---------------------------------------------------------------------------
-
-function parsePredicateExprInternal(raw: string): PredicateExpr {
-  const trimmed = raw.trim();
-  if (!trimmed) return { kind: "error", message: "empty" };
-
-  // Try to split on && / || at the top level (not inside parens)
-  let depth = 0;
-  let andIdx = -1;
-  let orIdx = -1;
-
-  for (let i = 0; i < trimmed.length; i++) {
-    const ch = trimmed[i];
-    if (ch === "(" || ch === "[") { depth++; continue; }
-    if (ch === ")" || ch === "]") { depth--; continue; }
-    if (depth === 0) {
-      if (trimmed[i] === "&" && trimmed[i + 1] === "&") { andIdx = i; break; }
-      if (trimmed[i] === "|" && trimmed[i + 1] === "|") { orIdx = i; break; }
-    }
-  }
-
-  if (andIdx !== -1) {
-    const left = parsePredicateExprInternal(trimmed.slice(0, andIdx));
-    const right = parsePredicateExprInternal(trimmed.slice(andIdx + 2));
-    return { kind: "and", left, right };
-  }
-
-  if (orIdx !== -1) {
-    const left = parsePredicateExprInternal(trimmed.slice(0, orIdx));
-    const right = parsePredicateExprInternal(trimmed.slice(orIdx + 2));
-    return { kind: "or", left, right };
-  }
-
-  // Parenthesized group
-  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
-    return parsePredicateExprInternal(trimmed.slice(1, -1));
-  }
-
-  // Not
-  if (trimmed.startsWith("!")) {
-    const operand = parsePredicateExprInternal(trimmed.slice(1));
-    return { kind: "not", operand };
-  }
-
-  // Property predicate: .prop op value  (e.g. ".length > 7")
-  const propM = trimmed.match(/^\.([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|!=|>|<)\s*(-?\d+(\.\d+)?)$/);
-  if (propM) {
-    return {
-      kind: "property",
-      prop: propM[1],
-      op: propM[2],
-      value: Number(propM[3]),
-    };
-  }
-
-  // Comparison predicate: op value  (e.g. ">0", "<=100", ">=0")
-  const cmpM = trimmed.match(/^(>=|<=|==|!=|>|<)\s*(-?\d+(\.\d+)?)$/);
-  if (cmpM) {
-    return {
-      kind: "comparison",
-      op: cmpM[1],
-      value: Number(cmpM[2]),
-    };
-  }
-
-  // Named shape: bare identifier (email, url, uuid, phone, date, time, color)
-  if (/^[a-z][A-Za-z0-9_]*$/.test(trimmed)) {
-    return { kind: "named-shape", name: trimmed };
-  }
-
-  return { kind: "error", message: `cannot parse: ${trimmed}` };
+/** The refinement carried by a TS stamp (param / fn return / decl), or null. */
+export function refinementOf(stamp: unknown): Refinement | null {
+  if (!stamp || typeof stamp !== "object") return null;
+  const r = stamp as { predicate?: unknown; baseType?: unknown; label?: unknown };
+  if (!r.predicate || typeof r.predicate !== "object") return null;
+  return {
+    baseType: typeof r.baseType === "string" ? r.baseType : "",
+    predicate: r.predicate as PredicateExpr,
+    label: typeof r.label === "string" ? r.label : null,
+  };
 }

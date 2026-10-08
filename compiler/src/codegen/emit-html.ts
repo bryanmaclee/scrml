@@ -26,12 +26,12 @@ import { collectThemeContext, collectThemeTokenNames } from "./emit-theme-reset.
 // B6's diagnostic walker).
 import { lookupStateCell, lookupQualifiedStateCell, lookupCompoundMembersByLeafName, getCellKind } from "../symbol-table.ts";
 // A1c C16 — §53.7.1 HTML attr generation for refinement-typed bindable cells.
-// `parsePredicateAnnotation` extracts the predicate from a typeAnnotation string;
 // `deriveHtmlAttrs` maps the predicate to native HTML validation attributes.
-import { parsePredicateAnnotation, deriveHtmlAttrs } from "./emit-predicates.ts";
+import { deriveHtmlAttrs } from "./emit-predicates.ts";
 // A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
-import { buildReactiveTypeMap, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
+// S458 one reader — `cellRefinement` reads the TS-resolved refinement off that map.
+import { buildReactiveTypeMap, cellRefinement, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard } from "./url-attr-guard.ts";
 // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
 // `collectEnumRenders` builds the file's variant -> renders-markup map;
@@ -3153,7 +3153,7 @@ export function generateHtml(
         const _bvRootKey = _bvName.split(".")[0];
         const _bvAnnot = reactiveTypeMap.get(_bvRootKey);
         if (!_bvAnnot) continue;
-        const _bvParsed = parsePredicateAnnotation(_bvAnnot);
+        const _bvParsed = cellRefinement(reactiveTypeMap, _bvRootKey);
         if (!_bvParsed) continue;
         const _bvDerived = deriveHtmlAttrs(_bvParsed.predicate, _bvParsed.baseType);
         for (const [k, v] of Object.entries(_bvDerived)) {

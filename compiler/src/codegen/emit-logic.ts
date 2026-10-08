@@ -12,7 +12,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHead
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRuntimeCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
+import { emitRuntimeCheck, refinementOf } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -547,6 +547,12 @@ export interface EmitLogicOpts {
    * emits no boundary check (correct for non-refinement-typed returns).
    */
   returnTypeAnnotation?: string | null;
+  /**
+   * S458 one reader — the TS-resolved return refinement (`fnNode.returnRefinement`,
+   * stamped by type-system.ts). return-stmt judges THIS, never the annotation
+   * string. Threaded alongside `returnTypeAnnotation`.
+   */
+  returnRefinement?: unknown;
   /**
    * C16 (§53.9.3) — The enclosing function's name, used in error messages
    * for return-stmt boundary check failures. Paired with returnTypeAnnotation.
@@ -3144,7 +3150,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // refinement-typed return type, wrap the return expression in a
       // boundary check (E-CONTRACT-001-RT) before returning.
       const _retPredInfo = opts.returnTypeAnnotation
-        ? parsePredicateAnnotation(opts.returnTypeAnnotation)
+        ? refinementOf(opts.returnRefinement)
         : null;
       const _wrapReturnWithCheck = (retExprStr: string): string => {
         if (!_retPredInfo) return `return ${retExprStr};`;

@@ -1,0 +1,14 @@
+{
+  "id": "refinement-enum-subset-param-reject-rt",
+  "description": "S458 one reader: an enum-subset PARAMETER is a boundary zone. promote(r: Role oneOf([.Admin, .Editor])) is called with .Viewer, which is outside the subset: the entry check throws E-CONTRACT-001-RT before the body runs, so @shown keeps \"none\". Before S458 codegen re-read parameter annotations with a regex that knew only number/string/integer/boolean heads, so an enum-subset parameter was never checked and .Viewer was accepted.",
+  "language-version": "1.0",
+  "spec": "§53.15.2",
+  "rationale": "§53.9.2 table: a full `Role` value into a `Role oneOf([.Admin,.Editor])` parameter — \"Yes — boundary narrow into the subset at the call site\"; §53.15.2 Boundary row: a runtime membership check raises E-CONTRACT-001-RT.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#bad" }],
+    "state": { "shown": "none" },
+    "domAnchored": [{ "selector": "#out", "text": "none" }]
+  }
+}

@@ -25,7 +25,7 @@ import {
   type SessionAttrName,
 } from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
-import { emitServerParamCheck, parsePredicateAnnotation, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
+import { emitServerParamCheck, refinementOf, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
@@ -4836,7 +4836,7 @@ export function generateServerJs(
         const _pParam = params[i];
         const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
         if (_pAnnotation) {
-          const _pParsed = parsePredicateAnnotation(_pAnnotation);
+          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
             const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ");
             // ⚑ GATED ON `_protectActive`. The mark only means anything to the
@@ -5121,7 +5121,7 @@ export function generateServerJs(
         const _pParam = params[i];
         const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
         if (_pAnnotation) {
-          const _pParsed = parsePredicateAnnotation(_pAnnotation);
+          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
             const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "  ");
             for (const l of _pLines) lines.push(l);

@@ -30,6 +30,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runSYM } from "../../src/symbol-table.ts";
+import { runTS } from "../../src/type-system.js";
 import { generateHtml } from "../../src/codegen/emit-html.ts";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { emitFunctions } from "../../src/codegen/emit-functions.ts";
@@ -53,6 +54,11 @@ function compileHtml(source, filePath = "/test/c16.scrml") {
     components: ast.components ?? [],
   };
   runSYM({ filePath, ast: fileAST });
+  // S458 one reader — codegen judges the refinement the TYPE stage resolved
+  // and stamped (param.refinement / fnNode.returnRefinement / decl
+  // predicateCheck); it no longer re-parses annotation strings. Run TS so the
+  // stamps exist, as in the real pipeline.
+  runTS({ files: [ast] });
   const registry = new BindingRegistry();
   const errors = [];
   const html = generateHtml(fileAST.nodes, errors, false, registry, fileAST);
@@ -73,6 +79,11 @@ function compileFunctions(source, filePath = "/test/c16.scrml") {
     components: ast.components ?? [],
   };
   runSYM({ filePath, ast: fileAST });
+  // S458 one reader — codegen judges the refinement the TYPE stage resolved
+  // and stamped (param.refinement / fnNode.returnRefinement / decl
+  // predicateCheck); it no longer re-parses annotation strings. Run TS so the
+  // stamps exist, as in the real pipeline.
+  runTS({ files: [ast] });
   const errors = [];
   // Minimal CompileContext shape needed by emitFunctions
   const ctx = {
