@@ -3719,8 +3719,13 @@ function _scrml_meta_effect(scopeId, fn, capturedBindings, typeRegistry) {
     runCount++;
     if (runCount > MAX_RUNS) {
       console.error("[scrml] meta effect " + scopeId + " exceeded " + MAX_RUNS + " re-runs — possible infinite loop");
-      // The bailed run's timers must not keep ticking (S458 review F5).
-      clearScopeTimers();
+      // No timer clear here (S458 review round 3): this guard is not reachable with a
+      // live timer. runCount only climbs across re-runs that are NOT reset to 0, and
+      // every re-run is driven by a reactive subscriber whose callback sets runCount = 0
+      // before calling runEffect; a synchronous self-trigger within a run is stopped by
+      // the isRunning re-entrancy guard above. Two independent reviews could not reach
+      // this line with an active timer, so a clear here would be dead code in a security
+      // path. If a reaching path is ever found, restore the clearScopeTimers() call here.
       isRunning = false;
       return;
     }

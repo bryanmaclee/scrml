@@ -803,19 +803,47 @@ function identifierReads(text: string): Set<string> {
  * then stripped from the client as "compile-time only". When a name is declared more
  * than once, the latest declaration (the one in scope at the `^{}` site) is the one taken.
  */
-function selectCapturedDecls(scope: ScopeDecl[], bodyReads: Set<string>): ScopeDecl[] {
+function selectCapturedDecls(scope: ScopeDecl[], bodyReads: Set<string>, bodyDeclared: ReadonlySet<string>): ScopeDecl[] {
   const latest = new Map<string, number>();
   scope.forEach((d, idx) => latest.set(d.name, idx));
   const chosen = new Set<number>();
-  const pending = [...bodyReads];
+  // A name the body DECLARES itself (top level) shadows the enclosing one, so that
+  // enclosing decl must not be prepended — prepending it emitted a duplicate
+  // `const max` beside the body's own `const max` → parse error (S458 review round 3,
+  // LOW). The shadowed name is not a capture.
+  const pending = [...bodyReads].filter((n) => !bodyDeclared.has(n));
   while (pending.length > 0) {
     const name = pending.pop() as string;
+    if (bodyDeclared.has(name)) continue;
     const idx = latest.get(name);
     if (idx === undefined || chosen.has(idx)) continue;
     chosen.add(idx);
     for (const r of scope[idx].refs) pending.push(r);
   }
   return scope.filter((_, idx) => chosen.has(idx));
+}
+
+/** Names a serialized body declares at its OWN top level (let / const / function). */
+function topLevelDeclaredNames(bodyText: string): Set<string> {
+  const out = new Set<string>();
+  let ast: any = null;
+  try { ast = acorn.parse(bodyText, { ecmaVersion: 2025, sourceType: "script", allowReturnOutsideFunction: true }); } catch { return out; }
+  for (const s of ast.body ?? []) {
+    if (s.type === "VariableDeclaration") for (const d of s.declarations) collectAcornPatternNames(d.id, out);
+    else if (s.type === "FunctionDeclaration" && s.id) out.add(s.id.name);
+  }
+  return out;
+}
+
+function collectAcornPatternNames(p: any, out: Set<string>): void {
+  if (!p) return;
+  switch (p.type) {
+    case "Identifier": out.add(p.name); return;
+    case "ObjectPattern": for (const pr of p.properties) collectAcornPatternNames(pr.type === "RestElement" ? pr.argument : pr.value, out); return;
+    case "ArrayPattern": for (const el of p.elements) collectAcornPatternNames(el, out); return;
+    case "RestElement": collectAcornPatternNames(p.argument, out); return;
+    case "AssignmentPattern": collectAcornPatternNames(p.left, out); return;
+  }
 }
 
 function scopeDeclOf(node: ASTNode): ScopeDecl | null {
@@ -829,12 +857,44 @@ function scopeDeclOf(node: ASTNode): ScopeDecl | null {
   return { name: pn.name, code: `${kw} ${pn.name} = ${initStr};`, node, refs: identifierReads(`(${initStr})`) };
 }
 
+/**
+ * Identifier names read by NON-meta code across a file's node tree — the text of every
+ * node that is not (and is not inside) a `^{}` body. Used to decide whether a captured
+ * declaration may be stripped from the client as compile-time-only.
+ */
+function collectNonMetaReads(nodes: ASTNode[]): Set<string> {
+  const out = new Set<string>();
+  const addText = (t: unknown) => { if (typeof t === "string" && t.trim()) for (const n of identifierReads(t)) out.add(n); };
+  const addTree = (e: unknown) => { if (e && typeof e === "object") { try { addText(emitStringFromTree(e as ExprNode)); } catch { /* ignore */ } } };
+  const visit = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const el of n) visit(el); return; }
+    const node = n as Record<string, unknown>;
+    if (typeof node.kind === "string" && isMetaKind(node.kind)) {
+      // A COMPILE-TIME meta body is evaluated away — its reads are not client reads. A
+      // RUNTIME meta body stays in the client and reads its captures through the emitted
+      // closure, so those reads DO keep a declaration alive (round 3 LOW).
+      if (bodyUsesCompileTimeApis((node.body as unknown[]) ?? [])) return;
+    }
+    for (const k of ["init", "expr", "raw", "condition", "content", "iterable"]) addText(node[k]);
+    for (const k of ["initExpr", "exprNode", "condExpr", "iterExpr", "matchExpr", "headerExpr"]) addTree(node[k]);
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key === "tabSpan" || key === "loc") continue;
+      const v = node[key];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(nodes);
+  return out;
+}
+
 function processNodeList(
   nodes: ASTNode[],
   typeRegistry: TypeRegistry,
   errors: MetaEvalError[],
   outerScope?: ScopeDecl[],
   filePath: string = "",
+  nonMetaReads?: ReadonlySet<string>,
 ): boolean {
   if (!Array.isArray(nodes)) return false;
 
@@ -884,16 +944,21 @@ function processNodeList(
 
       if (isCompileTime && !hasReactiveVars && !hasNestedMeta && !refused) {
         const bodyText = serializeBody((body || []) as LogicStatement[], collectMetaLocals((body || []) as LogicStatement[]));
-        const captured = selectCapturedDecls(scopeDecls, identifierReads(`(function () {\n${bodyText}\n})`));
+        const bodyDeclared = topLevelDeclaredNames(bodyText);
+        const captured = selectCapturedDecls(scopeDecls, identifierReads(`(function () {\n${bodyText}\n})`), bodyDeclared);
         const precedingDecls = captured.length > 0 ? captured.map((d) => d.code).join("\n") : undefined;
 
         const replacementNodes = evaluateMetaBlock(node as MetaNode, typeRegistry, errors, precedingDecls, filePath);
 
         if (replacementNodes !== null) {
           // Mark the declarations this meta block consumed as compile-time-only so they
-          // are stripped from client JS output (only those it captured — S458 F4).
+          // are stripped from client JS output — but ONLY those NO non-meta code reads
+          // (S458 review round 3, LOW: a decl read by both a compile-time `^{}` and the
+          // client must stay in the client, else the client reference throws).
           for (const d of captured) {
-            (d.node as Record<string, unknown>)._compileTimeOnly = true;
+            if (!nonMetaReads || !nonMetaReads.has(d.name)) {
+              (d.node as Record<string, unknown>)._compileTimeOnly = true;
+            }
           }
           // §5.2 executable-sink rule (S456) — the emitted nodes' spans point into the
           // re-parsed emit text (`__meta_emit__`); record the `^{}` block's own span so the
@@ -915,13 +980,27 @@ function processNodeList(
       // Not compile-time eligible or evaluation failed — leave the node
     }
 
-    // Recurse into children and body arrays, propagating accumulated scope
+    // Recurse into EVERY child container array, propagating accumulated scope (round 3,
+    // HIGH-1 total descent): a compile-time `^{}` sitting directly in an `if` / `else`
+    // branch, a match arm, or a loop body of a kind other than `body` was never
+    // evaluated or spliced here, so it reached codegen and was emitted as a runtime
+    // effect (`emit is not defined`). Splicing happens inside whichever array holds the
+    // meta node, so recursing into every array-valued child reaches it. A meta node's
+    // own `body` is NOT descended (its statements are the body being evaluated).
     const n = node as Record<string, unknown>;
-    if (Array.isArray(n.children)) {
-      if (processNodeList(n.children as ASTNode[], typeRegistry, errors, scopeDecls, filePath)) changed = true;
-    }
-    if (Array.isArray(n.body) && node.kind !== "meta") {
-      if (processNodeList(n.body as ASTNode[], typeRegistry, errors, scopeDecls, filePath)) changed = true;
+    if (!isMetaKind(node.kind)) {
+      for (const key of Object.keys(n)) {
+        if (key === "span" || key === "tabSpan" || key === "loc") continue;
+        const v = n[key];
+        if (Array.isArray(v) && v.some((el) => el && typeof el === "object" && typeof (el as ASTNode).kind === "string")) {
+          if (processNodeList(v as ASTNode[], typeRegistry, errors, scopeDecls, filePath, nonMetaReads)) changed = true;
+        } else if (v && typeof v === "object" && typeof (v as ASTNode).kind === "string") {
+          // A single child node held directly (e.g. a ternary branch) — wrap so a meta
+          // there is still reached. (It cannot be spliced in place, but a meta is only
+          // spliced from an array; a lone meta child is left for codegen to handle.)
+          if (processNodeList([v as ASTNode], typeRegistry, errors, scopeDecls, filePath, nonMetaReads)) changed = true;
+        }
+      }
     }
 
     i++;
@@ -970,8 +1049,14 @@ export function runMetaEval(input: MetaEvalInput): MetaEvalOutput {
     // Get the AST node list
     const nodes = (fileAST.ast?.nodes ?? (fileAST as unknown as { nodes?: ASTNode[] }).nodes ?? []) as ASTNode[];
 
+    // Names read by NON-meta code (S458 review round 3, LOW): a captured declaration is
+    // stripped from the client as compile-time-only ONLY when nothing outside a meta
+    // block reads it. A decl read by both a compile-time `^{}` and client code must stay
+    // in the client, or the client reference is a `ReferenceError`.
+    const nonMetaReads = collectNonMetaReads(nodes);
+
     // Process all meta blocks
-    processNodeList(nodes, typeRegistry, allErrors, undefined, fileAST.filePath ?? "");
+    processNodeList(nodes, typeRegistry, allErrors, undefined, fileAST.filePath ?? "", nonMetaReads);
   }
 
   return {

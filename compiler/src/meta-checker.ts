@@ -1174,10 +1174,10 @@ function markNestedMeta(nodes: unknown[], into: WeakSet<object>): void {
     if (!n || typeof n !== "object") continue;
     const node = n as LogicNode;
     if (isMetaKind(node.kind)) into.add(node);
-    for (const k of ["body", "children", "consequent", "alternate"] as const) {
-      const v = node[k];
-      if (Array.isArray(v)) markNestedMeta(v, into);
-    }
+    // Total descent (round 3): mark a nested `^{}` wherever it sits, not only under
+    // the four named branch fields — a nested meta in a ternary / match arm / loop of
+    // another shape would otherwise be visited twice by `findMetaBlocks`.
+    forEachChildNode(node as Record<string, unknown>, (child) => markNestedMeta([child], into));
   }
 }
 
@@ -1212,34 +1212,112 @@ export function collectFileScopeNames(
  * (let / const / lin / state / function declarations, function params, loop variables)
  * — the lexical scope at the breakout point (§22.3).
  */
+/**
+ * The names a DECLARATION node introduces into its own statement list (hoisted):
+ * `let` / `const` / `lin` / `state` / `function`, including a destructured target
+ * (`const { a, b } = …`, `const [x] = …`) whether the pattern is carried structurally
+ * on `node.name` or textually in `node.init`.
+ */
+function declBindings(n: LogicNode, out: Set<string>): void {
+  const decl = n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "lin-decl"
+    || n.kind === "state-decl" || n.kind === "function-decl";
+  if (!decl) return;
+  if (typeof n.name === "string" && n.name) { out.add(n.name); return; }
+  if (n.name && typeof n.name === "object") {
+    // A structured destructure pattern (DestructurePattern).
+    patternBindNamesInto(n.name as Record<string, unknown>, out);
+    return;
+  }
+  const init = typeof n.init === "string" ? n.init : "";
+  const eq = init.indexOf("=");
+  if (eq > 0) {
+    const pat = init.slice(0, eq).trim();
+    if (pat.startsWith("{") || pat.startsWith("[")) extractParamBindings(pat, out);
+  }
+}
+
+function patternBindNamesInto(p: Record<string, unknown>, out: Set<string>): void {
+  if (!p || typeof p !== "object") return;
+  if (p.kind === "destructure-object") {
+    for (const pr of (p.properties as Record<string, unknown>[]) ?? []) {
+      if (pr?.kind === "name" && typeof pr.bindName === "string") out.add(pr.bindName);
+      else if (pr?.kind === "nested") patternBindNamesInto(pr.pattern as Record<string, unknown>, out);
+    }
+  } else if (p.kind === "destructure-array") {
+    for (const el of (p.elements as Record<string, unknown>[]) ?? []) {
+      if (el?.kind === "name" && typeof el.name === "string") out.add(el.name);
+      else if (el?.kind === "nested") patternBindNamesInto(el.pattern as Record<string, unknown>, out);
+    }
+  }
+  if (typeof p.rest === "string" && p.rest) out.add(p.rest);
+}
+
+/**
+ * The names a SCOPE-INTRODUCING node binds for its OWN children (not its siblings):
+ * function parameters (incl. destructured), loop variables (for-of / for-in target,
+ * which may be a destructure pattern, the index variable, and a C-style `for (let i …)`
+ * init), and a match arm's payload bindings (`.Circle(r) :>` binds `r`).
+ */
+function childScopeBindings(n: LogicNode, out: Set<string>): void {
+  if (n.kind === "function-decl") {
+    for (const p of Array.isArray(n.params) ? n.params : []) {
+      if (typeof p === "string") extractParamBindings(p, out);
+      else if (p && typeof p === "object") {
+        const pn = (p as { name?: unknown }).name;
+        if (typeof pn === "string") out.add(pn);
+        // A destructured parameter — `function f({ a, b })` — carries a pattern object.
+        else if (pn && typeof pn === "object") patternBindNamesInto(pn as Record<string, unknown>, out);
+      }
+    }
+  } else if (n.kind === "for-stmt" || n.kind === "for-loop") {
+    if (typeof n.variable === "string" && n.variable) extractParamBindings(n.variable, out);
+    else if (n.variable && typeof n.variable === "object") patternBindNamesInto(n.variable as Record<string, unknown>, out);
+    if (typeof n.indexVariable === "string" && n.indexVariable) out.add(n.indexVariable);
+    // C-style `for (let i = 0; …)` — the live parser carries the init on
+    // `cStyleParts.initExpr` (an escape-hatch whose `raw` is the init text).
+    const cs = (n as Record<string, unknown>).cStyleParts as Record<string, unknown> | undefined;
+    const initRaw = cs && cs.initExpr && typeof (cs.initExpr as Record<string, unknown>).raw === "string"
+      ? (cs.initExpr as Record<string, unknown>).raw as string
+      : (typeof (n as Record<string, unknown>).rawInit === "string" ? (n as Record<string, unknown>).rawInit as string : "");
+    const m = /^\s*(?:let|const|var)\s+(\{[^}]*\}|\[[^\]]*\]|[A-Za-z_$][A-Za-z0-9_$]*)/.exec(initRaw);
+    if (m) extractParamBindings(m[1], out);
+  } else if (n.kind === "match-arm-inline" || n.kind === "match-arm-block") {
+    // The live parser resolves a variant payload to `payloadBindings` (names);
+    // fall back to the pattern text for other shapes.
+    const pb = (n as Record<string, unknown>).payloadBindings;
+    if (Array.isArray(pb)) for (const b of pb) if (typeof b === "string" && b) out.add(b);
+    else {
+      const test = typeof n.test === "string" ? n.test : (typeof n.pattern === "string" ? n.pattern : "");
+      const paren = /\(([^)]*)\)/.exec(test);
+      if (paren) extractParamBindings(paren[1], out);
+    }
+  }
+}
+
 export function collectEnclosingNames(nodes: LogicNode[]): Map<LogicNode, Set<string>> {
   const out = new Map<LogicNode, Set<string>>();
   const walk = (list: LogicNode[], inherited: Set<string>): void => {
     if (!Array.isArray(list)) return;
     const here = new Set(inherited);
-    for (const n of list) {
-      if (!n || typeof n !== "object") continue;
-      if ((n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "lin-decl" || n.kind === "state-decl"
-        || n.kind === "function-decl") && typeof n.name === "string" && n.name) here.add(n.name);
-    }
+    // Hoist every declaration in this statement list (siblings see each other).
+    for (const n of list) if (n && typeof n === "object") declBindings(n, here);
     for (const n of list) {
       if (!n || typeof n !== "object") continue;
       if (isMetaKind(n.kind)) { out.set(n, here); continue; }
-      let inner = here;
-      if (n.kind === "function-decl") {
-        inner = new Set(here);
-        for (const p of Array.isArray(n.params) ? n.params : []) {
-          if (typeof p === "string") extractParamBindings(p, inner);
-          else if (p && typeof p === "object" && typeof (p as { name?: unknown }).name === "string") inner.add((p as { name: string }).name);
+      const inner = new Set(here);
+      childScopeBindings(n, inner);
+      // Total descent (round 3): recurse into every child CONTAINER, not a named list.
+      // Arrays are walked whole so siblings in one statement list hoist together; a
+      // single child node is walked as a one-element list.
+      const rec = n as Record<string, unknown>;
+      for (const key of Object.keys(rec)) {
+        if (NON_CHILD_KEYS.has(key)) continue;
+        const v = rec[key];
+        if (Array.isArray(v)) {
+          if (v.some((el) => el && typeof el === "object" && typeof (el as LogicNode).kind === "string")) walk(v as LogicNode[], inner);
+        } else if (v && typeof v === "object" && typeof (v as LogicNode).kind === "string") {
+          walk([v as LogicNode], inner);
         }
-      } else if (n.kind === "for-stmt" || n.kind === "for-loop") {
-        inner = new Set(here);
-        if (typeof n.variable === "string" && n.variable) extractParamBindings(n.variable, inner);
-        if (typeof n.indexVariable === "string" && n.indexVariable) inner.add(n.indexVariable);
-      }
-      for (const k of ["body", "children", "consequent", "alternate"] as const) {
-        const v = n[k];
-        if (Array.isArray(v)) walk(v as LogicNode[], inner);
       }
     }
   };
@@ -1553,22 +1631,48 @@ export function typeToString(type: ResolvedType | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Walk an AST node tree and find all meta blocks.
+ * Property names that never hold a child AST node — spans, source text, and back
+ * references. Skipped by the generic node walk so it does not descend into position
+ * metadata or loop on a parent pointer.
+ */
+const NON_CHILD_KEYS: ReadonlySet<string> = new Set([
+  "span", "tabSpan", "loc", "start", "end", "line", "col", "file", "parent",
+  "raw", "expr", "init", "condition", "test", "name", "kind", "type",
+]);
+
+/**
+ * Call `fn` on every child AST node of `node` — every own property that holds a node
+ * (an object with a string `kind`) or an array, recursively into arrays. This is the
+ * TOTAL descent (S458 review round 3, HIGH-1): the hand-written `children`/`body`-only
+ * recursion missed a `^{}` sitting directly in an `if` / `else` branch, a ternary, a
+ * match arm, a loop body of a kind other than `body`, etc., so the allow-list never saw
+ * it and meta-eval never evaluated it. Whatever container a meta block sits in, it is
+ * reached here. (Strings carrying raw code — `expr` / `init` / `condition` — are NOT
+ * nodes and are checked as text by the allow-list's own readers, so they are skipped.)
+ */
+function forEachChildNode(node: Record<string, unknown>, fn: (child: LogicNode) => void): void {
+  for (const key of Object.keys(node)) {
+    if (NON_CHILD_KEYS.has(key)) continue;
+    const v = node[key];
+    if (Array.isArray(v)) {
+      for (const el of v) if (el && typeof el === "object" && typeof (el as LogicNode).kind === "string") fn(el as LogicNode);
+    } else if (v && typeof v === "object" && typeof (v as LogicNode).kind === "string") {
+      fn(v as LogicNode);
+    }
+  }
+}
+
+/**
+ * Walk an AST node tree and find all meta blocks, wherever they sit (total descent).
  */
 function findMetaBlocks(nodes: LogicNode[], visitor: (node: LogicNode) => void): void {
   if (!Array.isArray(nodes)) return;
-
-  for (const node of nodes) {
-    if (!node || typeof node !== "object") continue;
-
-    if (isMetaKind(node.kind)) {
-      visitor(node);
-    }
-
-    // Recurse into children
-    if (Array.isArray(node.children)) findMetaBlocks(node.children, visitor);
-    if (Array.isArray(node.body)) findMetaBlocks(node.body, visitor);
-  }
+  const visit = (node: LogicNode): void => {
+    if (!node || typeof node !== "object") return;
+    if (isMetaKind(node.kind)) visitor(node);
+    forEachChildNode(node as Record<string, unknown>, visit);
+  };
+  for (const node of nodes) visit(node);
 }
 
 
@@ -1734,6 +1838,11 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
     // §22.3 — the names a ^{} body may capture: file-scope bindings + imports, and
     // the bindings of every enclosing statement list / function at the breakout point.
     const fileScopeNames = collectFileScopeNames(fileAST, runtimeVars);
+    // Reactive cell names (§22.5.2): a store key, not a JS binding — a bare reference
+    // in a ^{} body resolves to a free global, not the cell (S458 review round 3).
+    const metaCellNames = new Set<string>(
+      [...runtimeVars.entries()].filter(([, k]) => k === "reactive").map(([n]) => n).filter((n) => !n.startsWith("@")),
+    );
     const enclosingNames = collectEnclosingNames(nodes);
     const nestedChecked = new WeakSet<object>();
     findMetaBlocks(nodes, (metaNode) => {
@@ -1749,6 +1858,7 @@ export function runMetaChecker(input: MetaCheckerInput): MetaCheckerOutput {
       checkMetaBlockAllowList(metaNode, filePath, allowListErrors, {
         captured,
         typeNames: new Set(typeRegistry.keys()),
+        cells: metaCellNames,
       }, nestedChecked);
 
       // §22.4 compile-time "runtime variable" check. A name that is no binding of the
