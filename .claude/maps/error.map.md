@@ -1,6 +1,21 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
+# user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
+# event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
+# gate + re-export cycles / missing names refused, #1353 test, #1354 §53 refinement slice 1 (one reader, base-type-first
+# fail-closed judge), #1355 S458 wrap), incremental refresh in an isolated worktree @ `8ce6d61b5` = `origin/main`.**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 8 commits behind HEAD (watermark 125486345, HEAD
+# 8ce6d61b5)` — matches `git log --oneline 125486345..HEAD` (8).
+# ⛑ FIGURES AT `8ce6d61b5` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **306,600 lines / 257 files**
+# (+1 module: `codegen/fn-name-rename.ts`; `git ls-tree` incl. `.d.ts` = 258) · test files **1,655** by `git ls-tree -r
+# --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10) · `compiler/SPEC.md` **47,062** lines (+16) · conformance
+# **1423** `case.scrml` (+27: refinement 12, module 8, attr-executable-sink 7) · `bootstrap-conformance.ts --check`:
+# **current** · FACTS CLI verbs **12** · NO new diagnostic code this window (E-IMPORT-002/-004/-006, E-CONTRACT-001/-002/-003,
+# E-DEPLOY-DB-TENANT-UNDECLARED gained emit sites/senses) · known-gaps heading/marker drift **68** (was 65) · `state.ts
+# --check` FAILS on `@generated:recent-sessions (master-list.md)` STALE. Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `125486345`), CARRIED. ━━━━━━━
 # ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
 # verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
 # slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
@@ -1049,6 +1064,23 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S458 — DIAGNOSTIC DELTA (`125486345..8ce6d61b5`)
+
+No new diagnostic code. New emit sites / senses:
+| code | change | where |
+|---|---|---|
+| `E-IMPORT-002` | a cycle closed by a RE-EXPORT edge (named or `export *`) is now a cycle; error carries `cycleFiles` | `module-resolver.js` `detectCircularImports` :641 |
+| `E-IMPORT-004` | a NAMED re-export of a name its source does not export; an import / re-export of a name two `export *` bind differently ("ambiguous"); a name reachable only via an unexpanded stdlib star says so | `module-resolver.js` `validateReExports` :1296, `ambiguousNameMessage`, `unexpandedStarMessage` |
+| `E-IMPORT-006` | a relative re-export whose file does not exist (was: import only) | `module-resolver.js` :366-:381 (`unresolvedReExports`) |
+| `W-SERVER-IMPORT-UNEMITTED` | suppressed on pairs already carrying a missing-name / ambiguous E-IMPORT-004 | `api.js` `checkServerImportInvariant` :3495 |
+| `E-CONTRACT-002` | now ALSO "inline predicate malformed" (unknown char, trailing tokens, unclosed group, tail after `)`, bad `pattern` regex); reported at the declaring site in every zone | `type-system.ts` `checkRefinementJudgeable` :3668; SPEC §34 row + §53.11 updated |
+| `E-CONTRACT-003` | reported at the declaring site in every zone (was: literal initializer only) | same |
+| `E-CONTRACT-001` | a literal whose BASE type mismatches a refinement (`integer(>0) = 1.5`, `number(>0) = "5"`, `number(>0) = true`) | `type-system.ts` literal zone |
+| `E-ATTR-INTERP-EXECUTABLE` | `srcdoc` with ANY non-literal value (expr / var / call / component prop) refused; event-handler text from data never written | `attr-injection-sink.ts` `executableDataWriteSink` :348; `codegen/url-attr-guard.ts` `refuseExecutableDataWrite` :99 |
+| `E-DEPLOY-DB-TENANT-UNDECLARED` | now also raised by `scrml dev`'s app server | `commands/dev.js` :535 |
+
+Runtime (not a code): an unjudgeable refinement predicate emits a check that REFUSES (`false`), never `true`; a 400 report no longer calls `String()` on the value. Line-ref correction: `_scrml_safe_url` is now `runtime-url-guard.js:239` (the S457 row's :208 is stale).
 
 ## S457 — DIAGNOSTIC DELTA (`ba2712973..125486345`)
 
