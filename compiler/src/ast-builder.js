@@ -173,6 +173,22 @@ function reemitJsStringLiteral(rawInner) {
 }
 
 /**
+ * S458 — one token's text as it belongs in a re-joined TYPE ANNOTATION string.
+ * A STRING token's `.text` is the inner text with its delimiters stripped, so
+ * joining `.text` turned `string(.kind == "a b")` into `string(.kind==a b)`: the
+ * §53 reader then could not tell the literal `"a b"` from the identifiers `a b`
+ * (refused), and `.kind == "a"` from `.kind == a`. Re-quote it (canonical
+ * double-quoted, escapes interpreted — `reemitJsStringLiteral`); a template keeps
+ * its back-ticks. Every other token is its text.
+ */
+function typeTokenText(t) {
+  if (t && t.kind === "STRING") {
+    return t.isTemplate ? "`" + t.text + "`" : reemitJsStringLiteral(t.text);
+  }
+  return t ? t.text : "";
+}
+
+/**
  * Phase 3.5: detect expressions that should NOT be parsed to ExprNode.
  * Returns true for:
  * - HTML tag fragments (tokenizer-spaced: `< / span >`, `< button onclick = ...`)
@@ -7514,7 +7530,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // so `(not to User)` and `lin`-typed annotations are unaffected.
         break;
       } else {
-        parts.push(t.text);
+        parts.push(typeTokenText(t)); // S458 — a string literal keeps its quotes
         consume();
       }
     }
@@ -11087,10 +11103,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -11100,14 +11116,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (peek().text === "-" && peek(1)?.text === ">") {
@@ -11121,10 +11137,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -11134,14 +11150,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -11370,10 +11386,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -11383,14 +11399,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
@@ -11403,10 +11419,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -11416,14 +11432,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -12883,7 +12899,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         next += ' ';
       }
       if (tok.kind === 'STRING') {
-        next += tok.isTemplate ? '`' + tok.text + '`' : JSON.stringify(tok.text);
+        // S458 — one cooking path for every annotation collector (typeTokenText):
+        // `.text` is the RAW inner text (escapes NOT interpreted), so
+        // JSON.stringify(text) re-escaped the backslash — `"a\"b"` became
+        // `"a\\\"b"` (a different string) in a parameter's refinement and in a
+        // parameter default value.
+        next += typeTokenText(tok);
       } else {
         next += tok.text;
       }
@@ -14799,10 +14820,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -14812,14 +14833,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
@@ -14833,10 +14854,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -14846,14 +14867,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }
@@ -15115,10 +15136,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -15128,14 +15149,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       } else if (!canFail && peek().text === "-" && peek(1)?.text === ">") {
@@ -15149,10 +15170,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _retToks = [];
         while (peek().kind !== "EOF") {
           const _t = peek().text;
-          if (_t === "(") { parenDepth++; _retToks.push(consume().text); }
-          else if (_t === ")") { parenDepth--; _retToks.push(consume().text); }
-          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(consume().text); }
-          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(consume().text); }
+          if (_t === "(") { parenDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ")") { parenDepth--; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "<" && parenDepth === 0) { angleDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === ">" && parenDepth === 0) { angleDepth--; _retToks.push(typeTokenText(consume())); }
           else if (_t === "{" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) {
             // ss25-2: an inline-struct return type — `-> { k: T, … }` — opens a
             // `{` that is part of the TYPE, not the fn body. Disambiguate: a `{`
@@ -15162,14 +15183,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const _prev = _retToks.length ? _retToks[_retToks.length - 1] : "";
             const _typeExpected = _prev === "" || _prev === "|" || _prev === "&" ||
               _prev === "," || _prev === "(" || _prev === "<" || _prev === "[";
-            if (_typeExpected) { braceDepth++; _retToks.push(consume().text); }
+            if (_typeExpected) { braceDepth++; _retToks.push(typeTokenText(consume())); }
             else break; // body brace
           }
-          else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
-          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if (_t === "{") { braceDepth++; _retToks.push(typeTokenText(consume())); }
+          else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(typeTokenText(consume())); }
           else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
           else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
-          else _retToks.push(consume().text);
+          else _retToks.push(typeTokenText(consume()));
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
       }

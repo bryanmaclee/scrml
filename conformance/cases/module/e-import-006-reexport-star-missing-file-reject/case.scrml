@@ -1,0 +1,4 @@
+${
+    import { M2 } from './m.scrml'
+}
+<p>${M2}</>

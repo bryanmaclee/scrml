@@ -110,6 +110,8 @@ interface LogicBinding {
   valueAttrIsFormValue?: boolean;
   /** §5.2 rule 3 (S457): a URL attribute on its element → the write goes through `_scrml_safe_url`. */
   valueAttrUrlGuard?: boolean;
+  /** S457: an SVG animation value → the animated URL attribute, the guard's 4th argument. */
+  valueAttrUrlGuardTarget?: string;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -446,6 +448,8 @@ function buildServerFnNames(fnNameMap: Map<string, string>): Set<string> {
  *   through `_scrml_safe_url`, which returns it unchanged when its scheme is
  *   admitted and `"about:blank"` (plus a log report) when it is not. Absence still
  *   removes the attribute.
+ * @param urlGuardTarget S457 — for an SVG animation value (`binding.valueAttrUrlGuardTarget`):
+ *   the animated URL attribute, passed to the guard as its 4th argument.
  */
 export function emitValueAttrApply(
   compiled: string,
@@ -453,8 +457,9 @@ export function emitValueAttrApply(
   isFormValue: boolean,
   el = "_scrml_el",
   urlGuard = false,
+  urlGuardTarget: string | null = null,
 ): string {
-  const strValue = urlGuard ? wrapUrlGuard(el, attrName, "String(_scrml_x)") : "String(_scrml_x)";
+  const strValue = urlGuard ? wrapUrlGuard(el, attrName, "String(_scrml_x)", urlGuardTarget) : "String(_scrml_x)";
   const write = isFormValue
     ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : String(_scrml_x); ` +
       `if (${el}.value !== _scrml_s) { ${el}.value = _scrml_s; }`
@@ -2304,6 +2309,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             binding.valueAttrIsFormValue === true,
             armEl(),
             binding.valueAttrUrlGuard === true,
+            binding.valueAttrUrlGuardTarget ?? null,
           );
           // Rebindable — re-binds the attr effect scoped to a swapped region and
           // is region-tracked for teardown (same contract as the bool path).

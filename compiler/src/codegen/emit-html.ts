@@ -26,13 +26,14 @@ import { collectThemeContext, collectThemeTokenNames } from "./emit-theme-reset.
 // B6's diagnostic walker).
 import { lookupStateCell, lookupQualifiedStateCell, lookupCompoundMembersByLeafName, getCellKind } from "../symbol-table.ts";
 // A1c C16 — §53.7.1 HTML attr generation for refinement-typed bindable cells.
-// `parsePredicateAnnotation` extracts the predicate from a typeAnnotation string;
 // `deriveHtmlAttrs` maps the predicate to native HTML validation attributes.
-import { parsePredicateAnnotation, deriveHtmlAttrs } from "./emit-predicates.ts";
+import { deriveHtmlAttrs } from "./emit-predicates.ts";
 // A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
-import { buildReactiveTypeMap, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
-import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard } from "./url-attr-guard.ts";
+// S458 one reader — `cellRefinement` reads the TS-resolved refinement off that map.
+import { buildReactiveTypeMap, cellRefinement, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget } from "./url-attr-guard.ts";
+import { _SCRML_SVG_ANIMATION_ELEMENTS } from "../runtime-url-guard.js";
 // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
 // `collectEnumRenders` builds the file's variant -> renders-markup map;
 // `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` lower fallback / renders
@@ -152,6 +153,11 @@ const STYLE_OWNING_DIRECTIVES = ["show"];
  */
 function valueAttrElementIsLowerable(node: any, tag: string): boolean {
   if (node?.resolvedKind === "html-builtin") return true;
+  // S457 — an SVG animation element (`<set>`, `<animate>`, …) is a real DOM element the
+  // registry does not list. Its value attributes (`to=${…}`, `values=(…)`) were silently
+  // DROPPED here; they now lower, and a value that animates a URL attribute is guarded
+  // (`_scrml_safe_url`, §5.2 rule 3). Lowercase-initial only: an uppercase tag is a component.
+  if (/^[a-z]/.test(tag) && _SCRML_SVG_ANIMATION_ELEMENTS.has(tag.toLowerCase())) return true;
   // Post-NR synthesized markup (re-parsed <match> arm bodies): NR never saw it,
   // so ask the element registry directly. Fails closed on an unknown tag.
   // g-ishtmlelement-registry-incomplete (S362) — also honor the complete standard-
@@ -3153,7 +3159,7 @@ export function generateHtml(
         const _bvRootKey = _bvName.split(".")[0];
         const _bvAnnot = reactiveTypeMap.get(_bvRootKey);
         if (!_bvAnnot) continue;
-        const _bvParsed = parsePredicateAnnotation(_bvAnnot);
+        const _bvParsed = cellRefinement(reactiveTypeMap, _bvRootKey);
         if (!_bvParsed) continue;
         const _bvDerived = deriveHtmlAttrs(_bvParsed.predicate, _bvParsed.baseType);
         for (const [k, v] of Object.entries(_bvDerived)) {
@@ -3353,8 +3359,12 @@ export function generateHtml(
                 directiveRefs: lowered.refs,
                 directiveIsFormValue,
                 // §5.2 rule 3 (S457) — `href="${@u}"`: the data supplies the scheme.
-                ...(quotedUrlAttrNeedsGuard(String(tag), name, String(val.value ?? ""))
+                ...(quotedUrlAttrNeedsGuard(String(tag), name, String(val.value ?? ""), attrs)
                   ? { directiveUrlGuard: true }
+                  : {}),
+                // S457 — an SVG animation value (`to="${@u}"` animating `href`).
+                ...(urlGuardTarget(String(tag), name, attrs) !== null
+                  ? { directiveUrlGuardTarget: urlGuardTarget(String(tag), name, attrs)! }
                   : {}),
               });
             }
@@ -3624,6 +3634,10 @@ export function generateHtml(
             // family (`bind:`, `class:`, `transition:`/`in:`/`out:`, `ref`,
             // developer attrs) is peeled off with `continue` well before this
             // dispatch, and `if`/`show`/`on*`/bool by the branches above.
+            // §5.2 (S457) — an event-handler spelling this emitter does not wire as a
+            // listener (`ONCLICK=${…}`, `Onclick=`) or a `srcdoc` would be WRITTEN here
+            // as handler text / an HTML document built from data: refused, nothing emitted.
+            if (refuseExecutableDataWrite(name, tag, attr?.span ?? node?.span, attr) !== null) continue;
             const placeholderId = genVar(`attr_${name}`);
             // CSS-safe placeholder key. The name reaches the DOM verbatim via
             // `setAttribute` (SVG needs `viewBox`/`xlink:href` intact), but the
@@ -3657,7 +3671,12 @@ export function generateHtml(
                   : {}),
                 // §5.2 rule 3 (S457) — a URL attribute on this element: the runtime
                 // write goes through `_scrml_safe_url` (the data supplies the scheme).
-                ...(dynamicUrlAttrNeedsGuard(tag, name) ? { valueAttrUrlGuard: true } : {}),
+                // An SVG animation value (`<set attributeName="href" to=${…}>`) writes
+                // the animated attribute: guarded, with that attribute as the target.
+                ...(dynamicUrlAttrNeedsGuard(tag, name, attrs) ? { valueAttrUrlGuard: true } : {}),
+                ...(urlGuardTarget(tag, name, attrs) !== null
+                  ? { valueAttrUrlGuardTarget: urlGuardTarget(tag, name, attrs)! }
+                  : {}),
                 refs: val.refs,
               });
             }

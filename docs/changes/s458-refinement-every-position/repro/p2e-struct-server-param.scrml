@@ -1,0 +1,9 @@
+<program>
+${
+  type Link:struct = { u: string(url), n: number(>0) }
+  server function save(l: Link) {
+    return l.u
+  }
+}
+<button onclick=save({ u: "https://example.com", n: 1 })>save</button>
+</program>

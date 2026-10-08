@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-svg-animation-literal-scheme-neg",
+  "description": "§5.2 rule 2, S457 bullet SVG animation values: `<set attributeName=\"href\" to=\"javascript:${@u}\">` interpolates data after a literal executable scheme into a value that animates a link's href — refused.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457): on `<set>` / `<animate>` / …, the value attributes `to` / `from` / `by` / `values` are URL-valued attributes for rule 2 \"when `attributeName` is written as a static string naming an attribute of the URL-valued list\"; a literal scheme other than the safe set before `${…}` SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE). Chromium runs the animated `javascript:` href on click (g-svg-animation-and-meta-refresh-url-sinks-s456).",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

@@ -1,0 +1,4 @@
+<program>
+<doc> = "hello"
+<iframe srcdoc=${@doc}></iframe>
+</program>

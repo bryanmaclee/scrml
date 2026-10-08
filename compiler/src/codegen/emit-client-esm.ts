@@ -251,7 +251,25 @@ function collectAssignmentTargets(node: any, out: Set<string>): void {
  * `as` alias is dropped for readability.
  */
 function footerPairsToExportSpecifiers(pairs: string): string {
-  const specs: string[] = [];
+  return splitFooterPairs(pairs).local
+    .map(({ pub, emit }) => (pub === emit ? pub : `${emit} as ${pub}`))
+    .join(", ");
+}
+
+// s457 (§21.4) — a RE-EXPORT pair in the classic footer reads the source module's
+// registry entry: `helper: _scrml_modules["c.client.js"].w`.
+const REEXPORT_VALUE_RE = new RegExp(`^_scrml_modules\\[${KEY}\\]\\.([A-Za-z_$][\\w$]*)$`);
+
+/**
+ * Split a footer pair-string into LOCAL pairs (`pub: emit`, a binding declared in
+ * this chunk) and RE-EXPORT pairs (`pub: _scrml_modules["<key>"].<name>`).
+ */
+function splitFooterPairs(pairs: string): {
+  local: Array<{ pub: string; emit: string }>;
+  reExport: Array<{ pub: string; key: string; name: string }>;
+} {
+  const local: Array<{ pub: string; emit: string }> = [];
+  const reExport: Array<{ pub: string; key: string; name: string }> = [];
   for (const raw of pairs.split(",")) {
     const pair = raw.trim();
     if (pair === "") continue;
@@ -259,14 +277,16 @@ function footerPairsToExportSpecifiers(pairs: string): string {
     if (colon === -1) {
       // Shorthand `{ name }` (pub === emit) — should not occur (emit-client
       // always writes `pub: emit`) but handle defensively.
-      specs.push(pair);
+      local.push({ pub: pair, emit: pair });
       continue;
     }
     const pub = pair.slice(0, colon).trim();
     const emit = pair.slice(colon + 1).trim();
-    specs.push(pub === emit ? pub : `${emit} as ${pub}`);
+    const re = REEXPORT_VALUE_RE.exec(emit);
+    if (re) reExport.push({ pub, key: JSON.parse(re[1]) as string, name: re[2] });
+    else local.push({ pub, emit });
   }
-  return specs.join(", ");
+  return { local, reExport };
 }
 
 /**
@@ -320,6 +340,10 @@ export function toEsmClientChunk(body: string, ctx: EsmChunkContext): string {
   };
   for (const m of body.matchAll(IMPORT_DESTRUCTURE_RE)) registerKey(m[2]);
   for (const m of body.matchAll(IMPORT_DEFAULT_RE)) registerKey(m[2]);
+  // s457 — a re-export pair in the footer reads another module too.
+  for (const m of body.matchAll(FOOTER_RE)) {
+    for (const r of splitFooterPairs(m[2]).reExport) registerKey(JSON.stringify(r.key));
+  }
 
   // --- Pass 2: rewrite footer + import reads in place. ---
   let out = body;
@@ -328,7 +352,21 @@ export function toEsmClientChunk(body: string, ctx: EsmChunkContext): string {
   out = out.replace(FOOTER_COMMENT, FOOTER_COMMENT_ESM);
   out = out.replace(FOOTER_RE, (_full, _key, pairs) => {
     const specs = footerPairsToExportSpecifiers(pairs);
-    return `export {${specs === "" ? "" : ` ${specs} `}};`;
+    // s457 (§21.4) — a re-exported name is read off the source module's NAMESPACE
+    // (never `export { w as helper } from "./c.client.js"`: a name the source does
+    // not export as a JS value — a component, a type — would be a module LINK error
+    // that kills the page, where the classic registry reads `undefined`). It binds
+    // under a compiler-prefixed local so it cannot collide with this chunk's own
+    // top-level names (a re-export binds nothing locally).
+    const reLines: string[] = [];
+    const reSpecs: string[] = [];
+    for (const r of splitFooterPairs(pairs).reExport) {
+      const local = `__scrml_reexport_${r.pub}`;
+      reLines.push(`const ${local} = ${keyToAlias.get(r.key)!}.${r.name};`);
+      reSpecs.push(`${local} as ${r.pub}`);
+    }
+    const all = [specs, ...reSpecs].filter((x) => x !== "").join(", ");
+    return [...reLines, `export {${all === "" ? "" : ` ${all} `}};`].join("\n");
   });
 
   // Importer destructure → local destructure off the namespace alias.

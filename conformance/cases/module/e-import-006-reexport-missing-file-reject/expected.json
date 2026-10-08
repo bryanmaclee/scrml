@@ -1,0 +1,8 @@
+{
+  "id": "e-import-006-reexport-missing-file-reject",
+  "description": "§21.3 / §21.4 — m.scrml re-exports `{ M1 }` from `./missing.scrml`, which does not exist (no such `files` fixture): E-IMPORT-006 at the re-export, the same check an `import` of that specifier gets. The importer's `import { M1 } from './m.scrml'` is not reported a second time (E-IMPORT-004).",
+  "language-version": "1.0",
+  "spec": "§21.3",
+  "rationale": "§21.3: a relative import must resolve to a real module (E-IMPORT-006). A re-export links its source module exactly like an import (§21.4, ES `export { name } from 'source'`), so an unresolvable re-export source is the same error. Before S458 the program compiled clean and its page loaded a `missing.client.js` that 404'd, after which the re-exporter's and the page's chunks threw (S458 re-review N1).",
+  "expect": { "codes": ["E-IMPORT-006"], "notCodes": ["E-IMPORT-004"] }
+}

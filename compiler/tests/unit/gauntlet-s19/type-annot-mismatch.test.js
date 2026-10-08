@@ -257,17 +257,19 @@ describe("§7.5.1 x §53.4 — the literal set does not decide what it cannot de
     expect(codes(str.errors)).toContain("E-CONTRACT-001");
   });
 
-  test("a BOOLEAN at a predicated numeric annotation stays a runtime check, not a silent pass", () => {
+  test("a BOOLEAN at a predicated numeric annotation is refused, not a silent pass", () => {
     const src = `\${
     let x: number(>0) = true
     log(x)
 }
 <p>ok</>`;
-    const { errors, emittedJs } = compileWholeScrml(src, "pred-bool-numeric");
+    const { errors } = compileWholeScrml(src, "pred-bool-numeric");
     // §7.5.1 position 1 is scoped to UNPREDICATED annotations, so E-TYPE-031
-    // does not fire here — but the §53 boundary guard must not be dropped
-    // either, which is what a "static" zone classification would do.
-    expect(codes(errors)).toEqual([]);
-    expect(emittedJs).toContain("E-CONTRACT-001-RT");
+    // does not fire here. S458 (re-review R2-2): the §53 literal check now
+    // tests the BASE type exactly as the runtime judge does, so a boolean
+    // literal into `number(>0)` is decided at compile time — E-CONTRACT-001
+    // (before: no compile error, a runtime check that `true > 0` passed).
+    expect(codes(errors)).toContain("E-CONTRACT-001");
+    expect(codes(errors)).not.toContain("E-TYPE-031");
   });
 });

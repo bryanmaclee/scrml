@@ -2,6 +2,7 @@ import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
 import { toPosix } from "../path-canonical.js";
+import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
@@ -168,6 +169,10 @@ function buildModuleRegistryFooter(
     }
     if (isImportedByAnother) break;
   }
+  // s457 (§21.4) — a module another module RE-EXPORTS from is read through the
+  // re-exporter's footer (`helper: _scrml_modules["c.client.js"].w`), so it needs a
+  // footer exactly as if it were imported.
+  if (!isImportedByAnother) isImportedByAnother = isReExportedByAnother(importGraph, filePath);
   if (!isImportedByAnother) return [];
 
   const exports = exportRegistry.get(filePath);
@@ -203,9 +208,33 @@ function buildModuleRegistryFooter(
     return false;
   };
 
+  // s457 (§21.4) — re-exports of other local `.scrml` modules. A re-export binds
+  // nothing in THIS module, so it is read from the source module's registry entry,
+  // which (dependencies load first) is already populated: `helper:
+  // _scrml_modules["c.client.js"].w`. `export *` arrives expanded to names. The pair
+  // mirrors a DIRECT import of the source exactly: whatever the source registers (a
+  // fn, a const, an enum's variant object) comes through, and a name it does not
+  // register (a pure struct type, a component) reads `undefined` — never a throw. A
+  // channel is skipped, as in the source's own footer (CHX inlines it at the
+  // consumer). A re-exported name never falls through to a same-named local binding
+  // below: that local is not what the module exports.
+  const reExportPairs: string[] = [];
+  const reExported = new Set<string>();
+  for (const edge of localReExportEdges(importGraph, filePath)) {
+    const srcKey = JSON.stringify(moduleRegistryKey(edge.absSource, ctx.outputBaseDir));
+    for (const { exported, imported } of edge.names) {
+      reExported.add(exported);
+      const b = resolveExportedBinding(importGraph, edge.absSource, imported);
+      if (b && b.kind === "channel") continue;
+      if (!/^[A-Za-z_$][\w$]*$/.test(imported) || !/^[A-Za-z_$][\w$]*$/.test(exported)) continue;
+      reExportPairs.push(`${exported}: _scrml_modules[${srcKey}].${imported}`);
+    }
+  }
+
   const pairs: string[] = [];
   if (exports) {
     for (const [publicName, info] of exports) {
+      if (reExported.has(publicName)) continue; // registered from its source (above)
       // Channels are inlined at the consumer site by CHX, never registered.
       if ((info as any)?.category === "channel" || (info as any)?.kind === "channel") continue;
       const emitted = fnNameMap.get(publicName) ?? publicName;
@@ -213,6 +242,7 @@ function buildModuleRegistryFooter(
       pairs.push(`${publicName}: ${emitted}`);
     }
   }
+  pairs.push(...reExportPairs);
 
   return [
     "// --- cross-file module registry footer (known-gaps-#6, §21.3) ---",
@@ -1177,6 +1207,11 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         }
         if (crossFileLocal) break;
       }
+    }
+    // (c) s457 (§21.4) — this file re-exports a local `.scrml`, or is re-exported by one?
+    if (!crossFileLocal && importGraph && filePath) {
+      crossFileLocal = localReExportEdges(importGraph, filePath).length > 0 ||
+        isReExportedByAnother(importGraph, filePath);
     }
     if (crossFileLocal) chunks.add("modules");
   }

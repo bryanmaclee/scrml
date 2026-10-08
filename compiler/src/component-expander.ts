@@ -1342,7 +1342,12 @@ function parseComponentDef(
     spanOverride: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
     markReported: true,
   })) {
-    ceErrors.push(makeCEError(e.code, e.message, e.span));
+    const ceErr = makeCEError(e.code, e.message, e.span);
+    // S457 — keep the attribute's identity so api.js drops a codegen backstop report of the same
+    // attribute (the expanded copy's spans are the body's, not the definition's).
+    (ceErr as { attrSinkKey?: string; attrSinkName?: string }).attrSinkKey = (e as { attrSinkKey?: string }).attrSinkKey;
+    (ceErr as { attrSinkKey?: string; attrSinkName?: string }).attrSinkName = (e as { attrSinkName?: string }).attrSinkName;
+    ceErrors.push(ceErr);
   }
 
   // Extract propsDecl from the primary (first) root element's `props` attribute

@@ -1,0 +1,10 @@
+<program>
+${
+  function pick(v) {
+    let q: string(url) = "https://example.com"
+    q = v
+    return q
+  }
+}
+<p>${pick("https://example.com")}</p>
+</program>

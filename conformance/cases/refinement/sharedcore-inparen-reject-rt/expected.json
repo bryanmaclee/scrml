@@ -1,0 +1,14 @@
+{
+  "id": "refinement-sharedcore-inparen-reject-rt",
+  "description": "S458: the §55.1 shared-core vocabulary inside a refinement predicate's parentheses is JUDGED. rate(score: number(min(0) && max(100))) — the §55.3 example — is called with 50 (passes; @shown becomes 50) and then with 150 (fails max(100): the entry check throws E-CONTRACT-001-RT and @shown keeps 50). Before S458 `min` read as an unknown named shape and the emitted check was `(true && true)`, which admitted 150.",
+  "language-version": "1.0",
+  "spec": "§53.6.1",
+  "rationale": "§53.6.1: the §55.1 shared-core vocabulary \"MAY appear in refinement-type position\" with \"Compile-time + runtime boundary check\" firing semantics; §55.3 shows `function rate(score: number(min(0) && max(100)))`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#good" }, { "click": "#bad" }],
+    "state": { "shown": 50 },
+    "domAnchored": [{ "selector": "#out", "text": "50" }]
+  }
+}

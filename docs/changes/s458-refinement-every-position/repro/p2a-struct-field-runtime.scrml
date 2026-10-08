@@ -1,0 +1,10 @@
+<program>
+${
+  type Link:struct = { u: string(url), n: number(>0) }
+  function mk(v, k) {
+    const l: Link = { u: v, n: k }
+    return l
+  }
+}
+<p>${mk("https://example.com", 1).u}</p>
+</program>
