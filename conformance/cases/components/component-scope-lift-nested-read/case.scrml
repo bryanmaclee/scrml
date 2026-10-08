@@ -1,0 +1,7 @@
+<program>
+const C = <div class="c" props={ label: string }>
+    ${ lift <div class="in"><p class="b">${label}</p>${ const label = "S" }<p class="t">${label}</p><i class="a" title="t-${label}">a</i></div> }
+    <p class="after">${label}</p>
+</>
+<C label="L"/>
+</program>

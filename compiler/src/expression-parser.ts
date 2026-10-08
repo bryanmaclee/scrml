@@ -3319,11 +3319,11 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
     if (p.type === "Identifier") {
       return { name: p.name as string };
     }
-    if (p.type === "RestElement" && (p as { argument: ESNode }).argument?.type === "Identifier") {
+    if (p.type === "RestElement" && (p.argument as ESNode | undefined)?.type === "Identifier") {
       const arg = (p as { argument: ESNode }).argument;
       return { name: arg.name as string ?? "", isRest: true };
     }
-    if (p.type === "AssignmentPattern" && (p as { left: ESNode }).left?.type === "Identifier") {
+    if (p.type === "AssignmentPattern" && (p.left as ESNode | undefined)?.type === "Identifier") {
       const left = (p as { left: ESNode }).left;
       const right = (p as { right: ESNode }).right;
       const defaultValue = esTreeToExprNode(right, filePath, baseOffset);

@@ -1608,7 +1608,10 @@ function substitutePropsInMarkupFromStmt(
 ): ASTNode {
   const props = stringPropsByExprMap.get(propExprMap) ?? new Map<string, string>();
   const scoped = scopedPropMaps(props, propExprMap, shadowed);
-  return substituteProps(node, scoped.props, scoped.propExprMap);
+  // S459 round 6 (F1) — the markup gets its OWN scope, seeded from the statement's shadow
+  // set: a `${}` nested inside lifted markup declares into it, and its later siblings (and
+  // their handlers) see the local — the same one-scope rule as the component body.
+  return substituteProps(node, scoped.props, scoped.propExprMap, new Set(shadowed));
 }
 function attrTextPropMaps(props: Map<string, string>, propExprMap?: Map<string, ExprNode>): AttrTextPropMaps {
   const registered = propExprMap ? attrTextPropMapsByExprMap.get(propExprMap) : undefined;
@@ -2636,8 +2639,10 @@ function substitutePropsInLogicStmt(
 function substituteProps(
   node: ASTNode,
   props: Map<string, string>,
-  propExprMap?: Map<string, ExprNode>,
-  bodyScope?: Set<string>,
+  propExprMap: Map<string, ExprNode> | undefined,
+  // REQUIRED (S459 round 6): every entry passes the scope it substitutes in, so no
+  // caller can silently start a fresh empty scope.
+  bodyScope: Set<string>,
 ): ASTNode {
   if (!node || typeof node !== "object") return node;
   // S459 H1 — ONE component scope. `bodyScope` holds every name declared so far, in
@@ -2650,7 +2655,7 @@ function substituteProps(
   // lifted markup — and §15.11.1 "A local declaration, parameter or loop binder named
   // like the prop is not the prop … and is writable" holds by construction (a write
   // to it is never recorded as a prop write, never lowered onto the caller's cell).
-  if (bodyScope && bodyScope.size > 0) {
+  if (bodyScope.size > 0) {
     const scoped = scopedPropMaps(props, propExprMap, bodyScope);
     props = scoped.props;
     propExprMap = scoped.propExprMap;
@@ -2937,10 +2942,10 @@ function substituteProps(
     // declare (let / const / tilde / lin / `@` / function, any pattern — binding-names.ts)
     // are carried out into `bodyScope` for everything after the block. Nested scopes
     // (function bodies, `if` / `for` bodies, lambdas) stay inside the statement walker.
-    const blockScope = new Set<string>(bodyScope ?? []);
+    const blockScope = new Set<string>(bodyScope);
     const newBody = (cloned.body as LogicStatement[]).map((stmt) =>
       substitutePropsInLogicStmt(stmt, propExprMap!, blockScope));
-    if (bodyScope) for (const name of blockScope) bodyScope.add(name);
+    for (const name of blockScope) bodyScope.add(name);
     // Markup body items and `lift` targets are substituted by the statement walker, in
     // their statement's scope (S458 fourth round).
     cloned.body = newBody;
@@ -2989,16 +2994,16 @@ function substituteProps(
     // the set per body (and per arm), never the set itself.
     for (const key of ["templateChildren", "bodyChildren", "arms"]) {
       if (Array.isArray(cloned[key])) {
-        const listScope = new Set<string>(bodyScope ?? []);
+        const listScope = new Set<string>(bodyScope);
         cloned[key] = (cloned[key] as unknown[]).map((item: unknown) =>
           item && typeof item === "object" && (item as Record<string, unknown>).kind
-            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap, key === "arms" ? new Set(bodyScope ?? []) : listScope)
+            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap, key === "arms" ? new Set(bodyScope) : listScope)
             : item,
         );
       }
     }
     if (cloned.emptyChild && typeof cloned.emptyChild === "object" && (cloned.emptyChild as Record<string, unknown>).kind) {
-      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap, new Set(bodyScope ?? []));
+      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap, new Set(bodyScope));
     }
     return cloned as unknown as ASTNode;
   }
