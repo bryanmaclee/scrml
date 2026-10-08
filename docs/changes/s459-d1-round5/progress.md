@@ -120,3 +120,13 @@
 ## Carried (round 6)
 - Two instances of a component with a body-level `let` / function crash or collide ("Cannot declare a let variable
   twice"; a body `function f` is emitted once per instance under one name) — pre-existing on base.
+
+## step 4 — gates + differential (round 6)
+- Differential base a793e24e5 compiler (git archive over the HEAD tree) vs head d017f8db7, same 2500 sources: 2 newly
+  failing = the two new intended reject cases (callback-prop-non-function-reject, callback-prop-optional-unguarded-reject;
+  +E-TYPE-031 only); 0 newly passing; text-only 1 (single-quoted-attr-in-component-reject: F3 span); 165 differing
+  artifacts = 162 scratch-path (`_scrml_project_root`) only + the 3 new runtime cases. F4 corpus impact outside the
+  new cases: ZERO. The ternary-condition printer fix changed no corpus artifact.
+- Gates: core suite 0 fail on every code commit (pre-commit); conformance/run.ts 1405/1455 + 50 xfail, 0 fail;
+  browser-baseline --check PASS (48 asserted); e2e-render-map 259/0; compiler/tests/*.test.js 2239/0; types-gate OK;
+  bootstrap-conformance current.
