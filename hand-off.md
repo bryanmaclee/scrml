@@ -1,3 +1,18 @@
+# S458 ADDENDUM (after the limit reset) — supersedes the S458 pickup table below where they differ
+
+**Rulings since the wrap** (user-voice §S458): runtime `meta.emit` GATED ("a"); D1 codes = PA recs (`E-COMPONENT-PROP-WRITE` new; E-SCOPE-001 row amended); `export *` RATIFIED ("ratify 21.4" → landed as SPEC text #1357).
+**Merged since the wrap:** #1355 (wrap) · #1356 (maps → 8ce6d61b5) · #1357 (§21.4 export * SPEC text).
+**Branches (all committed; landing ORDER matters — shared files):**
+1. **Host-global alias** — fix round 3 in flight on a FRESH branch from `cd638efe5` (library CSP: no `data:` import in browser-reachable artifacts; gate shard output to a file + R4 no-`data:` rule). Then re-review → land FIRST.
+2. **`^{}` allow-list** — final review LAND-WITH-NITS at `605337374`; final fix round in flight on a fresh branch from `605337374` (F3 compile-time `^{}` in a runtime if-branch silently dropped; F4 `meta.get` returns undefined for every cell — namespacing; `meta.*` sub-member closure; strict-mode effect bodies). Land SECOND.
+3. **Runtime `meta.emit` gate** (ruling "a") — in flight on a fresh branch from `605337374`; told to merge the meta final-fix branch. Land THIRD.
+4. **Unquoted values + `event`** — READY at `worktree-agent-a8c25b28dfe69bc8d` @ `417fa38a3` (determinism fixed: fixed host-global list, byte-identical-across-hosts test; corpus 0 outcome changes; merged with main 24922c0a1). Land after #1 (shares `fn-name-rename.ts`), then remove the host-global exception in `ref()` (follow-up noted in its progress.md). **Open ruling (nit a):** `onclient:open=onOpen(x, 1)` silently shadows a declared `x` — agent rec: extend E-CHANNEL-005 to `onclient:*` >1 arg; separately rule collision-with-declaration.
+5. **D1 declared props** — round 4 resumed (`worktree-agent-a2dd4a6ac2e78db31`) + the two D1 codes queued to it; then re-review.
+6. **Refinement 2a fix round** — resumed (`worktree-agent-a956eaa623dd550e4`); then re-review; then 2b, R4, position 5 / R1.
+Agents still running at ctx stop report into their branches' `progress.md` — read those, not this file, for their final state.
+
+---
+
 # scrml — Session 458 (bryan · ASUS-Vivobook) — WRAP (stopped by the weekly API limit)
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S457 below. Rulings: `scrml-support/user-voice-scrml.md` §S458 (2 rulings + 1 PA reading).
