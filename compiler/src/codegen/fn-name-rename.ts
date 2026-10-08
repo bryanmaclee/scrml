@@ -133,7 +133,17 @@ export function renameUserFnRefsScoped(
     const mangled = fnNameMap.get(name);
     if (mangled === undefined) return;
     if (isBound(scope, name)) return;
-    if (!inRenamedPosition(id.end)) return;
+    // s457 3a (S458 review (c)) — a free reference to the user's function is
+    // renamed in EVERY position (a member root `event.x`, a bare value
+    // `cb = event`), not only the call-like positions the legacy regex knew:
+    // with the handler wrapper no longer binding `event`, `event.preventDefault()`
+    // beside a user `function event` is that function, and left as written it
+    // was a dangling `event` after the rename. EXCEPT a host-global name
+    // (`document`, `Math`, `console`, …): compiler-emitted code references those
+    // as free member roots, and a user function that shadows one keeps the
+    // legacy positions until host-global references are spelled through an
+    // alias (g-user-fn-named-host-global-hijacks-compiler-refs-s457).
+    if (!inRenamedPosition(id.end) && isHostGlobalName(name)) return;
     edits.push({ start: id.start, end: id.end, text: mangled });
   };
 
@@ -479,6 +489,23 @@ export function renameUserFnRefsScoped(
     last = e.start;
   }
   return out;
+}
+
+/**
+ * A host-environment global the emitted code may reference as a free name:
+ * an ECMAScript / runtime global (anything on `globalThis` here), or a browser
+ * global absent from the compiler's own runtime.
+ */
+const BROWSER_GLOBALS = new Set([
+  "window", "document", "navigator", "location", "history", "localStorage", "sessionStorage",
+  "performance", "screen", "customElements", "requestAnimationFrame", "cancelAnimationFrame",
+  "requestIdleCallback", "matchMedia", "getComputedStyle", "alert", "confirm", "prompt",
+  "HTMLElement", "Element", "Node", "Event", "CustomEvent", "MutationObserver",
+  "IntersectionObserver", "ResizeObserver", "DOMParser", "FileReader", "Image", "XMLHttpRequest",
+  "WebSocket", "EventSource", "Worker", "indexedDB", "caches", "self", "parent", "top", "frames",
+]);
+function isHostGlobalName(name: string): boolean {
+  return BROWSER_GLOBALS.has(name) || name in globalThis;
 }
 
 /**

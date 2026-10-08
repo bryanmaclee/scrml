@@ -81,9 +81,19 @@ describe("§1 renameUserFnRefsScoped — only free references are renamed", () =
     expect(out).not.toContain("_scrml_id_3");
   });
 
-  test("the regex's syntactic positions are kept: `id.x` is not renamed, `id(`, `id;`, `id,` are", () => {
+  // S458 re-review (c) — a free reference to the user's function is renamed in
+  // EVERY position (a member root too): left as written, `id.name` beside a user
+  // `function id` dangled after the rename. Host-global names keep the legacy
+  // call-like positions (g-user-fn-named-host-global-hijacks-compiler-refs-s457).
+  test("every free reference is renamed, a member root included: `id.x`, `id(`, `id;`, `id,`", () => {
     const out = renameUserFnRefsScoped("x = id.name;\nf(id, 1);\ng(id);\nh = id;", map);
-    expect(out).toBe("x = id.name;\nf(_scrml_id_3, 1);\ng(_scrml_id_3);\nh = _scrml_id_3;");
+    expect(out).toBe("x = _scrml_id_3.name;\nf(_scrml_id_3, 1);\ng(_scrml_id_3);\nh = _scrml_id_3;");
+  });
+
+  test("a host-global name keeps the legacy positions: `document.x` is not renamed, `document(` is", () => {
+    const m2 = new Map([["document", "_scrml_document_4"]]);
+    const out = renameUserFnRefsScoped("x = document.title;\ndocument(1);", m2);
+    expect(out).toBe("x = document.title;\n_scrml_document_4(1);");
   });
 
   test("string literals and comments are untouched", () => {

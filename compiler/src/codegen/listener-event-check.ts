@@ -106,10 +106,37 @@ export function findUnboundEventListeners(code: string): UnboundEventListener[] 
   };
   walk(ast);
   if (listeners.length === 0) return [];
+  // A user FUNCTION value that a compiler wrapper invokes with the event —
+  // `(${userFn})(_scrml_event)` (the `<each>` / lift row wrappers around a
+  // `${(e) => …}` value, kept so the row variable resolves live) — IS the
+  // user's listener (§5.2.1: a function value is the listener). Its own
+  // references are the author's, judged exactly as at top level where the
+  // value is registered directly: not by this check.
+  const userListenerFns: N[] = [];
+  const seen2 = new Set<object>();
+  const walkCalls = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen2.has(node as object)) return;
+    seen2.add(node as object);
+    if (Array.isArray(node)) { for (const c of node) walkCalls(c); return; }
+    const n = node as N;
+    if (n.type === "CallExpression" && n.callee
+      && (n.callee.type === "ArrowFunctionExpression" || n.callee.type === "FunctionExpression")
+      && n.arguments && n.arguments[0] && n.arguments[0].type === "Identifier"
+      && n.arguments[0].name === LISTENER_EVENT_PARAM) {
+      userListenerFns.push(n.callee);
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+      const v = (n as Record<string, unknown>)[k];
+      if (v && typeof v === "object") walkCalls(v);
+    }
+  };
+  walkCalls(ast);
   const refs = resolveProgramReferences(ast);
   const hit = new Map<N, true>();
   for (const [id, binding] of refs) {
     if (binding !== undefined || (id as N).name !== "event") continue;
+    if (userListenerFns.some((u) => u.start <= (id as N).start && (id as N).end <= u.end)) continue;
     let inner: N | null = null;
     for (const l of listeners) {
       if (l.start <= (id as N).start && (id as N).end <= l.end && (!inner || l.start >= inner.start)) inner = l;
@@ -122,10 +149,37 @@ export function findUnboundEventListeners(code: string): UnboundEventListener[] 
 }
 
 /** E-EVENT-UNBOUND for every such listener, at its source attribute when recorded. */
-export function eventUnboundErrors(code: string, filePath: string): CGError[] {
+export function eventUnboundErrors(
+  code: string,
+  filePath: string,
+  fnNameMap?: ReadonlyMap<string, string> | null,
+): CGError[] {
   const out: CGError[] = [];
+  // The check runs on the text AFTER the user-function rename; the registry
+  // holds each listener as it was colored, BEFORE it. Map encoded names back to
+  // look a listener up.
+  const inverse = new Map<string, string>();
+  if (fnNameMap) for (const [author, encoded] of fnNameMap) if (encoded !== author) inverse.set(encoded, author);
+  const unrename = (text: string): string => inverse.size === 0 ? text
+    : text.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g, (w) => inverse.get(w) ?? w);
+  const reported = new Set<string>();
   for (const l of findUnboundEventListeners(code)) {
-    const src = listenerSourceOf(l.text);
+    const src = listenerSourceOf(l.text) ?? listenerSourceOf(unrename(l.text));
+    // One attribute can be wired by more than one listener (an engine arm's
+    // delegated registry entry and its arm factory): report it once.
+    const sp0 = src && src.span && typeof src.span === "object" ? (src.span as Record<string, unknown>) : null;
+    const key = sp0 ? `${String(sp0.file)}:${String(sp0.start)}:${String(sp0.end)}:${src?.attrName}` : `text:${l.text}`;
+    if (reported.has(key)) continue;
+    reported.add(key);
+    // A body re-parsed from synthesized text (a component body, a `<match>`
+    // arm, `^{ emit() }` markup) carries spans in that text, not the file's:
+    // say where it is (g-reparsed-body-spans-synthetic-s458).
+    const synthFile = sp0 && typeof sp0.file === "string" && sp0.file !== filePath ? sp0.file : null;
+    const where2 = synthFile === null ? ""
+      : /#([A-Za-z_$][\w$]*)$/.test(synthFile) ? ` (in component \`${/#([A-Za-z_$][\w$]*)$/.exec(synthFile)![1]}\`)`
+      : /^<match:[^:]*:([^>]*)>$/.test(synthFile) ? ` (in the \`<match>\` arm \`<${/^<match:[^:]*:([^>]*)>$/.exec(synthFile)![1]}>\`)`
+      : synthFile === "__meta_emit__" ? " (in markup emitted by `^{ emit(…) }`)"
+      : ` (in ${synthFile})`;
     const attr = src && src.attrName && /^on/i.test(src.attrName) ? src.attrName : null;
     const where = attr ? `the \`${attr}=\` handler` : "an event handler";
     const shape = attr ? `\`${attr}=\${(e) => …}\`` : "`onclick=${(e) => …}`";
@@ -137,7 +191,7 @@ export function eventUnboundErrors(code: string, filePath: string): CGError[] {
       `E-EVENT-UNBOUND: \`event\` in ${where} is not bound. A bare or inline-block handler does not receive ` +
       `the event object (SPEC §5.2, §5.2.3) — nothing in the handler or around it declares \`event\`, and ` +
       `the compiler's listener parameter is not visible to it. Take the event as a parameter of a function ` +
-      `you write — ${shape} — and use that parameter where the handler reads \`event\`${listing}.`,
+      `you write — ${shape} — and use that parameter where the handler reads \`event\`${listing}${where2}.`,
       span as never,
     ));
   }

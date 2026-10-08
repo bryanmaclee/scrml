@@ -3228,15 +3228,13 @@ export function generateClientJs(ctx: CompileContext): string {
   // reserved at the top of generateClientJs. By this point all emit-* walks
   // have run and tagged their AST-shape-derived chunks; the chunk set is now
   // final.
-  // s457 3a — E-EVENT-UNBOUND on the assembled listeners. Runs BEFORE the
-  // user-fn rename; a user top-level `function event` is already emitted under
-  // its encoded name here, so when one exists a free `event` IS that function
-  // (the rename resolves it) and the check stands down. A file-level `const` /
-  // `let event` is a declaration of this text and binds by scope.
-  // See codegen/listener-event-check.ts.
-  clientStage(ctx, "event-unbound-check", () => {
-    if (fnNameMap && fnNameMap.has("event")) return;
-    for (const e of eventUnboundErrors(lines.join("\n"), filePath)) errors.push(e);
+  // s457 3a — E-EVENT-UNBOUND on the listeners of the FINAL text, run right
+  // after the user-fn rename (below): a reference to a user `function event`
+  // has been rewritten to its encoded name by then, in every position, so a
+  // free `event` that remains is unbound by definition — no file-wide
+  // stand-down (S458 review (c)). See codegen/listener-event-check.ts.
+  const runEventUnboundCheck = (code: string) => clientStage(ctx, "event-unbound-check", () => {
+    for (const e of eventUnboundErrors(code, filePath, fnNameMap)) errors.push(e);
   });
   const runtimeSource = clientStage(ctx, "assemble-runtime", () => assembleRuntime(ctx.usedRuntimeChunks));
   let clientCode: string;
@@ -3393,6 +3391,7 @@ export function generateClientJs(ctx: CompileContext): string {
       // the identical assembled buffer it saw before.
       return joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, mangle);
     });
+    runEventUnboundCheck(clientCode);
 
     // GITI-001 (giti inbound 2026-04-20): `@data = serverFn(args)` emits
     // `_scrml_reactive_set("data", _scrml_fetch_serverFn_N(args));` — storing
@@ -3973,6 +3972,7 @@ export function generateClientJs(ctx: CompileContext): string {
     clientCode = clientStage(ctx, "lines-join", () =>
       joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, (s) => s),
     );
+    runEventUnboundCheck(clientCode);
   }
 
   // GITI-003 (giti inbound 2026-04-20): prune imports that are only used by

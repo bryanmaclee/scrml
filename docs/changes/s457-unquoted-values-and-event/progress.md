@@ -135,3 +135,29 @@ Append-only. Times local (2026-10-07/08).
   parser/native 2239/0; e2e-render-map 259/0; self-host-v2 slices 2016/0 + lowered 99/0; browser-baseline
   --check PASS (48); todomvc compile + node --check OK; snippet gate, compile floor, no-default-arm lint,
   types gate, FACTS / SPEC-INDEX / bootstrap-conformance current.
+
+## S458 re-review of c243a4741 = LAND-WITH-NITS — round 3
+- merged origin/main (#1351-#1354) at 591b594f4: SPEC §34 conflict = two adjacent rows (main's
+  E-ATTR-INTERP-EXECUTABLE + this branch's E-ATTR-UNQUOTED-OPERATOR) combined; derived docs regenerated.
+- (c) fn-name-rename.ts `ref()`: a free reference to a user function is renamed in EVERY position (member
+  root, bare value) — except host-global names (`name in globalThis` or a browser-global list), which keep
+  the legacy call positions (the sibling host-alias arc). E-EVENT-UNBOUND moved AFTER the rename
+  (emit-client `runEventUnboundCheck`, both branches), no stand-down; registry lookups un-rename the text.
+- F7 component-expander `spacedGtHandlerRefusals`: the spaced-`>` refusal judged on the body text BEFORE
+  normalizeTokenizedRaw (which strips the space) with the same shared reader.
+- (d) parseExprWithMarkupValues: the markup VALUE's verbatim text is recovered from the enclosing block's
+  raw (`_alignToSourceText` — the expression is often the TOKEN-JOINED rendering `onclick = f ( x )`, whose
+  whitespace is synthetic), its refusals FORWARDED (were discarded). The lift reader's silent fallback is
+  gone: text rebuilt from token offsets, else refused. (First attempt used the token-joined text →
+  6620×2 bogus refusals + a 165 s compile of gauntlet-r10-odin-filebrowser, caught by the hook's
+  expr-parity timeout; alignment fixes both: 2 s, clean.)
+- listeners: channel onclient:open/close/error bind the call's parameter name (§38.10.1) else
+  `_scrml_event`; worker `when message` (bundle + parent) / `when error` take `_scrml_event`; all record
+  their source attribute; the worker bundle is checked too. Other emitters: bind: listeners (compiler
+  text only), SSE onmessage/named events (compiler callback only), engine timers / poll / request
+  callbacks (no event object; a free `event` there is an ordinary free reference — `event` is in the TS
+  global allowlist: follow-up gap), dispatcher (compiler only).
+- <each>/lift: a function VALUE invoked by the row wrapper `(fn)(_scrml_event)` is the author's listener —
+  judged as at top level.
+- E-ATTR-010 names a computed index (`@drafts[@cid]`); synthetic re-parse spans named in the
+  E-EVENT-UNBOUND message (component / match arm / emit); duplicate listener reports deduped.

@@ -43,6 +43,7 @@
  */
 
 import { placeholderParam } from "./placeholder-nonce.ts";
+import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
@@ -1216,12 +1217,44 @@ function reparseSynthesizedFile(
   return { ast: result.ast, errors };
 }
 
+/**
+ * s457 4a (S458 F7) — the one refusal the shared unquoted-value reader can
+ * only make on the body AS WRITTEN: a handler expression followed by `>` after
+ * inline whitespace (`onclick=@n = @n > 1>t` — a comparison and a tag close read
+ * the same). normalizeTokenizedRaw strips the whitespace before `>` (it undoes
+ * tokenizer spacing), so the re-parse would read `onclick=@n=@n>` and render
+ * ` 1>t` silently. Each handler attribute of the raw text is read here by the
+ * SAME reader over the same text the top-level path sees; only its `gt`
+ * refusals are taken (every other refusal survives normalization and is made
+ * by the re-parse).
+ */
+function spacedGtHandlerRefusals(raw: string, filePath: string): Array<{ code: string; message: string; span: Span }> {
+  const out: Array<{ code: string; message: string; span: Span }> = [];
+  const re = /(?:^|[\s"'}])(on[A-Za-z][\w:-]*)=(?=[!(\[A-Za-z0-9_@])/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const name = m[1];
+    const valueStart = m.index + m[0].length;
+    const r = readUnquotedAttrValue(raw, valueStart, name, { inParenList: false, handlerSemicolonTail: false });
+    if (r.kind !== "ATTR_OP_REJECT") continue;
+    let payload: { reason?: string };
+    try { payload = JSON.parse(r.text); } catch { continue; }
+    if (payload.reason !== "gt") continue;
+    const d = unquotedRejectDiagnostic(name, r.text);
+    out.push({ code: d.code, message: d.message, span: { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span });
+  }
+  return out;
+}
+
 export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string
 ): { nodes: MarkupNode[]; errors: CEError[]; bodyEngines: BodyEngine[] } {
   try {
+    // s457 4a (S458 F7) — whitespace-dependent refusals judged on the body
+    // text BEFORE normalizeTokenizedRaw, which strips the space before a `>`.
+    const preNormalizeErrors = spacedGtHandlerRefusals(raw, filePath);
     const normalized = normalizeTokenizedRaw(raw);
 
     const reparsed = reparseSynthesizedFile(filePath + "#" + componentName, normalized);
@@ -1244,9 +1277,9 @@ export function parseComponentBody(
     // Filter out W-PROGRAM-001, warnings, and native-parser info diagnostics
     // — they're expected for snippets / multi-root fragments / dropped Test
     // blocks and do not indicate parse failure.
-    const realErrors = reparsed.errors.filter(
+    const realErrors = [...preNormalizeErrors, ...reparsed.errors.filter(
       (e) => e.severity !== "warning" && e.severity !== "info" && e.code !== "W-PROGRAM-001"
-    );
+    )];
 
     return {
       nodes: markupNodes,

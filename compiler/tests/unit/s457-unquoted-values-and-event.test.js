@@ -387,3 +387,75 @@ describe("§5 4a — ONE reader: the native re-parse paths and lifted markup rea
     expect(errors.find((e) => e.code === "E-ATTR-UNQUOTED-OPERATOR").message).toContain('`href="https://example.com/x"`');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe("§6 S458 re-review — (c), F7, (d), every listener emitter, <each> function values", () => {
+  test("(c) a user `function event` is the binding in EVERY position: `event.preventDefault()` is that function, not a dangling `event`", () => {
+    const { codes, clientJs } = compileToOutputs(page(
+      `<form onsubmit={ event.preventDefault(); f("sub") }><button>s</button></form>`,
+      `\${ function event() { return "userfn" } }`,
+    ));
+    expect(codes).toEqual([]);
+    const m = clientJs.match(/function (_scrml_event_\d+)\(\)/);
+    expect(m).not.toBeNull();
+    expect(clientJs).toContain(`${m[1]}.preventDefault()`);
+    expect(clientJs).not.toMatch(/[^_\w.]event\.preventDefault\(\)/);
+  });
+
+  test("(c) with a user `function event`, `event.type` in another handler is that function (resolved, not free)", () => {
+    const { codes, clientJs } = compileToOutputs(page(
+      `<button onclick=f(event.type)>go</button>`,
+      `\${ function event() { return 1 } }`,
+    ));
+    expect(codes).toEqual([]);
+    expect(clientJs).toMatch(/_scrml_f_\d+\(_scrml_event_\d+\.type\)/);
+  });
+
+  const COMP = (attrs) => `\${ const C = <div props={ label: string }><button ${attrs}>t</button></> }\n<C label="a"/>`;
+  for (const attr of [`onclick=@count = @count > 1`, `onclick=@count = @count + 1 `]) {
+    test(`F7 component body: \`${attr}>\` (spaced tag close after a handler expression) is refused like top level`, () => {
+      expect(compileToOutputs(page(COMP(attr))).codes).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    });
+  }
+
+  const MV = (markup) => `\${ const el = ${markup} }\n<div>\${ lift el }</div>`;
+  test("(d) markup VALUE: `onclick=mk(1) .then(g)` keeps `.then(g)`", () => {
+    const { codes, clientJs } = compileToOutputs(page(MV(`<button onclick=mk(1) .then(g)>x</button>`)));
+    expect(codes).toEqual([]);
+    expect(clientJs).toMatch(/_scrml_mk_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/);
+  });
+  for (const markup of [`<button onclick=@count = @count > 1>x</button>`, `<p title=@msg + "x">x</p>`]) {
+    test(`(d) markup VALUE: \`${markup}\` is refused (the diagnostic is forwarded, not discarded)`, () => {
+      expect(compileToOutputs(page(MV(markup))).codes).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
+    });
+  }
+
+  const CH = (attrs) => `<div><channel name="u" topic="main" ${attrs}></channel></div>`;
+  test("channel `onclient:open=f(event.type)` is E-EVENT-UNBOUND at the attribute", () => {
+    const { codes, errors } = compileToOutputs(page(CH(`onclient:open=f(event.type)`)));
+    expect(codes).toEqual(["E-EVENT-UNBOUND"]);
+    expect(errors[0].message).toContain("`onclient:open=");
+  });
+  test("channel `onclient:error=f(err)` binds `err` to the event (§38.10.1)", () => {
+    const { codes, clientJs } = compileToOutputs(page(CH(`onclient:open=f(e) onclient:error=f(err)`)));
+    expect(codes).toEqual([]);
+    expect(clientJs).toMatch(/\.onopen = \(e\) => \{ _scrml_f_\d+\(e\); \}/);
+    expect(clientJs).toMatch(/\.onerror = \(err\) => \{ _scrml_f_\d+\(err\); \}/);
+  });
+
+  const W = `<program name="w">\n\${ when message(data) { send({ r: data }) } }\n</>\n`;
+  test("parent `when message from <#w> (d)` — a free `event` in the body is E-EVENT-UNBOUND", () => {
+    expect(compileToOutputs(page(`${W}\${ when message from <#w> (d) { @msg = event.type } }`)).codes).toEqual(["E-EVENT-UNBOUND"]);
+  });
+  test("worker `when message(data)` — a free `event` in the worker body is E-EVENT-UNBOUND", () => {
+    expect(compileToOutputs(page(`<program name="w">\n\${ when message(data) { send({ r: event }) } }\n</>\n`)).codes)
+      .toEqual(["E-EVENT-UNBOUND"]);
+  });
+
+  test("<each>: a function VALUE `${() => …}` is the listener (§5.2.1) — judged as at top level", () => {
+    const top = compileToOutputs(page(`<button onclick=\${() => f(event.type)}>r</button>`));
+    const row = compileToOutputs(page(`<ul><each in=@list as it><li><button onclick=\${() => f(event.type)}>r</button></li></each></ul>`));
+    expect(top.codes).toEqual([]);
+    expect(row.codes).toEqual(top.codes);
+  });
+});
