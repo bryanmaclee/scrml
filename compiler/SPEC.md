@@ -14215,10 +14215,40 @@ const UserCard = <div props={ name: string, avatar: string, role: UserRole }>
   built-in scope bindings (`route`, `session`, `match`, `lift`, etc.).
 - A component definition using `props` MAY also use the bare-prop and inline-annotation
   forms from §15.1-§15.3. However, the same prop name SHALL NOT appear in both the
-  `props` block and as a bare attribute on the root element (E-COMPONENT-012:
-  duplicate prop declaration).
+  `props` block and as a VALUELESS attribute on the root element (`<a href props={ href: string }>`)
+  (E-COMPONENT-012: duplicate prop declaration). A root attribute that carries a VALUE
+  and a declared prop's name — `href=${href}`, `href=href`, `href="/p/${href}"`, or a
+  fixed `href="/home"` — is the component body writing its own root attribute, not a
+  second declaration, and SHALL NOT fire E-COMPONENT-012.
 - Props declared via `props` are in scope throughout the entire component body,
   including in nested markup, logic contexts, and slot content.
+- A declared prop is the component's INPUT. The value a call site passes for a declared
+  prop SHALL NOT be written onto the expanded component's root element (or any other
+  element) as a DOM attribute — at the top level, inside `<each>`, inside a `lift`, and
+  inside an engine or `<match>` arm alike, and whatever the value's form (literal,
+  `${expr}`, `@cell`, member chain, quoted `"${…}"`, function). A component that wants
+  a prop's value on its root writes the attribute there explicitly:
+
+  ```scrml
+  const Link = <a class="link" href=${href} props={ href: string, label: string }>${label}</>
+
+  <Link href=@docsUrl label="Docs"/>     // <a class="link" href="…the value of @docsUrl…">Docs</a>
+  ```
+
+  A prop the body never writes onto an element never appears in the DOM
+  (`<Card title="Order Summary"/>` with `<h2>${title}</h2>` in the body renders no
+  `title=` tooltip on the card's root). Undeclared call-site attributes (`class`, which
+  merges per §15.5; and on a component with no `props` block, every attribute) are not
+  governed by this rule.
+
+> **Provenance:** ruling:user-voice-scrml.md S458 "D1" (deep-dive
+> `declared-props-reach-root-2026-10-07.md`, Approach D1 — converge impl#1 on §66.14 rule 4 /
+> §66.6.1: use-site attributes are construction, never DOM attributes).
+> **supersedes:** the §15.10 rule sentence "the same prop name SHALL NOT appear in both the
+> `props` block and as a bare attribute on the root element (E-COMPONENT-012: duplicate prop
+> declaration)" — which impl#1 read as ANY same-named root attribute, so a body could not
+> write a root attribute from a prop — and impl#1's unspecified behaviour of merging every
+> call-site prop onto the expanded root.
 
 **Normative statements:**
 
@@ -14273,7 +14303,7 @@ Error E-COMPONENT-011: Component `Badge` does not declare prop `icon`.
 |---|---|---|
 | E-COMPONENT-010 | Required prop missing at call site, OR `props` attribute on non-root element | Error |
 | E-COMPONENT-011 | Extra prop at call site not declared in `props` block | Error |
-| E-COMPONENT-012 | Same prop name declared in both `props` block and as bare attribute | Error |
+| E-COMPONENT-012 | Same prop name declared in both `props` block and as a valueless (bare) root attribute (S458 "D1": a valued root attribute is a write, not a declaration) | Error |
 
 ### 15.10.1 Prop Substitution into Logic-Block Bodies
 
@@ -25727,7 +25757,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-COMPONENT-005~~ | §16.4 | **Retired 2026-08-01 (S310) — duplicate of a LIVE code.** Searched §16.4 and the whole SPEC — no normative definition, no emitter. Its stated trigger (caller provides children, target has no `${...}` spread) is already owned by **E-COMPONENT-021** (§16.4 — *"Caller provides unslotted children but the target component has no `${...}` spread in its body"*), which IS emitted. Zero surviving unique trigger. Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
 | E-COMPONENT-010 | §15.10 | Required prop missing at call site, or `props` on non-root element | Error |
 | E-COMPONENT-011 | §15.10 | Extra prop at call site not declared in `props` block | Error |
-| E-COMPONENT-012 | §15.10 | Same prop in both `props` block and bare attribute | Error |
+| E-COMPONENT-012 | §15.10 | Same prop in both `props` block and a valueless (bare) root attribute | Error |
 | E-NAME-001 | §15.6 | Component name collides with built-in HTML element name | Error |
 | E-TILDE-001 | §32.5 | `~` referenced but not initialized in current scope | Error |
 | E-TILDE-002 | §32.5 | `~` initialized but not consumed before scope exit or reinitialization | Error |

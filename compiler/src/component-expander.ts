@@ -1479,6 +1479,63 @@ function applyPropSubstitutions(text: string, props: Map<string, string>): strin
  * not an expression and must not have a word that happens to match a prop name
  * rewritten. Only `${...}` interiors are expression context.
  */
+/**
+ * S458 "D1" — the two prop maps a component body's attribute TEXT is rewritten with.
+ *
+ * The string `props` map only carries a caller's `string-literal` / `variable-ref`
+ * value (plus declared defaults); an EXPRESSION-valued caller (`href=${@u}`,
+ * `s=fmt(n)`, a member chain) is only in `propExprMap`. Two places rewrite prop
+ * names inside attribute text, and each needs a different answer:
+ *
+ *   - `literal`: the whole `${name}` segment of a QUOTED attribute is replaced by
+ *     the prop's TEXT. Correct only for a literal value (`"lit"` → `/p/lit`). A
+ *     reactive / expression value spliced as text becomes its SOURCE spelling
+ *     (`/p/@u`, `/p/r.url` — g-component-prop-in-quoted-attr-substitutes-source-text-s456).
+ *   - `expr`: a prop name inside expression text (a `${…}` segment of a quoted
+ *     attribute, or an unquoted `href=${href}` / `title=(label)` raw) is rewritten
+ *     to the caller's EXPRESSION, so `${href}` → `${@u}` stays an interpolation and
+ *     lowers reactively, and `${href}` with `href=${@u}` is no longer left unbound.
+ *
+ * A prop is EXPRESSION-valued when the caller wrote a `variable-ref` / `expr` /
+ * `call-ref` value. A caller string literal, a declared default and an absent
+ * optional's fill keep the legacy text behaviour in both maps (byte-identical).
+ * Built once per expansion (`expandComponentNode`) and registered against that
+ * expansion's ExprNode map; `substituteProps` looks it up.
+ */
+interface AttrTextPropMaps { literal: Map<string, string>; expr: Map<string, string>; }
+const attrTextPropMapsByExprMap = new WeakMap<Map<string, ExprNode>, AttrTextPropMaps>();
+function registerAttrTextPropMaps(
+  props: Map<string, string>,
+  propExprMap: Map<string, ExprNode>,
+  callerAttrs: AttrNode[],
+): void {
+  const expressionValued = new Set<string>();
+  for (const a of callerAttrs ?? []) {
+    if (!a || !a.name || !a.value) continue;
+    const k = a.value.kind;
+    if (k === "variable-ref" || k === "expr" || k === "call-ref") expressionValued.add(a.name);
+  }
+  const literal = new Map<string, string>();
+  const expr = new Map<string, string>(props);
+  for (const [name, value] of props.entries()) {
+    if (!expressionValued.has(name)) literal.set(name, value);
+  }
+  for (const name of expressionValued) {
+    if (props.has(name)) continue; // variable-ref: its text IS its expression (`@u`, `r.url`)
+    const node = propExprMap.get(name);
+    if (!node) continue;
+    try {
+      const text = emitStringFromTree(node);
+      if (typeof text === "string" && text.length > 0) expr.set(name, text);
+    } catch (_e) { /* not rewritable as text — the name stays, and TS/VP report it */ }
+  }
+  attrTextPropMapsByExprMap.set(propExprMap, { literal, expr });
+}
+function attrTextPropMaps(props: Map<string, string>, propExprMap?: Map<string, ExprNode>): AttrTextPropMaps {
+  const registered = propExprMap ? attrTextPropMapsByExprMap.get(propExprMap) : undefined;
+  return registered ?? { literal: props, expr: props };
+}
+
 function substituteInterpSegments(text: string, props: Map<string, string>): string {
   if (props.size === 0 || !text.includes("${")) return text;
   return text.replace(/\$\{([^}]*)\}/g, (_match: string, inner: string) => {
@@ -2448,9 +2505,18 @@ function substituteProps(
         const propExprMap = isHandlerAttr && outerPropExprMap && outerPropExprMap.has("event")
           ? new Map([...outerPropExprMap].filter(([k]) => k !== "event"))
           : outerPropExprMap;
+        const outerTextMaps = attrTextPropMaps(outerProps, outerPropExprMap);
+        const textMaps = isHandlerAttr && (outerTextMaps.literal.has("event") || outerTextMaps.expr.has("event"))
+          ? {
+              literal: new Map([...outerTextMaps.literal].filter(([k]) => k !== "event")),
+              expr: new Map([...outerTextMaps.expr].filter(([k]) => k !== "event")),
+            }
+          : outerTextMaps;
         if (attr.value.kind === "string-literal") {
-          // First the whole-prop-name `${name}` substitution (string values).
-          let newVal = applyPropSubstitutions(attr.value.value, props);
+          // First the whole-prop-name `${name}` substitution — LITERAL values only
+          // (S458 "D1": a reactive / expression value is rewritten inside its `${…}`
+          // segment below and stays an interpolation, never spliced as source text).
+          let newVal = applyPropSubstitutions(attr.value.value, textMaps.literal);
           // g-each-inline-component-prop-member-unsubstituted (Approach B, step 1):
           // a string-literal markup attr may carry `${expr}` interpolations whose
           // expr references a prop as a member-access BASE (`href="/x/${load.id}"`)
@@ -2462,7 +2528,7 @@ function substituteProps(
           // transitive Badge's `status`->`load.status`->`l.status`) flows through
           // the OUTER-FIRST walkAndExpand order. The raw `${}` still ships literal
           // out of CE; the loop markup emitters (emit-lift / emit-each) lower it.
-          newVal = substituteInterpSegments(newVal, props);
+          newVal = substituteInterpSegments(newVal, textMaps.expr);
           if (newVal !== attr.value.value) {
             return { ...attr, value: { ...attr.value, value: newVal } };
           }
@@ -2646,7 +2712,10 @@ function substituteProps(
               }
             }
             if (!usedStructured) {
-              const subbed = substitutePropsInRawExpr(exprVal.raw, props);
+              // S458 "D1": the expression map — an expression-valued caller
+              // (`<L href=${@u}/>`) is not in the string `props` map, so `href=${href}`
+              // in the body was left as the unbound name `href` (ReferenceError).
+              const subbed = substitutePropsInRawExpr(exprVal.raw, textMaps.expr);
               if (subbed !== exprVal.raw) {
                 return { ...attr, value: { ...exprVal, raw: subbed } };
               }
@@ -3092,8 +3161,13 @@ function expandComponentNode(
         }
       }
 
-      // E-COMPONENT-012: Duplicate prop name in props block and bare attribute on def root
-      const defNodeAttrs = (def.nodes[0].attrs ?? []).filter((a: AttrNode) => a && a.name !== "class");
+      // E-COMPONENT-012: Duplicate prop name in props block and BARE (valueless, §15.1
+      // `prop1`) attribute on def root. A VALUED root attribute with a declared prop's
+      // name (`href=${href}`, `href=href`, `href="/p/${href}"`) is the body WRITING its
+      // root attribute, not a second declaration (§15.10, S458 "D1").
+      const defNodeAttrs = (def.nodes[0].attrs ?? []).filter(
+        (a: AttrNode) => a && a.name !== "class" && (!a.value || a.value.kind === "absent"),
+      );
       for (const defAttr of defNodeAttrs) {
         if (declaredNames.has(defAttr.name)) {
           ceErrors.push(makeCEError(
@@ -3174,6 +3248,7 @@ function expandComponentNode(
   // logic-block substitution. The string-form `props` map is still used for
   // markup-text and string-literal-attr substitution.
   const propExprMap = buildPropExprMap(props, callerAttrs, def.propsDecl, filePath ?? (node.span?.file ?? ""), node.span ?? { file: filePath ?? "", start: 0, end: 0, line: 1, col: 1 });
+  registerAttrTextPropMaps(props, propExprMap, callerAttrs);
 
   // Clone and substitute props into the definition's primary root node
   let expanded = substituteProps(defNode, props, propExprMap) as MarkupNode;
@@ -3197,8 +3272,26 @@ function expandComponentNode(
 
   // Merge caller attrs onto the expanded node:
   // - class: already handled via mergeClasses
+  // - a DECLARED prop (§15.10 `props` block; `bind:name` counts as `name`) is the
+  //   component's INPUT, never an attribute of the expanded root (§15.10, S458 "D1";
+  //   §66.14 rule 4 — use-site attributes are construction). It is consumed by prop
+  //   substitution above and leaves the root's `attrs` here, at the ONE merge every
+  //   expansion path goes through, so no emitter can write it. A body that wants the
+  //   value on its root writes it there (`href=${href}`), and that def attr survives
+  //   the merge. The caller's attr nodes are kept on `_callSiteProps` for the checks
+  //   that judge what the caller wrote (scope, handler-reference diagnostics).
   // - all other caller attrs override def attrs (caller wins for non-class conflicts)
-  const callerNonClassAttrs = callerAttrs.filter((a: AttrNode) => a && a.name !== "class");
+  const rootDeclaredPropNames = new Set(
+    (def.propsDecl ?? []).map((p: PropDecl) => p.name),
+  );
+  const isCallSiteDeclaredProp = (a: AttrNode): boolean =>
+    rootDeclaredPropNames.has(a.name.startsWith("bind:") ? a.name.slice(5) : a.name);
+  const callSiteProps = callerAttrs.filter(
+    (a: AttrNode) => a && a.name && a.name !== "class" && isCallSiteDeclaredProp(a),
+  );
+  const callerNonClassAttrs = callerAttrs.filter(
+    (a: AttrNode) => a && a.name !== "class" && !isCallSiteDeclaredProp(a),
+  );
   const defNonClassAttrs = (expanded.attrs ?? []).filter((a: AttrNode) => a && a.name !== "class");
 
   // Build merged attrs: start with def attrs (non-class), then override with caller attrs
@@ -3336,6 +3429,9 @@ function expandComponentNode(
     ...(def.propsDecl && def.propsDecl.length > 0
       ? { _componentPropNames: def.propsDecl.map((p: PropDecl) => p.name) }
       : {}),
+    // S458 "D1" — the caller's declared-prop attr nodes, OFF `attrs` (see the merge
+    // above). Read by the type system only; no emitter reads this field.
+    ...(callSiteProps.length > 0 ? { _callSiteProps: callSiteProps } : {}),
     ...(_bindProps.length > 0 ? { _bindProps } : {}),
     ...(__propContractChecks.length > 0 ? { __propContractChecks } : {}),
   } as MarkupNode;

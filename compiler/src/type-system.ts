@@ -10143,6 +10143,16 @@ function annotateNodes(
             visitAttr(attr, n);
           }
         }
+        // S458 "D1" — an expanded component root's DECLARED call-site props are off
+        // `attrs` (they never reach the DOM, §15.10) and live on `_callSiteProps`.
+        // What the caller wrote is still checked exactly as before (scope, handler
+        // references), even when the body never reads the prop.
+        const callSiteProps = n._callSiteProps as ASTNodeLike[] | undefined;
+        if (Array.isArray(callSiteProps)) {
+          for (const attr of callSiteProps) {
+            visitAttr(attr, n);
+          }
+        }
 
         // Bug 63 (§51.0.G.1 / §14.10) — bare-variant `.advance(.V)` checking at
         // markup EVENT-HANDLER ATTRIBUTE positions (`onclick=@phase.advance(.V)`).
@@ -14721,8 +14731,14 @@ function annotateNodes(
             const expandedFrom = parentRec && typeof parentRec._expandedFrom === "string"
               ? (parentRec._expandedFrom as string)
               : null;
-            if (declaredProps && expandedFrom && Array.isArray(parentRec!.attrs)) {
-              for (const a of parentRec!.attrs as ASTNodeLike[]) {
+            // S458 "D1" — the call site's declared props live on `_callSiteProps`
+            // (off the root's `attrs`); `attrs` is still read for older shapes.
+            const callSiteAttrs = [
+              ...(Array.isArray(parentRec?._callSiteProps) ? (parentRec!._callSiteProps as ASTNodeLike[]) : []),
+              ...(Array.isArray(parentRec?.attrs) ? (parentRec!.attrs as ASTNodeLike[]) : []),
+            ];
+            if (declaredProps && expandedFrom && callSiteAttrs.length > 0) {
+              for (const a of callSiteAttrs) {
                 if (
                   a && typeof a.name === "string" && declaredProps.includes(a.name)
                   && handlerValueAsReference(a.value as ASTNodeLike) === refName
