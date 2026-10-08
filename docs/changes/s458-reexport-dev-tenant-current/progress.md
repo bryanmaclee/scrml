@@ -30,3 +30,23 @@
   s457-dev-tenant-startup-check, dev-db-no-side-file, imported-enum-match-binding — 119 pass / 0 fail.
 - [2026-10-07] regen of SPEC-INDEX / FACTS (`regen-spec-index.ts`, `facts.ts --write`) was DENIED by the harness
   permission classifier ("Modify Shared Resources"); not run, files untouched (main's versions as merged). Left for the PA.
+- [2026-10-07] Gates on f284a456b: pre-commit core suite 32161 pass / 58 skip / 12 todo / 0 fail (32231 tests, 1486 files);
+  `bun conformance/run.ts` 1346/1396 pass + 50 xfail, 0 FAIL; CI gauntlet step (todomvc compile + node --check) OK;
+  `bun scripts/browser-baseline.ts --check` PASS (48 asserted, 0 of 2 env-excluded observed); types:check OK 186/119.
+- [2026-10-07] EMPIRICAL A (.tmp/empA, `scrml build src -o dist`, `PORT=37581 bun dist/_server.js`, page driven in
+  happy-dom with scripts fetched from the live server, .tmp/drive.mjs):
+  c.scrml: `export type Color:enum`, `export const Card = <div class="card">…`, `export server fn w()`.
+  b.scrml: `export { w as helper, Card, Color } from "./c.scrml"`; b2.scrml: `export * from "./c.scrml"`.
+  FIRST BUILD (Card + Color + server fn all imported through b / b2) FAILED on the merged tree:
+    app.scrml:21 E-COMPONENT-020 `Card` is not defined (+ VP-2 E-COMPONENT-035) — a component re-exported through an
+      intermediate module does not expand (CE). star.scrml: same E-COMPONENT-020, and star.scrml:9 E-TYPE-025
+      "Cannot match on asIs-typed subject" — an enum reached through `export *` is untyped in TS, so `match` refuses.
+  Same project on origin/main's compiler (git-archived to .tmp/maincomp): app E-COMPONENT-020/035 identical (pre-existing);
+    star E-IMPORT-004 ×3 (w/Card/Color "not exported by ./b2.scrml") + the same E-COMPONENT-020/E-TYPE-025.
+  So the branch closes: server link + client registry + page script order for named and star re-exports; named enum
+  `match`. It does NOT close: (i) component through a re-export (CE), (ii) enum `match` through `export *` (TS).
+  SECOND BUILD (Card imported straight from c; star's label without `match`): builds, 3 routes, run:
+    health 200; app.html 200 initial out="" lab="is-red" card="card-from-c" -> click srv + flip -> out="from-c|app"
+    lab="is-green"; star.html 200 -> out="from-c|star" lab="is-Green"; 0 page errors.
+    b.server.js `export { w as helper } from "./c.server.js";` b2.server.js `export { w } from "./c.server.js";`
+    page scripts: runtime, c.client, b.client, app.client.
