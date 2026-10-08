@@ -19,6 +19,11 @@
  *   R3  no binding sits at the top level of a CLASSIC script (a client chunk, a worker
  *       bundle) other than the compiler's own `_scrml_`-prefixed ones: in a classic
  *       script a top-level declaration becomes a property of the global object.
+ *   R4  no artifact a BROWSER may load (client chunks, per-route chunks, the runtime,
+ *       the `_scrml/` modules, worker bundles, library modules) imports a `data:`
+ *       module: a browser refuses it under `Content-Security-Policy: script-src 'self'`
+ *       and the importing module never runs. Only server bundles, tool modules and test
+ *       modules (Bun / Node / Deno) may import the alias from `data:`.
  *
  * HOST NAMES: every identifier-shaped own property on Bun's `globalThis` and on a
  * happy-dom `Window` (prototype chains included) — about 520 names. `undefined` is
@@ -28,9 +33,9 @@
  * MODES (every .scrml under the roots is compiled in each):
  *   default · esm (moduleFormat:"esm") · embed (embedRuntime) · build (contentHashAssets +
  *   emitPerRoute — the `scrml build` compile, per-route chunks included) · test
- *   (testMode + emitMachineTests; only sources with `~{` or `<engine`).
- * Library / tool / worker / value-only modules arise in every mode from the sources that
- * produce them. Each multi-file program directory (examples/<dir>/, benchmarks/<dir>/) is
+ *   (testMode + emitMachineTests; only sources with `~{` or `<engine`) · library
+ *   (`--mode library`; only sources with an `export`).
+ * Tool / worker / value-only modules arise in every mode from the sources that produce them. Each multi-file program directory (examples/<dir>/, benchmarks/<dir>/) is
  * also compiled whole, as `scrml build <dir>` does.
  *
  * EXEMPT ARTIFACTS (no author code in them, so nothing can capture their references):
@@ -46,7 +51,7 @@
  *   bun scripts/host-global-scan.ts [--check] [--concurrency N] [--roots a,b] [--modes m1,m2]
  * EXIT 0 = no violation · 1 = violations (listed) · 2 = the scan itself failed / scanned nothing.
  */
-import { readdirSync, readFileSync, statSync, mkdtempSync, rmSync, existsSync } from "fs";
+import { readdirSync, readFileSync, writeFileSync, statSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { join, relative, dirname, resolve } from "path";
 import { tmpdir } from "os";
 
@@ -55,7 +60,7 @@ const argv = process.argv.slice(2);
 const flag = (n: string) => argv.includes(n);
 const opt = (n: string, d: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 
-const ALL_MODES = ["default", "esm", "embed", "build", "test"] as const;
+const ALL_MODES = ["default", "esm", "embed", "build", "test", "library"] as const;
 type Mode = typeof ALL_MODES[number];
 const MODE_OPTS: Record<Mode, Record<string, unknown>> = {
   default: {},
@@ -63,6 +68,7 @@ const MODE_OPTS: Record<Mode, Record<string, unknown>> = {
   embed: { embedRuntime: true },
   build: { contentHashAssets: true, emitPerRoute: true },
   test: { testMode: true, emitMachineTests: true },
+  library: { mode: "library" },
 };
 
 // ---------------------------------------------------------------------------
@@ -96,6 +102,9 @@ function authorText(entries: string[]): string {
   return text;
 }
 
+/** A static, side-effect or dynamic import of a `data:` module (R4). */
+const DATA_IMPORT = /\b(?:import|export)\s[^;'"`]*?\bfrom\s*["']data:|\bimport\s*\(?\s*["']data:/;
+
 function walkJs(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
@@ -105,7 +114,7 @@ function walkJs(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-type Violation = { rule: "R1" | "R2" | "R3"; mode: string; unit: string; artifact: string; detail: string };
+type Violation = { rule: "R1" | "R2" | "R3" | "R4"; mode: string; unit: string; artifact: string; detail: string };
 
 async function runShard(units: string[][], modes: Mode[]) {
   const { compileScrml } = await import(join(REPO, "compiler/src/api.js"));
@@ -124,8 +133,10 @@ async function runShard(units: string[][], modes: Mode[]) {
     const author = authorText(entries);
     const usesName = (n: string) => new RegExp(`(?<![\\w$])${n.replace(/\$/g, "\\$")}(?![\\w$])`).test(author);
     const wantsTest = /~\{|<engine\b/.test(author);
+    const wantsLibrary = /\bexport\b/.test(author);
     for (const mode of modes) {
       if (mode === "test" && !wantsTest) continue;
+      if (mode === "library" && !wantsLibrary) continue;
       const out = mkdtempSync(join(tmpdir(), "scrml-hgs-"));
       try {
         let r: any;
@@ -134,10 +145,18 @@ async function runShard(units: string[][], modes: Mode[]) {
         if (!r || r.artifactsWritten === false) continue;
         compiled++;
         const files = walkJs(out);
+        // tool modules (kind="tool") run under Bun, like server bundles: not browser-reachable
+        const toolFiles = new Set<string>();
+        for (const [src, o] of (r.outputs ?? new Map()) as Map<string, any>) if (o && o.toolJs) toolFiles.add(src.split("/").pop()!.replace(/\.scrml$/, ".js"));
         const runtimeDeclares = files.some((f) => /scrml-runtime[^/]*\.js$/.test(f) && /^var _scrml_g = globalThis;/m.test(readFileSync(f, "utf8")));
         for (const f of files) {
           const rel = relative(out, f);
           const base = rel.split("/").pop()!;
+          // R4 — every artifact, the exempt runtime / `_scrml/` modules included
+          const serverSide = /\.(server|test|machine\.test)\.js$/.test(base) || toolFiles.has(base);
+          if (!serverSide && DATA_IMPORT.test(readFileSync(f, "utf8"))) {
+            violations.push({ rule: "R4", mode, unit, artifact: rel, detail: "a browser-reachable artifact imports a `data:` module (refused under a `script-src 'self'` CSP)" });
+          }
           if (/^scrml-runtime/.test(base) || rel.split("/").includes("_scrml")) continue;
           if (r.chunksBootFilename && rel === r.chunksBootFilename) continue;
           artifacts++;
@@ -149,7 +168,9 @@ async function runShard(units: string[][], modes: Mode[]) {
           let parsesAsScript = true;
           try { acorn.parse(js, { ecmaVersion: "latest", sourceType: "script" }); } catch { parsesAsScript = false; }
           const isClient = !isWorker && !/\.(server|test|machine\.test)\.js$/.test(base) && parsesAsScript;
-          const classic = isWorker || (isClient && mode !== "esm"); // esm: client chunks load as modules
+          // esm: client chunks load as modules · library: `<base>.js` is an ES module (§21.5)
+          // even when it happens to parse as a script (a library exporting nothing)
+          const classic = isWorker || (isClient && mode !== "esm" && mode !== "library");
           // the embedded runtime region: compiler-only, exempt
           let embedded = false;
           const a = js.indexOf(RT_START), b = js.indexOf(RT_END);
@@ -157,7 +178,9 @@ async function runShard(units: string[][], modes: Mode[]) {
           // the classic-script alias line reads `globalThis` at the top level, before any author code
           let declaresScript = false;
           js = js.replace(/^var _scrml_g = globalThis;.*$/m, (m) => { declaresScript = true; return " ".repeat(m.length); });
-          const declaresModule = /^import _scrml_g from "data:text\/javascript,export default globalThis";/m.test(js);
+          // the data: module (server / tool / test modules) or, for a written library module,
+          // the compiler's same-origin `_scrml/_global.js` (host-global-alias.ts HOST_GLOBAL_MODULE_PATH)
+          const declaresModule = /^import _scrml_g from "(?:data:text\/javascript,export default globalThis|(?:\.\.?\/)+_scrml\/_global\.js)";/m.test(js);
           const importsFromRuntime = /^import \{[^}]*\b_scrml_g\b[^}]*\} from "[^"]*scrml-runtime[^"]*";/m.test(js);
           // R1 + R2
           const marker = "__HGS__";
@@ -237,9 +260,12 @@ function enumerate(roots: string[]): string[][] {
 }
 
 if (flag("--shard")) {
+  // The result goes to a FILE, not stdout: a large result written to a pipe and
+  // followed by process.exit() is truncated at the pipe buffer, and the parent
+  // then has no report exactly when many things broke.
   const payload = JSON.parse(readFileSync(opt("--shard", ""), "utf8"));
   const res = await runShard(payload.units, payload.modes);
-  process.stdout.write(JSON.stringify(res));
+  writeFileSync(opt("--out", ""), JSON.stringify(res));
   process.exit(0);
 }
 
@@ -254,24 +280,28 @@ units.forEach((u, i) => shards[i % conc].push(u));
 const work = mkdtempSync(join(tmpdir(), "scrml-hgs-shards-"));
 const results = await Promise.all(shards.map(async (s, i) => {
   const pf = join(work, `shard-${i}.json`);
+  const rf = join(work, `result-${i}.json`);
   await Bun.write(pf, JSON.stringify({ units: s, modes }));
-  const p = Bun.spawn(["bun", import.meta.path, "--shard", pf], { stdout: "pipe", stderr: "pipe" });
-  const [txt, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
-  await p.exited;
-  try { return JSON.parse(txt); } catch { console.error(`shard ${i} failed:\n${err.slice(-3000)}`); return null; }
+  const p = Bun.spawn(["bun", import.meta.path, "--shard", pf, "--out", rf], { stdout: "ignore", stderr: "pipe" });
+  const err = await new Response(p.stderr).text();
+  const code = await p.exited;
+  try { return JSON.parse(readFileSync(rf, "utf8")); }
+  catch { console.error(`host-global-scan: shard ${i} failed (exit ${code}):\n${err.slice(-3000)}`); return null; }
 }));
 rmSync(work, { recursive: true, force: true });
-if (results.some((r) => r === null)) process.exit(2);
-const violations: Violation[] = results.flatMap((r: any) => r.violations);
-const artifacts = results.reduce((a: number, r: any) => a + r.artifacts, 0);
-const compiled = results.reduce((a: number, r: any) => a + r.compiled, 0);
-const unparsed: string[] = results.flatMap((r: any) => r.unparsed);
+// A failed shard is reported, and the others' findings are still listed below.
+const shardFailed = results.some((r) => r === null);
+const done = results.filter((r) => r !== null);
+const violations: Violation[] = done.flatMap((r: any) => r.violations);
+const artifacts = done.reduce((a: number, r: any) => a + r.artifacts, 0);
+const compiled = done.reduce((a: number, r: any) => a + r.compiled, 0);
+const unparsed: string[] = done.flatMap((r: any) => r.unparsed);
 const secs = ((Date.now() - t0) / 1000).toFixed(0);
 console.log(`host-global-scan: ${units.length} units × modes [${modes.join(", ")}] — ${compiled} compiles, ${artifacts} artifacts scanned, ${violations.length} violation(s), ${secs}s`);
 if (artifacts === 0) { console.error("host-global-scan: scanned no artifact"); process.exit(2); }
 const seen = new Set<string>();
 for (const v of violations) {
-  const k = `${v.rule} ${v.unit} ${v.artifact} ${v.detail}`;
+  const k = `${v.rule} ${v.mode} ${v.unit} ${v.artifact} ${v.detail}`;
   if (seen.has(k)) continue;
   seen.add(k);
   console.log(`  ${v.rule} [${v.mode}] ${v.unit} :: ${v.artifact} — ${v.detail}`);
@@ -280,4 +310,5 @@ if (unparsed.length > 0) {
   console.log(`  (not judged — ${unparsed.length} artifact(s) that do not parse at all; a separate defect, listed:)`);
   for (const u of [...new Set(unparsed)]) console.log(`    ${u}`);
 }
+if (shardFailed) { console.error("host-global-scan: a shard failed (above) — the scan is incomplete"); process.exit(2); }
 process.exit(violations.length > 0 ? 1 : 0);
