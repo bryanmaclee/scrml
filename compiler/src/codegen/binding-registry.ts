@@ -299,6 +299,13 @@ export interface LogicBinding {
   valueAttrUrlGuard?: boolean;
 
   /**
+   * S457 — set with `valueAttrUrlGuard` when the value attr is an SVG animation value (`to=${…}` on
+   * `<set attributeName="href">`): the animated URL attribute (`""` when `attributeName` is computed),
+   * passed as `_scrml_safe_url`'s 4th argument (`codegen/url-attr-guard.ts` `urlGuardTarget`).
+   */
+  valueAttrUrlGuardTarget?: string;
+
+  /**
    * i81 — the CSS-SAFE placeholder key for a reactive value attribute.
    *
    * `valueAttrName` is the ORIGINAL author-written name and is what reaches
@@ -498,6 +505,11 @@ export interface LogicBinding {
    * Stamped by emit-html via `codegen/url-attr-guard.ts` `quotedUrlAttrNeedsGuard`.
    */
   directiveUrlGuard?: boolean;
+  /**
+   * S457 — the animated URL attribute for an SVG animation value (`to="${@u}"` on `<set
+   * attributeName="href">`), passed as `_scrml_safe_url`'s 4th argument; `""` = computed `attributeName`.
+   */
+  directiveUrlGuardTarget?: string;
 
   /**
    * i225 — form-control `value` marker for arm-body `attr-template` bindings.

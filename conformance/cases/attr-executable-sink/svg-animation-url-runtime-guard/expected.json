@@ -1,0 +1,22 @@
+{
+  "id": "attr-executable-sink-svg-animation-url-runtime-guard",
+  "description": "§5.2 rule 3 (S457 SVG animation values): a `to` / `values` on `<set>` / `<animate>` whose attributeName names a URL attribute is a URL write judged on every write — a non-admitted scheme (any `values` entry) writes about:blank; a safe value is written unchanged; the expression form `to=${…}` is written (no longer dropped); a non-URL attributeName is not judged.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 3 (S457): \"A write of `to` / `from` / `by` / `values` on an SVG animation element that rule 2 makes a URL-valued attribute … is a covered write, in every form above\"; `values` \"judges every `;`-separated entry\"; \"Any other value SHALL be written as `about:blank`\". Chromium runs `<a><set attributeName=\"href\" to=\"javascript:…\"/></a>` on click (g-svg-animation-and-meta-refresh-url-sinks-s456).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "input": [{ "click": "#flip" }, { "wait": "settle" }],
+    "domAnchored": [
+      { "selector": "#e", "attr": { "to": "about:blank" } },
+      { "selector": "#q", "attr": { "to": "about:blank" } },
+      { "selector": "#g", "attr": { "to": "/ok" } },
+      { "selector": "#v", "attr": { "values": "about:blank" } },
+      { "selector": "#d", "attr": { "to": "about:blank" } },
+      { "selector": "#n", "attr": { "to": "javascript:7" } },
+      { "selector": "#row-1", "attr": { "to": "about:blank" } },
+      { "selector": "#row-2", "attr": { "to": "https://example.com/" } }
+    ]
+  }
+}
