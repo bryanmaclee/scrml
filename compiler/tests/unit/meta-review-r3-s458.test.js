@@ -207,3 +207,46 @@ describe("S458 r3 LOW", () => {
     expect(r.clientJs).toContain("const pageSize = 25");
   });
 });
+
+describe("S458 r3b — meta.bindings stays the §22.5.2 snapshot; the internal _scrml_cap is live", () => {
+  // §22.5.2: "Non-reactive bindings are captured as plain values." The body's rewritten
+  // references go through a SEPARATE internal object (`_scrml_cap`, live getters), so
+  // author code reading `meta.bindings.x` keeps the snapshot semantics it had on base.
+  test("executed: after the binding changes, meta.bindings.counter is unchanged and _scrml_cap.counter is live", async () => {
+    const { emitLogicNode } = await import("../../src/codegen/emit-logic.ts");
+    const node = {
+      kind: "meta",
+      id: 1,
+      span: { file: "/t.scrml", start: 0, end: 1, line: 1, col: 1 },
+      body: [
+        { kind: "bare-expr", expr: "meta.emit(counter)" },
+        { kind: "bare-expr", expr: "meta.emit(meta.bindings.counter)" },
+      ],
+      capturedScope: [{ name: "counter", kind: "let" }],
+      capturedNames: ["counter"],
+    };
+    const emitted = emitLogicNode(node);
+    // meta.bindings is emitted exactly as before S458: a plain-value entry.
+    expect(emitted).toContain("counter: counter");
+    // The body's own reference goes through the internal object, not meta.bindings.
+    expect(emitted).toContain("_scrml_cap.counter");
+    expect(emitted).toMatch(/const _scrml_cap = Object\.freeze\(\{\s*get counter\(\) \{ return counter; \}/);
+    // eslint-disable-next-line no-new-func
+    const harness = new Function(`
+      let counter = 1;
+      let rerun = null;
+      const out = [];
+      function _scrml_meta_effect(id, fn, capturedBindings) {
+        const meta = { bindings: capturedBindings, emit: (v) => out.push(v) };
+        rerun = () => fn(meta);
+        rerun();
+      }
+      ${emitted}
+      counter = 2;
+      rerun();
+      return out;
+    `);
+    // run 1: [live, snapshot] = [1, 1]; run 2 after counter = 2: [2, 1]
+    expect(harness()).toEqual([1, 1, 2, 1]);
+  });
+});

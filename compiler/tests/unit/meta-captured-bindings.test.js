@@ -11,8 +11,8 @@
  *   CB-1  Meta node with no capturedScope emits "null" for capturedBindings
  *   CB-2  Meta node with one @var emits getter using _scrml_reactive_get
  *   CB-3  Meta node with multiple @vars emits getters for each
- *   CB-4  Meta node with let binding emits a getter over the live binding (S458 r3)
- *   CB-5  Meta node with const binding emits a getter over the live binding (S458 r3)
+ *   CB-4  Meta node with let binding emits direct reference
+ *   CB-5  Meta node with const binding emits direct reference
  *   CB-6  Mixed @vars and let/const bindings emits correct combination
  *   CB-7  Emitted object is wrapped in Object.freeze()
  *   CB-8  @var getter uses the source variable name (not encoded)
@@ -41,6 +41,8 @@ function makeMetaNodeWithScope(body, id, capturedScope) {
   };
 }
 
+// S458 r3: fixture bodies call a meta primitive (`meta.emit`), not a free `x()` — a runtime
+// ^{} body may read only body-locals, meta primitives and captured bindings.
 function makeBareExpr(expr) {
   return { kind: "bare-expr", expr };
 }
@@ -100,33 +102,33 @@ describe("meta-captured-bindings CB-3: multiple @vars emit multiple getters", ()
 });
 
 // ---------------------------------------------------------------------------
-// CB-4: let binding → getter over the live binding
+// CB-4: let binding → direct reference
 // ---------------------------------------------------------------------------
 
-describe("meta-captured-bindings CB-4: let binding emits a getter over the live binding (S458 r3)", () => {
-  test("let binding emits get varName() { return varName; } (S458 r3)", () => {
+describe("meta-captured-bindings CB-4: let binding emits direct reference", () => {
+  test("let binding emits varName: varName (direct reference)", () => {
     const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 4, [
       { name: "localVar", kind: "let" },
     ]);
     const output = emitLogicNode(node);
     // Direct reference form: localVar: localVar
-    expect(output).toMatch(/get localVar\(\)\s*\{\s*return localVar;\s*\}/);
+    expect(output).toContain("localVar: localVar");
     // Should NOT use reactive_get for let bindings
     expect(output).not.toContain('_scrml_reactive_get("localVar")');
   });
 });
 
 // ---------------------------------------------------------------------------
-// CB-5: const binding → getter over the live binding
+// CB-5: const binding → direct reference
 // ---------------------------------------------------------------------------
 
-describe("meta-captured-bindings CB-5: const binding emits a getter over the live binding (S458 r3)", () => {
-  test("const binding emits get varName() { return varName; } (S458 r3)", () => {
+describe("meta-captured-bindings CB-5: const binding emits direct reference", () => {
+  test("const binding emits varName: varName (direct reference)", () => {
     const node = makeMetaNodeWithScope([makeBareExpr('meta.emit("x")')], 5, [
       { name: "maxCount", kind: "const" },
     ]);
     const output = emitLogicNode(node);
-    expect(output).toMatch(/get maxCount\(\)\s*\{\s*return maxCount;\s*\}/);
+    expect(output).toContain("maxCount: maxCount");
     expect(output).not.toContain('_scrml_reactive_get("maxCount")');
   });
 });
@@ -147,8 +149,8 @@ describe("meta-captured-bindings CB-6: mixed bindings", () => {
     expect(output).toMatch(/get count\(\)/);
     expect(output).toContain('_scrml_reactive_get("count")');
     // Direct references
-    expect(output).toMatch(/get localVar\(\)\s*\{\s*return localVar;\s*\}/);
-    expect(output).toMatch(/get MAX\(\)\s*\{\s*return MAX;\s*\}/);
+    expect(output).toContain("localVar: localVar");
+    expect(output).toContain("MAX: MAX");
   });
 });
 
@@ -201,7 +203,7 @@ describe("meta-captured-bindings CB-9: multi-property output is valid JS", () =>
       { name: "inc", kind: "let" },
     ]);
     const output = emitLogicNode(node);
-    expect(output).toMatch(/get count\(\)[^}]*\}\s*,\s*get inc\(\)/);
+    expect(output).toMatch(/get count\(\)[^}]*\}\s*,\s*inc: inc/);
   });
 
   test("the emitted Object.freeze literal is parseable as JS", () => {

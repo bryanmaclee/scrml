@@ -914,33 +914,40 @@ function emitGuardedArmBinding(
  * @var entries produce getter functions (live reactive reads).
  * let/const/function entries produce direct value references.
  */
-function emitCapturedBindings(node: any, extraNames: ReadonlySet<string> = new Set()): string {
-  const scope: ScopeVarEntry[] = Array.isArray(node.capturedScope) ? node.capturedScope : [];
+function emitCapturedBindings(node: any): string {
+  const scope: ScopeVarEntry[] | undefined = node.capturedScope;
+  if (!Array.isArray(scope) || scope.length === 0) return "null";
+
   const props: string[] = [];
-  const seen = new Set<string>();
   for (const entry of scope) {
     const { name, kind } = entry;
     if (!name || typeof name !== "string") continue;
-    seen.add(name);
     if (kind === "reactive") {
       // Getter returns live reactive value; auto-tracking intercepts the read
       props.push(`  get ${name}() { return _scrml_reactive_get("${name}"); }`);
     } else {
-      // let/const/function — a getter over the compiled JS binding (S458 r3): the body
-      // reaches it as `_scrml_cap.<name>`, so it must read the LIVE binding (as the bare
-      // closure reference it replaces did) and must not throw a TDZ error at creation.
-      // A renamed user function is renamed inside the getter by the fn-name pass.
-      props.push(`  get ${name}() { return ${name}; }`);
+      // let/const/function — direct reference to the compiled JS variable
+      props.push(`  ${name}: ${name}`);
     }
-  }
-  // Bindings the body routes through the capture object that are not module-scope
-  // runtime vars (an enclosing loop variable / parameter / import, S458 r3).
-  for (const name of extraNames) {
-    if (seen.has(name)) continue;
-    props.push(`  get ${name}() { return ${name}; }`);
   }
 
   if (props.length === 0) return "null";
+  return ["Object.freeze({", props.join(",\n"), "})"].join("\n");
+}
+
+/**
+ * The INTERNAL capture object a rewritten runtime `^{}` body reads its captured bindings
+ * through (S458 review round 3, HIGH-2; codegen/meta-capture-rewrite.ts). It is NOT
+ * `meta.bindings`: §22.5.2 fixes `meta.bindings` as the author-visible frozen object whose
+ * non-reactive entries are plain values ("Non-reactive bindings are captured as plain
+ * values"), and that object is emitted unchanged by `emitCapturedBindings`. This one holds
+ * a GETTER per name the body reads — keyed by the AUTHOR name, returning the real (possibly
+ * renamed, by the fn-name pass) binding — so the body's rewritten `_scrml_cap.<name>` reads
+ * behave exactly as the bare closure reads they replace (live), and a user function named
+ * after a host global is reached as that function, never the global.
+ */
+function emitInternalCaptureObject(names: ReadonlySet<string>): string {
+  const props = [...names].map((name) => `  get ${name}() { return ${name}; }`);
   return ["Object.freeze({", props.join(",\n"), "})"].join("\n");
 }
 
@@ -4850,16 +4857,25 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         return `/* E-META-001: runtime ^{} body refused */`;
       }
       const effectLines = capture.text.split("\n");
-      if (capture.used.size > 0) effectLines.unshift(`  const ${META_CAPTURE_VAR} = meta.bindings;`);
 
-      // §22.5: emit 4-argument form with capturedBindings and typeRegistry
-      const capturedBindings = emitCapturedBindings(node, capture.used);
+      // §22.5: emit 4-argument form with capturedBindings and typeRegistry. The third
+      // argument is `meta.bindings` (§22.5.2) — emitted exactly as before S458.
+      const capturedBindings = emitCapturedBindings(node);
       const typeRegistryLiteral = emitTypeRegistryLiteral(node);
 
-      return [
+      const call = [
         `_scrml_meta_effect(${metaScopeId}, ${_metaFnKw} {`,
         ...effectLines,
         `}, ${capturedBindings}, ${typeRegistryLiteral});`
+      ];
+      if (capture.used.size === 0) return call.join("\n");
+      // The body reads captured bindings through the internal capture object, declared
+      // in a block at the `^{}` site (where every captured binding is in JS scope).
+      return [
+        `{`,
+        `const ${META_CAPTURE_VAR} = ${emitInternalCaptureObject(capture.used)};`,
+        ...call,
+        `}`,
       ].join("\n");
     }
 

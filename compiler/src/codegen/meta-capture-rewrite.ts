@@ -17,7 +17,8 @@
  *   1. Every reference in the emitted body to a CAPTURED binding (a name the one scope
  *      analysis — meta-checker `collectFileScopeNames` + `collectEnclosingNames` — says
  *      is in scope at the `^{}` site, cells excluded) is rewritten to
- *      `_scrml_cap.<name>`, where `_scrml_cap` is the capture object (`meta.bindings`).
+ *      `_scrml_cap.<name>`, where `_scrml_cap` is an INTERNAL capture object emitted at the `^{}` site (NOT
+ *      `meta.bindings`, which stays the §22.5.2 plain-value snapshot).
  *      The capture object holds each binding under its AUTHOR name with a getter that
  *      reads the real binding — so `_scrml_cap.window` is the user's renamed function,
  *      never the global.
