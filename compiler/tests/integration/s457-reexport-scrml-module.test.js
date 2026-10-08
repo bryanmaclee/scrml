@@ -166,6 +166,7 @@ describe("§21.4 — the client reads a re-export through the registry", () => {
     expect(b.read("c.client.js")).toMatch(/_scrml_modules\["c\.client\.js"\] = \{[^}]*\bK: K\b/);
     // Evaluate c then b (classic scripts share one registry) and compare identities.
     const ctx = vm.createContext({ _scrml_modules: {} });
+    vm.runInContext("var _scrml_g = globalThis;", ctx); // the runtime's host-global alias (S457 2a)
     vm.runInContext(b.read("c.client.js"), ctx);
     vm.runInContext(b.read("b.client.js"), ctx);
     const reg = ctx._scrml_modules;
@@ -183,6 +184,7 @@ describe("§21.4 — the client reads a re-export through the registry", () => {
     expect(b.errors).toEqual([]);
     expect(b.read("b.client.js")).toContain('_scrml_modules["b.client.js"] = { Color: _scrml_modules["c.client.js"].Color };');
     const ctx = vm.createContext({ _scrml_modules: {} });
+    vm.runInContext("var _scrml_g = globalThis;", ctx); // the runtime's host-global alias (S457 2a)
     vm.runInContext(b.read("c.client.js"), ctx);
     vm.runInContext(b.read("b.client.js"), ctx);
     const reg = ctx._scrml_modules;

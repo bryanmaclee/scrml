@@ -70,7 +70,7 @@ describe("Bug 64 — Tier-0 ${for...lift} per-item bindings are live-keyed", () 
     // class: is live-keyed (the toggle lives inside an effect that re-resolves).
     expect(clientJs).toMatch(/_scrml_effect\(\(\) => \{[\s\S]*classList\.toggle\("on", !!\(line\.active\)\)/);
     // text is a stable text node driven by textContent inside the effect.
-    expect(clientJs).toMatch(/\.textContent = String\(\(line\.label\) \?\? ""\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(\(line\.label\) \?\? ""\)/);
     // No bare `undefined` keyword leaks (W-CG-UNDEFINED-INTERPOLATION clean).
     expect(clientJs.includes("=== undefined")).toBe(false);
   });
@@ -89,7 +89,7 @@ describe("R28-1c — Tier-1 <each> per-item bindings are live-keyed (closes sibl
     // (sibling-gap #1 closed: it was a bare toggle with no reactivity pre-fix).
     expect(clientJs).toMatch(/_scrml_effect\(\(\) => \{[\s\S]*classList\.toggle\("on", !!\(_scrml_each_item\.active\)\)/);
     // text is a stable text node driven by textContent inside the effect.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.label\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.label\)/);
     expect(clientJs.includes("=== undefined")).toBe(false);
   });
 });

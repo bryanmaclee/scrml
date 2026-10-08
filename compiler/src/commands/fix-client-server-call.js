@@ -335,7 +335,12 @@ export function promiseAllBatches(clientJs) {
     } else if (x.type === "Property" && /^_scrml_attr_/.test(String(x.key?.value ?? x.key?.name ?? ""))) {
       here = { handler: true };
     }
-    if (x.type === "CallExpression" && x.callee?.type === "MemberExpression" && x.callee.object?.name === "Promise" && x.callee.property?.name === "all") {
+    // `Promise.all`, which impl#1 spells through its host-global alias (S457 2a):
+    // `_scrml_g.Promise.all([...])`.
+    const pObj = x.callee?.object;
+    const isPromise = pObj?.name === "Promise"
+      || (pObj?.type === "MemberExpression" && !pObj.computed && pObj.object?.name === "_scrml_g" && pObj.property?.name === "Promise");
+    if (x.type === "CallExpression" && x.callee?.type === "MemberExpression" && isPromise && x.callee.property?.name === "all") {
       const arr = x.arguments?.[0];
       for (const el of arr?.type === "ArrayExpression" ? arr.elements : []) {
         for (const c of calleeOf(el)) {

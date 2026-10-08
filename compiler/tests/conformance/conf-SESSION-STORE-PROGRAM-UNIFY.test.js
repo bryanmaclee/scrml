@@ -64,8 +64,9 @@ function serverJsFor(result, suffix) {
 
 const nonWarn = (errs) => (errs ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""));
 
-const DURABLE = "globalThis.__scrml_session_stores";      // plural, path-keyed
-const MAP_STORE = "globalThis.__scrml_session_store ??= new Map()"; // singular Map
+// The compiler reaches the global object through its host-global alias (S457 2a).
+const DURABLE = "_scrml_g.__scrml_session_stores";      // plural, path-keyed
+const MAP_STORE = "_scrml_g.__scrml_session_store ??= new _scrml_g.Map()"; // singular Map
 
 // ---------------------------------------------------------------------------
 // Composed auth app: a WRITE page (login, `session.set`) + a READ-only page

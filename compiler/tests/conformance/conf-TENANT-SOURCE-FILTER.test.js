@@ -513,7 +513,7 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — INSERT with no active tenant is a nam
     expect(await call("countAll", {}, p)).toEqual(["A-secret-asset:A", "B-secret-asset:B"]);
   });
   test("outside ANY request (boot / a background job): the shipped write key refuses by name", async () => {
-    const H = new Function(SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_write_key };")();
+    const H = new Function("const _scrml_g = globalThis;\n" + SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_write_key };")();
     expect(() => H._scrml_tenant_write_key()).toThrow(/E-TENANT-WRITE \(runtime\)/);
     expect(() => H._scrml_tenant_write_key()).toThrow(/acrossTenants\(\)/);
   });

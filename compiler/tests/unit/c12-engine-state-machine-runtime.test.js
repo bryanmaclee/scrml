@@ -258,7 +258,7 @@ describe("C12 §C12.7 — mixed rule shapes (canonical Mario)", () => {
   test("Mario engine table emits all four state-children correctly", () => {
     const out = emitEngineTransitionTable(meta()).join("\n");
     // Frozen const naming
-    expect(out).toContain("const __scrml_engine_marioState_transitions = Object.freeze({");
+    expect(out).toContain("const __scrml_engine_marioState_transitions = _scrml_g.Object.freeze({");
     // Each state-child entry
     expect(out).toContain('"Small": ["Big"]');
     expect(out).toContain('"Big": ["Fire","Cape","Small"]');
@@ -371,7 +371,7 @@ describe("C12 §C12.10 — end-to-end: SYM-populated AST emits expected client J
     const js = generateClientJs(ctx);
 
     expect(js).toContain("// --- engine substrate (compiler-generated, §51.0) ---");
-    expect(js).toContain("const __scrml_engine_phase_transitions = Object.freeze({");
+    expect(js).toContain("const __scrml_engine_phase_transitions = _scrml_g.Object.freeze({");
     expect(js).toContain('"Idle": ["Done"]');
     expect(js).toContain('"Done": []');
     expect(js).toContain('_scrml_reactive_set("phase", "Idle");');

@@ -564,7 +564,8 @@ describe("§6 F1 — a non-total handler is refused; an unmatched failure is nev
     const f = fnDecl(c.clientJs, "f");
     // Run g against a stub f that fails with a variant the checker never saw.
     // eslint-disable-next-line no-new-func
-    const run = new Function(`function ${f.id}(n) { return { __scrml_error: true, type: "E", variant: "Z", data: null }; }\n${g.src}\nreturn ${g.id}(1);`);
+    // `_scrml_g`: the runtime's host-global alias (S457 2a).
+    const run = new Function(`const _scrml_g = globalThis;\nfunction ${f.id}(n) { return { __scrml_error: true, type: "E", variant: "Z", data: null }; }\n${g.src}\nreturn ${g.id}(1);`);
     expect(() => run()).toThrow(/no handler arm matched the failure E\.Z/);
   });
 });

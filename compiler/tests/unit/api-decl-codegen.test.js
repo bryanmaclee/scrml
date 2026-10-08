@@ -108,10 +108,10 @@ describe("<api> codegen — per-endpoint typed fetch (§60.4), variant decode (�
     // the URL).
     expect(js).toContain(`"https://api.example.com"`);
     expect(js).toContain(`"/users/"`);
-    expect(js).toContain(`encodeURIComponent(String(_args["id"]))`);
+    expect(js).toContain(`_scrml_g.encodeURIComponent(_scrml_g.String(_args["id"]))`);
     // GET method on the request init; a GET carries NO JSON body.
     expect(js).toContain(`{ method: "GET" }`);
-    expect(js).not.toContain(`body: JSON.stringify(_args)`);
+    expect(js).not.toContain(`body: _scrml_g.JSON.stringify(_args)`);
   });
 
   test("a VARIANT ResponseT decodes via parseVariant into .data; a ::ParseError routes to .error (§60.5)", () => {
@@ -169,7 +169,7 @@ describe("<api> codegen — POST endpoint carries a JSON body (§60.4)", () => {
     const js = clientJs(r);
     expect(js).toContain(`method: "POST",`);
     expect(js).toContain(`headers: { "Content-Type": "application/json" },`);
-    expect(js).toContain(`body: JSON.stringify(_args),`);
+    expect(js).toContain(`body: _scrml_g.JSON.stringify(_args),`);
     // The variant decode still applies on the POST response.
     expect(js).toContain(`case "Placed":`);
     expect(js).toContain(`case "Rejected":`);
@@ -231,7 +231,7 @@ describe("<api> codegen — deep-walk under <program> (W5 fix): wrapped <api> is
   // every §60 check. The fetch + decode MUST emit under `<program>`.
   test("the wrapped <api> emits the fetch (not silently dropped)", () => {
     const js = clientJs(compile(VARIANT_APP));
-    expect(js).toContain(`await fetch(`);
+    expect(js).toContain(`await _scrml_g.fetch(`);
     expect(js).toContain(`async function _scrml_request_profile_fetch()`);
   });
 

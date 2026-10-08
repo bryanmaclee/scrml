@@ -148,7 +148,7 @@ describe("each bind:value i175 §3 — top-level path unchanged", () => {
     // §17.1 Phase 2 (S301): emitBindings' output is wrapped in a root-scoped
     // `_scrml_bind_rewire(_scrml_root)` so an `if=` mount can re-bind it, hence
     // `(_scrml_root || document).querySelector` rather than a bare `document.`.
-    expect(clientJs).toMatch(/\(_scrml_root \|\| document\)\.querySelector\('\[data-scrml-bind-value[^']*'\)/);
+    expect(clientJs).toMatch(/\(_scrml_root \|\| _scrml_g\.document\)\.querySelector\('\[data-scrml-bind-value[^']*'\)/);
     // The each-only live-keying must not leak into the default path.
     expect(clientJs).not.toContain("_scrml_resolve_item");
     // No each-bind deferred/warning noise for a plain top-level bind.

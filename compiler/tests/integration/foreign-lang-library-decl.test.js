@@ -77,9 +77,11 @@ function compile(name, source, mode = "library") {
 
 // `node --check` the string as an ES module (a `.mjs` forces module parsing, so
 // a stray top-level `await` in a non-async function is a hard SyntaxError — the
-// `.js` extension would be parsed CommonJS/sloppy and mask it).
-function nodeCheckModule(name, js) {
-  const p = join(TMP, `${name}.check.mjs`);
+// `.js` extension would be parsed CommonJS/sloppy and mask it). Written into the
+// library's own output directory: `bun --check` resolves the module's relative
+// imports (the library imports its host-global alias from `./_scrml/_global.js`).
+function nodeCheckModule(name, js, dir = TMP) {
+  const p = join(dir, `${name}.check.mjs`);
   writeFileSync(p, js);
   execFileSync(process.execPath, ["--check", p]); // throws on syntax error
 }
@@ -125,7 +127,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     // The enclosing fn was async-marked (the injected boundary await needs it).
     expect(r.libraryJs).toContain("export async function runOpen");
     // And the emitted module is valid ES.
-    expect(() => nodeCheckModule("lanes", r.libraryJs)).not.toThrow();
+    expect(() => nodeCheckModule("lanes", r.libraryJs, r.outDir)).not.toThrow();
   });
 
   test("lanes shape with `js` lang also resolves (§23.2.4a ts/js)", () => {
@@ -141,7 +143,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     const r = compile("lanes_js", src);
     expect(r.errorCodes).toEqual([]);
     expect(r.libraryJs).toContain("export async function tag");
-    expect(() => nodeCheckModule("lanes_js", r.libraryJs)).not.toThrow();
+    expect(() => nodeCheckModule("lanes_js", r.libraryJs, r.outDir)).not.toThrow();
   });
 
   // -------------------------------------------------------------------------
@@ -215,7 +217,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     expect(r.libExists).toBe(true);
     expect(r.libraryJs).not.toContain("_={");
     expect(r.libraryJs).not.toContain("?{");
-    expect(() => nodeCheckModule("fsp_lib", r.libraryJs)).not.toThrow();
+    expect(() => nodeCheckModule("fsp_lib", r.libraryJs, r.outDir)).not.toThrow();
     // The .server.js holds the fn and lowers BOTH the SQL and the foreign block.
     expect(r.serverExists).toBe(true);
     expect(r.serverJs).not.toContain("_={");
@@ -254,7 +256,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     const r = compile("foreign_only", src);
     expect(r.errorCodes).toEqual([]);
     expect(r.libraryJs).toContain("export async function shout");
-    expect(() => nodeCheckModule("foreign_only", r.libraryJs)).not.toThrow();
+    expect(() => nodeCheckModule("foreign_only", r.libraryJs, r.outDir)).not.toThrow();
   });
 
   // -------------------------------------------------------------------------
@@ -287,7 +289,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     const r = compile("impure_fn", src);
     expect(r.errorCodes).toEqual([]);
     expect(r.libraryJs).toContain("export async function doubler");
-    expect(() => nodeCheckModule("impure_fn", r.libraryJs)).not.toThrow();
+    expect(() => nodeCheckModule("impure_fn", r.libraryJs, r.outDir)).not.toThrow();
   });
 
   test("multiple `_{}` blocks in one fn all lower; one async-mark", () => {
@@ -304,7 +306,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
     // exactly one `export async function combine` (single async-mark).
     expect(r.libraryJs.match(/export async function combine/g)?.length).toBe(1);
     expect(r.libraryJs).not.toContain("_={");
-    expect(() => nodeCheckModule("multi_foreign", r.libraryJs)).not.toThrow();
+    expect(() => nodeCheckModule("multi_foreign", r.libraryJs, r.outDir)).not.toThrow();
   });
 
   test("crossing-shadow fires E-FOREIGN-006 (not a silent invalid emit)", () => {
@@ -337,7 +339,7 @@ describe("§23.6 — <foreign lang> library declaration", () => {
 }`;
     const r = compile("rt", src);
     expect(r.errorCodes).toEqual([]);
-    const p = join(TMP, "rt.import.mjs");
+    const p = join(r.outDir, "rt.import.mjs"); // beside the library: its alias import is relative
     writeFileSync(p, r.libraryJs);
     const mod = await import(`${p}?v=${Date.now()}`);
     await expect(mod.runOpen("gpt", "hello world")).resolves.toBe("GPT :: hello world");

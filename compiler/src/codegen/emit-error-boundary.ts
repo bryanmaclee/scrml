@@ -256,7 +256,7 @@ export function emitBoundaryMarkupExpr(
       if (segments[i] !== "") pieces.push(JSON.stringify(segments[i]));
     } else {
       const field = segments[i];
-      pieces.push(`String((${dataExpr}) != null ? (${dataExpr}).${field} : "")`);
+      pieces.push(`_scrml_g.String((${dataExpr}) != null ? (${dataExpr}).${field} : "")`);
     }
   }
   if (pieces.length === 0) return '""';

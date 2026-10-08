@@ -99,6 +99,7 @@ import { FOREIGN_SEAL_FN } from "./foreign-seal.ts";
 import { SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "./session-store-emit.ts";
+import { HOST_GLOBAL_ALIAS, HOST_GLOBAL_NAMES } from "./host-global-alias.ts";
 
 /** Label used for a row whose SQL origins could not be resolved (strip-all). */
 export const ALL_COLUMNS_LABEL = "*";
@@ -1246,6 +1247,72 @@ export function analyzeProtectFlow(moduleJs: string): ProtectFlowResult & { pars
   return { ...r, parseError: r.parseErrors.get("<module>") ?? null };
 }
 
+/**
+ * S457 2a — the compiler spells every host global it uses through one alias,
+ * `const _scrml_g = globalThis;` (codegen/host-global-alias.ts): `_scrml_g.JSON.stringify`,
+ * `new _scrml_g.Response(…)`, `_scrml_g._scrml_active_server`. The alias exists so that a
+ * module-scope `async function Response` (a server function another one calls) cannot
+ * capture the compiler's `Response`. This analysis reads the module with the alias
+ * undone, so it sees exactly the host references it modelled before:
+ *   - `_scrml_g.<host global>` becomes the identifier `<host global>`, marked in
+ *     `HOST_GLOBAL_IDS` — it resolves to the GLOBAL even where a binding of that name is
+ *     in scope (that is what the alias guarantees at run time);
+ *   - `_scrml_g.<other>` (a compiler slot on the global object) becomes
+ *     `globalThis.<other>`, and a bare `_scrml_g` becomes `globalThis`, both marked;
+ *   - the alias declaration itself is dropped (it is not a program use of the global
+ *     object as a value).
+ * `_scrml_` is reserved (§47.1.1): no program can declare or reference `_scrml_g`, so
+ * every occurrence is the compiler's. Node offsets are kept, so snippets and spans are
+ * unchanged.
+ */
+const HOST_GLOBAL_IDS = new WeakSet<object>();
+
+function dealiasHostGlobals(root: any): any {
+  if (Array.isArray(root?.body)) {
+    root.body = root.body.filter((st: any) => !(
+      (st?.type === "VariableDeclaration" && st.declarations?.length === 1
+        && st.declarations[0].id?.type === "Identifier" && st.declarations[0].id.name === HOST_GLOBAL_ALIAS
+        && st.declarations[0].init?.type === "Identifier" && st.declarations[0].init.name === "globalThis")
+      // the module form: `import _scrml_g from "data:text/javascript,…"`
+      || (st?.type === "ImportDeclaration" && st.specifiers?.length === 1
+        && st.specifiers[0].local?.name === HOST_GLOBAL_ALIAS
+        && typeof st.source?.value === "string" && st.source.value.startsWith("data:text/javascript,"))
+    ));
+  }
+  const markGlobalThis = (n: any) => {
+    n.type = "Identifier";
+    n.name = "globalThis";
+    HOST_GLOBAL_IDS.add(n);
+  };
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (typeof n.type !== "string") return;
+    if (n.type === "MemberExpression" && !n.computed && n.object?.type === "Identifier"
+        && n.object.name === HOST_GLOBAL_ALIAS && n.property?.type === "Identifier") {
+      const prop = n.property.name;
+      if (HOST_GLOBAL_NAMES.has(prop)) {
+        // `_scrml_g.X` -> the global identifier `X` (same span).
+        delete n.object; delete n.property; delete n.computed; delete n.optional;
+        n.type = "Identifier";
+        n.name = prop === "globalThis" ? "globalThis" : prop;
+        HOST_GLOBAL_IDS.add(n);
+        return;
+      }
+      markGlobalThis(n.object);
+      return;
+    }
+    if (n.type === "Identifier" && n.name === HOST_GLOBAL_ALIAS) { markGlobalThis(n); return; }
+    for (const k in n) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+  return root;
+}
+
 function runFlow(
   modules: Array<{ filePath: string; js: string }>,
   resolveImport: (fromFilePath: string, specifier: string) => string | null,
@@ -1254,7 +1321,7 @@ function runFlow(
   const parsed: Array<{ filePath: string; js: string; root: any }> = [];
   for (const m of modules) {
     try {
-      parsed.push({ ...m, root: acorn.parse(m.js, PARSE_OPTIONS) });
+      parsed.push({ ...m, root: dealiasHostGlobals(acorn.parse(m.js, PARSE_OPTIONS)) });
     } catch (e) {
       parseErrors.set(m.filePath, (e as Error)?.message ?? String(e));
     }
@@ -2610,7 +2677,7 @@ class FlowAnalysis {
           return null;
         };
         const root = rootOf(p.object);
-        const freeRoot = !!root && ((root.type === "Identifier" && !this.resolve(root.name, scope)) || root.type === "MetaProperty");
+        const freeRoot = !!root && ((root.type === "Identifier" && (HOST_GLOBAL_IDS.has(root) || !this.resolve(root.name, scope))) || root.type === "MetaProperty");
         const propName = p.computed ? staticKey(p.property) : (p.property?.name ?? null);
         const globalName = propName ?? staticNameOf(p.object);
         if (ownOf(t).size > 0) {
@@ -2703,7 +2770,7 @@ class FlowAnalysis {
       } else e = e.expression;
     }
     if (e?.type !== "Identifier") return false;
-    const s = this.resolve(e.name, scope);
+    const s = HOST_GLOBAL_IDS.has(e) ? null : this.resolve(e.name, scope);
     let names: string[];
     if (!s) names = [e.name, ...segs];
     else {
@@ -2886,6 +2953,7 @@ class FlowAnalysis {
     switch (node.type) {
       case "Identifier":
         if (node.name === "undefined") return clean();
+        if (HOST_GLOBAL_IDS.has(node)) return this.readGlobal(node.name);
         return this.getBinding(node.name, scope);
       case "Literal":
         return { ...clean(), k: 1 };
@@ -3215,7 +3283,7 @@ class FlowAnalysis {
       }
       e = e.object;
     }
-    if (!e || e.type !== "Identifier" || this.resolve(e.name, scope)) return null;
+    if (!e || e.type !== "Identifier" || (!HOST_GLOBAL_IDS.has(e) && this.resolve(e.name, scope))) return null;
     parts.unshift(e.name);
     return parts.join(".");
   }
@@ -3767,7 +3835,7 @@ class FlowAnalysis {
     // --- plain calls -------------------------------------------------------------
     const ct = this.evalExpr(callee, scope, fn);
     this.evaluated(ct.fns, node, fn);
-    if (callee.type === "Identifier" && args.length > 0) this.recordParamCall(callee, join(...args), scope);
+    if (callee.type === "Identifier" && !HOST_GLOBAL_IDS.has(callee) && args.length > 0) this.recordParamCall(callee, join(...args), scope);
     if (node.type === "NewExpression") {
       // A response the server sends: the BODY and the INIT (status + headers —
       // a `Location` / `Set-Cookie` built from the hash is egress too, F3). An

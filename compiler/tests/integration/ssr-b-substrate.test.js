@@ -184,13 +184,13 @@ describe("ssr-b-substrate (a): the SSR HTML-composition route injects the seed d
 
   test("the seed handler reads the sibling compiled <base>.html via import.meta.url", () => {
     const { serverJs } = compileBundles(TIER1);
-    expect(serverJs).toContain('Bun.file(new URL("./app.html", import.meta.url))');
+    expect(serverJs).toContain('_scrml_g.Bun.file(new _scrml_g.URL("./app.html", import.meta.url))');
   });
 
   test("a `<` in the serialized state is escaped so it cannot break out of the <script> tag", () => {
     const { serverJs } = compileBundles(TIER1);
     // String.fromCharCode(92) is a backslash → `<` becomes the JS escape \\u003c.
-    expect(serverJs).toContain('.replace(/</g, String.fromCharCode(92) + "u003c")');
+    expect(serverJs).toContain('.replace(/</g, _scrml_g.String.fromCharCode(92) + "u003c")');
   });
 });
 

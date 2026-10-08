@@ -38,6 +38,8 @@ import {
 } from "../../src/codegen/tenant-egress.ts";
 import { SERVER_PROTECT_HELPER } from "../../src/codegen/protect-egress.ts";
 import { normalizeSqlText } from "../../src/sql-projection.ts";
+// The bundle's host-global alias (S457 2a), stood in for under `new Function` (no module context).
+const ALIAS_STANDIN = "const _scrml_g = globalThis;";
 
 // A ProtectContext-shaped stub: schemaByTable drives tenant detection.
 function protectCtx(schema) {
@@ -55,7 +57,8 @@ async function loadHelperModule() {
   const file = join(dir, "helper.mjs");
   writeFileSync(
     file,
-    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    // `_scrml_g`: the bundle's host-global alias (S457 2a) the helper reads through.
+    "const _scrml_g = globalThis;\nfunction _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
       "\nexport { _scrml_tenant_scope, _scrml_tenant_mark, _scrml_tenant_redact, _scrml_tenant_opaque, _scrml_tenant_request_scope };\n",
   );
@@ -74,7 +77,8 @@ const HELPER_STRICT = await loadHelperModule();
 // route wrapper opens).
 function loadHelper() {
   const fn = new Function(
-    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    // `_scrml_g`: the bundle's host-global alias (S457 2a) the helper reads through.
+    "const _scrml_g = globalThis;\nfunction _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
       "\nreturn { _scrml_tenant_scope, _scrml_tenant_scope_none, _scrml_tenant_redact, _scrml_active_tenant, _scrml_tenant_request_scope, _scrml_tenant_write_key };",
   );
@@ -511,7 +515,7 @@ describe("§14.8.10 SERVER_TENANT_HELPER — the shipped source filter (eval'd)"
   });
 
   test("_scrml_active_tenant is null-safe with no resolver and with no request", () => {
-    const S = new Function(SERVER_TENANT_HELPER + "\nreturn { _scrml_active_tenant };")();
+    const S = new Function(ALIAS_STANDIN + "\n" + SERVER_TENANT_HELPER + "\nreturn { _scrml_active_tenant };")();
     expect(S._scrml_active_tenant({})).toBeNull();
     expect(S._scrml_active_tenant(null)).toBeNull();
   });
@@ -540,6 +544,7 @@ describe("§14.8.10 SERVER_TENANT_HELPER — the shipped source filter (eval'd)"
     // The emitted lowering:  _scrml_protect_tag(_scrml_tenant_scope(rows, keys, added), [cols])
     // The emitted sink:      _scrml_protect_redact(_scrml_tenant_redact(result, ambientTenant))
     const H = new Function(
+      ALIAS_STANDIN + "\n" +
       "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
       SERVER_PROTECT_HELPER + SERVER_TENANT_HELPER +
         "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
@@ -596,7 +601,7 @@ describe("§14.8.10 wrapWithTenantScope", () => {
 // ---------------------------------------------------------------------------
 describe("§14.8.10 redact — a MARKED host-opaque carrier is refused, not passed through", () => {
   const H = new Function(
-    SERVER_TENANT_HELPER +
+    ALIAS_STANDIN + "\n" + SERVER_TENANT_HELPER +
       "\nreturn { _scrml_tenant_mark, _scrml_tenant_redact, _scrml_tenant_opaque, _scrml_tenant_scope };",
   )();
   const mark = (v) => { H._scrml_tenant_mark(v, { tenant: "A" }); return v; };
@@ -676,7 +681,7 @@ describe("§14.8.10 mark — a descriptor that cannot be attached REFUSES, never
   const inA = (fn) => H._scrml_tenant_request_scope(fn)({ tenantId: "A" });
 
   test("SLOPPY-mode limb: the silent no-op is caught by the verify-after-write", () => {
-    const S = new Function(SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_mark };")();
+    const S = new Function(ALIAS_STANDIN + "\n" + SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_mark };")();
     expect(() => S._scrml_tenant_mark(Object.freeze({ tenant_id: "A" }), { tenant: "A" })).toThrow(REFUSAL);
   });
 

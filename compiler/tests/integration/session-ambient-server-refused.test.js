@@ -282,7 +282,7 @@ describe("HTTP — the migrated form writes the real session's id, whatever the 
     // per-path store is emitted only for session WRITES). Pin that, so the seed
     // lands in the store THIS module reads (other tests in the same process may
     // have created durable stores).
-    expect(r.serverJs).toContain("globalThis.__scrml_session_store ??= new Map()");
+    expect(r.serverJs).toContain("_scrml_g.__scrml_session_store ??= new _scrml_g.Map()");
     const store = globalThis.__scrml_session_store;
     expect(store).toBeTruthy();
     const SID = `sid-${Math.random().toString(36).slice(2)}`;

@@ -65,8 +65,12 @@ export const FOREIGN_SEAL_FN = "_scrml_foreign_seal";
  *
  * ⛔ Constraints on this text (shared with every server-module helper — sql-tx-guard.ts):
  * no `import`, no top-level `await` (the conformance adapter evaluates a server module with
- * `new Function`); `require` / `__dirname` / `__filename` are read through `typeof` because
- * that evaluation has no module context. No literal `undefined` either: the server-output
+ * `new Function`, rewriting `import.meta` to a plain object); `require` / `__dirname` /
+ * `__filename` are read off `import.meta` (Bun: `.require` / `.dir` / `.path`; Node:
+ * `.dirname` / `.filename`, and `require` built by `module.createRequire(import.meta.url)`,
+ * the `module` builtin reached through `process.getBuiltinModule` since an `import` is not
+ * allowed here) and bound only when present — never by their bare names, which a
+ * user binding in this module's scope could own (S457 2a). No literal `undefined` either: the server-output
  * lint W-CG-UNDEFINED-INTERPOLATION flags it (scrml absence is `null`, §42) — so a host name
  * the module lacks is left UNBOUND in the slice rather than bound to an absent value.
  *
@@ -88,17 +92,30 @@ export const SERVER_FOREIGN_SEAL_HELPER: string = String.raw`
 // this module's host context (require, __dirname, __filename) - never a scrml binding
 // and never a compiler-owned one.
 function _scrml_foreign_seal(site, source) {
-  const cache = _scrml_foreign_seal.cache || (_scrml_foreign_seal.cache = new Map());
+  const cache = _scrml_foreign_seal.cache || (_scrml_foreign_seal.cache = new _scrml_g.Map());
   let sealed = cache.get(source);
   if (!sealed) {
     // The module's host context, bound only where the host provides it (a module
     // evaluated without one leaves the name unbound, exactly as host code sees it).
     const hostNames = [];
     const hostValues = [];
-    if (typeof require === "function") { hostNames.push("require"); hostValues.push(require); }
-    if (typeof __dirname === "string") { hostNames.push("__dirname"); hostValues.push(__dirname); }
-    if (typeof __filename === "string") { hostNames.push("__filename"); hostValues.push(__filename); }
-    const build = new Function(...hostNames,
+    // Read off import.meta (syntax, not a name), never the bare names: this text sits in
+    // the module's own scope, where a server function or binding named require /
+    // __dirname / __filename would otherwise be what the slice receives (S457 2a).
+    const _scrml_meta = import.meta;
+    let _scrml_require = _scrml_meta.require;
+    // Node gives an ES module no require of its own: build the module's one from its URL.
+    if (typeof _scrml_require !== "function" && typeof _scrml_meta.url === "string") {
+      const _scrml_proc = _scrml_g.process;
+      const _scrml_mod = _scrml_proc && typeof _scrml_proc.getBuiltinModule === "function" ? _scrml_proc.getBuiltinModule("module") : null;
+      if (_scrml_mod && typeof _scrml_mod.createRequire === "function") _scrml_require = _scrml_mod.createRequire(_scrml_meta.url);
+    }
+    const _scrml_dirname = _scrml_meta.dir ?? _scrml_meta.dirname;
+    const _scrml_filename = _scrml_meta.path ?? _scrml_meta.filename;
+    if (typeof _scrml_require === "function") { hostNames.push("require"); hostValues.push(_scrml_require); }
+    if (typeof _scrml_dirname === "string") { hostNames.push("__dirname"); hostValues.push(_scrml_dirname); }
+    if (typeof _scrml_filename === "string") { hostNames.push("__filename"); hostValues.push(_scrml_filename); }
+    const build = new _scrml_g.Function(...hostNames,
       "\"use strict\";\nreturn (" + source + ");\n//# sourceURL=" + site);
     const slice = build(...hostValues);
     sealed = async (...args) => {
@@ -106,7 +123,7 @@ function _scrml_foreign_seal(site, source) {
         return await slice(...args);
       } catch (e) {
         // A name the slice reads that is not crossed is not in scope: say so at the slice.
-        if (e instanceof ReferenceError && typeof e.message === "string" && !e.message.includes("§23.2.4a")) {
+        if (e instanceof _scrml_g.ReferenceError && typeof e.message === "string" && !e.message.includes("§23.2.4a")) {
           e.message += " (raised in the foreign-code slice at " + site + ": only the names in its in:{} header cross into a slice, plus host globals - SPEC §23.2.4a)";
         }
         throw e;

@@ -29,6 +29,7 @@
  */
 
 import { basename } from "path";
+import { withHostGlobalAlias } from "./host-global-alias.ts";
 import type { TestGroup, TestBindDecl, AssertStmt } from "./ir.ts";
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ function emitTestBindThrowerStub(fnName: string, indent: string): string {
     `test block but has no \`test-bind\` declaration in scope. ` +
     `Per SPEC §19.12.7, fail-fast over silent passthrough. ` +
     `Add \`test-bind ${fnName} = <stub>\` to the ~{} block.`;
-  return `${indent}const ${fnName} = (...args) => { throw new Error(${JSON.stringify(msg)}); };`;
+  return `${indent}const ${fnName} = (...args) => { throw new _scrml_g.Error(${JSON.stringify(msg)}); };`;
 }
 
 // ---------------------------------------------------------------------------
@@ -279,5 +280,6 @@ export function generateTestJs(
   lines.push(`});`);
   lines.push(``); // trailing newline
 
-  return lines.join("\n");
+  // S457 2a — the test module reads host globals through `_scrml_g` (`new _scrml_g.Error(…)`).
+  return withHostGlobalAlias(lines.join("\n")) as string;
 }

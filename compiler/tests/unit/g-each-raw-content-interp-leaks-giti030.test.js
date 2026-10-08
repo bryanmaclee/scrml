@@ -89,7 +89,7 @@ describe("GITI-030 §2 — sibling non-raw <span> still substitutes (no regressi
     const { errors, clientJs } = compileToOutputs(src, "giti030-s2");
     expect(errors).toEqual([]);
     // The non-raw span uses the live-keyed reactive text node.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.label\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.label\)/);
   });
 });
 
@@ -107,7 +107,7 @@ describe("GITI-030 §3 — NON-key field ${@.label} inside <code> also verbatim"
     expect(clientJs).toContain('document.createTextNode("${@.label}")');
     expect(clientJs).not.toContain('"${_scrml_each_item.label}"');
     // And the non-raw <span> with the key field substitutes.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.id\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.id\)/);
   });
 });
 
@@ -123,8 +123,8 @@ describe("GITI-030 §4 — key field in a NON-raw <span> substitutes (brief fram
     const { errors, clientJs } = compileToOutputs(src, "giti030-s4");
     expect(errors).toEqual([]);
     // Both fields (incl. the key field) substitute — no verbatim ${...} anywhere.
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.id\)/);
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.label\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.id\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.label\)/);
     expect(clientJs).not.toContain('"${@.id}"');
   });
 });
@@ -156,8 +156,8 @@ describe("GITI-030 §6 — mixed plain text interpolates (regression guard)", ()
 </program>`;
     const { errors, clientJs } = compileToOutputs(src, "giti030-s6");
     expect(errors).toEqual([]);
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.id\)/);
-    expect(clientJs).toMatch(/\.textContent = String\(_scrml_each_item\.label\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.id\)/);
+    expect(clientJs).toMatch(/\.textContent = _scrml_g\.String\(_scrml_each_item\.label\)/);
     // The plain-text literal runs are still emitted verbatim.
     expect(clientJs).toContain('document.createTextNode("Item ")');
   });

@@ -73,11 +73,11 @@ describe("§C Worker instantiation in client JS", () => {
       derivedNames: new Set(),
       usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
     });
-    expect(js).toContain('new Worker("test-calc.worker.js")');
-    expect(js).toContain('new Worker("test-doubler.worker.js")');
+    expect(js).toContain('new _scrml_g.Worker("test-calc.worker.js")');
+    expect(js).toContain('new _scrml_g.Worker("test-doubler.worker.js")');
     expect(js).toContain("_scrml_worker_calc.send = function(data)");
     expect(js).toContain("_scrml_worker_doubler.send = function(data)");
-    expect(js).toContain("new Promise");
+    expect(js).toContain("new _scrml_g.Promise");
     expect(js).toContain("postMessage({ id: id, data: data })");
     // dpa-056 D2 — the reply router is a LISTENER; nothing assigns `onmessage`,
     // so a send can never displace a `when message from` hook.

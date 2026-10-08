@@ -38,6 +38,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
 import { IF_GATE_BYPASS_TAGS } from "../../src/codegen/emit-html.ts";
+import { hostView, rebindHostAlias } from "../helpers/host-view.js";
 
 // ---------------------------------------------------------------------------
 // Harness (mirrors ssr-b-substrate.test.js)
@@ -110,11 +111,13 @@ async function composeFirstPaint(serverJs, html, dbRows) {
     constructor(body, init) { this._body = body; this.status = init?.status; }
     async text() { return this._body; }
   }
+  // The bundle reaches host globals through its alias `_scrml_g` (S457 2a): the stubs
+  // reach it through a view of the global object.
   const wrapper = new Function(
-    "_scrml_sql", "Bun", "Response",
-    `${runnable}\nreturn { _scrml_ssr_compose_handler };`,
+    "_scrml_sql", "Bun", "Response", "__scrml_host__",
+    `${rebindHostAlias(runnable)}\nreturn { _scrml_ssr_compose_handler };`,
   );
-  const mod = wrapper(_scrml_sql, BunStub, ResponseStub);
+  const mod = wrapper(_scrml_sql, BunStub, ResponseStub, hostView({ Bun: BunStub, Response: ResponseStub }));
   const resp = await mod._scrml_ssr_compose_handler({});
   return await resp.text();
 }
@@ -229,7 +232,7 @@ describe("ssr-a-terminus (c): each rendered row carries a data-scrml-key marker"
     const { serverJs } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
     expect(serverJs).toContain('data-scrml-key=\\"');
     // keyed off the explicit key=@.id
-    expect(serverJs).toContain('_scrml_esc_attr(String(_scrml_item?.["id"]))');
+    expect(serverJs).toContain('_scrml_esc_attr(_scrml_g.String(_scrml_item?.["id"]))');
   });
 });
 

@@ -62,13 +62,13 @@ fn badge(n: string) { return <span class="b">\${n}</span> }`;
 
 // The mount wrapper: a `<span data-scrml-mv>` created inside the per-item factory.
 const mountsElementChild = (cj) =>
-  /_scrml_each_mv_\d+\s*=\s*document\.createElement\(/.test(cj) &&
+  /_scrml_each_mv_\d+\s*=\s*_scrml_g\.document\.createElement\(/.test(cj) &&
   /setAttribute\("data-scrml-mv"/.test(cj);
 
 // The legal-in-RCDATA fallback: a bare text node whose textContent is assigned.
 const writesTextNode = (cj) =>
-  /_scrml_each_tn_\d+\s*=\s*document\.createTextNode\(/.test(cj) &&
-  /_scrml_each_tn_\d+\.textContent\s*=\s*String\(/.test(cj);
+  /_scrml_each_tn_\d+\s*=\s*_scrml_g\.document\.createTextNode\(/.test(cj) &&
+  /_scrml_each_tn_\d+\.textContent\s*=\s*_scrml_g\.String\(/.test(cj);
 
 describe("g-each-value-form-if-in-rcdata-body-injects-element-child", () => {
   test("value-form-if in a <textarea> body emits NO element child", () => {

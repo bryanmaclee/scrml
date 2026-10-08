@@ -352,7 +352,7 @@ describe("A5-5 §A5-5.5b — legacy <engine> computed-form end-to-end (S77 fix)"
     expect(clientJs).toContain("_scrml_cs_machine_arm_timer");
     expect(clientJs).toContain('_scrml_cs_reactive_get("backoffDelay")');
     // The IIFE clamp shape (matches emitDurationLiteral output).
-    expect(clientJs).toMatch(/typeof v === ["']number["'] && isFinite\(v\)/);
+    expect(clientJs).toMatch(/typeof v === ["']number["'] && _scrml_g\.isFinite\(v\)/);
   });
 
   test("regression: literal-form `.From after 500ms => .To` still works (no inserted \\n needed)", () => {
@@ -372,7 +372,7 @@ describe("A5-5 §A5-5.5b — legacy <engine> computed-form end-to-end (S77 fix)"
     expect(clientJs).toContain("_scrml_cs_machine_arm_initial");
     expect(clientJs).toContain('\\"afterMs\\":500');
     // No IIFE wrapper for literal cases.
-    expect(clientJs).not.toMatch(/typeof v === ["']number["'] && isFinite\(v\)/);
+    expect(clientJs).not.toMatch(/typeof v === ["']number["'] && (?:_scrml_g\.)?isFinite\(v\)/);
   });
 });
 
@@ -491,7 +491,7 @@ describe("A5-5 §A5-5.9 — negative-runtime clamp shape", () => {
     // happens to reach the elision path. For now verify by reading the source:
     const fs = require("fs");
     const src = fs.readFileSync(require.resolve("../../src/codegen/emit-machines.ts"), "utf8");
-    expect(src).toContain('return (typeof v === "number" && isFinite(v) && v >= 0) ? Math.round(v) : 0');
+    expect(src).toContain('return (typeof v === "number" && _scrml_g.isFinite(v) && v >= 0) ? _scrml_g.Math.round(v) : 0');
   });
 });
 

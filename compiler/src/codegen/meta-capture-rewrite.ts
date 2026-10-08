@@ -27,12 +27,20 @@
  *      prefix no author can spell, §47.1.1) or one of the exact-match safe value names
  *      (`undefined`, `NaN`, `Infinity`). Anything else — a bare cell name, a host global,
  *      a write to a captured binding — is E-META-001. There is no host-name list.
+ *      ONE compiler name is not a helper: the host-global alias `_scrml_g`
+ *      (codegen/host-global-alias.ts) IS the global object, and compiler lowerings spell
+ *      their host-global reads through it (`_scrml_g.document.createElement(…)`). So
+ *      `_scrml_g.<name>` is judged as the host global `<name>` it reads — refused, exactly
+ *      as the bare `<name>` it replaced was — and a bare or computed `_scrml_g` is refused
+ *      as `globalThis`. The `_scrml_` prefix admits fixed runtime helpers, never the
+ *      global object.
  *
  * Text is edited by SPLICING located ranges (never regenerated), so comments and layout
  * of the emitted body are kept.
  */
 
 import * as acorn from "acorn";
+import { HOST_GLOBAL_ALIAS } from "./host-global-alias.ts";
 
 /** Exact-match safe free names (value literals spelled as identifiers). Not a danger list. */
 const SAFE_FREE_NAMES: ReadonlySet<string> = new Set(["undefined", "NaN", "Infinity"]);
@@ -117,6 +125,9 @@ export function rewriteMetaBodyCaptures(bodyText: string, captured: ReadonlySet<
   const reference = (id: AnyNode, scope: Scope, write: boolean, shorthand: boolean): void => {
     const name: string = id.name;
     if (scope.has(name)) return;
+    // The alias is the global object, not a helper: a bare (or computed-member) read is
+    // `globalThis`. A `_scrml_g.<name>` member read is judged at the MemberExpression.
+    if (name === HOST_GLOBAL_ALIAS) { refused.add("globalThis"); return; }
     if (name.startsWith("_scrml_")) return;
     if (!write && SAFE_FREE_NAMES.has(name)) return;
     if (captured.has(name)) {
@@ -245,6 +256,13 @@ export function rewriteMetaBodyCaptures(bodyText: string, captured: ReadonlySet<
         walkTarget(n.argument, scope);
         return;
       case "MemberExpression":
+        // `_scrml_g.<name>` reads the host global `<name>`: refused under that name, as
+        // the bare reference the alias replaced would be.
+        if (!n.computed && n.object?.type === "Identifier" && n.object.name === HOST_GLOBAL_ALIAS
+            && n.property?.type === "Identifier" && !scope.has(HOST_GLOBAL_ALIAS)) {
+          refused.add(n.property.name);
+          return;
+        }
         walk(n.object, scope, n, "object");
         if (n.computed) walk(n.property, scope, n, "property");
         return;

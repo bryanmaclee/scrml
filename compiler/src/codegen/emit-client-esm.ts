@@ -381,11 +381,13 @@ export function toEsmClientChunk(body: string, ctx: EsmChunkContext): string {
   });
 
   // Shared-mutable-global routing: rewrite every bare occurrence of a bridged
-  // global (a chunk WRITES it; ES imports are read-only) to `globalThis.<name>`,
-  // the slot the esm runtime (R2) reads. The negative lookbehind skips member
-  // accesses (`x._scrml_lift_target`) and longer identifiers.
+  // global (a chunk WRITES it; ES imports are read-only) to the global-object slot
+  // the esm runtime (R2) reads. Reached through the host-global alias `_scrml_g`
+  // (S457 2a), imported from the runtime below, never a bare `globalThis` — a
+  // chunk-level user binding named `globalThis` would capture that. The negative
+  // lookbehind skips member accesses (`x._scrml_lift_target`) and longer identifiers.
   for (const name of bridgedInChunk) {
-    out = out.replace(new RegExp(`(?<![.$\\w])${name}\\b`, "g"), `globalThis.${name}`);
+    out = out.replace(new RegExp(`(?<![.$\\w])${name}\\b`, "g"), `_scrml_g.${name}`);
   }
 
   // --- Pass 3: compute the runtime-import surface from the REWRITTEN body (so

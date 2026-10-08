@@ -279,7 +279,7 @@ function responseGuardedReturns(fnNode) {
     if (n.type === "IfStatement"
         && n.test.type === "BinaryExpression" && n.test.operator === "instanceof"
         && n.test.left.type === "Identifier"
-        && n.test.right.type === "Identifier" && n.test.right.name === "Response") {
+        && isResponseRef(n.test.right)) {
       const narrowed = n.test.left.name;
       const arm = n.consequent.type === "BlockStatement" ? n.consequent.body : [n.consequent];
       // ⚑ THE WALK IS RECURSIVE OVER THE NARROWED ARM, NOT A SINGLE LEVEL.
@@ -332,9 +332,17 @@ const RESPONSE_YIELDING_HELPERS = new Set([
   "_scrml_protect_opaque_refusal",
 ]);
 
+/** `Response`, or the compiler's spelling of it through the host-global alias (S457 2a): `_scrml_g.Response`. */
+function isResponseRef(n) {
+  if (!n) return false;
+  if (n.type === "Identifier") return n.name === "Response";
+  return n.type === "MemberExpression" && !n.computed && n.object.type === "Identifier" && n.object.name === "_scrml_g"
+    && n.property.type === "Identifier" && n.property.name === "Response";
+}
+
 function yieldsResponse(expr) {
   if (!expr) return false;
-  if (expr.type === "NewExpression" && expr.callee.type === "Identifier" && expr.callee.name === "Response") return true;
+  if (expr.type === "NewExpression" && isResponseRef(expr.callee)) return true;
   if (
     expr.type === "CallExpression" &&
     expr.callee.type === "Identifier" &&
@@ -726,7 +734,7 @@ describe("emission shape — every server-fn route handler terminates in a Respo
     // must ALREADY be redacted. `JSON.stringify(_scrml_protect_redact(x))`,
     // never `_scrml_protect_redact(JSON.stringify(x))`.
     expect(serverJs).toContain("JSON.stringify(_scrml_protect_redact(_scrml_result)");
-    expect(serverJs).not.toContain("_scrml_protect_redact(JSON.stringify");
+    expect(serverJs).not.toContain("_scrml_protect_redact(_scrml_g.JSON.stringify");
   });
 });
 
@@ -777,11 +785,11 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
 
   test("the guard is emitted ahead of the envelope, in that order", () => {
     const { serverJs } = compile(BODY_BUILDS_RESPONSE, "resp-passthrough-emit");
-    expect(serverJs).toContain("if (_scrml_result instanceof Response) return _scrml_result;");
+    expect(serverJs).toContain("if (_scrml_result instanceof _scrml_g.Response) return _scrml_result;");
     // Order matters: the guard must precede the JSON.stringify envelope, or the
     // Response is already destroyed by the time it runs.
-    const guardIdx = serverJs.indexOf("if (_scrml_result instanceof Response) return _scrml_result;");
-    const envIdx = serverJs.indexOf("const _scrml_resp_body = JSON.stringify(", guardIdx);
+    const guardIdx = serverJs.indexOf("if (_scrml_result instanceof _scrml_g.Response) return _scrml_result;");
+    const envIdx = serverJs.indexOf("const _scrml_resp_body = _scrml_g.JSON.stringify(", guardIdx);
     expect(guardIdx).toBeGreaterThanOrEqual(0);
     expect(envIdx).toBeGreaterThan(guardIdx);
   });

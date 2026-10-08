@@ -453,7 +453,7 @@ describe("§9 A-4.2 atom-emitter idempotency", () => {
     const b = emitServerFnStubAtom(fnNode, route, /** @type {any} */ ({}));
     expect(a).toBe(b);
     expect(a).toContain("async function _scrml_fetch_fetchUser(id)");
-    expect(a).toContain(`await fetch("/_scrml/fetchUser"`);
+    expect(a).toContain(`await _scrml_g.fetch("/_scrml/fetchUser"`);
     expect(a).toContain(`_scrml_wire_decode`);
   });
 
@@ -465,7 +465,7 @@ describe("§9 A-4.2 atom-emitter idempotency", () => {
     };
     const route = { path: "/_scrml/ping", method: "GET" };
     const out = emitServerFnStubAtom(fnNode, route, /** @type {any} */ ({}));
-    expect(out).toContain(`await fetch("/_scrml/ping", { method: "GET" })`);
+    expect(out).toContain(`await _scrml_g.fetch("/_scrml/ping", { method: "GET" })`);
     expect(out).not.toContain("Content-Type");
     expect(out).not.toContain("_scrml_body");
   });

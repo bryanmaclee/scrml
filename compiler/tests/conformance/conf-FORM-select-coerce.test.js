@@ -59,7 +59,7 @@ describe("CONF-FORM-select-coerce: §5.4 <select> bind:value coercion by cell ty
 `;
     const { errors, clientJs: __cjRaw } = compile(src, "select-num"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code && e.code.startsWith("E-")).length).toBe(0);
-    expect(clientJs).toContain('_scrml_reactive_set("choice", Number(event.target.value))');
+    expect(clientJs).toContain('_scrml_reactive_set("choice", _scrml_g.Number(event.target.value))');
   });
 
   test("boolean cell: onchange write-back coerces via event.target.value === \"true\"", () => {
@@ -88,7 +88,7 @@ describe("CONF-FORM-select-coerce: §5.4 <select> bind:value coercion by cell ty
     const { errors, clientJs: __cjRaw } = compile(src, "select-str"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code && e.code.startsWith("E-")).length).toBe(0);
     expect(clientJs).toContain('_scrml_reactive_set("pick", event.target.value)');
-    expect(clientJs).not.toContain('_scrml_reactive_set("pick", Number(event.target.value))');
+    expect(clientJs).not.toContain('_scrml_reactive_set("pick", _scrml_g.Number(event.target.value))');
     expect(clientJs).not.toContain('_scrml_reactive_set("pick", event.target.value === "true")');
   });
 });

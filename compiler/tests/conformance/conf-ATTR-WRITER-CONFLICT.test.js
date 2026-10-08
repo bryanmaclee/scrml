@@ -124,7 +124,7 @@ describe("CONF-ATTR-WRITER-CONFLICT — runtime-half (sole wholesale owner emits
     // HTML placeholder present (pre-#81 the whole attribute vanished).
     expect(r.html).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
     // Reactive DOM write wired, subscribing to the cell.
-    expect(r.clientJs).toContain('setAttribute("class", String(');
+    expect(r.clientJs).toContain('setAttribute("class", _scrml_g.String(');
     expect(r.clientJs).toContain('_scrml_cs_reactive_get("tab")');
     // Emitted bundle parses as an ES module (S267: sourceType:"module", not
     // new Function() which parses sloppy-mode and false-passes).
