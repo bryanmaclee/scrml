@@ -377,6 +377,55 @@ export function slash() {
 //
 // Returns { ok, name, hadSpaceAfterLt, selfClosing, voidElement, span,
 // malformed }.
+/**
+ * S458 (fourth round, F4) — string / interpolation skipping for the opener scan and the
+ * quoted attribute-value reader, so a component body re-parsed here reads an attribute
+ * exactly as the live pipeline does:
+ *   - a string literal INSIDE code (`${label + 'it\'s'}`, `${label + "\"q"}`) honours
+ *     backslash escapes;
+ *   - a quoted attribute value (`title="${label + "x"}"`) is `${…}`-aware: a quote inside an
+ *     interpolation belongs to that interpolation's code, not to the value.
+ * Each returns the index one PAST the construct (or `end` when it is unterminated).
+ */
+function skipCodeString(source, p, end, quote) {
+    // `p` is at the opening quote.
+    p = p + 1;
+    while (p < end) {
+        const c = source.charAt(p);
+        if (c === "\\") { p = p + 2; continue; }
+        if (quote === "`" && c === "$" && source.charAt(p + 1) === "{") { p = skipCodeBraces(source, p + 1, end); continue; }
+        if (c === quote) return p + 1;
+        p = p + 1;
+    }
+    return end;
+}
+function skipCodeBraces(source, p, end) {
+    // `p` is at an opening `{`; returns one past its matching `}`.
+    let depth = 0;
+    while (p < end) {
+        const c = source.charAt(p);
+        if (c === "\"" || c === "'" || c === "`") { p = skipCodeString(source, p, end, c); continue; }
+        if (c === "{") depth = depth + 1;
+        else if (c === "}") { depth = depth - 1; if (depth === 0) return p + 1; }
+        p = p + 1;
+    }
+    return end;
+}
+function skipQuotedAttrValue(source, p, end) {
+    // `p` is at the value's opening quote; a backslash escapes the next char (as the
+    // value reader below always did), and a `${` opens code up to its matching `}`.
+    const quote = source.charAt(p);
+    p = p + 1;
+    while (p < end) {
+        const c = source.charAt(p);
+        if (c === "\\" && p + 1 < end) { p = p + 2; continue; }
+        if (c === "$" && source.charAt(p + 1) === "{") { p = skipCodeBraces(source, p + 1, end); continue; }
+        if (c === quote) return p + 1;
+        p = p + 1;
+    }
+    return end;
+}
+
 export function tokenizeOpener(cursor, ltAnchor) {
     const source = cursor.source;
     const len = source.length;
@@ -467,9 +516,12 @@ export function tokenizeOpener(cursor, ltAnchor) {
     while (p < len) {
         const ch = source.charAt(p);
         if (inString === null) {
-            if (ch === "\"" || ch === "'") {
-                inString = ch;
-                p = p + 1;
+            if ((ch === "\"" || ch === "'") && bracketDepth === 0) {
+                // A quoted attribute value — `${…}`-aware (S458 F4).
+                p = skipQuotedAttrValue(source, p, len);
+            } else if (ch === "\"" || ch === "'" || (ch === "`" && bracketDepth > 0)) {
+                // A string literal inside an expression value — escape-aware (S458 F4).
+                p = skipCodeString(source, p, len, ch);
             } else if (ch === "(" || ch === "[" || ch === "{") {
                 bracketDepth = bracketDepth + 1;
                 p = p + 1;
@@ -1060,18 +1112,12 @@ export function tokenizeAttributeRegion(source, start, end, line, col, isStateOp
                 // Quoted string value. For `if=` the quoted text is a
                 // boolean expression (live parity — ATTR_EXPR), otherwise
                 // a plain string literal (ATTR_STRING).
-                p = p + 1; // opening `"`
-                let str = "";
-                while (p < end && source.charAt(p) !== "\"") {
-                    if (source.charAt(p) === "\\" && p + 1 < end) {
-                        str = str + source.charAt(p) + source.charAt(p + 1);
-                        p = p + 2;
-                    } else {
-                        str = str + source.charAt(p);
-                        p = p + 1;
-                    }
-                }
-                if (p < end && source.charAt(p) === "\"") p = p + 1;
+                // S458 F4 — `${…}`-aware: a quote inside an interpolation is code.
+                // The value text is kept verbatim (escapes as written, as before).
+                const valEnd = skipQuotedAttrValue(source, p, end);
+                const closed = valEnd <= end && source.charAt(valEnd - 1) === "\"" && valEnd - 1 > p;
+                const str = source.slice(p + 1, closed ? valEnd - 1 : valEnd);
+                p = valEnd;
                 if (name === "if") {
                     valTok = makeAttrToken("ATTR_EXPR", str,
                         valStart, p, line, col);

@@ -77,3 +77,12 @@
   on a component call site; CE owns it (one message naming `bind:n=@cell`). A refused bind prop reads `not` in the
   body (recovery: no cascading undeclared-`n` E-SCOPE-001) and is not re-judged from `_callSiteProps`. Unit: 4 forms
   -> exactly `["E-ATTR-010"]`.
+
+## 2026-10-08 — step 5: F4 — attribute strings in a component body round-trip in every form
+- Commit 4 (N1) gate: pass; the isComponent-read budget test forced folding the N1 guard into the existing read.
+- Root cause (pre-CE, the component re-parse in native-parser/tag-frame.js — the component-def raw itself was
+  already correct since round 3): (a) the opener scan did not honour backslash escapes in a string INSIDE an
+  expression value (`${label + 'it\'s'}` -> runaway string -> "Unterminated tag"); (b) the quoted attribute-value
+  reader ended the value at the first `"` even inside `${…}` (`"${label + "x"}"` -> `${label +`). New helpers
+  skipCodeString / skipCodeBraces / skipQuotedAttrValue used by both. Base flip: case fails on 540bc7f1e, passes on head.
+  parser-conformance + native suites 2486/0; conformance 1389/1439 + 50 xfail.
