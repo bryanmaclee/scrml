@@ -143,13 +143,13 @@ describe("each-in-match §1 — emit shape (no leak, mount div, helpers ship)", 
 
   test("the each renderer reads the source cell + registers itself", () => {
     const { clientJs } = compileToOutputs(SIGIL_SRC, "sigil");
-    expect(clientJs).toContain('const _items = _scrml_cs_reactive_get("todos");');
+    expect(clientJs).toContain('const _scrml_items = _scrml_cs_reactive_get("todos");');
     expect(clientJs).toMatch(/_scrml_each_renderers\["each_[0-9a-z]{8}_\d+"\] = _scrml_each_render_[0-9a-z]{8}_\d+;/);
   });
 
   test("the match dispatcher invokes _scrml_remount_each after writing the Browsing arm (Mode C fix)", () => {
     const { clientJs } = compileToOutputs(SIGIL_SRC, "sigil");
-    expect(clientJs).toMatch(/_mount\.innerHTML = _scrml_match_match_[0-9a-z]{8}_\d+_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_mount\);/);
+    expect(clientJs).toMatch(/_scrml_arm_mount\.innerHTML = _scrml_match_match_[0-9a-z]{8}_\d+_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_scrml_arm_mount\);/);
   });
 
   test("alias form: each renderer uses the `t` alias (not @.) and ships a mount div", () => {

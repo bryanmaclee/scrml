@@ -113,7 +113,7 @@ describe("each-render-before-cell-init §1 — emit ordering (cell-init before d
 
   test("the NO-<empty> render path carries an undefined guard (if (!_items))", () => {
     const { clientJs } = compileToOutputs(NONEMPTY_SRC, "no-empty");
-    expect(clientJs).toMatch(/if \(!_items\) \{\s*_scrml_each_clear\(_mount\);\s*return;\s*\}/);
+    expect(clientJs).toMatch(/if \(!_scrml_items\) \{\s*_scrml_each_clear\(_scrml_mount\);\s*return;\s*\}/);
   });
 });
 

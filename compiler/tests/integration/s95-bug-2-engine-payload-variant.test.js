@@ -272,9 +272,9 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
     const { errors, clientJs } = compileToClientJs(src, "dispatcher-data");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Tag extraction reads `.variant` (the canonical SPEC §51.3.2 shape).
-    expect(clientJs).toMatch(/typeof _v\.variant === "string"/);
+    expect(clientJs).toMatch(/typeof _scrml_arm_v\.variant === "string"/);
     // Data extraction reads `.data` (named fields, not Array.isArray on .payload).
-    expect(clientJs).toMatch(/_v\.data && typeof _v\.data === "object"/);
+    expect(clientJs).toMatch(/_scrml_arm_v\.data && typeof _scrml_arm_v\.data === "object"/);
     // The dead `.payload` Array placeholder is never referenced; `.variant` is
     // the PRIMARY discriminant. §55.10-L4 (msgchain-render-wiring-2026-07-03)
     // added a SECONDARY `.tag` fallback (checked AFTER `.variant`) so the
@@ -308,7 +308,7 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
 </>`;
     const { errors, clientJs } = compileToClientJs(src, "dispatcher-named-data");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
-    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_data && _data\["msg"\]\)/);
+    expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_scrml_arm_data && _scrml_arm_data\["msg"\]\)/);
   });
 });
 

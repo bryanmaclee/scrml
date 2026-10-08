@@ -13,6 +13,7 @@ import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
+import { renameUserFnRefsScoped } from "./fn-name-rename.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
 import { setActiveClientAsync } from "./js-async-analysis.ts";
@@ -2854,7 +2855,7 @@ export function generateClientJs(ctx: CompileContext): string {
   const bindingLines = clientStage(ctx, "emit-bindings", () => emitBindings(ctx));
   if (bindingLines.length > 0) {
     lines.push("// --- ref= / bind: / class: wiring; re-invoked per if= mount with the mounted root ---");
-    lines.push("function _scrml_bind_rewire(root) {");
+    lines.push("function _scrml_bind_rewire(_scrml_root) {");
     for (const line of bindingLines) lines.push(line);
     lines.push("}");
     lines.push("_scrml_bind_rewire(document);");
@@ -3352,8 +3353,16 @@ export function generateClientJs(ctx: CompileContext): string {
         return out.join("");
       };
 
-      const mangle = (segment: string): string =>
+      const regexMangle = (segment: string): string =>
         rewriteCodeSegments(segment, rewriteCodeSegment);
+      // g-user-function-named-id-breaks-click-dispatch-s457 — the rename is
+      // SCOPE-AWARE: only a reference no enclosing scope binds (i.e. one that
+      // means the user's top-level function) is renamed, in the same syntactic
+      // positions as the regex above. The regex is kept only for a segment that
+      // does not parse, so an already-invalid buffer compiles exactly as before.
+      // See codegen/fn-name-rename.ts.
+      const mangle = (segment: string): string =>
+        renameUserFnRefsScoped(segment, fnNameMap) ?? regexMangle(segment);
       // g-embed-runtime-ships-mangled-runtime-identifiers (S325) — the runtime
       // slot is COMPILER-OWNED text and a user fn name must never reach it.
       // The mangle is a whole-buffer text pass, so before this fence a user

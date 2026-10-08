@@ -1,0 +1,10 @@
+<program>
+<items> = [{ id: 1, code: "go()", url: "/one", t: "tip" }]
+const Btn = <button props={ onClick: string }>b</button>
+const Link = <a props={ href: string }>l</a>
+const Tip = <span props={ title: string }>t</span>
+<ul id="b">${ for (const it of @items) { lift <li><Btn onClick=it.code/></li> } }</ul>
+<ul id="e"><each in=@items key=@.id as it><li><Btn onClick=it.code/></li></each></ul>
+<ul id="h">${ for (const it of @items) { lift <li><Link href=it.url/></li> } }</ul>
+<ul id="t"><each in=@items key=@.id as it><li><Tip title=it.t/></li></each></ul>
+</program>

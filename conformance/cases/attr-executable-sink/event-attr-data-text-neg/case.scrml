@@ -1,0 +1,4 @@
+<program>
+<code> = "alert(1)"
+<button ONCLICK=${@code}>run</button>
+</program>
