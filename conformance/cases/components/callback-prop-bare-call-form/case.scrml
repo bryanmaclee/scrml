@@ -1,0 +1,28 @@
+<program>
+<log> = ""
+${
+  function handleDismiss() { @log = @log + "d" }
+  function handleRead() { @log = @log + "r" }
+  function handleGo(e) { @log = @log + e.type.slice(0, 1) }
+}
+const NotificationItem = <div
+    props={
+        message: string,
+        onDismiss: () => void,
+        onRead?: () => void
+    }
+>
+    <p>${message}</>
+    <button onclick=onDismiss()>Dismiss</>
+    <button onclick=${ if (onRead) { onRead() } }>Mark read</>
+</>
+const Go = <span class="go" props={ onGo: (e: asIs) => void }>
+    <button class="g" onclick=onGo(event)>go</button>
+</>
+<div id="a"><NotificationItem message="New message" onDismiss=handleDismiss/></div>
+<div id="b"><NotificationItem message="Other" onDismiss=handleDismiss onRead=handleRead/></div>
+<div id="c"><Go onGo=handleGo/></div>
+<section id="l">${ lift <div><Go onGo=handleGo/></div> }</section>
+<div id="x"><Go onGo=${(e) => @log = @log + "x"}/></div>
+<p id="o">${@log}</p>
+</program>

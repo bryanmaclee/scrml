@@ -1,0 +1,13 @@
+{
+  "id": "components-rest-param-named-like-prop",
+  "description": "§15.10.1 (S459 L1) — a REST parameter binds its name: `function g(...n)` inside a component with a prop `n` shadows the prop in the body (`n.length` is 3), the prop still reads 4 outside `g`, and a top-level `function top(...xs)` sees `xs`. Before S459 the type system bound the literal parameter text `\"... n\"`, so the body's `n` / `xs` was E-SCOPE-001 — inside and outside components.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: a parameter shadows a same-named prop in its function body. The scope check reads parameter names through the same binder rule as component prop substitution (binding-names.ts).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "input": [{ "click": ".c .b" }],
+    "domAnchored": [{ "selector": "#o", "text": "3/4/2" }]
+  }
+}

@@ -1,0 +1,17 @@
+<program>
+<v> = 7
+const C = <div class="c" props={ bind n: number, label: string }>
+    <p class="before">${n}</p>
+    ${
+      let n = 3
+      const label = "S"
+    }
+    <p class="t">${n}</p>
+    <i class="a" title="t${n}-${label}">a</i>
+    <p class="l">${label}</p>
+    <div class="nest"><span class="ns">${n + 1}</span></div>
+    ${ lift <b class="lf">${n}${label}</b> }
+</>
+<C bind:n=@v label="L"/>
+<p id="o">${@v}</p>
+</program>

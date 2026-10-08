@@ -2624,8 +2624,24 @@ function substituteProps(
   node: ASTNode,
   props: Map<string, string>,
   propExprMap?: Map<string, ExprNode>,
+  bodyScope?: Set<string>,
 ): ASTNode {
   if (!node || typeof node !== "object") return node;
+  // S459 H1 — ONE component scope. `bodyScope` holds every name declared so far, in
+  // source order, at component-body scope (the top level of any `${}` block in the
+  // body). §15.10.1: "From the point of declaration onward in the same scope, the
+  // local binding shadows the prop", and markup after a component logic block is
+  // the SAME scope (§15.10.1's Greeter example reads `greeting` in later markup).
+  // So a shadowed prop is ABSENT from the maps for this node and everything under it
+  // — later `${}` blocks, text interpolation, attribute values, handler expressions,
+  // lifted markup — and §15.11.1 "A local declaration, parameter or loop binder named
+  // like the prop is not the prop … and is writable" holds by construction (a write
+  // to it is never recorded as a prop write, never lowered onto the caller's cell).
+  if (bodyScope && bodyScope.size > 0) {
+    const scoped = scopedPropMaps(props, propExprMap, bodyScope);
+    props = scoped.props;
+    propExprMap = scoped.propExprMap;
+  }
   // g-each-component-body-invalid-js (STEP 2-B): also proceed when only the
   // ExprNode map is populated. Expression-valued props (call-ref / member chain)
   // never enter the string `props` map, so a component whose ONLY prop is
@@ -2703,6 +2719,27 @@ function substituteProps(
         // handler arg, conditional, or bind target.
         if (propExprMap && attr.value.kind === "call-ref") {
           const callVal = attr.value as { name: string; args: string[]; argExprNodes?: ExprNode[]; span: ExprSpan };
+          // S459 M2 — the CALLEE of the bare event-attribute call form is a prop reference
+          // too: `<button onclick=onDismiss()>` with `props={ onDismiss: () => void }`
+          // (§15.11.4's own example) calls the CALLER's value. It goes through the same
+          // structural map as every other prop read — no text fallback, no second reader:
+          // a plain-name value stays a call-ref to that name (lowered exactly as if the
+          // body had written `onclick=handleDismiss()`); any other value becomes an `expr`
+          // whose tree is the call with the substituted callee.
+          const calleeProp = typeof callVal.name === "string" ? propExprMap.get(callVal.name) : undefined;
+          if (calleeProp) {
+            const argNodes0 = Array.isArray(callVal.argExprNodes) ? callVal.argExprNodes : [];
+            const newArgNodes0 = argNodes0.map((a) => substitutePropsInExprNode(a, propExprMap, new Set()));
+            const newArgs0 = newArgNodes0.length === (callVal.args ?? []).length
+              ? newArgNodes0.map((a) => emitStringFromTree(a as ExprNode))
+              : callVal.args;
+            if (calleeProp.kind === "ident" && /^[A-Za-z_$][\w$]*$/.test((calleeProp as IdentExpr).name)) {
+              return { ...attr, value: { ...callVal, name: (calleeProp as IdentExpr).name, args: newArgs0, argExprNodes: newArgNodes0 } };
+            }
+            const span0 = callVal.span ?? (calleeProp as { span?: ExprSpan }).span;
+            const callNode = { kind: "call", span: span0, callee: calleeProp, args: newArgNodes0, optional: false } as unknown as ExprNode;
+            return { ...attr, value: { kind: "expr", raw: emitStringFromTree(callNode), refs: [], exprNode: callNode, span: callVal.span } };
+          }
           const argNodes = callVal.argExprNodes;
           if (Array.isArray(argNodes) && argNodes.length > 0) {
             let changed = false;
@@ -2870,7 +2907,11 @@ function substituteProps(
       });
     }
     if (Array.isArray(cloned.children)) {
-      cloned.children = (cloned.children as ASTNode[]).map((child: ASTNode) => substituteProps(child, props, propExprMap));
+      // Children in SOURCE ORDER through the one component scope (S459 H1): a child
+      // logic block's top-level declarations shadow for every later sibling and its
+      // subtree. A plain element creates no scope (outside a component, too, a `${}`
+      // declaration inside a nested element is read by later markup at file scope).
+      cloned.children = (cloned.children as ASTNode[]).map((child: ASTNode) => substituteProps(child, props, propExprMap, bodyScope));
     }
     return cloned as unknown as ASTNode;
   }
@@ -2879,11 +2920,14 @@ function substituteProps(
   // inside ExprNode subtrees. Without this, identifier references to props inside
   // logic-block bodies would error at TS as undeclared.
   if (cloned.kind === "logic" && propExprMap && Array.isArray(cloned.body)) {
-    const newBody = substitutePropsInLogicStmts(
-      cloned.body as LogicStatement[],
-      propExprMap,
-      new Set<string>(),
-    );
+    // The block's top level IS component-body scope (S459 H1): the names its statements
+    // declare (let / const / tilde / lin / `@` / function, any pattern — binding-names.ts)
+    // are carried out into `bodyScope` for everything after the block. Nested scopes
+    // (function bodies, `if` / `for` bodies, lambdas) stay inside the statement walker.
+    const blockScope = new Set<string>(bodyScope ?? []);
+    const newBody = (cloned.body as LogicStatement[]).map((stmt) =>
+      substitutePropsInLogicStmt(stmt, propExprMap!, blockScope));
+    if (bodyScope) for (const name of blockScope) bodyScope.add(name);
     // Markup body items and `lift` targets are substituted by the statement walker, in
     // their statement's scope (S458 fourth round).
     cloned.body = newBody;
@@ -2926,18 +2970,21 @@ function substituteProps(
         if (sub !== cur) cloned[field] = sub;
       }
     }
-    // Recurse into the structural child node lists + the optional <empty> child.
+    // Recurse into the structural child node lists + the optional <empty> child. An
+    // each body / match arm is its OWN scope: it sees the component scope so far, and a
+    // declaration inside it does not escape to later siblings (a copy, not the set).
+    const eachScope = new Set<string>(bodyScope ?? []);
     for (const key of ["templateChildren", "bodyChildren", "arms"]) {
       if (Array.isArray(cloned[key])) {
         cloned[key] = (cloned[key] as unknown[]).map((item: unknown) =>
           item && typeof item === "object" && (item as Record<string, unknown>).kind
-            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap)
+            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap, eachScope)
             : item,
         );
       }
     }
     if (cloned.emptyChild && typeof cloned.emptyChild === "object" && (cloned.emptyChild as Record<string, unknown>).kind) {
-      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap);
+      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap, new Set(bodyScope ?? []));
     }
     return cloned as unknown as ASTNode;
   }
@@ -2948,7 +2995,7 @@ function substituteProps(
     if (Array.isArray(cloned[key])) {
       cloned[key] = (cloned[key] as unknown[]).map((item: unknown) => {
         if (item && typeof item === "object" && (item as Record<string, unknown>).kind) {
-          return substituteProps(item as ASTNode, props, propExprMap);
+          return substituteProps(item as ASTNode, props, propExprMap, bodyScope);
         }
         return item;
       });
@@ -3429,7 +3476,10 @@ function expandComponentNode(
   _propWriteCtx = writeCtx;
 
   // Clone and substitute props into the definition's primary root node
-  let expanded = substituteProps(defNode, props, propExprMap) as MarkupNode;
+  // S459 H1 — ONE component scope, shared by the primary root and every secondary root
+  // in source order (see `substituteProps`).
+  const componentScope = new Set<string>();
+  let expanded = substituteProps(defNode, props, propExprMap, componentScope) as MarkupNode;
 
   // Merge class attribute:
   // Find the base class on the definition root element.
@@ -3616,7 +3666,7 @@ function expandComponentNode(
 
   // Expand secondary root nodes: prop substitution only, no attr/class/children merging
   const secondaryNodes: MarkupNode[] = extraDefNodes.map((extraNode: MarkupNode) => ({
-    ...(substituteProps(extraNode, props, propExprMap) as MarkupNode),
+    ...(substituteProps(extraNode, props, propExprMap, componentScope) as MarkupNode),
     id: ++counter.next,
     isComponent: false,
     _expandedFrom: componentName,

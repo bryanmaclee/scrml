@@ -88,6 +88,7 @@ import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, col
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
+import { boundNamesOf } from "./binding-names.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
 import { ifChainChildNodes } from "./ast-if-chain.js";
@@ -11020,7 +11021,12 @@ function annotateNodes(
               }
               continue;
             }
-            const paramName = typeof param === "string" ? param : paramNameField as string;
+            // S459 L1 — the NAME a parameter binds comes from the one binder reader
+            // (binding-names.ts, the same rule component prop substitution uses): a rest
+            // parameter arrives as `"... n"` and binds `n`, not the literal `"... n"`.
+            const paramText = typeof param === "string" ? param : paramNameField as string;
+            const paramLeaf = typeof paramText === "string" ? boundNamesOf(paramText) : [];
+            const paramName = paramLeaf.length === 1 ? paramLeaf[0] : paramText;
             if (paramName) {
               let paramResolvedType: ResolvedType = tAsIs();
               if (paramAnnot) {
