@@ -90,10 +90,13 @@ describe("§1 renameUserFnRefsScoped — only free references are renamed", () =
     expect(out).toBe("x = _scrml_id_3.name;\nf(_scrml_id_3, 1);\ng(_scrml_id_3);\nh = _scrml_id_3;");
   });
 
-  test("a host-global name keeps the legacy positions: `document.x` is not renamed, `document(` is", () => {
+  test("a host-global name is renamed in every position too; the compiler's aliased `_scrml_g.document` is not a reference (S459, after S457 2a)", () => {
+    // Compiler-emitted code reaches host globals through `_scrml_g` (S457 2a), so a
+    // free `document` is the user's own function in every position — the legacy
+    // call-position exception for host-global names is gone.
     const m2 = new Map([["document", "_scrml_document_4"]]);
-    const out = renameUserFnRefsScoped("x = document.title;\ndocument(1);", m2);
-    expect(out).toBe("x = document.title;\n_scrml_document_4(1);");
+    const out = renameUserFnRefsScoped("x = document.title;\ndocument(1);\ny = _scrml_g.document.title;\nz = { document };", m2);
+    expect(out).toBe("x = _scrml_document_4.title;\n_scrml_document_4(1);\ny = _scrml_g.document.title;\nz = { document: _scrml_document_4 };");
   });
 
   test("string literals and comments are untouched", () => {

@@ -39,11 +39,14 @@
  * local, a user's own local or parameter, a destructured binding — is that
  * binding, and is left alone, along with every use that resolves to it.
  *
- * The SYNTACTIC positions the regex renamed are kept exactly (an identifier
- * followed by `(`, `;`, `,`, `}`, `]`, `)`, a line break, a comment, a literal,
- * or the end of the text); this pass only removes the scope-bound ones from that
- * set. So it never renames anything the regex did not, and the change of
- * direction is one way: a locally-bound name stops being renamed.
+ * A free reference is renamed in EVERY syntactic position — a call, a member
+ * root (`event.x`), a bare value (`cb = event`). The legacy regex renamed only
+ * call-like positions (an identifier followed by `(`, `;`, `,`, `}`, `]`, `)`,
+ * a line break, a comment, a literal, or the end of the text) and left the rest
+ * as written — a dangling reference to a name the bundle no longer declares
+ * (s457 3a, S458 review (c)). That position rule existed to keep compiler-emitted
+ * host-global member roots (`document.…`) away from a same-named user function;
+ * the host-global alias below made it unnecessary.
  *
  * ## Why Acorn
  *
@@ -85,8 +88,8 @@ interface Edit {
  * Each method returns the replacement text, or `null` to leave the site alone.
  */
 interface FreeRefRewrite {
-  /** An identifier in reference position. `end` is its end offset in the code. */
-  ref(name: string, end: number): string | null;
+  /** An identifier in reference position. */
+  ref(name: string): string | null;
   /** A shorthand property `{ name }` (object literal or assignment pattern). */
   shorthand(name: string): string | null;
   /** The local name of an `export { name }` (aliased=false) / `export { name as x }` specifier. */
@@ -94,8 +97,8 @@ interface FreeRefRewrite {
 }
 
 /**
- * Rename every free reference to a user function in `code`, in the positions
- * the legacy regex renamed. Returns `null` when `code` does not parse.
+ * Rename every free reference to a user function in `code`, in every position.
+ * Returns `null` when `code` does not parse.
  */
 export function renameUserFnRefsScoped(
   code: string,
@@ -109,44 +112,15 @@ export function renameUserFnRefsScoped(
   }
   if (!any) return code;
 
-  /** The text after a reference ends in a position the legacy regex renamed. */
-  const inRenamedPosition = (end: number): boolean => {
-    let i = end;
-    let sawNewline = false;
-    while (i < code.length) {
-      const c = code[i];
-      if (c === "\n") { sawNewline = true; i++; continue; }
-      if (c === " " || c === "\t" || c === "\r" || c === "\f" || c === "\v" || c === " ") { i++; continue; }
-      break;
-    }
-    if (sawNewline) return true;
-    if (i >= code.length) return true;
-    const c = code[i];
-    if (c === "(" || c === ";" || c === "," || c === "}" || c === "]" || c === ")") return true;
-    // The regex ran on code segments only: a comment or a string / template
-    // literal starting here ended the segment, which its `$` alternative matched.
-    if (c === "/" && (code[i + 1] === "/" || code[i + 1] === "*")) return true;
-    if (c === '"' || c === "'" || c === "`") return true;
-    return false;
-  };
-
   return rewriteFreeRefs(code, {
-    ref: (name, end) => {
-      const mangled = fnNameMap.get(name);
-      if (mangled === undefined) return null;
-      // s457 3a (S458 review (c)) — a free reference to the user's function is
-      // renamed in EVERY position (a member root `event.x`, a bare value
-      // `cb = event`), not only the call-like positions the legacy regex knew:
-      // with the handler wrapper no longer binding `event`, `event.preventDefault()`
-      // beside a user `function event` is that function, and left as written it
-      // was a dangling `event` after the rename. EXCEPT a host-global name
-      // (`document`, `Math`, `console`, …): compiler-emitted code references those
-      // as free member roots, and a user function that shadows one keeps the
-      // legacy positions until host-global references are spelled through an
-      // alias (g-user-fn-named-host-global-hijacks-compiler-refs-s457).
-      if (!inRenamedPosition(end) && isHostGlobalName(name)) return null;
-      return mangled;
-    },
+    // A free reference to the user's function is renamed in EVERY position — a
+    // call, a member root (`event.x`), a bare value (`cb = event`) — host-global
+    // names included: compiler-emitted code reaches every host global through the
+    // alias (`_scrml_g.document`, S457 2a), a member access this pass never sees
+    // as a reference, so a free `document` here is the user's own binding.
+    // (s457 3a / S458 review (c); the legacy call-position rule and its
+    // host-global exception are gone with the alias.)
+    ref: (name) => fnNameMap.get(name) ?? null,
     shorthand: (name) => {
       const mangled = fnNameMap.get(name);
       if (mangled === undefined) return null;
@@ -199,7 +173,7 @@ function rewriteFreeRefs(code: string, rw: FreeRefRewrite): string | null {
   const ref = (id: AnyNode, scope: Scope) => {
     const name = id.name as string;
     if (isBound(scope, name)) return;
-    const text = rw.ref(name, id.end);
+    const text = rw.ref(name);
     if (text === null) return;
     edits.push({ start: id.start, end: id.end, text });
   };
@@ -544,55 +518,6 @@ function rewriteFreeRefs(code: string, rw: FreeRefRewrite): string | null {
     last = e.start;
   }
   return out;
-}
-
-/**
- * A host-environment global the emitted code may reference as a free name —
- * a FIXED list committed in source: the ECMAScript standard built-ins and the
- * web-platform globals. Never probed from the compiler's own process
- * (`name in globalThis`): that made the output depend on the host running
- * the compiler (Bun vs Node; a test process with happy-dom globals registered
- * saw `open` / `event` as globals and emitted different code — S458 review).
- * A compile is a pure function of its inputs.
- *
- * The list MUST hold every host global the compiler itself emits into client
- * text as a free name outside a call position (the rename runs on the client
- * buffer only; the runtime is spliced in after it) — e.g. `NodeFilter.SHOW_COMMENT`
- * (emit-each), `document.…`, `window.…`, `globalThis.…`. Otherwise a user
- * function of that name would capture the compiler's reference. Server / tool
- * globals (`process`, `Bun`, `Buffer`) are not here: the client buffer the
- * rename sees never references them, so a user function named `process` is
- * renamed in every position like any other user binding. Names that are window
- * properties but ordinary words (`open`, `close`, `name`, `event`, `status`) are
- * deliberately absent for the same reason — they are the user's names.
- * `tests/unit/fn-name-rename-determinism.test.js` pins the host independence.
- */
-const ECMASCRIPT_GLOBALS = [
-  "globalThis", "Infinity", "NaN", "undefined", "eval", "isFinite", "isNaN", "parseFloat", "parseInt",
-  "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "unescape",
-  "Object", "Function", "Boolean", "Symbol", "Error", "AggregateError", "EvalError", "RangeError",
-  "ReferenceError", "SyntaxError", "TypeError", "URIError", "Number", "BigInt", "Math", "Date",
-  "String", "RegExp", "Array", "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array",
-  "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array",
-  "BigUint64Array", "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "FinalizationRegistry",
-  "ArrayBuffer", "SharedArrayBuffer", "DataView", "Atomics", "JSON", "Promise", "Proxy", "Reflect",
-  "Intl", "Iterator",
-];
-const WEB_GLOBALS = [
-  "window", "document", "navigator", "location", "history", "localStorage", "sessionStorage",
-  "performance", "screen", "customElements", "requestAnimationFrame", "cancelAnimationFrame",
-  "requestIdleCallback", "cancelIdleCallback", "matchMedia", "getComputedStyle", "alert", "confirm",
-  "prompt", "console", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
-  "queueMicrotask", "structuredClone", "atob", "btoa", "URL", "URLSearchParams", "Headers", "Request",
-  "Response", "FormData", "Blob", "File", "AbortController", "AbortSignal", "TextEncoder", "TextDecoder",
-  "HTMLElement", "Element", "Node", "NodeFilter", "Event", "CustomEvent", "PopStateEvent", "EventTarget",
-  "MutationObserver", "IntersectionObserver", "ResizeObserver", "DOMParser", "FileReader", "Image",
-  "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "BroadcastChannel", "MessageChannel", "indexedDB",
-  "caches", "self", "parent", "top", "frames",
-];
-const HOST_GLOBAL_NAMES: ReadonlySet<string> = new Set([...ECMASCRIPT_GLOBALS, ...WEB_GLOBALS]);
-function isHostGlobalName(name: string): boolean {
-  return HOST_GLOBAL_NAMES.has(name);
 }
 
 /**

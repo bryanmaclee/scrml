@@ -3,10 +3,10 @@
  *
  * S458 review of s457 (round 3) — a compile is a pure function of its inputs.
  *
- * The client user-function rename (codegen/fn-name-rename.ts) keeps a free
+ * The client user-function rename (codegen/fn-name-rename.ts) once kept a free
  * reference to a host global (`document`, `Math`, …) in the legacy call
- * positions only, so a compiler-emitted `document.…` is not captured by a user
- * `function document`. "Host global" used to be decided by probing the
+ * positions only, so a compiler-emitted `document.…` was not captured by a user
+ * `function document`. "Host global" was first decided by probing the
  * COMPILER's own process (`name in globalThis`): the same source compiled to
  * different client code depending on what ran the compiler —
  *
@@ -16,7 +16,10 @@
  * (`open` is a window property in happy-dom; `process` / `postMessage` /
  * `reportError` / `Bun` differ between Bun and Node.) Every one of those left
  * the user's function un-renamed — a dangling reference to a name the bundle no
- * longer declares. The set is now a fixed list in source.
+ * longer declares. S458 made the set a fixed list in source; S459 removed the
+ * exception altogether (compiler host-global references go through `_scrml_g`,
+ * S457 2a), so the rename consults no host-name set at all — `document` and
+ * `Math` below are renamed like every other user function.
  *
  * Pinned here: the same source compiled (1) in-process with no DOM globals,
  * (2) in-process with happy-dom's globals registered, (3) by the CLI in a fresh
@@ -42,10 +45,12 @@ function process(x) { return x }
 function event(x) { return x }
 function postMessage(x) { return x }
 function reportError(x) { return x }
+function document(x) { return x }
+function Math(x) { return x }
 function setV(s) { @v = s }
 
 <div>
-  <button id="b" onclick={ setV(open.name + process.name + event.name + postMessage.name + reportError.name) }>go</button>
+  <button id="b" onclick={ setV(open.name + process.name + event.name + postMessage.name + reportError.name + document.name + Math.name) }>go</button>
   <p id="out">\${@v}</p>
 </div>
 </program>
@@ -102,7 +107,7 @@ describe("the client rename does not depend on the host running the compiler", (
         // renamed where the handler reads it as a member root.
         const line = plain.split("\n").find((l) => l.includes("_scrml_attr_onclick_"));
         expect(line).toBeDefined();
-        for (const n of ["open", "process", "event", "postMessage", "reportError"]) {
+        for (const n of ["open", "process", "event", "postMessage", "reportError", "document", "Math"]) {
           expect(line).toMatch(new RegExp(`_scrml_${n}_\\d+\\.name`));
           expect(line).not.toMatch(new RegExp(`(?<![A-Za-z0-9_$.])${n}\\.name`));
         }
