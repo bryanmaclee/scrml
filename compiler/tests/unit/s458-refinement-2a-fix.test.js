@@ -152,3 +152,21 @@ describe("F2 — refined cells register their judge; the shipped runtime carries
     expect(ok.errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F4 — the worker helper scan reads calls with a tokenizer
+// ---------------------------------------------------------------------------
+
+describe("F4 — a `_scrml_*(` mention in a worker's template literal is not a missing helper", () => {
+  const worker = (body) => `<program>\n<out> = ""\n<program name="wk">\n  \${\n    when message(data) {\n${body}\n    }\n  }\n</program>\n<p>\${@out}</p>\n</program>\n`;
+  test("template-literal text naming a helper compiles", () => {
+    const r = compileClient(worker("      const t = `see _scrml_foo(1) docs`\n      send(t)"), "f4-tpl");
+    expect(r.errors.map((e) => e.code)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+  });
+  test("a real call to an uninlined helper is still refused", async () => {
+    const { unmetWorkerHelperRefsForTest } = await import("../../src/codegen/emit-worker.ts");
+    expect(unmetWorkerHelperRefsForTest("const t = `see _scrml_foo(1) docs`; /* _scrml_bar(2) */ // _scrml_baz(3)\nx.y._scrml_m(1);")).toEqual([]);
+    expect(unmetWorkerHelperRefsForTest("const t = `a ${_scrml_foo(1)} b`;")).toEqual(["_scrml_foo"]);
+    expect(unmetWorkerHelperRefsForTest("_scrml_bar(2); function _scrml_ok() {} _scrml_ok();")).toEqual(["_scrml_bar"]);
+  });
+});

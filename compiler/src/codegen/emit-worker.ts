@@ -22,6 +22,7 @@
  */
 
 import { basename } from "path";
+import * as acorn from "acorn";
 import { emitLogicNode } from "./emit-logic.ts";
 import { needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER, appendJudgeDefinitions } from "./emit-predicates.ts";
 import { CGError } from "./errors.ts";
@@ -172,14 +173,31 @@ function unmetWorkerHelperRefs(bundle: string): string[] {
   // runtime provides it) — not a missing helper.
   for (const m of bundle.matchAll(/\btypeof\s+(_scrml_[A-Za-z0-9_$]*)/g)) defined.add(m[1]);
   const unmet = new Set<string>();
-  // calls, not mentions: strip string literals and comments first
-  const code = bundle
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
-  for (const m of code.matchAll(/(?<![\w$.])(_scrml_[A-Za-z0-9_$]*)\s*\(/g)) {
-    if (!defined.has(m[1])) unmet.add(m[1]);
+  // Calls, not mentions — read with a real JS tokenizer (S458 2a-fix F4): text in
+  // a string, a template literal's text, or a `//` / `/* */` comment is not a
+  // call. (A regex strip missed template literals and block comments, so
+  // `` `see _scrml_foo(1) docs` `` in a worker was refused as a compiler defect.)
+  let toks: acorn.Token[];
+  try {
+    toks = [...acorn.tokenizer(bundle, { ecmaVersion: "latest", sourceType: "module" })];
+  } catch {
+    // Not tokenizable: the §2.2.1 emit gate refuses the artifact on its own.
+    return [];
+  }
+  for (let i = 0; i + 1 < toks.length; i++) {
+    const t = toks[i];
+    if (t.type.label !== "name") continue;
+    const name = String((t as { value?: unknown }).value);
+    if (!name.startsWith("_scrml_") || toks[i + 1].type.label !== "(") continue;
+    if (i > 0 && (toks[i - 1].type.label === "." || toks[i - 1].type.label === "?.")) continue; // a method, not a free call
+    if (!defined.has(name)) unmet.add(name);
   }
   return [...unmet];
+}
+
+/** Test seam (S458 2a-fix F4) — the worker bundle's unmet `_scrml_*` call scan. */
+export function unmetWorkerHelperRefsForTest(bundle: string): string[] {
+  return unmetWorkerHelperRefs(bundle);
 }
 
 /**
