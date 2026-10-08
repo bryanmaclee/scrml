@@ -136,47 +136,34 @@ describe("MED-1 — a refined collection write judges only what it changes", () 
     expect(JSON.parse(JSON.stringify(rt.state[k]))).toEqual([1, 2, 3]);
   });
 
-  test("an object held at two positions of one value is judged at both", () => {
+  test("copy-in: a value reached at two positions is stored as two copies, each judged by its own position", () => {
     const { js, runtime, errors } = compile(`\${\n  type P:struct = { a: number(>0)[], b: number(>5)[] }\n  <p>: P = { a: [6], b: [8] }\n}\n<program>\n<p>x</p>\n</program>\n`, "two-pos");
     expect(errors).toEqual([]);
     const rt = load(js, runtime);
     const k = rt.key("p");
     const arr = [6, 7];
     rt.set(k, { a: arr, b: arr });
-    expect(throwsContract(() => rt.state[k].a.push(3))).toBe(true); // 3 > 0 for a, but not > 5 for b
-    expect(JSON.parse(JSON.stringify(rt.state[k]))).toEqual({ a: [6, 7], b: [6, 7] });
-    rt.state[k].a.push(9);
-    expect(rt.state[k].b.length).toBe(3);
+    expect(throwsContract(() => rt.state[k].b.push(3))).toBe(true); // b: > 5
+    rt.state[k].a.push(3);                                         // a: > 0 — and b is its own copy
+    expect(JSON.parse(JSON.stringify(rt.state[k]))).toEqual({ a: [6, 7, 3], b: [6, 7] });
+    arr.push(-1);                                                  // the source is not what the cell stores
+    expect(rt.state[k].a.length).toBe(3);
   });
 });
 
-describe("LOW-4 — an array shared by two refined cells", () => {
-  const src = page(`<y>: number(>5)[] = [6, 7]\n  <x>: number(>0)[] = [1]`);
-
-  test("a push one holder's type refuses is refused, and leaves the array unchanged", () => {
-    const { js, runtime, errors } = compile(src, "shared");
+describe("copy-in — `@x = @y` stores x's own copy (S459 \"a, go\")", () => {
+  test("a write through one cell never reaches the other; each is judged by its own type", () => {
+    const { js, runtime, errors } = compile(page(`<y>: number(>5)[] = [6, 7]\n  <x>: number(>0)[] = [1]`), "shared");
     expect(errors).toEqual([]);
     const rt = load(js, runtime);
     const y = rt.key("y"), x = rt.key("x");
     rt.set(x, rt.state[y]); // @x = @y
-    for (const via of [x, y]) {
-      expect(throwsContract(() => { rt.state[via].push(3); rt.set(via, rt.state[via]); })).toBe(true);
-      expect(throwsContract(() => { rt.state[via][0] = 3; })).toBe(true);
-      expect(JSON.parse(JSON.stringify(rt.state[y]))).toEqual([6, 7]);
-    }
-    rt.state[x].push(9); // both types admit it
-    expect(rt.state[y].length).toBe(3);
-  });
-
-  test("once the alias is released, the released cell's type no longer applies", () => {
-    const { js, runtime } = compile(page(`<y>: number(>0)[] = [6, 7]\n  <x>: number(>5)[] = [9]`), "released");
-    const rt = load(js, runtime);
-    const y = rt.key("y"), x = rt.key("x");
-    rt.set(x, rt.state[y]);
-    expect(throwsContract(() => rt.state[y].push(3))).toBe(true); // x (> 5) still holds it
-    rt.set(x, [8]);
-    rt.state[y].push(3);
-    expect(JSON.parse(JSON.stringify(rt.state[y]))).toEqual([6, 7, 3]);
+    expect(throwsContract(() => { rt.state[y].push(3); rt.set(y, rt.state[y]); })).toBe(true); // y: > 5
+    expect(throwsContract(() => { rt.state[y][0] = 3; })).toBe(true);
+    rt.state[x].push(3); rt.set(x, rt.state[x]);                    // x: > 0
+    rt.state[x][0] = 1;
+    expect(JSON.parse(JSON.stringify(rt.state[y]))).toEqual([6, 7]);
+    expect(JSON.parse(JSON.stringify(rt.state[x]))).toEqual([1, 7, 3]);
   });
 });
 
@@ -228,41 +215,42 @@ describe("LOW-MED-3 — a union member is never admitted wholesale", () => {
 // S459 round 3
 // ---------------------------------------------------------------------------
 
-describe("r3 HIGH-1 — a copy-on-write delta is trusted only when proven, and only by the set that follows it", () => {
+describe("path writes — in place through the cell's own proxies; copy-on-write when another cell stores the value", () => {
   const src = page(`<ls>: number(>0)[] = [1, 2]\n  <draft>: number[] = []\n  <other>: number = 0\n  function w(i, v) { @draft[i] = v }`);
   const cell = (rt, name) => Object.keys(rt.state).find((k) => k === name || k.endsWith("$" + name));
 
-  test("an edit buffer: path-edited, then pushed in place, then committed — the commit is judged whole", () => {
+  test("an edit buffer: @draft = @ls, path-edited and pushed through @draft, then committed — @ls is untouched until the commit, which is copied and judged whole", () => {
     const { js, runtime, errors } = compile(src, "lp");
     expect(errors).toEqual([]);
     const rt = load(js, runtime);
     const ls = rt.key("ls"), draft = cell(rt, "draft");
-    rt.set(draft, rt.state[ls]);                                  // @draft = @ls
-    rt.set(draft, rt.deepSet(rt.state[draft], [0], 5));           // @draft[0] = 5
-    rt.state[draft].push(-5);                                     // @draft.push(-5) (unrefined cell: unjudged)
+    rt.set(draft, rt.state[ls]);                                  // @draft = @ls (an unrefined cell stores @ls's value)
+    rt.set(draft, rt.deepSet(rt.state[draft], [0], 5));           // @draft[0] = 5 — copy-on-write: @ls is not written
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([1, 2]);
+    rt.state[draft].push(-5);                                     // @draft's own array now (unrefined: unjudged)
     expect(throwsContract(() => rt.set(ls, rt.state[draft]))).toBe(true); // @ls = @draft
     expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([1, 2]);
+    rt.state[draft].pop();
+    rt.set(ls, rt.state[draft]);                                  // admitted: @ls stores its own copy
+    rt.state[draft].push(-7);
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([5, 2]);
   });
 
-  test("a delta not set at once is discarded by the next set of ANY cell; a result changed off the path is not a path update", () => {
+  test("a path write on the cell's own value is made in place, judged at the leaf only; the set that follows is the cell's own value", () => {
     const { js, runtime } = compile(src, "lp2");
     const rt = load(js, runtime);
-    const ls = rt.key("ls"), other = cell(rt, "other");
+    const ls = rt.key("ls");
     const counts = {};
     instrument(rt.judges[ls].d, counts, "ls");
-    const r = rt.deepSet(rt.state[ls], [0], 7);
-    rt.set(other, 1);                                             // an unrelated set consumes the fact
+    const before = rt.state[ls];
+    const r = rt.deepSet(before, [1], 9);                         // `@ls[1] = 9`
+    expect(r).toBe(before);
     rt.set(ls, r);
-    expect(counts.ls).toBe(1);                                    // judged whole
-    const r2 = rt.deepSet(rt.state[ls], [1], 8);
-    r2.push(-1);                                                  // the result changed off the path
-    expect(throwsContract(() => rt.set(ls, r2))).toBe(true);      // not proven -> judged whole -> refused
-    expect(counts.ls).toBe(2);
-    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([7, 2]);
-    rt.set(ls, rt.deepSet(rt.state[ls], [1], 9));                 // a genuine path update: judged at the path
-    expect(counts.ls).toBe(2);
+    expect(counts.ls).toBe(0);
     expect(counts["ls.el"]).toBe(1);
-    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([7, 9]);
+    expect(throwsContract(() => rt.set(ls, rt.deepSet(rt.state[ls], [0], -1)))).toBe(true);
+    expect(JSON.parse(JSON.stringify(rt.state[ls]))).toEqual([1, 9]);
+    expect(counts.ls).toBe(0);
   });
 });
 

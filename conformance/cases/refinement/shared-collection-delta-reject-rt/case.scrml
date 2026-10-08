@@ -12,12 +12,12 @@ ${
         @x = @y
         @y.push(@t)
     }
-    function sharedPushViaX() { @x.push(@t) }
+    function sharedPushViaX() { @x.push(@m) }
     function pathField() { @rows[1].n = @m }
     function pathRow() { @rows[0] = { u: "q", n: @m } }
     function twoPositions() {
         @p.b = @p.a
-        @p.a.push(@t)
+        @p.b.push(@t)
     }
     function nestedPush() { @mm[1].push(@m) }
 }

@@ -1,0 +1,17 @@
+{
+  "id": "refinement-copy-in-define-property-reject-rt",
+  "description": "S459 copy-in (N4): `Object.defineProperty` on a refined cell's value is a write like any other. Defining `n` as -5 on a `L` (`n: number(>0)`) and element 0 as -5 on a `number(>0)[]` are both refused with E-CONTRACT-001-RT, and both cells keep their prior values. Before the fix the cell's proxy had no defineProperty trap, so both writes landed unjudged.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"If the predicate evaluates to false at runtime, the compiler-generated check SHALL throw a runtime error with code E-CONTRACT-001-RT before the assignment is applied. The variable retains its prior value.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#field" }, { "click": "#el" }],
+    "state": {
+      "l": { "u": "a", "n": 1 },
+      "ls": [1, 2]
+    },
+    "domAnchored": [{ "selector": "#out", "text": "1 1" }]
+  }
+}
