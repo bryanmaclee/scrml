@@ -1,12 +1,14 @@
 import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liveSqlInterpolations } from "./sql-lex.ts";
+import { sqlSitesInExpressionText } from "../sql-in-expression-text.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
 import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
 import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
+import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
 // columns a lowered `?{}` SELECT carries and wrap its result rows in the
 // `_scrml_protect_tag(...)` descriptor at query-lowering time (server only).
@@ -17,7 +19,7 @@ import {
   type ProtectedColumns,
 } from "./protect-egress.ts";
 import { sqlSkeleton } from "./protect-flow.ts";
-import { sqlHoldsOneStatement, multipleStatementsThrowExpr, judgeDriverCall, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE } from "./sql-one-statement-guard.ts";
+import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal } from "./sql-one-statement-guard.ts";
 // §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
 // `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
 // and coerce them back to true/false at query-lowering time (server only).
@@ -561,6 +563,15 @@ export function buildTaggedTemplate(
  *
  * §8.9.5: `.nobatch()` is a compile-time marker with no runtime effect.
  * It is stripped from both call positions before the main rewrite.
+ *
+ * WHICH TEXT IS A QUERY (S457, `g-rewrite-sql-refs-lowers-inside-js-literals-s456`): only the
+ * sites `sqlSitesInExpressionText` reports — a `?{` in CODE context, read by the same scanner the
+ * §8.1.2 / §14.8.10 compile checks read (`sql-in-expression-text.ts`). A `?{` inside a JS string,
+ * a comment, a regular-expression literal or template-literal TEXT is data and is left exactly as
+ * written. Before, whole-text regexes lowered it anyway — `x == "?{\`SELECT 1; DELETE FROM log\`}"`
+ * compiled clean (the checks skip literals) and emitted a broken string; two readers of one text.
+ * Each site is lowered on its own, with its own chain (`.nobatch()` / `.acrossTenants()` are read
+ * from that site's chain only, never from other text).
  */
 export function rewriteSqlRefs(
   expr: string,
@@ -568,105 +579,149 @@ export function rewriteSqlRefs(
   errors?: any[],
 ): string {
   if (!expr || typeof expr !== "string") return expr;
+  const sites = sqlSitesInExpressionText(expr);
+  if (sites.length === 0) return expr;
+  let out = "";
+  let cursor = 0;
+  for (const site of sites) {
+    // The site's chain: the `.name()` calls directly after its `}` (the shape the lowering
+    // reads; whitespace between them as the earlier whole-text pattern allowed).
+    const chain = /^(?:\s*\.\w+\(\s*\))*/.exec(expr.slice(site.end))![0];
+    out += expr.slice(cursor, site.at) + lowerSqlSite(site.body, chain, dbVar, errors);
+    cursor = site.end + chain.length;
+  }
+  return out + expr.slice(cursor);
+}
 
+/**
+ * Lower ONE text-path `?{}` site — `?{` + backtick + `sqlContent` + backtick + `}` followed by
+ * `chain` — to its driver call (the per-site body of `rewriteSqlRefs`).
+ */
+function lowerSqlSite(
+  sqlContent: string,
+  chain: string,
+  dbVar: string,
+  errors?: any[],
+): string {
   // §8.9.5: strip `.nobatch()` from either chain position.
   //   ?{...}.nobatch().get()  →  ?{...}.get()
   //   ?{...}.get().nobatch()  →  ?{...}.get()
-  let result = expr.replace(/\.nobatch\(\)/g, "");
+  let rest = chain.replace(/\.nobatch\(\)/g, "");
 
-  // §14.8.10 — collect + strip `.acrossTenants()` (the sole loud tenant opt-out;
-  // mirror of `.nobatch()`). A query whose chain carried `.acrossTenants()` is
-  // recorded so the tenant floor is SUPPRESSED for it (and `I-TENANT-ACROSS`
-  // fires). The marker has no runtime effect and is stripped from both positions.
-  const _acrossSqls = new Set<string>();
-  result = result.replace(/(\?\{`([^`]*)`\})((?:\s*\.\w+\(\s*\))*)/g, (full, q: string, sqlContent: string, chain: string) => {
-    if (/\.\s*acrossTenants\s*\(\s*\)/.test(chain)) {
-      _acrossSqls.add(sqlContent);
-      return q + chain.replace(/\.\s*acrossTenants\s*\(\s*\)/g, "");
+  // §14.8.10 — read + strip `.acrossTenants()` (the sole loud tenant opt-out;
+  // mirror of `.nobatch()`). A query whose chain carries `.acrossTenants()` has
+  // the tenant floor SUPPRESSED (and `I-TENANT-ACROSS` fires). The marker has no
+  // runtime effect and is stripped from both positions.
+  const across = /\.\s*acrossTenants\s*\(\s*\)/.test(rest);
+  if (across) rest = rest.replace(/\.\s*acrossTenants\s*\(\s*\)/g, "");
+
+  const methodCall = /^\.(\w+)\(\)/.exec(rest);
+  if (methodCall) {
+    return lowerSqlMethodSite(sqlContent, methodCall[1]!, across, dbVar, errors) + rest.slice(methodCall[0].length);
+  }
+  return lowerSqlBareSite(sqlContent, across, dbVar) + rest;
+}
+
+/** `?{…}.method()` — the chained form (see `rewriteSqlRefs`). */
+function lowerSqlMethodSite(
+  sqlContent: string,
+  method: string,
+  across: boolean,
+  dbVar: string,
+  errors?: any[],
+): string {
+  // §44.3: `.prepare()` is removed from Bun.SQL. Bound-statement caching
+  // is handled internally — surface E-SQL-006 at compile time.
+  if (method === "prepare") {
+    if (errors) {
+      errors.push(new CGError(
+        "E-SQL-006",
+        `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
+        { start: 0, end: 0 },
+      ));
     }
-    return full;
-  });
+    // Emit a compile-error marker so the JS still parses (defense in depth)
+    // but any runtime execution surfaces the issue immediately.
+    return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})()`;
+  }
 
-  result = result.replace(/\?\{`([^`]*)`\}\.(\w+)\(\)/g, (_, sqlContent: string, method: string) => {
-    // §44.3: `.prepare()` is removed from Bun.SQL. Bound-statement caching
-    // is handled internally — surface E-SQL-006 at compile time.
-    if (method === "prepare") {
-      if (errors) {
-        errors.push(new CGError(
-          "E-SQL-006",
-          `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
-          { start: 0, end: 0 },
-        ));
-      }
-      // Emit a compile-error marker so the JS still parses (defense in depth)
-      // but any runtime execution surfaces the issue immediately.
-      return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})()`;
-    }
+  // §14.8.10 — a tenant-scoped READ (any terminator): the key column(s) are
+  // added to the projection and the driver's rows are filtered to the active
+  // tenant at the SOURCE (`tenantScope`, innermost — before `.get()` takes its
+  // first row and before the §14.8.9 / §39.4 per-row wrappers). A write: an
+  // injectable INSERT gets `tenant_id` (the hard-fail codes fire from the
+  // emit-server scan).
+  const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, across, dbVar);
+  // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
+  if (!sqlHoldsOneStatement(effectiveSql)) return refuseMultipleStatements(effectiveSql, sqlContent);
+  const { params, segments } = extractSqlParams(effectiveSql);
+  const tagged = buildTaggedTemplate(dbVar, segments, params);
+  // §8.1.2 (S456 fix round F1) — judge the tagged template AS EMITTED: its quasis (the SQL
+  // text JS will send) must be the segments read above, holding one statement.
+  // §14.8.10 item (1) (S457) — the same text, held to the program-body statement allow-list at
+  // the lowering (g-sql-checker-and-lowering-read-different-text-s457).
+  const { verdict: _verdict, refusal: _refusal } = judgeDriverCallDetail(tagged, segments);
+  if (_verdict !== "ok") {
+    if (_verdict === "text-not-read" && errors) errors.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, { start: 0, end: 0 }));
+    if (_refusal) recordProgramStatementRefusal(_refusal, sqlContent);
+    return refusedDriverCallExpr(_verdict, _refusal);
+  }
+  const rows = tenantScope(`await ${tagged}`);
 
-    // §14.8.10 — a tenant-scoped READ (any terminator): the key column(s) are
-    // added to the projection and the driver's rows are filtered to the active
-    // tenant at the SOURCE (`tenantScope`, innermost — before `.get()` takes its
-    // first row and before the §14.8.9 / §39.4 per-row wrappers). A write: an
-    // injectable INSERT gets `tenant_id` (the hard-fail codes fire from the
-    // emit-server scan).
-    const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), dbVar);
-    // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
-    if (!sqlHoldsOneStatement(effectiveSql)) return multipleStatementsThrowExpr();
-    const { params, segments } = extractSqlParams(effectiveSql);
-    const tagged = buildTaggedTemplate(dbVar, segments, params);
-    // §8.1.2 (S456 fix round F1) — judge the tagged template AS EMITTED: its quasis (the SQL
-    // text JS will send) must be the segments read above, holding one statement.
-    const _verdict = judgeDriverCall(tagged, segments);
-    if (_verdict !== "ok") {
-      if (_verdict === "text-not-read" && errors) errors.push(new CGError("E-SQL-001", SQL_TEXT_NOT_READ_MESSAGE, { start: 0, end: 0 }));
-      return refusedDriverCallExpr(_verdict);
-    }
-    const rows = tenantScope(`await ${tagged}`);
+  // .get() and .first() — single-row helpers (§44.3 .get() returns Row | not).
+  // .first() is preserved as a back-compat alias for code emitted before §44
+  // was finalized. Both produce `(await sql`...`)[0] ?? null` — the first row
+  // AFTER the tenant filter. `sqlContent` (the ORIGINAL) resolves protected
+  // columns; the floor-added key column is not a protected concern.
+  if (method === "get" || method === "first") {
+    return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, sqlContent, true), sqlContent);
+  }
 
-    // .get() and .first() — single-row helpers (§44.3 .get() returns Row | not).
-    // .first() is preserved as a back-compat alias for code emitted before §44
-    // was finalized. Both produce `(await sql`...`)[0] ?? null` — the first row
-    // AFTER the tenant filter. `sqlContent` (the ORIGINAL) resolves protected
-    // columns; the floor-added key column is not a protected concern.
-    if (method === "get" || method === "first") {
-      return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, sqlContent, true), sqlContent);
-    }
+  // .all() (Row[]) emits the bare await form; §14.8.9 tags each row.
+  if (method === "all") {
+    return protectTagSqlResult(boolCoerceSqlResult(rows, sqlContent, false), sqlContent);
+  }
 
-    // .all() (Row[]) emits the bare await form; §14.8.9 tags each row.
-    if (method === "all") {
-      return protectTagSqlResult(boolCoerceSqlResult(rows, sqlContent, false), sqlContent);
-    }
+  // .run() and any other terminator. ⚑ S443 round 6: this path used to be left
+  // untagged on the premise that `.run()` discards its result — but the value
+  // is the driver's result ARRAY, and `const r = ?{`SELECT * …`}.run(); return r`
+  // or `UPDATE … RETURNING *` via `.run()` served `passwordHash` (measured). Every
+  // terminator's result is tagged; a statement with no protected output
+  // (plain INSERT/UPDATE/DELETE, DDL) resolves to no tag and emits unchanged.
+  // The same holds for the §14.8.10 source filter (a `.run()` of a SELECT).
+  return protectTagSqlResult(rows, sqlContent);
+}
 
-    // .run() and any other terminator. ⚑ S443 round 6: this path used to be left
-    // untagged on the premise that `.run()` discards its result — but the value
-    // is the driver's result ARRAY, and `const r = ?{`SELECT * …`}.run(); return r`
-    // or `UPDATE … RETURNING *` via `.run()` served `passwordHash` (measured). Every
-    // terminator's result is tagged; a statement with no protected output
-    // (plain INSERT/UPDATE/DELETE, DDL) resolves to no tag and emits unchanged.
-    // The same holds for the §14.8.10 source filter (a `.run()` of a SELECT).
-    return protectTagSqlResult(rows, sqlContent);
-  });
-
-  // Bare `?{`...`}` form — typically static DDL (`CREATE TABLE ...`) or a
-  // dropped-value statement. Routes through `dbVar.unsafe()` so dynamically-
-  // built SQL strings are accepted, with params (if any) passed as a bound
-  // array (Bun.SQL binds them per §44.5).
-  result = result.replace(/\?\{`([^`]*)`\}/g, (_, sqlContent: string) => {
-    // §14.8.10 — a bare INSERT into a tenant-scoped table gets `tenant_id`
-    // injected; a bare SELECT of one is filtered at the source like every read.
-    const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), dbVar);
-    // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
-    if (!sqlHoldsOneStatement(effectiveSql)) return multipleStatementsThrowExpr();
-    const { sql, params } = extractSqlParams(effectiveSql);
-    // ⚑ S443 round 6: a bare `?{`SELECT * …`}` used as a VALUE is the driver's row
-    // array — tag it like every other lowering (measured: it served `passwordHash`).
-    if (params.length === 0) {
-      return protectTagSqlResult(tenantScope(`await ${dbVar}.unsafe(${JSON.stringify(sql)})`), sqlContent);
-    }
-    return protectTagSqlResult(tenantScope(`await ${dbVar}.unsafe(${JSON.stringify(sql)}, [${params.join(", ")}])`), sqlContent);
-  });
-
-  return result;
+/**
+ * Bare `?{`...`}` form — typically static DDL (`CREATE TABLE ...`) or a
+ * dropped-value statement. Routes through `dbVar.unsafe()` so dynamically-
+ * built SQL strings are accepted, with params (if any) passed as a bound
+ * array (Bun.SQL binds them per §44.5).
+ */
+function lowerSqlBareSite(sqlContent: string, across: boolean, dbVar: string): string {
+  // §14.8.10 — a bare INSERT into a tenant-scoped table gets `tenant_id`
+  // injected; a bare SELECT of one is filtered at the source like every read.
+  const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, across, dbVar);
+  // §8.1.2 (S456) — defence in depth: a multi-statement body never reaches the driver.
+  if (!sqlHoldsOneStatement(effectiveSql)) return refuseMultipleStatements(effectiveSql, sqlContent);
+  const { sql, params, segments } = extractSqlParams(effectiveSql);
+  // ⚑ S443 round 6: a bare `?{`SELECT * …`}` used as a VALUE is the driver's row
+  // array — tag it like every other lowering (measured: it served `passwordHash`).
+  // One array element per slot: each payload is parenthesized, so a comma inside one
+  // (`${a, b}` — the comma operator, which the tagged-template path evaluates to `b`)
+  // stays ONE bound value instead of becoming two (S457: "expected 2 values, received 3").
+  const call = params.length === 0
+    ? `${dbVar}.unsafe(${JSON.stringify(sql)})`
+    : `${dbVar}.unsafe(${JSON.stringify(sql)}, [${params.map((p) => `(${p})`).join(", ")}])`;
+  // §8.1.2 + §14.8.10 item (1) (S457) — judge the `.unsafe` call AS EMITTED, like the tagged
+  // form: one statement, and on the program-body allow-list (`ATTACH DATABASE` reached the
+  // driver through this path — g-sql-checker-and-lowering-read-different-text-s457).
+  const { verdict: _verdict, refusal: _refusal } = judgeDriverCallDetail(call, segments);
+  if (_verdict !== "ok") {
+    if (_refusal) recordProgramStatementRefusal(_refusal, sqlContent);
+    return refusedDriverCallExpr(_verdict, _refusal);
+  }
+  return protectTagSqlResult(tenantScope(`await ${call}`), sqlContent);
 }
 
 // ---------------------------------------------------------------------------
@@ -1276,16 +1331,18 @@ function _scanChainStartLeft(s: string, endIdx: number): number {
 // find the matching `(` (handling nested parens). Replaces the entire
 // `(expr) is X` with a temp-var form that evaluates `expr` exactly once.
 //
-//   (expr) is not not  →  ((expr) != null)   [presence]
-//   (expr) is some     →  ((expr) != null)   [presence]
-//   (expr) is not      →  ((expr) == null)   [absence]
+//   (expr) is not not  →  ((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)((expr))
+//   (expr) is some     →  (same — presence)
+//   (expr) is not      →  ((__scrml_is_v) => __scrml_is_v === null || __scrml_is_v === undefined)((expr))
+//   (x) is not         →  (x === null || x === undefined)   [trivial operand: no IIFE]
 //
-// Uses double-equals (== / !=) to match both null and undefined in one check.
-// Single-evaluation of `expr` is intrinsic to the paren form — `expr` appears
-// exactly once on the LHS of the comparison; `null` is a constant, no second
-// reference needed. (Prior emit interposed `(_scrml_tmp_N = (expr))` for the
-// LHS, but that tmpvar was never declared in the emitted ES-module scope,
-// throwing ReferenceError under strict mode — see S103 self-host fix.)
+// The lowering is the shared one (is-predicate-lowering.ts), so this string
+// path and emit-expr's structured path emit the same §42.8 form. The IIFE binds
+// `expr` once (§42.2.4). (It used to emit `((expr) == null)` — one comparison
+// covering both null and undefined — but the client pipeline's later
+// rewriteEqualityOps pass rewrote that `==` to `===`, dropping the `undefined`
+// half; #1333. An even earlier form interposed `(_scrml_tmp_N = (expr))`, a
+// never-declared temp — ReferenceError under strict mode, S103 self-host fix.)
 // Only the parenthesized form is handled here. Identifier/dotted paths are
 // handled by the existing regex patterns below (unchanged). §42.2.4 Phase A.
 function _rewriteParenthesizedIsOp(segment: string): string {
@@ -1372,10 +1429,20 @@ function _rewriteParenthesizedIsOp(segment: string): string {
         lhsExpr = segment.slice(parenStart, opIdx + 1); // e.g. "(regex.exec(str))"
       }
 
-      // Build the replacement: compare expr to null directly.
-      // Single-evaluation is intrinsic — lhsExpr appears once on the LHS.
-      const cmp = op === "absence" ? "==" : "!=";
-      const replacement = `(${lhsExpr} ${cmp} null)`;
+      // Build the replacement — the explicit §42.8 form, never `== null`.
+      // g-is-some-in-a-function-expression-body-emits-an-undefined-helper (#1333,
+      // second defect): the old `((expr) == null)` was correct JS on its own,
+      // but the client pipeline's LATER rewriteEqualityOps pass turns every
+      // `==` into `===`, so it shipped as `((expr) === null)` — `undefined`
+      // dropped, a silent wrong answer against §42.8 ("`is not` SHALL compile to
+      // `(x === null || x === undefined)`"). The shared lowering states both
+      // halves; a non-trivial operand is bound once by its IIFE (§42.2.4).
+      const operandText = isCallParen ? lhsExpr : lhsExpr.slice(1, -1).trim();
+      const trivial = isTrivialOperandText(operandText);
+      const operand = trivial ? operandText : lhsExpr;
+      const replacement = op === "absence"
+        ? lowerAbsenceCheck(operand, trivial)
+        : lowerPresenceCheck(operand, trivial);
 
       // Splice the replacement into the segment.
       const fullMatch = lhsExpr + suffix;
@@ -2826,6 +2893,14 @@ const clientPasses: RewritePass[] = [
   (s, ctx) => ctx.skipPresenceGuard ? s : rewritePresenceGuard(s),
   // Pass 2
   (s, ctx) => rewriteNotKeyword(s, ctx.errors),
+  // Pass 2.2 (#1333) — the §42/§43 `is`-predicate PLACEHOLDER calls
+  // (`__scrml_is_some__(x)` …) that an escape-hatch raw carries out of the
+  // expression parser's preprocessed text. AFTER rewriteNotKeyword (whose
+  // E-SYNTAX-010 scan would read this pass's own `null`/`undefined` as source,
+  // and which lowers a scrml `not` inside the operand first) and BEFORE every
+  // later pass (reactive refs see the lowered operand; the enum/variant passes
+  // would otherwise rewrite the `".V"` tag string). See is-predicate-lowering.ts.
+  (s, _ctx) => lowerIsPlaceholders(s),
   // Pass 2.5 (R24-BUG-1, S136) — word-form boolean operators `or`/`and` → `||`/`&&`.
   // Runs RIGHT AFTER rewriteNotKeyword (the sibling word-form keyword lowering)
   // and BEFORE rewriteReactiveRefs so `@or` / `@and` sigil prefixes are still
@@ -2909,6 +2984,9 @@ const serverPasses: RewritePass[] = [
   (s, ctx) => ctx.skipPresenceGuard ? s : rewritePresenceGuard(s),
   // Pass 2
   (s, _ctx) => rewriteNotKeyword(s),
+  // Pass 2.2 (#1333) — `is`-predicate placeholder calls; same position and
+  // reason as client Pass 2.2.
+  (s, _ctx) => lowerIsPlaceholders(s),
   // Pass 2.5 (R24-BUG-1, S136) — word-form boolean operators `or`/`and` → `||`/`&&`.
   // Same shape as client Pass 2.5; runs before reactive-ref rewriting.
   (s, _ctx) => rewriteBooleanKeywords(s),

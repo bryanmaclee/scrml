@@ -14,6 +14,7 @@ import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
+import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -1199,6 +1200,18 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   const keyAlias: string | null = typeof hoist.keyAlias === "string" && hoist.keyAlias ? hoist.keyAlias : null;
   const valAlias: string | null = typeof hoist.valAlias === "string" && hoist.valAlias ? hoist.valAlias : null;
   if (keyAlias === null || valAlias === null || typeof inSqlTemplate !== "string" || !inSqlTemplate.includes(HOIST_VALUES_PLACEHOLDER)) {
+    return null;
+  }
+  // §14.8.10 item (1) (S457) — the pre-fetch sends SQL derived from the author's `?{}` body. A
+  // body the program-body allow-list refuses is not hoisted: the loop is emitted un-hoisted, and
+  // the per-iteration `?{}` lowering (emit-logic `case "sql"`) refuses it — the one place that
+  // reports and throws (g-sql-checker-and-lowering-read-different-text-s457).
+  // (Likewise a body holding more than one statement, §8.1.2 — the per-site lowering reports it.)
+  if (
+    typeof hoist.sqlTemplate !== "string" ||
+    !sqlHoldsOneStatement(hoist.sqlTemplate) ||
+    programStatementRefusal(hoist.sqlTemplate) !== null
+  ) {
     return null;
   }
 

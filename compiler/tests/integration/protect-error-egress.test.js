@@ -14,7 +14,7 @@
  * REAL `Bun.serve` whose `error:` handler is the one `generateServerEntry` emits.
  */
 import { describe, test, expect, beforeAll } from "bun:test";
-import { writeFileSync, readFileSync, mkdtempSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
@@ -364,8 +364,15 @@ describe("§14.8.9 round 6e — `this` in a function stored on a row, all three 
     db.close();
     const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: true, outputDir: out, log: () => {} });
     expect((r.errors ?? []).map((e) => e.code)).toContain("E-PROTECT-006");
+    // SPEC §2.2.1 (S457 "1a"): the refused compile writes NO file …
+    expect(readdirSync(out)).toEqual([]);
+    // … and the run-time strip is defense in depth PAST that refusal, so drive the
+    // refused compile's in-memory server codegen directly (plus the document its SSR
+    // route reads beside it).
+    const emitted = r.outputs.get(join(dir, "app.scrml"));
+    writeFileSync(join(out, "app.html"), emitted.html);
     const sp = join(out, "app.server.js");
-    writeFileSync(sp, readFileSync(sp, "utf8").replace(/new SQL\("sqlite:[^"]*"\)/g, `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
+    writeFileSync(sp, emitted.serverJs.replace(/new SQL\("sqlite:[^"]*"\)/g, `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
     const mod = await import(`file://${sp}?v=${Date.now()}`);
     const bodies = [];
     for (const rt of mod.routes) {

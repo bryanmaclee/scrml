@@ -25,7 +25,7 @@ import {
   type SessionAttrName,
 } from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
-import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
+import { emitServerParamCheck, parsePredicateAnnotation, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
@@ -66,7 +66,7 @@ import {
   type TenantContext,
 } from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
-import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
+import { buildSsrEachRenderers, SSR_RENDER_HELPER, SSR_URL_GUARD_HELPER } from "./emit-ssr-render.ts";
 // g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,
 // sliced from the SINGLE client-runtime source, inlined into a standalone
 // `.server.js` that references `_scrml_map_*` (reachability-gated below). Without
@@ -1552,6 +1552,10 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   // scope by `_scrml_foreign_seal` (foreign-seal.ts).
   if (emitted.includes(`${FOREIGN_SEAL_FN}(`)) {
     emitted = injectAfterHeader(emitted, SERVER_FOREIGN_SEAL_HELPER);
+  }
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check in a value-export fn.
+  if (needsUrlShapeHelper(emitted)) {
+    emitted = injectAfterHeader(emitted, SERVER_URL_SHAPE_HELPER);
   }
 
   return emitted;
@@ -6323,6 +6327,10 @@ export function generateServerJs(
       const _ssrRenderers = buildSsrEachRenderers(fileAST, _ssrSeededVarNames, errors, filePath);
       if (_ssrRenderers.length > 0) {
         for (const _hl of SSR_RENDER_HELPER.split("\n")) lines.push(_hl);
+        // §5.2 rule 3 (S457) — a row attribute that writes a data-supplied URL calls the guard.
+        if (_ssrRenderers.some((_r) => _r.fnLines.some((_fl) => _fl.includes("_scrml_safe_url(")))) {
+          for (const _hl of SSR_URL_GUARD_HELPER.split("\n")) lines.push(_hl);
+        }
         for (const _r of _ssrRenderers) {
           for (const _fl of _r.fnLines) lines.push(_fl);
           lines.push("");
@@ -6978,6 +6986,14 @@ export function generateServerJs(
   // inlined at the post-header boundary like the helpers above.
   if (finalEmitted.includes(`${FOREIGN_SEAL_FN}(`)) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_FOREIGN_SEAL_HELPER);
+  }
+
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check (a server-function parameter, a
+  // boundary-zone decl in a server body) calls `_scrml_url_shape_ok(`, defined in
+  // runtime-url-guard.js. Inlined once; skipped when the SSR first-paint URL guard copy (the same
+  // source) is already in the bundle.
+  if (needsUrlShapeHelper(finalEmitted)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_URL_SHAPE_HELPER);
   }
 
   // Phase-2 colorless-async — inject any collection-combinator helper

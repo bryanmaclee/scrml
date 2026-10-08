@@ -121,13 +121,20 @@ describe("W-SERVER-IMPORT-UNEMITTED §3: const-only value module used server-sid
 <n> = 0
 function loadIt() {
   const r = ?{ select 1 as n }
-  @n = TTL
+  return TTL
 }
-<button onclick=loadIt()>go</button>
+function go() {
+  @n = loadIt()
+}
+<button onclick=go()>go</button>
 <p>\${@n}</p>
 </program>
 `);
     const r = compile(dir, app);
+    // The server fn returns TTL and the client writes the cell: it used to write
+    // `@n` itself — E-RI-002 (§12.2), so the compile FAILED and this test read the
+    // files the failed compile still wrote; since SPEC §2.2.1 (S457) it writes none.
+    expect(r.errors).toEqual([]);
     // Pre-fix this FIRED (consts.scrml short-circuited to "" → no .server.js).
     // Post-fix the value-only .server.js is emitted, so the by-name server
     // import resolves and the MISSING-FILE warning no longer fires.

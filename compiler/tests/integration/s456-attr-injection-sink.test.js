@@ -138,10 +138,13 @@ describe("§1 classifyInterpolatedAttrSink — the shared reader", () => {
   });
 
   test("readLiteralUrlScheme reads only the literal prefix", () => {
+    // S457: `none` (commits to nothing — data can supply the scheme) is now told apart from
+    // `relative` (the literal text already rules a scheme out).
     expect(readLiteralUrlScheme("")).toEqual({ kind: "none" });
-    expect(readLiteralUrlScheme("/x:y")).toEqual({ kind: "none" });
+    expect(readLiteralUrlScheme("java")).toEqual({ kind: "none" });
+    expect(readLiteralUrlScheme("/x:y")).toEqual({ kind: "relative" });
     expect(readLiteralUrlScheme("Mailto:")).toEqual({ kind: "scheme", scheme: "mailto", rest: "" });
-    expect(readLiteralUrlScheme("1abc:")).toEqual({ kind: "none" });
+    expect(readLiteralUrlScheme("1abc:")).toEqual({ kind: "relative" });
   });
 });
 

@@ -51,6 +51,7 @@ import {
   ATTR_INTERP_EXECUTABLE_CODE,
   attrSinkKey,
 } from "../attr-injection-sink.ts";
+import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, wrapUrlGuard } from "./url-attr-guard.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2697,17 +2698,21 @@ function renderTemplateAttrToJs(
   // ---- (3) ${...} interpolation / @.field value → setAttribute value ------
   // Bug 64 / R28-1c (S159) — per-item attr interpolation is live-keyed too so
   // an attr value bound to item data refreshes on reconcile (matches Tier-0).
+  // §5.2 rule 3 (S457) — a URL attribute on this element takes its scheme from the
+  // row data, so its write goes through the runtime guard `_scrml_safe_url`.
+  const _urlValue = (valueJs: string): string =>
+    dynamicUrlAttrNeedsGuard(_elTag, aName) ? wrapUrlGuard(elVar, aName, valueJs) : valueJs;
   if (valKind === "expr") {
     const expr = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
   if (valKind === "variable-ref") {
     const expr = lowerEachExpr(String(val.name ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -2719,7 +2724,7 @@ function renderTemplateAttrToJs(
     // class — the generic value-attribute sibling of the class: arm.)
     const expr = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, String(${expr}));`], iterVarName, indent,
+      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`String(${expr})`)});`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -2752,8 +2757,12 @@ function renderTemplateAttrToJs(
       return;
     }
     if (tpl !== null) {
+      // §5.2 rule 3 (S457) — `href="${it.url}"`: a literal prefix that commits to no scheme
+      // lets the row data supply it; guard the write. A literal relative path / safe scheme
+      // (`href="/u/${it.id}"`) is proven and stays byte-identical.
+      const _tplValue = quotedUrlAttrNeedsGuard(_elTag, aName, sv) ? wrapUrlGuard(elVar, aName, tpl) : tpl;
       for (const _l of maybeWrapEachPerItemEffect(
-        [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${tpl});`], iterVarName, indent,
+        [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_tplValue});`], iterVarName, indent,
       )) lines.push(_l);
       return;
     }

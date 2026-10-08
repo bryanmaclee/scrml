@@ -85,7 +85,9 @@
  *   0  a VALID measurement was taken (whatever the numbers say). This is a TRACKING probe, not a
  *      gate: a red exit over a known backlog would be the §8 cry-wolf shape.
  *   1  only with --fail-on-fail (a FAIL or a CRASH was found) or --check (the report file is stale).
- *      CI runs `--check` in the NON-BLOCKING `tracking` job only.
+ *      CI runs `--check` in the NON-BLOCKING `tracking` job on every PR, and (S457) as a BLOCKING
+ *      `gate` step on a pull request whose diff touches `conformance/cases/**` or
+ *      `compiler/self-host-v2/**` — the report's STALENESS blocks there, never its FAIL count.
  *   2  NOT A VALID RUN — the bootstrap bundle failed to build/load, or zero cases were attempted.
  *
  * The report always states its own scope: "N of M cases attempted" (attempted = reached the

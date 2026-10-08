@@ -42,9 +42,10 @@ function compileClientJs(filename, source) {
   const abs = join(TMP, filename);
   mkdirSync(join(abs, "..").replace(/\/$/, ""), { recursive: true });
   writeFileSync(abs, source);
-  compileScrml({ inputFiles: [abs], outputDir: join(TMP, "dist"), write: true, log: () => {} });
-  const p = join(TMP, "dist", filename.replace(/\.scrml$/, "") + ".client.js");
-  return foldChunkNamespacing(existsSync(p) ? readFileSync(p, "utf8") : "");
+  const r = compileScrml({ inputFiles: [abs], outputDir: join(TMP, "dist"), write: true, log: () => {} });
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+  // in-memory output (a clean compile writes the same codegen).
+  return foldChunkNamespacing(r.outputs.get(abs)?.clientJs ?? "");
 }
 
 describe("§1-2 inline map-assign handler lowers `.insert` -> `_scrml_map_insert`", () => {

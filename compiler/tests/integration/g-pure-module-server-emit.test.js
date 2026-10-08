@@ -70,8 +70,8 @@ describe("g-pure-module-server-emit §1: client-only pure import is tree-shaken 
     return 7
   }
 }
-h1 "g-pure-module regression"
-p \${entryLine("client")}
+<h1>g-pure-module regression</h1>
+<p>\${entryLine("client")}</p>
 
 </program>
 `;
@@ -120,7 +120,7 @@ describe("g-pure-module-server-emit §2: a server-content module keeps the used 
     return serverHelper()
   }
 }
-p \${pureHelper(3)}
+<p>\${pureHelper(3)}</p>
 
 </program>
 `;
@@ -181,7 +181,7 @@ describe("g-pure-module-server-emit §3 (ss1): server-called exported helper emi
     return { path: path, ttl: ttl, hello: greet("there") }
   }
 }
-h1 "ss1 regression"
+<h1>ss1 regression</h1>
 
 </program>
 `;

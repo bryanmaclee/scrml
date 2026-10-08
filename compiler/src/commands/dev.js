@@ -28,7 +28,6 @@ import { tmpdir } from "os";
 import { resolve, dirname, join, basename, relative } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
-import { hasApplicationScopeRefusal } from "./refusal-gate.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 import { createTenantGate, tenantHealthReason, TENANT_REFUSED_STATUS_TEXT } from "../codegen/tenant-startup-check.ts";
@@ -700,12 +699,12 @@ function runOnce(opts, gatheredOut) {
       // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
       // `classic` keeps the shared runtime byte-identical to pre-arc output.
       moduleFormat,
-      // S445 — honour the same no-write refusal `build` / `compile` apply
-      // (./refusal-gate.js): a refused compile (E-MW-008, E-PROGRAM-002,
-      // E-PROGRAM-NESTED-AUTH, …) writes nothing, so the fail-open units never
-      // reach the out dir. The fetch handler already serves the compile error
-      // while the build is failing; this keeps the disk consistent with that.
-      beforeWrite: ({ errors }) => !hasApplicationScopeRefusal(errors),
+      // SPEC §2.2.1 (S457 "1a") — a recompile that reports any Error writes
+      // nothing (compileScrml decides it before the first byte; see
+      // ./refusal-gate.js), so the out dir keeps the last good build. The fetch
+      // handler serves the compile error at every request while the build is
+      // failing (`noteCompileResult` below), so that build is never served as
+      // current; the next green pass replaces it.
     });
   } catch (err) {
     // Fail CLOSED: a throw is a failed compile. Record it exactly like a

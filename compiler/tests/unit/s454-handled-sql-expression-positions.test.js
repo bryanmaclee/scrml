@@ -39,6 +39,7 @@ import {
   parseExprToNode,
   guardCallArmsRaw,
   emitStringFromTree,
+  GUARD_MARKER,
 } from "../../src/expression-parser.ts";
 
 // Scratch lives under os.tmpdir() — the S448 per-process temp root the test
@@ -579,7 +580,7 @@ describe("§7 F2 — a regex literal is not a handler", () => {
     expect(extractHandledOperands("q(/x?{2}/)")).toBe("q(/x?{2}/)");
   });
   test("a division is still a division (`a / b !{…}` is a handler on `b`)", () => {
-    expect(extractHandledOperands("a / b !{ _ :> 0 }")).toContain(".__scrml_guard__(");
+    expect(extractHandledOperands("a / b !{ _ :> 0 }")).toContain(`.${GUARD_MARKER()}(`);
   });
   test("RUNTIME: `/a!{2}/.test(\"a!!\")` is true in the compiled client function", () => {
     const c = compile(`<program>

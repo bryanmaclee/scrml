@@ -1,0 +1,10 @@
+<program>
+<safe>: string = "https://scrml.dev/"
+<evil>: string = "JaVaScRiPt:alert(1)"
+<shown>: string = "none"
+function show(link: string(url)) { @shown = link }
+
+<button id="ok" onclick=${show(@safe)}>Ok</button>
+<button id="bad" onclick=${show(@evil)}>Bad</button>
+<p id="out">Link: ${@shown}</p>
+</program>

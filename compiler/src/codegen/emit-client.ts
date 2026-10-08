@@ -3090,6 +3090,16 @@ export function generateClientJs(ctx: CompileContext): string {
     // defined` on the first arm entry. The factory name gates exactly the files
     // that emit one.
     ["_scrml_armb_", "deep_reactive"],
+    // §5.2 rule 3 (S457) — a URL-attribute write the compiler could not prove safe is routed
+    // through `_scrml_safe_url(` (codegen/url-attr-guard.ts), DEFINED in the `urlguard` chunk. The
+    // call is emitted by many lowerings (top level, arms, <each> rows, lift), so the emitted text is
+    // the one exact signal; a page with no such write ships without the chunk.
+    ["_scrml_safe_url(", "urlguard"],
+    // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls `_scrml_url_shape_ok(`
+    // (emit-predicates.ts), defined in the same `urlguard` chunk (runtime-url-guard.js). The check is
+    // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text
+    // is the one exact signal.
+    ["_scrml_url_shape_ok(", "urlguard"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;

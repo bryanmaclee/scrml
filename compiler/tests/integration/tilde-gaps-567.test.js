@@ -41,9 +41,9 @@ function compileSource(src, fname = "tilde-gaps-fixture.scrml") {
     log: () => {},
   });
   const base = fname.replace(/\.scrml$/, "");
-  const clientPath = join(dir, `${base}.client.js`);
-  let clientJs = "";
-  try { clientJs = readFileSync(clientPath, "utf-8"); } catch { /* file may not exist on errors */ }
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+  // in-memory client output (a clean compile writes the same codegen).
+  const clientJs = result.outputs.get(inputPath)?.clientJs ?? "";
   return {
     clientJs,
     errors: result.errors ?? [],

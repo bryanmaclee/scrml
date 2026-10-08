@@ -1,0 +1,11 @@
+${
+    // `__scrml_` is the compiler's placeholder namespace (§47.1.1, S457):
+    // declaring a name with it is refused, and so is referencing one.
+    const __scrml_cfg__ = 1
+    <msg> = ""
+    function go() {
+        @msg = "" + __scrml_cfg__
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@msg}</p>
