@@ -2,6 +2,8 @@
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S458 below. Rulings: `scrml-support/user-voice-scrml.md` §S459 (~12 entries). Board `S459-bryan.md`. Changelog §S459. Delta-log `[3940]`–`[3955]`. Solo session (a dPA ran alongside on bryan's command).
 
+> **ADDENDUM (post-wrap, same session) — D1 is S440-consistent already.** The stopped round-8 agent verified: round 7's `presence-narrowing.ts` narrows on bare `x`/`!x` ONLY when `x` is a tracked `T | not` receiver (an optional `@cell` for E-TYPE-046, an OPTIONAL fn prop for E-TYPE-031) — plain truthiness on a non-optional value never narrows; that is S440's typed presence test. **D1 landing path:** branch `s459-d1-r8` = `78576ce7a` (round 7) → merge commit **`01b1933cd`** (main 63423d5fa merged; landable; fixes `lift <li><Counter bind:count=@x/></li>` E-ATTR-011 + `onclick=onGo(event)` cases under #1363) → **`0c22fde5a` = round-8 strict reader, DO NOT LAND (drop it)** → `98d11d664` progress. Cut a landing branch at `01b1933cd`, review it (S239), land. Not yet run on 01b1933cd: corpus differential, browser tier, conformance, host-global-scan, types gate. Two residual SPEC deltas in round 7: narrows under `show=` (vs §42.3.5/S451, gap g-impl1-show-narrows-s451) and `match` narrowing covers the whole match body. dpa-070 still owed (it decides `is some`/`given` retirement, not D1).
+
 ## ⏭ NEXT-SESSION PICKUP (ordered)
 
 ### 0. bryan's rulings owed — FIVE dPA deep-dives complete, awaiting him (scrml-support/docs/deep-dives/*-2026-10-08.md)

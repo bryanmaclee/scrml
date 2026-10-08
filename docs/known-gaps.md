@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 244 | 6 |
-| MED | 553 | 4 |
-| LOW | 313 | 0 |
+| MED | 554 | 4 |
+| LOW | 314 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -23901,3 +23901,10 @@ Fresh-process compiles agree. Could matter for long-lived `scrml dev` / `serve`.
 ### g-ship-strip-esm-chunks-after-strip-s459 — with `--module-format=esm` + per-route chunks, the ESM chunk transform runs AFTER the strip: 21 chunks keep a header comment + an unstripped import line, and §47.9.9's "every hash over the stripped bytes" is false for ESM chunks — `NEW S459; LOW; open`
 Hash-before-esm-transform order is pre-existing (base too); no behaviour impact today. Fix: strip after `toEsmClientChunk`, or narrow the §47.9.9 sentence. Also: the fallback warning names a chunk by its internal EpId (absolute path); `build` ~15-25% slower on a large app (4 parses per artifact).
 <!-- @gap id=g-ship-strip-esm-chunks-after-strip-s459 sev=LOW status=open locus=compiler/src/codegen/index.ts(emitPerRouteChunks ~:4233-4245) prov=review:s459-ship-strip -->
+
+### g-eq-not-unchecked-in-block-handler-arrows-s459 — `== not` (E-EQ-002) is not checked inside block-bodied event-handler arrows: `onclick=${() => { if (@v == not) return … }}` compiles silently (top level and component bodies), while the same check fires inside a `function` — `NEW S459; LOW; open (pre-existing)`
+Agent-executed on origin/main (S459 D1 round-8 agent).
+<!-- @gap id=g-eq-not-unchecked-in-block-handler-arrows-s459 sev=LOW status=open locus=compiler/src/gauntlet-phase3-eq-checks.js(PA-located-verify) prov=empirical:s459-d1-r8-agent -->
+
+### g-top-level-given-emits-bare-name-s459 — top-level `${ given @a :> { <p>${@a.name}</p> } }` lowers the cell to a bare `a` (`if (a !== null && a !== undefined)`) → ReferenceError at load — `NEW S459; MED; open (agent-executed on the D1 branch tip; origin/main not re-checked)`
+<!-- @gap id=g-top-level-given-emits-bare-name-s459 sev=MED status=open locus=searched:emit-logic.ts given lowering — not traced prov=empirical:s459-d1-r8-agent -->

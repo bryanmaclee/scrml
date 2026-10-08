@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `ae40547bb` — wrap(s459): file 14 S459 gap entries (pre-existing defects found by this session's reviews) — **LOCAL-ONLY**
+- `f03cd108c` — wrap(s459): hand-off, changelog, delta-log [3940]-[3954], review markers, strip gaps resolved — **LOCAL-ONLY**
 - `3a4a3639a` — wrap(s458): addendum — post-reset rulings, #1355–#1357, branch landing order (#1358) — **pushed**
 - `46ed1f8ff` — wrap(s457): injection sinks and SQL checks moved to the text the runtime executes, `__scrml_` reserved, failed compiles write nothing — 8 PRs, four branches in flight (#1349) — **pushed**
 - `9d1a633ff` — wrap(s456): tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting per-row-equivalent, flogence's silent null slice (#1338) — **pushed**
