@@ -123,15 +123,80 @@ describe("copy-in — what a refined cell admits is its own copy", () => {
     expect(rt.state[k].u).toBe("a");
   });
 
-  test("a value reached twice is stored twice: one place per stored object", () => {
+  test("a value that reaches one object twice is stored sharing ONE copy (each source object copied once); every place stays judged", () => {
     const rt = load(page(`<rows>: L[] = []`), "dup");
     const k = rt.key("rows");
     const o = { u: "o", n: 4 };
     rt.set(k, [o, o]);
+    expect(rt.state[k][0]).toBe(rt.state[k][1]);
+    o.n = -1;                                               // the source is still the caller's
     rt.state[k][1].n = 7;
-    expect(rt.plain("rows")).toEqual([{ u: "o", n: 4 }, { u: "o", n: 7 }]);
-    rt.state[k].shift();
+    expect(rt.plain("rows")).toEqual([{ u: "o", n: 7 }, { u: "o", n: 7 }]);
+    // a PATH write names one place: that place gets its own copy first (as copy-on-write did)
+    rt.set(k, rt.deepSet(rt.state[k], [0, "n"], 9));
+    expect(rt.plain("rows")).toEqual([{ u: "o", n: 9 }, { u: "o", n: 7 }]);
+    expect(throwsContract(() => rt.set(k, rt.deepSet(rt.state[k], [1, "n"], -2)))).toBe(true);
+    o.n = 4;
+    rt.set(k, [o, o]);
+    rt.state[k].shift();                                    // one place left: still in the cell
     expect(throwsContract(() => { rt.state[k][0].n = -5; })).toBe(true);
+    const e = rt.state[k][0];
+    rt.state[k].pop();                                      // no place left: the caller's
+    e.n = -5;
+    expect(rt.plain("rows")).toEqual([]);
+  });
+
+  test("MED-2: a DAG is copied once per distinct object (linear), and a write through a shared object is judged", () => {
+    const rt = load(page(`type T:struct = { n: number(>0), kids: T[] }\n  <t>: T = { n: 1, kids: [] }`), "dag");
+    const k = rt.key("t");
+    let c = { n: 1, kids: [] };
+    for (let i = 0; i < 40; i++) c = { n: 1, kids: [c, c] };  // 2^40 paths, 41 objects
+    const t0 = performance.now();
+    rt.set(k, c);
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(rt.state[k].kids[0]).toBe(rt.state[k].kids[1]);
+    // (the struct judge of a recursive type stops one level down — a separate, pre-existing gap — so
+    // the write is made at the first level, which IS described)
+    expect(throwsContract(() => { rt.state[k].kids[1].n = -5; })).toBe(true);
+    rt.state[k].kids[1].n = 3;
+    expect(rt.state[k].kids[0].n).toBe(3);
+    rt.state[k].kids.pop();                                   // one of its two places removed: still in the cell
+    expect(throwsContract(() => { rt.state[k].kids[0].n = -5; })).toBe(true);
+  });
+
+  test("LOW-1: a deep ACYCLIC chain is admitted; a cycle is refused as cyclic; only absurd depth is refused as too deep", () => {
+    const rt = load(page(`type T:struct = { n: number(>0), kids: T[] }\n  <t>: T = { n: 1, kids: [] }`), "deep");
+    const k = rt.key("t");
+    const chain = (n) => { let c = { n: 1, kids: [] }; for (let i = 0; i < n; i++) c = { n: 1, kids: [c] }; return c; };
+    rt.set(k, chain(1200));
+    let depth = 0, x = rt.state[k];
+    while (x.kids.length) { x = x.kids[0]; depth++; }
+    expect(depth).toBe(1200);
+    const cyc = { n: 1, kids: [] };
+    cyc.kids.push(cyc);
+    expect(() => rt.set(k, cyc)).toThrow(/cyclic/);
+    expect(() => rt.set(k, chain(5000))).toThrow(/nested more than/);
+  });
+
+  test("MED-1: an object of another prototype at a judged position is copied as a record of its own data — never held", () => {
+    const rt = load(page(`<l>: L = { u: "a", n: 1 }\n  <rows>: L[] = []`), "proto");
+    const l = rt.key("l"), rows = rt.key("rows");
+    const o = Object.create({ base: 1 });
+    o.u = "o"; o.n = 5;
+    rt.set(l, o);
+    o.n = -5;
+    expect(rt.state[l].n).toBe(5);
+    expect(Object.getPrototypeOf(rt.state[l])).toBe(Object.prototype);
+    expect(rt.state[l].base).toBeUndefined();
+    class C { constructor() { this.u = "c"; this.n = 2; } }
+    const inst = new C();
+    rt.state[rows].push(inst);
+    inst.n = -5;
+    expect(rt.plain("rows")).toEqual([{ u: "c", n: 2 }]);
+    const inner = Object.setPrototypeOf({ u: "s", n: 3 }, { z: 1 });
+    rt.set(rows, [inner]);
+    inner.n = -5;
+    expect(rt.plain("rows")).toEqual([{ u: "s", n: 3 }]);
   });
 });
 
@@ -178,10 +243,13 @@ describe("N4 — every way to write the stored value is judged", () => {
     expect(throwsContract(() => { all["1"].value.n = -5; })).toBe(true);
     expect(throwsContract(() => Object.freeze(rt.state[k]))).toBe(true);
     expect(rt.plain("rows").every((r) => r.n > 0)).toBe(true);
-    Object.freeze(rt.state[k][0]);                 // only primitives inside: nothing can be reached around the cell
-    expect(Object.isFrozen(rt.state[k][0])).toBe(true);
-    Object.freeze(rt.state[rt.key("ls")]);
-    expect(rt.plain("ls")).toEqual([1, 2]);
+    // freeze / seal / preventExtensions of any refined value are refused (later writes would fail)
+    expect(throwsContract(() => Object.freeze(rt.state[k][0]))).toBe(true);
+    expect(throwsContract(() => Object.seal(rt.state[rt.key("ls")]))).toBe(true);
+    expect(throwsContract(() => Object.preventExtensions(rt.state[rt.key("ls")]))).toBe(true);
+    rt.state[k][0].n = 6;
+    rt.state[rt.key("ls")].push(3);
+    expect(rt.plain("ls")).toEqual([1, 2, 3]);
   });
 
   test("fill / copyWithin: every changed slot gets its own judged copy", () => {
