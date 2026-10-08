@@ -40035,14 +40035,18 @@ inserted into it (`push`, `unshift`, `splice`, `fill`, `copyWithin`), and a valu
 stored value can be reached only through the cell: a later write to the value it was copied from, or
 to any other binding that held it, does not change the cell and is not judged against the cell's type.
 After `@rows.push(@draft)`, editing `@draft` does not change the row; after `@x = @y`, a write through
-`@x` does not change `@y`. An identity (§66.10 item 6: an instance, an `as=` handle) is held, not copied.
-A cyclic value is not a value (§45.1) and is refused. A write made through a reference the cell itself
+`@x` does not change `@y`. At a refined position every object is copied as a value — an object with
+some other prototype as a record of its own enumerable data; only at a position with no refinement at or
+below it is an object that is not a plain record (an identity, §66.10 item 6) held as it is. Each object of
+the admitted value is copied once: a value that reaches one object at two places is stored sharing one copy,
+and a path write (`@rows[0].n = v`) through a shared object first gives that place its own copy. A cyclic
+value is not a value (§45.1) and is refused; nesting deeper than 4000 levels is refused as too deep. A write made through a reference the cell itself
 handed out (`const r = @rows[0]; r.n = v`) is judged at the position it writes while that position is
 still part of the cell's value; once removed from the cell, it is an ordinary value again. Every way of
 writing the stored value is a write: `Object.defineProperty` of a data property is judged; an accessor
-property is refused (its value cannot be judged once); a change of prototype is refused; making a
-property that holds an object non-configurable (`Object.freeze`, `Object.seal`) is refused, because its
-contents could then be reached around the cell.
+property is refused (its value cannot be judged once); a change of prototype is refused; freezing,
+sealing or preventing extension of the value is refused (later writes to the cell would fail); making a
+property that holds an object non-configurable is refused (its contents could then be reached around the cell).
 
 > **Provenance:** ruling:user-voice-scrml.md S459 "a, go" · analogy:§66.10 (aliases snapshot — §66 is
 > Nominal / spec-ahead on impl#1; this applies it to refined cells only) · review:S459 refinement rounds
@@ -40050,8 +40054,8 @@ contents could then be reached around the cell.
 > passed its check) · supersedes: nothing struck — §53 did not say whether a cell shares identity with
 > the value assigned to it, and §6.3 / §6.5 / §14 do not require it · **Direction of change:
 > semantics-changed** for refined cells only — a write through another reference no longer reaches a
-> refined cell; **newly-rejecting** for a cyclic value, an accessor, a prototype change, or freezing a
-> value that holds objects, on a refined cell (corpus measurement: docs/changes/s459-refine-copy-in/progress.md).
+> refined cell; **newly-rejecting** for a cyclic value, nesting beyond 4000 levels, an accessor, a prototype
+> change, or freezing / sealing a refined cell's value (corpus measurement: docs/changes/s459-refine-copy-in/progress.md).
 
 ### §53.3.4 Type Compatibility
 
