@@ -4,7 +4,7 @@
  * A block-form `<match>` inside an `<each>` row is item-scoped (R28-1b): one
  * dispatch per row, but its arm render / wire functions live at FILE scope.
  * Pre-fix they received only the arm's payload bindings, so an arm body that
- * read the row — `${g.name}` — emitted `_scrml_render_value(el, g.name)` against
+ * read the row — `${g.name}` — emitted `_scrml_render_value(_scrml_el, g.name)` against
  * a free `g` → `ReferenceError: g is not defined` inside the row factory, and
  * the whole list rendered empty at exit 0.
  *
@@ -78,17 +78,17 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     const { errors, js } = compile(program(`<match for=Kind on=g.kind><A><p>A:\${g.name}</p></><B><p>B:\${g.name}</p></></match>`));
     expect(errors).toEqual([]);
     const dispatch = fnSource(js, /__scrml_match_match_\w+_dispatch/);
-    expect(dispatch.params).toBe("_mount, _v, g");
+    expect(dispatch.params).toBe("_scrml_arm_mount, _scrml_arm_v, g");
     // the per-row call sits in the live-keyed effect, right after `g` is re-resolved
-    expect(js).toMatch(/let g = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\);\s+if \(g === null\) return;\s+__scrml_match_match_\w+_dispatch\(_scrml_match_mount_\d+, g\.kind, g\);/);
+    expect(js).toMatch(/let g = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\);\s+if \(g === null\) return;\s+__scrml_match_match_\w+_dispatch\(_scrml_match_mount_\d+, g\.kind, g\);/);
     const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
-    expect(wireA.params).toBe("_root, g");
+    expect(wireA.params).toBe("_scrml_arm_root, g");
     // a row-reading interpolation re-renders on an in-place field edit
-    expect(wireA.body).toContain("_disposers.push(_scrml_effect(function() { _scrml_render_value(el, g.name); }));");
-    expect(dispatch.body).toMatch(/_scrml_match_match_\w+_wire_A\(_mount, g\)/);
+    expect(wireA.body).toContain("_scrml_arm_disposers.push(_scrml_effect(function() { _scrml_render_value(_scrml_arm_el, g.name); }));");
+    expect(dispatch.body).toMatch(/_scrml_match_match_\w+_wire_A\(_scrml_arm_mount, g\)/);
     // the short-circuit compares the row item too (a same-key replace re-renders)
-    expect(dispatch.body).toContain("const _rs = [g];");
-    expect(dispatch.body).toMatch(/=== _v && _ls && _ls\[0\] === _rs\[0\]\) return;/);
+    expect(dispatch.body).toContain("const _scrml_arm_rs = [g];");
+    expect(dispatch.body).toMatch(/=== _scrml_arm_v && _scrml_arm_ls && _scrml_arm_ls\[0\] === _scrml_arm_rs\[0\]\) return;/);
   });
 
   test("`@.` in an arm body lowers to the row iter var (was `_scrml_reactive_get(\".name\")`)", () => {
@@ -103,7 +103,7 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     expect(errors).toEqual([]);
     expect(js).not.toContain(`reactive_get(".name")`);
     const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
-    expect(wireA.params).toBe("_root, _scrml_each_item");
+    expect(wireA.params).toBe("_scrml_arm_root, _scrml_each_item");
     expect(wireA.body).toContain("_scrml_each_item.name");
   });
 
@@ -117,11 +117,11 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
 </program>
 `);
     expect(errors).toEqual([]);
-    expect(fnSource(js, /_scrml_match_match_\w+_wire_Busy/).params).toBe("_root, note, g");
-    expect(fnSource(js, /_scrml_match_match_\w+_wire_Held/).params).toBe("_root, g");
+    expect(fnSource(js, /_scrml_match_match_\w+_wire_Busy/).params).toBe("_scrml_arm_root, note, g");
+    expect(fnSource(js, /_scrml_match_match_\w+_wire_Held/).params).toBe("_scrml_arm_root, g");
     const dispatch = fnSource(js, /__scrml_match_match_\w+_dispatch/);
-    expect(dispatch.body).toMatch(/_wire_Busy\(_mount, _data && _data\["note"\], g\)/);
-    expect(dispatch.body).toMatch(/_wire_Held\(_mount, _data && _data\["g"\]\)/);
+    expect(dispatch.body).toMatch(/_wire_Busy\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["note"\], g\)/);
+    expect(dispatch.body).toMatch(/_wire_Held\(_scrml_arm_mount, _scrml_arm_data && _scrml_arm_data\["g"\]\)/);
   });
 
   test("in a ROW arm every delegable handler becomes an element listener (the row's own contract), built by the shared lowering as a hoisted factory", () => {
@@ -136,7 +136,7 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     // hoisted at chunk scope, ahead of the boot IIFE (the row's arm wires at module init)
     expect(js.indexOf("function _scrml_armh_")).toBeLessThan(js.indexOf("function _scrml_boot()"));
     const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
-    expect((wireA.body.match(/el\.addEventListener\("click", _h\)/g) ?? []).length).toBe(2);
+    expect((wireA.body.match(/_scrml_arm_el\.addEventListener\("click", _scrml_arm_h\)/g) ?? []).length).toBe(2);
     // nothing of this arm is left in the document-level delegation table
     expect(js).not.toContain("const _scrml_click = {");
   });
@@ -170,15 +170,15 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     const { errors, js } = compile(program(`<match for=Kind on=g.kind><A><ol><each in=g.items as it><li>\${it}/\${g.name}</li></each></ol></><B><p>B</p></></match>`));
     expect(errors).toEqual([]);
     const each = fnSource(js, /_scrml_each_arm_render_\w+/);
-    expect(each.params).toBe("_root, g");
-    expect(each.body).toContain("const _items = g.items;");
+    expect(each.params).toBe("_scrml_each_root, g");
+    expect(each.body).toContain("const _scrml_items = g.items;");
     // located inside THIS arm's root (never the per-id anchor cache)
-    expect(each.body).toContain("document.createTreeWalker(_root, NodeFilter.SHOW_COMMENT)");
+    expect(each.body).toContain("document.createTreeWalker(_scrml_each_root, NodeFilter.SHOW_COMMENT)");
     expect(each.body).not.toContain("_scrml_find_each_anchor");
     // not registered for the module-scope remount path
     expect(js).not.toMatch(new RegExp(`_scrml_each_renderers\\[[^\\]]*\\] = ${each.name};`));
     const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
-    expect(wireA.body).toContain(`_disposers.push(_scrml_effect(function() { ${each.name}(_root, g); }));`);
+    expect(wireA.body).toContain(`_scrml_arm_disposers.push(_scrml_effect(function() { ${each.name}(_scrml_arm_root, g); }));`);
   });
 
   test("nested each: a match in the INNER row that reads the OUTER alias gets both names", () => {
@@ -191,15 +191,15 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
 </program>
 `);
     expect(errors).toEqual([]);
-    expect(fnSource(js, /__scrml_match_match_\w+_dispatch/).params).toBe("_mount, _v, s, g");
-    expect(fnSource(js, /_scrml_match_match_\w+_wire_A/).params).toBe("_root, s, g");
+    expect(fnSource(js, /__scrml_match_match_\w+_dispatch/).params).toBe("_scrml_arm_mount, _scrml_arm_v, s, g");
+    expect(fnSource(js, /_scrml_match_match_\w+_wire_A/).params).toBe("_scrml_arm_root, s, g");
   });
 
   test("byte-identical where nothing reads the row: a row match whose arms never read it, and a match outside any each", () => {
     const rowFree = compile(program(`<match for=Kind on=g.kind><A><p>A</p></><B><p>B</p></></match>`));
     expect(rowFree.errors).toEqual([]);
     const d1 = fnSource(rowFree.js, /__scrml_match_match_\w+_dispatch/);
-    expect(d1.params).toBe("_mount, _v");
+    expect(d1.params).toBe("_scrml_arm_mount, _scrml_arm_v");
     expect(d1.body).not.toContain("_rs");
     expect(rowFree.js).toMatch(/__scrml_match_match_\w+_dispatch\(_scrml_match_mount_\d+, g\.kind\);/);
 
@@ -210,7 +210,7 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
 </program>
 `);
     expect(top.errors).toEqual([]);
-    expect(fnSource(top.js, /__scrml_match_match_\w+_dispatch/).params).toBe("_v");
+    expect(fnSource(top.js, /__scrml_match_match_\w+_dispatch/).params).toBe("_scrml_arm_v");
   });
 });
 
@@ -253,7 +253,7 @@ describe("round 4 — payload-read detection for an arm <each> is identifier-lev
     test(`a real payload read through ${label} still reroutes`, () => {
       const { errors, js } = compile(armEach("note", body));
       expect(errors).toEqual([]);
-      expect(js).toMatch(/function _scrml_each_arm_render_\w+\(_root, note\)/);
+      expect(js).toMatch(/function _scrml_each_arm_render_\w+\(_scrml_each_root, note\)/);
     });
   }
 });

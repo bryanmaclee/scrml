@@ -348,12 +348,12 @@ describe("§5: client JS controller for all-clean chains (N18-N22)", () => {
     expect(clientJs).toContain("_scrml_unmount_scope(");
   });
 
-  test("N21: chain controller has idempotency guard (`if (_next === active) return`)", () => {
+  test("N21: chain controller has idempotency guard (`if (_scrml_next === active) return`)", () => {
     const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
     </>`);
-    expect(clientJs).toMatch(/if \(_next === _scrml_chain_[a-zA-Z0-9_]+_active\) return;/);
+    expect(clientJs).toMatch(/if \(_scrml_next === _scrml_chain_[a-zA-Z0-9_]+_active\) return;/);
   });
 
   test("N22: chain controller invokes _scrml_effect for reactive subscription", () => {
@@ -361,7 +361,7 @@ describe("§5: client JS controller for all-clean chains (N18-N22)", () => {
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
     </>`);
-    expect(clientJs).toMatch(/_scrml_effect\(_update_chain_/);
+    expect(clientJs).toMatch(/_scrml_effect\(_scrml_update_chain_/);
   });
 });
 
@@ -418,7 +418,7 @@ describe("§7: client JS controller for a mixed-wiring chain (N26-N28)", () => {
     const { clientJs } = compileFull(MIXED);
     expect((clientJs.match(/_scrml_chain_[A-Za-z0-9_]+_root/g) ?? []).length).toBeGreaterThan(1);
     expect((clientJs.match(/_scrml_chain_[A-Za-z0-9_]+_scope/g) ?? []).length).toBeGreaterThan(1);
-    expect(clientJs).not.toContain("_wrapper = (root || document).querySelector");
+    expect(clientJs).not.toContain("_wrapper = (_scrml_root || document).querySelector");
   });
 
   test("N28: the activate switch has ONLY mount arms (no display arm survives)", () => {
@@ -442,7 +442,7 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
     </>`);
-    expect(clientJs).toContain("_update_chain_");
+    expect(clientJs).toContain("_scrml_update_chain_");
     expect(() => new Function(clientJs.replace(/^\/\/ Requires:.*$/m, ""))).not.toThrow();
   });
 
@@ -480,7 +480,7 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
 // gate-found-invalid-js-fix-wave (S141 follow-on): an if=/else-if= chain whose
 // branch conditions COMPARE against a variant literal (`@step == .Info` /
 // `@step == Step::Info`) must lower the variant + ==/!= through the variant-
-// aware emitter, NOT leave them RAW in the `_update_chain_*` cascade. Before
+// aware emitter, NOT leave them RAW in the `_scrml_update_chain_*` cascade. Before
 // the fix the cascade used the raw-string rewriteReactiveRefs shortcut, which
 // left `.Info` / `Step::Info` + `==` verbatim -> E-CODEGEN-INVALID-LOGIC.
 // (example 05-multi-step-form shipped invalid .client.js this way.)
@@ -504,7 +504,7 @@ describe("if-chain branch condition compares variant literal -> valid JS (gate f
     expect(clientJs.length).toBeGreaterThan(0);
     expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
     // The chain cascade must use the structural-eq lowering, not the raw literal.
-    expect(clientJs).toContain("_update_chain_");
+    expect(clientJs).toContain("_scrml_update_chain_");
     expect(clientJs).toContain("_scrml_structural_eq");
     expect(clientJs).not.toContain("== .Confirm");
     expect(clientJs).not.toContain("== .Info");

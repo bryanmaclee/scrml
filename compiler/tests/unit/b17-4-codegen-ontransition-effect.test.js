@@ -253,8 +253,8 @@ describe("B17.4 §B17.4.3 — effect= arm shape", () => {
       ],
     });
     const out = emitEngineHookFiringFunction(m).join("\n");
-    expect(out).toContain("function __scrml_engine_marioState_fire_hooks(fromVariant, toVariant)");
-    expect(out).toContain('if (fromVariant === "Small" && toVariant === "Big")');
+    expect(out).toContain("function __scrml_engine_marioState_fire_hooks(_scrml_from, _scrml_to)");
+    expect(out).toContain('if (_scrml_from === "Small" && _scrml_to === "Big")');
     expect(out).toContain('playSound("grow")');
     expect(out).toContain("// §51.0.H effect= body for state-child .Small → .Big");
   });
@@ -278,7 +278,7 @@ describe("B17.4 §B17.4.3 — effect= arm shape", () => {
 // ---------------------------------------------------------------------------
 
 describe("B17.4 §B17.4.4 — <onTransition to=.X> arm shape", () => {
-  test("emits if-arm gating on (fromVariant, toVariant) with rewritten body", () => {
+  test("emits if-arm gating on (_scrml_from, _scrml_to) with rewritten body", () => {
     const m = meta({
       stateChildren: [
         {
@@ -291,7 +291,7 @@ describe("B17.4 §B17.4.4 — <onTransition to=.X> arm shape", () => {
       ],
     });
     const out = emitEngineHookFiringFunction(m).join("\n");
-    expect(out).toContain('if (fromVariant === "Big" && toVariant === "Fire")');
+    expect(out).toContain('if (_scrml_from === "Big" && _scrml_to === "Fire")');
     expect(out).toContain('playSound("fire")');
     expect(out).toContain("// §51.0.H <onTransition to=.Fire> in .Big");
   });
@@ -317,7 +317,7 @@ describe("B17.4 §B17.4.5 — <onTransition from=.X> inverted-direction arm", ()
       ],
     });
     const out = emitEngineHookFiringFunction(m).join("\n");
-    expect(out).toContain('if (fromVariant === "Small" && toVariant === "Big")');
+    expect(out).toContain('if (_scrml_from === "Small" && _scrml_to === "Big")');
     expect(out).toContain('log("entered")');
     expect(out).toContain("// §51.0.H <onTransition from=.Small> in .Big");
   });
@@ -471,10 +471,10 @@ describe("B17.4 §B17.4.9 — co-existence per §51.0.H lines 20580-20583", () =
     });
     const out = emitEngineHookFiringFunction(m).join("\n");
     // effect= arm: Small => Big
-    expect(out).toContain('if (fromVariant === "Small" && toVariant === "Big")');
+    expect(out).toContain('if (_scrml_from === "Small" && _scrml_to === "Big")');
     expect(out).toContain('effectFn()');
     // <onTransition from=.Big> arm: Big => Small (placed on .Small)
-    expect(out).toContain('if (fromVariant === "Big" && toVariant === "Small")');
+    expect(out).toContain('if (_scrml_from === "Big" && _scrml_to === "Small")');
     expect(out).toContain('inverseFn()');
   });
 });
@@ -578,9 +578,9 @@ describe("B17.4 §B17.4.13 — end-to-end: effect= alone", () => {
     const js = generateClientJs(makeTestCtx(fileAST));
 
     // Hook-firing function is emitted.
-    expect(js).toContain("function __scrml_engine_phase_fire_hooks(fromVariant, toVariant)");
+    expect(js).toContain("function __scrml_engine_phase_fire_hooks(_scrml_from, _scrml_to)");
     // The Idle => Running arm with the noop() body.
-    expect(js).toContain('if (fromVariant === "Idle" && toVariant === "Running")');
+    expect(js).toContain('if (_scrml_from === "Idle" && _scrml_to === "Running")');
     // Direct write inside go() is wrapped with capture + fire-hooks.
     expect(js).toContain("__scrml_engine_phase_fire_hooks(__scrml_engine_from");
   });
@@ -612,7 +612,7 @@ describe("B17.4 §B17.4.14 — end-to-end: <onTransition to=.X>", () => {
     const js = generateClientJs(makeTestCtx(fileAST));
 
     expect(js).toContain("function __scrml_engine_phase_fire_hooks");
-    expect(js).toContain('if (fromVariant === "A" && toVariant === "B")');
+    expect(js).toContain('if (_scrml_from === "A" && _scrml_to === "B")');
     // User-fn `logOK` gets renamed to `_scrml_logOK_<n>` by the function-name
     // mangler post-pass (line 765 of emit-client.ts) — matches across body.
     expect(js).toMatch(/_scrml_logOK_\d+\(\)/);
@@ -647,7 +647,7 @@ describe("B17.4 §B17.4.15 — end-to-end: <onTransition from=.X>", () => {
 
     // The arm is keyed (from=.A, to=.B) — placed structurally on .B but
     // predicate fires on the source A → target B transition.
-    expect(js).toContain('if (fromVariant === "A" && toVariant === "B")');
+    expect(js).toContain('if (_scrml_from === "A" && _scrml_to === "B")');
     // `inFn` gets mangled by the post-pass; match the suffix.
     expect(js).toMatch(/_scrml_inFn_\d+\(\)/);
   });
@@ -976,7 +976,7 @@ describe("B17.4 §B17.4.25 — runtime: hook bodies actually execute on transiti
     // We reuse the actual emitted js by extracting just the engine-related
     // sections — this is a pragmatic check that emit shape works at runtime.
     expect(js).toContain("function __scrml_engine_phase_fire_hooks");
-    expect(js).toContain('if (fromVariant === "A" && toVariant === "B")');
+    expect(js).toContain('if (_scrml_from === "A" && _scrml_to === "B")');
     // The body emits a call to the (mangled) recordEffect — check the call appears.
     expect(js).toMatch(/_scrml_recordEffect_\d+\("a-to-b"\)/);
   });

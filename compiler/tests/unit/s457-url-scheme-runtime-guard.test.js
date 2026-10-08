@@ -126,7 +126,7 @@ describe("§2 one reader — the shipped runtime IS runtime-url-guard.js", () =>
   });
 
   test("the 'urlguard' chunk carries the module source verbatim (export stripped)", () => {
-    expect(URL_GUARD_RUNTIME_SOURCE).toContain("function _scrml_safe_url(el, name, value)");
+    expect(URL_GUARD_RUNTIME_SOURCE).toContain("function _scrml_safe_url(el, name, value, target)");
     expect(URL_GUARD_RUNTIME_SOURCE).not.toMatch(/^export /m);
     expect(SCRML_RUNTIME).toContain(URL_GUARD_RUNTIME_SOURCE);
     expect(RUNTIME_CHUNKS.urlguard).toContain("function _scrml_safe_url(");

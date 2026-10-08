@@ -1,6 +1,20 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -843,6 +857,11 @@
 #
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
+
+## S457 — INFRA DELTA (`ba2712973..125486345`)
+
+- CI: NEW blocking PR-only `gate` step for `docs/bootstrap-conformance.md` currency, path-scoped to `conformance/cases/**` + `compiler/self-host-v2/**` (build.map.md `## S457`).
+- Deploy: a failed `scrml build` no longer leaves a complete-looking dist; the previous dist stays byte-identical.
 
 ## S456 — INFRA DELTA (`9c556dc74..ba2712973`)
 - Deploy behavior: a built `_server.js` refuses to serve (503 on every request) while a database it opens holds a `tenant_id` relation the build did not declare tenant-scoped, or cannot be checked within 10 s. It stays up and re-checks (1 s -> 30 s backoff; `/_scrml/health` immediate). Operators must declare such tables (`<schema>` / `<db tables=>`) or drop the column. Source: `codegen/tenant-startup-check.ts`, `commands/build.js` `generateServerEntry`.

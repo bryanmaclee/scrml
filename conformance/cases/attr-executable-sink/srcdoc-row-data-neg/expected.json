@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-srcdoc-row-data-neg",
+  "description": "§5.2 rule 2, S457 bullet `srcdoc` in every form: an `<each>` row's `srcdoc=pg.html` writes row data into an HTML document and is refused.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457): a `srcdoc` whose value is a variable (`srcdoc=it.html`) SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) in every position rule 2 names, `<each>` rows included. Before S457 the row lowering emitted `setAttribute(\"srcdoc\", String(pg.html))`.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

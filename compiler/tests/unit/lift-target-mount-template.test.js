@@ -45,9 +45,9 @@ function compile(source) {
   return { errors, js: out?.clientJs ?? "", html: out?.html ?? "" };
 }
 
-/** The `_scrml_nav_rewire(root)` body — where per-mount (rebind) wiring lives. */
+/** The `_scrml_nav_rewire(_scrml_root)` body — where per-mount (rebind) wiring lives. */
 function navRewireBody(js) {
-  const start = js.indexOf("function _scrml_nav_rewire(root) {");
+  const start = js.indexOf("function _scrml_nav_rewire(_scrml_root) {");
   const end = js.indexOf("_scrml_nav_rewire(document);");
   if (start === -1 || end === -1) return "";
   return js.slice(start, end);
@@ -73,8 +73,8 @@ function expectMountDeferredLift(src) {
   expect(count(js, "function _scrml_lift_mount_run(host, body) {")).toBe(1);
   // …bound per mount from the rebind rehydrator, root-scoped.
   const rewire = navRewireBody(js);
-  expect(rewire).toContain(`const el = (root || document).querySelector('[data-scrml-logic="${pid}"]');`);
-  expect(rewire).toContain(`_scrml_lift_mount_run(el, _scrml_lift_mount_${pid});`);
+  expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[data-scrml-logic="${pid}"]');`);
+  expect(rewire).toContain(`_scrml_lift_mount_run(_scrml_el, _scrml_lift_mount_${pid});`);
   return { js, pid };
 }
 
@@ -168,7 +168,7 @@ function yes() { return true }
     expect(pids.length).toBe(2);
     for (const pid of pids) {
       expect(js).toContain(`function _scrml_lift_mount_${pid}(`);
-      expect(navRewireBody(js)).toContain(`_scrml_lift_mount_run(el, _scrml_lift_mount_${pid});`);
+      expect(navRewireBody(js)).toContain(`_scrml_lift_mount_run(_scrml_el, _scrml_lift_mount_${pid});`);
     }
     expect(count(js, "function _scrml_lift_mount_run(host, body) {")).toBe(1);
   });
@@ -265,7 +265,7 @@ const ANCHORS = [
   {
     name: "<textarea> RCDATA content (data-scrml-rcdata)",
     attr: "data-scrml-rcdata",
-    tracked: "_scrml_region_track(el, _scrml_effect(function() { _scrml_set_rcdata(); }));",
+    tracked: "_scrml_region_track(_scrml_el, _scrml_effect(function() { _scrml_set_rcdata(); }));",
     untracked: "_scrml_effect(function() { _scrml_set_rcdata(); });",
     wrap: (inner, gated) => `<program>
 <show> = true
@@ -280,7 +280,7 @@ const ANCHORS = [
   {
     name: "<errors of=…/> (data-scrml-errors-anchor)",
     attr: "data-scrml-errors-anchor",
-    tracked: /_scrml_region_track\(el, _scrml_effect\(function\(\) \{ render_\w+\(\); \}\)\);/,
+    tracked: /_scrml_region_track\(_scrml_el, _scrml_effect\(function\(\) \{ render_\w+\(\); \}\)\);/,
     untracked: /\n\s+_scrml_effect\(function\(\) \{ render_\w+\(\); \}\);/,
     wrap: (inner, gated) => `<program>
 <page>
@@ -299,7 +299,7 @@ const ANCHORS = [
   {
     name: "<render of=@cell/> (data-scrml-render-anchor)",
     attr: "data-scrml-render-anchor",
-    tracked: /_scrml_region_track\(el, _scrml_(?:cs_)?reactive_subscribe\("[^"]+", function\(\) \{ render_\w+\(\); \}\)\);/,
+    tracked: /_scrml_region_track\(_scrml_el, _scrml_(?:cs_)?reactive_subscribe\("[^"]+", function\(\) \{ render_\w+\(\); \}\)\);/,
     untracked: /\n\s+_scrml_(?:cs_)?reactive_subscribe\("[^"]+", function\(\) \{ render_\w+\(\); \}\);/,
     wrap: (inner, gated) => `<program>
 type LE:enum = { NotFound(id: string) renders <p class="rend">No #\${id}</p>, Network(msg: string) renders <p class="rend">Net \${msg}</p> }
@@ -319,7 +319,7 @@ describe("anchor display sites inside a mount <template> — emitted shape", () 
       expect(errors).toEqual([]);
       expect(js).not.toContain(`document.querySelector('[${a.attr}=`);
       const rewire = navRewireBody(js);
-      expect(rewire).toContain(`const el = (root || document).querySelector('[${a.attr}=`);
+      expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[${a.attr}=`);
       if (a.tracked instanceof RegExp) expect(rewire).toMatch(a.tracked);
       else expect(rewire).toContain(a.tracked);
     });
@@ -327,11 +327,11 @@ describe("anchor display sites inside a mount <template> — emitted shape", () 
     test(`CONTROL ${a.name} in the SSR body: document-scoped boot block, effect untracked (unchanged)`, () => {
       const { errors, js } = compile(a.wrap(a.inner, false));
       expect(errors).toEqual([]);
-      expect(js).toContain(`    const el = document.querySelector('[${a.attr}=`);
+      expect(js).toContain(`    const _scrml_el = document.querySelector('[${a.attr}=`);
       expect(navRewireBody(js)).not.toContain(`[${a.attr}=`);
       if (a.untracked instanceof RegExp) expect(js).toMatch(a.untracked);
       else expect(js).toContain(`      ${a.untracked}`);
-      expect(js).not.toContain("_scrml_region_track(el, _scrml_effect(function() { _scrml_set_rcdata(); }))");
+      expect(js).not.toContain("_scrml_region_track(_scrml_el, _scrml_effect(function() { _scrml_set_rcdata(); }))");
     });
   }
 
@@ -362,7 +362,7 @@ function loadItem(id: string)! LoadError {
     const [pid] = logicPids(html);
     expect(js).not.toContain(`document.querySelector('[data-scrml-logic="${pid}"]')`);
     const rewire = navRewireBody(js);
-    expect(rewire).toContain(`const el = (root || document).querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[data-scrml-logic="${pid}"]');`);
     expect(rewire).toContain("_eb_render_");
   });
 
@@ -370,7 +370,7 @@ function loadItem(id: string)! LoadError {
     const { errors, js, html } = compile(EB(false));
     expect(errors).toEqual([]);
     const [pid] = logicPids(html);
-    expect(js).toContain(`    const el = document.querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(js).toContain(`    const _scrml_el = document.querySelector('[data-scrml-logic="${pid}"]');`);
   });
 
   const SRV = (gated) => `<program>
@@ -388,14 +388,14 @@ server function greeting() { return "SRV_OK" }
     const [pid] = logicPids(html);
     expect(js).not.toContain(`document.querySelector('[data-scrml-logic="${pid}"]')`);
     const rewire = navRewireBody(js);
-    expect(rewire).toContain(`const el = (root || document).querySelector('[data-scrml-logic="${pid}"]');`);
-    expect(rewire).toContain("el.textContent = await (");
+    expect(rewire).toContain(`const _scrml_el = (_scrml_root || document).querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(rewire).toContain("_scrml_el.textContent = await (");
   });
 
   test("CONTROL ${serverFn()} one-shot in the SSR body: document-scoped (unchanged)", () => {
     const { errors, js, html } = compile(SRV(false));
     expect(errors).toEqual([]);
     const [pid] = logicPids(html);
-    expect(js).toContain(`    const el = document.querySelector('[data-scrml-logic="${pid}"]');`);
+    expect(js).toContain(`    const _scrml_el = document.querySelector('[data-scrml-logic="${pid}"]');`);
   });
 });

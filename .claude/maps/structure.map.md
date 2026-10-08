@@ -1,6 +1,20 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-10-07T10:49:16-06:00  commit: ba2712973
+# updated: 2026-10-07T20:42:02-06:00  commit: 125486345
+# ⛑ **S457 STAMP — `ba2712973` -> `125486345`. 10 COMMITS (#1338 S456 wrap, #1339 the S456 maps refresh, #1340 FACTS
+# verbs + `fix --help` + CI bootstrap-conformance gate step, #1341 runtime URL-attribute scheme guard, #1342 one SQL `${}`
+# slot reader by parsing, #1343 `is some`/`is not` in function-expression bodies, #1344 program-body SQL checks at every
+# lowering, #1346 `__scrml_` reserved + per-compilation placeholder nonce + emit placeholder gate, #1347 `string(url)` judge,
+# #1348 no artifacts from a compile that reports an error), incremental refresh in an isolated worktree @ `125486345` =
+# `origin/main`.** MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 10 commits behind HEAD (watermark
+# ba2712973, HEAD 125486345)` — matches `git log --oneline ba2712973..HEAD` (10).
+# ⛑ FIGURES AT `125486345`: `facts.ts --check` PASS · FACTS `compiler/src` **304,067 lines / 256 files** (+6 new modules) ·
+# test files **1,645** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+10; the same command gives
+# 1,635 at `ba2712973` — the S456 "1,620" used a different count) · `compiler/SPEC.md` **47,046** lines (+53) · conformance
+# **1396** `case.scrml` (+5) · `bootstrap-conformance.ts --check`: **current** (first time in 8 windows) · FACTS CLI verbs
+# **12** (corrected by #1340) · NO new diagnostic code this window · known-gaps heading/marker drift **65** (was 61).
+# Conformance suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `ba2712973`), CARRIED. ━━━━━━━
 # ⛑ **S455 STAMP — `f38697900` -> `9c556dc74`. 20 COMMITS (#1306 S454 wrap, #1307 the S454 maps refresh, #1308 `scrml fix`
 # client-server-call, #1309/#1310/#1314/#1318/#1320/#1323 docs+gaps+SPEC, #1311 state.ts `--abbrev=9`, #1312 foreign
 # sealed scope, #1313 E-TENANT-SCHEMA-HAZARD, #1315 `scrml fix` sql-failable, #1316 one tenant set per compilation, #1317
@@ -959,6 +973,68 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S457 — STRUCTURE DELTA (`ba2712973..125486345`; 10 commits, source-bearing #1340-#1348)
+
+| path | change |
+|---|---|
+| `compiler/src/runtime-url-guard.js` (+ `.d.ts`) | **NEW** (243 lines) — §5.2 rule 3 / §53.6.1: THE one URL-scheme reader for runtime AND compile time; inlined into the client runtime as chunk `urlguard` and into server/worker/library/tool bundles (#1341, #1347) |
+| `compiler/src/codegen/url-attr-guard.ts` | **NEW** (46 lines) — when a URL-attribute write must go through `_scrml_safe_url` (#1341) |
+| `compiler/src/scrml-acorn.ts` | **NEW** (130 lines) — the scrml-extended acorn `ScrmlParser` (`@` sigil, `Type::Variant`), moved out of `expression-parser.ts` so the SQL slot reader uses the same parser (#1342) |
+| `compiler/src/placeholder-nonce.ts` | **NEW** (139 lines) — per-compilation unguessable token carried by every compiler placeholder name (#1346) |
+| `compiler/src/codegen/is-predicate-lowering.ts` | **NEW** (302 lines) — ONE lowering of `is some` / `is not` / `is not not` / `is .Variant`, shared by `emit-expr.ts` (structured) and `rewrite.ts` (string path) (#1343) |
+| `compiler/src/codegen/sql-one-statement-guard.ts` | 115 -> **382** lines — `judgeDriverCallDetail`, program-statement policy + refusal sink (#1344) |
+| `compiler/src/codegen/sql-lex.ts` | -> 274 lines — `jsInterpolationEnd` :69 now reads the slot with `ScrmlParser` (#1342) |
+| `compiler/src/sql-in-expression-text.ts` | 106 -> **220** lines — `sqlSitesInExpressionText` :213, the one reader of `?{}` sites in expression text (#1342) |
+| `compiler/src/codegen/rewrite.ts` | -> 3258 lines — `rewriteSqlRefs` :576 lowers exactly `sqlSitesInExpressionText` sites (:582); `.unsafe` params one per slot; `lowerIsPlaceholders` rules :2903/:2989 (#1342, #1343, #1344) |
+| `compiler/src/codegen/validate-emit.ts` | -> 261 lines — placeholder gate in `validateEmittedArtifact` :82 (`opts.checkPlaceholders`) (#1346) |
+| `compiler/src/validators/reserved-prefix.ts` | -> 576 lines — `__scrml_` also reserved (`RESERVED_NAME_PREFIXES` :94) (#1346) |
+| `compiler/src/attr-injection-sink.ts` | -> 241 lines — scheme reading now imported from `runtime-url-guard.js` (:42) (#1341) |
+| `compiler/src/api.js` | -> 4725 lines — commit point: `hasFatalBeforeWrite` :3718, staged writes committed :4351-:4359, `artifactsWritten` :4602; `planStdlibBundle` :594; `withCompilationPlaceholderToken` wraps the chokepoint :1058 (#1346, #1348) |
+| `compiler/src/commands/refusal-gate.js` | 136 -> **40** lines — `APPLICATION_SCOPE_REFUSALS` / `hasApplicationScopeRefusal` RETIRED; only `noFilesWrittenLine` :38 remains (#1348) |
+| `compiler/src/commands/{compile,build,dev,serve}.js` | read `result.artifactsWritten` (`compile.js:585`, `build.js:1425`, `serve.js:226/:297`) (#1348) |
+| `compiler/src/type-system.ts` | `url` named shape -> `_scrml_url_shape_ok` (:109 import, :1563) (#1347) |
+| `scripts/facts.ts` | `NOT_A_VERB` (:92) now lists `refusal-gate`, `fix-client-server-call`, `fix-sql-failable` (#1340) |
+| `.github/workflows/ci.yml` | NEW blocking `gate` step "Bootstrap conformance report current" (PR-only, path-scoped) (#1340) |
+| `compiler/tests/` | +10 — see test.map.md `## S457` |
+| `conformance/cases/` | +5 (1391 -> **1396**) |
+| `docs/changes/s457-*/` | 8 dispatch dirs (historical by design — compliant) |
+
+FACTS at `125486345`: `compiler/src` **304,067 lines / 256 files** (+6: 5 modules + 1 `.d.ts`). No file deleted.
+
+### ⛑ FILE INVENTORY — URL SCHEME GUARD (§5.2 rule 3 runtime · §53.6.1 `string(url)`) (new at `125486345`)
+| file | exports / loci |
+|---|---|
+| `compiler/src/runtime-url-guard.js` | `_SCRML_URL_VALUED_ATTRS` :25, `_SCRML_URL_ATTR_ELEMENTS` :39, `_scrml_is_url_attr` :63, `_SCRML_SAFE_URL_SCHEMES` :78 (http https ftp mailto tel sms), `_SCRML_SAFE_DATA_IMAGE_TYPES` :82, `_SCRML_IMAGE_SOURCE_ATTRS` :88, `_scrml_read_url_scheme` :110, `_scrml_data_url_is_raster_image` :133, `_scrml_url_scheme_admitted` :140, `_scrml_url_value_admitted` :187, `_scrml_safe_url(el, name, value)` :208 (returns `"about:blank"` + one `url-guard` log report on refusal; never logs the value), `_scrml_url_shape_ok(value)` :234 (absolute URL + safe scheme; no `data:`) |
+| `compiler/src/codegen/url-attr-guard.ts` | `URL_GUARD_FN = "_scrml_safe_url"` :26, `isUrlAttrOn` :29, `dynamicUrlAttrNeedsGuard` :34, `quotedUrlAttrNeedsGuard` :39, `wrapUrlGuard` :44 |
+| emitters (callers of url-attr-guard) | `emit-html.ts` :3356/:3660 · `emit-bindings.ts` :1017 · `emit-event-wiring.ts` :457 · `emit-variant-guard.ts` :921 · `emit-each.ts` :2704/:2763 · `emit-lift.js` :1392/:1659/:1684/:1720/:1828/:3280 · `emit-ssr-render.ts` :203/:217 (server first-paint copy, el = `null`) |
+| runtime packaging | `runtime-template.js:36` reads the file; chunk `urlguard` (`codegen/runtime-chunks.ts` :101/:152/:317); post-emit chunk trigger `emit-client.ts` :3062 (`_scrml_safe_url(`) / :3067 (`_scrml_url_shape_ok(`) |
+| `string(url)` judge | `type-system.ts:1563` (compile-time literal zone); `codegen/emit-predicates.ts` `URL_SHAPE_FN` :56, `SERVER_URL_SHAPE_HELPER` :65, `needsUrlShapeHelper` :72; inlined by `emit-server.ts:1509`, `emit-worker.ts:113`, `emit-library.ts:458`, `emit-tool.ts:390` |
+| compile-time sink | `attr-injection-sink.ts` imports the reader from `runtime-url-guard.js` (:42) — one reader, both sides |
+
+### ⛑ FILE INVENTORY — ONE SQL READER (slot extent · site extent · driver-call judge at every lowering) (new at `125486345`)
+| file | exports / loci |
+|---|---|
+| `compiler/src/scrml-acorn.ts` | `ScrmlParser` :130 (= `acorn.Parser.extend(scrmlAtPlugin :27, scrmlEnumPlugin :107)`). Consumers: `expression-parser.ts` :25/:649/:696/:3907, `codegen/sql-lex.ts` :25/:86 |
+| `compiler/src/codegen/sql-lex.ts` | `jsInterpolationEnd` :69 (parses the payload with `ScrmlParser`), `SqlInterpolation` :128, `liveSqlInterpolations` :142, `replaceLiveSqlInterpolations` :255, `liveSqlInterpolationExprs` :267, `sqlHasLiveInterpolation` :272 |
+| `compiler/src/sql-in-expression-text.ts` | `ExprTextSqlVisitor` :22, `scanExpressionTextForSql` :56, `ExprTextSqlSite` :199, `sqlSitesInExpressionText` :213 (used by `rewrite.ts:582` and the compile checks) |
+| `compiler/src/codegen/sql-one-statement-guard.ts` | `sqlHoldsOneStatement` :44, `DriverCallVerdict` :53 (`ok`/`multiple-statements`/`text-not-read`/`not-admitted`), `setProgramBodySqlPolicy` :91, `setProgramBodySqlFile` :101, `swapSqlLoweringSpan` :110, `ProgramStatementRefusal` :117, `programStatementRefusal` :132, `multipleStatementsRefusal` :155, `programStatementMessage` :188, `recordProgramStatementRefusal` :241, `resetProgramStatementRefusals` :257, `drainProgramStatementRefusals` :263, `DriverCallJudgement` :270, `judgeDriverCall` :287 (wrapper), **`judgeDriverCallDetail` :298**, `refusedDriverCallExpr` :343, `refuseMultipleStatements` :366 |
+| callers of `judgeDriverCallDetail` | `codegen/rewrite.ts` :663 (tagged template) / :719 (`.unsafe`), `codegen/emit-logic.ts` :3792 |
+| policy lifecycle (`codegen/index.ts`) | cleared :1187-:1188 · refusals reset :1347 · policy set :2366 (tenant tables + dialect from the compilation tenant set) · file :2386 · drained :3292 / :4344 · cleared :4348-:4349 |
+
+### ⛑ FILE INVENTORY — RESERVED `__scrml_` + PLACEHOLDER NONCE + EMIT GATE (§47.1.1, §2.2.1) (new at `125486345`)
+| file | exports / loci |
+|---|---|
+| `compiler/src/placeholder-nonce.ts` | `setPlaceholderTokenObserverForTest` :62, `newPlaceholderToken` :67, `currentPlaceholderToken` :79, `withCompilationPlaceholderToken` :84, `scrubPlaceholderToken` :92, `placeholderName` :98, `placeholderPrefix` :103, `placeholderParam` :108, `isCompilerPlaceholderName` :116; name thunks `PH_IS_SOME`…`PH_GUARD` :123-:132, prefix thunks `PHP_BARE_VARIANT`…`PHP_MV` :135-:139 |
+| consumers | `api.js` :45/:1058 (token per compile)/:1067 (`scrubPlaceholderTokenDeep` — diagnostics never show the token), `expression-parser.ts` :19, `ast-builder.js` :38/:5311, `component-expander.ts` :45, `codegen/emit-lift.js` :3, `codegen/is-predicate-lowering.ts` :43, `validators/reserved-prefix.ts` :85, `codegen/validate-emit.ts` :30 |
+| `compiler/src/validators/reserved-prefix.ts` | `RESERVED_NAME_PREFIX` :91, `RESERVED_NAME_PREFIXES = ["__scrml_", "_scrml_"]` :94, `reservedPrefixOf` :97, `RESERVED_PREFIX_CODE` :104, `isReservedPrefixName` :118 (exempts only `isCompilerPlaceholderName`), `runReservedPrefixCheck` :563 |
+| `compiler/src/codegen/validate-emit.ts` | `validateEmittedArtifact` :82 — refuses any artifact with a `__scrml_`-shaped NAME token (acorn tokens, not text) as `E-CODEGEN-INVALID-LOGIC`; message scrubbed of the token :139/:152 |
+
+### ⛑ FILE INVENTORY — `is` PREDICATE LOWERING (§42) (new at `125486345`)
+`codegen/is-predicate-lowering.ts`: `IS_OP_IIFE_LOCAL = "__scrml_is_v"` :51, `lowerPresenceCheck` :54, `lowerAbsenceCheck` :60, `lowerVariantCheck` :70, `isTrivialOperandText` :84, `lowerIsPlaceholders(text)` :236 (string path; recurses into template `${}`). Callers: `emit-expr.ts:52` (structured), `rewrite.ts` :11/:2903/:2989 (string).
+
+### ⛑ FILE INVENTORY — COMMIT POINT: NO ARTIFACT FROM A COMPILE WITH AN ERROR (§2.2.1) (new at `125486345`)
+`api.js`: `planStdlibBundle(names, diagnostics)` :594 (decides shim set before writing); `hasFatalBeforeWrite` :3718; `writeAborted` :3769; staged writes committed :4351 (`artifactsWritten = true` :4359); result field `artifactsWritten` :4602; early-return shape :1679. Command side: `commands/refusal-gate.js` `noFilesWrittenLine` :38 only; `build.js` still raises E-MW-007 via the `beforeWrite` callback. `dev` keeps the last good dist and answers every request with the error; `serve` returns `outputs: {}` + `artifactsWritten: false`.
 
 ## S456 — STRUCTURE DELTA (`9c556dc74..ba2712973`; 11 commits, source-bearing #1330-#1337)
 

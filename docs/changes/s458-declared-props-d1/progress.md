@@ -70,3 +70,18 @@ SHALL propagate back to `@var` in the parent." Worked example: "When the user cl
 - Tests: callback-props §H/§I rewritten (no `_bindProps`; write-back lowers to the caller cell; a grep for a bare JS
   write to the prop name / a cell keyed by it); conformance bind-prop-write-back (Modal, two independent instances),
   bind-prop-write-back-positions (4 positions × 3 write forms), bind-prop-forwarded-to-input — all executed in happy-dom.
+
+## 2026-10-07 — step 4: merge origin/main (S457 sinks #1351) + reconcile the sinks pins with D1
+- `git merge origin/main` (08adefc4c): clean auto-merge of SPEC.md / emit-html.ts / component-expander.ts.
+- The two sinks conformance cases encoded the leak (a DECLARED prop reaching the root). Retargeted, renamed, noted:
+  `declared-prop-srcdoc-each-lift-neg` → `undeclared-attr-srcdoc-each-lift-neg` (propless `Fr`; still E-ATTR-INTERP-
+  EXECUTABLE in lift AND each); `declared-prop-on-attr-lift-listener-pos` → `undeclared-attr-on-attr-lift-listener-pos`
+  (propless Btn/Link/Tip keep the listener / guarded href / title pins; declared DBtn/DLink/DTip assert ABSENCE).
+  The sink is still reachable through the undeclared fallthrough (O18 carry), so the coverage is kept, not dropped.
+- s457 integration §8 split: §8 (undeclared fallthrough — every original sink assertion, propless defs) + §8b (declared:
+  not written, not refused, no listener; trucking load-new: no `addressinput` listener, no `addressValue` write).
+  Browser test: the three "declared" tests now use propless components (same assertions). Unit file untouched (passes).
+- SPEC §5.2 rule 2: the two "component prop written onto an expanded root" parentheticals now say UNDECLARED call-site
+  attribute, and that a declared prop never reaches the root (§15.10).
+- docs/bootstrap-conformance.md regenerated (`bootstrap-conformance.ts --write`; generated file, renamed/new cases).
+- The S457 declared-`on…` lift listener wiring is not dead code: it still serves the undeclared fallthrough.

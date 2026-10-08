@@ -17,7 +17,7 @@
 // `directiveIsFormValue` marker (attrName === "value" AND tag ∈ {input,textarea,
 // select} AND no sibling `bind:value`/`bind:valueAsNumber`). emit-variant-guard.ts
 // branches on it, emitting the caret-safe property write
-// `{ const _v = <expr>; if (el.value !== _v) el.value = _v; }` (once at mount +
+// `{ const _scrml_arm_v = <expr>; if (el.value !== _v) el.value = _v; }` (once at mount +
 // inside the disposer-pushed `_scrml_effect`) instead of setAttribute.
 //
 // The `!hasBindValue` guard is preserved: `bind:value` is the sanctioned two-way
@@ -106,16 +106,16 @@ describe("§i225.1 — the reproducer: template value= on an <input> inside a <m
     const client = emittedClient(compile(armInputSrc));
     // The regression: pre-fix the arm wire fn emitted el.setAttribute("value", …).
     expect(client).not.toContain('setAttribute("value"');
-    // Caret-safe property write: `{ const _v = …; if (el.value !== _v) el.value = _v; }`.
-    expect(client).toMatch(/if \(el\.value !== _v\) el\.value = _v;/);
+    // Caret-safe property write: `{ const _scrml_arm_v = …; if (el.value !== _v) el.value = _v; }`.
+    expect(client).toMatch(/if \(_scrml_arm_el\.value !== _scrml_arm_v\) _scrml_arm_el\.value = _scrml_arm_v;/);
   });
 
-  test("the property write is acquired via _root.querySelector and pushed onto _disposers", () => {
+  test("the property write is acquired via _root.querySelector and pushed onto _scrml_arm_disposers", () => {
     const client = emittedClient(compile(armInputSrc));
     // The arm-path acquisition + disposal shape is unchanged — only the write
     // mechanism moved from setAttribute to a .value property assignment.
     expect(client).toMatch(/_root\.querySelector\("\[data-scrml-attr-tpl-value=/);
-    expect(client).toMatch(/_disposers\.push\(_scrml_effect\(function\(\) \{ const _v = [^;]*; if \(el\.value !== _v\) el\.value = _v; \}\)\)/);
+    expect(client).toMatch(/_scrml_arm_disposers\.push\(_scrml_effect\(function\(\) \{ const _scrml_arm_v = [^;]*; if \(_scrml_arm_el\.value !== _scrml_arm_v\) _scrml_arm_el\.value = _scrml_arm_v; \}\)\)/);
   });
 
   test("the oninput handler still wires (the value fix does not disturb events)", () => {
@@ -140,7 +140,7 @@ describe("§i225.2 — <textarea> parity inside an arm", () => {
       </div>
     </program>`;
     const client = emittedClient(compile(src));
-    expect(client).toMatch(/if \(el\.value !== _v\) el\.value = _v;/);
+    expect(client).toMatch(/if \(_scrml_arm_el\.value !== _scrml_arm_v\) _scrml_arm_el\.value = _scrml_arm_v;/);
     expect(client).not.toContain('setAttribute("value"');
   });
 });
@@ -206,7 +206,7 @@ describe("§i225.3 — no over-reach: only the form-control value family moves",
     expect(r.errors).toEqual([]);
     const client = emittedClient(r);
     // The attr-template value= did NOT add a caret-guard .value property writer …
-    expect(client).not.toMatch(/if \(el\.value !== _v\) el\.value = _v;/);
+    expect(client).not.toMatch(/if \(_scrml_arm_el\.value !== _scrml_arm_v\) _scrml_arm_el\.value = _scrml_arm_v;/);
     // … it fell through to setAttribute, leaving bind:value the sole property owner.
     expect(client).toContain('setAttribute("value"');
   });

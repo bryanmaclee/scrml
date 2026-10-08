@@ -7,16 +7,16 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1396 of 1396 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1408 of 1408 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 121 | 8.7% |
+| PASS | 121 | 8.6% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 4.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 520 | 37.2% |
-| UNSUPPORTED | 699 | 50.1% |
+| NOT-TWINNED | 529 | 37.6% |
+| UNSUPPORTED | 702 | 49.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,18 +26,18 @@ Scope: **1396 of 1396 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 500 · parse-reject 199.
+UNSUPPORTED by reason: bootstrap-unsupported 502 · parse-reject 200.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **639** — PASS 76 · FAIL 52 · UNSUPPORTED 511. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **642** — PASS 76 · FAIL 52 · UNSUPPORTED 514. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (520 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (529 cases; a case counts once per distinct reason):
 
-- 61 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 59 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 68 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 66 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 46 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 40 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
@@ -95,14 +95,14 @@ NOT-TWINNED by reason (520 cases; a case counts once per distinct reason):
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | api | 10 | · | · | · | · | · | 10 | · | · |
 | apply | 7 | · | · | · | · | · | 7 | · | · |
-| attr-executable-sink | 8 | · | · | · | · | 3 | 5 | · | · |
+| attr-executable-sink | 15 | · | · | · | · | 7 | 8 | · | · |
 | auth | 65 | 7 | · | · | · | 12 | 46 | · | · |
 | block-grammar | 7 | 3 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
-| components | 32 | · | · | 2 | · | 29 | 1 | · | · |
+| components | 37 | · | · | 2 | · | 34 | 1 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -417,7 +417,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (699)
+### UNSUPPORTED (702)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -436,10 +436,13 @@ none
 - `apply/apply-non-inlinable-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-unknown-utility-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-variant-unsupported-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
+- `attr-executable-sink/event-attr-data-text-neg` — twin · bootstrap-unsupported: `ONCLICK` on `<button>` is a case variant of the scrml attribute `onclick` — the bootstrap reads scrml attribute names exactly, so it would be a plain HTML attribute that does nothing; write `onclick`
 - `attr-executable-sink/meta-emit-neg` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `attr-executable-sink/non-handler-and-raster-data-pos` — twin · bootstrap-unsupported: `online="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
 - `attr-executable-sink/safe-interp-pos` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
+- `attr-executable-sink/srcdoc-data-forms-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `attr-executable-sink/srcdoc-interp-neg` — twin · bootstrap-unsupported: `srcdoc="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
+- `attr-executable-sink/svg-animation-literal-scheme-neg` — twin · bootstrap-unsupported: `to="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression
 - `attr-executable-sink/url-scheme-interp-neg` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
 - `auth/async-fn-escapes-as-value-dispatch-object-neg` — twin · bootstrap-unsupported: an unannotated parameter `pw` — bootstrap slice M2 needs `pw: Type` (Core parameters are typed)
 - `auth/async-fn-escapes-as-value-user-hof-neg` — twin · bootstrap-unsupported: an unannotated parameter `pw` — bootstrap slice M2 needs `pw: Type` (Core parameters are typed)
@@ -1119,10 +1122,14 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (520)
+### NOT-TWINNED (529)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/srcdoc-row-data-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/svg-animation-url-runtime-guard` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/undeclared-attr-on-attr-lift-listener-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/undeclared-attr-srcdoc-each-lift-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/url-data-scheme-runtime-guard` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
@@ -1166,6 +1173,11 @@ none
 - `components/bind-non-bindable-prop-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-non-primitive-type-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-non-primitive-type-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-prop-forwarded-to-input` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-prop-write-back` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-prop-write-back-positions` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `components/declared-prop-explicit-root-write` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `components/declared-prop-not-root-attr` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `components/duplicate-prop-decl-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/duplicate-prop-decl-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/each-in-prop-scope` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)

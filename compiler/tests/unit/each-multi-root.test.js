@@ -2,8 +2,8 @@
  * each-multi-root — adopter issue #141.
  *
  * An `<each>` body with MORE THAN ONE root element per item used to render only
- * the FIRST root: every root was built and wired into `_itemFrag`, then
- * `return _itemFrag.firstChild;` threw the rest away. Clean build, exit 0, no
+ * the FIRST root: every root was built and wired into `_scrml_item_frag`, then
+ * `return _scrml_item_frag.firstChild;` threw the rest away. Clean build, exit 0, no
  * diagnostic. Same truncation on the Tier-0 `for … lift` path
  * (`return <tmp>.firstChild;`).
  *
@@ -16,7 +16,7 @@
  *
  * The fix has two halves:
  *   CODEGEN  — the per-item root count is read off the emission. N === 1 stays
- *              `return _itemFrag.firstChild;` BYTE-IDENTICAL; N > 1 returns the
+ *              `return _scrml_item_frag.firstChild;` BYTE-IDENTICAL; N > 1 returns the
  *              DocumentFragment.
  *   RUNTIME  — `_scrml_reconcile_list`'s createFn may return a Node (unchanged)
  *              or a DocumentFragment; the reconciler owns a node GROUP per key
@@ -114,7 +114,7 @@ const ROWS = `[
 // ---------------------------------------------------------------------------
 
 describe("each-multi-root §1 — codegen root-count gate", () => {
-  test("single-root each still emits `return _itemFrag.firstChild;` (byte-level regression)", () => {
+  test("single-root each still emits `return _scrml_item_frag.firstChild;` (byte-level regression)", () => {
     const src = `\${
   <rows> = ${ROWS}
 }
@@ -126,11 +126,11 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
 `;
     const { errors, clientJs } = compileToOutputs(src, "one-root");
     expect(errors).toEqual([]);
-    expect(clientJs).toContain("return _itemFrag.firstChild;");
-    expect(clientJs).not.toContain("return _itemFrag;");
+    expect(clientJs).toContain("return _scrml_item_frag.firstChild;");
+    expect(clientJs).not.toContain("return _scrml_item_frag;");
   });
 
-  test("2-root each emits `return _itemFrag;`", () => {
+  test("2-root each emits `return _scrml_item_frag;`", () => {
     const src = `\${
   <rows> = ${ROWS}
 }
@@ -143,11 +143,11 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
 `;
     const { errors, clientJs } = compileToOutputs(src, "two-root");
     expect(errors).toEqual([]);
-    expect(clientJs).toContain("return _itemFrag;");
-    expect(clientJs).not.toContain("return _itemFrag.firstChild;");
+    expect(clientJs).toContain("return _scrml_item_frag;");
+    expect(clientJs).not.toContain("return _scrml_item_frag.firstChild;");
   });
 
-  test("3-root each emits `return _itemFrag;`", () => {
+  test("3-root each emits `return _scrml_item_frag;`", () => {
     const src = `\${
   <rows> = ${ROWS}
 }
@@ -161,13 +161,13 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
 `;
     const { errors, clientJs } = compileToOutputs(src, "three-root");
     expect(errors).toEqual([]);
-    expect(clientJs).toContain("return _itemFrag;");
+    expect(clientJs).toContain("return _scrml_item_frag;");
   });
 
   test("SHADOWING: a single-root OUTER each holding a nested each keeps `.firstChild` (byte-identity guard)", () => {
     // A nested <each> emits its own per-item factory INLINE, declaring its own
-    // `const _itemFrag` — the same literal name, shadowed. Counting bare
-    // `_itemFrag.appendChild(` occurrences mis-read this outer each as
+    // `const _scrml_item_frag` — the same literal name, shadowed. Counting bare
+    // `_scrml_item_frag.appendChild(` occurrences mis-read this outer each as
     // multi-root; the corpus byte-identity gate caught it on
     // examples/25-triage-board.scrml. Both forms must appear, each on its own
     // factory: outer `.firstChild` (1 root), inner fragment (2 roots).
@@ -187,11 +187,11 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
 `;
     const { errors, clientJs } = compileToOutputs(src, "shadow-guard");
     expect(errors).toEqual([]);
-    expect(clientJs).toContain("return _itemFrag.firstChild;");
-    expect(clientJs).toContain("return _itemFrag;");
+    expect(clientJs).toContain("return _scrml_item_frag.firstChild;");
+    expect(clientJs).toContain("return _scrml_item_frag;");
     // Exactly one of each — the outer factory and the inner factory.
-    expect(clientJs.split("return _itemFrag.firstChild;").length - 1).toBe(1);
-    expect(clientJs.split("return _itemFrag;").length - 1).toBe(1);
+    expect(clientJs.split("return _scrml_item_frag.firstChild;").length - 1).toBe(1);
+    expect(clientJs.split("return _scrml_item_frag;").length - 1).toBe(1);
   });
 
   test("SHADOWING: a multi-root OUTER each holding a single-root nested each keeps both forms straight", async () => {
@@ -212,8 +212,8 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
     const { errors, clientJs } = compileToOutputs(src, "shadow-guard-2");
     expect(errors).toEqual([]);
     // outer = 2 roots (fragment); inner = 1 root (firstChild).
-    expect(clientJs.split("return _itemFrag;").length - 1).toBe(1);
-    expect(clientJs.split("return _itemFrag.firstChild;").length - 1).toBe(1);
+    expect(clientJs.split("return _scrml_item_frag;").length - 1).toBe(1);
+    expect(clientJs.split("return _scrml_item_frag.firstChild;").length - 1).toBe(1);
     const api = await compileAndLoad(src, "shadow-guard-2-run");
     expect(api.count(".ghdr")).toBe(1);
     expect(api.count(".grp")).toBe(1);
@@ -239,9 +239,9 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
 `;
     const { errors, clientJs } = compileToOutputs(src, "if-root");
     expect(errors).toEqual([]);
-    expect(clientJs).toContain("return _itemFrag;");
+    expect(clientJs).toContain("return _scrml_item_frag;");
     // The conditional append is still gated, and still emitted at create time.
-    expect(clientJs).toMatch(/if \(r\.flag\) _itemFrag\.appendChild\(/);
+    expect(clientJs).toMatch(/if \(r\.flag\) _scrml_item_frag\.appendChild\(/);
     const api = await compileAndLoad(src, "if-root-run");
     expect(api.count(".always")).toBe(2);
     expect(api.count(".maybe")).toBe(1);
