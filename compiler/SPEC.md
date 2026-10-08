@@ -14303,7 +14303,7 @@ Error E-COMPONENT-011: Component `Badge` does not declare prop `icon`.
 |---|---|---|
 | E-COMPONENT-010 | Required prop missing at call site, OR `props` attribute on non-root element | Error |
 | E-COMPONENT-011 | Extra prop at call site not declared in `props` block | Error |
-| E-COMPONENT-012 | Same prop name declared in both `props` block and as a valueless (bare) root attribute (S458 "D1": a valued root attribute is a write, not a declaration) | Error |
+| E-COMPONENT-012 | Same prop name declared in both `props` block and as a valueless (bare) root attribute (S458 "D1": a valued root attribute is a write, not a declaration; emitted at `compiler/src/component-expander.ts:3174`.) | Error |
 
 ### 15.10.1 Prop Substitution into Logic-Block Bodies
 
@@ -25757,7 +25757,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-COMPONENT-005~~ | §16.4 | **Retired 2026-08-01 (S310) — duplicate of a LIVE code.** Searched §16.4 and the whole SPEC — no normative definition, no emitter. Its stated trigger (caller provides children, target has no `${...}` spread) is already owned by **E-COMPONENT-021** (§16.4 — *"Caller provides unslotted children but the target component has no `${...}` spread in its body"*), which IS emitted. Zero surviving unique trigger. Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
 | E-COMPONENT-010 | §15.10 | Required prop missing at call site, or `props` on non-root element | Error |
 | E-COMPONENT-011 | §15.10 | Extra prop at call site not declared in `props` block | Error |
-| E-COMPONENT-012 | §15.10 | Same prop in both `props` block and a valueless (bare) root attribute | Error |
+| E-COMPONENT-012 | §15.10 | Same prop in both `props` block and a valueless (bare) root attribute. A valued root attribute is the body writing its root (S458 "D1"). (Emitted at `compiler/src/component-expander.ts:3174`.) | Error |
 | E-NAME-001 | §15.6 | Component name collides with built-in HTML element name | Error |
 | E-TILDE-001 | §32.5 | `~` referenced but not initialized in current scope | Error |
 | E-TILDE-002 | §32.5 | `~` initialized but not consumed before scope exit or reinitialization | Error |
