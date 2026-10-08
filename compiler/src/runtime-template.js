@@ -655,7 +655,6 @@ const _scrml_reactivity_rules = Object.create(null);
 const _scrml_reactivity_bypass = Object.create(null);
 const _scrml_throttle_state = Object.create(null);
 
-
 // --- derived reactive state (§6.6) ---
 // _scrml_derived_fns: name → () => value  (evaluation function for each derived node)
 // _scrml_derived_cache: name → cached value

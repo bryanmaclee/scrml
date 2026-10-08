@@ -54,3 +54,14 @@ Governing sentences: §53.3.3 "the compiler-generated check SHALL throw a runtim
 Governing sentence: §2.2.1 (a compiled artifact is valid output; a compile error names a real defect) + the 2a F3 contract ("FAILS CLOSED on any `_scrml_*(` call the bundle neither defines nor inlines") — a mention is not a call.
 - emit-worker `unmetWorkerHelperRefs` tokenizes the bundle with acorn: a `_scrml_*` name followed by `(`, not after `.` / `?.`, is a call; template-literal text and `//` / `/* */` comments are not. `${…}` inside a template is code and still scanned. Untokenizable → [] (the §2.2.1 emit gate refuses invalid JS on its own).
 - Executed: worker `` const t = `see _scrml_foo(1) docs` ``: 2a → E-CODEGEN-INVALID-LOGIC ("a compiler defect"); head → compiles. Unit: template text / block comment / line comment / method call → no report; `${_scrml_foo(1)}` and a bare `_scrml_bar(2)` → reported.
+
+## Corpus emit differential (base c4eb2c589 vs head, identical .tmp layouts, 2,480 files; repro/classify-diff.mjs)
+
+- 2,310 identical · 170 different. Classified (every delta):
+  - 100 engine pages: the shipped runtime's engine chunk gains the two `typeof _scrml_refine_judges …` lines at the engine's direct internal writes (no behaviour change without a refined engine).
+  - 32 channel pages (conformance/channel/*, examples/15, examples/23 trucking ×13, samples channel ×3, auth-attr-legal-values-neg): the sync handler's `catch (_e) {}` now reports an E-CONTRACT refusal (`console.error`) instead of swallowing it.
+  - 1 protect/mediated-response-passthrough: the 400 body's constraint text `(number(>0 && <10000))` (slice 2a, unchanged here).
+  - 38 programs with a refinement (35 conformance refinement / forms / reactive cases + samples/compilation-tests/gauntlet-s20-validation/predicate-{email,url,number-range}-001): registrations, bind gate on the written value, hoisted judges, check text.
+- Outcome changes: 4, all conformance pos cases whose expected code is the point (literal-call-arg-pos, reassign-literal-pos, struct-field-literal-pos → E-CONTRACT-001, slice 2a; block-arrow-refined-local-pos → E-CONTRACT-002, this change). 0 in samples / examples / stdlib.
+- A first head run from the worktree (not a .tmp copy) showed stdlib differences (E-ASYNC / E-NAME-COLLIDES / E-CODEGEN-INVALID-LOGIC on stdlib/data) — the layout artifact the slice-1 entry already recorded; gone with an identically laid-out head copy.
+- Also found by that differential: a stray blank line left in the core chunk by the F2 edits (every runtime differed); removed — core and deep_reactive are byte-identical to the base.
