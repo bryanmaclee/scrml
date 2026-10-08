@@ -219,7 +219,8 @@ describe("C — runtime zone: every boundary check calls the one judge", () => {
       // the shipped runtime carries the 'urlguard' chunk (gated on the call)
       expect((out.runtimeJs.match(/function _scrml_url_shape_ok\(/g) ?? []).length).toBe(1);
       // server: the param check calls it; the bundle inlines the definition once
-      expect(out.serverJs).toContain("if (!(_scrml_url_shape_ok(link)))");
+      // S458 — the one judge tests the base type first, then the shape.
+      expect(out.serverJs).toContain(`if (!((typeof link === "string" && _scrml_url_shape_ok(link))))`);
       expect((out.serverJs.match(/function _scrml_url_shape_ok\(/g) ?? []).length).toBe(1);
       expect((out.serverJs.match(/function _scrml_read_url_scheme\(/g) ?? []).length).toBe(1);
       // the client does not receive the server-function body

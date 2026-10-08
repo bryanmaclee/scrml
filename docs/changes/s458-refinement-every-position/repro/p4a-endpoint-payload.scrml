@@ -1,0 +1,13 @@
+<program>
+
+type Req:enum = {
+  Save(link: string(url))
+  Count(n: number(>0))
+}
+
+<endpoint path="/e" method="POST" accepts=Req>
+  <Save(link) : { saved: link }>
+  <Count(n) : { n: n }>
+</endpoint>
+
+</program>

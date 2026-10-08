@@ -12,7 +12,7 @@ import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHead
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
-import { emitRuntimeCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
+import { emitRuntimeCheck, refinementOf } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
@@ -547,6 +547,12 @@ export interface EmitLogicOpts {
    * emits no boundary check (correct for non-refinement-typed returns).
    */
   returnTypeAnnotation?: string | null;
+  /**
+   * S458 one reader — the TS-resolved return refinement (`fnNode.returnRefinement`,
+   * stamped by type-system.ts). return-stmt judges THIS, never the annotation
+   * string. Threaded alongside `returnTypeAnnotation`.
+   */
+  returnRefinement?: unknown;
   /**
    * C16 (§53.9.3) — The enclosing function's name, used in error messages
    * for return-stmt boundary check failures. Paired with returnTypeAnnotation.
@@ -2384,7 +2390,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
           return [
             `const ${_checkTmpVar} = ${rhs};`,
             ..._checkLines,
@@ -2403,7 +2409,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && typeof node.name === "string") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
         return [`const ${_checkTmpVar} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`, ..._checkLines, `let ${node.name} = ${_checkTmpVar};`].join("\n");
       }
       return `let ${_letDeclLhs} = ${emitExprField(node.initExpr, letInit, _makeExprCtx(opts))};`;
@@ -3113,7 +3119,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
           const _pc = node.predicateCheck;
           const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+          const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
           return _appendSidecar([
             `const ${_checkTmpVar} = ${rewrittenInit};`,
             ..._checkLines,
@@ -3129,7 +3135,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.predicateCheck && node.predicateCheck.zone === "boundary" && initStr !== "null") {
         const _pc = node.predicateCheck;
         const _checkTmpVar = genVar(`_scrml_chk_${node.name}`);
-        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null);
+        const _checkLines = emitRuntimeCheck(_pc.predicate, _checkTmpVar, node.name, _pc.label ?? null, undefined, _pc);
         return _appendSidecar([`const ${_checkTmpVar} = ${rewrittenInit};`, ..._checkLines, _emitReactiveSet(encodedName, _wrapDeepReactive(_checkTmpVar, initStr), opts, node.name, isInit)].join("\n"));
       }
       return _appendSidecar(_emitReactiveSet(encodedName, wrappedInit, opts, node.name, isInit));
@@ -3144,7 +3150,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // refinement-typed return type, wrap the return expression in a
       // boundary check (E-CONTRACT-001-RT) before returning.
       const _retPredInfo = opts.returnTypeAnnotation
-        ? parsePredicateAnnotation(opts.returnTypeAnnotation)
+        ? refinementOf(opts.returnRefinement)
         : null;
       const _wrapReturnWithCheck = (retExprStr: string): string => {
         if (!_retPredInfo) return `return ${retExprStr};`;
@@ -3157,6 +3163,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           `<return value of ${_fnName}>`,
           _label,
           `fn ${_fnName}, return statement`,
+          _retPredInfo,
         );
         return [
           `const ${_tmpVar} = ${retExprStr};`,

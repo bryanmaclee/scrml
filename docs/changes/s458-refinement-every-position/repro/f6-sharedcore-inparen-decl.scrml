@@ -1,0 +1,9 @@
+<program>
+${
+  function pick(v) {
+    let n: number(min(0) && max(100)) = v
+    return n
+  }
+}
+<p>${pick(5)}</p>
+</program>

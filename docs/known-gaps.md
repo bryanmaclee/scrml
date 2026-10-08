@@ -31,10 +31,38 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 244 | 6 |
-| MED | 534 | 4 |
-| LOW | 298 | 0 |
+| MED | 535 | 4 |
+| LOW | 303 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-refinement-union-member-unchecked-s458 — a refinement inside a union other than `T | not` (`number(>0) | string`) gets no check — `NEW S458; MED; open (slice 2)`
+
+<!-- @gap id=g-refinement-union-member-unchecked-s458 sev=MED status=open locus=compiler/src/codegen/emit-predicates.ts(refinementShape returns null for unions other than T|not) prov=review:s458-refinement-slice1-r2 -->
+
+### g-refinement-predicate-contradicts-base-s458 — a predicate contradicting its base type compiles clean and refuses every value at runtime (`number(eq("x"))`, `number(length(>1))`, `number(.length > 1)`) — should be E-CONTRACT-002 at the declaration — `NEW S458; LOW; open (slice 2)`
+
+<!-- @gap id=g-refinement-predicate-contradicts-base-s458 sev=LOW status=open locus=compiler/src/type-system.ts(checkRefinementJudgeable) prov=review:s458-refinement-slice1-r2 -->
+
+### g-refinement-number-literal-multi-dot-s458 — `number(>1.2.3)` reads as `>1.2` (number token `[0-9.]*` + parseFloat drops the rest) — `NEW S458; LOW; open`
+
+<!-- @gap id=g-refinement-number-literal-multi-dot-s458 sev=LOW status=open locus=compiler/src/type-system.ts(predicate number token) prov=review:s458-refinement-slice1 -->
+
+### g-enum-subset-judge-admits-object-and-skips-payload-s458 — the variant-set judge reads `.variant` off any object, so `{"variant":"Admin"}` passes a unit-variant subset; payload fields are not validated — `NEW S458; LOW; open (slice 2)`
+
+<!-- @gap id=g-enum-subset-judge-admits-object-and-skips-payload-s458 sev=LOW status=open locus=compiler/src/codegen/emit-predicates.ts(variant-set judge) prov=review:s458-refinement-slice1 -->
+
+### g-refinement-string-operand-paren-tokenizer-s458 — a `)` inside a string operand of a decl or param annotation (`string(eq(")"))`) is a tokenizer parse error (fails closed) — `NEW S458; LOW; open`
+
+<!-- @gap id=g-refinement-string-operand-paren-tokenizer-s458 sev=LOW status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/ast-builder.js(annotation collectors) prov=review:s458-refinement-slice1-r2 -->
+
+### g-bind-value-check-skips-base-type-s458 — `bind:value` refinement checks judge the raw DOM string without the base-type guard (the coerced write value is not threaded to the check) — `NEW S458; LOW; open (slice 2)`
+
+<!-- @gap id=g-bind-value-check-skips-base-type-s458 sev=LOW status=open locus=compiler/src/codegen/emit-bindings.ts prov=empirical:s458-refinement-slice1 -->
+
+### g-test-body-string-token-double-escape-s458 — `tokenToSourceText` (ast-builder, test-case body rebuild) JSON.stringifies a STRING token's raw text — the double-escape S458 slice 1 fixed for annotations — `NEW S458; LOW; open`
+
+<!-- @gap id=g-test-body-string-token-double-escape-s458 sev=LOW status=open locus=compiler/src/ast-builder.js(tokenToSourceText) prov=empirical:s458-refinement-slice1 -->
 
 ### g-component-through-reexport-unexpanded-s458 — a component imported through a `.scrml` re-export (`export { Card } from "./c.scrml"` in b, `import { Card } from "./b.scrml"`) is not expanded: E-COMPONENT-020 / E-COMPONENT-035 — `NEW S458; MED; open (pre-existing)`
 
@@ -126,6 +154,8 @@ Same fix as 0c84f5038: rename at emission into `_scrml_`. Enumeration method in 
 
 <!-- @gap id=g-refinement-checks-absent-in-n-positions-s457 sev=HIGH status=open locus=searched:emit-logic.ts,emit-functions.ts,emit-server.ts,emit-worker.ts,emit-library.ts,emit-tool.ts,emit-parse-variant.ts prov=review:S457-differential-d48abd3f2(executed on base and head) -->
 
+**S458 slice 1 (`92cdfac66`):** one reader (codegen mirror deleted; the type stage stamps param / return / decl refinements, every emitter reads the stamp); the judge checks the BASE type first and fails closed (no `true` fallback); E-CONTRACT-002/-003 reported where declared, in every zone (E-CONTRACT-002 now also = malformed predicate, §34 + §53.11 amended); enum-subset params checked client + server; refinements inside `T[]` / `T | not` / `T?` judged; the §55.1 shared-core words INSIDE the parens judged (§55.3); string operands quoted on every path; a literal of the wrong base type is E-CONTRACT-001; the README flagship `createTask(text: string(.length >= 1))` is now enforced (main: `''` → 200). Remaining positions → slice 2 (obligation pass + R2 + R3), then R4 (space-separated shared-core, ruled S458), then position 5 / R1 (ruled S458). Plan: `docs/changes/s458-refinement-every-position/PLAN.md`.
+
 §53.4.3 / §53.9 say these SHALL be checked; none are: (1) reassignment of a refined cell (`@u = v` with `v = "javascript:x"` accepted); (2) struct fields (`type T:struct = { u: string(url) }`); (3) top-level `const X: string(url) = f()`; (4) `<endpoint>` payload fields (parseVariant defers — a `javascript:` field returns 200; `<api>` responses likely the same); (5) schema/table fields; (6) a server function's refined return type; (7) library / tool / value-export function parameters; (8) a literal call argument (throws at runtime, not judged statically); (9) a refined parameter on a nested worker `<program>` function. SPEC §53.6.1 now lists these under impl#1 status. Silent: a refinement type promises a property the program does not have.
 
 ### g-worker-bundle-runtime-helpers-not-inlined-s457 — a worker `<program>` bundle inlines only `_scrml_reply`; `==` on structs (`_scrml_structural_eq`) or a map literal (`_scrml_map_from_entries`) in a worker function throw ReferenceError at runtime, clean compile — `NEW S457; MED; open`
@@ -134,9 +164,11 @@ Same fix as 0c84f5038: rename at emission into `_scrml_`. Enumeration method in 
 
 The S457 `url` judge is now inlined (6a review N1). Fix: the sig→source table emit-tool / emit-library use, plus a fail-closed scan for unmet `_scrml_*(` refs.
 
-### g-server-param-contract-400-string-coercion-throws-s457 — the refined-parameter 400 response builds `value: String(param)`; `{"link":{"toString":1}}` makes `String()` throw and the handler crashes instead of 400 — `NEW S457; LOW; open`
+### g-server-param-contract-400-string-coercion-throws-s457 — the refined-parameter 400 response builds `value: String(param)`; `{"link":{"toString":1}}` makes `String()` throw and the handler crashes instead of 400 — `NEW S457; LOW; RESOLVED S458 (refinement slice 1)`
 
-<!-- @gap id=g-server-param-contract-400-string-coercion-throws-s457 sev=LOW status=open locus=compiler/src/codegen/emit-predicates.ts(emitServerParamCheck, emitRuntimeCheck) prov=review:S457-differential-d48abd3f2 -->
+<!-- @gap id=g-server-param-contract-400-string-coercion-throws-s457 sev=LOW status=resolved resolved-by=s458-refinement-every-position-slice1 locus=compiler/src/codegen/emit-predicates.ts(emitServerParamCheck, emitRuntimeCheck) prov=review:S457-differential-d48abd3f2 -->
+
+**RESOLVED S458** (slice 1): the one judge renders a refused value without `String()` (`typeof` for non-primitives); a `{toString:1}` body is a 400, never a 500 — executed on both route paths.
 
 ### g-stdlib-data-url-validator-admits-executable-schemes-s457 — `scrml:data` `url()` validator checks only that `new URL()` parses, so it accepts `javascript:`; its scrml source still uses try/catch — `NEW S457; LOW; open (ruling: follow string(url)?)`
 

@@ -1,0 +1,6 @@
+${
+    function take(n: number(>0 foo)) {
+        return n
+    }
+}
+<program><p>${take(5)}</p></program>

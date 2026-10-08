@@ -1,0 +1,9 @@
+<program>
+${
+  type Role:enum = { Admin, Editor, Viewer }
+  server function promote(r: Role oneOf([.Admin, .Editor])) {
+    return r
+  }
+}
+<button onclick=promote(.Admin)>go</button>
+</program>

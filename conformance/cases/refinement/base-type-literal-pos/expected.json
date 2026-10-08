@@ -1,0 +1,12 @@
+{
+  "id": "refinement-base-type-literal-pos",
+  "description": "S458: the compile-time literal check tests the BASE type, as the runtime judge does. `<count>: integer(>0) = 1.5` satisfies `>0` but 1.5 is not an integer, so it does not inhabit `integer(>0)`: E-CONTRACT-001. Before S458 it compiled with no error and, being a literal (static zone), with no runtime check either.",
+  "language-version": "1.0",
+  "spec": "§53.3.4",
+  "rationale": "§53.3.4: the constrained type is a subtype of the base type; §53.4.2 rule 1 + §53.11: a literal that demonstrably fails is E-CONTRACT-001.",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": ["E-CONTRACT-002"],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

@@ -25874,7 +25874,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-AUTH-ATTR-INVALID | §52.13.2, §52.13.1 | An `auth=` attribute on a `<program>` or `<page>` whose value is not exactly `"required"`, `"optional"` or `"none"`: any other literal (another case `"Required"`, padding `" required"`, the empty string `""`, `"role:admin"`, `"true"`) or any non-literal (a bare `auth`, `auth=${…}`, `auth=@x`). The message names the value written, lists the three legal values (with a did-you-mean when the value differs only in case or spaces, and the role-gate route for `role:X`). Before S449 these compiled to an application with no login gate (W-ATTR-002 for a literal, nothing at all for a non-literal or `""`). Does NOT fire on a nested `<program>` (E-PROGRAM-NESTED-AUTH is that declaration's one diagnostic) nor on `<channel>` (any `auth=` there gates; an unrecognized literal is W-ATTR-002). The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/validators/attribute-allowlist.ts` (VP-1). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2") · supersedes: spec:§52.13.2 (W-ATTR-002 + no gate). | Error |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
-| E-CONTRACT-002 | §53.11 | Named shape not found in registry | Error |
+| E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
 | E-CONTRACT-003 | §53.11 | Predicate references external state — use `<machine>` instead | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
@@ -40396,7 +40396,9 @@ Normative statements:
 ### E-CONTRACT-002: Named shape not found in registry
 
 Emitted when a named shape identifier in a predicate expression does not match any built-in or
-registered shape.
+registered shape, or when the inline predicate is malformed — text the §53.2.1 grammar does not read
+(an unexpected character, an unclosed group, tokens left over after the predicate, a tail after the
+closing `)` other than one `[label]`, an invalid `pattern(…)` regex).
 
 ```
 E-CONTRACT-002: Named shape 'ssn' not found in the shape registry.
@@ -40413,6 +40415,15 @@ Normative statements:
 > predicate and is not present in the built-in or extended shape registry.
 > Named shape resolution SHALL occur at compile time. There is no runtime shape lookup.
 > The compiler SHALL list available built-in shapes in the E-CONTRACT-002 error message.
+> The compiler SHALL emit E-CONTRACT-002 when an inline predicate in refinement-type position is
+> malformed under the §53.2.1 grammar. A malformed predicate SHALL NOT be treated as an
+> unrefined annotation, and its runtime check SHALL NOT admit values it cannot judge.
+> Both forms of E-CONTRACT-002 SHALL be emitted where the refinement is declared, whatever zone
+> its value is in — not only when the value is a literal.
+
+> **Provenance:** spec:§53.2.1 grammar (conformance restoration, S458) · the malformed-predicate
+> sense extends the code's prior "named shape not found" meaning; the malformed enum subset (§53.15.1)
+> already reported under this code.
 
 ### E-CONTRACT-002-RT: Named shape registry lookup at runtime
 

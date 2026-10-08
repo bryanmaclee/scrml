@@ -1,0 +1,12 @@
+{
+  "id": "refinement-unknown-shape-boundary-pos",
+  "description": "S458 F1: an unknown named shape is refused at the DECLARATION in every zone, not only when the initializer is a literal. `let s: string(ssn) = v` has a non-literal (boundary-zone) initializer; before S458 it compiled clean to a runtime check of `if (!(true))` that admitted every value. It is now E-CONTRACT-002.",
+  "language-version": "1.0",
+  "spec": "§53.6.3",
+  "rationale": "§53.6.3: \"If a named shape identifier does not match any entry in the built-in or extended registry, the compiler SHALL emit E-CONTRACT-002 at compile time. Named shapes are resolved at compile time — there is no runtime shape lookup.\" The rule names no zone.",
+  "expect": {
+    "codes": ["E-CONTRACT-002"],
+    "notCodes": [],
+    "severity": { "E-CONTRACT-002": "error" }
+  }
+}

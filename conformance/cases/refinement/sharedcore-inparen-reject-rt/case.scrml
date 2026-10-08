@@ -1,0 +1,13 @@
+${
+    <good>: number = 50
+    <bad>: number = 150
+    <shown>: number = 0
+    function rate(score: number(min(0) && max(100))) {
+        @shown = score
+    }
+}
+<program>
+<button id="good" onclick=${rate(@good)}>Good</button>
+<button id="bad" onclick=${rate(@bad)}>Bad</button>
+<p id="out">${@shown}</p>
+</program>
