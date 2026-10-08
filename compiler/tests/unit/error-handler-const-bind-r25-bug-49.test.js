@@ -327,7 +327,9 @@ describe("R25-Bug-49 §5: nested handler — `!{...}` inside an arm body", () =>
     expect((result.errors ?? []).filter((e) => e.code !== KNOWN_FALSE_POSITIVE)).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
+    // SPEC §2.2.1 (S457 "1a"): the known false positive above is an Error, so this compile
+    // writes NO file — read the in-memory client output.
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(srcFile)?.clientJs ?? ""));
     expect(clientJs).toContain('_scrml_reactive_set("inner", "y")');
     expect(clientJs).toContain('_scrml_reactive_set("outer", "x")');
 

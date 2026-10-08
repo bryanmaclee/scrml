@@ -56,10 +56,12 @@ function compileSource(name, source) {
   const errors = (result.errors || []).filter(
     e => e.severity == null || e.severity === "error",
   );
-  let clientJs = "";
-  let serverJs = "";
-  try { clientJs = readFileSync(join(outDir, `${name}.client.js`), "utf8"); } catch { /* missing */ }
-  try { serverJs = readFileSync(join(outDir, `${name}.server.js`), "utf8"); } catch { /* missing */ }
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file, and these
+  // fixtures report one (no `test.db` — E-SCHEMA-004 and kin) — read the in-memory
+  // outputs, which are the codegen the leak pins are about.
+  const output = result.outputs.get(filePath) ?? {};
+  const clientJs = output.clientJs ?? "";
+  const serverJs = output.serverJs ?? "";
   return { errors, clientJs, serverJs, outDir };
 }
 

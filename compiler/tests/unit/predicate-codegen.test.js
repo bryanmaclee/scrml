@@ -146,10 +146,11 @@ describe("§3 predicateToJsExpr — named-shape predicates", () => {
     expect(expr).toContain("@");  // email regex should include @
   });
 
-  test("url shape emits a URL parsing check", () => {
+  test("url shape emits a call to the shared url shape judge (S457 '6a')", () => {
     const expr = predicateToJsExpr(mkNamedShape("url"), "urlVal");
-    expect(expr).toContain("urlVal");
-    expect(expr).toContain("URL");
+    // The judge (URL parse + §5.2 safe-scheme check) lives in runtime-url-guard.js; the emitted
+    // check calls it rather than carrying a second copy of the reader.
+    expect(expr).toBe("_scrml_url_shape_ok(urlVal)");
   });
 
   test("uuid shape emits a pattern check", () => {

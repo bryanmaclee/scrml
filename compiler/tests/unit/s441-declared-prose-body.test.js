@@ -28,10 +28,15 @@ function compile(source, parser) {
   if (existsSync(out)) rmSync(out, { recursive: true });
   const r = compileScrml({ inputFiles: [f], outputDir: out, write: true, log: () => {}, parser: parser ?? null });
   const errors = r.errors ?? [];
-  const html = existsSync(join(out, `case-${n}.html`)) ? readFileSync(join(out, `case-${n}.html`), "utf8") : "";
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file, so
+  // the recovery cases (which all report one) are read from the in-memory
+  // outputs; a clean compile's written HTML is the same bytes.
+  if (errors.length > 0) expect(existsSync(out)).toBe(false);
+  const output = r.outputs.get(f) ?? {};
+  const html = output.html ?? "";
   const m = html.match(/<body>([\s\S]*?)<script/);
   const body = (m ? m[1] : "").replace(/\s+/g, " ").trim();
-  const client = existsSync(join(out, `case-${n}.client.js`)) ? readFileSync(join(out, `case-${n}.client.js`), "utf8") : "";
+  const client = output.clientJs ?? "";
   return { errors, codes: errors.map((e) => e.code), body, client };
 }
 

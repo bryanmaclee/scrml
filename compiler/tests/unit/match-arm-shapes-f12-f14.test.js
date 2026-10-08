@@ -20,7 +20,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, readdirSync } from "fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, readdirSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { pathToFileURL } from "url";
 import { compileScrml } from "../../src/api.js";
@@ -51,7 +51,12 @@ function compileProgram(source) {
     writeFileSync(srcPath, source, "utf8");
     const outDir = resolve(dir, "out");
     const result = compileScrml({ inputFiles: [srcPath], outputDir: outDir, write: true, log: () => {} });
-    const js = readdirSync(outDir).filter((f) => f.endsWith(".js")).map((f) => readFileSync(resolve(outDir, f), "utf8")).join("\n");
+    // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file — the
+    // refusal cases have no output directory and only their diagnostics are asserted.
+    if ((result.errors || []).length > 0) expect(existsSync(outDir)).toBe(false);
+    const js = existsSync(outDir)
+      ? readdirSync(outDir).filter((f) => f.endsWith(".js")).map((f) => readFileSync(resolve(outDir, f), "utf8")).join("\n")
+      : "";
     return { errors: (result.errors || []).map((e) => e.code), js };
   } finally {
     rmSync(dir, { recursive: true, force: true });

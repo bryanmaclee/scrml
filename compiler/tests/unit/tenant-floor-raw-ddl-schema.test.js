@@ -617,8 +617,10 @@ ${q}
 </program>`);
   const outDir = join(dir, "out");
   const r = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
-  let server = "";
-  try { server = readFileSync(join(outDir, "app.server.js"), "utf8"); } catch {}
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file. The
+  // fail-closed pins below inspect the codegen of compiles that DO report one
+  // (defense in depth past the error), so read the in-memory server output.
+  const server = r.outputs.get(file)?.serverJs ?? "";
   return { r, server };
 }
 const errCodes = (r) => (r.errors ?? []).map((d) => d.code);

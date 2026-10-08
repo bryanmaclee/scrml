@@ -47,17 +47,10 @@ function compileSource(name, src) {
   const inputPath = join(FIXTURE_DIR, name);
   writeFileSync(inputPath, src);
   const outDir = join(FIXTURE_DIR, "dist-" + name.replace(/\W/g, ""));
-  compileScrml({ inputFiles: [inputPath], outputDir: outDir, write: true, log: () => {} });
-  let clientJs = "";
-  (function find(dir) {
-    if (!existsSync(dir)) return;
-    for (const ent of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, ent.name);
-      if (ent.isDirectory()) find(p);
-      else if (ent.name.endsWith(".client.js")) clientJs = readFileSync(p, "utf-8");
-    }
-  })(outDir);
-  return clientJs;
+  const r = compileScrml({ inputFiles: [inputPath], outputDir: outDir, write: true, log: () => {} });
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file; read the
+  // in-memory output (a clean compile writes the same codegen).
+  return r.outputs.get(inputPath)?.clientJs ?? "";
 }
 
 /** Slice one `async function _scrml_<fnName>_<n>(...) { ... }` body out of the emit. */

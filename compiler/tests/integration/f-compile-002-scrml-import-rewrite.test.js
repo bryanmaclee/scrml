@@ -76,7 +76,7 @@ const PAGE_WITH_SERVER_IMPORT = `<program>
     return greet("world")
   }
 }
-h1 "f-compile-002 server-import test"
+<h1>f-compile-002 server-import test</h1>
 
 </program>
 `;
@@ -136,7 +136,7 @@ describe("F-COMPILE-002 §2: client emit rewrites .scrml → .client.js", () => 
 \${
   import { greet } from './helper.scrml'
 }
-h1 "client-import"
+<h1>client-import</h1>
 
 </program>
 `;
@@ -234,7 +234,7 @@ describe("F-COMPILE-002 §4: default imports are rewritten", () => {
     return helper("x")
   }
 }
-h1 "default-import"
+<h1>default-import</h1>
 
 </program>
 `;

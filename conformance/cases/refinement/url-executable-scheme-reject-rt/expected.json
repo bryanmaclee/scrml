@@ -1,0 +1,14 @@
+{
+  "id": "refinement-url-executable-scheme-reject-rt",
+  "description": "S457 \"6a\": the `url` named shape refuses a non-safe scheme in the BOUNDARY zone. show(link: string(url)) is called first with \"https://scrml.dev/\" (a safe scheme — the check passes, @shown takes it) and then with \"JaVaScRiPt:alert(1)\" (the URL parser accepts it; its scheme, read case-insensitively, is `javascript`, outside the §5.2 safe set). The compiler-generated boundary check throws E-CONTRACT-001-RT before the assignment, so @shown RETAINS the https value. (E-CONTRACT-001-RT is a runtime error, not a compile code; the observable is the retained prior value.)",
+  "language-version": "1.0",
+  "spec": "§53.6.1",
+  "rationale": "§53.6.1: every scheme outside `http`/`https`/`ftp`/`mailto`/`tel`/`sms` \"SHALL fail the predicate\" and \"a boundary-zone value that fails it raises `E-CONTRACT-001-RT` (§53.4.5)\"; §53.3.3: the variable retains its prior value.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001"],
+    "input": [{ "click": "#ok" }, { "click": "#bad" }],
+    "state": { "shown": "https://scrml.dev/" },
+    "domAnchored": [{ "selector": "#out", "text": "Link: https://scrml.dev/" }]
+  }
+}

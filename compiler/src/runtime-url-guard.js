@@ -8,8 +8,9 @@
 //     'urlguard'; emit-ssr-render.ts for the server's first-paint rows) and calls `_scrml_safe_url` on
 //     every URL-attribute write whose value the compiler could not prove safe — the data supplies the
 //     scheme there (`href="${url}"`, `href=${@u}`, an `<each>` row's `src=@.img`).
-// Both halves therefore read a URL with the same steps and admit the same schemes. Do not write a second
-// list or a second reader anywhere: change this file.
+// Both halves therefore read a URL with the same steps and admit the same schemes. The `string(url)`
+// refinement shape (§53.6.1, S457 "6a") is judged here too (`_scrml_url_shape_ok`, at the end). Do not
+// write a second list or a second reader anywhere: change this file.
 //
 // This file is inlined into a classic browser script and into the server bundle, so it holds plain
 // function and `const` declarations only — no imports, no TypeScript, and every top-level name carries
@@ -219,4 +220,24 @@ export function _scrml_safe_url(el, name, value) {
     console.error("[scrml url-guard] " + err.message);
   }
   return "about:blank";
+}
+
+// The `url` named shape of a refinement type (SPEC §53.6.1, S457 ruling "6a"): `string(url)`. A value
+// inhabits the shape when it is a string, the WHATWG URL parser accepts it as an absolute URL (no base
+// — a relative URL such as `/users/1` does not inhabit it), AND the scheme this file's reader finds is
+// one of `_SCRML_SAFE_URL_SCHEMES`. Every other scheme — `javascript:`, `vbscript:`, `data:` (a value
+// type does not know which attribute it will reach, so no `data:` form is admitted), `blob:`, `file:`,
+// and any scheme not named there — fails the shape (fail closed). The compiler's static zone imports
+// this function to judge a string literal (type-system.ts); the runtime boundary check calls it
+// (emit-predicates.ts), inlined from this file into the client runtime ('urlguard' chunk) and into the
+// server bundle — one predicate at both enforcement sites.
+export function _scrml_url_shape_ok(value) {
+  if (typeof value !== "string") return false;
+  try {
+    new URL(value);
+  } catch (e) {
+    return false;
+  }
+  const r = _scrml_read_url_scheme(value, false);
+  return r.kind === "scheme" && _SCRML_SAFE_URL_SCHEMES.has(r.scheme);
 }

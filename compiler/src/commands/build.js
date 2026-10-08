@@ -22,7 +22,7 @@ import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
-import { hasApplicationScopeRefusal, noFilesWrittenLine } from "./refusal-gate.js";
+import { noFilesWrittenLine } from "./refusal-gate.js";
 import { STATIC_POLICY_EMIT_SOURCE } from "../static-serve-policy.js";
 
 /** Valid deployment target identifiers. */
@@ -1372,16 +1372,17 @@ export async function runBuild(args) {
     console.error(line);
   }
 
-  // g-session-config-refusal-still-writes-dist — the application-scope refusal
-  // (E-MW-008 from the compile, E-MW-007 over the post-write unit set) is decided
-  // BEFORE any byte reaches `outputDir`; a refused build leaves it as it was.
-  // (The static target generates no server entry and never raised E-MW-007.)
-  let refusedWrite = false;
+  // SPEC §2.2.1 (S457 "1a") — a compile that reports any Error writes nothing;
+  // compileScrml decides it before any byte reaches `outputDir`, so a failed
+  // build leaves it as it was (see ./refusal-gate.js). The one refusal decided
+  // HERE is E-MW-007 over the post-write unit set (g-session-config-refusal-
+  // still-writes-dist): the planned units plus any `.server.js` already in dist,
+  // a fact compileScrml does not see. (The static target generates no server
+  // entry and never raises E-MW-007.)
   let onionRefusal = null;
-  const beforeWrite = ({ errors, outputDir: dir, plannedServerUnits }) => {
+  const beforeWrite = ({ outputDir: dir, plannedServerUnits }) => {
     if (opts.target !== "static") onionRefusal = decideOnionBeforeWrite(dir, plannedServerUnits).error;
-    refusedWrite = hasApplicationScopeRefusal(errors) || onionRefusal != null;
-    return !refusedWrite;
+    return onionRefusal == null;
   };
 
   const result = compileScrml({
@@ -1421,7 +1422,7 @@ export async function runBuild(args) {
       console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`);
     }
     if (onionRefusal) console.error(`  ${formatOnionConflict(onionRefusal)}`);
-    if (refusedWrite) console.error(noFilesWrittenLine(outputDir));
+    if (!result.artifactsWritten) console.error(noFilesWrittenLine(outputDir));
     process.exit(1);
   }
 

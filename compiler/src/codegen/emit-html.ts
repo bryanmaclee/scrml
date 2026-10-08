@@ -353,11 +353,14 @@ function valueAttrIsLowerable(
   // acorn's `parseExpressionAt("(cls)")` returns the INNER node, whose `end`
   // stops before the closing paren, so it reports every parenthesized
   // expression as invalid. `val.raw` is always parenthesized.)
+  // Syntax only (S457): this probe decides whether to DROP the attribute with a
+  // warning. A compiler placeholder in the lowering must instead reach the
+  // artifact gate (api.js), which refuses the whole compile loudly.
   const _probe = validateEmittedArtifact({
     sourceFile: "",
     artifact: "value-attr-probe.js",
     contents: `const _scrml_v = (${lowered});`,
-  });
+  }, { checkPlaceholders: false });
   if (_probe !== null) {
     if (errors) {
       errors.push(new CGError(

@@ -17,9 +17,10 @@
  * nothing beyond the output directory itself needs to be writable, and nothing is
  * created beside it.
  *
- * SCOPE PIN: every OTHER hard error keeps its pre-existing posture (artifacts land,
- * exit 1). A test pins that on purpose; widening fail-closed to all hard errors is
- * an open ruling, and flipping that test is how the ruling would land.
+ * SCOPE: the ruling landed. SPEC §2.2.1 (S451 5(b); impl#1 exception granted S457
+ * "1a") — a compile that reports ANY Error writes no artifact; the former SCOPE PIN
+ * test (a non-refusal hard error still wrote) is flipped below, as this header said
+ * it would be. The general rule: compiler/tests/integration/s457-no-artifacts-on-error.test.js.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -150,12 +151,12 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(nothingBeside(p)).toEqual([]);
   });
 
-  test("SCOPE PIN — a non-refusal hard error still writes artifacts (pre-existing posture)", () => {
+  test("SCOPE PIN, FLIPPED (S457 \"1a\") — any other hard error writes nothing too (SPEC §2.2.1)", () => {
     const p = project({ "index.scrml": `<program>\n  <p>\${@nope}</p>\n</program>\n` });
     const r = build(p);
     expect(r.code).not.toBe(0);
-    expect(r.out).not.toContain("No files were written");
-    expect(existsSync(join(p.dist, "index.html"))).toBe(true);
+    expect(r.out).toContain("No files were written");
+    expect(existsSync(p.dist)).toBe(false);
     expect(nothingBeside(p)).toEqual([]);
   });
 

@@ -1,13 +1,25 @@
 /**
- * Reserved `_scrml_` identifier prefix — SPEC §47.1.1, S439 ruling #7 + S440 ruling #9.
+ * Reserved `_scrml_` and `__scrml_` identifier prefixes — SPEC §47.1.1, S439
+ * ruling #7 + S440 ruling #9 (`_scrml_`), S457 ruling "a for __scrml_".
  *
  *   E-NAME-COLLIDES-RESERVED-PREFIX (Error)
  *
  * A user-authored scrml program SHALL NOT declare a binding whose name begins
- * with `_scrml_`, and SHALL NOT reference such a name: that prefix names the
- * compiler's own emitted identifiers and the runtime's (`_scrml_reactive_set`,
- * `_scrml_sql`, `_scrml_session_destroy`, ...). Standard-library source (the
- * `stdlib/` tree this compiler ships with) is exempt BY PATH.
+ * with `_scrml_` or `__scrml_`, and SHALL NOT reference such a name: `_scrml_`
+ * names the compiler's own emitted identifiers and the runtime's
+ * (`_scrml_reactive_set`, `_scrml_sql`, `_scrml_session_destroy`, ...);
+ * `__scrml_` names the compiler's internal placeholders and locals.
+ * Standard-library source (the `stdlib/` tree this compiler ships with) is
+ * exempt BY PATH.
+ *
+ * THE COMPILER'S OWN PLACEHOLDERS (S457). The expression parser writes its
+ * placeholders into the tree this check walks (inside escape-hatch raw text,
+ * as the `!{}` handler marker call, as a masked `.Variant`). Every one carries
+ * the per-process unguessable nonce of placeholder-nonce.ts and is exempt by
+ * that nonce (`isCompilerPlaceholderName`) — nothing an author can spell. An
+ * author-typed `__scrml_match__` is flagged here, and in any position this walk
+ * does not inspect it is still inert: every recogniser matches only the nonce'd
+ * form, so it is lowered by nothing and the §2.2.1 emit gate refuses it.
  *
  * WHY IT IS A SECURITY RULE. Every `?{}` safety floor — the §14.8.10 tenant
  * filter, the §14.8.9 protect tagging, the transaction gate — is armed at the
@@ -70,8 +82,24 @@ import { parseComponentBody } from "../component-expander.ts";
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { isStdlibSourceFile } from "../module-resolver.js";
+import { isCompilerPlaceholderName } from "../placeholder-nonce.ts";
 
+/**
+ * The shared substring of both reserved prefixes (`__scrml_` contains it) —
+ * the cheap pre-filter before any lexing.
+ */
 export const RESERVED_NAME_PREFIX = "_scrml_";
+
+/** The reserved identifier prefixes (§47.1.1); the longer is tested first. */
+export const RESERVED_NAME_PREFIXES = ["__scrml_", "_scrml_"] as const;
+
+/** The reserved prefix `name` begins with, or null. */
+export function reservedPrefixOf(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  const bare = name.startsWith("@") ? name.slice(1) : name;
+  for (const p of RESERVED_NAME_PREFIXES) if (bare.startsWith(p)) return p;
+  return null;
+}
 
 export const RESERVED_PREFIX_CODE = "E-NAME-COLLIDES-RESERVED-PREFIX";
 
@@ -82,11 +110,13 @@ export interface ReservedPrefixDiagnostic {
   severity: "error";
 }
 
-/** True iff `name` (an identifier, optionally `@`-sigilled) begins with `_scrml_`. */
+/**
+ * True iff `name` (an identifier, optionally `@`-sigilled) begins with
+ * `_scrml_` or `__scrml_` — and is not one of THIS compilation's own
+ * placeholders (which carry the unguessable nonce, placeholder-nonce.ts).
+ */
 export function isReservedPrefixName(name: unknown): boolean {
-  if (typeof name !== "string") return false;
-  const bare = name.startsWith("@") ? name.slice(1) : name;
-  return bare.startsWith(RESERVED_NAME_PREFIX);
+  return reservedPrefixOf(name) !== null && !isCompilerPlaceholderName(name);
 }
 
 /**
@@ -103,11 +133,12 @@ export function isReservedPrefixExemptPath(filePath: string | null | undefined):
  */
 export function reservedPrefixMessage(name: string): string {
   const bare = name.startsWith("@") ? name.slice(1) : name;
-  const rest = bare.slice(RESERVED_NAME_PREFIX.length);
+  const prefix = reservedPrefixOf(bare) ?? RESERVED_NAME_PREFIX;
   // Rule 7: inspects the identifier being reported (message wording), not source text.
+  const rest = bare.slice(prefix.length).replace(/_+$/, "");
   const suggestion = rest.length > 0 && /^[A-Za-z$]/.test(rest) ? rest : `my${rest || "Name"}`;
   return (
-    `${RESERVED_PREFIX_CODE}: \`${bare}\` begins with \`${RESERVED_NAME_PREFIX}\`, a prefix ` +
+    `${RESERVED_PREFIX_CODE}: \`${bare}\` begins with \`${prefix}\`, a prefix ` +
     `reserved for the compiler's and the runtime's own names (SPEC §47.1.1). A scrml program ` +
     `may neither declare nor reference a name with this prefix — a reference would reach a ` +
     `compiler-internal binding (for example the raw database handle) around the checks the ` +

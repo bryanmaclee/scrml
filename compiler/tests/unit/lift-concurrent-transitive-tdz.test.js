@@ -49,23 +49,16 @@ function compileSource(name, src) {
   const inputPath = join(FIXTURE_DIR, name);
   writeFileSync(inputPath, src);
   const outDir = join(FIXTURE_DIR, "dist-" + Math.random().toString(36).slice(2, 8));
-  compileScrml({
+  const r = compileScrml({
     inputFiles: [inputPath],
     outputDir: outDir,
     write: true,
     log: () => {},
   });
-  let clientJs = "";
-  function findClient(dir) {
-    if (!existsSync(dir)) return;
-    for (const ent of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, ent.name);
-      if (ent.isDirectory()) findClient(p);
-      else if (ent.name.endsWith(".client.js")) clientJs = readFileSync(p, "utf-8");
-    }
-  }
-  findClient(outDir);
-  return clientJs;
+  // SPEC §2.2.1 (S457 "1a"): a compile that reports an Error writes NO file, and the
+  // fixtures' `CREATE …; SELECT …` body is E-SQL-MULTIPLE-STATEMENTS (§8.1.2, S456) —
+  // read the in-memory output (the lift codegen under test is unchanged by it).
+  return r.outputs.get(inputPath)?.clientJs ?? "";
 }
 
 /** Slice out one function body from the emitted client.js for focused asserts. */

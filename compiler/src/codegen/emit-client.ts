@@ -3060,6 +3060,11 @@ export function generateClientJs(ctx: CompileContext): string {
     // call is emitted by many lowerings (top level, arms, <each> rows, lift), so the emitted text is
     // the one exact signal; a page with no such write ships without the chunk.
     ["_scrml_safe_url(", "urlguard"],
+    // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls `_scrml_url_shape_ok(`
+    // (emit-predicates.ts), defined in the same `urlguard` chunk (runtime-url-guard.js). The check is
+    // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text
+    // is the one exact signal.
+    ["_scrml_url_shape_ok(", "urlguard"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;

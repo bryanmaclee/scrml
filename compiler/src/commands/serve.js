@@ -64,6 +64,25 @@ Examples:
  * @param {string[]} args
  * @returns {{ port: number, host: string, verbose: boolean }}
  */
+
+/**
+ * The `outputs` a POST /compile or /compile-source response carries. SPEC §2.2.1
+ * (S457 "1a"): a compile that reports an Error produces no artifact through ANY
+ * entry point — compileScrml writes nothing to disk, and this endpoint returns an
+ * empty `outputs` set instead of the emitted code, so a client cannot run it
+ * either. The diagnostics are the response.
+ */
+export function serializeOutputs(result) {
+  const outputsObj = {};
+  if (result.errors && result.errors.length > 0) return outputsObj;
+  if (result.outputs) {
+    for (const [filePath, output] of result.outputs) {
+      outputsObj[filePath] = output;
+    }
+  }
+  return outputsObj;
+}
+
 export function parseArgs(args) {
   let port = parseInt(process.env.SCRML_PORT ?? "3100", 10);
   let host = DEFAULT_HOST;
@@ -198,17 +217,13 @@ export async function runServe(args) {
           compilationCount++;
 
           // Serialize outputs Map to a plain object for JSON
-          const outputsObj = {};
-          if (result.outputs) {
-            for (const [filePath, output] of result.outputs) {
-              outputsObj[filePath] = output;
-            }
-          }
+          const outputsObj = serializeOutputs(result);
 
           return Response.json({
             errors: result.errors,
             warnings: result.warnings,
             fileCount: result.fileCount,
+            artifactsWritten: result.artifactsWritten === true,
             outputDir: result.outputDir,
             durationMs: result.durationMs,
             outputs: outputsObj,
@@ -273,17 +288,13 @@ export async function runServe(args) {
           const result = compileScrml(compileOpts);
           compilationCount++;
 
-          const outputsObj = {};
-          if (result.outputs) {
-            for (const [filePath, output] of result.outputs) {
-              outputsObj[filePath] = output;
-            }
-          }
+          const outputsObj = serializeOutputs(result);
 
           return Response.json({
             errors: result.errors,
             warnings: result.warnings,
             fileCount: result.fileCount,
+            artifactsWritten: result.artifactsWritten === true,
             outputDir: result.outputDir,
             durationMs: result.durationMs,
             outputs: outputsObj,
