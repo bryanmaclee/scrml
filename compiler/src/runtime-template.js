@@ -7062,9 +7062,19 @@ if (typeof _scrml_deep_set === "function") {
 function _scrml_refine_stage_unshare(raw, steps) {
   const staged = [];
   for (const s of steps) {
-    staged.push(s.unshare ? (Array.isArray(s.nr) ? s.nr.slice() : Object.assign(Object.getPrototypeOf(s.nr) === null ? Object.create(null) : {}, s.nr)) : null);
+    staged.push(s.unshare ? (Array.isArray(s.nr) ? s.nr.slice() : _scrml_refine_shallow_record(s.nr)) : null);
   }
   return staged;
+}
+// A shallow copy of stored record \`r\`: same prototype (null or Object.prototype), and
+// each own enumerable key DEFINED, not assigned — a \`__proto__\` key is data, never the
+// copy's prototype (as in _scrml_refine_copy).
+function _scrml_refine_shallow_record(r) {
+  const out = Object.getPrototypeOf(r) === null ? Object.create(null) : {};
+  for (const k of Object.keys(r)) {
+    Object.defineProperty(out, k, { value: r[k], writable: true, enumerable: true, configurable: true });
+  }
+  return out;
 }
 // Judge \`leaf[prop] = value\` as made at the place the path names (its staged copies
 // linked into the raw value for the judgement, then unlinked; throws when refused,

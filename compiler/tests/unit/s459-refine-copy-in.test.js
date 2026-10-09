@@ -223,6 +223,44 @@ describe("N4 — every way to write the stored value is judged", () => {
     expect(rt.state[k].n).toBe(3);
   });
 
+  test("S460: an own `__proto__` key stays data through a whole write, a push, and a path write that un-shares", () => {
+    const own = (z) => Object.prototype.hasOwnProperty.call(z, "__proto__");
+    const src = '{"u":"o","n":4,"__proto__":{"x":1}}';
+    const check = (row) => {
+      expect(own(row)).toBe(true);
+      expect(Object.getPrototypeOf(row)).toBe(Object.prototype);
+      expect(row.x).toBeUndefined();                       // nothing inherited from the data
+    };
+    // whole write, the record shared twice
+    const rt = load(page(`<rows>: L[] = []`), "proto-key");
+    const k = rt.key("rows");
+    const o = JSON.parse(src);
+    rt.set(k, [o, o]);
+    check(rt.state[k][0]);
+    // a valid path write un-shares row 0: both rows keep the own key, only the written field differs
+    rt.set(k, rt.deepSet(rt.state[k], [0, "n"], 9));
+    check(rt.state[k][0]);
+    check(rt.state[k][1]);
+    expect(JSON.stringify(rt.state[k])).toBe(JSON.stringify([JSON.parse(src.replace('"n":4', '"n":9')), JSON.parse(src)]));
+    // a path write THROUGH the own `__proto__` key writes the data, never the prototype
+    const rt2 = load(page(`<rows>: L[] = []`), "proto-key-path");
+    const k2 = rt2.key("rows");
+    const o2 = JSON.parse(src);
+    rt2.set(k2, [o2, o2]);
+    rt2.set(k2, rt2.deepSet(rt2.state[k2], [0, "__proto__", "x"], 2));
+    check(rt2.state[k2][0]);
+    check(rt2.state[k2][1]);
+    expect(JSON.stringify(rt2.state[k2])).toBe(JSON.stringify([JSON.parse(src.replace('"x":1', '"x":2')), JSON.parse(src)]));
+    // push
+    const rt3 = load(page(`<rows>: L[] = []`), "proto-key-push");
+    const k3 = rt3.key("rows");
+    const o3 = JSON.parse(src);
+    rt3.state[k3].push(o3, o3);
+    check(rt3.state[k3][0]);
+    check(rt3.state[k3][1]);
+    expect(JSON.stringify(rt3.state[k3])).toBe(JSON.stringify([o3, o3]));
+  });
+
   test("a sort comparator sees the cell's elements as the cell hands them out (judged), never raw", () => {
     const rt = load(page(`<rows>: L[] = [{ u: "a", n: 1 }, { u: "b", n: 2 }]`), "sort");
     const k = rt.key("rows");
