@@ -13,7 +13,7 @@ ${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
     function clearColor() {
         given c = @color :> { c.value = "" }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
     }
-    function countryValue() { return @country.value }
+    function countryValue() -> string { return @country.value }   // s462: `-> string` — `firstCountry:string=` over an unannotated call is E-DECL-TYPE-UNPROVEN (§66.3 rule 10)
 
     <main class="filters">
         <p class="early">Early ${countryValue()} / ${@firstCountry}</p>

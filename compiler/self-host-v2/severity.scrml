@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 110 codes with a §34 severity; 69 without one (FAIL-CLOSED Error):
+// 114 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -74,7 +74,6 @@
 //   E-PROGRAM-MISSING — no §34 row
 //   E-RESET-ARG — no §34 row
 //   E-RESET-POSITION — no §34 row
-//   E-TYPE-ANNOTATION-REQUIRED — no §34 row
 //   E-TYPE-STRUCT-CONTEXT — no §34 row
 //   E-TYPE-STRUCT-FIELD — no §34 row
 //   E-TYPE-UNKNOWN — no §34 row
@@ -116,6 +115,9 @@ ${
             "E-CTRL-003" :> Severity.Error
             "E-CTRL-005" :> Severity.Error
             "E-CTX-001" :> Severity.Error
+            "E-DECL-TYPE-NOT-INFERABLE" :> Severity.Error
+            "E-DECL-TYPE-REQUIRED-AT-BOUNDARY" :> Severity.Error
+            "E-DECL-TYPE-UNPROVEN" :> Severity.Error
             "E-DEFER-AMBIGUOUS-LEAD" :> Severity.Error
             "E-DEFER-CONTROL-FLOW" :> Severity.Error
             "E-DEFER-LATER-SHADOW" :> Severity.Error
@@ -123,6 +125,7 @@ ${
             "E-DEFER-OUTSIDE-FUNCTION" :> Severity.Error
             "E-DEFER-UNHANDLED-FAILABLE" :> Severity.Error
             "E-DEFER-UNSUPPORTED-SITE" :> Severity.Error
+            "E-DERIVED-CIRCULAR-DEP" :> Severity.Error
             "E-DERIVED-VALUE-MUTATE" :> Severity.Error
             "E-DERIVED-WITH-VALIDATORS" :> Severity.Error
             "E-DERIVED-WRITE" :> Severity.Error
