@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-server-fn",
+  "description": "§38.10.3 — an `onclient:*` handler declared `server function` in the channel body fires E-CHANNEL-006. Before S461 no compiler source emitted the code: `onclient:open=onOpen(e)` with `server function onOpen(e)` compiled, and the browser listener called the fetch stub — a POST round-trip on every socket open.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §38.9",
+  "source-test": "compiler/tests/unit/channel-onclient-server-handler.test.js",
+  "rationale": "§38.10.3: a function designated as the handler for an `onclient:*` attribute SHALL NOT be declared `server function`; the compiler SHALL emit E-CHANNEL-006 and reject the program.",
+  "expect": {
+    "codes": ["E-CHANNEL-006"],
+    "severity": { "E-CHANNEL-006": "error" }
+  }
+}
