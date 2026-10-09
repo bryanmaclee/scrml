@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 247 | 6 |
-| MED | 564 | 5 |
-| LOW | 325 | 0 |
+| HIGH | 247 | 5 |
+| MED | 563 | 5 |
+| LOW | 324 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -16050,8 +16050,10 @@ walk of state-child bodies, so an unknown capitalised tag there stays `E-COMPONE
 `E-ENGINE-STATE-CHILD-MISSING` is gone; the shape now compiles with `W-ENGINE-MATCH-IN-STATE-CHILD` (see
 `g-nested-block-match-in-dispatched-arm-silently-drops`). Layers (2) and (3) remain on the hold ref, pending the ruling.
 
-### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431)`
-<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431); RESOLVED S461 (s461-splice-multi-arg)`
+<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=resolved resolved-by=s461-splice-multi-arg locus=compiler/src/ast-builder.js(collectReactiveArrayMutationArgs,both-statement-recognisers) prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+
+**RESOLVED S461** (s461-splice-multi-arg): conformance restoration of §6.5.1, no SPEC change. ROOT: the ast-builder's statement-position `@name.<method>(` recognisers joined the argument tokens' TEXT (a STRING token's text has no delimiters) and parsed the whole list as ONE expression, a comma sequence. Now `collectReactiveArrayMutationArgs` splits the list at its top-level `,` PUNCT tokens, re-quotes STRING tokens (`typeTokenText`), and parses one ExprNode per argument (node field `argExprs`; a spread becomes `spread`). emit-logic lowers each through the ExprNode printer, never the text rewriter, so the S429 hold's LOUD→SILENT string-rewrite concern does not arise. Executed: `splice(0, 0, @p)` gives [1,2] on base and [9,1,2] on the branch. Pinned by `compiler/tests/unit/reactive-array-mutation-multi-arg-s461.test.js` and the conformance cases `reactive/mutating-method-multi-arg-cell-read` and `reactive/mutating-method-string-arg` (xfail removed).
 > **S440 reconfirmed (dpa-052 D1, DD-executed at `048df04db`):** still live on main — `@q.push("x")` → `E-SCOPE-001: Undeclared identifier 'x'`; same for `.unshift("x")`, `.push("has space")`, `.push({ t: "x" })`, whatever the cell's declared type. Controls pass: `.push(1)`, `.push("x", "y")`, `let s = "x"; @q.push(s)`, `@q = [...@q, "x"]`. It blocks §66.19.5's own worked shape; the hold ref above has not landed.
 
 `function a() { @groups.splice(0, 1, { id: 1, name: "S" }) }` emits `.splice(0 , 1 , { id : 1 , name : S })` — compiles
@@ -23848,13 +23850,17 @@ The S456 write scan (§8.10.3 — hoist only a body proven not to write) accepts
 <!-- @gap id=g-impl1-match-arm-sql-server-boundary-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(match-arm structured-body emission ~:2796, PA-located-verify) prov=review:s455-hoist-dev -->
 Found while fixing #1325; not hoist-root.
 
-### g-splice-multi-arg-comma-expression-s459 — `@ls.splice(0, 0, @p)` compiles to `.splice((0, 0, x))`, a comma expression: the insert is silently lost (and with some values the array emptied) — `NEW S459; MED; open (pre-existing, data loss)`
+### g-splice-multi-arg-comma-expression-s459 — `@ls.splice(0, 0, @p)` compiles to `.splice((0, 0, x))`, a comma expression: the insert is silently lost (and with some values the array emptied) — `NEW S459; MED; RESOLVED S461 (s461-splice-multi-arg)`
 PA-verified on main 3a4a3639a: `<ls>: number[] = [1,2]; <p> = 9; function ins() { @ls.splice(0, 0, @p) }` emits `splice((0, 0, _scrml_cs_reactive_get("p")))`. The literal-argument form `splice(0, 0, p)` emits correctly; an argument that reads a cell triggers it. Found by the S459 refinement-2a review.
-<!-- @gap id=g-splice-multi-arg-comma-expression-s459 sev=MED status=open locus=searched:reactive array-mutation lowering (emit-expr.ts / rewrite.ts) — not traced prov=empirical:S459-PA-reproduced -->
+<!-- @gap id=g-splice-multi-arg-comma-expression-s459 sev=MED status=resolved resolved-by=s461-splice-multi-arg locus=compiler/src/ast-builder.js(collectReactiveArrayMutationArgs,both-statement-recognisers) prov=empirical:S459-PA-reproduced -->
 
-### g-push-object-literal-string-scope-s459 — `@rows.push({ u: "b", n: @m })` fails E-SCOPE-001 "Undeclared identifier `b`" — `NEW S459; LOW; open (pre-existing)`
+**RESOLVED S461** (s461-splice-multi-arg): conformance restoration of §6.5.1, no SPEC change. ROOT: the ast-builder's statement-position `@name.<method>(` recognisers joined the argument tokens' TEXT (a STRING token's text has no delimiters) and parsed the whole list as ONE expression, a comma sequence. Now `collectReactiveArrayMutationArgs` splits the list at its top-level `,` PUNCT tokens, re-quotes STRING tokens (`typeTokenText`), and parses one ExprNode per argument (node field `argExprs`; a spread becomes `spread`). emit-logic lowers each through the ExprNode printer, never the text rewriter, so the S429 hold's LOUD→SILENT string-rewrite concern does not arise. Executed: `splice(0, 0, @p)` gives [1,2] on base and [9,1,2] on the branch. Pinned by `compiler/tests/unit/reactive-array-mutation-multi-arg-s461.test.js` and the conformance cases `reactive/mutating-method-multi-arg-cell-read` and `reactive/mutating-method-string-arg` (xfail removed).
+
+### g-push-object-literal-string-scope-s459 — `@rows.push({ u: "b", n: @m })` fails E-SCOPE-001 "Undeclared identifier `b`" — `NEW S459; LOW; RESOLVED S461 (s461-splice-multi-arg)`
 Reviewer- and builder-executed (S459 refinement rounds); PA-unverified.
-<!-- @gap id=g-push-object-literal-string-scope-s459 sev=LOW status=open locus=searched:reactive array-mutation argument lowering prov=review:s459-refinement-2a -->
+<!-- @gap id=g-push-object-literal-string-scope-s459 sev=LOW status=resolved resolved-by=s461-splice-multi-arg locus=compiler/src/ast-builder.js(collectReactiveArrayMutationArgs,both-statement-recognisers) prov=review:s459-refinement-2a -->
+
+**RESOLVED S461** (s461-splice-multi-arg): the same root as g-splice-multi-arg-comma-expression-s459. The argument collector dropped the STRING delimiters, so `"b"` became the identifier `b`. Pinned by test section F of `reactive-array-mutation-multi-arg-s461.test.js`.
 
 ### g-bare-assign-to-param-emits-const-redeclaration-s459 — `function g(n) { n = 6; return n }` emits `const n = 6` → E-CODEGEN-INVALID-LOGIC ("Identifier 'n' has already been declared") — `NEW S459; MED; open (pre-existing, loud)`
 `tildeDeclIsRebind` never sees parameters. Found by the D1 round-5 agent; agent-executed.
