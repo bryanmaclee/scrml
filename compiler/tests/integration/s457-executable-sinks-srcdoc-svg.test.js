@@ -368,10 +368,15 @@ describe("§7 server-rendered first-paint rows", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §8 S457 review round — declared component props in `<each>` / `lift`, and the de-dup key
+// §8 S457 review round — call-site attributes on an expanded root in `<each>` / `lift`.
+//
+// S458 "D1" (§15.10): a DECLARED prop never reaches the expanded root, at any emitter. The
+// sink rules below (PA ruling (a)) therefore pin the UNDECLARED fallthrough — a component with
+// no `props` block, whose call-site attributes still land on its root (O18 carry). §8b pins the
+// declared half: nothing written, nothing refused, no listener.
 // ---------------------------------------------------------------------------
 
-describe("§8 a declared prop written onto an expanded root in `<each>` / `lift` (PA ruling (a))", () => {
+describe("§8 an undeclared call-site attribute written onto an expanded root in `<each>` / `lift` (PA ruling (a))", () => {
   const ROW = {
     each: (el) => `<ul><each in=@items as it><li>${el}</li></each></ul>`,
     lift: (el) => `<ul>\${ for (const it of @items) { lift <li>${el}</li> } }</ul>`,
@@ -379,7 +384,7 @@ describe("§8 a declared prop written onto an expanded root in `<each>` / `lift`
   const page = (defs, body) => `<program>\n<items> = [{ d: "x", code: "y", url: "/u", t: "tip" }]\n\${ function f(v) { return v } }\n${defs}${body}\n</program>\n`;
 
   // srcdoc: refused at the write, wherever it is emitted.
-  const FR = `const Fr = <iframe props={ srcdoc: string }></iframe>\n`;
+  const FR = `const Fr = <iframe></iframe>\n`;
   const SRCDOC = {
     var: `<Fr srcdoc=it.d/>`,
     expr: `<Fr srcdoc=\${it.d}/>`,
@@ -388,9 +393,8 @@ describe("§8 a declared prop written onto an expanded root in `<each>` / `lift`
   };
   for (const [pos, wrap] of Object.entries(ROW)) {
     for (const [name, el] of Object.entries(SRCDOC)) {
-      test(`declared srcdoc ${name} @ ${pos} → E-ATTR-INTERP-EXECUTABLE, never written`, () => {
-        const def = name === "upper" ? `const Fr = <iframe props={ SRCDOC: string }></iframe>\n` : FR;
-        const { codes, client } = compile(`decl-srcdoc-${name}-${pos}`, page(def, wrap(el)));
+      test(`undeclared srcdoc ${name} @ ${pos} → E-ATTR-INTERP-EXECUTABLE, never written`, () => {
+        const { codes, client } = compile(`undecl-srcdoc-${name}-${pos}`, page(FR, wrap(el)));
         expect(codes).toContain("E-ATTR-INTERP-EXECUTABLE");
         expect(client).not.toMatch(/setAttribute\("(srcdoc|SRCDOC)",/);
       });
@@ -398,20 +402,21 @@ describe("§8 a declared prop written onto an expanded root in `<each>` / `lift`
   }
 
   // on…: wired as a listener (each and lift alike), never written as handler text.
+  const BTN = `const Btn = <button>b</button>\n`;
   const ONS = {
-    onClickVar: [`const Btn = <button props={ onClick: string }>b</button>\n`, `<Btn onClick=it.code/>`, "click"],
-    onClickExpr: [`const Btn = <button props={ onClick: string }>b</button>\n`, `<Btn onClick=\${it.code}/>`, "click"],
-    upperVar: [`const Btn = <button props={ ONCLICK: string }>b</button>\n`, `<Btn ONCLICK=it.code/>`, "click"],
-    upperExpr: [`const Btn = <button props={ ONCLICK: string }>b</button>\n`, `<Btn ONCLICK=\${it.code}/>`, "click"],
-    mixedVar: [`const Btn = <button props={ Onclick: string }>b</button>\n`, `<Btn Onclick=it.code/>`, "click"],
-    mixedExpr: [`const Btn = <button props={ Onclick: string }>b</button>\n`, `<Btn Onclick=\${it.code}/>`, "click"],
-    customVar: [`const Btn = <button props={ onPick: string }>b</button>\n`, `<Btn onPick=it.code/>`, "pick"],
-    customExpr: [`const Btn = <button props={ onPick: string }>b</button>\n`, `<Btn onPick=\${it.code}/>`, "pick"],
+    onClickVar: [`<Btn onClick=it.code/>`, "click"],
+    onClickExpr: [`<Btn onClick=\${it.code}/>`, "click"],
+    upperVar: [`<Btn ONCLICK=it.code/>`, "click"],
+    upperExpr: [`<Btn ONCLICK=\${it.code}/>`, "click"],
+    mixedVar: [`<Btn Onclick=it.code/>`, "click"],
+    mixedExpr: [`<Btn Onclick=\${it.code}/>`, "click"],
+    customVar: [`<Btn onPick=it.code/>`, "pick"],
+    customExpr: [`<Btn onPick=\${it.code}/>`, "pick"],
   };
   for (const [pos, wrap] of Object.entries(ROW)) {
-    for (const [name, [def, el, ev]] of Object.entries(ONS)) {
-      test(`declared ${name} @ ${pos} → a "${ev}" listener, no handler text`, () => {
-        const { codes, client } = compile(`decl-on-${name}-${pos}`.toLowerCase(), page(def, wrap(el)));
+    for (const [name, [el, ev]] of Object.entries(ONS)) {
+      test(`undeclared ${name} @ ${pos} → a "${ev}" listener, no handler text`, () => {
+        const { codes, client } = compile(`undecl-on-${name}-${pos}`.toLowerCase(), page(BTN, wrap(el)));
         expect(codes).toEqual([]);
         expect(client).toContain(`.addEventListener(${JSON.stringify(ev)}, `);
         expect(client).not.toMatch(/setAttribute\("on[A-Za-z]|setAttribute\("O[Nn]/);
@@ -419,10 +424,10 @@ describe("§8 a declared prop written onto an expanded root in `<each>` / `lift`
     }
   }
 
-  test("a URL-valued declared prop (`<Link href=it.url/>`) is still written, through the guard", () => {
-    const def = `const Link = <a props={ href: string }>l</a>\n`;
+  test("an undeclared URL attribute (`<Link href=it.url/>`) is written, through the guard", () => {
+    const def = `const Link = <a>l</a>\n`;
     for (const [pos, wrap] of Object.entries(ROW)) {
-      const { codes, client } = compile(`decl-href-${pos}`, page(def, wrap(`<Link href=it.url/>`)));
+      const { codes, client } = compile(`undecl-href-${pos}`, page(def, wrap(`<Link href=it.url/>`)));
       expect(codes).toEqual([]);
       const writes = client.split("\n").filter((l) => l.includes('setAttribute("href",'));
       expect(writes.length).toBeGreaterThan(0);
@@ -430,16 +435,40 @@ describe("§8 a declared prop written onto an expanded root in `<each>` / `lift`
     }
   });
 
-  test("a non-sink declared prop (`title`) is still written onto the root", () => {
-    const def = `const Tip = <span props={ title: string }>t</span>\n`;
+  test("an undeclared non-sink attribute (`title`) is written onto the root", () => {
+    const def = `const Tip = <span>t</span>\n`;
     for (const [pos, wrap] of Object.entries(ROW)) {
-      const { codes, client } = compile(`decl-title-${pos}`, page(def, wrap(`<Tip title=it.t/>`)));
+      const { codes, client } = compile(`undecl-title-${pos}`, page(def, wrap(`<Tip title=it.t/>`)));
       expect(codes).toEqual([]);
       expect(client).toContain('setAttribute("title", ');
     }
   });
+});
 
-  test("trucking load-new.scrml compiles; its declared `onAddressInput=` props are listeners, not handler text", () => {
+describe("§8b S458 \"D1\": a DECLARED prop never reaches the expanded root in `<each>` / `lift`", () => {
+  const ROW = {
+    each: (el) => `<ul><each in=@items as it><li>${el}</li></each></ul>`,
+    lift: (el) => `<ul>\${ for (const it of @items) { lift <li>${el}</li> } }</ul>`,
+  };
+  const page = (defs, body) => `<program>\n<items> = [{ d: "x", code: "y", url: "/u", t: "tip" }]\n${defs}${body}\n</program>\n`;
+  const CASES = {
+    srcdoc: [`const Fr = <iframe props={ srcdoc: string }></iframe>\n`, `<Fr srcdoc=it.d/>`, "srcdoc"],
+    onClick: [`const Btn = <button props={ onClick: string }>b</button>\n`, `<Btn onClick=it.code/>`, "onClick"],
+    href: [`const Link = <a props={ href: string }>l</a>\n`, `<Link href=it.url/>`, "href"],
+    title: [`const Tip = <span props={ title: string }>t</span>\n`, `<Tip title=it.t/>`, "title"],
+  };
+  for (const [pos, wrap] of Object.entries(ROW)) {
+    for (const [name, [def, el, attr]] of Object.entries(CASES)) {
+      test(`declared ${name} @ ${pos} → not written, not refused, no listener`, () => {
+        const { codes, client } = compile(`decl-${name}-${pos}`.toLowerCase(), page(def, wrap(el)));
+        expect(codes).toEqual([]);
+        expect(client).not.toContain(`setAttribute(${JSON.stringify(attr)},`);
+        expect(client).not.toMatch(/addEventListener\("click"/);
+      });
+    }
+  }
+
+  test("trucking load-new.scrml compiles; its declared `onAddressInput=` / `addressValue=` props reach no root", () => {
     const file = join(import.meta.dir, "../../../examples/23-trucking-dispatch/pages/dispatch/load-new.scrml");
     const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
     expect((result.errors ?? []).map((e) => e.code)).toEqual([]);
@@ -447,9 +476,8 @@ describe("§8 a declared prop written onto an expanded root in `<each>` / `lift`
     (result.outputs ?? new Map()).forEach((o) => { client += (o && o.clientJs) || ""; });
     expect(client.length).toBeGreaterThan(0);
     expect(client).not.toMatch(/setAttribute\("on[A-Za-z]/);
-    expect(client).toContain('.addEventListener("addressinput", ');
-    // Non-sink declared props are written as before.
-    expect(client).toContain('setAttribute("addressValue", ');
+    expect(client).not.toContain('.addEventListener("addressinput", ');
+    expect(client).not.toContain('setAttribute("addressValue", ');
   });
 });
 

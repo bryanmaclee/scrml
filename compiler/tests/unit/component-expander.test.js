@@ -814,9 +814,9 @@ describe("§N Typed props call-site validation", () => {
   });
 
   test("duplicate prop declared in props block AND as bare attr on root element — produces E-COMPONENT-012", () => {
-    // `role` appears both in props={...} AND as a bare attr on the root <div>
+    // `role` appears both in props={...} AND as a bare (valueless) attr on the root <div>
     const source = `<program>
-\${ const Widget = <div role="default" props={ role: string }/> }
+\${ const Widget = <div role props={ role: string }/> }
 <Widget role="button"/>
 </program>`;
     const { errors } = runCEOn(source);
@@ -828,7 +828,7 @@ describe("§N Typed props call-site validation", () => {
 
   test("E-COMPONENT-012 names both the prop and the component", () => {
     const source = `<program>
-\${ const Box = <div id="static" props={ id: string }/> }
+\${ const Box = <div id props={ id: string }/> }
 <Box id="dynamic"/>
 </program>`;
     const { errors } = runCEOn(source);
@@ -837,6 +837,21 @@ describe("§N Typed props call-site validation", () => {
     expect(e012[0].message).toContain("id");
     expect(e012[0].message).toContain("Box");
   });
+
+  // S458 "D1" (§15.10): E-COMPONENT-012 is narrowed to a VALUELESS root attribute.
+  // A valued root attribute carrying a declared prop's name is the body WRITING its
+  // root attribute — from the prop (`href=${href}`, `href=href`, `href="/p/${href}"`)
+  // or a fixed literal — not a second declaration.
+  for (const rootAttr of ["href=${href}", "href=href", 'href="/p/${href}"', 'href="/fixed"']) {
+    test(`valued root attr \`${rootAttr}\` with a same-named declared prop — no E-COMPONENT-012`, () => {
+      const source = `<program>
+\${ const Link = <a class="link" ${rootAttr} props={ href: string }>go</> }
+<Link href="/x"/>
+</program>`;
+      const { errors } = runCEOn(source);
+      expect(errors.filter(e => e.code === "E-COMPONENT-012")).toHaveLength(0);
+    });
+  }
 
   test("class is not treated as a typed prop — no E-COMPONENT-011 for caller class", () => {
     // class is always merged separately; it must not trigger undeclared-prop error

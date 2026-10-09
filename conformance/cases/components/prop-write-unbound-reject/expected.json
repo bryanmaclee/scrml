@@ -1,0 +1,12 @@
+{
+  "id": "components-prop-write-unbound-reject",
+  "description": "§15.11.1 / §15.13.2 (S458) — a component body writing a prop the caller did not bind with `bind:` is E-COMPONENT-PROP-WRITE, once per prop: `n` is passed by value (`n=@v`), and `m` is a bindable prop the caller passed by value (`m=@v`, no `bind:`). The write is never lowered onto the caller's cell. (Interim S458 rounds reused E-ASSIGN-004; the dedicated code is the S458 ruling.)",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: only a prop the caller binds with `bind:` is a write-back channel; §15.13.2: non-`bind` props passed by value are captured once at mount. A body write to any other prop SHALL be E-COMPONENT-PROP-WRITE. Provenance: ruling:user-voice-scrml.md S458 \"your recs on both D1 codes\".",
+  "expect": {
+    "codes": ["E-COMPONENT-PROP-WRITE"],
+    "codeCounts": { "E-COMPONENT-PROP-WRITE": 2 },
+    "notCodes": ["E-ASSIGN-004"]
+  }
+}

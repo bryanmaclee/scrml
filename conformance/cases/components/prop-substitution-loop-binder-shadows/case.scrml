@@ -1,0 +1,17 @@
+<program>
+<v> = 7
+<out> = 0
+const C = <div class="c" props={ n: number }>
+    ${
+      function run() {
+        let total = 0
+        for (const n of [1, 2, 3]) { total = total + n }
+        const viaArrow = [10, 20].map(x => { let s = 0; for (const n of [x]) { s = s + n }; return s })
+        @out = total + viaArrow[0] + viaArrow[1] + n
+      }
+    }
+    <button class="r" onclick=run()>run</button>
+</>
+<C n=@v/>
+<p id="o">${@out}</p>
+</program>

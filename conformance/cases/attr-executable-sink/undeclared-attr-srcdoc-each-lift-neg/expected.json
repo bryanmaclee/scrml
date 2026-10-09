@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-undeclared-attr-srcdoc-each-lift-neg",
+  "description": "S457 review: `lift` / `<each>` markup writes a call site's UNDECLARED attribute onto the expanded root of a component with no `props` block, so `srcdoc=it.d` would write row data into an iframe document — refused at the write. NOTE (S458 \"D1\"): this case was `declared-prop-srcdoc-each-lift-neg`, with `Fr` declaring `props={ srcdoc: string }`. Under D1 a DECLARED prop never reaches the root (§15.10), so that form writes nothing and correctly fires nothing (pinned by components/declared-prop-not-root-attr). The sink is still reachable through the undeclared fallthrough, which this case now pins in both `lift` and `<each>`.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457) `srcdoc` in every form: \"The refusal applies wherever such a write is emitted — including a call-site attribute written onto an expanded component root.\" Before S457: `setAttribute(\"srcdoc\", it.d)`, Chromium ran the data.",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" }
+  }
+}

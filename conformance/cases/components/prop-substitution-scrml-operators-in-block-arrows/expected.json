@@ -1,0 +1,14 @@
+{
+  "id": "components-prop-substitution-scrml-operators-in-block-arrows",
+  "description": "§15.10.1 / §42 (S458 fourth round, F1) — a block-bodied arrow in a component body that uses scrml operators on a prop (`label is some`, `missing is not`, `!(label is not)`) is substituted on a tree parsed by the expression parser's OWN front (the same `is` / `not` / `::` / `.Variant` preprocessing), and the decisions are applied to the original text. Before the fix the JS-text substituter parsed with bare acorn, could not read `is`, and refused the prop with a misleading E-SCOPE-001 'could not parse'. A literal value landing as an `is` operand is grouped (`(\"L\") is some`) and lowered.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: 'The substitution SHALL apply at every ExprNode position reachable from a logic-block body, including … Function/lambda return expressions, condition expressions'. §42: `is some` / `is not` are presence / absence checks; an omitted optional prop with no default is substituted as `not` (§15.10.1 'Substitution form').",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "input": [{ "click": ".c .r" }],
+    "state": { "out": "true,none,true" },
+    "domAnchored": [{ "selector": "#o", "text": "true,none,true" }]
+  }
+}

@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liveSqlInterpolations } from "./sql-lex.ts";
 import { sqlSitesInExpressionText } from "../sql-in-expression-text.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
-import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive } from "../expression-parser.ts";
+import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive, blankLiteralTextInSource } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
@@ -1256,7 +1256,33 @@ export function rewriteNotKeyword(expr: string, errors?: any[]): string {
   // would also corrupt under the prior text-only pass — harmless at runtime
   // but cosmetically wrong in emitted output. The splitter is now the shared
   // rewriteCodeSegments helper (S125) — see its comment for the residual fix.
-  return rewriteCodeSegments(expr, (seg) => _rewriteNotSegment(seg, errors));
+  return rewriteCodeSegments(lowerParenthesizedStringIsOps(expr), (seg) => _rewriteNotSegment(seg, errors));
+}
+
+/**
+ * S458 (fourth round) — a parenthesized STRING LITERAL as the operand of a §42 `is`
+ * predicate (`("L") is some`, produced when a component prop with a literal value is
+ * substituted into raw text) spans three code segments (`(` · `"L"` · `) is some`), so
+ * the per-segment `_rewriteParenthesizedIsOp` never sees its open paren and the `is`
+ * survived into the output. Located on the literal-BLANKED text (so a lookalike inside a
+ * string / template / comment is never matched), spliced from the original.
+ */
+function lowerParenthesizedStringIsOps(expr: string): string {
+  if (!/["']\s*\)\s*is\s/.test(expr)) return expr;
+  const blanked = blankLiteralTextInSource(expr);
+  if (blanked.length !== expr.length) return expr;
+  const re = /\(\s*(["'])[^"'\n]*\1\s*\)\s+is\s+(not\s+not|some|not)(?![A-Za-z0-9_$])/g;
+  let out = "";
+  let last = 0;
+  for (const m of blanked.matchAll(re)) {
+    const start = m.index!;
+    const whole = expr.slice(start, start + m[0].length);
+    const lit = whole.slice(whole.indexOf("(") + 1, whole.lastIndexOf(")")).trim();
+    const op = m[2].replace(/\s+/g, " ");
+    out += expr.slice(last, start) + (op === "not" ? lowerAbsenceCheck(lit, true) : lowerPresenceCheck(lit, true));
+    last = start + m[0].length;
+  }
+  return last === 0 ? expr : out + expr.slice(last);
 }
 
 // ---------------------------------------------------------------------------

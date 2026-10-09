@@ -411,29 +411,26 @@ describe("§G W-COMPONENT-001 — function-typed prop warning", () => {
 // §H Valid bind: expansion — _bindProps on expanded node
 // ---------------------------------------------------------------------------
 
-describe("§H Valid bind: expansion — _bindProps metadata", () => {
-  test("valid bind:visible=@showModal produces _bindProps on expanded node", () => {
+describe("§H Valid bind: expansion — the bind prop is the caller's cell (S458)", () => {
+  test("valid bind:visible=@showModal: no _bindProps sync metadata, no bind:/visible attr on the root", () => {
     const source = `<program>
 \${ const Modal = <div class="modal" props={ bind visible: boolean }/> }
 <Modal bind:visible=@showModal/>
 </program>`;
     const ceOut = runCEOn(source);
-    // No hard errors
     const hardErrors = ceOut.errors.filter(e =>
       e.severity !== "warning" &&
       !["E-COMPONENT-021"].includes(e.code)
     );
     expect(hardErrors).toHaveLength(0);
-
-    // Find the expanded markup node
     const allMarkup = collectMarkup(ceOut.ast.nodes);
     const expanded = allMarkup.find(n => n._expandedFrom === "Modal");
-    if (expanded) {
-      expect(Array.isArray(expanded._bindProps)).toBe(true);
-      expect(expanded._bindProps.length).toBe(1);
-      expect(expanded._bindProps[0].propName).toBe("visible");
-      expect(expanded._bindProps[0].callerVar).toBe("showModal");
-    }
+    expect(expanded).toBeDefined();
+    // S458: the former global-cell mirror (`_bindProps` → a cell named `visible`
+    // shared by every instance) is gone; the body reads/writes `@showModal`.
+    expect(expanded._bindProps).toBeUndefined();
+    expect((expanded.attrs ?? []).some(a => a.name === "bind:visible" || a.name === "visible")).toBe(false);
+    expect((expanded._callSiteProps ?? []).some(a => a.name === "bind:visible")).toBe(true);
   });
 
   test("no bind: attrs means no _bindProps on expanded node", () => {
@@ -452,39 +449,65 @@ describe("§H Valid bind: expansion — _bindProps metadata", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §I bind: codegen wiring (unblocked via temp-file compile harness)
+// §I bind: codegen — body reads/writes of a bind prop lower to the caller's cell
 // ---------------------------------------------------------------------------
 
-describe("§I bind: codegen wiring", () => {
-  const bindSource = `<program>
-\${ @text = "" }
-\${ const TextField = <input type="text" props={ bind value: string }/> }
-<TextField bind:value=@text/>
-</program>`;
+// A bare JS write to the PROP NAME (an undeclared global) or a cell keyed by the
+// prop name is the miscompile this section exists to forbid (S458 PA ruling:
+// "the result must never compile to a write to an undeclared global").
+function assertNoWriteToPropName(clientJs, prop) {
+  // Comments are dropped first; `.value =` (a DOM property), `bind:value=` and
+  // `bind-value=` (attribute names in comments/selectors) are not JS writes.
+  const code = clientJs.replace(/\/\/[^\n]*/g, "");
+  const bareWrite = new RegExp(`(^|[^.\\w$"'\`:-])${prop}\\s*(=(?!=)|\\+=|-=|\\*=|\\+\\+|--)`, "m");
+  expect(code).not.toMatch(bareWrite);
+  expect(clientJs).not.toContain(`_reactive_set("${prop}"`);
+}
 
-  test("compiled output contains _scrml_effect wiring for bind: props", () => {
-    const { errors, clientJs } = compileSource(bindSource);
-    // Filter to only hard errors (ignore warnings and E-COMPONENT-021)
-    const hardErrors = errors.filter(e =>
-      e.severity !== "warning" &&
-      !["E-COMPONENT-021"].includes(e.code ?? e.name ?? "")
-    );
-    expect(hardErrors).toHaveLength(0);
-    // bind: wiring emits _scrml_effect calls with _scrml_reactive_get / _scrml_reactive_set
-    expect(clientJs).toContain("_scrml_effect");
-    expect(clientJs).toContain("_scrml_reactive_get");
-    expect(clientJs).toContain("_scrml_reactive_set");
-    // The wiring section comment is emitted by emit-reactive-wiring
-    expect(clientJs).toContain("bind: prop bidirectional wiring");
+describe("§I bind: codegen — write-back through the caller's cell (S458)", () => {
+  test("§15.11.1 Modal: `visible = false` in a body handler writes @showModal", () => {
+    const { errors, clientJs } = compileSource(`<program>
+    const Modal = <div class="modal" props={ bind visible: boolean, title: string }>
+        <h2>\${title}</h2>
+        <span class="state">\${visible}</span>
+        <button onclick=\${ visible = false }>Close</button>
+    </>
+    <showModal> = false
+    <button onclick=\${ @showModal = true }>Open settings</button>
+    <Modal bind:visible=@showModal title="Settings"/>
+</program>`);
+    expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
+    expect(clientJs).toContain(`_scrml_cs_reactive_set("showModal", false)`);
+    assertNoWriteToPropName(clientJs, "visible");
   });
 
-  test("bind: codegen uses guard variable to prevent infinite loop", () => {
-    const { clientJs } = compileSource(bindSource);
-    // Guard variable is named _scrml_bind_sync_N (from genVar("bind_sync"))
-    expect(clientJs).toMatch(/_scrml_bind_sync_\d+/);
-    // Guard is declared as `let` and checked with `if (guard) return;`
-    expect(clientJs).toMatch(/let _scrml_bind_sync_\d+ = false/);
-    expect(clientJs).toMatch(/if \(_scrml_bind_sync_\d+\) return/);
+  test("compound / ++ writes, a body function, and a guarded write all target the caller's cell", () => {
+    const { errors, clientJs } = compileSource(`<program>
+    const Counter = <div class="ctr" props={ bind count: number }>
+        \${ function reset() { count = 0 } }
+        <span>\${count}</span>
+        <button onclick=\${ count++ }>a</button>
+        <button onclick=\${ count += 10 }>b</button>
+        <button onclick=\${ if (count > 5) { count = count * 2 } }>c</button>
+        <button onclick=reset()>d</button>
+    </>
+    <n> = 0
+    <Counter bind:count=@n/>
+</program>`);
+    expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
+    assertNoWriteToPropName(clientJs, "count");
+    expect(clientJs).toContain(`_scrml_cs_reactive_set("n"`);
+  });
+
+  test("a bind prop forwarded to an inner <input bind:value=value> binds the caller's cell", () => {
+    const { errors, clientJs } = compileSource(`<program>
+\${ @text = "" }
+\${ const TextField = <input type="text" bind:value=value props={ bind value: string }/> }
+<TextField bind:value=@text/>
+</program>`);
+    expect(errors.filter(e => e.severity !== "warning")).toHaveLength(0);
+    expect(clientJs).toContain(`_scrml_cs_reactive_set("text", event.target.value)`);
+    assertNoWriteToPropName(clientJs, "value");
   });
 });
 

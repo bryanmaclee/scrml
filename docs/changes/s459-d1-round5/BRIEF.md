@@ -1,0 +1,86 @@
+# s459-d1-round5 — one component scope: a body-level declaration shadows a prop everywhere after it
+
+## CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (do first; stop and report if any check fails)
+1. `pwd` must start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`. Call it WT.
+2. `git -C "$WT" rev-parse --show-toplevel` == WT; `git -C "$WT" status --porcelain` empty.
+3. `bun install` in WT; `bun run pretest` run PLAINLY from WT (never `bun --cwd <path> run`); confirm `samples/compilation-tests/dist/` exists.
+4. Every Read/Write/Edit uses an ABSOLUTE path under WT. NEVER `cd` into /home/bryan-maclee/scrmlMaster/scrml. Use `git -C "$WT"`.
+5. NEVER `git stash`. NEVER `pkill -f`/`killall` by pattern — kill only PIDs you started.
+6. TMPDIR=$HOME/.cache/scrml-agent-tmp/s459-d1-r5 per command; delete scratch before the final report.
+7. First commit: `WIP(s459-d1-r5): start at $(pwd)`.
+
+## MAPS — REQUIRED FIRST READ
+`$WT/.claude/maps/primary.map.md` (stamp `8ce6d61b5`, 2026-10-08; main moved since only by docs/SPEC text + PR #1359 the `^{}` allow-list, which may merge while you work) — follow its routing for components / component-expander. Verify against source. Report whether load-bearing.
+
+## Brief archival + crash recovery
+Copy this brief verbatim to `$WT/docs/changes/s459-d1-round5/BRIEF.md` (second commit); append timestamped lines to `progress.md` beside it. Commit after EVERY meaningful change. Context budget: at ~650k tokens, commit, write progress.md, report. (Two earlier D1 agents ran out of context — budget it.)
+
+## Base
+`git -C "$WT" checkout -B s459-d1-r5 worktree-agent-a2dd4a6ac2e78db31` (tip 8e7bd4a2c, D1 round 4), then `git merge origin/main`. Read `docs/changes/s458-declared-props-d1/{BRIEF,progress}.md` and `docs/changes/s458-d1-round4/{BRIEF,progress}.md` first — the D1 design (ruled S458: declared props never reach the root; ONE binding model; `E-COMPONENT-PROP-WRITE`). DD: `/home/bryan-maclee/scrmlMaster/scrml-support/docs/deep-dives/declared-props-reach-root-2026-10-07.md`.
+
+## The S459 differential review: DO-NOT-LAND on one HIGH; all round-4 items CLOSED. Fix these.
+Reviewer probes: `/home/bryan-maclee/.cache/scrml-agent-tmp/s459-rev-d1/keep/` and `.../q/` (read-only — copy into your scratch). Reviewer harness: `$SCRATCH/runprobes.ts` there imports `<tree>/conformance/run.ts` `evaluateCase`. Findings are CLAIMS: reproduce each; report held / refined / wrong. (H1 is PA-reproduced: emitted `f()` writes `_scrml_cs_reactive_set("v", 5)`.)
+
+**H1 HIGH — two scope models across the component body (new on HEAD, silent).**
+```scrml
+<v> = 7
+<o> = ""
+const C = <div class="c" props={ bind n: number }>
+    ${ let n = 0 }
+    <i>x</i>
+    ${ function f() { n = 5; @o = String(n) } }
+    <button class="k" onclick=f()>k</button>
+</>
+<C bind:n=@v/>
+<p id="o">${@v}/${@o}</p>
+```
+`n` declared at component-body top level shadows the prop only inside its own `${}` statement list; later `${}` blocks and markup (incl. handler expressions like `onclick=${() => n = 50}`) still resolve `n` to the prop → the parent's `@v` is written. Governing (quote in your SPEC/code comments): §15.10.1 "From the point of declaration onward in the same scope, the local binding shadows the prop." + §15.11.1 "A local declaration, parameter or loop binder named like the prop is not the prop … and is writable." + §15.10.1's Greeter example (markup after a component logic block is the same scope). PA-located-verify locus: `substitutePropsInLogicStmts` (component-expander.ts ~2225) keeps `localShadowed` per statement list. **Fix = ONE component scope:** a declaration at component-body scope enters the shadow set for EVERYTHING after it in the body (later `${}` blocks, markup text interpolation, attribute values, handler expressions, lifted markup), in source order. Not a refusal — the SPEC says the local shadows.
+**M1 MED — same root, by-value props.** `${ const label = "S"; function r(){ return label } }` + `<p>${label}</p>` with `<C label="L"/>` renders `L` in markup while `r()` returns `S` (pre-existing, both trees). And `onclick=${() => label = "Z"}` after `${ let label = "S" }` is falsely refused with E-COMPONENT-PROP-WRITE (new on HEAD). Both fall out of the H1 fix; verify.
+**M2 MED — callback prop in the bare event-attribute call form is never substituted (pre-existing, silent).** SPEC §15.11.4's own worked example — `props={ message: string, onDismiss: () => void }` + `<button onclick=onDismiss()>` — emits `function(event) { onDismiss(); }` → ReferenceError on click. Also `onclick=onGo(event)`, top level and inside `lift`. Flagship example 23 ships it (address-form `oninput=onAddressInput(event)`, assignment-picker `onAssign(event)`). This is a third prop reader outside the ONE binding model — route it through the same structural substitution (no text fallback, no second reader).
+**L1 LOW — rest parameter named like a prop:** `function g(...n){ return n.length }` → HEAD E-SCOPE-001 (the later scope check never binds rest params). Bind rest params in that scope check (one reader with the expander's binder rule).
+**L2 LOW — single-quoted attribute value in a component body** (`title='${label}x'`) → HEAD emits garbage valueless attributes `<i class="a" title x>` silently; BASE rendered it; outside a component it is E-ATTR-001. SPEC ~L1790 "single-quote is not an attribute-string delimiter." → refuse with E-ATTR-001 in component bodies too.
+**L4 LOW — message nits:** E-COMPONENT-PROP-WRITE on a prop already declared `bind` still says "Declare `bind visible: T`…" (should say: bind it at the call site); an omitted prop is described as "passed by value" (say "not bound at the call site"); `bind:n=${@v}` is refused as "`@v` is an expression, not a cell" (say: write `bind:n=@v`).
+
+Out of scope (carried, do NOT fix): destructured-param / param defaults dropped (`{ n = 5 }`, `k = 2`); destructuring assignment unsupported; C-style `for` in component fns; `<each>` in lifted components; block-arrow handler in `<each>` never invoked; `<Card id=…>` E-COMPONENT-011 vs §15.5. List them in progress.md as carried.
+
+## Verify
+- Core suite `bun test compiler/tests/{unit,integration,conformance} --bail` = 0 fail; browser tier exactly as `.github/workflows/ci.yml` runs it; `bun conformance/run.ts` no regressions (HEAD baseline 1391/1441 + 50 xfail).
+- Conformance cases for H1 (later-block write, markup handler write, markup text read — each with the parent cell asserted UNCHANGED), M1, M2 (the §15.11.4 example verbatim, click works), L1, L2.
+- Corpus differential (samples, examples, conformance/cases) at the merged base vs your tip; every change explained. Example 23 must now wire its callback props.
+- Pre-commit runs the core suite — never `--no-verify`, never touch core.hooksPath.
+
+## Final report
+WT · final SHA · branch · per finding: held/refined/wrong + what you did + executed evidence · differential summary · anything not done. Do NOT push.
+
+## S459 round 6 addendum
+
+PA: S459 re-review of your round 5 (a793e24e5) = LAND-WITH-NITS; H1/M1/M2/L1/L2/L4 all CLOSED. Round 6, same branch s459-d1-r5, same rules as your brief (commit after each change, progress.md under "Round 6", no push). Append this message verbatim to your BRIEF.md under "S459 round 6 addendum". Reviewer probes: /home/bryan-maclee/.cache/scrml-agent-tmp/s459-rev-d1r5/ (p4/liftnested, p5/liftnestedread, f/metasq.scrml, f/sqspan.scrml, cbomit*, run.sh) — read-only. Reproduce each first.
+
+1. F1 MED (H1 class, silent parent write): a `${}` nested INSIDE lifted markup starts a fresh empty scope.
+```scrml
+<v> = 7
+const C = <div class="c" props={ bind n: number }>
+    ${ lift <div class="in">${ let n = 0 }<button class="w" onclick=${() => n = 9}>w</button></div> }
+</>
+<C bind:n=@v/>
+<p id="o">${@v}</p>
+```
+Click → #o = 9 (should stay 7). Read side: `${ lift <div>${ const label = "S" }<p class="t">${label}</p></div> }` with label="L" renders L (should be S). Reviewer cause: `substitutePropsInMarkupFromStmt` (~1604) calls `substituteProps(node, scoped.props, scoped.propExprMap)` with no `bodyScope`. Fix: thread a scope (a fresh copy seeded from the enclosing shadowed set) so declarations inside lifted markup carry forward to later siblings within it, exactly like the body scope. Hunt for any OTHER `substituteProps` call site that drops the scope the same way — make "every entry passes a scope" true (e.g. make the parameter required). Conformance cases for both.
+2. F4 LOW but SPEC-SHALL, newly reachable through your M2: `props={ onGo?: () => void }` + `<button onclick=onGo()>` + `<C/>` emits `function(event) { null(); }` with no diagnostic. §15.11.4: "an unguarded call to a potentially-absent function-typed prop SHALL be a compile error (E-TYPE-031 …)". Fire E-TYPE-031 for the bare call-ref form (and check the `${() => onGo()}` lambda form — base already emitted `null()` there). Passing a non-function (`onGo="x"`) emits `"x"()` with no type error — refuse with the existing type-mismatch code if the prop's declared type is a function type. Measure corpus impact; if non-zero, list and stop for the PA.
+3. F2 LOW: your L2 change also affects compile-time meta emit (`meta-eval.ts` re-parses emitted markup with the shared native reader): `^{ emit("<p class='x' id=\"m\">hi</p>") }` → now E-META-EVAL-002 (base emitted garbage `<p class x id="m">`). Intended — add a conformance case pinning it (and note it in your progress.md as a language-wide consequence).
+4. F3 LOW: the component-body E-ATTR-001 is reported at the component def span, which resolves to an unrelated earlier line (f/sqspan.scrml → 2:12, attribute is on line 6). Report at the attribute's own source position.
+5. L4 nit: E-COMPONENT-010 for an omitted required `bind` prop still says "Declare it as `n="value"`" — say to bind it at the call site (`<C bind:n=@cell/>`).
+Out of scope: two instances of a component with a body-level `let` crash ("Cannot declare a let variable twice") — pre-existing on base; note it as carried.
+Final report: SHA, per item held/refined/wrong + evidence, full gates (core, browser tier, conformance), corpus differential vs a793e24e5.
+
+## S459 round 7 addendum
+
+PA: S459 review of round 6 (270f2812e) = DO-NOT-LAND on one HIGH (PA-reproduced). F1/F2/L4 CLOSED, printer fix correct (fixes 3 wrong file-scope renders, 0 corpus artifacts), types-gate rewrite verified bidirectional. Round 7, same branch, same rules; append this verbatim to BRIEF.md as "S459 round 7 addendum". Reviewer probes (read-only): /home/bryan-maclee/.cache/scrml-agent-tmp/s459-rev-d1r6/ (p2/ single-instance, p/, f/, p6/, run.sh, cmp.sh).
+
+1. HIGH — E-TYPE-031 refuses correctly guarded programs that compiled and ran on a793e24e5. Your progress note says the model "cannot false-positive a real guard" — false. Refused on HEAD (all 12 p2 probes, none + some variants): `if (onGo is not) return; onGo()`, `if (!onGo) return; onGo()`, `if (onGo is not) { } else { onGo() }`, `function f() { onGo?.() }`, `onclick=${() => onGo?.()}` (PA-reproduced), `<button if=onGo onclick=onGo()>` (bare call-ref hard-coded unguarded: `notPropCall(callVal.name, false)`). Governing — QUOTE IT in code: §42.3.5 absence-safe = (1) "Optional chaining the access itself — … `recv?.method(...)`" or (2) "Narrowing … via any canonical presence-discrimination: the `if=` markup guard (§42.4), `given recv :> { ... }`, an `if (recv is not) return` / `is some` early-return, or a `match recv …` arm". §15.11.4 only says "an absence check". FIX AT THE ROOT: do not keep a bespoke "region under a test that reads the prop" model. Find the compiler's existing §42 presence-narrowing / absence-safety analysis (the one that fires for `T | not` receivers outside components — search type-system for the §42.3.5 / E-TYPE-031 / is-not narrowing logic) and route component prop calls through THAT reader, so a component prop is judged exactly as a `fn | not` local would be. If no shared reader exists that you can call at the expander stage, report that finding and implement the §42.3.5 list exactly (optional call/chain; `if=` on the element or an ancestor element; `given`; early return on `is not` / `!p` / `== not`; `is some`/truthy consequent; else of a negated test; ternary consequent; `&&` RHS), with a conformance case per form (none + some instances). The lenient false-negative direction (test reads but doesn't guard: `if (onGo is not) { onGo() }`, `!onGo && onGo()`) should now be CAUGHT by a real narrowing reader — report which are.
+2. LOW — E-TYPE-031 reported at the first instance's call-site span; report at the offending call in the body (same mechanism you built for F3).
+3. LOW — `<C onGo=${not}/>` against `onGo?: () => void` → now E-TYPE-031 "non-function value". `not` inhabits `fn | not`: ADMIT it (and make sure the emitted JS is valid — a793e24e5 emitted a syntax error there). A literal string/number to a function prop stays refused.
+4. LOW docs — SPEC §34 E-TYPE-031 row (~SPEC.md:25770) states "19 push sites … exactly three positions … the prop-passing position … ZERO push sites". You added 2 push sites / 2 positions. Update the row to the measured truth (re-count with `grep`), and note scripts/s34-census.ts does not catch it.
+5. LOW — F3 occurrence heuristic misplaces when text absent from the normalized body (a `// old: title='x'` comment) precedes real occurrences (f/sqcomment.scrml → 3:19 inside the comment). Skip comments/strings when locating, or locate by the re-parse's own token positions mapped back.
+6. Then `git merge origin/main` (49b7fcc1d; conflicts are generated docs only — regenerate).
+Final report: SHA, per item evidence, full gates, corpus differential vs 270f2812e. Carried (not this round): multi-instance body fn/const collision; `given`/`match` in component bodies failing E-COMPONENT-020/021/035 — but if item 1 needs `given` to work, report it.

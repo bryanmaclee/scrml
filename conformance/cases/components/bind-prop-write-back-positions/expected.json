@@ -1,0 +1,25 @@
+{
+  "id": "components-bind-prop-write-back-positions",
+  "description": "§15.11.1 — a body write to a `bind` prop reaches the caller's bound cell in every write form (`count++`, `count += 10`, `count = count * 2`) and at every render position of the component (top level, inside `<each>`, inside a `lift`, inside a `<match>` arm). Each instance is bound to its own cell; 1 → 11 → 22 per instance.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: 'Changes to the bindable prop inside the component SHALL propagate back to `@var` in the parent.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-011", "E-COMPONENT-013", "E-SCOPE-001"],
+    "input": [
+      { "click": "#t .inc" }, { "click": "#t .add" }, { "click": "#t .set" },
+      { "click": "#e .inc" }, { "click": "#e .add" }, { "click": "#e .set" },
+      { "click": "#l .inc" }, { "click": "#l .add" }, { "click": "#l .set" },
+      { "click": "#a .inc" }, { "click": "#a .add" }, { "click": "#a .set" }
+    ],
+    "state": { "top": 22, "inEach": 22, "inLift": 22, "inArm": 22 },
+    "domAnchored": [
+      { "selector": "#vals", "text": "22/22/22/22" },
+      { "selector": "#t .v", "text": "22" },
+      { "selector": "#a .v", "text": "22" },
+      { "selector": "#e .v", "text": "22" },
+      { "selector": "#l .v", "text": "22" }
+    ]
+  }
+}

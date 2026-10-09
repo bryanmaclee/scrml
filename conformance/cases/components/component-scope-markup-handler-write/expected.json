@@ -1,0 +1,13 @@
+{
+  "id": "components-component-scope-markup-handler-write",
+  "description": "§15.10.1 (S459 H1) — ONE component scope: after `${ let n = 0 }` at component-body top level, handler expressions in LATER markup (`onclick=${() => n = 50}`, a handler statement `onclick=${ n = n + 100 }`, a read in `onclick=${() => … n}`) resolve `n` to the LOCAL, not the `bind n` prop. The parent cell `@v` stays 7. Before S459 those handlers wrote the parent's cell.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: \"From the point of declaration onward in the same scope, the local binding shadows the prop.\" §15.11.1: \"A local declaration, parameter or loop binder named like the prop is not the prop … and is writable.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-SCOPE-001"],
+    "input": [{ "click": ".c .k" }, { "click": ".c .w" }, { "click": ".c .s" }, { "click": ".c .r" }],
+    "domAnchored": [{ "selector": "#o", "text": "7|1/150" }]
+  }
+}

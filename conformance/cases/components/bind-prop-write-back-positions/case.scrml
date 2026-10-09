@@ -1,0 +1,35 @@
+<program>
+    ${ type Phase:enum = { Idle, Ready } }
+    const Counter = <div class="ctr" props={ bind count: number, label: string }>
+        <span class="v">${count}</span>
+        <button class="inc" onclick=${ count++ }>+1</button>
+        <button class="add" onclick=${ count += 10 }>+10</button>
+        <button class="set" onclick=${ count = count * 2 }>x2</button>
+    </>
+    <top> = 0
+    <inEach> = 0
+    <inLift> = 0
+    <inArm> = 0
+    <phase>: Phase = .Ready
+    <rows> = [{ id: 1 }]
+    <p id="vals">${@top}/${@inEach}/${@inLift}/${@inArm}</p>
+    <div id="t"><Counter bind:count=@top label="t"/></div>
+    <ul id="e">
+        <each in=@rows key=@.id as r>
+            <li><Counter bind:count=@inEach label="e"/></li>
+        </each>
+    </ul>
+    <ol id="l">
+        ${ for (r of @rows) { lift <li><Counter bind:count=@inLift label="l"/></li> } }
+    </ol>
+    <div id="a">
+        <match for=Phase on=@phase>
+            <Idle>
+                <p>idle</p>
+            </>
+            <Ready>
+                <Counter bind:count=@inArm label="a"/>
+            </>
+        </match>
+    </div>
+</program>

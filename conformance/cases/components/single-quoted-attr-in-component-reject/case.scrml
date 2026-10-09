@@ -1,0 +1,6 @@
+<program>
+const C = <div class="c" props={ label: string }>
+    <i class="a" title='${label}x'>a</i>
+</>
+<C label="L"/>
+</program>
