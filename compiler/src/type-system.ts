@@ -90,6 +90,7 @@ import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { boundNamesOf } from "./binding-names.ts";
 import { walkBodyNarrowed } from "./presence-narrowing.ts";
+import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
 import { ifChainChildNodes } from "./ast-if-chain.js";
@@ -13805,6 +13806,19 @@ function annotateNodes(
       // lift-expr: `lift partial match ...` in rendering context (E-TYPE-081)
       // ------------------------------------------------------------------
       case "lift-expr": {
+        // s461 — an implied lift the §17.6.10 desugar made for an arm the PRE-s461
+        // pass never desugared (any arm of a cascade reaching a `given` guard, at
+        // any depth — implied-lift-desugar.ts `keepPiecesForArmsBaseNeverPlanned`)
+        // carries that arm's PRE-desugar pieces; visit them in this scope position so
+        // every check the arm got before s461 made it render (E-STATE-UNDECLARED,
+        // E-SCOPE-001, … on its `${…}` reads) still runs. This arm otherwise does not
+        // walk a lift's markup (pre-existing; see the Bug 70 note below).
+        const checkPieces = impliedLiftCheckPieces(n);
+        if (checkPieces) {
+          for (const piece of checkPieces) {
+            if (piece && typeof piece === "object" && (piece as ASTNodeLike).kind) visitNode(piece);
+          }
+        }
         const liftExpr = n.expr as { kind: string; expr?: string; exprNode?: unknown } | undefined;
         // Check if the lift target is a raw expression string that starts with "partial match"
         if (liftExpr && liftExpr.kind === "expr") {
