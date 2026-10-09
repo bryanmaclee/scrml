@@ -11,3 +11,26 @@
 - 2026-10-09T17:25 CORPUS IMPACT of the head refusal (compiled, head3 vs base; 3501 tracked .scrml excl self-host-v2 + 4 gauntlet-r25): +E-SYNTAX-044 in 4 files before the `is given`-tail exemption: explicit-pair-value-positions-pos (FALSE POSITIVE — the cut `a is given` tail; exempted, verified clean), docs/changes/derived-engine-expression-form-2026-06-13/repro/11-call.scrml (historical repro, no test compiles it; left), samples gauntlet phase3-match-given-arm-075 + phase3-match-optional-no-arms-076 (`given n -> …`: `->` is not a given separator; 076 already failed E-MATCH-012/E-CG-003; 075 compiled with the arm silently dropped). Gauntlet-r25: 0. stdlib/examples: 0. Test-fixture strings (not .scrml): 3 (migrated, above).
 - 2026-10-09T17:30 S402 gap repro now E-SYNTAX-044 -> resolved. New gap g-impl1-given-match-arm-body-dropped-s462 (HIGH). Annotated: is-given value-position (recommend LOW->HIGH), bare-name s459, bootstrap s460, keyword-table s460. gates: types OK, snippet-gate 128/0, compile-floor PASS.
 - 2026-10-09T19:00 DONE. Commits 337a0f04d a789d3e41 33fc02747 4017b9b20 7d2cada48 6d7a62bab + this. Gates: pre-commit 33927/0; integration+lsp+commands 5607/0; e2e-render-map 259/0; slices 2066/0 + lowered m1 99/0; types-gate OK; snippet 128/0; compile-floor PASS; host-global 0 violations; browser-baseline PASS; facts/spec-index/s34-census/delta-lint/conflict-marker/bootstrap-severity/bootstrap-conformance current.
+
+## FIX ROUND 1 brief
+
+FIX ROUND 1 for s462-given-presence-deprecate — S239 differential review of c3178a7ab = LAND-WITH-NITS. Append this message verbatim to progress.md ("FIX ROUND 1 brief") and commit; fix on your branch; same process rules. Do NOT merge origin/main yet — the PA will tell you when (the sibling is-some branch lands first and touches the same collectExpr area).
+
+F1 (HIGH, pre-existing, same gap you marked resolved): a BRACE-LESS standalone guard body runs unconditionally at exit 0. `function loadThing(id: int | not)! LoadError { given id :> fail LoadError.NotFound; return "ok" }` (body on the same line, no braces) emits `if (id …) {}` then an unconditional `return {__scrml_error…}`; `given x :> return 1` likewise. Governing grammar §42.2.3: `given-guard ::= 'given' identifier-list (':>' | '=>') block` — a non-`{` body is outside the grammar. PA ruling under the S385 pa-ruled class (governing sentence quoted · newly-rejecting · corpus impact MUST be MEASURED zero): refuse a brace-less standalone guard body with E-SYNTAX-044 (extend its row/message to "a `given` guard must be `given <names> :> { … }`" — still one code for malformed guards; do NOT mint a new one) in logic + markup. Match ARMS `given x :> expr` are a different production (arm bodies may be expressions) — do NOT refuse those. MEASURE by compiling the full corpus (your 3501-file harness + gauntlet-r25): report every newly refused site. If the count is NON-ZERO (beyond docs/changes repros), STOP that sub-item and report — it goes to bryan. If zero, record `prov=pa-ruled:§42.2.3 grammar requires a block body; corpus measured 0 (<command>)` on the g-given-bool-expr-fail-runs-unconditionally-s460 @gap marker, and only then keep it resolved; otherwise reopen it.
+
+SEVERITY (PA call, bryan veto window): W-GIVEN-PRESENCE-DEPRECATED → Info, matching the sibling W-IS-SOME-DEPRECATED and the §63 precedents (arm-pipe, match-arrow). Update §34 row + tests.
+
+F2 (MED): `const ok = a is given` then a next line `foo(ok)` → false W-GIVEN-PRESENCE-DEPRECATED naming `given foo` (the cut-off-initializer bug swallows the next line's identifier). The sibling branch fixes that cut in collectExpr; after you merge main later, re-verify this goes away. For now: make the lint NOT fire when the guard node came from the cut-off path (if detectable structurally), else note it for the post-merge check.
+
+F3 (LOW): `const ok = a is⏎ given` → E-SYNTAX-044 says "found the end of the line" — wrong root cause; after the merge this should compile correctly via the sibling's fix — re-check post-merge.
+
+F4 (LOW, SPEC): §63.7 bullet understates where §63.5 runtime identity fails: also the markup guard over a plain value (`<div>${ given zero :> { <p>z</p> } }</div>` drops the body on both trees). List it; file it under the existing g-impl1-given-match-arm-body-dropped-s462 gap (or a sibling gap with locus) as the same family.
+
+F5 (LOW): a guard-shaped STRING (`const s = "given x :> y"`) is a permanent fix-rule blocker → `scrml fix --check` exits 2 forever. The rule must locate guards structurally and ignore string/comment contents.
+
+F6 (LOW, doc): the W-GIVEN-ARROW-LEGACY §34 row claims an in-match `given` arm "already fires W-MATCH-ARROW-LEGACY" — false (`match x { not :> 0  given x => 1 }` fired nothing at base). Fix the row text.
+
+F7: noted (the 4 gauntlet fixtures were migrated though they tested `given`; coverage moved to conformance) — record in progress.md; no change needed.
+
+Report: new FINAL_SHA; per finding before/after; F1 corpus measurement (command + files); gates re-run.
+- F7 recorded: gauntlet 087/088/094/095 were `given` tests migrated by the fix rule; the deprecated-form coverage moved to conformance/cases/condition/given-presence-deprecated-{guard,arm,markup} + given-head-names-accepted (no change needed).
