@@ -1,0 +1,14 @@
+{
+  "id": "refinement-nested-fn-param-reject-rt",
+  "description": "S458 slice 2: a NESTED function's refined parameter is checked. `pick(u: string(url))` is declared inside `show`; called with \"javascript:alert(1)\" its entry check throws E-CONTRACT-001-RT, so @shown keeps the https value from the first click. Before S458 only the top-level client function emitter wrote a parameter check; a nested function (and worker / tool / library functions) got none.",
+  "language-version": "1.0",
+  "spec": "§53.9.1",
+  "rationale": "§53.9.1: \"The compiler SHALL emit a runtime check when the function is called with an unconstrained argument\" — no carve-out for nested functions.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#good" }, { "click": "#bad" }],
+    "state": { "shown": "https://scrml.dev/" },
+    "domAnchored": [{ "selector": "#out", "text": "https://scrml.dev/" }]
+  }
+}

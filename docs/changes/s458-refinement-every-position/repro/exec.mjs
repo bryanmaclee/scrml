@@ -30,6 +30,7 @@ function clientFn(probe, fnName) {
   return { f, sets };
 }
 function runClient(label, probe, fnName, args, expected, pick = (r, sets) => JSON.stringify(sets.length ? sets : r)) {
+  if (!existsSync(out(probe))) { show(label, "COMPILE ERROR (no artifact)", expected); return; }
   try {
     const { f, sets } = clientFn(probe, fnName);
     const r = f(...args);
@@ -55,7 +56,9 @@ runClient("(f2) promote(r: Role oneOf([.Admin,.Editor]))", "f2-enum-subset-param
 runClient("(f3) let e: string(pattern(/^[^@]+@.../)) = v", "f3-pattern-decl", "pick", ["nope"], "refused");
 {
   const js = readFileSync(out("p3a-toplevel-const"), "utf8");
-  show("(3a) top-level const X: string(url) = pick()", /const X = _scrml_pick_\d+\(\);/.test(js) && !js.includes("E-CONTRACT-001-RT") ? "ACCEPTED (const X = pick(); no check)" : "?", "refused");
+  show("(3a) top-level const X: string(url) = pick()",
+    /const X = _scrml_pick_\d+\(\);/.test(js) && !js.includes("E-CONTRACT-001-RT") ? "ACCEPTED (const X = pick(); no check)"
+      : /_scrml_url_shape_ok\(_scrml__?scrml_chk_X/.test(js) ? "CHECKED before `const X =` binds" : "?", "refused");
 }
 
 // --- (4) parseVariant call (client) ---
@@ -76,7 +79,13 @@ const csrf = { "Content-Type": "application/json", Cookie: "scrml_csrf=t", "X-CS
 async function post(probe, body, pathMatch) {
   const mod = await import(out(probe, "app.server.js") + "?" + Math.random());
   const route = mod.routes.find((r) => r.method === "POST" && (!pathMatch || r.path === pathMatch));
-  const res = await mod.fetch(new Request("http://localhost" + route.path, { method: "POST", headers: csrf, body: JSON.stringify(body) }));
+  let res;
+  try {
+    res = await mod.fetch(new Request("http://localhost" + route.path, { method: "POST", headers: csrf, body: JSON.stringify(body) }));
+  } catch (e) {
+    // an uncaught throw out of the handler — the host server answers 500
+    return `THROWN (host 500): ${String(e.message).split("\n")[0].slice(0, 22)}`;
+  }
   return `${res.status} ${(await res.text()).slice(0, 38)}`;
 }
 show("c2 control: server param save(link: url)", await post("c2-server-param", { link: BAD }), "400");

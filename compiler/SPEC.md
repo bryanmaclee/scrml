@@ -26201,7 +26201,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-AUTH-ATTR-INVALID | §52.13.2, §52.13.1 | An `auth=` attribute on a `<program>` or `<page>` whose value is not exactly `"required"`, `"optional"` or `"none"`: any other literal (another case `"Required"`, padding `" required"`, the empty string `""`, `"role:admin"`, `"true"`) or any non-literal (a bare `auth`, `auth=${…}`, `auth=@x`). The message names the value written, lists the three legal values (with a did-you-mean when the value differs only in case or spaces, and the role-gate route for `role:X`). Before S449 these compiled to an application with no login gate (W-ATTR-002 for a literal, nothing at all for a non-literal or `""`). Does NOT fire on a nested `<program>` (E-PROGRAM-NESTED-AUTH is that declaration's one diagnostic) nor on `<channel>` (any `auth=` there gates; an unrecognized literal is W-ATTR-002). The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/validators/attribute-allowlist.ts` (VP-1). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2") · supersedes: spec:§52.13.2 (W-ATTR-002 + no gate). | Error |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
-| E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
+| E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed, or a union with a refined member has a member with no runtime test (S459) (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
 | E-CONTRACT-003 | §53.11 | Predicate references external state — use `<machine>` instead | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
@@ -39824,6 +39824,9 @@ The authority model directly controls which state is pre-rendered during SSR.
 - The compiler SHALL include all server-authoritative reactive variables in the SSR output.
 - The compiler SHALL NOT include client-local reactive variables in the SSR output.
 - The compiler SHALL pre-render a derived value (`const <derived>`) if and only if all of its reactive dependencies are server-authoritative.
+- **A seeded value the cell's declared contract refuses (S459).** On the client, applying the SSR seed is a write of each seeded value into its cell, judged against the cell's full declared contract (§53 refinements included) like any other write. A seeded value that does not satisfy the contract SHALL NOT reach the cell and SHALL NOT be coerced into it: the cell keeps the value it held before the seed was applied (its initial value), the refusal (`E-CONTRACT-001-RT`) SHALL be reported to scrml's logging surface (§19.6.8 B5), and the remaining seeded cells SHALL still be seeded and the page SHALL still boot. A refused seed is not a boot-time throw.
+
+  > **Provenance:** analogy:§6.14.2 r3 (a `persist=` restore whose decoded value does not satisfy the current contract takes the default and is never coerced — the seed is the same kind of write: a value arriving from outside the running page into a declared cell, at boot) · ruling-pending: S459 PA rec (bryan holds a veto window) · supersedes: nothing struck — §52.8 did not say what happens when a seed is refused; impl#1 threw `E-CONTRACT-001-RT` out of top-level client code, so the cells after it were never seeded and no handler was wired · **Direction of change: semantics-changed** — a page whose seed carries a refused value now boots (the refused cell keeps its initial value) instead of dying; no program's compile outcome changes. Conformance: `refinement/ssr-seed-refused-keeps-initial-rt`, `refinement/ssr-seed-legit-accept-neg`.
 
 **Implementation status (S234–S235 — SSR pre-render + flash-free DOM-adoption SHIPPED).** The SSR pre-render above is implemented end-to-end for the common list shape:
 
@@ -40294,6 +40297,63 @@ c. Is elided entirely (trusted zone)
 The assignment is applied if and only if the predicate evaluates to `true`. If the predicate
 evaluates to `false` at runtime, the compiler-generated check SHALL throw a runtime error with
 code `E-CONTRACT-001-RT` before the assignment is applied. The variable retains its prior value.
+
+**Arrays of a refined element type (S459).** Every slot of an array is an element. An empty slot
+(left by lengthening an array, writing past its end, or deleting an element) reads as `not` (§42).
+It is judged as `not` against the element type: `number(>0)[]` does not admit it, and
+`(number(>0) | not)[]` does. This applies whether the array is written whole or changed in place.
+Shortening an array writes no element, so it is not refused by the element type.
+
+> **Provenance:** spec:§42 (absence is `not`) applied to §53.3.1 ("a pure boolean expression over
+> the incoming value at every assignment or binding site") · review:S459 round-3 MED-2 (impl#1 ran the
+> element judge on a `length` value and refused every `@rows.length = n`; it also admitted holes,
+> because its whole-array judge skipped them) · ruling-pending: S459 PA · supersedes: nothing struck
+> — §53 said nothing about empty slots · **Direction of change: newly-rejecting** for a refined
+> array that gains an empty slot (corpus impact: see the S459 round-3 differential);
+> **newly-accepting** for shortening a refined array of structs.
+
+**A refined cell stores its own copy (S459).** A cell of a refined type stores its own copy of every
+value it admits: a value assigned to the cell, an element or field written into its value, an element
+inserted into it (`push`, `unshift`, `splice`, `fill`, `copyWithin`), and a value written at a path
+(`@rows[i].n = v`). The copy is what is judged, and only an admitted copy is stored. After that, the
+stored value can be reached only through the cell: a later write to the value it was copied from, or
+to any other binding that held it, does not change the cell and is not judged against the cell's type.
+After `@rows.push(@draft)`, editing `@draft` does not change the row; after `@x = @y`, a write through
+`@x` does not change `@y`. At a refined position every object is copied as a value — an object with
+some other prototype as a record of its own enumerable data; only at a position with no refinement at or
+below it is an object that is not a plain record (an identity, §66.10 item 6) held as it is. Each object of
+the admitted value is copied once: a value that reaches one object at two places is stored sharing one copy,
+and a path write (`@rows[0].n = v`) through a shared object first gives that place its own copy. A cyclic
+value is not a value (§45.1) and is refused; nesting deeper than 4000 levels is refused as too deep. A write made through a reference the cell itself
+handed out (`const r = @rows[0]; r.n = v`) is judged at the position it writes while that position is
+still part of the cell's value; once removed from the cell, it is an ordinary value again. Every way of
+writing the stored value is a write: `Object.defineProperty` of a data property is judged; an accessor
+property is refused (its value cannot be judged once); a change of prototype is refused; freezing,
+sealing or preventing extension of the value is refused (later writes to the cell would fail); making a
+property that holds an object non-configurable is refused (its contents could then be reached around the cell).
+
+> **Provenance:** ruling:user-voice-scrml.md S459 "a, go" · analogy:§66.10 (aliases snapshot — §66 is
+> Nominal / spec-ahead on impl#1; this applies it to refined cells only) · review:S459 refinement rounds
+> 2–3 (a refined cell that shared its value with another binding could be changed by a write that never
+> passed its check) · supersedes: nothing struck — §53 did not say whether a cell shares identity with
+> the value assigned to it, and §6.3 / §6.5 / §14 do not require it · **Direction of change:
+> semantics-changed** for refined cells only — a write through another reference no longer reaches a
+> refined cell; **newly-rejecting** for a cyclic value, nesting beyond 4000 levels, an accessor, a prototype
+> change, or freezing / sealing a refined cell's value (corpus measurement: docs/changes/s459-refine-copy-in/progress.md).
+
+**Scope of the guarantee (S460).** The refinement guarantees hold for every value scrml can express. A
+value that arrives from host JS is copied to plain data on the way in — its own enumerable data, read
+once — and from then on it is the cell's own. A refined list's own properties are its elements and its
+`length`; any other own property written to a stored refined list (`constructor`, a symbol, a name) is
+refused, since it is not part of the value and would steer the list's own methods. Beyond that, a
+hostile host object — a getter or proxy trap that reaches back into the cell, a key object with a
+`toString`, a `Symbol.species` constructor — is not something the cell defends against: the cell is not
+a sandbox, as a runtime `^{}` body is not (§22.12, "Not a sandbox").
+
+> **Provenance:** ruling:user-voice-scrml.md S460 "a on copy-in" · precedent:§22.12 "Not a sandbox"
+> (S458 review F-A) · review:S460 copy-in rounds 1–3 · supersedes: nothing struck — §53 did not bound
+> the guarantee against host objects · **Direction of change: newly-rejecting** for an own property
+> other than an index or `length` written to a stored refined list.
 
 ### §53.3.4 Type Compatibility
 
@@ -40851,10 +40911,25 @@ Normative statements:
 > unrefined annotation, and its runtime check SHALL NOT admit values it cannot judge.
 > Both forms of E-CONTRACT-002 SHALL be emitted where the refinement is declared, whatever zone
 > its value is in — not only when the value is a literal.
+> A union with a refined member is checked by testing the value against each member, so every
+> member SHALL have a runtime test. The compiler SHALL emit E-CONTRACT-002 where such a union is
+> declared when a member has none — an unresolved type, markup, an engine, a map or set whose keys
+> or values are refined, and the like. A member SHALL NOT be admitted without a test. Members with
+> a runtime test are: the primitives, including `date` and `timestamp` (registered string-shaped
+> primitives, tested as strings); a struct; an enum; an array; a map or set of unrefined entries
+> (tested by its map shape); a function; and `asIs`, which every value inhabits (§7.5.2).
 
 > **Provenance:** spec:§53.2.1 grammar (conformance restoration, S458) · the malformed-predicate
 > sense extends the code's prior "named shape not found" meaning; the malformed enum subset (§53.15.1)
 > already reported under this code.
+>
+> **Provenance (the union-member sentence, S459):** spec:§53.11 ("The compiler SHALL emit a runtime
+> check for every boundary-zone assignment that it cannot statically elide") and the statement above
+> ("its runtime check SHALL NOT admit values it cannot judge") · review:S459 differential review
+> LOW-MED-3 (executed: `number(>0) | date` admitted -5) · supersedes: nothing struck · **Direction of
+> change: newly-rejecting** for a union with a refined member and an untestable member (corpus impact
+> measured: 0 sources across samples / examples / conformance / stdlib); **semantics-changed** for a
+> `date` / `timestamp` / map / function member, whose arm now tests the value instead of admitting it.
 
 ### E-CONTRACT-002-RT: Named shape registry lookup at runtime
 

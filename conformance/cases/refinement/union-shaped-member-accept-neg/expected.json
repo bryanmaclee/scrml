@@ -1,0 +1,14 @@
+{
+  "id": "refinement-union-shaped-member-accept-neg",
+  "description": "S459 LOW-MED-3 legitimate twin of union-shaped-member-reject-rt: a date string inhabits `number(>0) | date`, a timestamp string inhabits `number(>0) | timestamp`, and the `pick(v: number(>0) | date)` parameter admits a date string. `asIs` is a developer-signed untyped value that every value inhabits (§7.5.2), so `number(>0) | asIs` admits -5 — that is the type's meaning, not a missing check.",
+  "language-version": "1.0",
+  "spec": "§53.3.1, §7.5.2",
+  "rationale": "§53.3.1: a value inhabits a union by inhabiting a member. §7.5.2: `asIs` means a developer signed for it — the deliberate untyped escape hatch.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#d" }, { "click": "#t" }, { "click": "#a" }, { "click": "#p" }],
+    "state": { "d": "2026-10-08", "t": "2026-10-08T10:00:00Z", "a": -5, "shown": "ok" },
+    "domAnchored": [{ "selector": "#out", "text": "2026-10-08 2026-10-08T10:00:00Z -5 ok" }]
+  }
+}

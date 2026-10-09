@@ -616,6 +616,7 @@ const CELL_SCOPE_ACCESSORS = [
   "_scrml_engine_audit_register",
   "_scrml_reactive_get",
   "_scrml_reactive_set",
+  "_scrml_refine_register",
   "_scrml_init_set",
   "_scrml_default_set",
   "_scrml_reset",
@@ -1908,7 +1909,7 @@ export function runCG(input: CgInput): CgOutput {
       const bundles = new Map<string, string>();
       for (const [name, def] of workerDefs) {
         const workerJs = codegenStage("emit-worker", () =>
-          generateWorkerJs(name, def.children, def.whenMessage)
+          generateWorkerJs(name, def.children, def.whenMessage, errors, filePath)
         );
         bundles.set(name, workerJs);
         // s457 3a — the worker's `when message` listener is compiler-written

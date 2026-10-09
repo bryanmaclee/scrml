@@ -1,0 +1,16 @@
+{
+  "id": "refinement-copy-in-raw-ref-accept-neg",
+  "description": "S459 copy-in (N2): `@rows = r` stores a copy of the local array `r`. Writing through `r` afterwards (`r[0].n = -5`, `r.push({ …, n: -5 })` — writes the unrefined local admits) changes `r` only: @rows keeps [{ u: \"o\", n: 4 }] and nothing is refused. Before copy-in @rows held `r` itself, and both writes landed in `L[]` unjudged.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: the assignment is applied only if the predicate holds, and the variable otherwise retains its prior value — a write through another reference must not be able to change a refined cell without its check. ruling:user-voice-scrml.md S459 \"a, go\" (copy on the way in); analogy:§66.10.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#load" }],
+    "state": {
+      "rows": [{ "u": "o", "n": 4 }]
+    },
+    "domAnchored": [{ "selector": "#out", "text": "1" }]
+  }
+}

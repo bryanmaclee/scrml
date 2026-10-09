@@ -1,0 +1,20 @@
+${
+    type Role:enum = { Admin, Editor }
+    <neg>: number = -5
+    <fake>: string = "Owner"
+    <shown>: string = "none"
+    <listed>: string = "none"
+    function pick(v: number(>0) | Role) {
+        @shown = "ok"
+    }
+    function list(v: number(>0) | string[]) {
+        @listed = "ok"
+    }
+}
+<program>
+<button id="a" onclick=${pick(@neg)}>a</button>
+<button id="b" onclick=${pick(@fake)}>b</button>
+<button id="c" onclick=${list(@neg)}>c</button>
+<p id="out">${@shown}</p>
+<p id="lst">${@listed}</p>
+</program>

@@ -1,0 +1,32 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    type P:struct = { a: number(>0)[], b: number(>5)[] }
+    <t>: number = 3
+    <y>: number(>0)[] = [6, 7]
+    <x>: number(>5)[] = [9]
+    <rows>: L[] = [{ u: "a", n: 1 }, { u: "b", n: 2 }]
+    <p>: P = { a: [6, 7], b: [8] }
+    <mm>: number(>0)[][] = [[1], [2]]
+    function released() {
+        @x = @y
+        @x = [8]
+        @y.push(@t)
+    }
+    function pathField() { @rows[1].n = 9 }
+    function pathRow() { @rows[0] = { u: "q", n: 4 } }
+    function unrefinedField() { @rows[1].u = "zz" }
+    function twoPositions() {
+        @p.b = @p.a
+        @p.a.push(9)
+    }
+    function nestedPush() { @mm[1].push(@t) }
+}
+<program>
+<button id="released" onclick=released()>a</button>
+<button id="field" onclick=pathField()>c</button>
+<button id="row" onclick=pathRow()>d</button>
+<button id="unref" onclick=unrefinedField()>g</button>
+<button id="two" onclick=twoPositions()>e</button>
+<button id="nested" onclick=nestedPush()>f</button>
+<p id="out">${@y.length} ${@rows.length} ${@p.a.length} ${@mm.length}</p>
+</program>

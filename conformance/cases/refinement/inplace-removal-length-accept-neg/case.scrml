@@ -1,0 +1,22 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <m>: number = -5
+    <rows>: L[] = [{ u: "a", n: 1 }, { u: "b", n: 2 }, { u: "c", n: 3 }]
+    <ls>: number(>0)[] = [1, 2, 3]
+    <gone>: number = 0
+    function trim() {
+        @rows.length = 2
+        @ls.length = 0
+    }
+    function removeThenWrite() {
+        const r = @rows[0]
+        @rows.shift()
+        r.n = @m
+        @gone = r.n
+    }
+}
+<program>
+<button id="t" onclick=trim()>t</button>
+<button id="r" onclick=removeThenWrite()>r</button>
+<p id="out">${@rows.length} ${@ls.length} ${@gone}</p>
+</program>

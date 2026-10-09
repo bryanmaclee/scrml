@@ -152,6 +152,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'map',
   'ssr',
   'log',
+  'refine',
   'urlguard',
   'metaemit',
   // ---------------------------------------------------------------------
@@ -319,6 +320,8 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // (emit-client.ts POST_EMIT_HELPER_CHUNK_GATES) for a `_scrml_safe_url(` call, so a page that writes
   // no data-derived URL attribute ships without it.
   urlguard:       "§5.2 URL-attribute scheme guard runtime (chunk: 'urlguard')",
+  // §53 (S458 2a-fix) — the refined-cell write judges; gated on a registration call.
+  refine:         "§53 refined-cell write judges (chunk: 'refine')",
   // §22.4.1 (S458 "a") — the runtime `meta.emit(html)` gate (runtime-meta-emit-gate.js). Pulled
   // whenever the 'meta' chunk is (CHUNK_DEPENDENCIES): every runtime `^{}` effect's `meta` object
   // carries `emit`, so a program that ships `_scrml_meta_emit` always ships the gate it calls.

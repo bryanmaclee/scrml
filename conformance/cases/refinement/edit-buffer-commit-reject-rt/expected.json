@@ -1,0 +1,14 @@
+{
+  "id": "refinement-edit-buffer-commit-reject-rt",
+  "description": "S459 round 3 HIGH-1: an unrefined edit buffer copied from a refined cell (`@draft = @ls`), path-edited (`@draft[0] = 5`), extended in place with a value the refined type refuses (`@draft.push(-5)`), then committed (`@ls = @draft`) in three separate events. The commit is a whole new value and is judged whole: -5 is refused and @ls keeps [1, 2]. In round 2 the copy-on-write fact left by `@draft[0] = 5` survived the unrelated events and the commit was judged only at index 0, so @ls became [5, 2, -5].",
+  "language-version": "1.0",
+  "spec": "§53.3.3, §53.11",
+  "rationale": "§53.3.3: the check runs before the assignment is applied and a refused value is not applied. §53.11: a runtime check is emitted for every boundary-zone assignment the compiler cannot statically elide — a check narrowed to part of the value must be proven to cover everything that changed.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#e" }, { "click": "#a" }, { "click": "#c" }],
+    "state": { "ls": [1, 2], "draft": [5, 2, -5] },
+    "domAnchored": [{ "selector": "#out", "text": "2" }]
+  }
+}

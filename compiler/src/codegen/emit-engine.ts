@@ -53,6 +53,7 @@
 
 import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
+import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -2205,6 +2206,16 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
     for (const l of idleLines) lines.push(l);
     for (const l of historyMapLines) lines.push(l);
     for (const l of msgArmLines) lines.push(l);
+    // §53 (S458 2a-fix F2) — a `for=` enum with a refined payload field: the variant
+    // cell registers its judge BEFORE its first write, so every transition that
+    // commits a payload is judged at the runtime setter (_scrml_engine_advance /
+    // _scrml_engine_direct_set both commit through it).
+    {
+      const _rj = (decl as any).refineJudge;
+      if (_rj) {
+        lines.push(`_scrml_refine_register(${JSON.stringify(meta.varName)}, ${judgeDescriptorExpr(_rj)}, ${JSON.stringify(describeJudgeType(_rj))}, ${JSON.stringify(stripNsName(meta.varName))});`);
+      }
+    }
     for (const l of cellLines) lines.push(l);
     for (const l of historyCellLines) lines.push(l);
     // AFTER the cell inits: the audit target is a reactive cell, and the

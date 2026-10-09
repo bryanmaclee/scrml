@@ -1,0 +1,14 @@
+{
+  "id": "refinement-union-nonprimitive-member-reject-rt",
+  "description": "S458 2a-fix F2 (union arm): an UNREFINED non-primitive union member is judged by its shape, never admitted wholesale. `pick(v: number(>0) | Role)` called with -5 (not number(>0), not a Role variant) and with \"Owner\" (a string that is not a Role variant) throws E-CONTRACT-001-RT; `list(v: number(>0) | string[])` called with -5 throws. In slice 2a the `Role` / `string[]` arm judged `true`, so -5 was admitted.",
+  "language-version": "1.0",
+  "spec": "§53.3.1",
+  "rationale": "§53.3.1: the refinement is evaluated at every binding site; a value inhabits a union by inhabiting a member — -5 inhabits neither `number(>0)` nor `Role` nor `string[]`. §53.9.1: the parameter constraint is a boundary-zone declaration with a runtime check.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#a" }, { "click": "#b" }, { "click": "#c" }],
+    "state": { "shown": "none", "listed": "none" },
+    "domAnchored": [{ "selector": "#out", "text": "none" }, { "selector": "#lst", "text": "none" }]
+  }
+}

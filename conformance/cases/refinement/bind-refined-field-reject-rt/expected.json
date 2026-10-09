@@ -1,0 +1,14 @@
+{
+  "id": "refinement-bind-refined-field-reject-rt",
+  "description": "S458 2a-fix F1: `bind:value` on a REFINED struct field is judged by that field's own refinement, against the value that is written. `@p.n` is `number(>0)`: typing \"-5\" is refused and @p keeps n = 1; typing \"7\" into `@q.n` writes the NUMBER 7 (a numeric refinement renders `type=\"number\"`, so the written value is the number, and the judge checks the base type).",
+  "language-version": "1.0",
+  "spec": "§53.7.2",
+  "rationale": "§53.7.2: \"If the check fails, the assignment is not applied and the reactive variable retains its prior value.\" §53.7.1: a numeric refinement bound with bind:value renders a number input.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "input": "#bad", "value": "-5" }, { "input": "#good", "value": "7" }],
+    "state": { "p": { "name": "a", "n": 1 }, "q": { "name": "b", "n": 7 } },
+    "domAnchored": [{ "selector": "#out", "text": "1" }, { "selector": "#qo", "text": "7" }]
+  }
+}

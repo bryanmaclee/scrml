@@ -1,0 +1,19 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <n>: number(>0) = 1
+    <p>: number = 7
+    <l>: L = { u: "a", n: 1 }
+    <ls>: number(>0)[] = [1, 2]
+    <o>: number(>0) | not = 1
+    function fieldWrite() { @l.n = @p }
+    function pushGood() { @ls.push(@p) }
+    function inc() { @n++ }
+    function clear() { @o = not }
+}
+<program>
+<button id="field" onclick=fieldWrite()>b</button>
+<button id="push" onclick=pushGood()>c</button>
+<button id="inc" onclick=inc()>d</button>
+<button id="clear" onclick=clear()>e</button>
+<p id="out">${@n} ${@l.n} ${@ls.length}</p>
+</program>

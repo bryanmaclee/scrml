@@ -1,0 +1,14 @@
+{
+  "id": "refinement-inplace-removal-length-accept-neg",
+  "description": "S459 round 3 MED-2 + LOW-MED-3 (legitimate writes that round 2 refused): `@rows.length = 2` on an `L[]` and `@ls.length = 0` on a `number(>0)[]` shorten the arrays — a length is not an element, so the element judge does not run on it. A row removed in place (`const r = @rows[0]; @rows.shift()`) has left the cell, so a later write to it (`r.n = -5`) is not judged against the cell's type.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: the assignment is applied if and only if the predicate evaluates to true — shortening writes no value into any element, and a value no longer held by the cell is not assigned into it.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#t" }, { "click": "#r" }],
+    "state": { "rows": [{ "u": "b", "n": 2 }], "ls": [], "gone": -5 },
+    "domAnchored": [{ "selector": "#out", "text": "1 0 -5" }]
+  }
+}

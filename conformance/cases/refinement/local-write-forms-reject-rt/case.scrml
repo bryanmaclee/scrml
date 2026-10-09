@@ -1,0 +1,44 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <m>: number = -5
+    <done>: string = ""
+    function elem() {
+        let a: number(>0)[] = [1, 2]
+        a[0] = @m
+        @done = @done + "e"
+    }
+    function pushBad() {
+        let a: number(>0)[] = [1, 2]
+        a.push(@m)
+        @done = @done + "p"
+    }
+    function dec() {
+        let k: number(>0) = 1
+        k--
+        @done = @done + "d"
+    }
+    function assignBad() {
+        let l: L = { u: "a", n: 1 }
+        Object.assign(l, { n: @m })
+        @done = @done + "a"
+    }
+    function destructure() {
+        let { n }: L = { u: "a", n: @m }
+        @done = @done + "s"
+    }
+    function exprArrow() {
+        let k: number(>0) = 1
+        const f = (d) => (k = d)
+        f(@m)
+        @done = @done + "x"
+    }
+}
+<program>
+<button id="e" onclick=elem()>e</button>
+<button id="p" onclick=pushBad()>p</button>
+<button id="d" onclick=dec()>d</button>
+<button id="a" onclick=assignBad()>a</button>
+<button id="s" onclick=destructure()>s</button>
+<button id="x" onclick=exprArrow()>x</button>
+<p id="out">[${@done}]</p>
+</program>

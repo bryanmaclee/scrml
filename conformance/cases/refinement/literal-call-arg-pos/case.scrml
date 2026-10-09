@@ -1,0 +1,6 @@
+${
+    function rate(score: number(>=0 && <=100)) {
+        return score
+    }
+}
+<program><p>${rate(150)}</p></program>

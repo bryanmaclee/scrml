@@ -1,0 +1,11 @@
+${
+    <link>: string(url) = "https://scrml.dev/"
+    <other>: string = "https://example.com/"
+    function setLink(v) {
+        @link = v
+    }
+}
+<program>
+<button id="ok" onclick=${setLink(@other)}>Ok</button>
+<p id="out">${@link}</p>
+</program>

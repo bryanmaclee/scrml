@@ -41,6 +41,8 @@ import type {
 } from "../types/ast.ts";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived, setRewriteCurrentUserAmbientActive } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
+import { isRefineCall } from "../refinement-obligations.ts";
+import { emitRefineExpr, emitRefineUpdate, emitRefineMerge } from "./emit-predicates.ts";
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
@@ -3151,6 +3153,23 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     node.args[0] && node.args[0].kind === "ident"
   ) {
     return "";
+  }
+
+  // S458 slice 2 — a §53 refinement obligation (`__scrml_refine_<token>__(value)`,
+  // desugared by the type-system stage, refinement-obligations.ts): judge the
+  // value where it is written. Not lowering it leaves the placeholder in the
+  // artifact, which the §2.2.1 emit gate refuses — a missed lowering is a
+  // compile error, never an unchecked write.
+  if (isRefineCall(node)) {
+    const r = (node as unknown as { refine: { judge: any; where: any; update?: { op: "+" | "-"; prefix: boolean }; merge?: boolean } }).refine;
+    if (r.update) {
+      return emitRefineUpdate(emitExpr(node.args[0] as ExprNode, ctx), r.judge, r.where, r.update, ctx.mode === "server");
+    }
+    if (r.merge) {
+      return emitRefineMerge(node.args.map((a) => emitExpr(a as ExprNode, ctx)), r.judge, r.where, ctx.mode === "server");
+    }
+    const valueJs = emitExpr(node.args[0] as ExprNode, ctx);
+    return emitRefineExpr(valueJs, r.judge, r.where, ctx.mode === "server");
   }
 
   // §41.13 parseVariant — call-site annotated by TS pass with parseVariantEnum.

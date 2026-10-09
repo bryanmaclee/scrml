@@ -1,0 +1,17 @@
+{
+  "id": "refinement-copy-in-draft-accept-neg",
+  "description": "S459 copy-in (N3): a refined cell stores its own copy of what it admits. `@rows.push(@draft)` stores a copy of the draft; editing the draft afterwards (`const d = @draft; d.n = -5` — a write the unrefined draft type admits) does not reach the stored row, so @rows never holds -5 and nothing is refused. Before copy-in the row WAS the draft's object, and the later edit put -5 into @rows (`number(>0)`) without a check.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"The assignment is applied if and only if the predicate evaluates to true … The variable retains its prior value.\" A refined cell that shared its value with another binding could be changed by a write that never passed its check; copy-in (ruling:user-voice-scrml.md S459 \"a, go\"; analogy:§66.10 aliases snapshot) makes the cell's value reachable only through the cell.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#add" }, { "click": "#edit" }],
+    "state": {
+      "rows": [{ "u": "d", "n": 1 }],
+      "draft": { "u": "d", "n": -5 }
+    },
+    "domAnchored": [{ "selector": "#out", "text": "1" }]
+  }
+}

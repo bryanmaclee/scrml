@@ -1,0 +1,17 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <m>: number = -5
+    <l>: L = { u: "a", n: 1 }
+    <ls>: number(>0)[] = [1, 2]
+    function defField() {
+        Object.defineProperty(@l, "n", { value: @m, writable: true, enumerable: true, configurable: true })
+    }
+    function defElement() {
+        Object.defineProperty(@ls, "0", { value: @m, writable: true, enumerable: true, configurable: true })
+    }
+}
+<program>
+<button id="field" onclick=defField()>field</button>
+<button id="el" onclick=defElement()>el</button>
+<p id="out">${@l.n} ${@ls[0]}</p>
+</program>

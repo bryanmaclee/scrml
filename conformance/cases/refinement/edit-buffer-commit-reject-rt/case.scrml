@@ -1,0 +1,17 @@
+${
+    <m>: number = -5
+    <ls>: number(>0)[] = [1, 2]
+    <draft>: number[] = []
+    function edit() {
+        @draft = @ls
+        @draft[0] = 5
+    }
+    function add() { @draft.push(@m) }
+    function commit() { @ls = @draft }
+}
+<program>
+<button id="e" onclick=edit()>e</button>
+<button id="a" onclick=add()>a</button>
+<button id="c" onclick=commit()>c</button>
+<p id="out">${@ls.length}</p>
+</program>

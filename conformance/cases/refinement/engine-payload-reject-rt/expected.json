@@ -1,0 +1,13 @@
+{
+  "id": "refinement-engine-payload-reject-rt",
+  "description": "S458 2a-fix F2: an engine whose `for=` enum carries a refined payload field (`Dragging(id: number(>0))`) registers that enum's judge for its variant cell, so a transition that commits `.Dragging(-5)` is refused (E-CONTRACT-001-RT) and the engine stays in `.Idle`. Before, the payload was never judged.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.1: the refinement is evaluated at every binding site — a payload field binding included (§53.2.2 lists struct / enum-shaped type positions). §53.3.3: the prior value is retained.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#bad" }],
+    "state": { "drag": "Idle" }
+  }
+}
