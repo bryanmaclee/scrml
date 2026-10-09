@@ -9,7 +9,7 @@
 // `data-scrml*`), which admitted everything it did not name. The lists name presentation, structure,
 // accessibility and form-value attributes that never run text as script and never load or navigate
 // on their own; the URL-valued names they admit (`href`, `src`, `srcset`, `cite`, `poster`,
-// `xlink:href`, `itemid`, `itemtype`, `usemap`) are ADDITIONALLY judged by scheme per §5.2 by the
+// `xlink:href`, `itemid`, `itemtype`) are ADDITIONALLY judged by scheme per §5.2 by the
 // caller, in BOTH phases with the ONE §5.2 reader (S459 round 4 F4): `_scrml_is_url_attr("", name)` +
 // `_scrml_url_value_admitted(name, value)` from runtime-url-guard.js — the runtime on the parsed value,
 // compile time (meta-eval.ts `checkEmittedNodes`) on the literal value the emitted markup carries,
@@ -25,7 +25,11 @@
 // the emitted form or, through `form=`, of a form already on the page); `popovertarget`,
 // `popovertargetaction`, `commandfor`, `command`, `anchor`, and `for` on `<label>` (act on an element
 // elsewhere in the page by id — a `<label for="x">` click IS a click on the page's `#x`, S459 round 4
-// F1; `<output for>` only names its inputs and is admitted); the SVG animation attributes `attributename`, `to`, `from`, `by`, `begin` (their elements are
+// F1; `<output for>` only names its inputs and is admitted); `usemap` on `<img>` and `name` on `<map>`
+// (S460 N1 — the same reference-by-name class: `<img usemap="#m">` resolves `#m` against every
+// `<map>` in the page by name OR id, so an emitted image would run a page `<area>`'s activation on
+// click, and an emitted `<map name>` / `<map id>` would capture the areas of a page image — `id` on
+// `<map>` is the one global refused on one element, in `_scrml_emit_attr_name_verdict`); the SVG animation attributes `attributename`, `to`, `from`, `by`, `begin` (their elements are
 // refused anyway); and the compiler-owned `data-scrml` / `data-scrml-*` namespace (ruling S458 "your
 // recs on all four" item 3 + PA-ruled S459 consequence: the component CSS scope root and the runtime
 // markers).
@@ -102,7 +106,11 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   minlength: ["input", "textarea"],
   multiple: ["input", "select"],
   muted: ["audio", "video"],
-  name: ["button", "fieldset", "input", "output", "select", "textarea", "map", "details", "meta"],
+  // `name` on `<map>` is NOT admitted (S460 N1): a map's name is what an `<img usemap="#name">`
+  // ANYWHERE in the page resolves to, so an emitted `<map name="pm">` would take over the areas of the
+  // page's `<img usemap="#pm">`; `id` on `<map>` is refused for the same reason (see the judge below).
+  // (`usemap` itself is on no list — see the header.)
+  name: ["button", "fieldset", "input", "output", "select", "textarea", "details", "meta"],
   novalidate: ["form"],
   open: ["details", "dialog"],
   optimum: ["meter"],
@@ -130,7 +138,6 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   start: ["ol"],
   step: ["input"],
   type: ["a", "button", "input", "ol", "source", "menu"],
-  usemap: ["img"],
   value: ["button", "data", "input", "li", "meter", "option", "progress"],
   width: ["img", "video", "canvas", "input", "source", "col", "colgroup"],
   wrap: ["textarea"],
@@ -195,6 +202,14 @@ export function _scrml_emit_attr_name_verdict(ns, tag, name) {
   if (_scrml_emit_reserved_attr_name(lowerName)) {
     return "a " + lowerName + "= attribute on <" + tag + "> (the data-scrml attribute namespace is " +
       "reserved for the compiler's own markers)";
+  }
+  // A `<map>` is found BY its `id` as well as by its `name` (the HTML hash-name reference rule; Chromium
+  // 148: `<map id="pm">` with no name takes the clicks of the page's `<img usemap="#pm">`), so `id` — on
+  // every other element a global — is not admitted on an HTML `<map>` (S460 N1). With neither name nor
+  // id a map is referenced by nothing and is admitted.
+  if (lowerName === "id" && String(tag).toLowerCase() === "map" && ns !== _SCRML_EMIT_NS_SVG && ns !== _SCRML_EMIT_NS_MATHML) {
+    return "an id= attribute on <map> (an <img usemap> anywhere in the page resolves to a map by its id " +
+      "or name)";
   }
   if (lowerName.slice(0, 5) === "data-" && lowerName.length > 5) return "";
   if (lowerName.slice(0, 5) === "aria-" && lowerName.length > 5) return "";
