@@ -1,1 +1,3 @@
 2026-10-09T17:25:05-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ac10ad44b9db2f4d5; brief fetched
+2026-10-09T17:50:44-06:00 baseline corpus measurement (bootstrap, as-is + fix-s66 twin): 2706 files, 0 E-DECL-USE-ATTR / 0 E-DECL-STAR-REF-ATTR-WRITE sites. Probe: plain-use scope already refuses class/style/id/aria/data/on/key/href/bind:/class:; GAP = <*x> reference silently drops undeclared attrs (class, key, as).
+2026-10-09T17:53:42-06:00 SPEC: §66.14 r4, §66.15 provenance+table reversal, §66.15.3 X (Nominal), §66.20 row, §66.22 O18 RULED/O18-r/O46, §15.5 id= struck, §34 row, §5.2 legacy qualifiers

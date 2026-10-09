@@ -1799,8 +1799,8 @@ An event-handler attribute additionally admits the `${…}` expression form (§5
      - *The scheme test* reads the literal prefix the way a browser's URL parser reads the runtime value: leading C0 controls and spaces are ignored; ASCII tab, LF and CR are removed anywhere (`java<TAB>script:` is `javascript:`); the scheme is the run before the first `:` when it matches `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )` and no `/`, `?` or `#` precedes it, compared case-insensitively. A `\` or `&` before the scheme ends SHALL be treated as an unprovable scheme and refused (the compiled template literal decodes escape sequences, and a character reference spells a scheme letter).
      - *Admitted:* a relative URL (`href="/users/${id}"`) and an interpolation after a literal safe scheme (`href="https://x/${id}"`, `href="mailto:${email}"`) — a scheme written literally cannot be changed by the interpolation that follows its `:`. A value whose literal prefix commits to no scheme (`href="${url}"`) is not refused by this rule; the scheme there comes from the data, and rule 3 below guards it at runtime.
      - *SVG animation values (S457).* On an SVG animation element — `<set>`, `<animate>`, `<animateTransform>`, `<animateMotion>`, `<animateColor>` (tags compared case-insensitively) — the value attributes `to`, `from`, `by` and `values` write the attribute that the element's `attributeName` names (`<a><set attributeName="href" to="javascript:…"/>…</a>` animates the link's `href`; a click runs it). Such a value attribute IS a URL-valued attribute for this rule and for rule 3 when `attributeName` is written as a static string naming an attribute of the URL-valued list above (by name, on any element — the animated element is not known at compile time), and ALSO when `attributeName` is not a static string (an expression, a variable, a call, or a quoted value with `${…}`: any attribute may be animated, so the value is treated as a URL — fail closed). The scheme test reads `to`, `from` and `by` as one URL, and reads `values` as a `;`-separated list: the literal text before the first `${…}` of each entry that interpolates is tested (an entry whose literal text is preceded by an earlier interpolation in the same entry is data-led and left to rule 3). The raster `data:image` admission applies only when the animated attribute is itself an image-source attribute. A static value with no `${…}` (`to="javascript:…"` written by the author) is the rule-above static string, as on `href`.
-     - *`srcdoc` in every form (S457).* A `srcdoc` attribute (any case) on an element whose value is not a static string — the expression form `srcdoc=${…}`, a variable `srcdoc=@doc` / `srcdoc=it.html`, a call `srcdoc=f()`, a value a component prop supplies (`<iframe srcdoc=doc>` in a component body, reported once at the definition) — SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) in every position rule 2 names, as the quoted `srcdoc="${…}"` form is. A `srcdoc` is an HTML document; data is never written into one. A prop passed to a component call (`<Frame srcdoc=@x/>`) is not an element attribute and is judged where the component writes it. The refusal applies wherever such a write is emitted — including a call-site attribute written onto an expanded component root. A DECLARED prop never reaches the root (§15.10, S458 "D1"); an UNDECLARED call-site attribute on a component with no `props` block still does (`const Fr = <iframe></iframe>` used as `<Fr srcdoc=it.d/>`).
-     - *Event-handler text from data (S457).* The unquoted event forms `onclick=f(x)` and `onclick=${() => f(x)}` are wired as listeners and never write the attribute. In `<each>` rows and `lift` markup every attribute rule 1's name test makes an event handler (any case, `on:x` included) is wired as a listener for the lowercased event name, an undeclared call-site attribute written onto an expanded component root included (`lift <Btn onClick=it.code/>` with `const Btn = <button>b</button>`, no `props` block, registers a `click` listener; it never writes handler text). A DECLARED prop never reaches the root (§15.10, S458 "D1"). Where an emitter would instead WRITE an `on…` attribute from data — a spelling it does not wire as a listener, such as `ONCLICK=${…}` at top level — the write SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) naming the lowercase spelling that is wired; the refusal applies wherever such a write is emitted. JavaScript is never built from data.
+     - *`srcdoc` in every form (S457).* A `srcdoc` attribute (any case) on an element whose value is not a static string — the expression form `srcdoc=${…}`, a variable `srcdoc=@doc` / `srcdoc=it.html`, a call `srcdoc=f()`, a value a component prop supplies (`<iframe srcdoc=doc>` in a component body, reported once at the definition) — SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) in every position rule 2 names, as the quoted `srcdoc="${…}"` form is. A `srcdoc` is an HTML document; data is never written into one. A prop passed to a component call (`<Frame srcdoc=@x/>`) is not an element attribute and is judged where the component writes it. The refusal applies wherever such a write is emitted — including a call-site attribute written onto an expanded component root. A DECLARED prop never reaches the root (§15.10, S458 "D1"); an UNDECLARED call-site attribute on a component with no `props` block still does (`const Fr = <iframe></iframe>` used as `<Fr srcdoc=it.d/>`). That fall-through exists only in the legacy `const X = <…>` form (§63 window); in the §66 dialect an undeclared use-site attribute is `E-DECL-USE-ATTR` and reaches no element (§66.6.9, S462).
+     - *Event-handler text from data (S457).* The unquoted event forms `onclick=f(x)` and `onclick=${() => f(x)}` are wired as listeners and never write the attribute. In `<each>` rows and `lift` markup every attribute rule 1's name test makes an event handler (any case, `on:x` included) is wired as a listener for the lowercased event name, an undeclared call-site attribute written onto an expanded component root included (`lift <Btn onClick=it.code/>` with `const Btn = <button>b</button>`, no `props` block, registers a `click` listener; it never writes handler text). A DECLARED prop never reaches the root (§15.10, S458 "D1"). (The undeclared fall-through is the legacy `const X = <…>` form's only; in the §66 dialect it is `E-DECL-USE-ATTR`, §66.6.9.) Where an emitter would instead WRITE an `on…` attribute from data — a spelling it does not wire as a listener, such as `ONCLICK=${…}` at top level — the write SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) naming the lowercase spelling that is wired; the refusal applies wherever such a write is emitted. JavaScript is never built from data.
   > **Provenance (S457 additions — SVG animation values, `srcdoc` in every form, event-handler text from data):** ruling:user-voice-scrml.md S456 "your recs on 1 and 2" (purpose: "JavaScript is never built from interpolated text"; "so a `javascript:` URL cannot be built from data"; `srcdoc` named) and S457 "a now with c discussed for later" (runtime guard on data-supplied URL attribute writes) — PA reading recorded with dispatch `s457-executable-sinks-srcdoc-svg`: an animation value that writes a URL attribute is a URL attribute write; every data form into `srcdoc` is the same sink as the quoted one; an emitter's text write of an event attribute is handler text built from data. Chromium-confirmed sinks (`<set attributeName="href" to=…>` runs on click; `<iframe srcdoc=${…}>` runs the data). **Direction of change:** newly-rejecting (the three bullets above; measured corpus impact recorded with the dispatch) and semantics-changed for rule 3 (an animation value with a non-admitted scheme now becomes `about:blank`); the expression form `to=${…}` on `<set>` / `<animate>`, previously DROPPED silently from the emitted program, is now lowered (newly-accepting, guarded).
   > **Provenance:** ruling:user-voice-scrml.md S456 "your recs on 1 and 2" — refuse `${…}` in quoted event attributes everywhere, and in URL attributes whose value begins with a scheme, plus `srcdoc` · **supersedes:** nothing ruled — the §3 table, §4.18 and §5.5.3 sanction `${…}` in quoted attributes generally; this carves event attributes and scheme-led URL attributes out of that sanction. The safe-scheme set (`http` / `https` / `ftp` / `mailto` / `tel` / `sms`, plus raster `data:image/…` on image sources), the event-attribute test (any `on…` name except the exact words `one` / `online` / `onboarding` — S239 round 2 inverted a browser-handler name list that missed SVG `onbegin` and 18 other Chromium handlers), and the post-substitution / post-`^{}` scope were fixed in the S456 S239 review round (F1–F3); the safe-scheme set is the implementation's reading of "begins with a scheme" against the ruling's stated purpose ("so a `javascript:` URL cannot be built from data").
 - **Data-supplied URL schemes — runtime guard (rule 3, S457).** Where the scheme of a URL-valued attribute comes from data, the compiler cannot judge it, so the emitted program SHALL judge it on every write. This is a runtime rule: no diagnostic code, no compile refusal.
@@ -14137,7 +14137,19 @@ const card = <div title:String using (length > 0)>
 - Static attributes declared on the root element of a component definition are fixed on every instance.
 - When a caller provides a `class` attribute, it is APPENDED to the component's existing class list, not replaced.
 - Normal CSS cascade applies after class merging.
-- Adding `id=` at a call site is allowed. Adding `id=` makes that instance a singleton.
+- ~~Adding `id=` at a call site is allowed. Adding `id=` makes that instance a singleton.~~ **Struck S462.**
+  "Singleton" was never defined and never implemented (dpa-069 D-6: two `id="main"` instances compile with no
+  diagnostic). §15.10 governs: on a component with a `props` block, a call-site `id=` is an undeclared prop,
+  `E-COMPONENT-011`; on a component with no `props` block it is one more call-site attribute written onto the
+  root, with no further meaning.
+- This section describes the legacy component form `const X = <root …>` only, through its §63 window. In the §66
+  dialect a use's `class` (or `id`) is undeclared and refused — `E-DECL-USE-ATTR` (§66.6.9) — and §66.15.1
+  reverses the S435 class-merging carry-over.
+
+> **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 3) · supersedes: the §15.5
+> sentence *"Adding `id=` at a call site is allowed. Adding `id=` makes that instance a singleton."* (struck in
+> place above), resolving its contradiction with §15.10's `E-COMPONENT-011` in §15.10's direction · **Direction of
+> change:** inert — no compiler implemented the singleton meaning; impl#1 behaviour is unchanged.
 
 ### 15.6 Component Naming
 
@@ -26058,6 +26070,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-COMPONENT-005~~ | §16.4 | **Retired 2026-08-01 (S310) — duplicate of a LIVE code.** Searched §16.4 and the whole SPEC — no normative definition, no emitter. Its stated trigger (caller provides children, target has no `${...}` spread) is already owned by **E-COMPONENT-021** (§16.4 — *"Caller provides unslotted children but the target component has no `${...}` spread in its body"*), which IS emitted. Zero surviving unique trigger. Audit: `docs/changes/s34-catalog-truthfulness/`. | — |
 | E-COMPONENT-010 | §15.10 | Required prop missing at call site, or `props` on non-root element | Error |
 | E-COMPONENT-011 | §15.10 | Extra prop at call site not declared in `props` block | Error |
+| E-DECL-USE-ATTR | §66.6.9, §66.20 | §66 dialect: an attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` (`class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, …); an attribute on a `<*x>` reference that names no field of `x` (`as=` included); a construction value written as a `{…}` block. Nothing a use writes reaches an element of its `renders`. The legacy `const X = <…>` form keeps `E-COMPONENT-011` (§15.10). **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveUse`, `resolveStar`, `resolveConstructValue`). | Error |
 | E-COMPONENT-012 | §15.10 | Same prop in both `props` block and a valueless (bare) root attribute. A valued root attribute is the body writing its root (S458 "D1"). (Emitted at `compiler/src/component-expander.ts`, `expandComponentNode`.) | Error |
 | E-NAME-001 | §15.6 | Component name collides with built-in HTML element name | Error |
 | E-TILDE-001 | §32.5 | `~` referenced but not initialized in current scope | Error |
@@ -46953,8 +46966,11 @@ declaration is and goes before the `<` — ruling:user-voice-scrml.md S447, *"yo
    (§66.2.5): `export let <value:string=""/>` (writable by `replace`), `export <open:Openness=.Closed>…</>` (along
    its transition graph). A write from another file to a non-exported field is `E-FIELD-PRIVATE-WRITE` (§66.20).
    *(S435 also allowed `export let value:string=""` on an ATTRIBUTE; retired S447.)*
-4. **Use-site attributes are CONSTRUCTION** — always allowed, from any file (`<dropdown label="Size"/>` sets the
-   new instance's `label` whether or not `label` is exported). Whether a construction value TRACKS its
+4. **A DECLARED use-site attribute is CONSTRUCTION** — always allowed, from any file (`<dropdown label="Size"/>`
+   sets the new instance's `label` whether or not `label` is exported). "Always allowed" is about file visibility;
+   an attribute the declaration does not declare is refused (`E-DECL-USE-ATTR`, §66.6.9).
+   *(S462, dpa-069 item 4 — ruling:user-voice-scrml.md S462 "ratified path to X" · supersedes: the rule's prior
+   head "Use-site attributes are CONSTRUCTION", which did not say "declared".)* Whether a construction value TRACKS its
    expression is §66.9 rule 8 (S437, L6): the use-site attribute is that field's initializer for that instance,
    so a locked field given a live expression is derived (tracks) and a `let` field is seeded once — except a locked
    field that carries a grant, which a live use-site initializer seeds (O60).
@@ -46980,7 +46996,8 @@ unless the field is exported — and route the count to bryan.
 > **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #10) · *"yes, retire it, move on"* (ratifying:
 > `const X = <… props={…}>` retires; a declaration with typed attributes + `renders` IS the component; callback
 > props = function-typed attributes; use-site children = slot content via `<slot/>`; §15.11.1 bind props →
-> E2 exported `let` fields; spread / `fixed` / class merging carry over; §63 deprecation, not same-arc).
+> E2 exported `let` fields; spread / `fixed` / ~~class merging~~ carry over; §63 deprecation, not same-arc).
+> *(The "class merging carry over" clause is superseded S462 — §66.15.1's reversed row; "spread" is O46.)*
 > **supersedes:** §15.1 / §15.1.1 / §15.3 / §15.10 (component definition by `const X = <root props={…}>`);
 > §15.12 (component rendering syntax); §15.13.5 (see §66.13); §16's slot-declaration surface as far as §66.15.2
 > states it.
@@ -46997,8 +47014,18 @@ renderable vehicle, not two.
 | a callback prop (`onpick: fn`) | a function-typed attribute (see O8) |
 | `bind name: T` prop + `bind:name=@x` at the call site | an E2 exported `let` field, written/read through an `as=` handle (§66.14) |
 | caller children → `${...}` spread | slot content, placed with `<slot/>` in `renders` (§66.15.2) |
-| `fixed`, static-attribute class merging (§15.5, §15.7), spread | carry over |
+| `fixed` (§15.7) | carries over |
+| static-attribute class merging (§15.5) — a caller's `class` appended to the root's | **REVERSED S462 — does not carry over.** A `class` on a use is undeclared, `E-DECL-USE-ATTR` (§66.6.9); nothing a use writes reaches an element of `renders`. The ratified destination is explicit forwarding (§66.15.3, not yet built). |
+| spread | ⚑ O46 (§66.15.2) |
 | component-local state (`${ <open> = false }`) | a child field of the declaration — per instance (§66.6.1) |
+
+> **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" · supersedes: ruling:S435 (class merging
+> carry-over row). The S435 row read *"`fixed`, static-attribute class merging (§15.5, §15.7), spread | carry
+> over"*; it is split above — `fixed` keeps the S435 answer, class merging is reversed, spread is left to O46. The
+> S435 clause was part of the PA proposal text bryan answered *"yes, retire it, move on"* — never separately
+> deliberated (dpa-069 §2 STEP-1 (a)) — and S462 reverses it explicitly, not by silence. **Direction of change:**
+> newly-rejecting on the §66 dialect (no §66 program carried a use-site `class`: measured 0 sites); impl#1's
+> legacy form keeps §15.5 through its §63 window (§66.6.9 rule 6).
 
 **impl#1 divergence (CARRIED).** Per-instance state has no runtime substrate in impl#1: a component-local cell
 compiles to ONE global key, so every instance shares it (DD D1, execution-verified — one click opens all three
@@ -47021,6 +47048,8 @@ Content written between a use's tags is **slot content**, placed inside the decl
 > (`${...}`), `fixed`, and class merging: these carry over"* — naming as "attribute spread" the token §16.4 defines
 > as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
 > is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
+> **S462:** O46 is now also the remaining blocker for the ratified forwarding destination (§66.15.3) — its
+> spelling is ruled with O46 (whether `${...}` becomes the attribute spread, or another spelling is chosen).
 
 > ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. `onOpen:fn()`) is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
 >
@@ -47035,6 +47064,50 @@ Content written between a use's tags is **slot content**, placed inside the decl
 > that stance rejects. (The components text bryan answered asserted the opposite reading — *"This isn't a method,
 > just a value passed in, so it's consistent with your S430 stance"* — which ratifies function-typed attributes
 > (`<card title:string onOpen:fn()>`) but not how they meet §15.11.5.1 / `E-EQ-003`.)
+
+#### 66.15.3 Explicit attribute forwarding — the ratified destination (Nominal, not built)
+
+> **Provenance:** ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to
+> X"* (dpa-069 §7, "X named in advance as the only widening"; bryan: build it as soon as O46 is ruled, not "when a
+> wrapper needs it") · dd: undeclared-use-site-attributes-o18-dpa-069-2026-10-08 §3 (pole X), §5, §6 ·
+> supersedes: nothing — it specifies where §66.6.9's refusal is headed, so the refusal is not read as permanent.
+> **Direction of change when built:** newly-accepting, and only for a declaration that opts in.
+
+**Status: Nominal — specified, not built.** No implementation accepts it; until it lands, every attribute it would
+forward is `E-DECL-USE-ATTR` (§66.6.9). Its spelling is **PENDING O46** (§66.15.2, §66.22): the forms below are
+the dpa-069 sketch, not ruled syntax.
+
+A declaration MAY opt in to forwarding by declaring an **element-typed rest** aimed at **one named element** in its
+`renders`:
+
+```scrml
+<btn label:string act:fn() ...rest:<button>/>                                   // spelling PENDING O46
+renders <button class="btn" onclick=act() ${...rest}>${label}</button>         // spelling PENDING O46
+
+<btn label="Delete" act=confirmDelete() aria-describedby="del-help" data-testid="del"/>
+```
+
+1. **Declared and typed.** The rest is a declared field. `:<button>` types it as `<button>`'s attribute set, so
+   an attribute that element does not have is still refused at the use (a typo is not forwarded); an attribute
+   the use writes that is neither a declared field nor in the rest's type is `E-DECL-USE-ATTR`.
+2. **One named target.** The rest is placed on exactly one element of `renders`, named by the author — never an
+   implicit root.
+3. **Compiler-owned merge.** Where the target element already writes the same attribute: `class` concatenates
+   (the element's classes, then the caller's); `style` merges **per property**, the caller winning per property;
+   an `on…` handler **composes, the component's handler first** — a caller's handler never replaces the
+   component's own.
+4. **The four security conditions** (dpa-069 §6, verbatim; any design of this destination SHALL meet all four —
+   the sink checks named in 1 are §5.2's):
+   1. it desugars at **one** site (the expander) into ordinary body-authored attributes on the named element, so
+      the existing sink checks see an ordinary write;
+   2. the key set is **static per use** (scrml expands per instance, so this holds unless `<*x>` references become
+      dynamic — Svelte voice's flip condition);
+   3. `on…` **composes, never replaces**;
+   4. `srcdoc` and `on…` text are **never forwardable** (types the rest so those names are absent).
+
+Open with O46 (not ruled here): the rest declarator's grammar in a declaration opener, the forwarding form inside
+an element opener and its fit with §66.2.4's opener-expression rule, and nested forwarding (a target that is
+itself a use of a declaration).
 
 ### 66.16 `server` and `pinned` on declarations
 
@@ -47428,6 +47501,10 @@ emitter). Every code below is Nominal on impl#1.
 > **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2; sub-recs 2, 3, 4) · dd:
 > opener-keyword-vs-attribute-2026-10-01 (SF4).
 
+> **Amendment S462 — one row added:** `E-DECL-USE-ATTR` (O18, §66.6.9). The bootstrap emitted it before any SPEC
+> text named it (dpa-069 D-9 — the house rule broken the other way round); its §34 row lands with this row.
+> **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1).
+
 **New codes**
 
 | Code | Severity | Fires when |
@@ -47438,6 +47515,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-FIELD-TAG-NEEDS-STAR`** | Error | A bare `<f/>` names a child field of the enclosing declaration. Message: *"did you mean `<*f/>`?"* (§66.6.6). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-USE-ATTR`** | Error | An attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` — `class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, … (§66.6.9 rules 1, 2, 4); an attribute on a `<*x>` reference that names no field of `x`, `as=` included (§66.6.9 rule 3); and a declared attribute's construction value written as a `{…}` block (a construction value is an expression). **Provenance:** ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to X"* (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66; its legacy component form keeps `E-COMPONENT-011`, §15.10); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `resolveUse`, `resolveStar`, `resolveConstructValue`). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
@@ -47572,7 +47650,8 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O15 | §66.18 | Whether `<each … as (k, v)>` (§59.8, built on §14.11) survives the Tier-3 retirement. |
 | O16 | §66.12.5 | Whether the tuple-type annotation in the answered one-axis text (`[:number, :number]`) is the spelling in every type position. |
 | O17 | §66.17 | Remaining T3 details: hyphenated token names / non-string CSS values, whether `for=` is still permitted, the `@media` auto-bind, library-file placement. |
-| O18 | §66.6.7 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. |
+| ~~O18~~ RULED S462 | §66.6.7, §66.6.9 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. RULED (dpa-069): a use carries its declared attributes / child fields, `as=` and `if=` / `else-if=` / `else`; a `<*x>` reference carries no field and no `as=`; everything else is `E-DECL-USE-ATTR`. The ratified destination is explicit forwarding (§66.15.3, blocked on O46). Provenance: ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to X"*. |
+| O18-r (S462) | §66.6.9 rule 3 | The residue of O18: whether `if=` / `else-if=` / `else` may gate a `<*x>` reference (the bootstrap refuses it today, `E-BOOTSTRAP-UNSUPPORTED`). |
 | O19 | §66.3 | An own value AND attributes on one declaration; what `@x` then is. |
 | ~~O21~~ RULED S437 (by derivation from L6) | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. RULED: a use MAY set it — the use-site attribute is that instance's initializer (§66.9 rule 8). Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | O24 | §66.5 | The spelling of a markup-typed derived cell. |
@@ -47589,7 +47668,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O43~~ RULED S437 | §66.4 | Setting a child declaration's value by a same-named use-site attribute (the un-presented half of #11 — fell out of the record). RULED: a use-site attribute MAY set a child field (§66.9 rule 8; O60 exception). Provenance: ruling:user-voice-scrml.md S437 — *"1 yes, 2 yes, 6 yes"*. |
 | O44 | §66.11 | Maps and sets under the transition axis. |
 | O45 | §66.13 | The S178 "final shared-state design" sentence under Q1 + Q6 (#20 — fell out of the record). |
-| O46 | §66.15 | Does the `${...}` children spread survive beside `<slot/>`? |
+| O46 | §66.15 | Does the `${...}` children spread survive beside `<slot/>`? **S462: also the remaining blocker for the ratified forwarding destination (§66.15.3)** — its spelling is ruled with O46 (`${...}` repurposed as the attribute spread, or another spelling). |
 | O48 | §66.21 | Tier-3 positional: a Stage-1 window that preserves a silent miscompile, vs a §63.4 designer-card removal. |
 | O51 | §66.6.8 | A use or `<*x/>` of a declaration with no `renders`: an error, or a data-only instance (an `as=`-bound instance need not render). |
 | ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
@@ -47610,6 +47689,8 @@ Q6 "a", "E2, move on", "yes, :struct,") — **O53's attribute half is SUPERSEDED
 writable / exported fields are children — ruling:user-voice-scrml.md S447, *"your recs"*, item 2, sub-rec 4). Ruled S437 (*"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): O21 (by derivation from L6), O57, O58, O59, O60.
 Ruled S442: O55 (*"1 your rec, 2 deliberate, 3 your rec"* — a plain use of a `single` declaration is an error);
 O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 stays OPEN).
+Ruled S462: O18 (*"I really like X so I accept your rec as a ratified path to X"* — undeclared use-site
+attributes are refused; explicit forwarding is the ratified destination; residue O18-r stays open).
 
 ### 66.23 Cross-references
 
