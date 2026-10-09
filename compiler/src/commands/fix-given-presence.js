@@ -263,7 +263,7 @@ function planSite(source, site) {
     };
   }
   if (source[head.braceAt] !== "{") {
-    return { reason: "the guard's body is not a `{ … }` block (impl#1 reads the statement after it as outside the guard) — left for a human" };
+    return { reason: "the guard's body is not a `{ … }` block (E-SYNTAX-044: a guard body is a block; braces decide what the guard covers) — left for a human" };
   }
   const cond = head.names.map((n) => `${n} is given`).join(" && ");
   return {
@@ -282,9 +282,20 @@ function maskComments(source) {
   return out;
 }
 
-/** Offsets of `given <name>` heads followed by `,`, `:>` or `=>` (comments masked). Reporting only. */
+/**
+ * Blank out the CONTENTS of string literals — `"…"`, `'…'`, `` `…` `` — on one line (S462 fix round 1,
+ * F5): a guard-shaped string (`const s = "given x :> y"`) is not a guard, and a net hit inside one
+ * would be a blocker no rewrite can clear (`scrml fix --check` would exit 2 forever). The net only
+ * REPORTS, so a string the masking misjudges (an apostrophe in markup text) can only hide a hit on
+ * that line, never invent one.
+ */
+function maskStrings(source) {
+  return source.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/g, (m) => m[0] + m.slice(1, -1).replace(/[^\n]/g, " ") + m[m.length - 1]);
+}
+
+/** Offsets of `given <name>` heads followed by `,`, `:>` or `=>` (comments and strings masked). Reporting only. */
 function netSites(source) {
-  const masked = maskComments(source);
+  const masked = maskStrings(maskComments(source));
   const out = [];
   const re = /(?<![A-Za-z0-9_$.@-])given\s+@?[A-Za-z_$][A-Za-z0-9_$]*\s*(?:,|:>|=>)/g;
   for (let m; (m = re.exec(masked)); ) out.push(m.index);

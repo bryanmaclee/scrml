@@ -1,0 +1,9 @@
+// §42.2.3 (S462 fix round 1) — a standalone `given` guard body SHALL be a `{ … }` block
+// (`given-guard ::= 'given' identifier-list (':>' | '=>') block`). A brace-less body is refused
+// (E-SYNTAX-044): without braces it ran whether or not the name was present.
+${
+    type LoadError:enum = { NotFound }
+
+    function loadThing(id: int | not)! LoadError { given id :> fail LoadError.NotFound; return "ok" }
+}
+<p>x</p>

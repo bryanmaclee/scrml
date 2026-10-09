@@ -92,7 +92,6 @@ ${
             // §34 Severity: Warning
             "W-ATTR-001" :> Severity.Warning
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning
-            "W-GIVEN-PRESENCE-DEPRECATED" :> Severity.Warning
             "W-LIFECYCLE-010" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
@@ -100,6 +99,7 @@ ${
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
             "W-ARM-PIPE-LEGACY" :> Severity.Info
+            "W-GIVEN-PRESENCE-DEPRECATED" :> Severity.Info
             "W-MATCH-ARROW-LEGACY" :> Severity.Info
             // §34 Severity: Error
             "E-ATTR-010" :> Severity.Error

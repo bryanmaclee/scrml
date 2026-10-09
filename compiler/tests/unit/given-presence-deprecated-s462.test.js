@@ -60,7 +60,7 @@ describe("§A: W-GIVEN-PRESENCE-DEPRECATED fires at every in-place site", () => 
     const r = compile("a/single.scrml", LOGIC("    given x :> { let _a = x }"));
     const d = diagsOf(r, LINT);
     expect(d.length).toBe(1);
-    expect(d[0].severity).toBe("warning");
+    expect(d[0].severity).toBe("info");
     expect(d[0].message).toContain("if (x is given)");
     expect(d[0].message).toContain("scrml fix");
     expect(d[0].message).toContain("§42.2.3");
@@ -390,5 +390,86 @@ ${line}
     const e = (r.errors || []).find((d) => d.code === "E-SYNTAX-044");
     expect(e).toBeDefined();
     expect(e.severity ?? "error").toBe("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §E — S462 fix round 1 (S239 review of c3178a7ab)
+// ---------------------------------------------------------------------------
+
+describe("§E: fix round 1 — brace-less guard body, cut `is given` tail, strings", () => {
+  test("F1: a brace-less STANDALONE guard body is E-SYNTAX-044 (once, no W) — logic", () => {
+    const r = compile("e/brace-fail.scrml", `\${
+    type LoadError:enum = { NotFound }
+    function loadThing(id: int | not)! LoadError { given id :> fail LoadError.NotFound; return "ok" }
+    function two(x: int | not) -> int {
+        given x :> return 1
+        return 2
+    }
+}
+<p>x</p>
+`);
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(2);
+    expect(diagsOf(r, LINT).length).toBe(0);
+    expect(diagsOf(r, "E-SYNTAX-044")[0].message).toContain("given <names> :> { … }");
+  });
+
+  test("F1: the same in a markup `${ … }`", () => {
+    const r = compile("e/brace-markup.scrml", `\${ let zero: int | not = 0 }
+<main>
+    <div>\${ given zero :> zero }</div>
+</main>
+`);
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(1);
+  });
+
+  test("F1: a brace-less match ARM `given x :> expr` is a different production — NOT refused", () => {
+    const r = compile("e/arm.scrml", LOGIC("    let out = match x {\n        not :> \"none\"\n        given x :> \"hi \" + x\n    }"));
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(0);
+    expect(diagsOf(r, LINT).length).toBe(1);
+  });
+
+  test("F2: `const ok = a is given` then `foo(ok)` — no false lint, and `foo(ok)` is its own statement", () => {
+    const r = compile("e/tail.scrml", `\${
+    function four(a: string | not) -> bool {
+        const ok = a is given
+        foo(ok)
+        return true
+    }
+    function foo(b: bool) { let _ = b }
+}
+<p>\${four("x")}</p>
+`);
+    expect(diagsOf(r, LINT).length).toBe(0);
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(0);
+    expect(clientJs(r)).toMatch(/_scrml_foo_\d+\(ok\);/);
+    expect(clientJs(r)).not.toMatch(/if \(_scrml_foo_\d+ !== null/);
+  });
+
+  test("F3: `x is` at a line end with `given` on the next line names the real cause", () => {
+    const r = compile("e/isbreak.scrml", `\${
+    function f(a: string | not) -> bool {
+        const ok = a is
+            given
+        return true
+    }
+}
+<p>x</p>
+`);
+    const d = diagsOf(r, "E-SYNTAX-044");
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("Write `x is given` on one line");
+  });
+
+  test("F5: a guard-shaped STRING is not a fix-rule site and not a blocker", () => {
+    const src = `\${
+    const s = "given x :> y"
+    const t = 'given a, b => c'
+}
+<p>\${s}\${t}</p>
+`;
+    const r = fixGivenPresence(src, { filePath: join(TMP, "e/string.scrml") });
+    expect(r.changed).toBe(false);
+    expect(r.blockers).toEqual([]);
   });
 });

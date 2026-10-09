@@ -14197,7 +14197,26 @@ function annotateNodes(
         // A head that is not `given <names> :>` is refused (E-SYNTAX-044, S462 "a");
         // the refusal is the site's one diagnostic.
         const malformedHead = (n as { malformedHead?: boolean }).malformedHead === true;
-        if (!isRebind && !malformedHead && guardVars.length > 0) {
+        // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`.
+        // A STANDALONE guard whose body is not a `{ … }` block (`given id :> fail X`, `given x :>
+        // return 1`) used to lower to an empty `if` with the body run unconditionally after it.
+        // Refused here, where the match-arm context is known: a `given x :> expr` match ARM is a
+        // different production (an arm body may be an expression) and is not refused.
+        const bracelessGuard = !inMatchBody && !isRebind && !malformedHead && guardVars.length > 0 &&
+          (n as { bracelessBody?: boolean }).bracelessBody === true;
+        if (bracelessGuard) {
+          const ggSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const found = String((n as { bracelessFound?: string }).bracelessFound ?? "");
+          errors.push(new TSError(
+            "E-SYNTAX-044",
+            `E-SYNTAX-044: a \`given\` guard must be \`given <names> :> { … }\` — its body is a \`{ … }\` block (§42.2.3); ` +
+            `found ${found ? `\`${found}\`` : "the end of the line"} after \`:>\`. Without the braces the body would run whether or not ` +
+            `the names are present. Write \`if (${guardVars.join(" is given && ")} is given) { … }\`.`,
+            ggSpan,
+            "error",
+          ));
+        }
+        if (!isRebind && !malformedHead && !bracelessGuard && guardVars.length > 0) {
           const ggSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           const written = (n as { spellings?: unknown }).spellings;
           const names = Array.isArray(written) && written.length === guardVars.length
@@ -14207,7 +14226,7 @@ function annotateNodes(
             "W-GIVEN-PRESENCE-DEPRECATED",
             givenPresenceDeprecatedMessage(names, inMatchBody),
             ggSpan,
-            "warning",
+            "info",
           ));
         }
         if (isRebind && !inMatchBody && glyph === "=>") {

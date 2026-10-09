@@ -139,7 +139,7 @@ describe("§B: W-GIVEN-ARROW-LEGACY guard-context scope", () => {
     expect(diagsOf(result, "W-GIVEN-ARROW-LEGACY").length).toBe(0);
     const lints = diagsOf(result, "W-GIVEN-PRESENCE-DEPRECATED");
     expect(lints.length).toBe(1);
-    expect(lints[0].severity).toBe("warning");
+    expect(lints[0].severity).toBe("info");
     expect(lints[0].message).toContain("if (x is given)");
   });
 

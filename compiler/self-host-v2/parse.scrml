@@ -1620,7 +1620,7 @@ ${
     // s462 — the in-place presence guard `given x[, y]* :> { … }` (§42.2.3),
     // SOFT-DEPRECATED (§63.1 Stage 1): read as `if (x is given && …) { … }`,
     // the form it lowers and narrows as (§42.5, §42.4 statement 8), and surface
-    // W-GIVEN-PRESENCE-DEPRECATED (Warning, one per guard). The legacy `=>`
+    // W-GIVEN-PRESENCE-DEPRECATED (Info, one per guard). The legacy `=>`
     // separator is read like `:>`. A lint only — the guard is otherwise unchanged.
     fn parseGivenPresence(tp: TP) -> RStmt {
         const start: int = cur(tp).start
@@ -1698,6 +1698,15 @@ ${
                 sepEnd = g.end
                 t = adv(adv(t))
             }
+        }
+        if (!bad && !isP(t, "{")) {
+            // s462 fix round 1 — a guard body is a `{ … }` block (§42.2.3 grammar); without braces
+            // the body would run whether or not the names are present.
+            bad = true
+            const bt: PTok = cur(t)
+            let bfound: string = "the end of the line"
+            if (bt.line == headLine && bt.cls != TC.End) bfound = "`" + bt.text + "`"
+            t = diagAt(t, "E-SYNTAX-044", "a `given` guard must be `given <names> :> { … }` — its body is a `{ … }` block (§42.2.3); found " + bfound + " after `:>`. Without the braces the body would run whether or not the names are present. Write `if (" + tests + ") { … }`.", bt)
         }
         if (bad && !isP(t, "{")) {
             // A refused head with no block: nothing to guard; the line's rest parses on.

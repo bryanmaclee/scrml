@@ -3430,6 +3430,15 @@ function givenHeadError(found) {
   );
 }
 
+/** §42.2.4 / S462 fix round 1 (F3): `x is` at a line end, `given` on the next line. */
+function givenAfterIsLineError() {
+  return (
+    "E-SYNTAX-044: this `given` starts a line after `is`, so it is read as a new `given` guard, not as the " +
+    "end of an `x is given` test (§7.2.2: a line does not continue across a break before a keyword). " +
+    "Write `x is given` on one line."
+  );
+}
+
 function tokenSpan(tok, filePath) {
   return {
     file: filePath,
@@ -11079,7 +11088,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // S462 "a" — a head that is not `given <names> :>` (E-SYNTAX-044).
       let malformedHead = false;
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
-      while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
+      // S462 fix round 1 (F2): after a cut `x is given`, no names are read — the next line is
+      // its own statement (it used to be swallowed as this node's name: `given foo`).
+      while (!isPredicateTail && (peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
         const identTok = consume();
         let name = identTok.text;
         if (name.startsWith("@")) name = name.slice(1); // strip @ if user wrote @x
@@ -11142,7 +11153,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const bad = peek();
         errors.push(new TABError(
           "E-SYNTAX-044",
-          givenHeadError(onHeadLine(bad) ? bad.text : ""),
+          prevTok != null && prevTok.text === "is"
+            ? givenAfterIsLineError()
+            : givenHeadError(onHeadLine(bad) ? bad.text : ""),
           tokenSpan(onHeadLine(bad) ? bad : startTok, filePath),
         ));
         while (onHeadLine(peek()) && !(peek().kind === "PUNCT" && peek().text === "{") && !isMatchArrow(peek())) {
@@ -11155,13 +11168,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // W-GIVEN-ARROW-LEGACY lint + `migrate --fix` can see the deprecated form
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
-      if (isMatchArrow(peek())) {
+      let separatorConsumed = false;
+      if (!isPredicateTail && isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
+        separatorConsumed = true;
       }
+      // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
+      // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
+      // followed by the body run unconditionally; the type system refuses it (E-SYNTAX-044) unless
+      // the node is a match arm (`given x :> expr` — arm bodies may be expressions).
+      const bracelessBody = separatorConsumed && !malformedHead && !rebind &&
+        !(peek().kind === "PUNCT" && peek().text === "{");
+      const bracelessFound = bracelessBody && peek().kind !== "EOF" && peek().span != null && peek().span.line === startTok.span.line
+        ? peek().text : "";
       // parse body
       let body = [];
-      if (peek().kind === "PUNCT" && peek().text === "{") {
+      if (!isPredicateTail && peek().kind === "PUNCT" && peek().text === "{") {
         consume(); // consume '{'
         body = parseRecursiveBody();
       }
@@ -11173,6 +11196,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         spellings,
         rebind,
         malformedHead,
+        predicateTail: isPredicateTail,
+        bracelessBody,
+        bracelessFound,
         body,
         span: spanOf(startTok, peek()),
       };
@@ -16275,7 +16301,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // S462 "a" — a head that is not `given <names> :>` (E-SYNTAX-044).
       let malformedHead = false;
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
-      while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
+      // S462 fix round 1 (F2): after a cut `x is given`, no names are read — the next line is
+      // its own statement (it used to be swallowed as this node's name: `given foo`).
+      while (!isPredicateTail && (peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
         const identTok = consume();
         let name = identTok.text;
         if (name.startsWith("@")) name = name.slice(1); // strip @ if user wrote @x
@@ -16339,7 +16367,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const bad = peek();
         errors.push(new TABError(
           "E-SYNTAX-044",
-          givenHeadError(onHeadLine(bad) ? bad.text : ""),
+          prevTok != null && prevTok.text === "is"
+            ? givenAfterIsLineError()
+            : givenHeadError(onHeadLine(bad) ? bad.text : ""),
           tokenSpan(onHeadLine(bad) ? bad : startTok, filePath),
         ));
         while (onHeadLine(peek()) && !(peek().kind === "PUNCT" && peek().text === "{") && !isMatchArrow(peek())) {
@@ -16352,13 +16382,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // W-GIVEN-ARROW-LEGACY lint + `migrate --fix` can see the deprecated form
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
-      if (isMatchArrow(peek())) {
+      let separatorConsumed = false;
+      if (!isPredicateTail && isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
+        separatorConsumed = true;
       }
+      // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
+      // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
+      // followed by the body run unconditionally; the type system refuses it (E-SYNTAX-044) unless
+      // the node is a match arm (`given x :> expr` — arm bodies may be expressions).
+      const bracelessBody = separatorConsumed && !malformedHead && !rebind &&
+        !(peek().kind === "PUNCT" && peek().text === "{");
+      const bracelessFound = bracelessBody && peek().kind !== "EOF" && peek().span != null && peek().span.line === startTok.span.line
+        ? peek().text : "";
       // parse body
       let body = [];
-      if (peek().kind === "PUNCT" && peek().text === "{") {
+      if (!isPredicateTail && peek().kind === "PUNCT" && peek().text === "{") {
         consume(); // consume '{'
         body = parseRecursiveBody();
       }
@@ -16370,6 +16410,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         spellings,
         rebind,
         malformedHead,
+        predicateTail: isPredicateTail,
+        bracelessBody,
+        bracelessFound,
         body,
         span: spanOf(startTok, peek()),
       });
