@@ -29,6 +29,11 @@ import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { patchAndImport, closeOpenedDbHandles, safeRmSync, emittedDbFile } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_sql_runtime");
 
@@ -267,7 +272,7 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
     // the same module instance. The KEY ASSERTION is that the response is
     // a valid array, not a 500 / ReferenceError.
     expect(Array.isArray(body)).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------

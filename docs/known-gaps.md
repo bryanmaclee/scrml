@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 6 |
 | MED | 564 | 5 |
-| LOW | 327 | 0 |
+| LOW | 325 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -23904,9 +23904,11 @@ Both failed on unrelated PRs (#1176 docs-only, #1361) and passed on re-run.
 Fresh-process compiles agree. Could matter for long-lived `scrml dev` / `serve`. Reviewer-executed (S459 ship-strip review).
 <!-- @gap id=g-chunk-mount-id-nondeterminism-s459 sev=LOW status=open locus=searched:route-splitter.ts,emit-client.ts — not traced prov=review:s459-ship-strip -->
 
-### g-ship-strip-esm-chunks-after-strip-s459 — with `--module-format=esm` + per-route chunks, the ESM chunk transform runs AFTER the strip: 21 chunks keep a header comment + an unstripped import line, and §47.9.9's "every hash over the stripped bytes" is false for ESM chunks — `NEW S459; LOW; open`
+### g-ship-strip-esm-chunks-after-strip-s459 — with `--module-format=esm` + per-route chunks, the ESM chunk transform runs AFTER the strip: 21 chunks keep a header comment + an unstripped import line, and §47.9.9's "every hash over the stripped bytes" is false for ESM chunks — `NEW S459; LOW; RESOLVED S461 (s461-esm-strip-order)`
 Hash-before-esm-transform order is pre-existing (base too); no behaviour impact today. Fix: strip after `toEsmClientChunk`, or narrow the §47.9.9 sentence. Also: the fallback warning names a chunk by its internal EpId (absolute path); `build` ~15-25% slower on a large app (4 parses per artifact).
-<!-- @gap id=g-ship-strip-esm-chunks-after-strip-s459 sev=LOW status=open locus=compiler/src/codegen/index.ts(emitPerRouteChunks ~:4233-4245) prov=review:s459-ship-strip -->
+<!-- @gap id=g-ship-strip-esm-chunks-after-strip-s459 sev=LOW status=resolved resolved-by=s461-esm-strip-order locus=compiler/src/codegen/route-splitter.ts(finalizeChunkHash),compiler/src/codegen/index.ts(runCG esmPayload) prov=review:s459-ship-strip -->
+
+**RESOLVED S461** (s461-esm-strip-order): conformance restoration, no SPEC change. `toEsmClientChunk` now runs inside `finalizeChunkHash` (the `esmPayload` hook) BEFORE the strip and the hash — order esm transform -> strip -> hash -> (emit gate, write). Measured on `examples/23-trucking-dispatch` (`compile --emit-per-route --minify --module-format=esm`): 21/21 written chunks carried a strippable comment and a filename hash that did not name their bytes on origin/main; 0/21 after. Every chunk reference (tier-1 URL baked into the initial chunk, `chunks.json`, the chunk-activation script, HTML modulepreload) reads `chunk.filename` after finalize, so all agree. The fallback warning now names a chunk by its dist path, not its EpId. Classic output byte-identical. Pinned by `compiler/tests/unit/s461-esm-chunk-strip-order.test.js`. Residual (not addressed): `build` ~15-25% slower on a large app (4 parses per artifact).
 
 ### g-eq-not-unchecked-in-block-handler-arrows-s459 — `== not` (E-EQ-002) is not checked inside block-bodied event-handler arrows: `onclick=${() => { if (@v == not) return … }}` compiles silently (top level and component bodies), while the same check fires inside a `function` — `NEW S459; LOW; open (pre-existing)`
 Agent-executed on origin/main (S459 D1 round-8 agent).
@@ -24272,8 +24274,8 @@ From the S460 #1370 differential review. The reviewer's browser harness `/home/b
 
 **Severity LOW:** a same-origin visual copy. No script runs (an SVG `<use>` shadow tree does not execute scripts), and the `data:` URL variant is a separate harness row (`run.cjs` `use-data`). Filed so the emit rules' "an emitted fragment cannot reach page elements" story names this exception, or refuses a fragment-reference `href` that points outside the fragment.
 
-### G-WINDOWS-EXECUTED-DB-TESTS-5S-TIMEOUT-S460 — executed-DB tests run on bun's default 5 s per-test timeout and time out on the Windows CI runner: two instances on S460 landings, each passing on re-run — `NEW S460; LOW; open`
-<!-- @gap id=g-windows-executed-db-tests-5s-timeout-s460 sev=LOW status=open locus=compiler/tests/conformance/conf-TENANT-SOURCE-FILTER.test.js,compiler/tests/unit/sql-one-statement.test.js(no explicit per-test timeout on the executed-DB tests) prov=empirical:s460-ci-windows-run-37877489519-attempt-1;empirical:s460-ci-windows-run-37885564157-attempt-1 -->
+### G-WINDOWS-EXECUTED-DB-TESTS-5S-TIMEOUT-S460 — executed-DB tests run on bun's default 5 s per-test timeout and time out on the Windows CI runner: two instances on S460 landings, each passing on re-run — `NEW S460; LOW; RESOLVED S461 (explicit 30 s per-test timeout on 211 executed-DB sites in 49 test files; change-id s461-db-test-timeouts)`
+<!-- @gap id=g-windows-executed-db-tests-5s-timeout-s460 sev=LOW status=resolved locus=compiler/tests/conformance/conf-TENANT-SOURCE-FILTER.test.js,compiler/tests/unit/sql-one-statement.test.js(no explicit per-test timeout on the executed-DB tests) prov=empirical:s460-ci-windows-run-37877489519-attempt-1;empirical:s460-ci-windows-run-37885564157-attempt-1 -->
 
 Verified from the CI logs (`gh run view <id> --attempt 1 --log-failed`, `windows` job):
 - run 37877489519 (PR #1369, attempt 1): `CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile AND scope (EXECUTED, two tenants) > an UPDATE / DELETE with no active tenant is refused by name; nothing changes [5456 ms]` — "this test timed out after 5000ms". Attempt 2 passed.

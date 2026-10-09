@@ -402,7 +402,7 @@ describe("S441 EXECUTED — the negatives still work on the wire", () => {
     const { status, body } = await serveAndCall(prog(CLEAN["a non-protected field of the same row"][0]), "{}");
     expect(status).toBe(200);
     expect(JSON.parse(body)).toBe("ada");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the row itself: 200, protected column stripped", async () => {
     if (domPolluted()) return;
@@ -410,14 +410,14 @@ describe("S441 EXECUTED — the negatives still work on the wire", () => {
     expect(status).toBe(200);
     expect(body).not.toContain("SECRET-HASH-123");
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("reveal is still the deliberate admit path", async () => {
     if (domPolluted()) return;
     const { status, body } = await serveAndCall(prog(CLEAN["reveal, then read (the declassify path)"][0]), "{}");
     expect(status).toBe(200);
     expect(JSON.parse(body)).toBe("SECRET-HASH-123");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the canonical login verifies against the protected hash and never ships it", async () => {
     if (domPolluted()) return;
@@ -427,7 +427,7 @@ describe("S441 EXECUTED — the negatives still work on the wire", () => {
     expect(ok.body).not.toContain("$argon2");
     const bad = await serveAndCall(LOGIN, JSON.stringify({ name: "ada", pw: "wrong" }), { realHash: true });
     expect(JSON.parse(bad.body)).toEqual({ ok: false });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -474,7 +474,7 @@ describe("S441 round 5 EXECUTED — the row path strips what it used to ship", (
     expect(status).toBe(200);
     expect(body).not.toContain("SECRET-HASH-123");
     expect(JSON.parse(body)).toEqual({ id: 1 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   for (const expr of ["passwordHash || ''", "lower(passwordHash)", "hex(passwordHash)", '"passwordHash"', "users.PASSWORDHASH || ''"]) {
     test(`F3: SELECT id, ${expr} AS x … return u — stripped wholesale`, async () => {
@@ -486,7 +486,7 @@ describe("S441 round 5 EXECUTED — the row path strips what it used to ship", (
       expect(JSON.parse(body)).toEqual({});
       const codes = [...(result.errors ?? []), ...(result.warnings ?? [])].map((d) => d.code);
       expect(codes).toContain("I-PROTECT-STRIP-001");
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 
   test('reveal("PASSWORDHASH") admits the column (case-insensitive declassify)', async () => {
@@ -494,7 +494,7 @@ describe("S441 round 5 EXECUTED — the row path strips what it used to ship", (
     const { status, body } = await serveAndCall(prog(fnBody([ONE, 'return u.reveal("PASSWORDHASH")'])), "{}");
     expect(status).toBe(200);
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", passwordHash: "SECRET-HASH-123" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -558,7 +558,7 @@ describe("S447 round 7 — no false positives", () => {
     const { status, body } = await serveAndCall(prog(R7_CLEAN["a method writing a clean column through this"]), "{}");
     expect(status).toBe(200);
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", label: "hi ada" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -567,6 +567,11 @@ describe("S447 round 7 — no false positives", () => {
 // the emitter drifted from that constant the flow would silently fall back to
 // walking the store (sound, but examples/23's analysis goes from ~1 s to ~100 s),
 // so pin the seam: what the emitter writes IS the recognized text.
+
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
 // ---------------------------------------------------------------------------
 import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "../../src/codegen/session-store-emit.ts";
 

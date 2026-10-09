@@ -36,6 +36,11 @@ import {
   generateDbAuthoritativeDDL,
 } from "../../src/schema-differ.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const SOCK = "/var/run/postgresql";
 const PG_USER = process.env.PGUSER || process.env.USER || "postgres";
 const SCRATCH_DB = `scrml_dbauth_m1test_${process.pid}`;
@@ -139,7 +144,7 @@ d("§14.8.11 DB-authoritative reads (live Postgres negative test)", () => {
     // owning superuser sees ALL rows — A1 WITHOUT S6 would be a silent no-op.
     const rows = await sql`SELECT count(*)::int AS n FROM invoices`;
     expect(rows[0].n).toBe(3);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(a) bounded role, NO set_config → ZERO rows (fail-closed)", async () => {
     const rows = await sql.begin(async (tx) => {
@@ -147,7 +152,7 @@ d("§14.8.11 DB-authoritative reads (live Postgres negative test)", () => {
       return await tx`SELECT count(*)::int AS n FROM invoices`;
     });
     expect(rows[0].n).toBe(0);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(b) bounded role WITH set_config(tenantA) → ONLY tenant-A rows", async () => {
     const rows = await sql.begin(async (tx) => {
@@ -157,5 +162,5 @@ d("§14.8.11 DB-authoritative reads (live Postgres negative test)", () => {
     });
     expect(rows.length).toBe(2);
     expect(rows.every((r) => r.tenant_id === TENANT_A)).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

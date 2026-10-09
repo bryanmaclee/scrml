@@ -46,6 +46,11 @@ import { decideOwnedDbFiles, fileDefaultDbValue, sqlDeclaresTable } from "../../
 import { failedModuleRoutes } from "../../src/commands/dev.js";
 import { emittedDbFile } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(testDir, "../../src/cli.js");
 const _tmp = perRunTmp(resolve(testDir, "_tmp_dev_db_no_side_file"));
@@ -675,7 +680,7 @@ describe("§6 data root: SCRML_DATA_DIR ?? the project root recorded at build", 
     const copy = mkdtempSync(join(tmpdir(), "s445-copy-"));
     cpSync(join(root, "dist"), copy, { recursive: true });
     expect(await withDataDir(data, () => call(join(copy, "app.server.js"), "count"))).toEqual({ status: 200, body: "1" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a MOVED build with no SCRML_DATA_DIR refuses to guess — owning handle fails at load naming SCRML_DATA_DIR, nothing created", async () => {
     const root = fixture("moved", BOOTSTRAP_APP.replace("./boot.db", "./app.db"), false);
@@ -694,5 +699,5 @@ describe("§6 data root: SCRML_DATA_DIR ?? the project root recorded at build", 
     const data = mkdtempSync(join(tmpdir(), "s445-vol-"));
     expect(await withDataDir(data, () => call(join(moved2, "app.server.js"), "ensure"))).toEqual({ status: 200, body: "1" });
     expect(existsSync(join(data, "src", "app.db"))).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

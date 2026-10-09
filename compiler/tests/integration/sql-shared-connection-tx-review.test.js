@@ -28,6 +28,11 @@ import { Database } from "bun:sqlite";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const APP = (dbPath) => `<program db="${dbPath}">
 <channel name="chat" topic="lobby" onserver:message=onChat(msg)>
   \${
@@ -174,7 +179,7 @@ beforeAll(async () => {
     fetch: async (req) => (await mod.fetch(req)) ?? new Response("not found", { status: 404 }),
     error: () => new Response("Internal Server Error", { status: 500 }),
   });
-});
+}, EXECUTED_DB_TIMEOUT_MS);
 
 async function httpCall(name, body) {
   const route = routeFor(name);
@@ -216,7 +221,7 @@ describe("S449 review fix round", () => {
     } finally {
       console.error = origError;
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("F1: a stream that completes commits normally (no backstop involvement)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -229,7 +234,7 @@ describe("S449 review fix round", () => {
     expect(text).toContain("data: 1");
     expect(committed().acc).toEqual([555, 556]);
     expect(await within(call("plainWrite", { msg: "x" }), 3000)).toEqual({ status: 200, body: 1 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("F3: an inner BEGIN/COMMIT inside the envelope is a savepoint — a later `fail` still rolls EVERYTHING back", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -237,7 +242,7 @@ describe("S449 review fix round", () => {
     const r = await call("outerFail", { n: 1 });
     expect(r.body?.variant).toBe("Rejected"); // was: 500 "cannot start a transaction within a transaction"
     expect(committed()).toEqual({ acc: [10, 0], log: [] });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("F3: success commits the envelope and the inner work together; the connection is free after", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -245,7 +250,7 @@ describe("S449 review fix round", () => {
     expect(await call("outerFail", { n: 0 })).toEqual({ status: 200, body: 0 });
     expect(committed()).toEqual({ acc: [300, 200], log: ["inner"] });
     expect(await within(call("plainWrite", { msg: "y" }), 3000)).toEqual({ status: 200, body: 1 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("re-review nit 1: a handler that leaves its transaction open FAILS (HTTP 500) — never 200 with its writes rolled back", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -265,7 +270,7 @@ describe("S449 review fix round", () => {
     const ok = await httpCall("plainWrite", { msg: "clean" }); // a clean handler still answers 200
     expect(ok.status).toBe(200);
     expect(committed().log).toEqual(["clean"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("re-review nit 1 (SSE): a stream that ends with its transaction open rolls back and sends a terminal `error` event", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -284,7 +289,7 @@ describe("S449 review fix round", () => {
       console.error = origError;
     }
     expect(committed().acc).toEqual([10, 0]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("F5: WebSocket callbacks are async and await their onserver handler inside the request scope", () => {
     if (typeof globalThis.document !== "undefined") return;

@@ -30,6 +30,11 @@ import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { compileScrml } from "../../src/api.js";
 import { effectiveCsrfUnderAuth } from "../../src/compute-program-config.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const _tmp = perRunTmp(resolve(testDir, "_tmp_csrf_default_under_auth"));
 beforeAll(_tmp.setup);
@@ -163,28 +168,28 @@ describe("runtime over HTTP — the default fails closed", () => {
     expect(r.clientFirst).toBe(403); // no token yet → the gate plants it
     expect(r.clientFinal).toBe(200); // the generated client's one retry succeeds
     expect(r.rows).toEqual(["legit"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("auth=\"required\" csrf=\"auto\" (explicit): same behaviour", () => {
     const r = probe(compileVariant("rt-auto", ` auth="required" csrf="auto"`));
     expect(r.forged).toBe(403);
     expect(r.clientFinal).toBe(200);
     expect(r.rows).toEqual(["legit"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("auth=\"required\" csrf=\"off\": the opt-out is honoured (no CSRF gate)", () => {
     const r = probe(compileVariant("rt-off", ` auth="required" csrf="off"`));
     expect(r.forged).toBe(200);
     expect(r.clientFinal).toBe(200);
     expect(r.rows).toEqual(["forged", "legit"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("no auth=: the baseline double-submit gate is unchanged", () => {
     const r = probe(compileVariant("rt-noauth", ""));
     expect(r.forged).toBe(403);
     expect(r.clientFinal).toBe(200);
     expect(r.rows).toEqual(["legit"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -327,13 +332,13 @@ describe("client — a stale first-paint CSRF meta token recovers on the one ret
     expect(r.statuses).toEqual([403, 200]);
     expect(r.final).toBe(200);
     expect(r.metaNow).toBe(r.sessionToken);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("control — without the meta sync the retry resends the stale token and 403s again", () => {
     const v = compileVariant("retry-stale-meta-control", ` auth="required"`);
     const r = retryProbe(v, "no-sync");
     expect(r.statuses).toEqual([403, 403]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the baseline (no auth=) client has no meta tag and emits no sync helper", () => {
     const v = compileVariant("retry-baseline", "");
@@ -353,5 +358,5 @@ describe("scrml dev — a compose route whose document is gone answers nothing",
     await loadServerRoutes(v.outDir);
     const res = await devDispatch(new Request("http://localhost/app"), null, v.outDir, {});
     expect(res.status).toBe(404);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

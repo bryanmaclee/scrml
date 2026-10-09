@@ -35,6 +35,11 @@ import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const QUERY = "const u = ?{`SELECT id, name, passwordHash FROM users WHERE id = 1`}.get() !{ _ :> not }";
 const handleProg = (lines) => `<program db="./app.db">
   <schema>
@@ -185,13 +190,13 @@ describe("S456 EXECUTED — the negatives still work on the wire", () => {
     const body = await res.text();
     expect(body).not.toContain("SECRET-HASH-123");
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("reveal ships the column deliberately", async () => {
     const mod = await serve(handleProg(HANDLE_CLEAN["reveal — the deliberate admit path"]));
     const res = await mod.fetch(new Request("http://localhost/anything"));
     expect(JSON.parse(await res.text()).passwordHash).toBe("SECRET-HASH-123");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("POST-middleware header of a non-protected field is set", async () => {
     const mod = await serve(handleProg(HANDLE_CLEAN["a POST-middleware header of a NON-protected field"]));
@@ -199,5 +204,5 @@ describe("S456 EXECUTED — the negatives still work on the wire", () => {
     const res = await mod._scrml_mw_pipeline(async () => null)(new Request("http://localhost/anything"));
     expect(res.status).toBe(404);
     expect(res.headers.get("x-name")).toBe("ada");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

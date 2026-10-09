@@ -41,6 +41,11 @@ import vm from "node:vm";
 import { compileScrml } from "../../src/api.js";
 import { patchAndImport, closeOpenedDbHandles, safeRmSync } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_peer_in_template");
 
@@ -328,7 +333,7 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
     // the template — NOT a stringified Promise.
     expect(txt).toBe("order #1 ready");
     expect(String(txt)).not.toContain("[object Promise]");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // ── #284 residual (S304): a peer reached through a first-class ALIAS
   // (`const p = nextOrder; ${p()}`) inside a SQL `?{}` param was NOT awaited.

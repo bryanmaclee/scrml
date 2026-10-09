@@ -24,6 +24,11 @@ import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const _tmp = perRunTmp(resolve(testDir, "_tmp_ws_origin_check"));
 beforeAll(_tmp.setup);
@@ -164,7 +169,7 @@ describe("§40.2 — the channel WebSocket upgrade refuses a cross-origin handsh
     // …while a same-origin peer's message and __sync still broadcast normally.
     expect(r.victimReceived.some((m) => m.includes("from a peer"))).toBe(true);
     expect(r.victimReceived.some((m) => m.includes("__sync") && m.includes('"value":3'))).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("§40.2 — `scrml dev`'s parent-side Origin rule agrees with the emitted one", () => {
