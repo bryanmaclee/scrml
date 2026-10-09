@@ -10638,7 +10638,59 @@ ${
         return match v {
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
-            .Unknown :> condUnresolved(env, c, what, ts)
+            .Unknown :> condUnresolvedWhole(env, c, what, ts)
+        }
+    }
+
+    // s460 N1 (PA reading of "a on F2, go": a ternary that IS the condition's
+    // value is inside the condition — §42.4 statement 10). Each arm is the
+    // condition's value when taken, so a ternary whose type did not resolve is
+    // judged ARM BY ARM: a `bool` arm passes, a `T | not` arm is a presence
+    // test of its own, an unresolved or non-bool arm is blamed at the arm. A
+    // ternary whose arms joined to a known type is judged whole (condKnown).
+    fn condUnresolvedWhole(env: TEnv, c: AExpr, what: string, ts0: TypeState) -> TypeState {
+        const arms: AExpr[] = armsOf(c)
+        if (arms.length == 0) return condUnresolved(env, c, what, ts0)
+        let ts: TypeState = ts0
+        for (const arm of arms) {
+            ts = condWhole(env, arm, exprType0(ts, arm.nid), armWhat(what), ts)
+        }
+        return ts
+    }
+
+    // How an arm is named: "a ternary arm of an `if` condition" — once; an arm
+    // of a nested ternary is still an arm of the same condition.
+    fn armWhat(what: string) -> string {
+        if (what.indexOf("a ternary arm of ") == 0) return what
+        return "a ternary arm of " + what
+    }
+
+    // A ternary's two arms (its test is a condition of its own); [] otherwise.
+    fn armsOf(x: AExpr) -> AExpr[] {
+        const k: AExprK = x.k
+        return match k {
+            .Ternary(test: t, yes: y, no: n) :> [y, n]
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: f) :> []
+            .Assign(target: x2) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x2) :> []
         }
     }
 
@@ -10648,11 +10700,15 @@ ${
     // stay provable-or-silent (S440 Q2)" (§42.4 statement 10). The walk starts
     // at the condition and goes down through `!` / `&&` / `||` only: a nested
     // logical operator is walked, any other operand (a call, a name, a
-    // comparison, a ternary) is judged by the type the typer recorded for it.
+    // comparison) is judged by the type the typer recorded for it.
     // So `!(g() && @b)` reaches `g()`; `f(!g())` does not (that `!` is an
     // argument, a value position). Parentheses are not nodes — transparent.
     // A ternary's TEST is a condition of its own (checkCond via typeTernary),
-    // so it gets this walk there; its arms are values, not operands.
+    // so it gets this walk there. s460 N1: a ternary that is the condition's
+    // value, or an operand in its `!` / `&&` / `||` chain, has ARMS that are
+    // that value when taken — walked like the place they stand in
+    // (condUnresolvedWhole, condArmOperands). A ternary in a value position (an
+    // argument, an index, an initializer) is not reached: its arms are values.
     // Statement 6 per operand: suppressed when an Error lies within THAT
     // operand (condBlamed); a logical operator the binder never resolved (a
     // refused region) stops the walk. A known non-bool / `not` operand is
@@ -10673,7 +10729,7 @@ ${
             .Variant(name: n) :> ts
             .Member(obj: o) :> ts
             .Call(callee: f) :> ts
-            .Ternary(test: x) :> ts
+            .Ternary(test: x, yes: y, no: n) :> condOperands(env, n, armWhat(what), condOperands(env, y, armWhat(what), ts))
             .Assign(target: x) :> ts
             .ArrayLit(elems: es) :> ts
             .ObjectLit(props: ps) :> ts
@@ -10704,9 +10760,27 @@ ${
     // judged — an unresolved one is E-COND-NOT-BOOLEAN unless blamed.
     fn condOperand(env: TEnv, x: AExpr, opName: string, what: string, ts: TypeState) -> TypeState {
         if (isLogical(x)) return condOperands(env, x, what, ts)
+        const arms: AExpr[] = armsOf(x)
+        if (arms.length > 0) return condArmOperands(env, x, arms, opName, what, ts)
         if (!unresolvedVT(exprType0(ts, x.nid))) return ts
         if (condBlamed(env, x, ts)) return ts
         return report(ts, env, x.span, "E-COND-NOT-BOOLEAN", "this operand of " + opName + " in " + what + " is a value whose type the compiler cannot resolve, and `!` / `&&` / `||` in a condition take a `bool` — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a on F2, go\")")
+    }
+
+    // s460 N1 — a ternary operand of a condition's `!` / `&&` / `||`: each arm
+    // is the operand when taken, so each is judged as an operand (walked if
+    // logical, blamed if unresolved). When the ternary's own type did not
+    // resolve, the typer's bool check on it was silent, so each RESOLVED arm
+    // gets that check here (checkBoolOperand); a resolved ternary was already
+    // checked whole.
+    fn condArmOperands(env: TEnv, x: AExpr, arms: AExpr[], opName: string, what: string, ts0: TypeState) -> TypeState {
+        const whole: boolean = unresolvedVT(exprType0(ts0, x.nid))
+        let ts: TypeState = ts0
+        for (const arm of arms) {
+            ts = condOperand(env, arm, opName, armWhat(what), ts)
+            if (whole) ts =checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
+        }
+        return ts
     }
 
     fn unresolvedVT(v: VType) -> boolean {
@@ -11797,7 +11871,8 @@ ${
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return keepTEnv(env, ts)
         const r: RVT = typeExpr(env, x, ts)
-        return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`if=`", r.ts))
+        // s460 N3 — name the attribute the condition stands in (`if=` / `else-if=`)
+        return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`" + a.name + "=`", r.ts))
     }
 
     fn typeShowAttr(env: TEnv, a: AAttr, ts: TypeState) -> TypeState {
