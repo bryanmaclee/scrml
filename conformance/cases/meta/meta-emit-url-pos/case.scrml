@@ -1,0 +1,3 @@
+<program>
+^{ emit("<a id=\"u1\" href=\"https://e.com/\">a</a><a id=\"u2\" href=\"/r\">b</a><img id=\"u3\" srcset=\"/a.png 1x, https://e.com/b.png 2x\" alt=\"a\">") }
+</program>

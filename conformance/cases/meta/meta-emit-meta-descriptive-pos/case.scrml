@@ -1,0 +1,3 @@
+<program>
+^{ emit("<meta id=\"m1\" name=\"robots\" content=\"index, follow\"/><meta id=\"m2\" property=\"og:title\" content=\"T\"/><meta id=\"m3\" name=\"theme-color\" media=\"(prefers-color-scheme: dark)\" content=\"#000\"/>") }
+</program>

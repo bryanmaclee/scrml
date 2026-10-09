@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { aliasHostGlobalsInRuntimeText } from "./codegen/host-global-alias.ts";
+import { standardMarkupElementNamesLowercase, CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
 
 /**
  * Phase A1c Step C7 — pull the validator predicate runtime catalog into
@@ -37,6 +38,22 @@ export const URL_GUARD_RUNTIME_SOURCE = readFileSync(
   join(__runtime_template_dir, "runtime-url-guard.js"),
   "utf8",
 ).replace(/^export /gm, "");
+
+/**
+ * SPEC §22.4.1 (S458 "a") — the runtime `meta.emit(html)` gate. `runtime-meta-emit-gate.js` is inlined
+ * verbatim (chunk 'metaemit', `export ` stripped), preceded by the two element tables it reads, built
+ * here from the compiler's ONE element list (html-elements.js) — the list compile-time `emit()` output
+ * is judged against — so the runtime gate never carries a hand-copied element list.
+ */
+export const META_EMIT_GATE_RUNTIME_SOURCE =
+  "const _SCRML_META_EMIT_KNOWN_ELEMENTS = new Set(" +
+  JSON.stringify(standardMarkupElementNamesLowercase()) + ");\n" +
+  "const _SCRML_CUSTOM_ELEMENT_NAME = " + String(CUSTOM_ELEMENT_NAME_PATTERN) + ";\n" +
+  // S459 round 3 — the ONE attribute judge, shared with compile-time emit() (meta-eval.ts imports it).
+  // S459 round 4 — the document / form member tables the id/name named-property rule reads (generated).
+  readFileSync(join(__runtime_template_dir, "dom-named-property-members.js"), "utf8").replace(/^export /gm, "") +
+  readFileSync(join(__runtime_template_dir, "markup-attr-allow-list.js"), "utf8").replace(/^export /gm, "") +
+  readFileSync(join(__runtime_template_dir, "runtime-meta-emit-gate.js"), "utf8").replace(/^export /gm, "");
 
 /**
  * Stdlib shim loader. Reads a hand-written `compiler/runtime/stdlib/<name>.js`
@@ -3590,17 +3607,11 @@ var _scrml_modules = (typeof _scrml_modules !== "undefined")
  */
 function _scrml_meta_emit(scopeId, htmlString) {
   if (typeof document === "undefined") return;
-  const placeholder = document.querySelector('[data-scrml-meta="' + scopeId + '"]');
-  if (placeholder) {
-    placeholder.innerHTML = htmlString;
-  } else {
-    // Fallback: if no placeholder found (e.g. meta block not in markup context),
-    // append a new element to the document body with the scopeId marker.
-    const el = document.createElement("span");
-    el.setAttribute("data-scrml-meta", scopeId);
-    el.innerHTML = htmlString;
-    document.body.appendChild(el);
-  }
+  // §22.4.1 / §22.12 (S458 "a", S459 round 3): the 'metaemit' gate parses the string once, inertly,
+  // judges it, and moves the judged nodes to the placeholder — reading the DOM only through accessors
+  // captured from the prototypes, so neither the data nor a page element can shadow what it reads.
+  // A refused string writes nothing (the gate reports it).
+  _scrml_meta_emit_insert(scopeId, htmlString);
 }
 
 // ---------------------------------------------------------------------------
@@ -4953,7 +4964,10 @@ const _scrml_messages_registered = Object.create(null);
 // Tag → validator name mapping for Level-1 inline override lookup. Mirrors
 // the validator-catalog at compile time but lives here so Level-1 lookup
 // is self-contained at runtime. Custom maps to "custom" (developer-defined).
-const _SCRML_TAG_TO_VALIDATOR = {
+// Both tag-keyed tables (this one and _SCRML_DEFAULT_MESSAGES) are null-prototype: they are
+// indexed by error.tag, which is data, so a tag such as "constructor" or "toString" reads
+// nothing rather than an Object.prototype member (S459).
+const _SCRML_TAG_TO_VALIDATOR = Object.assign(Object.create(null), {
   Required:        "req",
   NotSome:         "is some",
   LengthFailed:    "length",
@@ -4969,7 +4983,7 @@ const _SCRML_TAG_TO_VALIDATOR = {
   OneOfFailed:     "oneOf",
   NotInFailed:     "notIn",
   Custom:          "custom",
-};
+});
 
 // Format a relational-predicate payload like { op: ">=", value: 2 } → ">= 2".
 // Used by LengthFailed default. Payload may be null/undefined defensively.
@@ -4991,7 +5005,7 @@ function _scrml_format_set(s) {
 // ValidationError enum at SPEC §55.9 (e.g., MinFailed has \`threshold\`).
 // Uses string concatenation rather than template literals so we don't have to
 // escape every \\\${} inside this template-literal runtime source.
-const _SCRML_DEFAULT_MESSAGES = {
+const _SCRML_DEFAULT_MESSAGES = Object.assign(Object.create(null), {
   Required:        function (f) { return f + " is required."; },
   NotSome:         function (f) { return f + " is required."; },
   LengthFailed:    function (f, p) { return f + " length must satisfy " + _scrml_format_predicate(p) + "."; },
@@ -5007,7 +5021,7 @@ const _SCRML_DEFAULT_MESSAGES = {
   OneOfFailed:     function (f, p) { return f + " must be one of: " + _scrml_format_set(p) + "."; },
   NotInFailed:     function (f, p) { return f + " cannot be any of: " + _scrml_format_set(p) + "."; },
   Custom:          function (f, p) { return f + " failed validation (" + p + ")."; },
-};
+});
 
 // Fallback for unknown/future tags. Keeps messageFor total — never throws,
 // never returns undefined.
@@ -6706,6 +6720,16 @@ function _scrml_log(side, loc) {
 // goes through it. Inlined verbatim from compiler/src/runtime-url-guard.js — the same reader the
 // compile-time rule uses. Activated by a POST-EMIT scan for "_scrml_safe_url(" (emit-client.ts).
 ${URL_GUARD_RUNTIME_SOURCE}
+// §22.4.1 runtime meta.emit gate (chunk: 'metaemit')
+//
+// _scrml_meta_emit_insert(scopeId, html) — parses runtime meta.emit() output inertly (a document
+// with no browsing context), judges the parsed tree through prototype-captured accessors only
+// (elements; attribute names by the closed list of markup-attr-allow-list.js, the judge compile-time
+// emit() shares; URL schemes via the 'urlguard' reader above) and moves the SAME nodes into the
+// block's placeholder, or writes nothing + one §19.6.8 report. Inlined from
+// compiler/src/markup-attr-allow-list.js + compiler/src/runtime-meta-emit-gate.js. Pulled with the
+// 'meta' chunk (CHUNK_DEPENDENCIES).
+${META_EMIT_GATE_RUNTIME_SOURCE}
 ${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**

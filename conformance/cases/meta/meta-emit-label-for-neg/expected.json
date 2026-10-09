@@ -1,0 +1,17 @@
+{
+  "id": "meta-emit-label-for-neg",
+  "description": "§22.4.1 (S459 round 4 F1) — `for` on `<label>` in compile-time `emit()` output is E-META-EVAL-002 (the same closed list).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: an attribute in `emit()` output SHALL carry a name on the closed list of §22.12; `for` is listed for `<output>` only. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [
+      "E-META-EVAL-002"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-META-EVAL-002": "error"
+    }
+  }
+}

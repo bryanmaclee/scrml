@@ -1,0 +1,13 @@
+{
+  "id": "meta-emit-bare-scope-attr-neg",
+  "description": "§22.4.1 (S458 \"your recs on all four\" item 3 + PA-ruled S459 consequence) — bare `data-scrml` is compiler-owned: it is the component CSS scope root (`@scope ([data-scrml=\"Name\"]) to ([data-scrml])`). A compile-time `emit()` whose output carries `data-scrml=\"Card\"` would place author markup under Card's scoped styles; it is refused with E-META-EVAL-002.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: an attribute in `emit()` / `emit.raw()` output whose name is `data-scrml` or begins with `data-scrml-` SHALL be `E-META-EVAL-002`.",
+  "expect": {
+    "codes": ["E-META-EVAL-002"],
+    "notCodes": [],
+    "severity": { "E-META-EVAL-002": "error" }
+  }
+}

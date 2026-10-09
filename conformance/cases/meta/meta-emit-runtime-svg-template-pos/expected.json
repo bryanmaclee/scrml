@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-svg-template-pos",
+  "description": "§22.12 (S459 round 4 F3) — a `template` inside SVG has no content fragment; the gate walks it as an ordinary element (it used to throw `Illegal invocation` out of `meta.emit`). Admitted.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 step 2: a `template` element in SVG or MathML is an ordinary element whose children are judged; a throwing read is a violation, never an exception. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host #after",
+        "text": "after"
+      }
+    ]
+  }
+}

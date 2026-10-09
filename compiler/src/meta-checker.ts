@@ -801,10 +801,13 @@ export function collectMetaLocals(body: LogicNode[]): Set<string> {
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
 
-      // let/const/var declarations
-      if (node.kind === "let-decl" || node.kind === "const-decl") {
-        if (node.name) {
+      // let/const/lin declarations (S459 round 3: `lin` is a local like `let` / `const`; a
+      // destructuring declaration carries its PATTERN object in `name`, whose bound names are locals)
+      if (node.kind === "let-decl" || node.kind === "const-decl" || node.kind === "lin-decl") {
+        if (typeof node.name === "string" && node.name) {
           locals.add(node.name);
+        } else if (node.name && typeof node.name === "object") {
+          collectPatternBindNames(node.name as unknown, locals);
         } else if (node.init || (node as any).initExpr) {
           // Destructured declaration: name is empty, init contains `{ a, b } = expr`
           const initStr = (node as any).initExpr ? emitStringFromTree((node as any).initExpr) : (node.init ?? "");
@@ -824,6 +827,11 @@ export function collectMetaLocals(body: LogicNode[]): Set<string> {
           for (const param of node.params) {
             if (typeof param === "string" && param) {
               extractParamBindings(param, locals);
+            } else if (param && typeof param === "object" && typeof (param as { name?: unknown }).name === "string") {
+              // S459 round 3 (review F3): the AST carries a parameter as `{ name, typeAnnotation?,
+              // defaultValue? }` — only the string form was read, so `function item(s) { emit(s) }`
+              // reported its own parameter `s` as a runtime variable (E-META-001 + E-META-005).
+              extractParamBindings(String((param as { name: string }).name), locals);
             }
           }
         }
@@ -847,6 +855,23 @@ export function collectMetaLocals(body: LogicNode[]): Set<string> {
 
   walk(body);
   return locals;
+}
+
+/**
+ * The names a destructuring pattern object binds (`destructure-object` / `destructure-array`, nested
+ * patterns included) — the AST shape a `const { a, b } = …` / `const [p, q] = …` carries in `name`.
+ */
+function collectPatternBindNames(p: unknown, out: Set<string>): void {
+  if (!p || typeof p !== "object") return;
+  const pat = p as { kind?: string; properties?: unknown[]; elements?: unknown[] };
+  const items = pat.kind === "destructure-object" ? pat.properties : pat.kind === "destructure-array" ? pat.elements : null;
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it || typeof it !== "object") continue;
+    const e = it as { kind?: string; bindName?: unknown; name?: unknown; pattern?: unknown };
+    if (e.kind === "nested") collectPatternBindNames(e.pattern, out);
+    else if (typeof e.bindName === "string" && e.bindName) out.add(e.bindName);
+    else if (typeof e.name === "string" && e.name) out.add(e.name);
+  }
 }
 
 /**
