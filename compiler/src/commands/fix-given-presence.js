@@ -28,9 +28,11 @@
  * `rebind` flag (ast-builder.js). A node that is a direct child of a `match-stmt` / `match-expr`
  * body is an arm. Each located head is confirmed against the source: `given`, the names exactly
  * as recorded separated by commas and whitespace, the separator the node recorded, and (for a
- * guard) the `{` that opens its block. Anything else — a comment inside the head, a property
- * path (E-SYNTAX-044), a missing separator or brace (`given id < 0 :> fail …`, a head impl#1
- * mis-reads) — is a blocker: left as written and reported.
+ * guard) the `{` that opens its block. Anything else — a comment inside the head, a missing
+ * brace, or a head impl#1 refuses as not an identifier-list (E-SYNTAX-044: a property path,
+ * `given id < 0 :> fail …`, no separator; the node's `malformedHead`) — is a blocker: left as
+ * written and reported. A refused head has no mechanical rewrite: its author meant a condition
+ * (`if (<cond>) { … }`), and which one is theirs to say.
  *
  * A completeness net reports any `given <name>` head (outside comments) the tree did not
  * locate — inside a component body or an attribute value, say — rather than leaving it silently.
@@ -191,7 +193,7 @@ function readHead(source, node) {
     return { ok: false, reason: "a property path in a `given` head (E-SYNTAX-044) — there is nothing to rewrite to; left as written" };
   }
   if (sep !== ":>" && sep !== "=>") {
-    return { ok: false, reason: "the `given` head is not followed by `:>` or `=>` (impl#1 mis-reads such a head as a guard with an empty body, g-given-bool-expr-fail-runs-unconditionally-s460) — left for a human" };
+    return { ok: false, reason: "the `given` head is not a list of names followed by `:>` or `=>` (E-SYNTAX-044) — a condition is written `if (<cond>) { … }`; left for a human" };
   }
   if (typeof node.separatorGlyph === "string" && node.separatorGlyph !== sep) {
     return { ok: false, reason: "the separator in the source is not the one impl#1 recorded — left for a human" };
@@ -226,6 +228,11 @@ function armKind(arm) {
 /** Plan one site's edit, or return a blocker reason. */
 function planSite(source, site) {
   const { node, match } = site;
+  if (node.malformedHead === true) {
+    // impl#1 refuses the head (E-SYNTAX-044); the reason names what is wrong where it can.
+    const head = readHead(source, node);
+    return { reason: head.ok ? "the `given` head is refused by impl#1 (E-SYNTAX-044) — left for a human" : head.reason };
+  }
   const head = readHead(source, node);
   if (!head.ok) return { reason: head.reason };
   if (match) {

@@ -281,7 +281,7 @@ describe("§C: scrml fix `given-presence`", () => {
     expect(path.blockers[0].reason).toContain("E-SYNTAX-044");
   });
 
-  test("refuses a head impl#1 mis-reads as a guard (`given id < 0 :> fail …`)", () => {
+  test("refuses a head impl#1 refuses (`given id < 0 :> fail …`, E-SYNTAX-044)", () => {
     const src = `\${
     type E:enum = { Bad }
     function f(id: int)! E {
@@ -294,7 +294,8 @@ describe("§C: scrml fix `given-presence`", () => {
     const r = fixGivenPresence(src, { filePath: join(TMP, "c/boolhead.scrml"), verify: false });
     expect(r.changed).toBe(false);
     expect(r.blockers.length).toBe(1);
-    expect(r.blockers[0].reason).toContain("g-given-bool-expr-fail-runs-unconditionally-s460");
+    expect(r.blockers[0].reason).toContain("E-SYNTAX-044");
+    expect(r.blockers[0].reason).toContain("if (<cond>)");
   });
 
   test("chained in fixS66 by default: `scrml fix` rewrites the guard", () => {
@@ -302,5 +303,92 @@ describe("§C: scrml fix `given-presence`", () => {
     const r = fixS66(src, { filePath: join(TMP, "c/chain.scrml"), rules: [...IMPL1_SAFE_RULES] });
     expect(r.output).toContain("if (x is given) { let _a = x }");
     expect(r.applied.some((a) => a.rule === "given-presence")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §D — S462 "a": a `given` head that is not an identifier-list is E-SYNTAX-044
+// (§42.2.3: "A `given` head SHALL contain only an identifier-list"; was
+// g-given-bool-expr-fail-runs-unconditionally-s460 — the `fail` ran unconditionally).
+// ---------------------------------------------------------------------------
+
+describe("§D: E-SYNTAX-044 — a `given` head that is not an identifier-list", () => {
+  const FN = (line) => `\${
+    type E:enum = { Bad }
+    function f(id: int, n: int | not)! E {
+${line}
+        return "ok"
+    }
+}
+<p>x</p>
+`;
+  const only044 = (r) => {
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(1);
+    expect(diagsOf(r, LINT).length).toBe(0); // the refusal stands alone
+    expect(diagsOf(r, "E-SYNTAX-045").length).toBe(0);
+  };
+
+  test("a comparison head `given id < 0 :> fail …` is refused, naming the `if` fix", () => {
+    const r = compile("d/cmp.scrml", FN("        given id < 0 :> fail E.Bad"));
+    only044(r);
+    expect(diagsOf(r, "E-SYNTAX-044")[0].message).toContain("if (<cond>)");
+  });
+
+  test("an equality head `given id == 0 :> { … }` and a call head `given ok(id) :> { … }` are refused", () => {
+    only044(compile("d/eq.scrml", FN("        given id == 0 :> { fail E.Bad }")));
+    only044(compile("d/call.scrml", FN("        given ok(id) :> { fail E.Bad }")));
+  });
+
+  test("a head with no name (`given (id < 0) :>`) is refused", () => {
+    only044(compile("d/paren.scrml", FN("        given (id < 0) :> { fail E.Bad }")));
+  });
+
+  test("a head with no separator (`given n { … }`, `given n -> …`) is refused", () => {
+    only044(compile("d/nosep.scrml", FN("        given n { fail E.Bad }")));
+    only044(compile("d/arrowsep.scrml", FN("        given n -> fail E.Bad")));
+  });
+
+  test("the property path keeps its E-SYNTAX-044 (once, no W)", () => {
+    const r = compile("d/path.scrml", `\${
+    type U:struct = { name: string | not }
+    let u: U = { name: "a" }
+    given u.name :> { let _a = 1 }
+}
+<p>x</p>
+`);
+    only044(r);
+  });
+
+  test("the same refusal in a markup `${ … }`", () => {
+    const r = compile("d/markup.scrml", `<count>: int = 1
+<main>
+    \${ given @count > 0 :> { <p>positive</p> } }
+</main>
+`);
+    only044(r);
+  });
+
+  test("identifier-list heads are accepted (no E-SYNTAX-044), with `=>` too", () => {
+    const r = compile("d/ok.scrml", FN("        given n :> { fail E.Bad }\n        given n, id => { fail E.Bad }"));
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(0);
+    expect(diagsOf(r, LINT).length).toBe(2);
+  });
+
+  test("the rebind head keeps E-SYNTAX-045 alone (not E-SYNTAX-044)", () => {
+    const r = compile("d/rebind.scrml", `<user>: string | not = not
+\${
+    function g() { given c = @user :> { return c } }
+}
+<p>x</p>
+`);
+    expect(diagsOf(r, "E-SYNTAX-045").length).toBe(1);
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(0);
+  });
+
+  test("the old silent miscompile is gone: the refusal is an Error, so the compile fails (§2.2.1)", () => {
+    const r = compile("d/noart.scrml", FN("        given id < 0 :> fail E.Bad"));
+    const e = (r.errors || []).find((d) => d.code === "E-SYNTAX-044");
+    expect(e).toBeDefined();
+    expect(e.severity ?? "error").toBe("error");
   });
 });

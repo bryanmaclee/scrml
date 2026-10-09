@@ -14194,7 +14194,10 @@ function annotateNodes(
         const guardVars = Array.isArray((n as { variables?: unknown }).variables)
           ? ((n as { variables: unknown[] }).variables).filter((v): v is string => typeof v === "string" && v.length > 0)
           : [];
-        if (!isRebind && guardVars.length > 0) {
+        // A head that is not `given <names> :>` is refused (E-SYNTAX-044, S462 "a");
+        // the refusal is the site's one diagnostic.
+        const malformedHead = (n as { malformedHead?: boolean }).malformedHead === true;
+        if (!isRebind && !malformedHead && guardVars.length > 0) {
           const ggSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           const written = (n as { spellings?: unknown }).spellings;
           const names = Array.isArray(written) && written.length === guardVars.length

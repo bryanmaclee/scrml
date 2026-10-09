@@ -1587,9 +1587,11 @@ ${
         return mkS(t, start, AStmtK.Fail({ enumName: enumName, variant: vtok.v, args: args, target: not }))
     }
 
-    // `given c = @h :> { … }` (§66.7.5)
+    // `given c = @h :> { … }` (§66.7.5) — and, when no `=` follows the first
+    // name, the soft-deprecated in-place presence guard (§42.2.3, S462).
     fn parseGiven(tp: TP) -> RStmt {
         const start: int = cur(tp).start
+        if (!givenRebindAhead(tp)) return parseGivenPresence(tp)
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-GIVEN", "expected a name after `given`", nameTok)
@@ -1605,6 +1607,114 @@ ${
         }
         const body: RBlock = parseBlock(t)
         return mkS(body.tp, start, AStmtK.Given(nameTok.v, subj.e, body.b))
+    }
+
+    // At `given`: does a `=` follow the first name (`given c = …`, the §66.7.5
+    // rebind head)? A name is `x` or `@x`.
+    fn givenRebindAhead(tp: TP) -> boolean {
+        let t: TP = adv(tp)
+        if (cur(t).cls == TC.At) t = adv(t)
+        return isP(adv(t), "=")
+    }
+
+    // s462 — the in-place presence guard `given x[, y]* :> { … }` (§42.2.3),
+    // SOFT-DEPRECATED (§63.1 Stage 1): read as `if (x is given && …) { … }`,
+    // the form it lowers and narrows as (§42.5, §42.4 statement 8), and surface
+    // W-GIVEN-PRESENCE-DEPRECATED (Warning, one per guard). The legacy `=>`
+    // separator is read like `:>`. A lint only — the guard is otherwise unchanged.
+    fn parseGivenPresence(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let cond: AExpr | not = not
+        let names: string = ""
+        let tests: string = ""
+        let bad: boolean = false
+        const headLine: int = cur(tp).line
+        let going: boolean = true
+        while (going) {
+            const nameTok: PTok = cur(t)
+            let n: RExpr | not = not
+            let written: string = nameTok.v
+            if (nameTok.cls == TC.At) {
+                written = "@" + peekAt(t, 1).v
+                n = parseAt(t)
+            } else if (nameTok.cls == TC.Ident) {
+                n = mkE(adv(t), nameTok.start, AExprK.Name(nameTok.v))
+            }
+            if (n is given) {
+                const test: RExpr = mkE(n.tp, nameTok.start, AExprK.Unary(UnOp.IsGiven, n.e))
+                t = test.tp
+                if (names != "") {
+                    names = names + ", "
+                    tests = tests + " && "
+                }
+                names = names + written
+                tests = tests + written + " is given"
+                if (cond is given) {
+                    const both: RExpr = mkE(t, start, AExprK.Binary(BinOp.And, cond, test.e))
+                    cond = both.e
+                    t = both.tp
+                } else {
+                    cond = test.e
+                }
+                if (isP(t, ",")) {
+                    t = adv(t)
+                } else {
+                    going = false
+                }
+            } else {
+                bad = true
+                going = false
+            }
+        }
+        // s462 "a" — §42.2.3: "A `given` head SHALL contain only an identifier-list."
+        // Anything else before the `:>` (a comparison, a call, no name, no separator)
+        // is E-SYNTAX-044; the rest of the head on its line is skipped.
+        let c: PTok = cur(t)
+        let g: PTok = peekAt(t, 1)
+        let sepEnd: int = c.end
+        let sepFound: boolean = (c.text == ":" && g.text == ">" && touching(c, g)) || c.text == "=>"
+        if (bad || !sepFound) {
+            bad = true
+            let found: string = "the end of the line"
+            if (c.line == headLine && c.cls != TC.End) found = "`" + c.text + "`"
+            t = diagAt(t, "E-SYNTAX-044", "a `given` head is a list of names followed by `:>` (`given x, y :> { … }`, §42.2.3); found " + found + " instead. To run code when a condition holds, write `if (<cond>) { … }`; to run it when a value is present, write `if (x is given) { … }`.", c)
+            let skipping: boolean = true
+            while (skipping) {
+                c = cur(t)
+                g = peekAt(t, 1)
+                sepFound = (c.text == ":" && g.text == ">" && touching(c, g)) || c.text == "=>"
+                if (c.cls == TC.End || c.line != headLine || isP(t, "{") || sepFound) {
+                    skipping = false
+                } else {
+                    t = adv(t)
+                }
+            }
+        }
+        if (sepFound) {
+            if (c.text == "=>") {
+                t = adv(t)
+            } else {
+                sepEnd = g.end
+                t = adv(adv(t))
+            }
+        }
+        if (bad && !isP(t, "{")) {
+            // A refused head with no block: nothing to guard; the line's rest parses on.
+            const empty: ABlock = { nid: t.nid, span: mkSpan(start, start), stmts: [] }
+            const none0: RExpr = mkE(bumpId(t), start, AExprK.NotLit)
+            return mkS(none0.tp, start, AStmtK.If(none0.e, empty, not))
+        }
+        if (names != "" && !bad) {
+            const msg: string = "the presence guard `given " + names + " :> { … }` is deprecated (§42.2.3). Write `if (" + tests + ") { … }` — it tests the same thing and narrows the same names inside the block. Run `scrml fix` to rewrite it. It compiles as before during the deprecation window (§63)."
+            const d: Diag = newDiag("W-GIVEN-PRESENCE-DEPRECATED", msg, t.file, mkSpan(start, sepEnd))
+            t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file }
+        }
+        const body: RBlock = parseBlock(t)
+        if (cond is given && !bad) return mkS(body.tp, start, AStmtK.If(cond, body.b, not))
+        // A refused head (E-SYNTAX-044 above): keep the block, under a test that never holds.
+        const none: RExpr = mkE(body.tp, start, AExprK.NotLit)
+        return mkS(none.tp, start, AStmtK.If(none.e, body.b, not))
     }
 
     // =========================================================================

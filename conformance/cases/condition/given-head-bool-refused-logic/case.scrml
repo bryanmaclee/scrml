@@ -1,0 +1,13 @@
+// §42.2.3 (S462 "a") — a `given` head SHALL contain only an identifier-list. A comparison in the
+// head is refused (E-SYNTAX-044); the condition is an `if`: `if (id < 0) { fail … }`.
+${
+    type LoadError:enum = {
+        NotFound
+    }
+
+    function loadThing(id: int)! LoadError {
+        given id < 0 :> fail LoadError.NotFound
+        return "ok"
+    }
+}
+<p>x</p>

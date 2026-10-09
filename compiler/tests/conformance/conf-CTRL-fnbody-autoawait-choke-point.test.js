@@ -127,7 +127,7 @@ const GIVEN_SRC = `<page>
 \${
     server function getFlag() -> { ok: bool } { return { ok: true } }
     function run(k) {
-        given k {
+        given k :> {
             const r = getFlag()
             return r.ok
         }
