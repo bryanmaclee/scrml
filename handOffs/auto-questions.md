@@ -2,6 +2,12 @@
 
 Newest first. One at a time (axiom floor). Each: context · options · recommendation · what it blocks.
 
+## 2026-10-09 (S461 AUTO) · promoted-onclient-handler — is a plain `function` handler that route inference moves to the server also an E-CHANNEL-006?
+- E-CHANNEL-006 now fires when an `onclient:*` handler is DECLARED `server function` (PR #1379). A plain `function onOpen(e) { broadcast(…) }` used as `onclient:open=onOpen(e)` compiles, gets I-FN-PROMOTABLE, and the client still calls it locally. The SPEC sentence (§38.10.3) says "declared `server function`", so AUTO built only the declared case.
+- (a) [rec] also refuse it: an `onclient:*` handler whose body route inference places on the server (it reads server-only state, or calls `broadcast`) is E-CHANNEL-006 with a "this handler needs the server because <reason>" message. This needs one SPEC sentence widening "declared" to "declared or inferred". (b) leave it: the declared case only, and the promoted one stays a silent local call that fails at runtime. (c) a warning instead of an error.
+- Worked code: `<channel name="c" onclient:open=onOpen(e)> ${ function onOpen(e) { broadcast({ joined: true }) } } </channel>` → (a): E-CHANNEL-006; (b): compiles, and `broadcast` is undefined in the browser.
+- Blocks: nothing queued; it is the remaining half of the E-CHANNEL-006 intent.
+
 ## 2026-10-09 (S461 AUTO) · narrowing-after-write — does a write to a narrowed cell end the narrowing, and should the SPEC say so? (gap `g-narrowing-survives-writes-incl-callee-s460`, HIGH)
 - Today `if (@user is some) { clear(); @user.name }` compiles clean and throws a TypeError when `clear()` set `@user = not`. The bootstrap already drops the narrowing on a direct write, a callee's write and a nested-block write; impl#1 does not.
 - Why AUTO stopped: no SPEC sentence says a write ends a narrowing. §42.3.5 item 2 says only *"Inside the narrowed scope `recv` is `T`"*, and §42.4 statement 8 says the test narrows *"where the test is true"*. Searched §42.2.3, §42.3.5, §42.4, §42.7. So the fix is a SPEC amendment (newly-rejecting: E-TYPE-046 fires where it did not), which is a ruling, not something AUTO may do.
