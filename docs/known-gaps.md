@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 244 | 6 |
-| MED | 554 | 4 |
-| LOW | 314 | 0 |
+| HIGH | 247 | 6 |
+| MED | 561 | 4 |
+| LOW | 319 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -2468,6 +2468,7 @@ Guarding a WRITE with `given` — `given @v :> { @u = @v }` — does not propaga
 <!-- @gap id=g-42-4-markup-guard-not-a-narrowing-construct sev=MED status=open locus=searched:classify-write.md prov=spec:§42.4 -->
 
 `SPEC.md` (~:24450) names the `if=`/`show=` markup guard (§42.4) as one of the canonical presence-discriminations, and ~:24452 states `E-TYPE-001` and `E-TYPE-046` "both demand the same handling" — the implementation honours the guard for NEITHER code, and the guarded and unguarded plain-optional rows are byte-identical, which the report calls the sharpest form of "this guard does nothing". Measured pre-existing on both refs by classify-write round 3 (§R3.5) and carried by the S342 arc audit (`handOffs/s342-arc-audit/classify-write.md`). Branch condition: for lifecycle cells the gap is latent on main today; the unlanded classify-write arc is what makes it REACHABLE for a lifecycle cell (the markup positions go `[]` → fires), upgrading it to a live over-refusal the moment that arc lands. The report states no code locus.
+**S460 also (dpa-070 D3, main `d3f5d4239`): this entry is now half stale for E-TYPE-046, and the surviving half is inverted.** The bare form narrows: `<div if=@user>${@user.name}</div>` compiles clean (`<dpa070>/fx/f11-markup-if-bare.scrml`), because `markupNarrowedCells` (`type-system.ts` ~:31091) accepts a bare identifier on `if`/`show`/`else-if`. The canonical presence test does NOT narrow: `<div if=(@user is some)>${@user.name}</div>` fires E-TYPE-046 (`fx/f12-markup-if-is-some.scrml`, on main and on the D1 r7 branch). So the markup guard narrows only on the truthiness spelling, and over-refuses the spelling §42 sanctions. The `show=` half is separately tracked: [[g-impl1-show-narrows-s451]]. Measuring the E-TYPE-001 (lifecycle) half was not part of D3. (`<dpa070>` is defined in the S460 filings preamble at the end of this file.)
 
 ### g-absence-literal-closure-one-node-kind-wide — `@u = not ?? not`, `@u = @flag ? not : not` and `@u = giveNot()` all compile CLEAN and leave the cell genuinely `not` — the absence-literal closure is one NODE KIND wide, not semantic — `NEW S345-bryan (S342 arc audit, classify-write.md §R3.6); MED; open (pre-existing on both refs)`
 <!-- @gap id=g-absence-literal-closure-one-node-kind-wide sev=MED status=open locus=compiler/src/type-system.ts prov=rationale:the-absence-recognizer-answers-is-this-node-a-not-literal-and-coalesce-ternary-and-call-nodes-that-evaluate-to-not-are-other-node-kinds-so-the-write-classifies-as-a-transition-and-the-read-compiles-clean -->
@@ -7342,9 +7343,10 @@ Surfaced by the E-ADAPTER agent (a530ae1a, obs #3). `${@user.name}` where `@user
 ### G-ETYPE046-MAP-BRACKET-READ-NARROW — E-TYPE-046 fires on `@map[k].field` only for optional-VALUE maps; §59.6 implies ALL bracket-reads are `V | not` — `NEW S237; MED; open`
 E-TYPE-046 (§42.3.5, S237) fires on `@map[k].field` only when the map's VALUE type is optional (`[K: V | not]`). But SPEC §59.6 states a bracket-read on ANY map yields `V | not` (an absent key → `not`), so `@map[k].field` on a plain `[K: V]` map is ALSO a dereference through a possibly-`not` receiver and SHOULD fire E-TYPE-046 — else it silently `null.field`-throws at runtime when the key is absent (the same class as the resolved parent gap). The E-TYPE-046 pass was deliberately scoped down to the optional-value case to stay within the blast-radius bound; widening to all bracket-reads requires the type-system to type every `@map[k]` as `V | not` (verify wiring) + a corpus re-scan. A Rule-4 §59.6-vs-§42.3.5 reconciliation. <!-- @gap id=g-etype046-map-bracket-read-narrow sev=MED status=open -->
 
-### G-ETYPE046-WRITE-LHS-AND-FN-PARAM — E-TYPE-046 does not fire on a write-LHS or fn-param receiver typed `T | not` — `NEW S237; LOW; open`
-The E-TYPE-046 pass (§42.3.5, S237) is read-focused: it does NOT fire on (a) a write-LHS `@u.name = "x"` where `@u` is a plain-optional `T | not` cell (writing through `not` also throws `null.name = …` at runtime), nor (b) a `T | not` **function-parameter** receiver accessed bare in the body. Both are the same absence-dereference class as the resolved parent gap, conservative UNDER-fires (miss cases, no false positives). Deferred from the S237 build (outside the read-focused fire set); extend the pass's fire-site set to LHS-of-assignment + fn-param receivers. <!-- @gap id=g-etype046-write-lhs-and-fn-param sev=LOW status=open -->
+### G-ETYPE046-WRITE-LHS-AND-FN-PARAM — E-TYPE-046 does not fire on a write-LHS or fn-param receiver typed `T | not` (S460: also LOCALS) — `NEW S237; MED; open (S460: re-rated LOW→MED)`
+The E-TYPE-046 pass (§42.3.5, S237) is read-focused: it does NOT fire on (a) a write-LHS `@u.name = "x"` where `@u` is a plain-optional `T | not` cell (writing through `not` also throws `null.name = …` at runtime), nor (b) a `T | not` **function-parameter** receiver accessed bare in the body. Both are the same absence-dereference class as the resolved parent gap, conservative UNDER-fires (miss cases, no false positives). Deferred from the S237 build (outside the read-focused fire set); extend the pass's fire-site set to LHS-of-assignment + fn-param receivers. <!-- @gap id=g-etype046-write-lhs-and-fn-param sev=MED status=open -->
 **S359-peter re-verify + RUNTIME PROOF (2026-08-21).** Both under-fires reproduce on HEAD (mirroring the `optional-member-access-not` conformance shape, `<user>: { name: string } | not = not`): READ `let n = @user.name` → E-TYPE-046 fires (control ✓); WRITE-LHS `@user.name = "x"` → does NOT fire (0); FN-PARAM `function show(u: { name: string } | not) { let n = u.name }` → does NOT fire (0). **Impact is a SHIPPABLE null-deref, not theoretical:** the fn-param case emits BARE `function _scrml_show_2(u) { let n = u.name; }` with no null-guard, wired `onclick=show(not)` → `_scrml_show_2(null)` → `null.name` → runtime `TypeError` — a valid-looking program the null-safety pass that catches the READ silently passes. (WRITE-LHS lowers to `_scrml_deep_set(null, ["name"], "x")`, unchecked.) Confirms the gap: a real fire-site hole in E-TYPE-046, conservative to close (same absence-dereference class → coverage add, no new false-positives). **Direction-of-change (a diagnostic newly fires on code that compiles today) → bryan**; SAFETY, worth the newly-rejecting call. Routed (S359 post-wrap). Probe: peter scratchpad et-read/et-write/et-param.
+**S460 also (dpa-070 D2, main `d3f5d4239`):** the hole is wider than parameters. E-TYPE-046 never fires for any non-`@` receiver: a LOCAL `let u: { name: string } | not = not; u.name` compiles clean (`<dpa070>/fx/f14-local-let.scrml`) and throws TypeError at runtime (`rx/r06`). The dPA located it as follows, not traced here. `collectPlainOptionalReceivers` (`type-system.ts` ~:30859) collects only top-level `state-decl`s and skips function bodies (~:30880), and `bareCellName` (~:30956) skips every non-`@` name. **Re-rated LOW→MED:** S359 already proved a shippable null-deref for the parameter case, and the local case is the same silent-acceptance → runtime-crash class (legend MED). The dossier rates it HIGH. It is held below HIGH because the code is SPEC-invalid (it should be E-TYPE-046) rather than SPEC-valid and miscompiled. (`<dpa070>` is defined in the S460 filings preamble at the end of this file.)
 
 ### G-CSRF-RETRY-HELPER-DEF-GATED — `_scrml_fetch_with_csrf_retry` CALL emitted but its DEFINITION is gated on the no-auth branch — `NEW S236; MED; RESOLVED S238`
 Surfaced by the E-ADAPTER agent (a530ae1a, obs #1 — the root of the ss60 E-CSRF escalation). An auth-middleware client emits the `_scrml_fetch_with_csrf_retry(...)` CALL but NOT its DEFINITION — the def is gated on the baseline/no-auth branch (`emit-client.ts:1686`), so an auth-path client mount throws `ReferenceError` on load. A codegen call/def-gating bug (the def must emit whenever the call does). The conformance harness worked around it with a fallback SHIM (adapter-only, NOT contract); the codegen bug remains. **RESOLVED S238** (auth-path CSRF wave, agent a783be0a → PA-landed): the emit gate `csrfEnabled && !authMiddlewareEntry` → `csrfEnabled`, so `_scrml_get_csrf_token` + `_scrml_fetch_with_csrf_retry` DEFs emit on the auth path (emit-client.ts); emit-functions.ts unified the idempotency-key auth branch to `_scrml_get_csrf_token()`. R26: pre-fix client CALLs the helper with NO DEF (would ReferenceError) → post-fix DEF present + loadable; full suite 26576/0. <!-- @gap id=g-csrf-retry-helper-def-gated sev=MED status=resolved -->
@@ -13101,6 +13103,7 @@ Same root cause as the round-5 review's B1 (the transitive limb's hop-edge scan 
 <!-- @gap id=g-lifecycle-return-match-fires-e-type-024 sev=MED status=open locus=searched:compiler/src/type-system.ts(E-TYPE-024 fire site + the match-subject type classification for a lifecycle-annotated return; not traced) prov=spec:§14.12.6.1-"The-caller-receives-a-value-typed-as-T-|-not"-+-form-3-`match-u-{-not-:>-…-given-u-:>-…-}` -->
 
 Executed at `f6883b26` (main + docs): `function loadUser(id) -> (not to User)`, then `match u { not :> … given u :> u.name }` → **`E-TYPE-024: Cannot match on struct-typed subject User`**; the §18.8.2 `.Some(v)`/`.None` spelling → the SAME `E-TYPE-024`. Control: the identical `match` over a PLAIN union (`let u: User | not` or `fn -> User | not`) with `not :>`/`given u :>` arms COMPILES clean. So the defect is specifically that a `(not to T)` lifecycle return is classified as the bare post-type `T` at the match subject, where §14.12.6.1 says verbatim the caller receives `T | not` and lists `match u { … }` as caller form 3. Newly-accepting toward the contract (a pre-existing normative sentence + worked example say the form is legal; the compiler holds it shut) — a bug fix, not a widening. Forms 1 (`given`) and 2 (`if (u is not) return`) NOT probed here — verify before assuming they work. Reproducers: the S346 scratchpad `dpa027/{a,b,c,d,e,f}.scrml` (re-derive from the shapes above if gone).
+**S460 also (dpa-070 D10, main `d3f5d4239`): still live.** `<dpa070>/lx/l05` (match on a `(not to User)` binding, §14.12.6.1 caller form 3) still fails with E-TYPE-024 + E-TYPE-001. The same dPA run also probed the forms this entry left unprobed. Form 1 `given` is clean and runs (l03). Form 2 `if (u is not) return` is clean (l04). The rebind `given u = …` named in the §14.12.6 table is E-SYNTAX-045 (l10; see [[g-presence-spec-self-contradictions-s460]]). (`<dpa070>` is defined in the S460 filings preamble at the end of this file.)
 
 ### g-emit-parse-gate-reports-artifact-position-not-source-span — `E-CODEGEN-INVALID-LOGIC` (the emit-parse gate) reports Acorn's line/col INSIDE the emitted artifact; nothing maps it back to the `.scrml` span, so the adopter cannot locate the offending source — `NEW S346-bryan (adopter issue #519, pjoliver11, 2026-08-12 — DX, "low priority" per the reporter); MED; open`
 <!-- @gap id=g-emit-parse-gate-reports-artifact-position-not-source-span sev=MED status=open locus=compiler/src/codegen/validate-emit.ts:77-87(the Acorn SyntaxError's {pos,loc} is formatted as "artifact: X (byte, line, column)" — the artifact coordinate, by construction; no emitted-range→source-span map exists at that seam) prov=adopter:#519-the-emitted-line-reference-was-noise-the-raw-CG-E-EQ-004-list-is-what-located-the-#517-bug -->
@@ -13262,6 +13265,7 @@ dpa-020/023 class (the async boundary). Adopter #509's design depends on exactly
 <!-- @gap id=g-some-none-optional-match-prose-is-a-reconstruction-artifact sev=MED status=open locus=compiler/SPEC.md(§18.8.2 optional-match prose + worked example; the §53.15 citation at :33812 that consumed it) prov=dd:scrml-support/docs/deep-dives/presence-match-arm-vocabulary-dpa-027-2026-08-15.md -->
 
 Confirms the S346 PA lean (a) — strike — with two corrections to it: striking leaves **two** live vocabularies (`is some` AND `given`), not one, and the worst dangling citation is **`E-MATCH-012`'s own message**, which prescribes the deprecated `=>` arrow. **★ The durable method finding: a reconstruction is a laundering vector** — draft → changelog → reconstruction → citation → fixture, five hops, no hop reads the compiler. Same shape as pa-base §1's laundering trace, in the SPEC's own history.
+**S460 also (dpa-070 D13, main `d3f5d4239`): the ratified strike is still unexecuted.** dpa-027 was ratified S347 ("strike"), but SPEC §18.8.2 (SPEC.md ~:17874-17903) still prescribes `.Some(value)` / `.None`. `E-MATCH-012`'s message (`type-system.ts:20306-20307`, verified on `b4b94f3d6`) still teaches `Add a \`not => ...\` arm or an \`_ => ...\` wildcard`, which uses the deprecated `=>` arrow. The live separator is `:>`. Severity is kept at MED. The brief's LOW guidance for SPEC contradictions applies to the prose. The compiler message is adopter-facing and teaches a deprecated spelling, so it is the part to fix first.
 
 ### G-EMITTED-JS-NEVER-MINIFIED-PRIZE-UNMEASURED — the compiler ships unminified JS and nobody has measured what a mangle-only pass would buy — `NEW S347; MED; open (an unmeasured optimization, not a defect)`
 
@@ -23905,6 +23909,207 @@ Hash-before-esm-transform order is pre-existing (base too); no behaviour impact 
 ### g-eq-not-unchecked-in-block-handler-arrows-s459 — `== not` (E-EQ-002) is not checked inside block-bodied event-handler arrows: `onclick=${() => { if (@v == not) return … }}` compiles silently (top level and component bodies), while the same check fires inside a `function` — `NEW S459; LOW; open (pre-existing)`
 Agent-executed on origin/main (S459 D1 round-8 agent).
 <!-- @gap id=g-eq-not-unchecked-in-block-handler-arrows-s459 sev=LOW status=open locus=compiler/src/gauntlet-phase3-eq-checks.js(PA-located-verify) prov=empirical:s459-d1-r8-agent -->
+**S460 also (dpa-070 D9, independent reproduction on main `d3f5d4239`):** the same hole in inline-handler `${…}` bodies. Fixture pair: `<dpa070>/ex/e01-eqnot-handler.scrml` (handler, silent) vs `ex/e02-eqnot-fn.scrml` (fn, E-EQ-002). A second half: the unchecked `== not` lowers ONE-SIDED to `=== null` only, unlike §42.8's two-sided `null`/`undefined` absence check, so it also misses a host `undefined`. The dossier rates it MED. It stays LOW here: once E-EQ-002 is enforced in handler bodies the lowering is unreachable, so the fix is the check, and no lowering change is needed. (`<dpa070>` is defined in the S460 filings preamble at the end of this file.)
 
-### g-top-level-given-emits-bare-name-s459 — top-level `${ given @a :> { <p>${@a.name}</p> } }` lowers the cell to a bare `a` (`if (a !== null && a !== undefined)`) → ReferenceError at load — `NEW S459; MED; open (agent-executed on the D1 branch tip; origin/main not re-checked)`
-<!-- @gap id=g-top-level-given-emits-bare-name-s459 sev=MED status=open locus=searched:emit-logic.ts given lowering — not traced prov=empirical:s459-d1-r8-agent -->
+### g-top-level-given-emits-bare-name-s459 — top-level `${ given @a :> { <p>${@a.name}</p> } }` lowers the cell to a bare `a` (`if (a !== null && a !== undefined)`) → ReferenceError at load — `NEW S459; HIGH; open (S460: main-confirmed by dpa-070 D1, re-rated MED→HIGH)`
+<!-- @gap id=g-top-level-given-emits-bare-name-s459 sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(given-guard emit ~:3935-3955 — `vars.map(v => \`${v} !== null && ${v} !== undefined\`)` interpolates the raw name, no reactive-cell lowering; read, not traced to the fix) prov=empirical:s459-d1-r8-agent -->
+**S460 also (dpa-070 D1, main `d3f5d4239`; the S459 note "origin/main not re-checked" is now answered: it is on main):** the bug is not specific to the top level. Any `given @cell :> { … }` lowers the cell to a bare JS name. `codegen/emit-logic.ts:3943` builds the condition by interpolating the raw variable name (`${v} !== null && ${v} !== undefined`), with no `_scrml_cs_reactive_get` lowering, and in markup the guarded body is also DROPPED. Fixtures: `<dpa070>/px/p10`, `rx/r01`, `wx/w02` (runtime "ReferenceError: user is not defined"), `fx/f04-given-stmt.scrml` (compile clean). **The SPEC's own §42.3.5 worked example (SPEC.md ~:31240) is broken**, and no conformance case covers `given @cell`. **Re-rated HIGH:** a runtime ReferenceError on a form the SPEC defines as valid and canonical (§42.2.3), at exit 0. That meets the brief's HIGH bar and the legend's silent-wrong-output class. Related: [[g-component-body-given-match-unusable-s459]] (the same form is refused in component bodies), and the dpa-070 ruling, which may retire `given` as a presence test (the DD counts 9 corpus uses, all S19 gauntlet fixtures). The ReferenceError stays HIGH until that ruling lands. (`<dpa070>` is defined in the S460 filings preamble below.)
+
+> **S460 filings: dpa-070 §11 (one presence test) and the S460 copy-in differential review.**
+>
+> - **`<dpa070>`** below is the dPA's fixture tree, `/tmp/claude-1000/-home-bryan-maclee-scrmlMaster-flogence/de68c80f-4a67-4e57-a650-78604caf01f2/scratchpad/dpa-070/`. It sits in a session scratchpad under `/tmp`, so it is **volatile**. Each entry quotes the shape so it can be re-derived. The path is not `scrml-support/docs/deep-dives/dpa-070/`, which does not exist.
+> - The dPA ran on main `d3f5d4239`. The cited line numbers were spot-checked on `b4b94f3d6` and all still match: emit-logic.ts:3943; type-system.ts:29529, 31144 and 20306; tokenizer.ts:106; analyze.scrml:9023-9038.
+> - Fixture verdicts are the dPA's (dossier §4). They were not re-run here.
+> - The DD is `scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md`. It is advisory and not ratified, but these defects were measured, not proposed.
+> - D1, D2, D3, D9, D10 and D13 are merged into existing entries as "S460 also:" notes.
+> - D16 is not filed: it is a ruling conflict the PA is holding.
+
+### G-NARROWING-SURVIVES-WRITES-INCL-CALLEE-S460 — a presence narrowing on a `T | not` cell survives a later write to that cell, including a write made by a called function: `if (@user is some) { clear(); @user.name }` compiles clean and throws TypeError when `clear()` set `@user = not` — `NEW S460; HIGH; open (pre-existing)`
+<!-- @gap id=g-narrowing-survives-writes-incl-callee-s460 sev=HIGH status=open locus=searched:compiler/src/type-system.ts(E-TYPE-046 reader ~:30747-31236 — no write-invalidation found in discriminateCondition / the if-stmt narrowing ~:31199; not traced) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D6. Fixture: `<dpa070>/wx/w01` (`<user>: { name: string } | not`, `function clear() { @user = not }`, `if (@user is some) { clear(); @user.name }`).
+
+**Expected:** the narrowing drops at the write, so the read after `clear()` gets E-TYPE-046. The bootstrap already does this. It drops a narrowing on a direct write (s1a/a06), on a write through a callee via the callee's write set `fnw` (s1a/a04, analyze.scrml:9011), and on a write in a nested block (a05, a10).
+
+**Actual (impl#1):** exit 0, then a runtime `TypeError` when the handler runs.
+
+**Severity HIGH.** This is the central soundness condition of S440 Q1 / S442 ("the presence test COUNTS AS the narrowing"), and condition (1) of the DD's design insight. When the write sits in a callee the author cannot see the hazard locally, and the compiler certifies the read as safe. Kotlin refuses smart casts on mutable properties for exactly this reason, and scrml `@cells` are mutable properties. scrml can do better than TS here, because it knows each callee's write set: it should drop the narrowing only when a call's write set touches the cell.
+
+### G-MATCH-OPTIONAL-CELL-NARROWS-NOT-ARM-S460 — a `match` on a `T | not` cell narrows the WHOLE match body, including the `not` arm: `match @user { not :> { @user.name } … }` compiles clean and throws TypeError — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-match-optional-cell-narrows-not-arm-s460 sev=MED status=open locus=compiler/src/type-system.ts:matchHeaderCell(~:31144, + the narrowing use ~:31192; dPA-located, not traced here) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D4. Fixtures: `<dpa070>/fx/f10b-match-not-arm-unsound.scrml` (compiles clean) and `<dpa070>/rx/r03` (runtime TypeError).
+
+**Expected:** only the `given @user :>` arm is narrowed. In the `not :>` arm, `@user` is `not`, so `@user.name` there is E-TYPE-046.
+
+**Actual:** `matchHeaderCell` returns the header cell, and the whole match body is treated as narrowed.
+
+**Severity MED.** The dossier rates it HIGH. The code is SPEC-invalid under §42.3.5 and is silently accepted, which is the legend's "missing safety guarantee" class. It sits one tier below the write-invalidation entry above because the hazard is visible on the page: the author wrote the read inside the `not` arm.
+
+### G-ELSE-SIBLING-OF-IF-PRESENCE-TREATED-AS-NARROWED-S460 — `<div if=@user>…</div><div else>${@user.name}</div>` compiles clean: the `else` sibling is treated as narrowed, though it renders exactly when `@user` is `not` → runtime TypeError — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-else-sibling-of-if-presence-treated-as-narrowed-s460 sev=MED status=open locus=searched:compiler/src/type-system.ts(markupNarrowedCells ~:31091 handles if/show/else-if; the else-sibling path not located) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D5. Fixtures: `<dpa070>/fx/f30-else-markup.scrml` (compiles clean on main and on the D1 r7 branch) and `<dpa070>/rx/r02` (runtime TypeError).
+
+**Expected:** the `else` of a presence test is the absence branch. There `@user` is `not`, so `@user.name` is E-TYPE-046.
+
+**Actual:** accepted. The `if=` element's narrowing set leaks into its `else` sibling.
+
+**Severity MED,** for the same reason as the match-arm entry above: SPEC-invalid code, silently accepted, crashing at runtime. The dossier rates it HIGH.
+
+Related: [[g-impl1-show-narrows-s451]] (`show=` narrows; f13/r04).
+
+### G-LIFECYCLE-READER-REGEX-MISREADS-NEGATED-IS-NOT-S460 — the §14.12.6 lifecycle reader recognises an absence early return with a TEXT regex, so `if (!(u is not)) return; u.name` counts as "returned when absent": it compiles clean, then throws TypeError when `u` is absent — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-lifecycle-reader-regex-misreads-negated-is-not-s460 sev=MED status=open locus=compiler/src/type-system.ts:isIsNotCheckOf(~:29529 — a `\b<u>\b\s+is\s+not\b` RegExp over the condition STRING; read to the regex, callers not traced) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D7. Fixture: `<dpa070>/lx/l08b` (`function load(id) -> (not to User)`, then `let u = load(1); if (!(u is not)) return; u.name`).
+
+**Expected:** E-TYPE-001. The early return fires when `u` is PRESENT, so the read below it runs on `not`.
+
+**Actual:** exit 0, then a runtime TypeError when `u` is absent. `isIsNotCheckOf` matches `u is not` anywhere in the condition text, so it cannot see a `!`, `&&` or `||` composed around it.
+
+**Fix direction:** read the condition's AST (the `is-not` BinaryExpr, `expression-parser.ts:2986-2991`) instead of its text. That is also the root of the "two readers disagree" entry below.
+
+**Severity MED,** on the same basis as the two entries above: SPEC-invalid code, silently accepted, crashing at runtime. The dossier rates it HIGH.
+
+### G-GIVEN-BOOL-EXPR-FAIL-RUNS-UNCONDITIONALLY-S460 — `given <bool-expr> :> fail X` parses as a presence guard on the leading identifier with an EMPTY body: the comparison is dropped and the `fail` runs unconditionally, at exit 0 — `NEW S460; HIGH; open (pre-existing, silent miscompile)`
+<!-- @gap id=g-given-bool-expr-fail-runs-unconditionally-s460 sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(given-guard parse ~:11104/16263),compiler/src/codegen/emit-logic.ts(given-guard emit ~:3935-3955) — not traced prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D8. Fixture: `<dpa070>/gx/g01-given-boolguard.scrml`. The emitted JS is `if (id !== null…) {}  0; return {__scrml_error…}`. Reading it in order:
+- the guard is a presence test on `id`, and its body is empty;
+- `< 0` survives as a stray expression statement;
+- the `fail` follows outside the guard, so it always runs.
+
+**Expected:** the §42.2.3 grammar (`'given' identifier-list (':>'|'=>') block`) refuses this with a parse error. If a boolean `given` is meant instead, the comparison must guard the `fail`.
+
+**Actual:** exit 0, every call fails, and E-TYPE-044 does not fire.
+
+Three conformance cases contain the shape. They pass because they assert other codes: `conformance/cases/error/{failable-match-nonexhaustive-ok, failable-match-nonexhaustive-err, propagate-incompat-variants}`.
+
+**Severity HIGH:** wrong control flow at exit 0 with no diagnostic, the legend's silent-wrong-output class.
+
+Same family as [[g-given-outside-machine-rule-body-mislowers-silently]], where `given n { n > 10 :> … }` gets shredded. In both, a `given` followed by anything other than an identifier list is consumed as a presence guard and the rest is mangled. One fix, refusing a non-identifier-list `given` head, likely closes both.
+
+### G-IS-SOME-LIFECYCLE-VS-PLAIN-OPTIONAL-READERS-DISAGREE-S460 — `is some` narrows a plain `T | not` cell (the E-TYPE-046 reader) but does not transition a `(not to T)` lifecycle binding (the E-TYPE-001 reader): two readers give two answers for one spelling — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-is-some-lifecycle-vs-plain-optional-readers-disagree-s460 sev=MED status=open locus=compiler/src/type-system.ts(E-TYPE-001 reader checkLifecycleBindingAccess ~:29427, whose if-stmt arm ~:29919-29975 promotes only `is not`+early-return; E-TYPE-046 reader discriminateCondition ~:31032, which accepts is-some; dPA-located, not traced) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D11. Two fixtures:
+- `<dpa070>/fx/f02-is-some-if.scrml`, `if (@user is some) { @user.name }` on a plain optional: compiles clean.
+- `<dpa070>/lx/l02-is-some.scrml`, `if (u is some) { u.name }` with `u` from `-> (not to User)`: fires E-TYPE-001.
+
+**Expected:** one answer. The §14.12.6 prose (SPEC.md ~:13899) names "`is not` / `is some` / `given` / `match`" as the canonical discrimination shape, so `is some` should transition the binding.
+
+**Actual:** the two readers implement two different vocabularies. Which answer is right is tangled up with the §42.2.2a-vs-§42.3.5 contradiction (the SPEC entry below) and with the dpa-070 ruling, so the fix has to wait for that ruling. The disagreement itself is the defect, and it is not a doc gap.
+
+**Shared fix:** one presence-narrowing reader serving both codes. D1 r7's `presence-narrowing.ts` is the branch-side candidate.
+
+### G-BOOTSTRAP-REJECTS-SANCTIONED-IS-SOME-IS-NOT-S460 — the bootstrap refuses `x is some` / `x is not` with E-PARSE-EXPECTED rather than E-BOOTSTRAP-UNSUPPORTED, and its diagnostics teach `x != not`, which impl#1 and §45 reject as E-EQ-002 — `NEW S460; MED; open (bootstrap)`
+<!-- @gap id=g-bootstrap-rejects-sanctioned-is-some-is-not-s460 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(`is` sits in a word list ~:1505 with no `is` operator; parseGiven ~:1572-1590 handles only the §66.7.5 rebind) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D14. Fixtures:
+- `<dpa070>/bx/b02-is-some.scrml` and `b05-is-not-return.scrml` fail with `E-PARSE-EXPECTED … found 'is'`.
+- The b01, b04 and b09 messages recommend `x != not`.
+- Also s1a/a07.
+
+**Expected:** under §63.5, an impl#2 that is stricter than 1.0 and rejects a sanctioned form has a conformance bug. At minimum the refusal should be E-BOOTSTRAP-UNSUPPORTED, and no bootstrap message should teach a spelling that impl#1 refuses.
+
+**Actual:** canonical code gets a parse error, and the messages teach an E-EQ-002 spelling. The bootstrap's S442 message says "`is some` once the slice parses it", which concedes the form is owed.
+
+The two compilers' presence vocabularies barely overlap (dossier §0.4). The only spelling they share is bare `x`, and it means JS truthiness in impl#1 and a typed presence test in the bootstrap.
+
+### G-GIVEN-KEYWORD-TABLE-VS-IDENTIFIER-S460 — `tokenizer.ts:106` lists `given` as a keyword, yet `let given = 1` compiles (correctly, per §4.11.4): the keyword table and the compiler's behaviour disagree — `NEW S460; LOW; open`
+<!-- @gap id=g-given-keyword-table-vs-identifier-s460 sev=LOW status=open locus=compiler/src/tokenizer.ts:106 prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D15. Fixture: `<dpa070>/fx/f27-given-as-ident.scrml`.
+
+The behaviour matches §4.11.4 (*"In all other contexts, `given` SHALL be a valid identifier"*), and adopter code relies on it: flogence `src/ports/capture-tool.scrml` has 7 `const given = …` locals. The table entry misleads whoever reads it.
+
+**Severity LOW.** It starts to matter only if the dpa-070 ruling makes `given` a presence keyword. Then this site and the flogence locals become newly rejected.
+
+Compare [[g-given-outside-machine-rule-body-mislowers-silently]], where `given` in a fn body is consumed as a keyword.
+
+### G-PRESENCE-SPEC-SELF-CONTRADICTIONS-S460 — five SPEC self-contradictions about presence tests (does `is some` narrow? is `given` machine-only? is the `given c = …` rebind legal? a retired code still cited; truthiness wording in §42.4) — `NEW S460; LOW; open (SPEC)`
+<!-- @gap id=g-presence-spec-self-contradictions-s460 sev=LOW status=open locus=compiler/SPEC.md(§42.2.2a ~:31058, §42.3.5 ~:31222, §4.11.4 ~:683-720, §18.8.1 ~:17864, §53.15 ~:41065, §42.2.3 ~:31065-31125, §66.7.5 ~:45732, §42.3.2 ~:31202, §42.4 ~:31266 — lines from main d3f5d4239) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 D12. Each one is quoted with its line numbers in dossier §1.
+1. **Does `is some` narrow?** §42.2.2a says *"`expr is some` does NOT narrow"*. §42.3.5 item 2 lists the "`is some` early-return" as a narrowing form, and impl#1's E-TYPE-046 reader does narrow on it (f02, f17).
+2. **Is `given` machine-only?** §4.11.4, §18.8.1 and §53.15 say `given` is used only in machine rules and that scrml has no general flow-narrowing construct. §42.2.3 defines a `given` presence guard.
+3. **Is a `given` rebind legal?** §42.2.3 forbids rebinding (E-SYNTAX-045). The ruled S435/S437 form `given c = @h :>` (§66.7.5, §59.6, the §14.12.6 table) is a rebind.
+4. **A retired code is still cited.** §42.3.2 cites E-TYPE-042 for `== not`. That code was retired S305 ([[g-e-type-042-unreachable-duplicate-of-e-eq-002]]); the live code is E-EQ-002.
+5. **Truthiness wording.** §42.4 says "`not` is falsy". That describes truthiness, but S440 Q1 rules that a bare `T | not` condition is a presence test.
+
+A further trap: §42.2.2a's "definitional equivalent" `not (expr is not)` is itself E-TYPE-045 under §42.10 (f23).
+
+**Severity LOW,** per the brief's guidance for SPEC self-contradictions. The cost is a trap for readers; nothing miscompiles because of the text. But item 1 feeds the "two readers disagree" entry above, and items 2 and 3 limit what the dpa-070 ruling can say. Resolve them together with that ruling, not before it.
+
+### G-SPEC-17-1-IF-EXAMPLE-STRING-TRUTHINESS-S460 — the §17.1 worked example `<div class="error-banner" if=@errorMessage>` uses the string-truthiness idiom that S440 makes E-COND-NOT-BOOLEAN when `errorMessage: string` — `NEW S460; LOW; open (SPEC example)`
+<!-- @gap id=g-spec-17-1-if-example-string-truthiness-s460 sev=LOW status=open locus=compiler/SPEC.md(§17.1 ~:15629, ~:15634) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 P3 (the Svelte panel voice). This is the example adopters copy. The corpus count (dossier §2) finds about 24 `if=@<string>` sites using the idiom; at each one, `""` hides the element.
+
+**Fix:** rewrite the example as `if=(@errorMessage != "")`, or as an optional cell with a presence test.
+
+**Severity LOW:** it is a doc fix. Make it before the S440 truthiness corpus migration, though, because this example is the template the corpus was copied from.
+
+### G-BOOTSTRAP-NARROWING-COMMENT-STALE-S460 — the bootstrap's narrowing comment at `analyze.scrml:9023-9038` is wrong on two points: it says a nested-block write does not un-narrow (measured: it does), and it reads as if `!x` on `T | not` is accepted (it is refused) — `NEW S460; LOW; open (bootstrap comment)`
+<!-- @gap id=g-bootstrap-narrowing-comment-stale-s460 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:9023-9038 prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+
+From dpa-070 P2, with P1 folded in.
+- **P2 (lines 9037-9038).** The comment says "erring generous — a write in a NESTED block does not un-narrow". The probes `<dpa070>/s1a/a05` and `a10` show nested-block writes do drop the narrowing (E-OPERAND-NOT-NARROWED). Either the comment is stale or it covers a shape the probe did not reach. The DD did not investigate further.
+- **P1 (lines 9023-9031).** The comment's "`&&` / `||` / `!` combinations" is ambiguous about `!`. In fact `!x` on `T | not` is refused (E-OPERATOR-OPERAND-TYPE, b10, booleans-only per S440 Gotcha Q2), and that is consistent, because `!` composes over `x != not`, not over a bare `x`.
+
+**Fix:** reword the comment; no behaviour change. The one exception: if a re-run of the a05/a10 probes finds a nested-block shape that really does keep its narrowing, the P2 sentence may be right for that shape and should name it.
+
+### G-REFINEMENT-RECURSIVE-STRUCT-JUDGE-DEPTH-1-S459 — a recursive struct refinement is judged only one level deep: with `type T:struct = { n: number(>0), kids: T[] }`, the write `@t.kids[0].kids[0].n = -5` is admitted, while the same write at levels 0 and 1 is refused — `NEW S460; MED; open (present once s459-refine-copy-in lands)`
+<!-- @gap id=g-refinement-recursive-struct-judge-depth-1-s459 sev=MED status=open locus=compiler/src/refinement-obligations.ts:judgeTypeOf(~:126, branch s459-refine-copy-in — the recursion cut via the S458 2a-fix F3 memo; dev-traced, not re-traced here) prov=review:s460-copy-in-differential -->
+
+Found by the S460 differential review of branch `s459-refine-copy-in` (§53 refinement copy-in). `refinement-obligations.ts` does not exist on main yet, so this gap is **present once s459-refine-copy-in lands**.
+
+**Expected (§53):** every write into a refined position is judged, at any depth of a recursive type.
+
+**Actual:** recursion stops after one level. The cut comes from the S458 2a-fix F3 memo in `judgeTypeOf`, which treats a type it has already seen as judged, so grandchildren are never judged.
+
+**Fix (from the dev's trace):** have a recursive struct reference call its own hoisted judge by name, instead of cutting the recursion.
+
+Reviewer- and dev-executed. Reproducers are kept out of the repo, under `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-copyin/p/`.
+
+### G-REFINEMENT-MAP-FIELD-VALUES-NEVER-JUDGED-S460 — values inside a refined MAP field are never judged: for `{ n: number(>0), m: [string: L] }`, a whole write carrying an `n: -1` map value is admitted, and so is the in-place write `m.get("x").n = -1` — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-refinement-map-field-values-never-judged-s460 sev=MED status=open locus=searched:compiler/src/codegen/emit-predicates.ts(main),compiler/src/refinement-obligations.ts(case "map" ~:250 on branch s459-refine-copy-in, which has an `unjudgeable` verdict and a "map" shape) — not traced prov=review:s460-copy-in-differential -->
+
+Finding L-D of the S460 copy-in differential review. The reviewer reports it as pre-existing, on main as well.
+
+Reproducers: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-copyin/p/j.mjs`, filters:
+- `f3-map-whole-bad`: a whole write with `new Map([["x", { u: "o", n: -1 }]])` is stored;
+- `f4-map-get-inplace-bad`: `r.S("s").m.get("x").n = -1` is stored;
+- `f5-map-shared-cross-place`.
+
+**Expected:** a value written into a refined position is judged. Failing that, the declaration is refused as unjudgeable; the branch's `refinement-obligations.ts` already has an `unjudgeable` verdict for "a map whose keys or values are refined".
+
+**Actual:** the value is stored with no diagnostic and no runtime check.
+
+**Severity MED:** an invalid value is silently accepted, the legend's missing-safety-guarantee class.
+
+Reviewer-executed; PA-unverified.
+
+### G-REFINED-CELL-WHOLE-WRITE-GIVES-NESTED-ELEMENTS-NEW-IDENTITY-S460 — a whole write to a refined cell gives the cell's own nested elements new identities, so a find-by-reference-then-splice handler silently does nothing: `const a = @w.rows[0]; @w = { rows: [...@w.rows], name: "z" }; @w.rows.indexOf(a)` returns -1 (0 on an unrefined cell) — `NEW S460; LOW; open (semantics note; consequence of a ruling)`
+<!-- @gap id=g-refined-cell-whole-write-gives-nested-elements-new-identity-s460 sev=LOW status=open locus=compiler/src/runtime-template.js:_scrml_refine_copy(~:6833, branch s459-refine-copy-in) prov=ruling:user-voice-scrml.md S459 "a, go" -->
+
+Finding L-C of the S460 copy-in differential review. This is the intended consequence of the S459 copy-in ruling ("a refined cell stores its own copy", §53.3.3). It is not a bug against that ruling; it is filed so the cost is visible.
+
+**Who pays:** an adopter who holds a reference to an element, writes the whole cell, then looks the element up by reference (`indexOf`, `===`, `includes`, `Set` membership). The lookup misses with no error, while the same code works on an unrefined cell.
+
+Reproducer: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-copyin/p/g2.mjs` with `s1.mjs`, row `ident-own-grandchild-after-whole`, against the control row `ident-own-grandchild-Q(ctl)`.
+
+**Options if it bites:**
+- document it in §53.3.3, next to the copy-in note;
+- add a lint for an element reference captured before a whole write and used after it;
+- skip the copy when the source object is already the cell's own copy. This one needs a new ruling.
+
+### G-REFINE-COPY-UNBOUNDED-ON-PROXY-GROWING-LENGTH-S460 — the refinement copy-in loop trusts `length`: a hostile array Proxy whose `length` keeps growing makes the copy loop run without bound — `NEW S460; LOW; open (present once s459-refine-copy-in lands)`
+<!-- @gap id=g-refine-copy-unbounded-on-proxy-growing-length-s460 sev=LOW status=open locus=compiler/src/runtime-template.js:_scrml_refine_copy(~:6833, branch s459-refine-copy-in — not traced) prov=review:s460-copy-in-differential -->
+
+Finding I-1 of the S460 copy-in differential review. Reproducer: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-copyin/p/j.mjs`, filter `e3-proxy-array-growing-length`. It builds a `Proxy([1])` whose `length` getter returns a larger number on every read; the probe stops it after 50,000 reads so the run ends.
+
+**Severity LOW:** it takes a deliberately hostile host object. No scrml-authored value can do this.
+
+**Fix:** read `length` once before the loop, or bound the loop by the copy depth/size limit the branch already enforces.
