@@ -196,7 +196,7 @@ describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
     expect(runtime).not.toContain("_scrml_wire_decode");
   });
 
-  test("SPA shape includes core + scope + errors (always-present set)", () => {
+  test("SPA shape includes core + scope (always-present set)", () => {
     const { result, outDir } = compileSingle(SPA_COUNTER);
     const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
     // 'core' chunk
@@ -204,9 +204,11 @@ describe("§1 shared-runtime tree-shake (Phase B 3.1)", () => {
     expect(runtime).toContain("_scrml_reactive_set");
     // 'scope' chunk
     expect(runtime).toContain("_scrml_register_cleanup");
-    // 'errors' chunk
-    expect(runtime).toContain("class _ScrmlError");
-    expect(runtime).toContain("class NetworkError");
+    // 'errors' chunk — in this always-present set until S461; it now ships only
+    // when the emitted client names one of its definitions (post-emit gate), and
+    // the counter names none. See s461-runtime-tree-shake.test.js.
+    expect(runtime).not.toContain("class _ScrmlError");
+    expect(runtime).not.toContain("class NetworkError");
     // The 'transitions' chunk was in this always-present set until the §38
     // keyframes moved to the emitted stylesheet (codegen/emit-transition-css.ts).
     // An inline <style> is refused under `headers="strict"`'s pinned

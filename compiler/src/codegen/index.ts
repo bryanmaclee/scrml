@@ -23,7 +23,7 @@ import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename, dirname, relative, resolve } from "path";
 import { toPosix } from "../path-canonical.js";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
-import { assembleRuntime } from "./runtime-chunks.ts";
+import { assembleRuntime, applyChunkDependencies } from "./runtime-chunks.ts";
 import { toEsmRuntime } from "./runtime-esm.ts";
 import { toEsmClientChunk } from "./emit-client-esm.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
@@ -2797,7 +2797,7 @@ export function runCG(input: CgInput): CgOutput {
         structuralDeclNames: collectStructuralDeclNames(fileAST),
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
-        usedRuntimeChunks: new Set(['core', 'scope', 'errors']),
+        usedRuntimeChunks: new Set(['core', 'scope']),
         // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
         // discriminate cross-file engine mount sites from local components / HTML.
         exportRegistry: exportRegistryInput,
@@ -4095,18 +4095,18 @@ export function runCG(input: CgInput): CgOutput {
   let classicRuntimeSliceForChunks: string | null = null;
   if (!embedRuntime) {
     // Union usedRuntimeChunks across every compiled file in this run.
-    // Always include the per-spec always-present set (`core`, `scope`,
-    // `errors`, `transitions`) so files that skipped CG (library mode,
-    // empty workers, fixture files with no AST features) still produce
-    // a runnable runtime.
+    // Always include the always-present set (`core`, `scope`) so files that
+    // skipped CG (library mode, empty workers, fixture files with no AST
+    // features) still produce a runnable runtime. (S461: `errors` left this set —
+    // a file that needs it carries it in its own usedRuntimeChunks; the retired
+    // `transitions` name, which no longer names a chunk, is dropped too.)
     const union = new Set<string>();
     for (const ctx of cgContextByFile.values()) {
       for (const name of ctx.usedRuntimeChunks) union.add(name);
     }
     union.add("core");
     union.add("scope");
-    union.add("errors");
-    union.add("transitions");
+    applyChunkDependencies(union);
     runtimeJs = assembleRuntime(union);
     // Capture the CLASSIC slice (its top-level decls are the runtime-export
     // universe) before the esm transform, for the per-route chunk conversion.

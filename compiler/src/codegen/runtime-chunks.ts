@@ -8,8 +8,10 @@
  * feature group. Chunks are assembled in `emit-client.ts` based on what the
  * compiled scrml file actually uses.
  *
- * Always-included chunks: 'core', 'scope', 'errors'
+ * Always-included chunks: 'core', 'scope'
  * (Pre-populated in makeCompileContext() in context.ts.)
+ * ('errors' was always-included until S461; it is now pulled by the post-emit
+ * reference gate in emit-client.ts and by the CHUNK_DEPENDENCIES edges below.)
  *
  * Conditionally-included chunks: all others.
  * (Added by detectRuntimeChunks() in emit-client.ts.)
@@ -52,7 +54,11 @@
  *   (transitions  RETIRED — the §38 keyframes moved to the emitted stylesheet,
  *                 codegen/emit-transition-css.ts. An inline <style> is refused
  *                 under `headers="strict"`'s `default-src 'self'`, §39.2.5.)
- *   errors        _ScrmlError, NetworkError, ValidationError, SQLError, AuthError, etc.
+ *   errors        _ScrmlError, NetworkError, ValidationError, SQLError, AuthError, etc.,
+ *                 _scrml_error_boundary_log, _scrml_error_boundary_uncaught. Activated by the
+ *                 POST-EMIT reference gate (emit-client.ts ERRORS_CHUNK_REFERENCE) when the
+ *                 emitted client names any of them, and by the dependency edges from the
+ *                 chunks whose own helpers report through `_scrml_error_boundary_log`.
  *   input         _scrml_input_keyboard/mouse/gamepad_create/destroy
  *   equality      _scrml_structural_eq
  *   deep_reactive _scrml_track, _scrml_trigger, _scrml_deep_reactive (Proxy),
@@ -528,14 +534,25 @@ export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkNa
   scope: ['timers', 'animation'],
   // §22.4.1 (S458 "a"): `_scrml_meta_emit` (meta) calls `_scrml_meta_emit_insert` (metaemit), which
   // judges URL attributes with `_scrml_is_url_attr` / `_scrml_url_value_admitted` (urlguard).
+  // metaemit also reports a refused emit through `_scrml_error_boundary_log` (errors).
   meta: ['metaemit'],
-  metaemit: ['urlguard'],
+  metaemit: ['urlguard', 'errors'],
+  // S461 — `errors` is no longer always-included, so every chunk whose OWN helpers report through
+  // `_scrml_error_boundary_log` records the edge. Those calls are `typeof`-guarded, so a missing
+  // edge would not throw — it would silently drop the report, which is a behaviour change, not a
+  // saving. Audit (acorn, every chunk): reset (`_scrml_reset_apply`), ssr (`_scrml_ssr_seed_apply`),
+  // urlguard (the refused-URL report), metaemit (the refused-emit report). No other chunk names
+  // any `errors` definition.
+  reset: ['errors'],
+  ssr: ['errors'],
+  urlguard: ['errors'],
 };
 
 // Pulls all transitive chunk dependencies into the set in place. Returns
-// the set for chaining. Safe to call repeatedly (idempotent). Called once
-// at the end of `detectRuntimeChunks` (emit-client.ts) before chunk-set
-// consumption.
+// the set for chaining. Safe to call repeatedly (idempotent). Called at the
+// end of `detectRuntimeChunks` (emit-client.ts) AND again after the post-emit
+// reference gates there (S461): a chunk those gates add (reset, ssr,
+// urlguard, ...) carries its edges too.
 export function applyChunkDependencies(chunks: Set<string>): Set<string> {
   // Fixed-point iteration — current dep set is shallow (max depth 1) but
   // the loop tolerates future deeper chains without re-engineering.

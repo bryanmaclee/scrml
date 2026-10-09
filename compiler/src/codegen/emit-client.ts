@@ -41,6 +41,17 @@ import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-enc
 import { collectThemeContext, themeVariantAttr } from "./emit-theme-reset.ts";
 import type { CompileContext } from "./context.ts";
 import { judgeDefinitionsFor } from "./emit-predicates.ts";
+
+/**
+ * S461 — a reference, in emitted client text, to anything the 'errors' runtime
+ * chunk defines (runtime-template.js §19 / §19.6.8). Word-bounded; a name
+ * directly inside quotes (`"NetworkError"`, a variant TAG) or after a member dot
+ * is not a reference. Keep the name list in step with the chunk — the S461
+ * corpus sweep (docs/changes/s461-runtime-tree-shake) is the proof it is.
+ */
+const ERRORS_CHUNK_REFERENCE =
+  /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/;
+
 export type { EncodingContext } from "./type-encoding.ts";
 export type { CompileContext } from "./context.ts";
 
@@ -2558,8 +2569,9 @@ export function generateClientJs(ctx: CompileContext): string {
     // page would tell the user they are logged out when they are not (the
     // shared-computer hazard). Instead the projection is left intact and the
     // failure is reported through the scrml client error surface
-    // `_scrml_error_boundary_log` (the always-included 'errors' runtime chunk —
-    // the same reporter the server-fn call IIFEs route rejections to). destroy()
+    // `_scrml_error_boundary_log` (the 'errors' runtime chunk, pulled by the
+    // post-emit ERRORS_CHUNK_REFERENCE gate below — the same reporter the
+    // server-fn call IIFEs route rejections to). destroy()
     // resolves `true` on logout, `false` on failure; it does not reject, because
     // `onclick=session.destroy()` is wired without a `.catch` and a rejection
     // would be a silent browser-level unhandledrejection.
@@ -3138,6 +3150,36 @@ export function generateClientJs(ctx: CompileContext): string {
       }
     }
   }
+
+  // S461 — POST-EMIT `errors` chunk gate. The 'errors' chunk (the §19 built-in
+  // error classes + the §19.6.8 `_scrml_error_boundary_log` /
+  // `_scrml_error_boundary_uncaught` reporters) was seeded into EVERY page; a
+  // page that names none of them paid ~470 B gzip for nothing. Its references
+  // are emitted by many lowerings (server-fn call IIFEs, errorBoundary wiring,
+  // async `on mount`, engine `effect=`, session.destroy, the js-async listener
+  // seam, author code naming a class), so the emitted text is the one exact
+  // signal — the rationale of the table above.
+  //
+  // Word-bounded, and a name directly inside quotes does not count: every
+  // server-fn stub emits the STRING `variant: "NetworkError"`, which is a tag,
+  // not a reference to the class, and counting it would re-ship the chunk on
+  // every server page. A member read (`x.NetworkError`) is not a reference
+  // either. Over-inclusion is the only failure direction left (a comment or an
+  // author binding of the same name) and it is safe: the chunk ships as before.
+  // The chunks whose own helpers report through `_scrml_error_boundary_log`
+  // pull 'errors' by CHUNK_DEPENDENCIES edge (runtime-chunks.ts), closed below.
+  if (!ctx.usedRuntimeChunks.has("errors")) {
+    for (const _ln of lines) {
+      if (typeof _ln === "string" && ERRORS_CHUNK_REFERENCE.test(_ln)) {
+        ctx.usedRuntimeChunks.add("errors");
+        break;
+      }
+    }
+  }
+  // S461 — close the dependency edges again: the post-emit gates above add
+  // chunks (reset, ssr, urlguard, ...) AFTER `detectRuntimeChunks` already ran
+  // `applyChunkDependencies`, and those chunks carry edges of their own.
+  applyChunkDependencies(ctx.usedRuntimeChunks);
 
   // ss27-4 (runtime-minimality) — POST-EMIT tree-shake of client-SAFE stdlib
   // runtime chunks used ONLY in server code. A `scrml:NAME` capability lowers
@@ -3787,8 +3829,9 @@ export function generateClientJs(ctx: CompileContext): string {
         // loud non-swallowing typed reporter the errorBoundary catch uses at
         // emit-event-wiring.ts:1320 — it accepts a raw host throw OR a typed
         // `{ __scrml_error, ... }` envelope, so no separate normalization is
-        // needed). `_scrml_error_boundary_log` lives in the always-included
-        // 'errors' runtime chunk, so the reference never dangles.
+        // needed). `_scrml_error_boundary_log` lives in the 'errors' runtime
+        // chunk, which the post-emit ERRORS_CHUNK_REFERENCE gate (below) pulls
+        // for exactly the files that emit this reference, so it never dangles.
         //
         // The `.catch(...)` sits on the IIFE CALL — valid in BOTH statement
         // position (`(...)().catch(...);`) and expression position (preserving the

@@ -63,7 +63,8 @@ export interface CompileContext {
    * by the factory):
    *   - 'core'        — _scrml_reactive_get/set/subscribe (used everywhere)
    *   - 'scope'       — _scrml_register_cleanup, _scrml_destroy_scope (used by timers, meta, input)
-   *   - 'errors'      — built-in error classes (NetworkError, ValidationError, etc.)
+   * ('errors' — the built-in error classes + `_scrml_error_boundary_log` — was
+   * always-included until S461; emit-client.ts now adds it by post-emit reference.)
    *
    * All other chunks are conditionally added by detectRuntimeChunks() in
    * emit-client.ts based on AST feature usage.
@@ -258,7 +259,10 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // stylesheet instead (codegen/emit-transition-css.ts) — an inline <style>
     // is refused under `headers="strict"`'s `default-src 'self'` (§39.2.5) —
     // so the chunk no longer exists.
-    usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope', 'errors']),
+    // S461 — 'errors' is no longer seeded: a page that names none of its classes
+    // or `_scrml_error_boundary_log` ships without it (emit-client.ts adds it by
+    // post-emit reference, and runtime-chunks.ts CHUNK_DEPENDENCIES by edge).
+    usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope']),
     // C15 — MOD exportRegistry, optional. Defaults to null for tests that
     // bypass the full pipeline; the C15 cross-file mount walker short-circuits
     // when null.
