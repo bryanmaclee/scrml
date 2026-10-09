@@ -26,9 +26,9 @@
 //     THE TYPER (a type per expression node in `Tables.typing`; writes,
 //     initializers, call arity, `<each in=>`, conditions and operator
 //     operands checked — E-TYPE-031, E-TYPE-041, E-CALL-ARITY,
-//     E-EACH-NOT-SEQUENCE, and the S440-ruled E-COND-NOT-BOOLEAN,
-//     E-OPERATOR-OPERAND-TYPE, E-OPERAND-NOT-NARROWED, E-INT-DIVISION, whose
-//     codes are PROPOSED here — no SPEC text names them yet). Where neither a
+//     E-EACH-NOT-SEQUENCE, and the S440-ruled E-COND-NOT-BOOLEAN (SPEC
+//     §42.4, S460), E-OPERATOR-OPERAND-TYPE, E-OPERAND-NOT-NARROWED,
+//     E-INT-DIVISION — named in SPEC §66.20, S442). Where neither a
 //     ruling nor the SPEC names a rule they use bootstrap-local
 //     `E-BOOTSTRAP-*` codes; see each section's header for the sentences.
 //
@@ -52,6 +52,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
+    import { Severity } from "./severity.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
@@ -4253,6 +4254,16 @@ ${
         if (isNot) {
             const r: RX = resolveExpr(env, x, Type.Bool, st0)
             return plain(Type.Bool, addValue(r.st, e.nid, ValueFact.VOp(PrimOp.Not)))
+        }
+        // s460: `x is given` / `x is not` (§42.2.4) — an absence check over a
+        // value of any type, lowered as `x != not` / `x == not` are
+        const isGiven: boolean = op == UnOp.IsGiven
+        const isAbsent: boolean = op == UnOp.IsNot
+        if (isGiven || isAbsent) {
+            const rp: RX = resolveExpr(env, x, not, st0)
+            let prim: PrimOp = PrimOp.IsSome
+            if (isAbsent) prim = PrimOp.IsNot
+            return plain(Type.Bool, addValue(rp.st, e.nid, ValueFact.VOp(prim)))
         }
         const r2: RX = resolveExpr(env, x, not, st0)
         return plain(r2.x.ty, addValue(r2.st, e.nid, ValueFact.VOp(PrimOp.Neg)))
@@ -8956,9 +8967,11 @@ ${
     //   - CALL ARITY: E-CALL-ARITY (ruled S440 #2; SPEC §7.3) — see typeCall.
     //   - `<each in=…>`: E-EACH-NOT-SEQUENCE (ruled S440 #3; SPEC §17.7.2) for
     //     a value provably not a sequence — see checkIterable.
-    //   - CONDITIONS (`if`, `if=`, a ternary test): a `bool` or a `T | not`
-    //     presence test, else E-COND-NOT-BOOLEAN (ruled S440 #4 = (c) + Q1/Q2)
-    //     — see checkCond; a presence test is recorded for `lower`.
+    //   - CONDITIONS (`if`, `if=` / `else-if=`, `show=`, a ternary test): a
+    //     `bool` or a `T | not` presence test, else E-COND-NOT-BOOLEAN (ruled
+    //     S440 #4 = (c) + Q1) — an UNRESOLVED type included (ruled S460 "a′,
+    //     go": conditions are provable-or-ERROR, SPEC §42.4) — see checkCond;
+    //     a presence test is recorded for `lower`.
     //   - OPERATORS (ruled S440 Gotcha Q1-Q3, dpa-054 #3): E-OPERATOR-OPERAND-TYPE,
     //     E-OPERAND-NOT-NARROWED, E-INT-DIVISION — see checkOperands; the
     //     narrowing they need — see NARROWING.
@@ -8967,7 +8980,8 @@ ${
     // (position 4) — no ruling widened those.
     //
     // Assignability is PROVABLE-OR-SILENT: a check fires only on `Fails`, and
-    // an Unknown value is never an error here. `int` is ENFORCED (RULED S440,
+    // an Unknown value is never an error here. (The one exception is a
+    // CONDITION — S460, see checkCond.) `int` is ENFORCED (RULED S440,
     // JS-WAT 7(a)): a `number` into an `int` is `Fails`.
     // =========================================================================
     export fn exprType(t: Tables, nid: int) -> VType {
@@ -9010,14 +9024,31 @@ ${
     // place key — a `T | not` read of one of them is typed `T`.
     // `fnw`: each function's WRITE SET (place keys it may write, transitively
     // through its calls) — a call drops the narrowing of what its callee writes.
+    // `blame`: what has already been reported (see Blame) — read only by the
+    // condition rule (checkCond), never by another check.
     type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[], narrowed: string[],
-                         fnw: FnW[], rows: Alias[], fret: Type | not }
+                         fnw: FnW[], rows: Alias[], fret: Type | not, blame: Blame }
+    // s460 — §42.4 statement 6 ("no second report"): a CONDITION whose type is
+    // unresolved BECAUSE of an error already reported is not reported again.
+    // `spans`: the Error diagnostics the passes before the typer (binder, scope,
+    // effect, validator) reported in this file; `syms`: the locals whose
+    // WRITTEN type was refused (a parameter annotation that failed to parse or
+    // to resolve, E-TYPE-UNKNOWN — Rule C for names, r8); `fns`: the functions
+    // (by Sym id) whose written return type was refused, or whose name is
+    // declared in two files (guard (ii), already E-BOOTSTRAP-UNSUPPORTED).
+    type Blame:struct = { spans: ASpan[], syms: int[], fns: int[] }
     type RVT:struct = { vt: VType, ts: TypeState }
     type RTEnv:struct = { env: TEnv, ts: TypeState }
 
+    fn tWithRefused(env: TEnv, s: Sym) -> TEnv {
+        const b: Blame = { spans: env.blame.spans, syms: env.blame.syms.concat([s.id]), fns: env.blame.fns }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled,
+                 narrowed: env.narrowed, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: b }
+    }
+
     fn tWithLocal(env: TEnv, s: Sym, vt: VType) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled,
-                 narrowed: env.narrowed, fnw: env.fnw, rows: env.rows, fret: env.fret }
+                 narrowed: env.narrowed, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     // ---- NARROWING (for the S440 `T | not` operand rule) ------------------------
@@ -9025,17 +9056,22 @@ ${
     // arithmetic, comparison, or use in a template" — so the typer must know
     // where a `T | not` place IS narrowed, or it would refuse correct code.
     // The slice's narrowing forms (it parses no `is some` / `given` over a
-    // value): a presence comparison `x != not` / `x == not` (either side), a
-    // bare `T | not` condition `if (x)` (a presence test, truthiness Q1), and
-    // their `&&` / `||` / `!` combinations — narrowing the `if` / `else`
-    // branch, the ternary arm, the right operand of `&&` / `||`, an element
-    // under `if=` (its other attributes and children), and the rest of a
-    // block after an `if` whose other branch always `return`s. A place is
-    // named by its key: a local by its Sym (`#id`), a cell / handle path by
-    // its spelling (`@o.v`). A later bare write to the place (or a prefix of
-    // it) in the same block drops the narrowing. Narrowing only ever makes
-    // the typer SILENT (a narrowed read is `T`), so erring generous — a write
-    // in a NESTED block does not un-narrow — is the provable-or-silent side.
+    // value): the explicit tests `x is given` / `x is not` (s460, §42.4
+    // statement 8), a presence comparison `x != not` / `x == not` (either
+    // side), and a bare `T | not` condition `if (x)` (a presence test,
+    // truthiness Q1) — narrowing the `if` / `else` branch, the ternary arm,
+    // the right operand of `&&` / `||`, an element under `if=` (its other
+    // attributes and children), and the rest of a block after an `if` whose
+    // other branch always `return`s. They combine through `&&` / `||` and
+    // through a `!` applied to one of those BOOLEAN tests (`!(x is not)`,
+    // `!(x == not)`); a `!` over a bare `T | not` is not a combination — it is
+    // refused (E-OPERATOR-OPERAND-TYPE: `!` takes booleans, S440 Gotcha Q2),
+    // because a bare optional is a presence test only as a WHOLE condition.
+    // A place is named by its key: a local by its Sym (`#id`), a cell /
+    // handle path by its spelling (`@o.v`). A write to the place (or a prefix
+    // of it) drops the narrowing for the rest of the block — a bare write, a
+    // call whose callee may write it (`fnw`), and a write inside a NESTED
+    // block too (an `if` / `given` leaves the JOIN of its paths, r2 F1 / F3).
     type Narrowing:struct = { yes: string[], no: string[] }
 
     fn noNarrowing() -> Narrowing { return { yes: [], no: [] } }
@@ -9053,7 +9089,7 @@ ${
         for (const k of env.narrowed) {
             if (k.indexOf("#") == 0 && k.indexOf(".") < 0 && !reboundLocal(env.t, k.substring(1))) keep = keep.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     // Is the local with Sym id `id` rebound (`x = …`) anywhere?
@@ -9081,7 +9117,7 @@ ${
         for (const k of keys) {
             if (k != "") out = out.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     // Drop the narrowing of `key` and of every place under it.
@@ -9102,7 +9138,7 @@ ${
         for (const k of env.narrowed) {
             if (!underAny(k, drop)) out = out.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     // Is `k` one of `keys`, or a place under one?
@@ -9115,7 +9151,7 @@ ${
 
     fn tWithRow(env: TEnv, bind: Sym, src: string) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: env.narrowed,
-                 fnw: env.fnw, rows: env.rows.concat([{ name: "#" + bind.id, key: src }]), fret: env.fret }
+                 fnw: env.fnw, rows: env.rows.concat([{ name: "#" + bind.id, key: src }]), fret: env.fret, blame: env.blame }
     }
 
     // A place's key ("" — not a place the typer narrows).
@@ -9253,6 +9289,10 @@ ${
     fn orNarrowing(a: Narrowing, b: Narrowing) -> Narrowing { return { yes: [], no: a.no.concat(b.no) } }
 
     fn unaryNarrowing(env: TEnv, op: UnOp, x: AExpr) -> Narrowing {
+        // s460: `x is given` proves `x` present when true; `x is not` when
+        // false (as `x != not` / `x == not` do — §42.4 statement 8)
+        if (op == UnOp.IsGiven) return { yes: [nKey(env, x)], no: [] }
+        if (op == UnOp.IsNot) return { yes: [], no: [nKey(env, x)] }
         const isNot: boolean = op == UnOp.Not
         if (!isNot) return noNarrowing()
         const n: Narrowing = condNarrowing(env, x)
@@ -10135,7 +10175,7 @@ ${
 
     fn checkKnown(env: TEnv, x: Type, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         if (mayBeNot(x, target)) {
-            return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x != not) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
+            return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x is given) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
         }
         if (fitsType(x, target) != Verdict.Fails) return ts
         return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
@@ -10390,6 +10430,9 @@ ${
 
     fn typeUnary(env: TEnv, e: AExpr, o: UnOp, x: AExpr, ts: TypeState) -> RVT {
         const r: RVT = typeExpr(env, x, ts)
+        // s460: `x is given` / `x is not` is a `bool` over an operand of any
+        // type (§42.2.4) — the operand needs no narrowing; it is what narrows
+        if (o == UnOp.IsGiven || o == UnOp.IsNot) return rvt(known(Type.Bool), r.ts)
         const isNot: boolean = o == UnOp.Not
         if (hasErrIn(env.errs, e.span)) {
             // Rule C: an operation holding a parser error is not judged
@@ -10429,7 +10472,9 @@ ${
     // booleans only; defaults use `??`." Gotcha Q3: "a `T | not` operand must
     // be narrowed before `+`, arithmetic, comparison, or use in a template."
     // Truthiness Q2: "an immediate error wherever the violation is PROVABLE,
-    // silence where the type is unknown (provable-or-silent)". dpa-054 #3: "`/`
+    // silence where the type is unknown (provable-or-silent)" — still the rule
+    // for every OPERAND here; superseded for CONDITIONS by S460 (checkCond).
+    // dpa-054 #3: "`/`
     // between two `int`s … is a compile error naming the fix".
     // No SPEC text or code exists yet for these (SPEC pass 2 owes both), so the
     // codes are PROPOSED here and flagged: E-OPERATOR-OPERAND-TYPE (an operand
@@ -10557,7 +10602,7 @@ ${
 
     fn operandType(env: TEnv, x: AExpr, got: string, what: string, takes: string, ts: TypeState) -> TypeState {
         let hint: string = ""
-        if (takes == "booleans") hint = " — compare explicitly (`n > 0`, `s != \"\"`, `x != not`)"
+        if (takes == "booleans") hint = " — compare explicitly (`n > 0`, `s != \"\"`, `x is given`)"
         return report(ts, env, x.span, "E-OPERATOR-OPERAND-TYPE", what + " takes " + takes + ", and this operand is `" + got + "`" + hint + " (ruled S440, Gotcha Q1 / Q2)")
     }
 
@@ -10567,15 +10612,19 @@ ${
     // with flow narrowing it silenced only reads where the local may really be
     // `not` (`let a = not; if (…) { a = 5 }; a + 1`).
     fn notNarrowed(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
-        return report(ts, env, x.span, "E-OPERAND-NOT-NARROWED", what + " on a `" + typeName(t) + "` operand — it may be `not`; narrow it first (`if (x != not) { … }`, `x != not && …`) (ruled S440, Gotcha Q3)")
+        return report(ts, env, x.span, "E-OPERAND-NOT-NARROWED", what + " on a `" + typeName(t) + "` operand — it may be `not`; narrow it first (`if (x is given) { … }`, `x is given && …`) (ruled S440, Gotcha Q3)")
     }
 
-    // A condition — `if`, `if=`, a ternary test (truthiness (c), RULED S440 #4:
-    // "All conditions require a boolean, or a `T | not` presence test, and the
-    // truthiness of numbers and strings goes"; Q1: "a bare `@x` of type
-    // `T | not` IS a presence test … the compiler emits an absence check,
-    // never JS truthiness"; Q2: "an immediate error wherever the violation is
-    // PROVABLE, silence where the type is unknown … no §63 window").
+    // A condition — `if`, `if=` / `else-if=`, `show=`, a ternary test (SPEC
+    // §42.4). RULED S440 #4 = (c): "All conditions require a boolean, or a
+    // `T | not` presence test, and the truthiness of numbers and strings goes";
+    // Q1: "a bare `@x` of type `T | not` IS a presence test … the compiler
+    // emits an absence check, never JS truthiness". RULED S460 ("a′, go"):
+    // "a bare `x` whose type the compiler CANNOT resolve is an ERROR naming
+    // the fixes (annotate it, or write `x is given` / `x == true`)" — which
+    // supersedes S440 Truthiness Q2's provable-or-silent FOR CONDITIONS ONLY:
+    // a condition is PROVABLE-OR-ERROR. Every other check here stays
+    // provable-or-silent (an Unknown operand, argument, `in=` … is silent).
     fn checkCond(env: TEnv, c: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
         if (hasErrIn(env.errs, c.span)) return ts          // Rule C: not judged across a parse error
         // r5 R3: a bare conditional-handle presence test stays a presence
@@ -10585,8 +10634,96 @@ ${
         return match v {
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
-            .Unknown :> ts
+            .Unknown :> condUnresolved(env, c, what, ts)
         }
+    }
+
+    // s460 — a condition whose type did not resolve is E-COND-NOT-BOOLEAN
+    // (§42.4 statement 5), unless an error already reported explains it
+    // (statement 6: no second report — see Blame).
+    fn condUnresolved(env: TEnv, c: AExpr, what: string, ts: TypeState) -> TypeState {
+        if (condBlamed(env, c, ts)) return ts
+        return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a value whose type the compiler cannot resolve, and a condition must be a `bool` or a `T | not` presence test — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a′, go\")")
+    }
+
+    // Is condition `c`'s unresolved type already accounted for? An Error the
+    // typer (a refused operator, E-CALL-ARITY …) or an earlier pass (an
+    // undeclared name, a refused construct) reported inside it; or a read of
+    // a local / field whose written type was refused, or a call of a function
+    // whose written return type was refused.
+    fn condBlamed(env: TEnv, c: AExpr, ts: TypeState) -> boolean {
+        if (hasErrIn(env.blame.spans, c.span)) return true
+        for (const d of ts.diags) {
+            if (d.file == env.file && d.severity == Severity.Error && d.span.start >= c.span.start && d.span.end <= c.span.end) return true
+        }
+        return refusedRead(env, c)
+    }
+
+    fn refusedRead(env: TEnv, c: AExpr) -> boolean {
+        const k: AExprK = c.k
+        return match k {
+            .Name(name: n) :> refusedName(env, nameFact(env.t.names, c.nid))
+            .At(name: n) :> refusedName(env, nameFact(env.t.names, c.nid))
+            .Member(obj: o) :> refusedName(env, nameFact(env.t.names, c.nid)) || refusedRead(env, o)
+            .Call(callee: f) :> refusedCallee(env, calleeFn(nameFact(env.t.names, f.nid)))
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> true
+            .Variant(name: n) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    fn refusedName(env: TEnv, f: NameFact | not) -> boolean {
+        return match f {
+            .NLocal(sym: s) :> env.blame.syms.indexOf(s.id) >= 0
+            .NField(decl: d, inst: i, idx: x) :> refusedDeclField(env.t, d, x)
+            .NStruct(owner: o, idx: x) :> refusedStructField(env.t, o, x)
+            .NInst(decl: d) :> false
+            .NFn(sym: s) :> false
+            .NLength :> false
+            .NSurface(of: x) :> false
+            // a name the binder did not resolve: undeclared (reported by the
+            // scope rules) or inside a construct already refused (`if=` on a
+            // `<db>`, E-BOOTSTRAP-UNSUPPORTED) — not a type left unresolved
+            not :> true
+        }
+    }
+
+    fn refusedCallee(env: TEnv, s: Sym | not) -> boolean {
+        if (s is not) return false
+        return env.blame.fns.indexOf(s.id) >= 0
+    }
+
+    // A declaration field whose WRITTEN type was refused (FieldInfo.trusted, r8).
+    fn refusedDeclField(t: Tables, d: Sym, idx: int) -> boolean {
+        const di: DeclInfo | not = declInfo(t, d)
+        if (di is not) return false
+        if (idx < 0 || idx >= di.fields.length) return false
+        return di.fields[idx].annotated && !di.fields[idx].trusted
+    }
+
+    // A struct field whose type did not resolve (Unresolved.fields, r8).
+    fn refusedStructField(t: Tables, owner: Sym, idx: int) -> boolean {
+        const ti: TypeInfo | not = typeInfoOf(t.types, owner)
+        if (ti is not) return false
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return false
+        if (idx < 0 || idx >= fs.length) return false
+        return t.unresolved.fields.indexOf(fs[idx].sym.id) >= 0
     }
 
     fn condKnown(env: TEnv, c: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
@@ -10599,7 +10736,7 @@ ${
             // outside a narrowing". (A NARROWED `bool | not` reads as `bool`
             // and stays a value test.)
             if (kindOf(inner) == 3) {
-                return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a bare `bool | not` — ambiguous: say `x != not` (is it present? — `is some` once the slice parses it) or `x == true` (is it true?) (ruled S442)")
+                return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a bare `bool | not` — ambiguous: say `x is given` (is it present?) or `x == true` (is it true?) (ruled S442)")
             }
             return markPresence(ts, c.nid)
         }
@@ -11117,7 +11254,7 @@ ${
 
     fn withNarrowed(env: TEnv, keys: string[]) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keys,
-                 fnw: env.fnw, rows: env.rows, fret: env.fret }
+                 fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
 
     fn typeMaybeExpr(env: TEnv, e: AExpr | not, ts: TypeState) -> TypeState {
@@ -11680,13 +11817,15 @@ ${
     // within 3N + 2 passes (the bound; a chain of N locals needs N + 1). If
     // the bound is ever hit, only the locals STILL CHANGING become Unknown
     // (silent — provable-or-silent); settled ones keep their type.
-    fn typeProgram(files: FileAst[], t: Tables) -> RTyping {
+    // `prior`: the diagnostics the passes before the typer reported — read only
+    // to keep the condition rule from reporting a second time (Blame, s460).
+    fn typeProgram(files: FileAst[], t: Tables, prior: Diag[]) -> RTyping {
         let settled: LocalT[] = []
         let prev: LocalT[] = []
         let pass = 0
         let bound = 2
         while (pass < bound) {
-            const ts: TypeState = typePass(files, t, settled)
+            const ts: TypeState = typePass(files, t, settled, prior)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
             if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence), diags: ts.diags }
@@ -11694,7 +11833,7 @@ ${
             settled = next
             pass = pass + 1
         }
-        const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled))
+        const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled), prior)
         return { typing: typingOf(last.exprs, last.presence), diags: last.diags }
     }
 
@@ -11713,14 +11852,47 @@ ${
         return out
     }
 
-    fn typePass(files: FileAst[], t: Tables, settled: LocalT[]) -> TypeState {
+    fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[]) -> TypeState {
         let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [] }
         const fnw: FnW[] = fnWrites(files)
+        const fns: int[] = refusedReturns(files, t)
         for (const f of files) {
-            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw, rows: [], fret: not }
+            const blame: Blame = { spans: errorSpansIn(prior, f.path), syms: [], fns: fns }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw, rows: [], fret: not, blame: blame }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
+    }
+
+    // s460 (Blame.spans): the spans of the Error diagnostics in file `path`.
+    fn errorSpansIn(ds: Diag[], path: string) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const d of ds) {
+            if (d.file == path && d.severity == Severity.Error) out = out.concat([d.span])
+        }
+        return out
+    }
+
+    // s460 (Blame.fns): the functions whose WRITTEN return type was refused —
+    // it failed to parse or to resolve (fnsOf leaves `ret` unset: guard (i))
+    // — or whose name is declared in two files (guard (ii)).
+    fn refusedReturns(files: FileAst[], t: Tables) -> int[] {
+        let out: int[] = []
+        for (const f of files) {
+            for (const af of fnItems(f.items)) {
+                const s: Sym | not = bindSym(bindFact(t.binds, af.nid))
+                if (s is some) {
+                    const fi: FnInfo | not = fnInfoOf(t, s)
+                    if (fi is some) {
+                        const at: AType | not = af.ret
+                        let refused: boolean = inManyFiles(t, fi.name)
+                        if (at is some && !isVoidType(at) && fi.ret is not) refused = true
+                        if (refused) out = out.concat([s.id])
+                    }
+                }
+            }
+        }
+        return out
     }
 
     fn typeItem(env: TEnv, it: AItem, ts: TypeState) -> TypeState {
@@ -11837,8 +12009,15 @@ ${
             const s: Sym | not = bindSym(pf)
             // an untyped parameter, or one whose type failed to parse, is unproven
             let pvt: VType = VType.Unknown
-            if (paramsTrusted(env.errs, [p]) && env.t.unresolved.params.indexOf(p.nid) < 0) pvt = paramType(pf)
-            if (s is some) fenv = tWithLocal(fenv, s, pvt)
+            const trusted: boolean = paramsTrusted(env.errs, [p]) && env.t.unresolved.params.indexOf(p.nid) < 0
+            if (trusted) pvt = paramType(pf)
+            if (s is some) {
+                fenv = tWithLocal(fenv, s, pvt)
+                // s460 (Blame.syms): a WRITTEN type that was refused (Rule C);
+                // an unannotated parameter is not blamed — its type is simply
+                // unresolved, which is what the condition rule reports (§42.4 5)
+                if (!trusted && p.ty is some) fenv = tWithRefused(fenv, s)
+            }
         }
         return typeBlock(withRet(fenv, fnRet(env.t, af)), af.body, ts)
     }
@@ -11854,7 +12033,7 @@ ${
 
     fn withRet(env: TEnv, r: Type | not) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: env.narrowed,
-                 fnw: env.fnw, rows: env.rows, fret: r }
+                 fnw: env.fnw, rows: env.rows, fret: r, blame: env.blame }
     }
 
     // =========================================================================
@@ -15971,7 +16150,7 @@ ${
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum)
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
-        const typed: RTyping = typeProgram(files, bound)
+        const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags))
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)
         // s454 (U1b): the suspension plan — per client site, after placement (it

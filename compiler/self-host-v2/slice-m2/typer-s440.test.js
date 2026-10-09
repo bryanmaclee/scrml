@@ -298,7 +298,7 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
   test("r4 (a) — a bare `bool | not` condition is E-COND-NOT-BOOLEAN naming both fixes (ruled S442)", () => {
     const d = run([LIB(), app(O, "<p if=@o.f>x</p>")]).diags;
     expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
-    expect(d[0].message).toContain("x != not");
+    expect(d[0].message).toContain("x is given");   // s460: the SPEC spelling (§42.2.4), no longer `x != not`
     expect(d[0].message).toContain("x == true");
     expect(inApp(O + "    function f() { if (@o.f) { @m = 1 } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
@@ -348,8 +348,9 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     const r = run([LIB(), app(CELLS, "<p if=@b>x</p>")]);
     expect(r.typed.tables.typing.presence).toEqual([]);
   });
-  test("Q2 provable-or-silent — a call with no declared return type (Unknown) as a condition is silent", () => {
-    expect(inApp("    function g() { }", "<p if=g()>x</p>")).toEqual([]);
+  test("S460 (supersedes Q2 for conditions) — a call with no declared return type (Unknown) as a condition FIRES", () => {
+    // ruled S460 "a′, go": "a bare `x` whose type the compiler CANNOT resolve is an ERROR naming the fixes"
+    expect(inApp("    function g() { }", "<p if=g()>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("Q2 provable-or-silent — a call DECLARED `-> int` as a condition fires", () => {
     expect(inApp("    function g() -> int { return 1 }", "<p if=g()>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
@@ -518,7 +519,7 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp("    let <m:int=0/>\n    function f() { let a: int | not = 5\n @m = a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("the message says how to narrow", () => {
-    expect(diagsIn(O + "    function f() { @m = @o.n + 1 }")[0].message).toContain("!= not");
+    expect(diagsIn(O + "    function f() { @m = @o.n + 1 }")[0].message).toContain("x is given");   // s460: §42.2.4's spelling
   });
   test("narrowed — `if (x != not)`, `x != not && …`, a ternary arm, `if (x)` (a presence test)", () => {
     expect(inApp(O + "    function f() { if (@o.n != not) { @m = @o.n + 1 } }")).toEqual([]);

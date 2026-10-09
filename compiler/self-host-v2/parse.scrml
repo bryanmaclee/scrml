@@ -360,6 +360,13 @@ ${
             } else if (isPropagate(r.tp)) {
                 // s451 (Ue): `expr?` — propagation (§19.5)
                 r = handledExpr(adv(r.tp), start, r.e, AHow.Propagate)
+            } else if (isPresenceTest(r.tp)) {
+                // s460: `expr is given` / `expr is not` — a postfix presence
+                // test (§42.2.2, §42.2.4), binding tighter than a prefix `!`
+                // (`!x is not` is `!(x is not)`, as impl#1 reads it)
+                let pop: UnOp = UnOp.IsNot
+                if (isWord(adv(r.tp), "given")) pop = UnOp.IsGiven
+                r = mkE(adv(adv(r.tp)), start, AExprK.Unary(pop, r.e))
             } else {
                 going = false
             }
@@ -408,6 +415,17 @@ ${
         if (b.cls == TC.End || b.line != a.line) return true
         if (b.cls != TC.Punct) return false
         return b.text == ")" || b.text == "]" || b.text == "," || b.text == "}" || b.text == ";" || b.text == "|"
+    }
+
+    // s460: `is given` / `is not` on the line of what it tests (§7.2.2: a
+    // line that starts with `is` does not continue the previous one).
+    // `is some` is not parsed here (its retirement is un-ruled — S460).
+    fn isPresenceTest(tp: TP) -> boolean {
+        if (!isWord(tp, "is")) return false
+        if (tp.i == 0) return false
+        if (peekAt(tp, -1).line != cur(tp).line) return false
+        const n: TP = adv(tp)
+        return isWord(n, "given") || isWord(n, "not")
     }
 
     fn handledExpr(tp: TP, start: int, subject: AExpr, how: AHow) -> RExpr {
