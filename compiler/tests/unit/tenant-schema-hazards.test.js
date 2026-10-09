@@ -32,6 +32,11 @@ import {
 } from "../../src/tenant-schema-hazards.ts";
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const BT = "`";
 const w = (s) => `?{${BT}${s}${BT}}`;
 const body = (...stmts) => "\n" + stmts.map((s) => `    ${s.startsWith("--") || s.startsWith("/*") || /^\w+ \{/.test(s) ? s : w(s)}`).join("\n") + "\n  ";
@@ -439,7 +444,7 @@ describe("end to end — a schema whose triggers / FKs / views touch only non-te
     expect(await (await req("mine", a)).json()).toEqual([{ id: 1, name: "A-secret-asset" }]);
     expect(await (await req("cv", a)).json()).toEqual([{ k: "a", v: "b" }]);
     expect(await (await req("au", a)).json()).toEqual([{ msg: "a" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // S455 review round 2b (PA-reproduced on c85602108: exit 0, floor active, A's go() rewrote

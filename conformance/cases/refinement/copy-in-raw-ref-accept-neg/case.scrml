@@ -1,0 +1,16 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <m>: number = -5
+    <rows>: L[] = []
+    function load() {
+        const r = [{ u: "o", n: 4 }]
+        @rows = r
+        const p = { u: "p", n: @m }
+        r[0].n = @m
+        r.push(p)
+    }
+}
+<program>
+<button id="load" onclick=load()>load</button>
+<p id="out">${@rows.length}</p>
+</program>

@@ -1,0 +1,14 @@
+{
+  "id": "refinement-bind-unrefined-field-accept-neg",
+  "description": "S458 2a-fix F1: `bind:value` on a position that carries NO refinement writes the cell, even when the cell's type needs the whole-type judge. `@p.name` is an unrefined field of a struct with a refined field (`n: number(>0)`), and `@u` is a union `number(>0) | string`. Typing \"bob\" / \"hello\" writes both. In slice 2a the bind:value gate read a placeholder predicate off the whole-type stamp and emitted `if (false)`, so neither input ever wrote its cell.",
+  "language-version": "1.0",
+  "spec": "§53.7.2",
+  "rationale": "§53.7.2: \"bind:value on a constrained variable SHALL emit a runtime check at every input event, before the reactive assignment is applied. If the check fails, the assignment is not applied\" — the check is the bound value's own constraint: `name` has none, and \"hello\" inhabits the `string` member of `number(>0) | string` (§53.3.1).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "input": "#nm", "value": "bob" }, { "input": "#un", "value": "hello" }],
+    "state": { "p": { "name": "bob", "n": 1 }, "u": "hello" },
+    "domAnchored": [{ "selector": "#out", "text": "bob" }, { "selector": "#uo", "text": "hello" }]
+  }
+}

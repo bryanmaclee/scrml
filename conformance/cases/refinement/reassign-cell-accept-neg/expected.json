@@ -1,0 +1,14 @@
+{
+  "id": "refinement-reassign-cell-accept-neg",
+  "description": "S458 slice 2 (position 1) — the negative twin of reassign-cell-reject-rt: reassigning `<link>: string(url)` with a value that inhabits the type (\"https://example.com/\") passes the check and the cell takes it.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "§53.3.3: \"The assignment is applied if and only if the predicate evaluates to true.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#ok" }],
+    "state": { "link": "https://example.com/" },
+    "domAnchored": [{ "selector": "#out", "text": "https://example.com/" }]
+  }
+}

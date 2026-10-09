@@ -35,6 +35,11 @@ import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
 import { hostView } from "../helpers/host-view.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
 const _tmp = perRunTmp(resolve(testDir, "_tmp_csrf_write_path"));
@@ -185,5 +190,5 @@ describe("Issue #2 — CSRF write-path bootstrap", () => {
     const rows = verify.query("SELECT name FROM items").all();
     verify.close();
     expect(rows).toEqual([{ name: "alpha" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

@@ -1,0 +1,25 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <rows>: L[] = [{ u: "a", n: 1 }]
+    <other>: L[] = []
+    <ls>: number(>0)[] = [1, 2]
+    function pushThenEdit() {
+        const r = { u: "b", n: 2 }
+        @rows.push(r)
+        r.n = 9
+    }
+    function copyCell() {
+        @other = @rows
+        @other[0].n = 7
+    }
+    function append() {
+        @ls = [...@ls, 3]
+        @ls[0] = 4
+    }
+}
+<program>
+<button id="push" onclick=pushThenEdit()>push</button>
+<button id="copy" onclick=copyCell()>copy</button>
+<button id="append" onclick=append()>append</button>
+<p id="out">${@rows.length} ${@other.length} ${@ls.length}</p>
+</program>

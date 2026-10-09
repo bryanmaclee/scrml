@@ -1,0 +1,12 @@
+{
+  "id": "refinement-literal-call-arg-pos",
+  "description": "S458 slice 2 (position 8): a LITERAL argument to a refined parameter is decided at compile time. `rate(150)` against `score: number(>=0 && <=100)` is E-CONTRACT-001. Before S458 the literal compiled clean and failed only at run time, in the callee's entry check.",
+  "language-version": "1.0",
+  "spec": "§53.4.2",
+  "rationale": "§53.4.2 rule 1 (a numeric literal is statically decided); §53.3.1 \"at every assignment or binding site\"; §53.12.3: \"Call site: 10 is a literal, 10 > 0 && 10 < 500 — static zone, no check\".",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": ["E-CONTRACT-002"],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

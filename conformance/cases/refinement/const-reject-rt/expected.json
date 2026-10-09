@@ -1,0 +1,14 @@
+{
+  "id": "refinement-const-reject-rt",
+  "description": "S458 slice 2 (position 3): a refined `const` is judged like a refined `let`. `const link: string(url) = v` with v = \"javascript:alert(1)\" throws E-CONTRACT-001-RT before `link` binds, so @shown keeps the https value from the first click. Before S458 the `const` emitter ignored the check the type stage computed — every `const` refinement, at any depth, was unchecked.",
+  "language-version": "1.0",
+  "spec": "§53.2.2",
+  "rationale": "§53.2.2 \"variable declaration: let x: number(...) = expr\" — `const` is a variable declaration; §53.4.3(1) a raw function value is the boundary zone; §53.4.5.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#good" }, { "click": "#bad" }],
+    "state": { "shown": "https://scrml.dev/" },
+    "domAnchored": [{ "selector": "#out", "text": "https://scrml.dev/" }]
+  }
+}

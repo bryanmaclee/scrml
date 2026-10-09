@@ -28,6 +28,11 @@ import {
 import { rewriteSqlRefs } from "../../src/codegen/rewrite.ts";
 import { sqlSitesInExpressionText } from "../../src/sql-in-expression-text.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const BT = "`";
 
 /** Compile one server function body `stmt` (with `decl` before it) in a database program. */
@@ -110,7 +115,7 @@ describe("the three executed bypasses are refused at compile and send nothing", 
       const run = await execEmittedLine(serverJs);
       expect(run.notesPresent).toBe(true);
       expect(run.threw).toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 
   test("every keyword-named cell before `/` (the regex-vs-division misread)", () => {
@@ -128,7 +133,7 @@ describe("the three executed bypasses are refused at compile and send nothing", 
     const run = await execEmittedLine(serverJs);
     expect(run.attached).toBe(1);
     expect(run.threw).toContain("E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("E-TENANT-UNDECLARED is enforced at the lowering too (a hidden CREATE TABLE … tenant_id)", () => {
     const { codes, serverJs } = compileFn(
@@ -155,7 +160,7 @@ describe("§8.1.2 at the lowering — a multi-statement body in F2/F3/F4 positio
       const run = await execEmittedLine(serverJs);
       expect(run.notesPresent).toBe(true);
       expect(run.threw).toContain("E-SQL-MULTIPLE-STATEMENTS");
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 
   test("the bare `.unsafe` form too", () => {

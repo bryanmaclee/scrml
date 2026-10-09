@@ -32,6 +32,11 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { SQL } from "bun";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const SOCK = "/var/run/postgresql";
 const PG_USER = process.env.PGUSER || process.env.USER || "postgres";
 const SUFFIX = `${process.pid}`;
@@ -184,7 +189,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
       denied = /permission denied|not.*privilege/i.test(String(e.message ?? e));
     }
     expect(denied).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(2) bounded scrml_app mutation of the LOCKED status (not via the SECDEF) → DENIED", async () => {
     let denied = false;
@@ -205,7 +210,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
       return await tx`SELECT status FROM invoices WHERE id = ${invoiceA}`;
     });
     expect(rows[0].status).toBe("open");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(3a) the SECDEF WITHOUT the cap raises `denied` (fail-closed capability gate)", async () => {
     let msg = "";
@@ -227,7 +232,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
       return await tx`SELECT status FROM invoices WHERE id = ${invoiceA}`;
     });
     expect(rows[0].status).toBe("open");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(3b) the SECDEF WITH the cap succeeds — the sole sanctioned mutation path", async () => {
     await m.begin(async (tx) => {
@@ -242,7 +247,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
       return await tx`SELECT status FROM invoices WHERE id = ${invoiceA}`;
     });
     expect(rows[0].status).toBe("void");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(4) the emitted SECDEF is HARDENED — prosecdef + search_path pin + no PUBLIC EXECUTE", async () => {
     const rows = await m`
@@ -259,7 +264,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
     expect(cfg).not.toContain("pg_temp");
     expect(r.public_exec).toBe(false); // REVOKE EXECUTE FROM PUBLIC held
     expect(r.app_exec).toBe(true); // GRANT EXECUTE TO scrml_app held
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(4b) proowner REGRESSION LOCK — the SECDEF runs as the BOUNDED owner, NOT the migrator/superuser", async () => {
     // The load-bearing property: a SECURITY DEFINER function runs AS ITS OWNER, so if
@@ -277,7 +282,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
     expect(rows[0].rolname).not.toBe(MIGRATOR);
     expect(rows[0].rolsuper).toBe(false); // not a superuser (SECDEF ≠ superuser gateway)
     expect(rows[0].rolbypassrls).toBe(false); // stays subject to tenant RLS through the choke
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("bonus: scrml_app CAN update a MUTABLE column (memo) — the reshape is precise, not a blanket lock", async () => {
     await m.begin(async (tx) => {
@@ -291,5 +296,5 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
       return await tx`SELECT memo FROM invoices WHERE id = ${invoiceA}`;
     });
     expect(rows[0].memo).toBe("edited");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

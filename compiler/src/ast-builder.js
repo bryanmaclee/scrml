@@ -11052,11 +11052,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
       const variables = [];
+      // s461 — parallel to `variables`: true where the head identifier was
+      // written as a reactive CELL (`given @x`). `variables` holds the name with
+      // the `@` stripped (the narrowing consumers key on the bare name), so without
+      // this bit codegen cannot tell `given @x` from `given x` and lowered the
+      // cell to a bare JS name (ReferenceError at runtime — §42.2.3 / §42.5).
+      const variableIsCell = [];
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
       while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
         const identTok = consume();
         let name = identTok.text;
-        if (name.startsWith("@")) name = name.slice(1); // strip @ if user wrote @x
+        const isCell = name.startsWith("@");
+        if (isCell) name = name.slice(1); // strip @ if user wrote @x
         // §42.2.3: `given` takes plain identifiers, NOT property paths. Reject `given u.name`.
         if (peek().kind === "PUNCT" && peek().text === ".") {
           errors.push(new TABError(
@@ -11095,6 +11102,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
         variables.push(name);
+        variableIsCell.push(isCell);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
@@ -11121,6 +11129,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "given-guard",
         variables,
+        variableIsCell,
         separatorGlyph,
         body,
         span: spanOf(startTok, peek()),
@@ -16212,11 +16221,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
       const variables = [];
+      // s461 — parallel to `variables`: true where the head identifier was
+      // written as a reactive CELL (`given @x`). `variables` holds the name with
+      // the `@` stripped (the narrowing consumers key on the bare name), so without
+      // this bit codegen cannot tell `given @x` from `given x` and lowered the
+      // cell to a bare JS name (ReferenceError at runtime — §42.2.3 / §42.5).
+      const variableIsCell = [];
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
       while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
         const identTok = consume();
         let name = identTok.text;
-        if (name.startsWith("@")) name = name.slice(1); // strip @ if user wrote @x
+        const isCell = name.startsWith("@");
+        if (isCell) name = name.slice(1); // strip @ if user wrote @x
         // §42.2.3: `given` takes plain identifiers, NOT property paths. Reject `given u.name`.
         if (peek().kind === "PUNCT" && peek().text === ".") {
           errors.push(new TABError(
@@ -16256,6 +16272,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
         variables.push(name);
+        variableIsCell.push(isCell);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
@@ -16282,6 +16299,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "given-guard",
         variables,
+        variableIsCell,
         separatorGlyph,
         body,
         span: spanOf(startTok, peek()),

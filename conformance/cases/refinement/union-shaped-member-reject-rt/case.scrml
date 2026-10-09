@@ -1,0 +1,17 @@
+${
+    <neg>: number = -5
+    <d>: number(>0) | date = 1
+    <t>: number(>0) | timestamp = 1
+    <mp>: number(>0) | [string: number] = 1
+    <shown>: string = "none"
+    function pick(v: number(>0) | date) {
+        @shown = "ok"
+    }
+}
+<program>
+<button id="d" onclick=${@d = @neg}>a</button>
+<button id="t" onclick=${@t = @neg}>b</button>
+<button id="mp" onclick=${@mp = @neg}>c</button>
+<button id="p" onclick=${pick(@neg)}>d</button>
+<p id="out">${@d} ${@t} ${@mp} ${@shown}</p>
+</program>

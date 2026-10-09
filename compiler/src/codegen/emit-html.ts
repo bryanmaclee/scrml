@@ -27,7 +27,7 @@ import { collectThemeContext, collectThemeTokenNames } from "./emit-theme-reset.
 import { lookupStateCell, lookupQualifiedStateCell, lookupCompoundMembersByLeafName, getCellKind } from "../symbol-table.ts";
 // A1c C16 — §53.7.1 HTML attr generation for refinement-typed bindable cells.
 // `deriveHtmlAttrs` maps the predicate to native HTML validation attributes.
-import { deriveHtmlAttrs } from "./emit-predicates.ts";
+import { deriveHtmlAttrs, htmlPredicateOf, refinementAtPath } from "./emit-predicates.ts";
 // A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
 // S458 one reader — `cellRefinement` reads the TS-resolved refinement off that map.
@@ -596,6 +596,9 @@ const SERVER_ONLY_STATE_TYPES = new Set(["schema", "seeds"]);
  */
 function stmtContainsRenderableLogic(node: any): boolean {
   if (!node || typeof node !== "object") return false;
+  // S458 slice 2 — a refined parameter's guard (a body-prepended bare-expr the
+  // type-system stage adds, refinement-obligations.ts) renders nothing.
+  if (node.refineParamGuard) return false;
   if (node.kind === "bare-expr" || node.kind === "lift-expr") return true;
   for (const key of ["body", "consequent", "alternate"]) {
     if (Array.isArray(node[key])) {
@@ -3171,7 +3174,9 @@ export function generateHtml(
         const _bvRootKey = _bvName.split(".")[0];
         const _bvAnnot = reactiveTypeMap.get(_bvRootKey);
         if (!_bvAnnot) continue;
-        const _bvParsed = cellRefinement(reactiveTypeMap, _bvRootKey);
+        // S458 2a-fix F1 — the attributes come from the BOUND position's own
+        // refinement (`@p.n` → field `n`), and only from a plain refinement.
+        const _bvParsed = htmlPredicateOf(refinementAtPath(cellRefinement(reactiveTypeMap, _bvRootKey), _bvName.split(".").slice(1)));
         if (!_bvParsed) continue;
         const _bvDerived = deriveHtmlAttrs(_bvParsed.predicate, _bvParsed.baseType);
         for (const [k, v] of Object.entries(_bvDerived)) {

@@ -1,0 +1,12 @@
+${
+    <pos>: number = 4
+    <neg>: number = -4
+    <shown>: string = "none"
+    function show(v: number(>0) | string) {
+        @shown = "ok"
+    }
+}
+<program>
+<button id="neg" onclick=${show(@neg)}>Neg</button>
+<p id="out">${@shown}</p>
+</program>

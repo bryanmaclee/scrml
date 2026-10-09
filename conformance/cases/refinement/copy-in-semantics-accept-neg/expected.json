@@ -1,0 +1,18 @@
+{
+  "id": "refinement-copy-in-semantics-accept-neg",
+  "description": "S459 copy-in, the positive semantics (every write here is legitimate): (1) after `@rows.push(r)`, editing `r` (`r.n = 9`) does not reach the stored row — @rows[1].n stays 2. (2) `@other = @rows` stores @other's own copy: `@other[0].n = 7` changes @other only; @rows[0].n stays 1. (3) whole writes built from the cell's own value (`@ls = [...@ls, 3]`) and later element writes keep working.",
+  "language-version": "1.0",
+  "spec": "§53.3.3",
+  "rationale": "ruling:user-voice-scrml.md S459 \"a, go\" — a refined cell stores its own copy of everything it admits (the pushed element on push, the whole value on assignment); analogy:§66.10 (aliases snapshot). The direction of change for refined cells: after `@rows.push(@draft)`, editing `@draft` no longer changes the row.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#push" }, { "click": "#copy" }, { "click": "#append" }],
+    "state": {
+      "rows": [{ "u": "a", "n": 1 }, { "u": "b", "n": 2 }],
+      "other": [{ "u": "a", "n": 7 }, { "u": "b", "n": 2 }],
+      "ls": [4, 2, 3]
+    },
+    "domAnchored": [{ "selector": "#out", "text": "2 2 3" }]
+  }
+}

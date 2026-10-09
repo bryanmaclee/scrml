@@ -23,7 +23,7 @@ import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename, dirname, relative, resolve } from "path";
 import { toPosix } from "../path-canonical.js";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
-import { assembleRuntime } from "./runtime-chunks.ts";
+import { assembleRuntime, applyChunkDependencies } from "./runtime-chunks.ts";
 import { toEsmRuntime } from "./runtime-esm.ts";
 import { toEsmClientChunk } from "./emit-client-esm.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
@@ -616,6 +616,7 @@ const CELL_SCOPE_ACCESSORS = [
   "_scrml_engine_audit_register",
   "_scrml_reactive_get",
   "_scrml_reactive_set",
+  "_scrml_refine_register",
   "_scrml_init_set",
   "_scrml_default_set",
   "_scrml_reset",
@@ -1908,7 +1909,7 @@ export function runCG(input: CgInput): CgOutput {
       const bundles = new Map<string, string>();
       for (const [name, def] of workerDefs) {
         const workerJs = codegenStage("emit-worker", () =>
-          generateWorkerJs(name, def.children, def.whenMessage)
+          generateWorkerJs(name, def.children, def.whenMessage, errors, filePath)
         );
         bundles.set(name, workerJs);
         // s457 3a — the worker's `when message` listener is compiler-written
@@ -2796,7 +2797,9 @@ export function runCG(input: CgInput): CgOutput {
         structuralDeclNames: collectStructuralDeclNames(fileAST),
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
-        usedRuntimeChunks: new Set(['core', 'scope', 'errors']),
+        usedRuntimeChunks: new Set(['core', 'scope']),
+        // S461 — the route-splitter-only runtime chunks key on this (emit-client.ts).
+        emitPerRoute: emitPerRoute && !!reachabilityRecordInput,
         // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
         // discriminate cross-file engine mount sites from local components / HTML.
         exportRegistry: exportRegistryInput,
@@ -4094,18 +4097,18 @@ export function runCG(input: CgInput): CgOutput {
   let classicRuntimeSliceForChunks: string | null = null;
   if (!embedRuntime) {
     // Union usedRuntimeChunks across every compiled file in this run.
-    // Always include the per-spec always-present set (`core`, `scope`,
-    // `errors`, `transitions`) so files that skipped CG (library mode,
-    // empty workers, fixture files with no AST features) still produce
-    // a runnable runtime.
+    // Always include the always-present set (`core`, `scope`) so files that
+    // skipped CG (library mode, empty workers, fixture files with no AST
+    // features) still produce a runnable runtime. (S461: `errors` left this set —
+    // a file that needs it carries it in its own usedRuntimeChunks; the retired
+    // `transitions` name, which no longer names a chunk, is dropped too.)
     const union = new Set<string>();
     for (const ctx of cgContextByFile.values()) {
       for (const name of ctx.usedRuntimeChunks) union.add(name);
     }
     union.add("core");
     union.add("scope");
-    union.add("errors");
-    union.add("transitions");
+    applyChunkDependencies(union);
     runtimeJs = assembleRuntime(union);
     // Capture the CLASSIC slice (its top-level decls are the runtime-export
     // universe) before the esm transform, for the per-route chunk conversion.
@@ -4203,22 +4206,6 @@ export function runCG(input: CgInput): CgOutput {
   let chunksBootJs: string | undefined;
   let chunksBootFilename: string | undefined;
   if (emitPerRoute && reachabilityRecordInput) {
-    const splitterResult = emitPerRouteChunks({
-      reachabilityRecord: reachabilityRecordInput,
-      cgContextByFile,
-      perFileOutputs: outputs,
-      // Q-OPEN-5 — forward the CLI-supplied `--chunk-size-budget`
-      // value (or `undefined` for "use default" / "flag absent").
-      chunkSizeBudgetBytes,
-      // S459 (§47.9.9) — chunk payloads are stripped inside `finalizeChunkHash`, before hashing.
-      ...(stripShippedJs ? { shipPayload: shipStripped } : {}),
-    });
-    chunks = splitterResult.chunks;
-    chunksManifest = splitterResult.manifest;
-    if (splitterResult.diagnostics.length > 0) {
-      errors.push(...splitterResult.diagnostics);
-    }
-
     // ESM chunks arc (Unit 3) — convert per-route chunk payloads to ES modules.
     //
     // Under `--module-format=esm` the role-bootstrap injects the per-role INITIAL
@@ -4239,18 +4226,39 @@ export function runCG(input: CgInput): CgOutput {
     // so the placeholder-substitution + `stripPagesPrefix` logic of the per-file
     // path does not apply. Gated on `!embedRuntime` (esm needs a standalone
     // runtime module to import from), mirroring the per-file path.
-    if (moduleFormat === "esm" && !embedRuntime && classicRuntimeSliceForChunks !== null) {
-      for (const chunk of chunks.values()) {
-        if (!chunk.payloadJs) continue;
-        const depth = chunk.filename.split("/").length - 1;
-        const runtimeUrl = (depth > 0 ? "../".repeat(depth) : "./") + runtimeFilename;
-        chunk.payloadJs = toEsmClientChunk(chunk.payloadJs, {
-          runtimeSlice: classicRuntimeSliceForChunks,
-          runtimePlaceholder: runtimeFilename, // unused when runtimeUrl is set
-          importerDistDir: ".", // unused when runtimeUrl is set
-          runtimeUrl,
-        });
-      }
+    //
+    // S461 (§47.9.9 "one reader") — the transform runs INSIDE `finalizeChunkHash`, BEFORE the
+    // strip and the content hash (it used to run here, after both: an esm chunk shipped the
+    // transform's header comment + import line unstripped, and its filename hash named the
+    // pre-transform bytes). The chunk's directory depth is fixed before its hash is known.
+    const esmPayload =
+      moduleFormat === "esm" && !embedRuntime && classicRuntimeSliceForChunks !== null
+        ? (payloadJs: string, filename: string): string => {
+            const depth = filename.split("/").length - 1;
+            const runtimeUrl = (depth > 0 ? "../".repeat(depth) : "./") + runtimeFilename;
+            return toEsmClientChunk(payloadJs, {
+              runtimeSlice: classicRuntimeSliceForChunks as string,
+              runtimePlaceholder: runtimeFilename, // unused when runtimeUrl is set
+              importerDistDir: ".", // unused when runtimeUrl is set
+              runtimeUrl,
+            });
+          }
+        : undefined;
+    const splitterResult = emitPerRouteChunks({
+      reachabilityRecord: reachabilityRecordInput,
+      cgContextByFile,
+      perFileOutputs: outputs,
+      // Q-OPEN-5 — forward the CLI-supplied `--chunk-size-budget`
+      // value (or `undefined` for "use default" / "flag absent").
+      chunkSizeBudgetBytes,
+      // §47.9.9 — inside `finalizeChunkHash`: esm transform, then strip, then hash.
+      ...(esmPayload ? { esmPayload } : {}),
+      ...(stripShippedJs ? { shipPayload: shipStripped } : {}),
+    });
+    chunks = splitterResult.chunks;
+    chunksManifest = splitterResult.manifest;
+    if (splitterResult.diagnostics.length > 0) {
+      errors.push(...splitterResult.diagnostics);
     }
 
     // -------------------------------------------------------------------------

@@ -47,6 +47,11 @@ import {
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 function astOf(src) {
   return buildAST(splitBlocks("test.scrml", src)).ast;
 }
@@ -481,7 +486,7 @@ describe("ROUND-3 crossed matrix — qualifier x parenthesized-type x leader-wor
       } finally {
         db.close();
       }
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 
   test("a leader-word column with a PARENTHESIZED type is a column, not a KEY clause", () => {
@@ -1186,7 +1191,7 @@ describe("the harvest reads the SAME heads — declaration and rejection cannot 
       try { expect(() => db.run(out.get("assets"))).not.toThrow(); } finally { db.close(); }
       expect(harvestRawCreateTableDecls(sql)[0].columns.map((c) => c.name)).toEqual(["id", "tenant_id"]);
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the `?{}` walker's acceptance is UNCHANGED — ≤1 qualifier stripped, ≥2 not harvested", () => {
     const one = new Map();

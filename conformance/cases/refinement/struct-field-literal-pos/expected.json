@@ -1,0 +1,12 @@
+{
+  "id": "refinement-struct-field-literal-pos",
+  "description": "S458 slice 2 (position 2): a refined STRUCT FIELD is judged where a struct value is written. The literal `{ href: \"https://scrml.dev/\", weight: -1 }` assigned to `Link` has `weight: -1` against `number(>0)`: E-CONTRACT-001. Before S458 only an enum-subset field was checked this way; a `number(...)` / `string(...)` field was never judged.",
+  "language-version": "1.0",
+  "spec": "§53.2.2",
+  "rationale": "§53.2.2 lists \"struct field: type Invoice:struct = { amount: number(>0 && <10000) }\" as a usage position; §53.15.2's static row decides a literal field at compile time; §53.11 E-CONTRACT-001.",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": ["E-CONTRACT-002"],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

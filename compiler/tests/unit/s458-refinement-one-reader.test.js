@@ -60,7 +60,18 @@ function clientFn(js, name) {
   if (!head) throw new Error(`no ${name} in client.js`);
   let i = head.index + head[0].length, depth = 1;
   for (; i < js.length && depth > 0; i++) { if (js[i] === "{") depth++; else if (js[i] === "}") depth--; }
-  return new Function("_scrml_url_shape_ok", `const _scrml_g = globalThis;\n${js.slice(head.index, i)}; return ${head[1]};`)(_scrml_url_shape_ok);
+  return new Function("_scrml_url_shape_ok", `const _scrml_g = globalThis;\n${hoistedJudges(js)}\n${js.slice(head.index, i)}; return ${head[1]};`)(_scrml_url_shape_ok);
+}
+
+/** The hoisted §53 judge functions (`function _scrml_judge_…`) appended to `js`. */
+function hoistedJudges(js) {
+  const out = [];
+  for (const m of js.matchAll(/function _scrml_judge_[A-Za-z0-9_]+\([^)]*\) \{/g)) {
+    let i = m.index + m[0].length, depth = 1;
+    for (; i < js.length && depth > 0; i++) { if (js[i] === "{") depth++; else if (js[i] === "}") depth--; }
+    out.push(js.slice(m.index, i));
+  }
+  return out.join("\n");
 }
 
 // ---------------------------------------------------------------------------

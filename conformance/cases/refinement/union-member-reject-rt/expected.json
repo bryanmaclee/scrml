@@ -1,0 +1,14 @@
+{
+  "id": "refinement-union-member-reject-rt",
+  "description": "S458 slice 2 (gap g-refinement-union-member-unchecked-s458): a union with a refined member is judged — the value must satisfy one member. `show(v: number(>0) | string)` called with -4 matches neither `number(>0)` nor `string`, so the entry check throws E-CONTRACT-001-RT and @shown keeps \"none\". Before, a refinement inside a union other than `T | not` was not checked at all.",
+  "language-version": "1.0",
+  "spec": "§53.3.1",
+  "rationale": "§53.3.1: the refinement narrows its base type and is evaluated at every binding site; a union member that is a refinement keeps that meaning (a value inhabits the union by inhabiting a member).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#neg" }],
+    "state": { "shown": "none" },
+    "domAnchored": [{ "selector": "#out", "text": "none" }]
+  }
+}

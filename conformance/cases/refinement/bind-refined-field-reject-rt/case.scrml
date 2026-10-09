@@ -1,0 +1,11 @@
+${
+    type P:struct = { name: string, n: number(>0) }
+    <p>: P = { name: "a", n: 1 }
+    <q>: P = { name: "b", n: 2 }
+}
+<program>
+<input id="bad" bind:value=@p.n/>
+<input id="good" bind:value=@q.n/>
+<p id="out">${@p.n}</p>
+<p id="qo">${@q.n}</p>
+</program>

@@ -1,0 +1,8 @@
+${
+    type Link:struct = { href: string(url), weight: number(>0) }
+    function make() {
+        const l: Link = { href: "https://scrml.dev/", weight: -1 }
+        return l
+    }
+}
+<program><p>${make().href}</p></program>

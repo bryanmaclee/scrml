@@ -1,0 +1,20 @@
+{
+  "id": "refinement-ssr-seed-refused-keeps-initial-rt",
+  "description": "S459 MED-2: a server-authority cell whose SSR hydration seed its refinement refuses (`R[]` with `n: number(>0)`, a seeded row with n = -5). The seed is judged like any write; the refused value is NOT applied, the cell keeps its initial value, the refusal is reported to the logging surface, and seeding (@names, after it) and boot (the click handler) continue. Before the fix the refusal threw out of top-level client code: later cells were never seeded and no handler was wired.",
+  "language-version": "1.0",
+  "spec": "§52.8, §53.3.3",
+  "rationale": "§53.3.3: a refused value is not applied — the variable retains its prior value. §52.8 note (S459): a refused seed is treated like a persist= restore (§6.14.2 rule 3, take the default on refusal, never coerced), not a boot-time throw.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "nums": [{ "id": 1, "n": -5 }],
+      "names": [{ "id": 1, "v": "a" }, { "id": 2, "v": "b" }]
+    },
+    "firstPaint": { "contains": ["<script type=\"application/json\" id=\"__scrml_ssr_state\">"] },
+    "input": [{ "click": "#b" }],
+    "domAnchored": [{ "selector": "#out", "text": "2 1" }],
+    "state": { "names": [{ "id": 1, "v": "a" }, { "id": 2, "v": "b" }], "clicks": 1 }
+  }
+}

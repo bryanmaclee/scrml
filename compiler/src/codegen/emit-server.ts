@@ -26,7 +26,7 @@ import {
   type SessionAttrName,
 } from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
-import { emitServerParamCheck, refinementOf, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER } from "./emit-predicates.ts";
+import { emitServerRefinementCheck, refinementOf, needsUrlShapeHelper, SERVER_URL_SHAPE_HELPER, appendJudgeDefinitions } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
@@ -1555,6 +1555,8 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   if (emitted.includes(`${FOREIGN_SEAL_FN}(`)) {
     emitted = injectAfterHeader(emitted, SERVER_FOREIGN_SEAL_HELPER);
   }
+  // S458 2a-fix F3 — the hoisted §53 judges this module calls (before the url scan below).
+  emitted = appendJudgeDefinitions(emitted);
   // §53.6.1 (S457 "6a") — a `string(url)` boundary check in a value-export fn.
   if (needsUrlShapeHelper(emitted)) {
     emitted = injectAfterHeader(emitted, SERVER_URL_SHAPE_HELPER);
@@ -4888,7 +4890,7 @@ export function generateServerJs(
         if (_pAnnotation) {
           const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
-            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "    ", _pParsed);
+            const _pLines = emitServerRefinementCheck(_pParsed, paramNames[i], name, "    ");
             // ⚑ GATED ON `_protectActive`. The mark only means anything to the
             // §14.8.9 guard, which only exists on a protect path — but emitting
             // it unconditionally referenced `_scrml_protect_mediated`, which
@@ -5038,6 +5040,10 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
+          // S458 slice 2 — a refined parameter is judged by the §53.9.4 400 check
+          // written above (the route boundary); its body guard statement is not
+          // emitted a second time here.
+          if (stmt && stmt.refineParamGuard) continue;
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOpts));
           if (code) {
             for (const line of indentBodyLines(code, "    ")) {
@@ -5173,7 +5179,7 @@ export function generateServerJs(
         if (_pAnnotation) {
           const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
           if (_pParsed) {
-            const _pLines = emitServerParamCheck(paramNames[i], _pParsed.predicate, _pParsed.label, name, "  ", _pParsed);
+            const _pLines = emitServerRefinementCheck(_pParsed, paramNames[i], name, "  ");
             for (const l of _pLines) lines.push(l);
           }
         }
@@ -5360,6 +5366,10 @@ export function generateServerJs(
         }
       } else {
         for (const stmt of body) {
+          // S458 slice 2 — a refined parameter is judged by the §53.9.4 400 check
+          // written above (the route boundary); its body guard statement is not
+          // emitted a second time here.
+          if (stmt && stmt.refineParamGuard) continue;
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
           if (code) {
             for (const line of indentBodyLines(code, _bodyIndentNonCsrf)) {
@@ -6994,6 +7004,8 @@ export function generateServerJs(
   // boundary-zone decl in a server body) calls `_scrml_url_shape_ok(`, defined in
   // runtime-url-guard.js. Inlined once; skipped when the SSR first-paint URL guard copy (the same
   // source) is already in the bundle.
+  // S458 2a-fix F3 — the hoisted §53 judges this bundle calls (a judge may call the url judge).
+  finalEmitted = appendJudgeDefinitions(finalEmitted);
   if (needsUrlShapeHelper(finalEmitted)) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_URL_SHAPE_HELPER);
   }

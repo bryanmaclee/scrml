@@ -1,0 +1,20 @@
+{
+  "id": "refinement-ssr-seed-legit-accept-neg",
+  "description": "S459 MED-2 legitimate twin of ssr-seed-refused-keeps-initial-rt: the seeded rows satisfy `R[]` (n = 5), so the seed is applied to the refined server-authority cell, the next cell is seeded, and boot wires the handler. Guards the refusal path against over-refusing.",
+  "language-version": "1.0",
+  "spec": "§52.8, §53.3.3",
+  "rationale": "§52.8: server-authoritative variables are pre-rendered and the client receives the pre-rendered value. §53.3.3: the assignment is applied if and only if the predicate evaluates to true.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "nums": [{ "id": 1, "n": 5 }],
+      "names": [{ "id": 1, "v": "a" }, { "id": 2, "v": "b" }]
+    },
+    "firstPaint": { "contains": ["<script type=\"application/json\" id=\"__scrml_ssr_state\">"] },
+    "input": [{ "click": "#b" }],
+    "domAnchored": [{ "selector": "#out", "text": "2 1" }],
+    "state": { "nums": [{ "id": 1, "n": 5 }], "names": [{ "id": 1, "v": "a" }, { "id": 2, "v": "b" }], "clicks": 1 }
+  }
+}

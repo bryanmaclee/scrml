@@ -1,0 +1,14 @@
+// §42.2.3 / §42.3.5 — while the CELL is `not`, a `given @user :>` body is skipped: the markup guard renders nothing and the handler body does not run.
+<program>
+    type User:struct = { name: string }
+    <user>: User | not = not
+    <msg>: string = "none"
+    function greet() {
+        given @user :> { @msg = "hi " + @user.name }
+    }
+    <main>
+        <button id="greet" onclick=greet()>greet</button>
+        <p id="msg">${@msg}</p>
+        <div id="guard">${ given @user :> { <p class="who">${@user.name}</p> } }</div>
+    </main>
+</program>

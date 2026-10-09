@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-server-fn-sibling-const-ok",
+  "description": "§38.10.3 clean neg — channel `a`'s `onclient:open=onOpen(e)` names the `const onOpen` declared in its own body; channel `b` declares a `server function onOpen` as its `onserver:message` handler. The nearer `const` binding is the handler (the client listener calls it), so no E-CHANNEL-006 fires. The delta from `channel/handler-onclient-server-fn` is that the handler resolves to a value binding, not to the server function.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §38.6.1",
+  "source-test": "compiler/tests/unit/channel-onclient-server-handler.test.js",
+  "rationale": "§38.10.3 restricts a FUNCTION designated as an `onclient:*` handler; the handler name resolves to the nearest binding, here a client-side `const`. A same-named `server function` in a sibling channel is not the handler.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-006"]
+  }
+}

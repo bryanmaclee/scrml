@@ -1,0 +1,6 @@
+${
+    <m>: number(>0) | [string: number(>0)] = 1
+}
+<program>
+<p>${@m}</p>
+</program>

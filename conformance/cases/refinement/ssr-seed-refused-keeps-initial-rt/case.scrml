@@ -1,0 +1,20 @@
+<program db="sqlite:./app.db">
+<schema>
+  ?{`CREATE TABLE nums (id INTEGER PRIMARY KEY, n INTEGER)`}
+  ?{`CREATE TABLE names (id INTEGER PRIMARY KEY, v TEXT)`}
+</schema>
+<db src="app.db" tables="nums,names"></db>
+${
+  type R:struct = { id: number, n: number(>0) }
+  server function loadNums() { return ?{`SELECT * FROM nums`}.all() !{ _ :> [] } }
+  server function loadNames() { return ?{`SELECT * FROM names`}.all() !{ _ :> [] } }
+  <nums server>: R[] = loadNums()
+  <names server> = loadNames()
+  <clicks>: number = 0
+}
+<main>
+  <button id="b" onclick=${@clicks = @clicks + 1}>b</button>
+  <ul><each in=@nums key=@.id as r><li class="num">${r.n}</li></each></ul>
+  <p id="out">${@names.length} ${@clicks}</p>
+</main>
+</program>

@@ -1,0 +1,5 @@
+${
+  export server function onErr(err) {
+    return 1
+  }
+}

@@ -42,6 +42,11 @@ import {
 } from "../../src/codegen/server-session-guard.ts";
 import { detectServerAmbientSessionReadsInText } from "../../src/route-inference.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_session_ambient_server");
 let n = 0;
@@ -303,7 +308,7 @@ describe("HTTP — the migrated form writes the real session's id, whatever the 
     } finally {
       db.close();
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------

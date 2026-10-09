@@ -1,0 +1,12 @@
+{
+  "id": "refinement-reassign-literal-pos",
+  "description": "S458 slice 2 (position 1): a LITERAL reassigned into a refined cell is decided at compile time. `@link = \"javascript:alert(1)\"` into `<link>: string(url)` is E-CONTRACT-001 — the same static zone a declaration's literal initializer gets.",
+  "language-version": "1.0",
+  "spec": "§53.4.2",
+  "rationale": "§53.4.2 rule 2: a string literal against a named shape is statically decided; §53.11: \"The compiler SHALL emit E-CONTRACT-001 when a literal value is assigned to a constrained type variable and the literal demonstrably fails the predicate.\"",
+  "expect": {
+    "codes": ["E-CONTRACT-001"],
+    "notCodes": ["E-CONTRACT-002"],
+    "severity": { "E-CONTRACT-001": "error" }
+  }
+}

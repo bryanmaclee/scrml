@@ -23,6 +23,11 @@ import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_session_secure_b4b5");
 let tmpCounter = 0;
@@ -133,7 +138,7 @@ describe("B5 runtime guard — a dynamic session.set(csrfToken) cannot pin the t
     );
     expect(statusOf(rReal)).toBe(200);
     expect(await jsonOf(rReal)).toBe("pinned");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("B4a opt-out — a session-secure=\"false\" app authenticates over http://localhost", () => {
@@ -208,7 +213,7 @@ describe("B4a opt-out — a session-secure=\"false\" app authenticates over http
     const rHost = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` }, {});
     const host = await jsonOf(rHost);
     expect(host.isAuth).toBe(false);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("B4a fixation — secure mode reads ONLY __Host-scrml_sid (cookie-tossing defense)", () => {
@@ -281,5 +286,5 @@ describe("B4a fixation — secure mode reads ONLY __Host-scrml_sid (cookie-tossi
     const host = await whoWith(`__Host-scrml_sid=${sid}`);
     expect(host.isAuth).toBe(true);
     expect(host.userId).toBe("u-secure");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

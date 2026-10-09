@@ -36,6 +36,11 @@ import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
 import { hostView } from "../helpers/host-view.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js. Recurrence-proof isolation
 // (a killed / --bail'd prior run skips afterAll) now comes from the fresh per-run dir;
@@ -285,5 +290,5 @@ describe("end-to-end — first POST with the delivered token PASSES (no 403); fa
     const rows = db.query("SELECT name FROM items").all();
     db.close();
     expect(rows.some((x) => x.name === "delivered")).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

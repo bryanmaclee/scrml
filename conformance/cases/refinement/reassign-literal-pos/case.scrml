@@ -1,0 +1,10 @@
+${
+    <link>: string(url) = "https://scrml.dev/"
+    function clearLink() {
+        @link = "javascript:alert(1)"
+    }
+}
+<program>
+<button onclick=${clearLink()}>Clear</button>
+<p>${@link}</p>
+</program>

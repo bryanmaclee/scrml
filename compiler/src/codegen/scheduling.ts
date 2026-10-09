@@ -996,7 +996,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     // §51.0.S (S155 batch 3) — message-plane routing inputs for `.advance`.
     ...(enginesWithMessageArms && enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}),
     ...(engineMessageVariants && engineMessageVariants.size > 0 ? { engineMessageVariants } : {}),
-    ...(returnTypeAnnotation ? { returnTypeAnnotation, returnRefinement: (fnNode as { returnRefinement?: unknown }).returnRefinement ?? null, enclosingFnName: enclosingFnName ?? null } : {}),
+    ...(returnTypeAnnotation ? { returnTypeAnnotation, enclosingFnName: enclosingFnName ?? null } : {}),
     // S89 §13.2 Sub-Phase B Step 3 — auto-await classifier inputs threaded
     // through opts so `case "guarded-expr"` in emit-logic.ts can auto-await
     // a `Promise<T>` initExpr per §13.2.1 (collapses the S88 two-step

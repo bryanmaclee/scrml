@@ -1,0 +1,14 @@
+{
+  "id": "refinement-length-grow-holes-reject-rt",
+  "description": "S459 round 3 MED-2: lengthening an array (`@ls.length = 4`) leaves empty slots, which read as `not` (§42). `number(>0)` is not inhabited by `not`, so the write throws E-CONTRACT-001-RT and @ls keeps [1, 2]; `(number(>0) | not)[]` is, so `@opt.length = 3` is applied. (SPEC §53 says nothing about holes; this follows §42 — absence is `not` — and the same rule now holds for a whole value: the array judge visits every slot.)",
+  "language-version": "1.0",
+  "spec": "§53.3.3, §42",
+  "rationale": "§53.3.1: a value inhabits a refined type only if it satisfies it; §42: absence is `not`, and an empty slot is an absent element.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTRACT-001", "E-CONTRACT-002"],
+    "input": [{ "click": "#g" }, { "click": "#o" }],
+    "state": { "ls": [1, 2] },
+    "domAnchored": [{ "selector": "#out", "text": "2 3" }]
+  }
+}

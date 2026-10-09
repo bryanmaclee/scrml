@@ -40,6 +40,11 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "conf-session-8b-")); });
 afterAll(() => {
@@ -320,7 +325,7 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — runtime", () => {
     } finally {
       process.chdir(cwdBefore);
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ── S438 review F1 — 2+ `<program>` nodes in ONE file keep the stamped secure defaults.
@@ -460,6 +465,6 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
       } finally {
         process.chdir(cwdBefore);
       }
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });

@@ -28,6 +28,11 @@ import { classifyHoistableQuery, HOIST_VALUES_PLACEHOLDER, HOIST_VAL_ALIAS } fro
 import { HOIST_KEY_ALIAS, runBatchPlanner } from "../../src/batch-planner.ts";
 import { sqlIsPlainRead } from "../../src/hoist-write-scan.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const CASES = join(import.meta.dir, "..", "..", "..", "conformance", "cases", "server-db");
 
 function compile(source, aux = {}) {
@@ -280,7 +285,7 @@ describe("(1) the key table matches with the per-iteration query's own `=` (exec
       const perRow = [];
       keys.forEach((k, i) => { for (const r of db.query(`SELECT body FROM n WHERE ${col} = ?1`).all(k)) perRow.push([i, r.body]); });
       expect(hoisted).toEqual(perRow.sort());
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
   test("a SELECT * row carries the key-table columns, which the emitter strips", () => {
     const shape = classifyHoistableQuery("SELECT * FROM n WHERE id = ${it.k}", "it", HOIST_KEY_ALIAS);
@@ -288,7 +293,7 @@ describe("(1) the key table matches with the per-iteration query's own `=` (exec
     expect(Object.keys(row)).toContain(HOIST_VAL_ALIAS);
     const js = compile(program("            out.push(row)").replace("SELECT body FROM notes", "SELECT * FROM notes")).serverJs;
     expect(js).toContain(`delete _r["${HOIST_KEY_ALIAS}"]; delete _r["${HOIST_VAL_ALIAS}"];`);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("the query may not name the pre-fetch's reserved names", () => {
     expect(typeof classifyHoistableQuery("SELECT body FROM n __scrml_batch_k WHERE id = ${it.k}", "it", HOIST_KEY_ALIAS).reason).toBe("string");
     expect(typeof classifyHoistableQuery("SELECT __scrml_batch_val FROM n WHERE id = ${it.k}", "it", HOIST_KEY_ALIAS).reason).toBe("string");

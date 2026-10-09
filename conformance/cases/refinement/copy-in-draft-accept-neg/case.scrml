@@ -1,0 +1,17 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    type Q:struct = { u: string, n: number }
+    <m>: number = -5
+    <rows>: L[] = []
+    <draft>: Q = { u: "d", n: 1 }
+    function add() { @rows.push(@draft) }
+    function edit() {
+        const d = @draft
+        d.n = @m
+    }
+}
+<program>
+<button id="add" onclick=add()>add</button>
+<button id="edit" onclick=edit()>edit</button>
+<p id="out">${@rows.length}</p>
+</program>

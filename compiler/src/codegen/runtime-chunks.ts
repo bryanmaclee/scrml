@@ -8,14 +8,20 @@
  * feature group. Chunks are assembled in `emit-client.ts` based on what the
  * compiled scrml file actually uses.
  *
- * Always-included chunks: 'core', 'scope', 'errors'
+ * Always-included chunks: 'core', 'scope'
  * (Pre-populated in makeCompileContext() in context.ts.)
+ * ('errors' was always-included until S461; it is now pulled by the post-emit
+ * reference gate in emit-client.ts and by the CHUNK_DEPENDENCIES edges below.)
  *
  * Conditionally-included chunks: all others.
  * (Added by detectRuntimeChunks() in emit-client.ts.)
  *
  * Chunk → runtime functions:
  *   core          _scrml_state, _scrml_subscribers, _scrml_reactive_get/set/subscribe/propagate_dirty
+ *   machine       _scrml_machine_timers, _scrml_machine_clear_timer/arm_timer/arm_initial (§51.12),
+ *                 _scrml_replay (§51.14). In 'core' until S461; no core function calls them.
+ *                 Activated by the post-emit `_scrml_machine_` / `_scrml_replay(` gates
+ *                 (emit-client.ts) and by the engine → machine edge (<onTimeout> helpers).
  *   wire          _scrml_wire_decode (§57 dual-decoder, v0.3.x SPA tree-shake Phase B 3.2).
  *                 Only referenced by emitted server-fn fetch stubs
  *                 (`emit-functions.ts` + `atom-emitter.ts`). Tree-shaken when
@@ -52,7 +58,11 @@
  *   (transitions  RETIRED — the §38 keyframes moved to the emitted stylesheet,
  *                 codegen/emit-transition-css.ts. An inline <style> is refused
  *                 under `headers="strict"`'s `default-src 'self'`, §39.2.5.)
- *   errors        _ScrmlError, NetworkError, ValidationError, SQLError, AuthError, etc.
+ *   errors        _ScrmlError, NetworkError, ValidationError, SQLError, AuthError, etc.,
+ *                 _scrml_error_boundary_log, _scrml_error_boundary_uncaught. Activated by the
+ *                 POST-EMIT reference gate (emit-client.ts ERRORS_CHUNK_REFERENCE) when the
+ *                 emitted client names any of them, and by the dependency edges from the
+ *                 chunks whose own helpers report through `_scrml_error_boundary_log`.
  *   input         _scrml_input_keyboard/mouse/gamepad_create/destroy
  *   equality      _scrml_structural_eq
  *   deep_reactive _scrml_track, _scrml_trigger, _scrml_deep_reactive (Proxy),
@@ -127,6 +137,7 @@ import { SCRML_RUNTIME } from "../runtime-template.js";
 
 export const RUNTIME_CHUNK_ORDER = [
   'core',
+  'machine',
   'wire',
   'reset',
   'validators',
@@ -152,6 +163,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'map',
   'ssr',
   'log',
+  'refine',
   'urlguard',
   'metaemit',
   // ---------------------------------------------------------------------
@@ -252,6 +264,8 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // SPA-shape compile units with zero server-fns ship without it.
   // Activated by `detectRuntimeChunks` when ANY file in the compile unit
   // contains a server `function-decl` OR a `use foreign:` use-decl.
+  // S461 — the §51.12 / §51.14 machine helpers, moved out of 'core'.
+  machine:        "§51.12 / §51.14 machine temporal-transition runtime (chunk: 'machine')",
   wire:           "§57 Wire Format dual-decoder (chunk: 'wire')",
   reset:          "§6.8 reset+default runtime (chunk: 'reset')",
   validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
@@ -319,6 +333,8 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // (emit-client.ts POST_EMIT_HELPER_CHUNK_GATES) for a `_scrml_safe_url(` call, so a page that writes
   // no data-derived URL attribute ships without it.
   urlguard:       "§5.2 URL-attribute scheme guard runtime (chunk: 'urlguard')",
+  // §53 (S458 2a-fix) — the refined-cell write judges; gated on a registration call.
+  refine:         "§53 refined-cell write judges (chunk: 'refine')",
   // §22.4.1 (S458 "a") — the runtime `meta.emit(html)` gate (runtime-meta-emit-gate.js). Pulled
   // whenever the 'meta' chunk is (CHUNK_DEPENDENCIES): every runtime `^{}` effect's `meta` object
   // carries `emit`, so a program that ships `_scrml_meta_emit` always ships the gate it calls.
@@ -499,40 +515,54 @@ export const RUNTIME_CHUNKS: Record<RuntimeChunkName, string> = buildRuntimeChun
 // transitively reachable from an always-included chunk), the edge MUST be
 // recorded here.
 //
-// Edges as of S124:
-//
-//   scope → {timers, animation}
-//     `_scrml_destroy_scope` (scope chunk, always-included) calls
+// History — the S124 edge `scope → {timers, animation}`:
+//     `_scrml_destroy_scope` (scope chunk, always-included) called
 //     `_scrml_stop_scope_timers` (timers chunk) and
-//     `_scrml_cancel_animation_frames` (animation chunk). When a compile
-//     unit had no timer/animation-frame usage, both target chunks were
-//     tree-shaken and `_scrml_destroy_scope` crashed on first scope
-//     teardown — symptom: `ReferenceError: _scrml_stop_scope_timers is
-//     not defined` on every reactive scope cleanup, killing all
-//     subsequent reactive effects (6nz Bug P, every adopter app).
+//     `_scrml_cancel_animation_frames` (animation chunk) unguarded. When a
+//     compile unit had no timer/animation-frame usage, both target chunks were
+//     tree-shaken and `_scrml_destroy_scope` crashed on first scope teardown
+//     (6nz Bug P). The edge fixed the crash by shipping both chunks on every
+//     page. S461 fixed the ROOT instead: the two calls are `typeof`-guarded
+//     (a registry only its own chunk can fill is empty when the chunk is
+//     absent), and the edge is retired.
 //
-// Forward note: declaring an edge here makes the target chunk effectively
-// always-included whenever the source is. For `scope → timers/animation`
-// this is correct (scope is unconditionally seeded — see context.ts:211 —
-// so the conditional gates on timers/animation in detectRuntimeChunks
-// become moot for chunk-set composition, though they remain useful as
-// documentation of which features pull the chunk for non-transitive
-// reasons). For future edges where the source is itself conditional, the
-// closure logic correctly propagates only when the source actually fires.
+// Forward note: declaring an edge from an ALWAYS-INCLUDED chunk makes the
+// target always-included too — prefer guarding the call when the target's
+// state can only exist if the target chunk shipped.
 // ---------------------------------------------------------------------------
 
 export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkName[]>> = {
-  scope: ['timers', 'animation'],
+  // S461 — `scope: ['timers', 'animation']` RETIRED. It made both chunks ship on EVERY page
+  // (scope is always seeded) for one reason: `_scrml_destroy_scope` called their scope-teardown
+  // helpers unguarded. Those registries are populated only by the chunks' own start functions,
+  // so a page without the chunk has nothing to stop; the calls are now `typeof`-guarded in
+  // runtime-template.js, and the chunks ship by their own triggers (detectRuntimeChunks + the
+  // post-emit `_scrml_timer_` / `animationFrame` gates in emit-client.ts).
   // §22.4.1 (S458 "a"): `_scrml_meta_emit` (meta) calls `_scrml_meta_emit_insert` (metaemit), which
   // judges URL attributes with `_scrml_is_url_attr` / `_scrml_url_value_admitted` (urlguard).
+  // metaemit also reports a refused emit through `_scrml_error_boundary_log` (errors).
   meta: ['metaemit'],
-  metaemit: ['urlguard'],
+  metaemit: ['urlguard', 'errors'],
+  // S461 — `errors` is no longer always-included, so every chunk whose OWN helpers report through
+  // `_scrml_error_boundary_log` records the edge. Those calls are `typeof`-guarded, so a missing
+  // edge would not throw — it would silently drop the report, which is a behaviour change, not a
+  // saving. Audit (acorn, every chunk): reset (`_scrml_reset_apply`), ssr (`_scrml_ssr_seed_apply`),
+  // urlguard (the refused-URL report), metaemit (the refused-emit report). No other chunk names
+  // any `errors` definition.
+  reset: ['errors'],
+  ssr: ['errors'],
+  urlguard: ['errors'],
+  // S461 — the engine <onTimeout> helpers (`_scrml_engine_arm_state_timers`, …) arm and clear
+  // through `_scrml_machine_arm_timer` / `_scrml_machine_clear_timer`, which moved out of the
+  // always-included 'core' into 'machine'.
+  engine: ['machine'],
 };
 
 // Pulls all transitive chunk dependencies into the set in place. Returns
-// the set for chaining. Safe to call repeatedly (idempotent). Called once
-// at the end of `detectRuntimeChunks` (emit-client.ts) before chunk-set
-// consumption.
+// the set for chaining. Safe to call repeatedly (idempotent). Called at the
+// end of `detectRuntimeChunks` (emit-client.ts) AND again after the post-emit
+// reference gates there (S461): a chunk those gates add (reset, ssr,
+// urlguard, ...) carries its edges too.
 export function applyChunkDependencies(chunks: Set<string>): Set<string> {
   // Fixed-point iteration — current dep set is shallow (max depth 1) but
   // the loop tolerates future deeper chains without re-engineering.

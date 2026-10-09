@@ -1,0 +1,26 @@
+${
+    type L:struct = { u: string, n: number(>0) }
+    <n>: number(>0) = 1
+    <m>: number = -5
+    <l>: L = { u: "a", n: 1 }
+    <ls>: number(>0)[] = [1, 2]
+    <items> = [{ id: 1, v: -5 }]
+    function fieldWrite() { @l.n = @m }
+    function pushBad() { @ls.push(@m) }
+    function dec() { @n-- }
+    function assignBad() { Object.assign(@l, { n: @m }) }
+    function viaArrow() {
+        const f = () => { @n = @m }
+        f()
+    }
+}
+<program>
+<button id="inline" onclick=${@n = @m}>a</button>
+<button id="field" onclick=fieldWrite()>b</button>
+<button id="push" onclick=pushBad()>c</button>
+<button id="dec" onclick=dec()>d</button>
+<button id="assign" onclick=assignBad()>e</button>
+<button id="arrow" onclick=viaArrow()>f</button>
+<ul><each in=@items key=@.id as it><li><button class="row" onclick=${@n = it.v}>r</button></li></each></ul>
+<p id="out">${@n} ${@l.n} ${@ls.length}</p>
+</program>

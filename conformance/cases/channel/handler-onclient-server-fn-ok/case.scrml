@@ -1,0 +1,15 @@
+<program>
+
+  <channel name="chat" onclient:open=onOpen(e) onserver:message=onMsg(msg)>
+    <count> = 0
+    function onOpen(e) {
+      @count = 1
+    }
+    server function onMsg(msg) {
+      broadcast(msg)
+    }
+  </channel>
+
+  <p>${@count}</p>
+
+</program>
