@@ -1,0 +1,19 @@
+// §42.2.3 multi-narrowing over two CELLS is all-or-nothing: with only @a present, neither the markup guard nor the handler guard runs its body.
+<program>
+    type Item:struct = { name: string }
+    <a>: Item | not = not
+    <b>: Item | not = not
+    <msg>: string = "none"
+    function setA() {
+        @a = { name: "x" }
+    }
+    function both() {
+        given @a, @b :> { @msg = @a.name + @b.name }
+    }
+    <main>
+        <button id="setA" onclick=setA()>a</button>
+        <button id="both" onclick=both()>both</button>
+        <p id="msg">${@msg}</p>
+        <div id="guard">${ given @a, @b :> { <p class="pair">${@b.name}</p> } }</div>
+    </main>
+</program>

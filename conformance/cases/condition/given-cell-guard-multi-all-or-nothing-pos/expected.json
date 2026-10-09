@@ -1,0 +1,17 @@
+{
+  "id": "condition-given-cell-guard-multi-all-or-nothing-pos",
+  "description": "`given @a, @b :>` over two `Item | not` CELLS, with only @a set present: the markup guard renders nothing and the handler guard's body does not run (@msg unchanged). Pre-s461 impl#1 lowered both heads to undeclared bare JS names (ReferenceError).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: \"Multi-narrowing is all-or-nothing. If any listed variable is `not`, the body is skipped entirely. There is no partial execution of the body with a subset of variables present.\" §42.5: `given x, y :> body` → `if (x !== null && x !== undefined && y !== null && y !== undefined) { body }`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-046", "E-STATE-UNDECLARED", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#setA" }, { "click": "#both" }],
+    "state": { "a": { "name": "x" }, "b": null, "msg": "none" },
+    "domAnchored": [
+      { "selector": "#guard .pair", "count": 0 },
+      { "selector": "#msg", "text": "none" }
+    ]
+  }
+}

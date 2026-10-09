@@ -228,6 +228,8 @@ interface ArmPlan {
   arm: unknown[];
   markupNode: Record<string, unknown>;
   span: unknown;
+  /** s461 — the arm is a §42.2.3 `given` guard's body (see applyPlans). */
+  givenBody?: boolean;
 }
 
 /** Nodes an arm may hold and still be "exactly one markup expression" in source. */
@@ -324,6 +326,27 @@ function planArm(
 }
 
 /**
+ * s461 — the control-flow nodes whose arms this pass plans: an `if-stmt`
+ * (`consequent` / `alternate`) and a §42.2.3 `given` presence guard (`body`).
+ *
+ * A `given` guard IS an `if` once lowered — §42.5: `given x :> body` →
+ * `if (x !== null && x !== undefined) { body }` — so its body is a branch body
+ * in exactly §17.6.10's sense, and a body that is exactly one markup expression
+ * carries the same implied `lift`. §42.3.5's own worked example is that shape:
+ * `${ given @user :> { <p>${@user.name}</p> } }`. Before s461 the guard body
+ * reached `emit-logic.ts`'s `case "html-fragment": return ""` and rendered
+ * nothing whether the cell was present or not (`g-top-level-given-emits-bare-
+ * name-s459`, markup limb). The guard has a single arm, so when it is `not` the
+ * interpolation renders nothing — the same as an `if` with no `else`.
+ *
+ * `planIfCascade` already walks the `body` key, so the guard needs no planner of
+ * its own; only the "is this a cascade node" tests had to learn the kind.
+ */
+function isCascadeNode(n: Record<string, unknown>): boolean {
+  return n.kind === "if-stmt" || n.kind === "given-guard";
+}
+
+/**
  * Collect the rewrite plan for a whole if-cascade — `else if` links and `if`s
  * NESTED inside an arm included (a nested `if` arm is not itself one
  * expression, so the outer arm is classified `null` while the inner arms plan;
@@ -353,12 +376,13 @@ function planIfCascade(
     if (plan === "declined") return false;
     if (plan) {
       if (seenNonMarkupValueArm.yes) return false;
+      if (ifNode.kind === "given-guard") plan.givenBody = true;
       out.push(plan);
       continue;
     }
     for (const child of arm) {
       const rec = child as Record<string, unknown> | null;
-      if (rec && rec.kind === "if-stmt") {
+      if (rec && isCascadeNode(rec)) {
         if (!planIfCascade(rec, sourceText, filePath, out, seenNonMarkupValueArm)) return false;
       }
     }
@@ -426,7 +450,7 @@ function armHoldsMarkup(arm: unknown[], sourceText: string): boolean {
     // WHOLE extent instead declined every `else if` cascade and every nested-`if`
     // arm — the outer arm's extent spans the inner arms' markup — which broke two
     // shapes the fix had already covered. Measured, both directions.
-    if (piece.kind === "if-stmt") continue;
+    if (isCascadeNode(piece)) continue;
     if (piece.kind === "bare-expr") {
       const k = (piece.exprNode as Record<string, unknown> | undefined)?.kind;
       if (k === "markup" || k === "markup-value") return true;
@@ -445,10 +469,34 @@ function armHoldsMarkup(arm: unknown[], sourceText: string): boolean {
   return false;
 }
 
+/**
+ * s461 — the pre-desugar pieces a `given`-body implied lift carries for the
+ * checkers (see applyPlans), or null for any other node.
+ */
+export function impliedLiftCheckPieces(node: unknown): unknown[] | null {
+  const r = node as Record<string, unknown> | null | undefined;
+  if (!r || r.kind !== "lift-expr" || r._impliedLift !== true) return null;
+  const w = r._givenBodyPieces as { nodes?: unknown } | undefined;
+  return w && Array.isArray(w.nodes) ? w.nodes : null;
+}
+
 /** Apply a planned cascade rewrite: each arm becomes a single `lift-expr`. */
 function applyPlans(plans: ArmPlan[], counter: { next: number }): void {
   for (const p of plans) {
     renumber(p.markupNode, counter);
+    // s461 — a `given` body keeps its pre-desugar pieces (the `html-fragment` /
+    // `logic` run the parser produced) beside the lift, for the CHECKERS only.
+    // The type system's `lift-expr` arm and the §42 presence reader
+    // (presence-narrowing.ts) do not descend into a lift's markup, so without the
+    // pieces every read in a `given` body — `${@typo}` (E-STATE-UNDECLARED), an
+    // unguarded `${@o.opt.x}` (E-TYPE-046) — would stop being judged the moment
+    // the body started rendering: a newly-ACCEPTING change, which the s461
+    // lowering fix must not make. Those two consumers judge the pieces exactly as
+    // they did before (`impliedLiftCheckPieces`). An OBJECT wrapper, not an
+    // array, so the generic array-key walkers do not see the reads twice.
+    // The `if`-arm implied lift is untouched: its markup is unchecked today by
+    // that same hole (pre-existing; widening it is newly-REJECTING — reported).
+    const pieces = p.givenBody ? p.arm.slice() : null;
     p.arm.length = 0;
     p.arm.push({
       id: ++counter.next,
@@ -459,6 +507,7 @@ function applyPlans(plans: ArmPlan[], counter: { next: number }): void {
       // the author. Consumers that want to distinguish them (diagnostic wording,
       // E-LIFT-002 multiplicity messaging) have the bit; nothing reads it yet.
       _impliedLift: true,
+      ...(pieces ? { _givenBodyPieces: { nodes: pieces } } : {}),
     });
   }
 }
@@ -482,7 +531,7 @@ export function desugarImpliedLiftMarkupArms(
   // Cheap pre-filter: no `if` in the source, nothing to do. Only usable when a
   // source was supplied — shape B (the native parser's `markup-value` arm)
   // needs none, so a caller that has no source still gets that path.
-  if (src.length > 0 && !/\bif\b/.test(src)) return 0;
+  if (src.length > 0 && !/\b(?:if|given)\b/.test(src)) return 0;
 
   const counter = { next: maxNodeId(ast) };
   let rewritten = 0;
@@ -502,7 +551,7 @@ export function desugarImpliedLiftMarkupArms(
     if (!nowInFunction && rec.kind === "logic" && Array.isArray(rec.body)) {
       for (const stmt of rec.body) {
         const s = stmt as Record<string, unknown> | null;
-        if (s && s.kind === "if-stmt") {
+        if (s && isCascadeNode(s)) {
           const plans: ArmPlan[] = [];
           // ALL-OR-NOTHING per cascade. A cascade with one convertible arm and
           // one arm outside §17.6.10's grammar would otherwise render half of

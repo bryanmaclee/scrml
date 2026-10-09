@@ -1,0 +1,17 @@
+{
+  "id": "condition-given-cell-guard-worked-example-absent-pos",
+  "description": "The `not` half of the §42.3.5 worked example: with @user still `not`, `${ given @user :> { <p>…</p> } }` renders nothing and a click on a handler whose body is `given @user :> { … }` leaves @msg untouched — no runtime fault. Pre-s461 impl#1 threw ReferenceError on the undeclared bare name `user` (at load, and on click).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: \"Multi-narrowing is all-or-nothing. If any listed variable is `not`, the body is skipped entirely.\" (the single-variable case is the one-element list). §42.1: `not` propagates, it does not fault.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-046", "E-STATE-UNDECLARED", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#greet" }],
+    "state": { "user": null, "msg": "none" },
+    "domAnchored": [
+      { "selector": "#guard .who", "count": 0 },
+      { "selector": "#msg", "text": "none" }
+    ]
+  }
+}

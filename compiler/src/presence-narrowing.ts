@@ -38,6 +38,8 @@
  *   - `given recv :> { … }` body; a `match recv { … }` body.
  */
 
+import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
+
 /** A source span (the subset this module reads / passes through). */
 export type NarrowSpan = { file?: string; start?: number; end?: number; line?: number; col?: number };
 
@@ -191,6 +193,23 @@ function guardKeys(markup: Rec, opts: PresenceNarrowingOptions): string[] {
   return out;
 }
 
+/**
+ * s461 — a `given` guard body whose single markup expression the §17.6.10 implied-
+ * lift desugar (implied-lift-desugar.ts, CE head) rewrote to a `lift-expr` is
+ * judged on the PRE-desugar pieces that lift carries (`impliedLiftCheckPieces`),
+ * exactly as the body was judged before the desugar reached `given`. This walker
+ * does not descend into a `lift-expr`'s `expr` object, so without this
+ * `${ given @o :> { <p>${@o.opt.x}</p> } }` would stop firing E-TYPE-046 — a
+ * newly-ACCEPTING change the s461 lowering fix must not make.
+ *
+ * That a `lift-expr`'s markup is unwalked in general (an explicit `lift <p>…</p>`,
+ * an `if`-arm's implied lift) is a pre-existing coverage hole; closing it is
+ * newly-REJECTING for those forms and is not done here (reported).
+ */
+function givenBodyForCheck(body: unknown[]): unknown[] {
+  return body.flatMap((s) => impliedLiftCheckPieces(s) ?? [s]);
+}
+
 /** Walk one statement / markup node with the current presence set. */
 export function walkNodeNarrowed(
   node: unknown,
@@ -227,7 +246,7 @@ export function walkNodeNarrowed(
     for (const v of (n.variables as string[] | undefined) ?? []) {
       inner = withKey(inner, opts.givenKey ? opts.givenKey(v) : opts.receiverKey({ kind: "ident", name: v }));
     }
-    walkBodyNarrowed((n.body as unknown[]) ?? [], inner, here, opts);
+    walkBodyNarrowed(givenBodyForCheck((n.body as unknown[]) ?? []), inner, here, opts);
     return;
   }
   if (n.kind === "match-stmt") {
