@@ -28,3 +28,13 @@
 - `conformance/cases/condition/given-cell-guard-worked-example-present-pos` (§42.3.5 worked example, present after click)
 - `conformance/cases/condition/given-cell-guard-worked-example-absent-pos` (`not` half: renders nothing, handler body skipped)
 - `conformance/cases/condition/given-cell-guard-multi-all-or-nothing-pos` (§42.2.3 multi all-or-nothing over two cells)
+
+## Phase 3 — empirical verification
+- R26 grep (repro `a.scrml` recompiled on head): `grep -c 'user !== null' a.client.js` = 0. Both guards read `if (_scrml_cs_reactive_get("user") !== null && _scrml_cs_reactive_get("user") !== undefined)` — the same accessor every other read of `@user` uses. The markup `<p>` body is present (`createElement("p")` inside a reactive `_scrml_effect` lift group).
+- EXECUTED: `compiler/tests/browser/browser-given-cell-s461.browser.test.js` (happy-dom + the shipped pruned runtime): loads with no ReferenceError; `not` → guard renders nothing / handler body skipped; set present → renders "a", handler writes; change → re-renders "b" (one node); back to `not` → cleared; multi all-or-nothing. On base all 4 throw `ReferenceError: user is not defined`.
+- Conformance: 3 new cases PASS on head; on base all 3 FAIL (runtime half — `--xfail-signature` produced a runtime failure sig for each).
+- CORPUS DIFFERENTIAL (`scripts/corpus-emit-differential.ts`, roots examples,samples,conformance,stdlib,benchmarks; base = detached worktree `.claude/worktrees/s461-given-base` @ 5a895f3, head = f4639ff):
+  - enumeration 2594 base / 2597 head (+3 = the new conformance cases, nothing else).
+  - compile-failure SET identical (0 newly failing, 0 newly passing); diagnostic-CODE changes 0; diagnostic-TEXT changes 0.
+  - 7640 artifacts compared: 7477 byte-identical, 163 differing — ALL 163 are `*.server.js` differing ONLY in `const _scrml_project_root = "<worktree path>"` (verified by normalising both worktree roots: 163/163 identical after normalisation, 0 real content changes).
+  - So: 0 changed artifacts beyond the build-path artifact. Expected: no corpus source outside the 3 new cases contains `given @` (`grep -rlE 'given\s+@'` over the five roots = 0 files).
