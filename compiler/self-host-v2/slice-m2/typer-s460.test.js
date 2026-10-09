@@ -137,6 +137,11 @@ describe("S460 statement 6 — no second report: an unresolved type an error alr
   });
   test("a condition inside a construct already refused (`if=` on a `<db>`: E-BOOTSTRAP-UNSUPPORTED only)", () => {
     expect(codes("    let <n:int=0/>\n    <db src=\"./a.db\" if=@n><p>a</p></db>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // an operator the binder never resolved there (found by the S460 corpus self-count)
+    expect(codes("    let <n:int=0/>\n    <db src=\"./a.db\" if=(@n > 0)><p>a</p></db>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("a call of an undeclared function (E-SCOPE-001 only)", () => {
+    expect(codes("", "<p if=nope()>a</p>")).toEqual(["E-SCOPE-001"]);
   });
   test("a parse error inside the condition (Rule C — the condition is not judged)", () => {
     const cs = codes("    function g() { }\n    let <m:int=0/>\n    function f() { if (g(#)) { @m = 1 } }");

@@ -10665,7 +10665,7 @@ ${
             .Name(name: n) :> refusedName(env, nameFact(env.t.names, c.nid))
             .At(name: n) :> refusedName(env, nameFact(env.t.names, c.nid))
             .Member(obj: o) :> refusedName(env, nameFact(env.t.names, c.nid)) || refusedRead(env, o)
-            .Call(callee: f) :> refusedCallee(env, calleeFn(nameFact(env.t.names, f.nid)))
+            .Call(callee: f) :> refusedCallee(env, calleeFn(nameFact(env.t.names, f.nid))) || unboundCall(env, c, f)
             .AtItem :> false
             .Num(raw: r) :> false
             .Str(v: s) :> false
@@ -10673,8 +10673,10 @@ ${
             .NotLit :> false
             .Recovered :> true
             .Variant(name: n) :> false
-            .Unary(op: o) :> false
-            .Binary(op: o) :> false
+            // an operator the binder never resolved (it stands in a region the
+            // binder refused or skipped) — its Unknown is not a type left open
+            .Unary(op: o) :> opOf(valueFact(env.t.values, c.nid)) is not
+            .Binary(op: o) :> opOf(valueFact(env.t.values, c.nid)) is not
             .Ternary(test: x) :> false
             .Assign(target: x) :> false
             .ArrayLit(elems: es) :> false
@@ -10685,6 +10687,14 @@ ${
             .Sql(q: q) :> false
             .Handled(h: x) :> false
         }
+    }
+
+    // A call the binder never resolved: its callee names nothing it bound and
+    // it is no built-in (undeclared — the scope rules report it — or inside a
+    // region the binder skipped).
+    fn unboundCall(env: TEnv, c: AExpr, callee: AExpr) -> boolean {
+        if (nameFact(env.t.names, callee.nid) is some) return false
+        return valueFact(env.t.values, c.nid) is not
     }
 
     fn refusedName(env: TEnv, f: NameFact | not) -> boolean {
