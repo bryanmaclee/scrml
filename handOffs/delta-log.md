@@ -4359,3 +4359,12 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3969] land · #1374 a′ ternary follow-up — arms walked, 0 newly accepted · @adv:dpa-070
 [3970] land · #1370 meta.emit follow-ups (usemap/map, radios, template, n4 b, CRLF-safe member table)
 [3971] state · AUTO profile built: scrml-support/pa-auto.md + cloud probe passed (routine trig_01XT9rCqxDwuYFbfj5Jr4bSC); GitHub GraphQL blocked in cloud → REST
+[3972] state · S461 AUTO run booted (first unattended cloud run); board S461-auto.md LIVE; queue = handOffs/auto-queue.md
+[3973] land · #1375 refinement copy-in merged (re-merge: generated docs only; runtime-template guard re-proved) · @adv:g-refine-copy-in
+[3974] land · #1377 ESM chunk strip order (§47.9.9) · @adv:g-ship-strip-esm-chunks-after-strip-s459
+[3975] land · #1378 executed-DB test timeouts · @adv:g-windows-executed-db-tests-5s-timeout-s460
+[3976] land · #1379 E-CHANNEL-006 (pa-ruled, measured zero) after fix round · @adv:g-channel-handler-args-emitted-raw-s460
+[3977] land · #1380 given @cell lowering + markup given body after fix round · @adv:g-top-level-given-emits-bare-name-s459
+[3978] land · #1382 runtime tree-shake 7,442 → 5,907 B · @adv:g-spa-runtime-gzip-budget-knife-edge
+[3979] blocked · given-bool-head, narrowing-after-write, promoted-onclient-handler → auto-questions.md · @adv:g-given-bool-expr-fail-runs-unconditionally-s460,g-narrowing-survives-writes-incl-callee-s460
+[3980] file · six S461 review findings → known-gaps "S461 filings"

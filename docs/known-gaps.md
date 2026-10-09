@@ -24298,3 +24298,35 @@ S460: #1370, #1371, #1372 and the copy-in branch were each re-merged against mai
 - (c) Keep committing, but drop the volatile parts (SPEC-INDEX line ranges, absolute counts) so unrelated PRs stop touching the same lines.
 
 **Severity LOW:** no product impact. The cost is serialized landing and a recurring hand-merge step where a wrong `--theirs` can lose content.
+
+> **S461 filings (AUTO run): the non-blocking findings of the S461 S239 reviews.** Each was found by an adversarial reviewer on a frozen landing commit; "reviewer-executed" means the reviewer compiled and ran the reproducer; the PA did not re-run it unless stated. Scratch reproducers live under `/root/.cache/scrml-rev/` in the S461 cloud container and are NOT durable — each entry quotes its shape so it can be re-derived.
+
+### G-ESCAPE-HATCH-ARG-TEXT-REWRITE-CORRUPTS-STRINGS-S461 — an expression the parser cannot read (an "escape-hatch" node, e.g. an IIFE with a block body) still goes through the TEXT-level rewrite passes, so a string inside it is rewritten: `@ls.push((() => { const s = "use fn here"; return s })())` emits `"use function here"` — `NEW S461; MED; open (pre-existing class)`
+<!-- @gap id=g-escape-hatch-arg-text-rewrite-corrupts-strings-s461 sev=MED status=open locus=searched:compiler/src/codegen/rewrite.ts(text rewrite passes applied to escape-hatch ExprNodes),compiler/src/codegen/emit-expr.ts — not traced prov=review:S461-splice-multi-arg-r1 -->
+
+Reviewer-executed on the #1381 landing (`068417d`, `e42e87a`). Same corruption on main for a `const r = (() => { const s = "use fn here"; return s })()` initialiser, so the root is the escape-hatch text rewrite, not the #1381 argument splitter. #1381 made it reachable in a new position: on base the same push FAILED LOUDLY (the quotes were already lost → E-CODEGEN-INVALID-LOGIC); now it compiles and silently ships a changed string. Regex literals: `/use fn/` → `/use function/` on base and head alike, every position. **Severity MED:** silent wrong output at exit 0, narrow shape. Related: [[g-mutating-method-string-args-lose-their-quotes]].
+
+### G-ECHANNEL006-BLOCK-SCOPED-BINDING-HIDES-SERVER-HANDLER-S461 — a `const onOpen` declared inside a loop or block in the channel body suppresses E-CHANNEL-006 for a channel-level `server function onOpen` handler, though the block binding is not visible at the channel — `NEW S461; LOW; open`
+<!-- @gap id=g-echannel006-block-scoped-binding-hides-server-handler-s461 sev=LOW status=open locus=compiler/src/type-system.ts(collectHandlerBindings — counts value bindings inside nested block/loop bodies) prov=review:S461-e-channel-006-r2 -->
+
+Reviewer-executed on #1379 (`1190043`). Shape: channel with `onclient:open=onOpen(e)`, `${ server function onOpen(e) {…} for (…) { const onOpen = x } }` → compiles, onopen calls `_scrml_fetch_onOpen_<n>` (a server round-trip). Accepted on main before #1379 too (no regression). Fix: do not descend into loop/block bodies when counting value bindings. A `for (const onOpen of …)` loop VARIABLE is already handled correctly.
+
+### G-ECHANNEL006-VS-CODEGEN-HANDLER-NAME-RESOLUTION-S461 — when one handler name is declared both plain and `server` in two scopes, E-CHANNEL-006 (lexical, innermost wins) and codegen (file-wide) pick different functions; component-local functions also leak to file scope in codegen — `NEW S461; LOW; open`
+<!-- @gap id=g-echannel006-vs-codegen-handler-name-resolution-s461 sev=LOW status=open locus=compiler/src/type-system.ts(checkClientHandlerNotServer region order) vs the channel listener emit in compiler/src/codegen/emit-channel.ts(handler name resolution — not traced) prov=review:S461-e-channel-006-r1;review:S461-e-channel-006-r2 -->
+
+Reviewer-executed on #1379. Shapes: top-level plain `function onOpen` + channel-local `server function onOpen` → the check refuses (innermost = server); codegen would call the top-level plain one. Top-level server `onOpen` + a COMPONENT-local plain `onOpen` → refused; codegen calls the component's. The refusal errs safe (it never accepts a server call), and these programs are ambiguous already — the defect is the two resolvers disagreeing; codegen's file-wide choice looks like the real bug. Corpus: 0 programs.
+
+### G-TIMER-IN-GIVEN-MARKUP-BODY-NOT-STARTED-S461 — a `<timer>` inside a markup `given @u :> { … }` body is emitted as a literal `<timer>` element (`createElement("timer")`) and never ticks — `NEW S461; MED; open (adjacent to #1380)`
+<!-- @gap id=g-timer-in-given-markup-body-not-started-s461 sev=MED status=open locus=searched:compiler/src/implied-lift-desugar.ts(given-body implied lift),compiler/src/codegen(timer element lowering) — not traced prov=review:S461-runtime-tree-shake -->
+
+Reviewer-executed (probe p14) during the #1382 review, on main after #1380. #1380 made markup `given` bodies render through the §17.6.10 implied lift; a structural element (`<timer>`) inside that lift is lowered as plain HTML instead of the timer runtime. Before #1380 the whole body was dropped, so this is newly VISIBLE rather than newly broken. Check `<poll>` and other structural elements in the same position.
+
+### G-COMPONENT-TIMER-SURVIVES-IF-UNMOUNT-S461 — a component's `<timer>` inside an `if=` keeps ticking after the `if=` unmounts the component (15 → 28 ticks after hide in the probe) — `NEW S461; MED; open (pre-existing)`
+<!-- @gap id=g-component-timer-survives-if-unmount-s461 sev=MED status=open locus=searched:compiler/src/runtime-template.js(_scrml_destroy_scope / scope timer teardown),compiler/src/codegen(component if= unmount) — not traced prov=review:S461-runtime-tree-shake -->
+
+Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pre-existing, not caused by the tree-shake (which only `typeof`-guarded the teardown calls). A leaked interval per mount/unmount cycle.
+
+### G-LATE-RUNTIME-REASSEMBLY-AFTER-EGRESS-SCANS-S461 — the post-emit late chunk gate (#1382) re-assembles the runtime AFTER the stdlib-client-chunk gate, the protected-field egress scan and the SQL-leak scan have run, so text from a chunk added late is never scanned by them — `NEW S461; LOW; open`
+<!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
+
+Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
