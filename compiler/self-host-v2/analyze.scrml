@@ -9535,6 +9535,42 @@ ${
         return out
     }
 
+    // s462 — §42.3.5 (ruling:user-voice-scrml.md S462 "b"): "A write to the
+    // narrowed place — direct, in a nested block, or by a call that writes it
+    // or whose write set cannot be determined — ends the narrowing from that
+    // point". A call `()name` whose `name` is no function of the linked
+    // program has a write set that cannot be determined: its key is UNKNOWN
+    // ("*"), which ends every cell narrowing (fail closed). Unreachable in the
+    // current slice — function values, function-typed parameters and braced
+    // arrows are all refused (E-BOOTSTRAP-UNSUPPORTED / parse) — and kept so
+    // the "function values" slice inherits the rule instead of re-deriving it.
+    fn hasFnNamed(ws: FnW[], name: string) -> boolean {
+        for (const w of ws) {
+            if (w.name == name) return true
+        }
+        return false
+    }
+
+    // The write keys of a call of `name`: its function's write set, or UNKNOWN.
+    export fn callKeys(ws: FnW[], name: string) -> string[] {
+        if (!hasFnNamed(ws, name)) return ["*"]
+        return fnKeysNamed(ws, name)
+    }
+
+    // s462 — drop every CELL narrowing (`@…`), and every `<each>` row binding
+    // whose source is a cell: an UNKNOWN write may write any of them. A local's
+    // narrowing (`#id`) stays: a call cannot rebind a local.
+    fn tUnnarrowCells(env: TEnv) -> TEnv {
+        let out: TEnv = env
+        for (const k of env.narrowed) {
+            if (k.indexOf("@") == 0) out = tUnnarrow(out, k)
+        }
+        for (const r of env.rows) {
+            if (r.key.indexOf("@") == 0) out = tUnnarrow(out, r.name)
+        }
+        return out
+    }
+
     // Every function's write set, closed over its calls (a fixpoint: each pass
     // adds keys, a key set is finite; bounded by the function count + 2).
     fn fnWrites(files: FileAst[]) -> FnW[] {
@@ -9551,7 +9587,7 @@ ${
                 let keys: string[] = w.keys
                 for (const k of w.keys) {
                     if (k.indexOf("()") == 0) {
-                        for (const c of fnKeysNamed(ws, k.substring(2))) {
+                        for (const c of callKeys(ws, k.substring(2))) {
                             if (keys.indexOf(c) < 0) {
                                 keys = keys.concat([c])
                                 changed = true
@@ -9577,7 +9613,8 @@ ${
         let out: TEnv = env
         for (const eff of exprEffects(e)) {
             if (eff.indexOf("()") == 0) {
-                for (const k of fnKeysNamed(env.fnw, eff.substring(2))) {
+                for (const k of callKeys(env.fnw, eff.substring(2))) {
+                    if (k == "*") out = tUnnarrowCells(out)
                     if (k.indexOf("@") == 0) out = tUnnarrow(out, k)
                 }
             }
