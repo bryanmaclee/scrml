@@ -4860,6 +4860,14 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // capture object and verify the EXACT emitted text (codegen/meta-capture-rewrite.ts).
       const capturedNames = new Set<string>(Array.isArray(node.capturedNames) ? node.capturedNames : []);
       const capture = rewriteMetaBodyCaptures(bodyLines.join("\n"), capturedNames, _metaBodyHasAwait);
+      // A body the meta-checker already refused (E-META-001 from the closed allow-list over
+      // the source body) is reported ONCE: the emitted-text check below is the second reader
+      // of the same body, so its finding is not a second diagnostic (S459 addendum 3 — a
+      // runtime `^{}` reading `window` reported E-META-001 twice). The body is still not
+      // emitted.
+      if (!capture.ok && node._metaAllowListRefused === true) {
+        return `/* E-META-001: runtime ^{} body refused */`;
+      }
       if (!capture.ok) {
         const parseFail = capture.refused.length === 1 && capture.refused[0].startsWith("[parse: ");
         const assigned = capture.assigned ?? [];

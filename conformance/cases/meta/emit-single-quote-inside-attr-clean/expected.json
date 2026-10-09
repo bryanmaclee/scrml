@@ -1,6 +1,6 @@
 {
   "id": "meta-emit-single-quote-inside-attr-clean",
-  "description": "§5 / §22 (S459 round 6, F2) — the clean twin of emit-single-quoted-attr-reject: a single quote INSIDE a double-quoted attribute value in emitted meta markup (`onclick=\"go('a')\"`) is ordinary value content, not a delimiter, and compiles.",
+  "description": "§5 / §22 (S459 round 6, F2) — the clean twin of emit-single-quoted-attr-reject: a single quote INSIDE a double-quoted attribute value in emitted meta markup (`title=\"go('a')\"`) is ordinary value content, not a delimiter, and compiles. (S460 merge: the vehicle was `onclick=\"go('a')\"`; #1367's §22.4.1 closed attribute list now refuses event-handler attributes in emit() output, so the vehicle moved to `title=` — the property under test is unchanged.)",
   "language-version": "1.0",
   "spec": "§5",
   "rationale": "SPEC §5: the attribute quoted-string form is `\"`-only; a `'` inside a `\"…\"` value is part of the value.",

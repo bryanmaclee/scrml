@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-page-form-hidden-input-rt",
+  "description": "§22.12 (S459 round 4 F1) — the insertion point is inside a page `<form>`: an injected hidden input would join that form's submission. Refused: nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Insertion inside a page form*: a form-associated control anywhere in the parsed tree is a violation when the insertion point has a `<form>` ancestor. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#pf input",
+        "count": 0
+      }
+    ]
+  }
+}

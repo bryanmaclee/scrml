@@ -1,0 +1,3 @@
+<program>
+^{ emit("<label for=\"danger\">x</label>") }
+</program>

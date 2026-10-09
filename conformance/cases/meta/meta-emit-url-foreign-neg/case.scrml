@@ -1,0 +1,3 @@
+<program>
+^{ emit("<svg><a xlink:href=\"javascript:alert(1)\"><text>x</text></a></svg><math><mi href=\" javascript:alert(2)\">y</mi></math>") }
+</program>

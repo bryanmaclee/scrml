@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-clobber-lastchild-rt",
+  "description": "§22.12 (S459 review HIGH, DOM clobbering) — a control named `lastChild` shadows the form's `lastChild`; a gate reading node.lastChild never saw the `<img onerror>`. Refused: nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 \"Runtime `meta.emit` output is gated\" step 2: the gate reads the parsed tree ONLY through accessors markup cannot shadow; on a violation it SHALL write NOTHING. (ruling:user-voice-scrml.md S458 \"a\" + PA addendum 3 (S459 review of a7480c675))",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#host form", "count": 0 }, { "selector": "#host img", "count": 0 }, { "selector": "#host p", "count": 0 }]
+  }
+}

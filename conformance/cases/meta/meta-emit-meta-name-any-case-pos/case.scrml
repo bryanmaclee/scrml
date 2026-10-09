@@ -1,0 +1,3 @@
+<program>
+^{ emit("<meta id=\"md\" name=\"Description\" content=\"d\"/><meta id=\"mc\" name=\"DC.title\" content=\"t\"/><meta id=\"mm\" name=\"msapplication-TileColor\" content=\"#000\"/>") }
+</program>

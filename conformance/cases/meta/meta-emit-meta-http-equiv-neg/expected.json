@@ -1,0 +1,13 @@
+{
+  "id": "meta-emit-meta-http-equiv-neg",
+  "description": "§22.4.1 / §22.12 (PA-ruled S459: meta descriptive attrs; http-equiv refused) — `http-equiv` is refused outright in compile-time `emit()` output: `http-equiv=\"refresh\"` with `content=\"0;url=…\"` is a navigation sink (S456 meta refresh). E-META-EVAL-002.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.12 *Attributes — a CLOSED list*: `http-equiv` is on no list; §22.4.1: a name not on the list is `E-META-EVAL-002`.",
+  "expect": {
+    "codes": ["E-META-EVAL-002"],
+    "notCodes": [],
+    "severity": { "E-META-EVAL-002": "error" }
+  }
+}

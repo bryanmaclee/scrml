@@ -43,6 +43,21 @@ import * as acorn from "acorn";
 import { checkExecutedMetaJs } from "./meta-allow-list.ts";
 import { isStandardMarkupElementName } from "./html-elements.js";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
+// The ONE attribute judge for emitted markup — also inlined into the runtime meta.emit gate (S459).
+import {
+  _scrml_emit_attr_name_verdict, _scrml_emit_attr_value_verdict, _scrml_emit_child_ns,
+  _scrml_emit_fold_name, _scrml_emit_reserved_attr_name, _SCRML_EMIT_NS_HTML,
+  _scrml_emit_named_value_verdict,
+} from "./markup-attr-allow-list.js";
+// S459 round 4 (F2) — the generated document / HTMLFormElement member tables the named-property rule
+// reads (the compiler has no DOM; the runtime gate reads the same tables plus the live prototypes).
+import { _SCRML_EMIT_DOCUMENT_MEMBERS, _SCRML_EMIT_FORM_MEMBERS } from "./dom-named-property-members.js";
+// S459 round 4 (F4) — the ONE §5.2 URL judge, the one the runtime meta.emit gate applies.
+import { _scrml_is_url_attr, _scrml_url_value_admitted } from "./runtime-url-guard.js";
+import { CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
+// The ONE reader of `match` arm syntax (§18) — shared with the runtime lowering, so a compile-time
+// `match` is read exactly as the same arms are read everywhere else.
+import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockBinding, type MatchArm } from "./codegen/emit-control-flow.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -245,6 +260,224 @@ function restoreEmitBackticks(code: string): string {
   );
 }
 
+/**
+ * A statement a compile-time `^{}` body contains that this serializer cannot turn into the
+ * text the evaluator runs. Thrown — never swallowed into "" — so a statement is either
+ * EMITTED or the block is REFUSED (E-META-EVAL-001 naming the form); it is never dropped
+ * (S459 addendum 1: `while`, `function` and `match` used to fall through to `return ""`,
+ * so a `while` loop building `<li>`s rendered `<ul></ul>` with no diagnostic).
+ */
+export class MetaSerializeRefusal extends Error {
+  constructor(what: string) {
+    super(
+      `E-META-EVAL-001: this compile-time ^{} contains ${what}, which impl#1 cannot evaluate at ` +
+      `compile time, so the block is refused rather than evaluated without it (§22.4 — a ` +
+      `compile-time block is evaluated and its result inlined; nothing in it may be dropped).`,
+    );
+    this.name = "MetaSerializeRefusal";
+  }
+}
+
+/** The source form of a statement kind the serializer refuses — never the internal node name. */
+const SERIALIZE_REFUSED_FORM: Readonly<Record<string, string>> = {
+  "match-arm-inline": "a `match` arm outside a `match`",
+  "match-arm-block": "a `match` arm outside a `match`",
+  "lift-expr": "a `lift`",
+  "sql": "a `?{}` SQL block",
+  "state-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
+  "meta": "a nested `^{}`",
+};
+
+function serializeRefusedForm(kind: string): string {
+  return SERIALIZE_REFUSED_FORM[kind] ?? "a statement of a form impl#1 cannot evaluate here";
+}
+
+const PLAIN_JS_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * A `let` / `const` / `lin` whose value the serializer can write exactly: a plain name
+ * bound to its `initExpr` / `init` text, or no initializer. Any other value form the AST
+ * carries (`match`, value-form `if` / `for`, `?{}`, …) or a destructuring pattern is refused —
+ * the check is over the node's structure (every `*Expr` key other than `initExpr`), so a value
+ * form added later is refused until it is serialized, never silently written as `let x;`.
+ */
+function serializeDecl(n: Record<string, unknown>, keyword: "let" | "const", locals: Set<string>): string {
+  if (typeof n.name !== "string" || !PLAIN_JS_NAME.test(n.name)) {
+    throw new MetaSerializeRefusal("a destructuring declaration (impl#1 does not evaluate one in compile-time meta — " +
+      "bind each value with its own `const`)");
+  }
+  let matchValue: Record<string, unknown> | null = null;
+  for (const [k, v] of Object.entries(n)) {
+    if (v == null || k === "initExpr") continue;
+    if (k === "sqlNode") throw new MetaSerializeRefusal("a `?{}` SQL block");
+    if (k === "matchExpr" && typeof v === "object") { matchValue = v as Record<string, unknown>; continue; }
+    if (/Expr$/.test(k)) {
+      throw new MetaSerializeRefusal("a declaration whose value is a statement form (a value-form `if` / `for` / …)");
+    }
+  }
+  if (matchValue) {
+    if (n.initExpr) throw new MetaSerializeRefusal("a declaration carrying both a value and a `match`");
+    return `${keyword} ${n.name} = ${serializeMatchValue(matchValue, locals)};`;
+  }
+  const str = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null | undefined);
+  return str != null && String(str).trim() !== ""
+    ? `${keyword} ${n.name} = ${rewriteReflectCalls(String(str), locals)};`
+    : `${keyword} ${n.name};`;
+}
+
+/** A plain `function name(a, b = 1) { … }` declaration's parameter list, as JS. */
+function serializeParams(params: unknown): string {
+  const out: string[] = [];
+  for (const p of Array.isArray(params) ? params : []) {
+    const rec = (p && typeof p === "object") ? p as Record<string, unknown> : null;
+    const name = typeof p === "string" ? p.replace(/^\s*lin\s+/, "").split(/[:=]/)[0].trim()
+      : typeof rec?.name === "string" ? rec.name : "";
+    if (!PLAIN_JS_NAME.test(name)) {
+      throw new MetaSerializeRefusal("a function parameter pattern impl#1 cannot evaluate in compile-time meta");
+    }
+    const dflt = typeof p === "string"
+      ? (p.includes("=") ? p.slice(p.indexOf("=") + 1).trim() : "")
+      : typeof rec?.defaultValue === "string" ? rec.defaultValue.trim() : "";
+    out.push(dflt ? `${name} = ${dflt}` : name);
+  }
+  return out.join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// `match` in a compile-time body (§22.9: "`^{}` blocks MAY contain `match` expressions").
+// ---------------------------------------------------------------------------
+
+let metaMatchSeq = 0;
+
+/** An arm's expression text, prepared exactly as an expression statement is (bare-expr). */
+function metaArmExprText(text: string, locals: Set<string>): string {
+  return rewriteReflectCalls(restoreEmitBackticks(text), locals);
+}
+
+/**
+ * The arms of a `match` node, read by the shared arm reader (codegen/emit-control-flow.ts).
+ * Every child is either an arm the reader understands or the block is refused — an arm is
+ * never skipped. A payload-binding arm (`.Circle(r)`) is refused: binding a payload by
+ * position needs the subject enum's field order, and a compile-time body has no enum VALUE to
+ * match (§22.12: a type name is not a value there).
+ */
+function readMetaMatchArms(node: Record<string, unknown>): Array<MatchArm & { exprText?: string }> {
+  const scrutinees = (Array.isArray(node.scrutineeExprs) && node.scrutineeExprs.length >= 2)
+    || (Array.isArray(node.subjects) && node.subjects.length >= 2);
+  if (scrutinees) throw new MetaSerializeRefusal("a multi-subject `match` (impl#1 evaluates a single-subject `match` only)");
+  const arms: Array<MatchArm & { exprText?: string }> = [];
+  for (const c0 of Array.isArray(node.body) ? node.body : []) {
+    if (!c0 || typeof c0 !== "object") continue;
+    const child = c0 as Record<string, unknown>;
+    if (child.kind === "comment") continue;
+    if (child.kind === "match-arm-block") {
+      arms.push({
+        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
+        test: (child.variant as string | null) ?? null,
+        binding: matchArmBlockBinding(child),
+        result: "",
+        structuredBody: Array.isArray(child.body) ? child.body : [],
+      });
+      continue;
+    }
+    if (child.kind === "match-arm-inline") {
+      const arm = matchArmInlineToMatchArm(child);
+      if (!arm) throw new MetaSerializeRefusal("a `match` arm of a form impl#1 cannot read");
+      const exprText = child.resultExpr ? emitStringFromTree(child.resultExpr as ExprNode) : undefined;
+      arms.push(exprText !== undefined ? { ...arm, exprText } : arm);
+      continue;
+    }
+    // A literal block arm (`"a" :> { … }`) and a literal alternation (`"b" | "c" :> …`) reach
+    // here as raw arm text — the same text the runtime lowering reads with the same reader.
+    if (child.kind === "bare-expr" && typeof child.expr === "string" && child.expr.trim()) {
+      for (const armText of splitMultiArmString(child.expr.trim().replace(/-\s*>/g, "->"))) {
+        const arm = parseMatchArm(armText);
+        if (!arm) throw new MetaSerializeRefusal("a `match` arm of a form impl#1 cannot read");
+        arms.push(arm);
+      }
+      continue;
+    }
+    throw new MetaSerializeRefusal("a `match` arm of a form impl#1 cannot read");
+  }
+  if (arms.length === 0) throw new MetaSerializeRefusal("a `match` with no arm impl#1 can read");
+  for (const arm of arms) {
+    if (arm.binding) {
+      throw new MetaSerializeRefusal("a `match` arm that binds a variant payload (impl#1 does not bind payloads in compile-time meta)");
+    }
+    if ((arm as { failExpr?: unknown }).failExpr) throw new MetaSerializeRefusal("a `match` arm that re-`fail`s");
+  }
+  return arms;
+}
+
+/** `const <m> = (subject); const <t> = <m>'s variant tag (or <m> itself);` — the runtime's discriminator. */
+function metaMatchPrelude(node: Record<string, unknown>, mVar: string, tVar: string): string {
+  const header = node.headerExpr ? emitStringFromTree(node.headerExpr as ExprNode) : String(node.header ?? "").trim();
+  if (!header) throw new MetaSerializeRefusal("a `match` whose subject impl#1 cannot read");
+  return `const ${mVar} = (${header});\n` +
+    `const ${tVar} = (${mVar} != null && typeof ${mVar} === "object") ? ${mVar}.variant : ${mVar};`;
+}
+
+/** A raw arm result written as a `{ … }` block, without its braces — or null. */
+/**
+ * The shared arm condition (armCondition), except the `not` arm: the shared form reads the
+ * host global `undefined`, which the closed allow-list refuses in the evaluated text (§22.12),
+ * so absence is tested with a loose `== null` (true for both JS absence values, nothing else).
+ */
+function metaArmCondition(arm: MatchArm, mVar: string, tVar: string): string {
+  return arm.kind === "not" ? `${mVar} == null` : armCondition(arm, mVar, tVar);
+}
+
+function rawBlockInner(result: string): string | null {
+  const t = result.trim();
+  return t.startsWith("{") && t.endsWith("}") ? t.slice(1, -1) : null;
+}
+
+/**
+ * A `match` STATEMENT: an `if` / `else if` chain in a block of its own, so `break` / `continue`
+ * / `return` inside an arm act on the enclosing loop or function exactly as written. Arms after
+ * the first wildcard are unreachable and are not written.
+ */
+function serializeMatchStmt(node: Record<string, unknown>, locals: Set<string>): string {
+  const arms = readMetaMatchArms(node);
+  const seq = ++metaMatchSeq;
+  const mVar = `_scrml_meta_match_${seq}`;
+  const tVar = `_scrml_meta_tag_${seq}`;
+  const parts: string[] = [];
+  for (const arm of arms) {
+    let body: string;
+    if (arm.structuredBody) body = serializeBody(arm.structuredBody as LogicStatement[], locals);
+    else {
+      const inner = arm.exprText === undefined ? rawBlockInner(arm.result) : null;
+      body = inner !== null ? metaArmExprText(inner, locals) : `${metaArmExprText(arm.exprText ?? arm.result, locals)};`;
+    }
+    if (arm.kind === "wildcard") { parts.push(`{\n${body}\n}`); break; }
+    parts.push(`if (${metaArmCondition(arm, mVar, tVar)}) {\n${body}\n}`);
+  }
+  return `{\n${metaMatchPrelude(node, mVar, tVar)}\n${parts.join(" else ")}\n}`;
+}
+
+/**
+ * A `match` VALUE (`const x = match k { … }`): each arm's result is the value. An arm whose
+ * result is a block (a statement body) has no single value impl#1 can read — refused. No arm
+ * matching gives the absence value.
+ */
+function serializeMatchValue(node: Record<string, unknown>, locals: Set<string>): string {
+  const arms = readMetaMatchArms(node);
+  const seq = ++metaMatchSeq;
+  const mVar = `_scrml_meta_match_${seq}`;
+  const tVar = `_scrml_meta_tag_${seq}`;
+  const lines: string[] = [];
+  for (const arm of arms) {
+    if (arm.structuredBody || (arm.exprText === undefined && rawBlockInner(arm.result) !== null)) {
+      throw new MetaSerializeRefusal("a `match` value with a block arm (impl#1 evaluates `match` values whose arms are expressions)");
+    }
+    const value = metaArmExprText(arm.exprText ?? arm.result, locals);
+    if (arm.kind === "wildcard") { lines.push(`return (${value});`); break; }
+    lines.push(`if (${metaArmCondition(arm, mVar, tVar)}) return (${value});`);
+  }
+  return `(() => {\n${metaMatchPrelude(node, mVar, tVar)}\n${lines.join("\n")}\nreturn;\n})()`;
+}
+
 function serializeBody(nodes: LogicStatement[], locals: Set<string> = new Set()): string {
   if (!Array.isArray(nodes)) return "";
   const parts: string[] = [];
@@ -271,15 +504,47 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
       return `${rewriteReflectCalls(bareStr, locals)};`;
     }
 
-    case "let-decl": {
-      const letStr = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null);
-      return letStr != null ? `let ${n.name} = ${rewriteReflectCalls(letStr, locals)};` : `let ${n.name};`;
+    case "let-decl":
+      return serializeDecl(n, "let", locals);
+
+    case "const-decl":
+      return serializeDecl(n, "const", locals);
+
+    // `lin`: a value used exactly once — the compiler checks the use; the binding itself is
+    // never reassigned, so it evaluates as a `const`.
+    case "lin-decl":
+      return serializeDecl(n, "const", locals);
+
+    case "while-stmt": {
+      const whileCond = n.condExpr ? emitStringFromTree(n.condExpr as ExprNode) : (n.condition as string | undefined);
+      if (typeof whileCond !== "string" || whileCond.trim() === "") {
+        throw new MetaSerializeRefusal("a `while` loop whose condition impl#1 cannot read");
+      }
+      return `while (${whileCond}) {\n${serializeBody((n.body || []) as LogicStatement[], locals)}\n}`;
     }
 
-    case "const-decl": {
-      const constStr = n.initExpr ? emitStringFromTree(n.initExpr as ExprNode) : (n.init as string | null);
-      return constStr != null ? `const ${n.name} = ${rewriteReflectCalls(constStr, locals)};` : `const ${n.name};`;
+    case "break-stmt":
+    case "continue-stmt": {
+      const kw = node.kind === "break-stmt" ? "break" : "continue";
+      return typeof n.label === "string" && n.label ? `${kw} ${n.label};` : `${kw};`;
     }
+
+    case "function-decl": {
+      // A plain `function` declaration. `fn` is E-PARSE-002 inside `^{}`; a server, failable
+      // or generator function has no compile-time meaning — refused, not dropped.
+      if (n.fnKind !== "function" || n.isServer === true || n.canFail === true || n.isGenerator === true
+        || typeof n.name !== "string" || !PLAIN_JS_NAME.test(n.name)) {
+        throw new MetaSerializeRefusal("a function declaration of a form impl#1 cannot evaluate in compile-time meta " +
+          "(only a plain `function name(…) { … }` is)");
+      }
+      return `function ${n.name}(${serializeParams(n.params)}) {\n${serializeBody((n.body || []) as LogicStatement[], locals)}\n}`;
+    }
+
+    case "comment":
+      return "";
+
+    case "match-stmt":
+      return serializeMatchStmt(n, locals);
 
     case "for-loop": {
       // Phase 4d: ExprNode-first, string fallback for iterable
@@ -308,10 +573,7 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
       if (n.rawInit !== undefined || n.rawTest !== undefined || n.rawUpdate !== undefined) {
         return `for (${n.rawInit || ""}; ${n.rawTest || ""}; ${n.rawUpdate || ""}) {\n${loopBody}\n}`;
       }
-      // Last resort: try ExprNode then expr field
-      if (n.exprNode) return `${emitStringFromTree(n.exprNode as ExprNode)};`;
-      if (n.expr) return `${n.expr};`;
-      return "";
+      throw new MetaSerializeRefusal("a `for` loop of a form impl#1 cannot read");
     }
 
     case "if-stmt": {
@@ -358,10 +620,11 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
     }
 
     default:
-      // For unrecognized nodes, try ExprNode then expr field or skip
-      if (n.exprNode) return `${emitStringFromTree(n.exprNode as ExprNode)};`;
-      if (n.expr) return `${n.expr};`;
-      return "";
+      // FAIL CLOSED (S459 addendum 1). A statement kind this serializer does not write is
+      // refused, never returned as "" — reader 1 (meta-allow-list.ts) admitting a kind does
+      // not make it evaluable, and a dropped statement changes what the block emits with no
+      // diagnostic.
+      throw new MetaSerializeRefusal(serializeRefusedForm(String(node.kind)));
   }
 }
 
@@ -669,6 +932,15 @@ function runInMetaRealm(
 const EMIT_ATTR_VALUE_KINDS = new Set(["string-literal", "absent"]);
 
 /**
+ * SPEC §22.4.1 / §22.12 (S459 round 3): emit() output attribute NAMES are judged by the ONE closed
+ * attribute judge both phases use — markup-attr-allow-list.js `_scrml_emit_attr_name_verdict`
+ * (inlined verbatim into the runtime meta.emit gate). A name not on its list is refused; the
+ * compiler-owned `data-scrml` / `data-scrml-*` namespace is refused there too. The element's
+ * namespace (HTML / SVG / MathML) is tracked down the tree with the tree builder's rule
+ * (`_scrml_emit_child_ns`), since no HTML parser built this tree.
+ */
+
+/**
  * `emit()` output re-enters the pipeline AFTER the type system, route inference and
  * every front-end check have run (ME is Stage 6.5), so a construct those stages own
  * would reach code generation unchecked — measured S457: an emitted `<script>`
@@ -689,7 +961,11 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
     reported.add(message);
     errors.push(new MetaEvalError(code, message, site));
   };
-  const visit = (list: unknown[]): void => {
+  const members = { document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: _SCRML_EMIT_FORM_MEMBERS };
+  // `inForm`: an emitted `<form>` encloses this list (S459 round 4 F2 — a control's id / name becomes a
+  // named property of that form). The page around a compile-time `^{}` is author source, judged as
+  // source; only the run-time gate knows a page form around a `meta.emit` insertion point (F1).
+  const visit = (list: unknown[], parentNs: string = _SCRML_EMIT_NS_HTML, parentTag: string = "", inForm: boolean = false): void => {
     for (const n0 of list) {
       if (!n0 || typeof n0 !== "object") continue;
       const n = n0 as Record<string, unknown>;
@@ -713,8 +989,55 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
             `that expand and check it in source.`);
           continue;
         }
-        for (const a of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
+        // ASCII-only fold, as the HTML tokenizer (and the runtime gate) fold.
+        const lowerTag = _scrml_emit_fold_name(tag);
+        const ns = _scrml_emit_child_ns(parentNs, parentTag, lowerTag);
+        const attrList = Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : [];
+        const hasNameAttr = attrList.some((a) => _scrml_emit_fold_name(String(a?.name ?? "")) === "name");
+        const isCustom = CUSTOM_ELEMENT_NAME_PATTERN.test(lowerTag);
+        for (const a of attrList) {
+          const nameVerdict = _scrml_emit_attr_name_verdict(ns, lowerTag, String(a?.name ?? ""));
+          if (nameVerdict !== "") {
+            const reserved = _scrml_emit_reserved_attr_name(_scrml_emit_fold_name(String(a?.name ?? "")));
+            refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` the attribute ` +
+              `'${String(a.name)}' — ${nameVerdict}. ` + (reserved
+                ? `The \`data-scrml\` attribute namespace (\`data-scrml\` itself and every \`data-scrml-*\` name) ` +
+                  `is reserved for the compiler's own markers (the component CSS scope root \`data-scrml\`, ` +
+                  `\`data-scrml-meta\`, \`data-scrml-outlet\`, …), like the \`_scrml_\` name prefix — use another ` +
+                  `\`data-\` name (§22.4.1).`
+                : `emit() output admits a closed list of attributes — global and per-element presentation, ` +
+                  `structure, accessibility and form-value attributes, \`data-*\` and \`aria-*\` — and refuses ` +
+                  `every other name (§22.4.1, §22.12).`));
+            continue;
+          }
           const v = a?.value as { kind?: string } | undefined;
+          if (v && typeof v === "object" && v.kind === "string-literal") {
+            const valueVerdict = _scrml_emit_attr_value_verdict(String(a.name), String((v as { value?: unknown }).value ?? ""), lowerTag);
+            if (valueVerdict !== "") {
+              refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` ${valueVerdict} ` +
+                `(§22.4.1).`);
+              continue;
+            }
+            const literal = String((v as { value?: unknown }).value ?? "");
+            const lowerName = _scrml_emit_fold_name(String(a.name));
+            const namedVerdict = _scrml_emit_named_value_verdict(ns, lowerTag, lowerName, literal, hasNameAttr,
+              inForm, isCustom, members);
+            if (namedVerdict !== "") {
+              refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives ${namedVerdict} (§22.12). Rename ` +
+                `it — on these elements an \`id\` / \`name\` becomes a named property of \`document\` or of the form, ` +
+                `and one spelled like a member hides that member from every script that reads it.`);
+              continue;
+            }
+            // §22.12 / §5.2 — the URL judge the runtime gate applies (S459 round 4 F4): the literal is the
+            // string the browser parses there.
+            if (_scrml_is_url_attr("", lowerName) && !_scrml_url_value_admitted(lowerName, literal)) {
+              refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives \`<${tag}>\` a ${lowerName}= URL ` +
+                `whose scheme is not admitted (§22.4.1, §5.2): emitted markup admits http:, https:, ftp:, ` +
+                `mailto:, tel:, sms:, a relative URL, or a raster data:image on an image source — the same ` +
+                `rule runtime meta.emit() output is held to.`);
+              continue;
+            }
+          }
           const interpolated = v && typeof v === "object" && v.kind === "string-literal"
             && typeof (v as { value?: unknown }).value === "string" && ((v as { value: string }).value).includes("${");
           if (v && typeof v === "object" && (!EMIT_ATTR_VALUE_KINDS.has(String(v.kind)) || interpolated)) {
@@ -728,7 +1051,9 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
               `attribute values — a literal string or no value — in emit() output (§22.4.1).`);
           }
         }
-        if (Array.isArray(n.children)) visit(n.children);
+        if (Array.isArray(n.children)) {
+          visit(n.children, ns, lowerTag, inForm || (lowerTag === "form" && ns === _SCRML_EMIT_NS_HTML));
+        }
         continue;
       }
       refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output contains a '${String(n.kind)}' construct. impl#1 ` +
@@ -972,8 +1297,23 @@ function processNodeList(
       // is NEVER executed — before S457 a refused body still ran here.
       const refused = (node as Record<string, unknown>)._metaAllowListRefused === true;
 
+      // S459 addendum 1 — a statement the serializer cannot write refuses the block
+      // (E-META-EVAL-001 naming the form); it is never evaluated without that statement.
+      let bodyText: string | null = null;
       if (isCompileTime && !hasReactiveVars && !hasNestedMeta && !refused) {
-        const bodyText = serializeBody((body || []) as LogicStatement[], collectMetaLocals((body || []) as LogicStatement[]));
+        try {
+          bodyText = serializeBody((body || []) as LogicStatement[], collectMetaLocals((body || []) as LogicStatement[]));
+        } catch (e) {
+          if (!(e instanceof MetaSerializeRefusal)) throw e;
+          errors.push(new MetaEvalError(
+            "E-META-EVAL-001",
+            e.message,
+            (node as { span?: Span }).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span,
+          ));
+        }
+      }
+
+      if (bodyText !== null) {
         const bodyDeclared = topLevelDeclaredNames(bodyText);
         const captured = selectCapturedDecls(scopeDecls, identifierReads(`(function () {\n${bodyText}\n})`), bodyDeclared);
         const precedingDecls = captured.length > 0 ? captured.map((d) => d.code).join("\n") : undefined;
