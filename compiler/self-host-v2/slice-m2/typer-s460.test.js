@@ -287,3 +287,85 @@ describe("S460 at runtime — `is given` / `is not` lower to absence checks, nev
     expect(document.querySelector("p.out").textContent).toBe("absent");
   });
 });
+
+// S460 N1 — PA reading of "a on F2, go" (user-voice-scrml.md §S460; SPEC §42.4 statement 10): a ternary
+// that IS the condition's value, or an operand in its `!` / `&&` / `||` chain, has ARMS that are the
+// condition's value when taken — walked with the same rule (an unresolved arm or arm operand is
+// E-COND-NOT-BOOLEAN, blamed at the arm / operand; a `T | not` arm is a presence test). A ternary in a VALUE
+// position (an initializer, a call argument) stays a value: silent (S440 Q2).
+describe("S460 N1 — ternary arms of the condition's value are inside the condition", () => {
+  const G = "    function g() { }\n    function h(x: bool) -> bool { return x }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
+  const inIf = (cond) => diags(G + `    function f() { if (${cond}) { @m = 1 } }`);
+  const blamed = (cond) => {
+    const src = prog(G + `    function f() { if (${cond}) { @m = 1 } }`);
+    return run(src).diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)]);
+  };
+  test("fires — `@b ? !g() : @c` and `@b ? (g() && @c) : @c` (were clean), blamed at `g()`", () => {
+    expect(blamed("@b ? !g() : @c")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+    expect(blamed("@b ? (g() && @c) : @c")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+    const m = inIf("@b ? !g() : @c")[0].message;
+    expect(m).toContain("a ternary arm of an `if` condition");
+    expect(m).toContain(UNRESOLVED_MSG);
+  });
+  test("a bare unresolved arm is blamed at the ARM (not the whole ternary)", () => {
+    expect(blamed("@b ? g() : @c")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+  });
+  test("nested ternaries — `@b ? (@c ? !g() : @b) : @c`, `@b ? (@c ? g() : @b) : @c`", () => {
+    expect(blamed("@b ? (@c ? !g() : @b) : @c")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+    expect(blamed("@b ? (@c ? g() : @b) : @c")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+  });
+  test("a ternary operand of `!` / `&&` — `!(@b ? !g() : @c)`, `(@b ? g() : @c) && @c` — blamed at `g()`", () => {
+    expect(blamed("!(@b ? !g() : @c)")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+    expect(blamed("(@b ? g() : @c) && @c")).toEqual([["E-COND-NOT-BOOLEAN", "g()"]]);
+  });
+  test("a non-bool arm of an unresolved ternary is judged too (whole: E-COND-NOT-BOOLEAN; operand: E-OPERATOR-OPERAND-TYPE)", () => {
+    expect(blamed("@b ? 1 : g()")).toEqual([["E-COND-NOT-BOOLEAN", "1"], ["E-COND-NOT-BOOLEAN", "g()"]]);
+    expect(blamed("(@b ? 1 : g()) && @c")).toEqual([["E-OPERATOR-OPERAND-TYPE", "1"], ["E-COND-NOT-BOOLEAN", "g()"]]);
+  });
+  test("a RESOLVED non-bool ternary is still judged whole (one report)", () => {
+    expect(blamed("@b ? 1 : 2")).toEqual([["E-COND-NOT-BOOLEAN", "@b ? 1 : 2"]]);
+  });
+  test("markup `if=` — the same walk", () => {
+    expect(codes(G, "<p if=(@b ? !g() : @c)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("statement 6 per arm — an arm an error explains is not reported; its sibling still is", () => {
+    expect(blamed("@b ? zz : g()")).toEqual([["E-SCOPE-001", "zz"], ["E-COND-NOT-BOOLEAN", "g()"]]);
+    expect(blamed("@b ? zz : @c")).toEqual([["E-SCOPE-001", "zz"]]);
+  });
+  test("twins — VALUE positions stay silent: an initializer, a call argument", () => {
+    expect(codes(G + "    function f() { const v = @b ? !g() : @c\n @b = v }")).toEqual([]);
+    expect(inIf("h(@b ? !g() : @c)")).toEqual([]);
+    expect(inIf("h(!g())")).toEqual([]);
+  });
+  test("twin — resolved `bool` arms are legal", () => {
+    expect(inIf("@b ? !(g() is given) : @c")).toEqual([]);
+  });
+  test("strict direction — a ternary whose arms do not join (`bool` beside `int | not`) is refused WHOLE, as before N1", () => {
+    // each arm alone would be a legal condition value; their join is unresolved, and N1 admits nothing new
+    const C = O + "    let <c:bool=false/>\n";
+    for (const cond of ["@b ? @o.n : @c", "@b ? @c : @o.n"]) {
+      const src = prog(C + `    function f() { if (${cond}) { @m = 1 } }`);
+      const r = run(src);
+      expect(r.diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)])).toEqual([["E-COND-NOT-BOOLEAN", cond]]);
+      expect(r.diags[0].message).toContain(UNRESOLVED_MSG);
+      expect(r.typed.tables.typing.presence).toEqual([]);
+    }
+    expect(codes(C, "<p if=(@b ? @o.n : @c)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    // as an operand of `&&`: the `int | not` arm is not a boolean (statement 7)
+    expect(codes(C + "    function f() { if ((@b ? @o.n : @c) && @c) { @m = 1 } }")).not.toEqual([]);
+  });
+});
+
+describe("S460 N3 — the condition message names the attribute it stands in", () => {
+  const G = "    function g() { }\n    let <b:bool=false/>\n    let <c:bool=false/>\n";
+  test("an `else-if=` operand and a whole `else-if=` say `else-if=`, not `if=`", () => {
+    const d = diags(G, "<p if=@c>a</p><p else-if=(@b || g())>b</p>");
+    expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(d[0].message).toContain("in `else-if=`");
+    expect(d[0].message).not.toContain("`if=`");
+    expect(diags(G, "<p if=@c>a</p><p else-if=g()>b</p>")[0].message).toContain("`else-if=` is a value");
+  });
+  test("twin — an `if=` operand still says `if=`", () => {
+    expect(diags(G, "<p if=(@b || g())>a</p>")[0].message).toContain("in `if=`");
+  });
+});

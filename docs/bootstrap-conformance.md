@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1536 of 1536 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1537 of 1537 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 138 | 9.0% |
+| PASS | 139 | 9.0% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.6% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1536 of 1536 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 194; of those, 138 hold (71.1%). Runtime half executed on the bootstrap for 44 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 195; of those, 139 hold (71.3%). Runtime half executed on the bootstrap for 44 case(s).
 
-- **Vacuous** passes: 11 of 138 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **127**.
+- **Vacuous** passes: 11 of 139 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **128**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -105,7 +105,7 @@ NOT-TWINNED by reason (571 cases; a case counts once per distinct reason):
 | channel | 39 | · | · | · | · | 27 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 67 | · | · | 2 | · | 64 | 1 | · | · |
-| condition | 20 | 17 | · | · | · | · | 3 | · | · |
+| condition | 21 | 18 | · | · | · | · | 3 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -296,7 +296,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (138)
+### PASS / CODES-ONLY (139)
 
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
@@ -332,6 +332,7 @@ none
 - `condition/unresolved-operand-not-neg` — PASS
 - `condition/unresolved-operand-outside-condition-pos` — PASS
 - `condition/unresolved-sql-row-neg` — PASS
+- `condition/unresolved-ternary-arm-neg` — PASS
 - `control-flow/ctrl-001-orphan-else-pos` — PASS · TWIN
 - `control-flow/ctrl-001-orphan-else-program-pos` — PASS
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
