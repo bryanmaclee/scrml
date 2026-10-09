@@ -4526,7 +4526,7 @@ const JS_KEYWORDS = new Set([
   "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent",
   "decodeURIComponent", "setTimeout", "setInterval", "clearTimeout",
   "clearInterval", "document", "window", "navigator", "fetch",
-  "not", "is", "some", "match", "fail",
+  "not", "is", "some", "given", "match", "fail",
 ]);
 
 /**

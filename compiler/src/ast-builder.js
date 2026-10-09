@@ -683,6 +683,8 @@ let tokenizePassthrough = _defaultTokenizePassthrough;
 // confirmed site; `scrml fix` (commands/fix-is-some.js) rewrites the same
 // confirmed sites. An offset the source does not confirm is dropped by both.
 let _isSomeSink = null;
+// Relevance pre-check only (never a locator): can this text hold an `is some` at all?
+const IS_SOME_TEXT_RE = /(?<![A-Za-z0-9_$])is\s+some(?![A-Za-z0-9_$])/;
 // A SUB-PARSE (an `<each>` body, a `<match>` arm body re-split from its raw text)
 // tokenizes a substring at substring-relative offsets. `withIsSomeBase` adds the
 // substring's file offset to what it records; a sub-parse whose file offset is
@@ -721,7 +723,22 @@ function noteIsSomeTokens(tokens, kind = "expr") {
     const start = b.span.start + _isSomeBias;
     const end = b.span.end + _isSomeBias;
     if (typeof start !== "number" || typeof end !== "number" || end - start !== 4) continue;
-    if (!_isSomeSink.has(start)) _isSomeSink.set(start, { start, end, kind });
+    // `is some` that CLOSES a declaration opener (`<mid: string is some>`) is the §55.1
+    // validator even where the opener scan does not read it (S462 F5) — in an
+    // expression, `some` is never followed by the opener's `>`.
+    const after = tokens[k + 2];
+    const siteKind = after && after.text === ">" ? "validator" : kind;
+    if (!_isSomeSink.has(start)) _isSomeSink.set(start, { start, end, kind: siteKind });
+  }
+  // A backtick template literal is ONE STRING token whose body keeps its `${…}`
+  // interpolations verbatim (tokenizer.ts readBacktickString); read them at their own
+  // offsets (S462 F3a). Its span covers the backticks, so a body that is not the
+  // verbatim source slice (span length != text length + 2) is never placed.
+  for (const t of tokens) {
+    if (!t || t.kind !== "STRING" || t.isTemplate !== true || !t.span) continue;
+    if (typeof t.text !== "string" || !t.text.includes("${") || !t.text.includes("some")) continue;
+    if (t.span.end - t.span.start !== t.text.length + 2) continue;
+    noteIsSomeInInterpolations(t.text, t.span.start + 1, t.span.line ?? 1);
   }
   // A child block this stream only REFERENCES (a component body `const C = <div …>…</>`,
   // whose markup the builder keeps as raw text until component expansion) is read here,
@@ -739,7 +756,7 @@ function noteIsSomeTokens(tokens, kind = "expr") {
  */
 function noteIsSomeInBlockTree(block, depth) {
   if (!_isSomeSink || _isSomeMuted > 0 || !block || depth > 64) return;
-  if (typeof block.raw !== "string" || !block.span || !block.raw.includes("some")) return;
+  if (typeof block.raw !== "string" || !block.span || !IS_SOME_TEXT_RE.test(block.raw)) return;
   if (block.type === "markup" || block.type === "state") {
     let toks = [];
     try {
@@ -753,8 +770,8 @@ function noteIsSomeInBlockTree(block, depth) {
       else if (t.kind === "ATTR_STRING") noteIsSomeInAttrString(t.text, t.span);
     }
     for (const c of block.children ?? []) noteIsSomeInBlockTree(c, depth + 1);
-  } else if (block.type === "logic" || block.type === "error-effect" || block.type === "test") {
-    const prefixLen = block.raw.startsWith("${") || block.raw.startsWith("!{") || block.raw.startsWith("~{") ? 2 : 1;
+  } else if (block.type === "logic" || block.type === "error-effect" || block.type === "test" || block.type === "meta") {
+    const prefixLen = block.raw.startsWith("${") || block.raw.startsWith("!{") || block.raw.startsWith("~{") || block.raw.startsWith("^{") ? 2 : 1;
     let toks;
     try {
       toks = tokenizeLogic(block.raw.slice(prefixLen, block.raw.length - 1), block.span.start + prefixLen, block.span.line ?? 1, (block.span.col ?? 1) + prefixLen, block.children ?? []);
@@ -797,8 +814,18 @@ function noteIsSomeInAttrString(text, valSpan) {
   if (!_isSomeSink || typeof text !== "string" || !valSpan || !text.includes("${") || !text.includes("some")) return;
   // The token text must be the source slice between the quotes, or offsets are unknown.
   if ((valSpan.end ?? 0) - (valSpan.start ?? 0) !== text.length + 2) return;
-  const base = valSpan.start + 1;
+  noteIsSomeInInterpolations(text, valSpan.start + 1, valSpan.line ?? 1);
+}
+
+/**
+ * The `${…}` interpolations of a text whose byte 0 sits at `base`: a quoted attribute
+ * value, or the body of a backtick template literal in logic (S462 F3a). Each interior
+ * is tokenized at its own offset; the literal text around them is never tokenized. A
+ * `\${` is literal text, not an interpolation.
+ */
+function noteIsSomeInInterpolations(text, base, line) {
   for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\\") { i++; continue; }
     if (text[i] !== "$" || text[i + 1] !== "{") continue;
     let depth = 1;
     let j = i + 2;
@@ -817,7 +844,7 @@ function noteIsSomeInAttrString(text, valSpan) {
     const inner = text.slice(i + 2, j - 1);
     let toks;
     try {
-      toks = tokenizeLogic(inner, base + i + 2, valSpan.line ?? 1, 1, []);
+      toks = tokenizeLogic(inner, base + i + 2, line, 1, []);
     } catch {
       return;
     }
@@ -22664,6 +22691,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const bodyCol = block.span.col + 2;
 
       const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, block.children);
+      noteIsSomeTokens(tokens);
       const body = parseLogicBody(tokens, filePath, block.children, block, counter, errors, "meta");
 
       // parentContext: the kind passed in from the enclosing block
@@ -23211,7 +23239,11 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   const savedNestedOk = _isSomeNestedOk;
   if (!shared) {
     _isSomeBias = 0;
-    _isSomeMuted = 0;
+    // Cost gate (S462 fix round): a file whose text holds no `is`-whitespace-`some`
+    // has no site, so its build does no site work at all. This only decides whether
+    // to LOOK; every site is still located from tokens and confirmed against source.
+    const blocks = Array.isArray(bsOutput?.blocks) ? bsOutput.blocks : [];
+    _isSomeMuted = blocks.some((b) => typeof b?.raw === "string" && IS_SOME_TEXT_RE.test(b.raw)) ? 0 : 1;
   } else if (!_isSomeNestedOk) {
     // A same-file nested build nobody placed: its offsets are its own text's.
     _isSomeMuted = savedMuted + 1;
@@ -23223,7 +23255,7 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     // regions — a component body, an `<each>` body — from text whose offsets are its
     // own; those re-reads only ADD candidates, and source confirmation drops a
     // misplaced one.)
-    if (!shared && Array.isArray(bsOutput?.blocks)) {
+    if (!shared && _isSomeMuted === 0 && Array.isArray(bsOutput?.blocks)) {
       for (const b of bsOutput.blocks) noteIsSomeInBlockTree(b, 0);
     }
     const result = _buildASTImpl(bsOutput, tokenizerOverrides);
