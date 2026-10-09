@@ -4204,22 +4204,6 @@ export function runCG(input: CgInput): CgOutput {
   let chunksBootJs: string | undefined;
   let chunksBootFilename: string | undefined;
   if (emitPerRoute && reachabilityRecordInput) {
-    const splitterResult = emitPerRouteChunks({
-      reachabilityRecord: reachabilityRecordInput,
-      cgContextByFile,
-      perFileOutputs: outputs,
-      // Q-OPEN-5 — forward the CLI-supplied `--chunk-size-budget`
-      // value (or `undefined` for "use default" / "flag absent").
-      chunkSizeBudgetBytes,
-      // S459 (§47.9.9) — chunk payloads are stripped inside `finalizeChunkHash`, before hashing.
-      ...(stripShippedJs ? { shipPayload: shipStripped } : {}),
-    });
-    chunks = splitterResult.chunks;
-    chunksManifest = splitterResult.manifest;
-    if (splitterResult.diagnostics.length > 0) {
-      errors.push(...splitterResult.diagnostics);
-    }
-
     // ESM chunks arc (Unit 3) — convert per-route chunk payloads to ES modules.
     //
     // Under `--module-format=esm` the role-bootstrap injects the per-role INITIAL
@@ -4240,18 +4224,39 @@ export function runCG(input: CgInput): CgOutput {
     // so the placeholder-substitution + `stripPagesPrefix` logic of the per-file
     // path does not apply. Gated on `!embedRuntime` (esm needs a standalone
     // runtime module to import from), mirroring the per-file path.
-    if (moduleFormat === "esm" && !embedRuntime && classicRuntimeSliceForChunks !== null) {
-      for (const chunk of chunks.values()) {
-        if (!chunk.payloadJs) continue;
-        const depth = chunk.filename.split("/").length - 1;
-        const runtimeUrl = (depth > 0 ? "../".repeat(depth) : "./") + runtimeFilename;
-        chunk.payloadJs = toEsmClientChunk(chunk.payloadJs, {
-          runtimeSlice: classicRuntimeSliceForChunks,
-          runtimePlaceholder: runtimeFilename, // unused when runtimeUrl is set
-          importerDistDir: ".", // unused when runtimeUrl is set
-          runtimeUrl,
-        });
-      }
+    //
+    // S461 (§47.9.9 "one reader") — the transform runs INSIDE `finalizeChunkHash`, BEFORE the
+    // strip and the content hash (it used to run here, after both: an esm chunk shipped the
+    // transform's header comment + import line unstripped, and its filename hash named the
+    // pre-transform bytes). The chunk's directory depth is fixed before its hash is known.
+    const esmPayload =
+      moduleFormat === "esm" && !embedRuntime && classicRuntimeSliceForChunks !== null
+        ? (payloadJs: string, filename: string): string => {
+            const depth = filename.split("/").length - 1;
+            const runtimeUrl = (depth > 0 ? "../".repeat(depth) : "./") + runtimeFilename;
+            return toEsmClientChunk(payloadJs, {
+              runtimeSlice: classicRuntimeSliceForChunks as string,
+              runtimePlaceholder: runtimeFilename, // unused when runtimeUrl is set
+              importerDistDir: ".", // unused when runtimeUrl is set
+              runtimeUrl,
+            });
+          }
+        : undefined;
+    const splitterResult = emitPerRouteChunks({
+      reachabilityRecord: reachabilityRecordInput,
+      cgContextByFile,
+      perFileOutputs: outputs,
+      // Q-OPEN-5 — forward the CLI-supplied `--chunk-size-budget`
+      // value (or `undefined` for "use default" / "flag absent").
+      chunkSizeBudgetBytes,
+      // §47.9.9 — inside `finalizeChunkHash`: esm transform, then strip, then hash.
+      ...(esmPayload ? { esmPayload } : {}),
+      ...(stripShippedJs ? { shipPayload: shipStripped } : {}),
+    });
+    chunks = splitterResult.chunks;
+    chunksManifest = splitterResult.manifest;
+    if (splitterResult.diagnostics.length > 0) {
+      errors.push(...splitterResult.diagnostics);
     }
 
     // -------------------------------------------------------------------------
