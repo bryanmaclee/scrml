@@ -412,3 +412,55 @@ describe("G — a markup value is ONE argument: its text's `,` `(` `)` are conte
     expect(JSON.parse(p.text("#out"))).toEqual([1, 2, true, true]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// H — a value-ending KEYWORD before `<` makes it a comparison (s461 review N5)
+// ---------------------------------------------------------------------------
+
+/** `go()` declares locals b, c, d and runs `stmt`; `#out` = JSON of @ls (an element as "<TAG>text"). */
+const kwPage = (stmt) => `\${
+    <ls> = []
+    function go() {
+        const b = 2
+        const c = 3
+        const d = 0
+        ${stmt}
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">\${JSON.stringify(@ls.map((e) => e && e.nodeType ? "<" + e.tagName + ">" + e.textContent : e))}</p>
+`;
+
+describe("H — `true`/`false`/`not` end a value; `typeof`/`return` do not", () => {
+  // Each of these compiles and runs identically on base d99dad0 (executed there).
+  const cases = [
+    { name: "c03 `push(false <b, 1)`", stmt: "@ls.push(false <b, 1)", args: 2, want: [true, 1] },
+    { name: "a19 `push(true <b, c> d)`", stmt: "@ls.push(true <b, c> d)", args: 2, want: [true, true] },
+    { name: "`push(not <b, 1)` — `not` is the absence literal", stmt: "@ls.push(not <b, 1)", args: 2, want: [true, 1] },
+    { name: "`push(typeof <li>x</li>)` — `typeof` starts an operand: markup", stmt: "@ls.push(typeof <li>x</li>)", args: 1, want: ["object"] },
+  ];
+  for (const { name, stmt, args, want } of cases) {
+    test(name, async () => {
+      const [node] = mutationNodes(kwPage(stmt));
+      expect(node.argExprs).toHaveLength(args);
+      const p = await boot(kwPage(stmt), "h");
+      await p.click("#go");
+      expect(JSON.parse(p.text("#out"))).toEqual(want);
+      expect(p.pageErrors).toEqual([]);
+    });
+  }
+
+  test("`typeof <li>x, y</li>` — markup after `typeof` keeps its comma: one argument", () => {
+    const [node] = mutationNodes(kwPage("@ls.push(typeof <li>x, y</li>)"));
+    expect(node.argExprs).toHaveLength(1);
+  });
+
+  // `return <li>…</li>` inside a block-bodied arrow argument is read as markup
+  // (the list splits only at the top-level comma). The program itself is
+  // E-CODEGEN-INVALID-LOGIC on base too (block arrow + markup), so this pins
+  // the split structurally.
+  test("`return <li>x, y</li>` — `return` starts an operand: markup, list of 2", () => {
+    const [node] = mutationNodes(kwPage("@ls.push(1, (() => { return <li>x, y</li> })())"));
+    expect(node.argExprs).toHaveLength(2);
+  });
+});

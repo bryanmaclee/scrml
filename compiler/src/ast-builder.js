@@ -3904,6 +3904,13 @@ const BIND_DIRECTIVES = new Set([
 // Standard HTML5 void elements + SVG primitive shapes registered in
 // compiler/src/html-elements.js with isVoid: true. Lower-cased; lookup
 // must lower-case the tag name.
+//
+// (s461) VALUE_KEYWORDS — the tokenizer KEYWORDs that are a COMPLETE operand,
+// so a `<` after one is a comparison, never a markup opener: the literals,
+// `this` / `super`, and scrml's absence literal `not` (§42). Every other
+// keyword either starts an operand or is a statement word.
+const VALUE_KEYWORDS = new Set(["true", "false", "null", "undefined", "this", "super", "not"]);
+
 const HTML_VOID_ELEMENTS = new Set([
   // HTML5 void elements (W3C HTML Living Standard)
   "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -5616,8 +5623,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     let pendingVoidClose = false; // the next `>` closes a void element
     let pendingCloseGt = false;   // the outermost element closed; its `>` is next
     const isPunct = (tok, text) => !!tok && tok.kind === "PUNCT" && tok.text === text;
+    // A KEYWORD that is a complete operand (a literal, `this`/`super`, scrml's
+    // absence literal `not`) also ends a value: `false < b` is a comparison.
+    // Keywords that START an operand (`return`, `typeof`, `new`, `in`, `of`,
+    // `void`, `await`, `yield`, …) do not: `return <li/>` is markup.
     const endsValue = (tok) => !!tok && (
       tok.kind === "IDENT" || tok.kind === "AT_IDENT" || tok.kind === "NUMBER" || tok.kind === "STRING" ||
+      (tok.kind === "KEYWORD" && VALUE_KEYWORDS.has(tok.text)) ||
       isPunct(tok, ")") || isPunct(tok, "]"));
     while (peek().kind !== "EOF") {
       const t = peek();
