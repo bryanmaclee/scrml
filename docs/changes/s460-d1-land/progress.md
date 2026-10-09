@@ -63,3 +63,13 @@ SEMANTIC conflict (no textual conflict): D1's `conformance/cases/meta/emit-singl
 ## Merge #3 — origin/main 02732712a (#1368 gaps, docs-only), landed during this run
 Conflict (1): `docs/known-gaps.md` §0 @generated:gap-counts only. First attempt `--theirs` on the whole file DROPPED the F1 resolution of g-impl1-show-narrows-s451 (caught by grep before commit); redone with `git checkout -m` + hunk-only resolution, then `state.ts --write` (LOW 319 -> 318). Verified: known-gaps differs from origin/main only by the F1 entry + the count. master-list.md = origin/main verbatim.
 Note: #1368 filed g-match-optional-cell-narrows-not-arm-s460 (= residual (b) above); its locus names type-system.ts matchHeaderCell — on this branch the rule lives in presence-narrowing.ts `match-stmt` (not edited here).
+
+## Final gates on the final code head (after merges #2/#3; tree = this commit's parent tree + this progress note)
+- pre-commit core gate (merge #2 commit; same tree run without --bail): 33628 pass / 58 skip / 0 fail
+- conformance/run.ts: 1458/1508 + 50 xfail, 0 FAIL
+- browser-baseline --check: PASS (48 asserted, 0 of 2 env-excluded observed)
+- host-global-scan --check: exit 0 — 2559 units, 6328 compiles, 119 threw (pinned), 9616 artifacts, 0 violations
+- types-gate: OK 184/117 unchanged (baseline not rewritten); runtime-size-ratchet 8/0
+- e2e-render-map 259/0; self-host-v2 m1 99/0 (+lowered 99/0), m2 462/0, m3 60/0, m4 1229/0, codec 166/0, v2-lexer 337/0; lint-no-default-arm 0
+- todomvc compile + node --check OK; snippet-gate 128/128; compile-floor PASS; conflict-marker PASS; SPEC-INDEX/FACTS/bootstrap-conformance/state.ts all current; delta-lint PASS; s34-census PASS
+- Final corpus differential vs origin/main 02732712a: 0 newly failing; same 2 newly passing, same 3 code changes, same 4 text-only, 192 differing artifacts = 162 path-only + the same 30 real (declared props not root attrs) — identical to the first differential.
