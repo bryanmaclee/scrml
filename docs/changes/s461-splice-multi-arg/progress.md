@@ -109,3 +109,16 @@
   types:check unchanged (184). facts --check PASS (regenerated). bootstrap-conformance --check current.
   regen-spec-index --check OK. The corpus differential was re-run (2620 files): the only changes are
   reactive/mutating-method-string-arg (E-SCOPE-001 → clean) and the branch-only new case. 0 newly-rejecting files.
+
+## Fix round 2 (re-review LAND-WITH-NITS on e42e87a)
+- N5 FIXED. In collectReactiveArrayMutationArgs, `endsValue` left out value-ending KEYWORD tokens, so `push(false <b, 1)`
+  (c03) and `push(true <b, c> d)` (a19) read the `<` as a markup opener and failed E-CODEGEN-INVALID-LOGIC. The new
+  module-level `VALUE_KEYWORDS` lists the tokenizer KEYWORDs that are a complete operand: true, false, null, undefined,
+  this, super, not (§42 absence literal). Keywords that start an operand (return, typeof, new, in, of, void, await,
+  yield, …) do not end a value.
+  Executed against base d99dad0. c03 → [true,1], a19 → [true,true], `not <b, 1` → [true,1] and
+  `typeof <li>x</li>` → ["object"] are identical on base and branch. `null <b, 1` is now E-SYNTAX-042, the N3 class.
+  `return <li>…</li>` inside a block-arrow argument is E-CODEGEN-INVALID-LOGIC on base and branch alike (pre-existing),
+  so that direction is pinned structurally (argExprs split = 2).
+  Section H tests: with VALUE_KEYWORDS emptied locally, c03, a19 and `not` go red; restored.
+  Gates: targeted tests 977 pass / 0 fail; conformance 1516/1580, 64 xfail, 0 FAIL/XPASS/UNPINNED.
