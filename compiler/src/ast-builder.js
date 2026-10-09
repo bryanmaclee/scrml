@@ -237,6 +237,9 @@ function reemitJsStringLiteral(rawInner) {
  * (refused), and `.kind == "a"` from `.kind == a`. Re-quote it (canonical
  * double-quoted, escapes interpreted — `reemitJsStringLiteral`); a template keeps
  * its back-ticks. Every other token is its text.
+ *
+ * s461 — the same rule (collectExpr's) holds for an EXPRESSION argument re-joined
+ * from tokens, so `collectReactiveArrayMutationArgs` uses this too.
  */
 function typeTokenText(t) {
   if (t && t.kind === "STRING") {
@@ -5569,6 +5572,69 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * §6.5.1 — the ARGUMENT LIST of a statement-position reactive array mutation
+   * `@name.<method>( … )`. The caller has consumed the opening `(`; this consumes
+   * through the matching `)`.
+   *
+   * §6.5.1 lists `@arr.splice(start, deleteCount, ...items)`: each argument is a
+   * separate argument. So the list is split at its TOP-LEVEL `,` PUNCT tokens
+   * (nesting is tracked on `(`/`[`/`{` PUNCT tokens only; a `,` or `)` inside a
+   * STRING token is that token's content, never a delimiter) and EACH argument is
+   * parsed to its own ExprNode. A spread argument (`...@items`, the OPERATOR
+   * `...` leading the argument) becomes a `spread` ExprNode around its operand.
+   *
+   * (s461 — this replaces a collector that joined every token's text and parsed
+   * the WHOLE list as ONE expression: a JS SequenceExpression whose value is the
+   * last argument, so `@ls.splice(0, 0, @p)` lowered to `splice((0, 0, p))` and
+   * inserted nothing. It also dropped a STRING token's delimiters, so `"a,b"`
+   * became the code `a,b`, and `push({ u: "b" })` read an undeclared `b`.)
+   *
+   * Returns `{ args, argExprs }`: `argExprs` is one ExprNode per argument, in
+   * order (the field codegen lowers); `args` is the same list as source-shaped
+   * text joined by `, ` (the legacy string mirror).
+   */
+  function collectReactiveArrayMutationArgs() {
+    const groups = [];
+    let cur = [];
+    let depth = 0;
+    while (peek().kind !== "EOF") {
+      const t = consume();
+      if (t.kind === "COMMENT") continue;
+      if (t.kind !== "STRING" && typeof t.text === "string" && t.text.trim() === "") continue;
+      if (t.kind === "PUNCT") {
+        if (t.text === ")" && depth === 0) break;
+        if (t.text === "(" || t.text === "[" || t.text === "{") depth++;
+        else if (t.text === ")" || t.text === "]" || t.text === "}") depth--;
+        else if (t.text === "," && depth === 0) { groups.push(cur); cur = []; continue; }
+      }
+      cur.push(t);
+    }
+    groups.push(cur);
+    const texts = [];
+    const argExprs = [];
+    for (const toks of groups) {
+      // An empty group is the slot after a trailing comma (`push(a, )`) or the
+      // whole list of a no-argument call (`pop()`): it is not an argument.
+      if (toks.length === 0) continue;
+      const isSpread = toks[0].kind === "OPERATOR" && toks[0].text === "...";
+      const operand = isSpread ? toks.slice(1) : toks;
+      const operandText = operand.map(typeTokenText).join(" ");
+      const start = operand.length > 0 ? (operand[0].span?.start ?? 0) : (toks[0].span?.start ?? 0);
+      const operandExpr = safeParseExprToNode(operandText, start);
+      texts.push(isSpread ? "..." + operandText : operandText);
+      if (!operandExpr) continue;
+      argExprs.push(isSpread
+        ? {
+            kind: "spread",
+            span: { ...operandExpr.span, start: toks[0].span?.start ?? operandExpr.span.start },
+            argument: operandExpr,
+          }
+        : operandExpr);
+    }
+    return { args: texts.join(", "), argExprs };
+  }
+
+  /**
    * Collect tokens into a raw expression string up to (but not including)
    * the next statement boundary. Returns { expr: string, span }.
    *
@@ -10213,22 +10279,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           // @arr.push(item) → reactive-array-mutation node
           consume(); // consume "("
-          const argParts = [];
-          let parenDepth = 1;
-          while (parenDepth > 0 && peek().kind !== "EOF") {
-            const t = consume();
-            if (t.text === "(") parenDepth++;
-            if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-            argParts.push(t.text);
-          }
-          const _ramArgs = argParts.join(" ").trim();
+          const { args: _ramArgs, argExprs: _ramArgExprs } = collectReactiveArrayMutationArgs();
           return {
             id: ++counter.next,
             kind: "reactive-array-mutation",
             target: name,
             method: lastSeg,
             args: _ramArgs,
-            argsExpr: safeParseExprToNode(_ramArgs, spanOf(startTok, peek())?.start ?? 0),
+            argExprs: _ramArgExprs,
             span: spanOf(startTok, peek()),
           };
         }
@@ -14272,22 +14330,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const lastSeg = pathSegments[pathSegments.length - 1];
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           consume(); // consume "("
-          const argParts = [];
-          let parenDepth = 1;
-          while (parenDepth > 0 && peek().kind !== "EOF") {
-            const t = consume();
-            if (t.text === "(") parenDepth++;
-            if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-            argParts.push(t.text);
-          }
-          const _ramArgs2 = argParts.join(" ").trim();
+          const { args: _ramArgs2, argExprs: _ramArgExprs2 } = collectReactiveArrayMutationArgs();
           nodes.push({
             id: ++counter.next,
             kind: "reactive-array-mutation",
             target: name,
             method: lastSeg,
             args: _ramArgs2,
-            argsExpr: safeParseExprToNode(_ramArgs2, spanOf(startTok, peek())?.start ?? 0),
+            argExprs: _ramArgExprs2,
             span: spanOf(startTok, peek()),
           });
           continue;

@@ -14416,7 +14416,7 @@ function annotateNodes(
       // §2a — assignment RHS coverage. Two structured assignment kinds
       // produce dedicated AST nodes with walkable expression fields:
       //   - reactive-nested-assign (`@obj.path = value`) → valueExpr
-      //   - reactive-array-mutation (`@arr.push(x)` etc.) → argsExpr
+      //   - reactive-array-mutation (`@arr.push(x)` etc.) → argExprs (one per argument)
       // Plain `x = expr` / `@x = expr` statements inside function bodies
       // currently parse as bare-expr; they remain deferred alongside other
       // bare-expr coverage.
@@ -14512,9 +14512,12 @@ function annotateNodes(
 
       case "reactive-array-mutation": {
         const ramSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-        const ramArgsExpr = (n as Record<string, unknown>).argsExpr;
-        if (ramArgsExpr) {
-          checkLogicExprIdents(ramArgsExpr, ramSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+        // One ExprNode per argument (s461 — §6.5.1: separate arguments).
+        const ramArgExprs = (n as Record<string, unknown>).argExprs;
+        if (Array.isArray(ramArgExprs)) {
+          for (const ramArg of ramArgExprs) {
+            if (ramArg) checkLogicExprIdents(ramArg, ramSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          }
         }
         resolvedType = tAsIs();
         break;
@@ -23325,7 +23328,7 @@ function walkAndValidateParseVariantCalls(
 ): void {
   // Set of fields on AST nodes that may carry an ExprNode payload.
   const EXPR_FIELDS = [
-    "exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
+    "exprNode", "initExpr", "argsExpr", "argExprs", "condExpr", "headerExpr",
     "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr",
   ];
 
@@ -23348,6 +23351,8 @@ function walkAndValidateParseVariantCalls(
 
   function walkExpr(expr: unknown): void {
     if (!expr || typeof expr !== "object") return;
+    // An ExprNode-LIST field (`argExprs`, one node per argument) walks each.
+    if (Array.isArray(expr)) { for (const e of expr) walkExpr(e); return; }
     // Use the structural call-walker on every ExprNode root.
     try {
       forEachCallInExprNode(expr as any, (call) => {
@@ -24881,6 +24886,8 @@ function walkAndExpandSchemaForCalls(
 
     const walkExprForSchemaFor = (v: unknown): void => {
       if (!v || typeof v !== "object") return;
+      // An ExprNode-LIST field (`argExprs`, one node per argument) walks each.
+      if (Array.isArray(v)) { for (const e of v) walkExprForSchemaFor(e); return; }
       try {
         forEachCallInExprNode(v as any, flagInvalidSchemaForCall);
       } catch {
@@ -24892,7 +24899,7 @@ function walkAndExpandSchemaForCalls(
       if (!n || typeof n !== "object") continue;
 
       // Walk ExprNode payloads via the standard forEachCallInExprNode helper.
-      const EXPR_FIELDS = ["exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
+      const EXPR_FIELDS = ["exprNode", "initExpr", "argsExpr", "argExprs", "condExpr", "headerExpr",
                             "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr"];
       for (const f of EXPR_FIELDS) {
         walkExprForSchemaFor((n as Record<string, unknown>)[f]);

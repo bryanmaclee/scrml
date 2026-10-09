@@ -114,7 +114,9 @@ function withKeys(present: ReadonlySet<string>, keys: string[]): ReadonlySet<str
   return out;
 }
 
-const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "conditionExpr", "callbackExpr", "valueExpr"];
+// `argExprs` (s461) is an ExprNode LIST — one node per argument of a reactive
+// array mutation (§6.5.1); every other key holds a single ExprNode.
+const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "argExprs", "conditionExpr", "callbackExpr", "valueExpr"];
 const CHILD_KEYS = ["body", "children", "consequent", "alternate", "cases", "arms"];
 
 /** Walk one expression tree, calling `onExpr` with the presence set at every node. */
@@ -203,7 +205,12 @@ export function walkNodeNarrowed(
   const n = node as Rec;
   const here = spanOf(n, span);
   for (const k of EXPR_KEYS) {
-    if (n[k] && typeof n[k] === "object") walkExprNarrowed(n[k], present, here, opts);
+    const v = n[k];
+    if (Array.isArray(v)) {
+      for (const e of v) if (e && typeof e === "object") walkExprNarrowed(e, present, here, opts);
+    } else if (v && typeof v === "object") {
+      walkExprNarrowed(v, present, here, opts);
+    }
   }
   if (n.kind === "markup") {
     let inner = present;

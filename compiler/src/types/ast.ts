@@ -806,8 +806,14 @@ export interface ReactiveArrayMutationNode extends BaseNode {
   target: string;
   /** Array method name (push, pop, shift, unshift, splice, sort, reverse, fill). */
   method: string;
-  /** Raw arguments string. */
+  /** Raw arguments text, `, `-joined (legacy string mirror of `argExprs`). */
   args: string;
+  /**
+   * One ExprNode per argument, in order; a spread argument is a `spread` node.
+   * Empty for an argument-less call (`pop()`). §6.5.1: each argument is a
+   * separate argument, so the list is never one (comma-sequence) expression.
+   */
+  argExprs?: ExprNode[];
 }
 
 /** An explicit reactive set: `@set(@obj, "path", value)`. Escape hatch. */

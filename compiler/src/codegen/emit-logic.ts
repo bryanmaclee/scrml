@@ -4694,28 +4694,32 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
       const target = JSON.stringify(encodedTarget);
       const method: string = node.method;
-      const args = emitExprField(node.argsExpr, node.args ?? "", _makeExprCtx(opts));
+      // §6.5.1 — each argument is a SEPARATE argument: lower every argument's
+      // own ExprNode and join the results as a call's argument list. (s461: the
+      // list used to arrive as ONE comma-sequence expression, so
+      // `@ls.splice(0, 0, @p)` emitted `splice((0, 0, p))` and inserted nothing.)
+      // A node with no `argExprs` (a hand-built node carrying only the `args`
+      // text) falls back to the raw-text rewrite of that list.
+      const exprCtx = _makeExprCtx(opts);
+      const args = Array.isArray(node.argExprs)
+        ? node.argExprs.map((a: ExprNode) => emitExpr(a, exprCtx)).join(", ")
+        : emitExprField(null, node.args ?? "", exprCtx);
 
       // With Proxy-based reactivity, array mutations go through the Proxy traps
       // which automatically notify fine-grained effects. We still call
       // _scrml_reactive_set afterwards to fire coarse-grained subscribers.
+      // Every recognised method lowers through this ONE shape; an argument-less
+      // call (`pop()`, `reverse()`) simply has an empty list.
       switch (method) {
         case "push":
-          return `{ _scrml_reactive_get(${target}).push(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "unshift":
-          return `{ _scrml_reactive_get(${target}).unshift(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "pop":
-          return `{ _scrml_reactive_get(${target}).pop(); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "shift":
-          return `{ _scrml_reactive_get(${target}).shift(); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "splice":
-          return `{ _scrml_reactive_get(${target}).splice(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "sort":
-          return `{ _scrml_reactive_get(${target}).sort(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "reverse":
-          return `{ _scrml_reactive_get(${target}).reverse(); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "fill":
-          return `{ _scrml_reactive_get(${target}).fill(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
+          return `{ _scrml_reactive_get(${target}).${method}(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         default:
           return `_scrml_reactive_set(${target}, _scrml_reactive_get(${target}));`;
       }
