@@ -1,0 +1,11 @@
+{
+  "id": "condition-given-rebind-no-presence-lint",
+  "description": "§42.2.3 / §66.7.5 — the S462 soft-deprecation covers the IN-PLACE presence guard only. The rebind head `given c = @color :> { … }` is a different form and SHALL NOT surface W-GIVEN-PRESENCE-DEPRECATED. (What the rebind head itself is — §66.7.5's narrowed instance handle, or §42.2.3's E-SYNTAX-045 — is not asserted here; only the absence of the deprecation code.)",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "Ruling user-voice-scrml.md S462 \"a, go\": the in-place presence guard is soft-deprecated; \"The rebind form `given c = @h :>` (§66.7.5) is NOT affected.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-GIVEN-PRESENCE-DEPRECATED"]
+  }
+}

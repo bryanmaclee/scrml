@@ -14187,13 +14187,19 @@ function annotateNodes(
         const inMatchBody = (n as { __inMatchBody?: boolean }).__inMatchBody === true;
         const glyph = (n as { separatorGlyph?: string }).separatorGlyph;
         const isRebind = (n as { rebind?: boolean }).rebind === true;
-        if (!isRebind) {
+        // A `given-guard` with NO names is not a guard the author wrote: a
+        // declaration initializer ending in `is given` (`const ok = a is given`)
+        // is cut at the `given` keyword, which then parses as an empty guard
+        // (g-impl1-is-given-and-value-position-codegen-s460). Not this lint's site.
+        const guardVars = Array.isArray((n as { variables?: unknown }).variables)
+          ? ((n as { variables: unknown[] }).variables).filter((v): v is string => typeof v === "string" && v.length > 0)
+          : [];
+        if (!isRebind && guardVars.length > 0) {
           const ggSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           const written = (n as { spellings?: unknown }).spellings;
-          const names = (Array.isArray(written) && written.length > 0
-            ? written
-            : Array.isArray((n as { variables?: unknown }).variables) ? (n as { variables: unknown[] }).variables : []
-          ).filter((v): v is string => typeof v === "string" && v.length > 0);
+          const names = Array.isArray(written) && written.length === guardVars.length
+            ? written.filter((v): v is string => typeof v === "string" && v.length > 0)
+            : guardVars;
           errors.push(new TSError(
             "W-GIVEN-PRESENCE-DEPRECATED",
             givenPresenceDeprecatedMessage(names, inMatchBody),

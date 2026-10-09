@@ -1,0 +1,10 @@
+// §66.7.5 / §42.2.3 (S462) — the rebind head `given c = @h :> { … }` is NOT the in-place presence
+// guard and is NOT in the S462 deprecation window: it never surfaces W-GIVEN-PRESENCE-DEPRECATED.
+<color>: string | not = not
+
+${
+    function clearColor() {
+        given c = @color :> { @color = "" }
+    }
+}
+<p>ok</p>

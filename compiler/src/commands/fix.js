@@ -54,7 +54,9 @@ import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from
 const HELP = `scrml fix <file|dir> [options]
 
 Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; arm-pipe: a
-\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; client-server-call: an
+\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; given-presence: the in-place
+\`given x, y :> { … }\` guard → \`if (x is given && y is given) { … }\` and a \`given x :>\` match arm →
+\`else :>\`, §42.2.3; client-server-call: an
 unhandled client call of a server function → \`f() !{ .Transport(_) :> { return } }\`, §19.9.10;
 sql-failable: an unhandled \`?{}\` READ in a server function that is not \`!\` →
 \`?{…}.get() !{ _ :> not }\` / \`.all() !{ _ :> [] }\`, §19.8.3; every WRITE — any \`.run()\`, a bare

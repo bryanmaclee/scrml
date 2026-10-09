@@ -1,0 +1,20 @@
+{
+  "id": "condition-given-presence-deprecated-guard",
+  "description": "§42.2.3 / §63.5 — the soft-deprecated in-place presence guard: a single-name `given name :> { … }`, a multi-name `given name, age :> { … }` (one name absent, so the body is skipped) and `given empty :> { … }` over the defined value \"\" (present, §42.1.1). Each guard surfaces W-GIVEN-PRESENCE-DEPRECATED (Warning; 3 here) and runs identically to its `x is given` rewrite — the twin is condition/given-presence-canonical-twin, which reaches the same state. The legacy spelling is the PURPOSE of this case; it is not migrated.",
+  "language-version": "deprecated",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3 (S462) — the in-place presence guard is SOFT-DEPRECATED: it parses, lowers and runs as before (the body runs only when every listed name is not `not`; `\"\"` is present, §42.1.1) and every guard surfaces W-GIVEN-PRESENCE-DEPRECATED. §63.5 — during the window the W-code is a conformance-required code and the deprecated form's runtime is identical to the canonical form's. Provenance: ruling:user-voice-scrml.md S462 \"a, go\".",
+  "expect": {
+    "codes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "codeCounts": { "W-GIVEN-PRESENCE-DEPRECATED": 3 },
+    "severity": { "W-GIVEN-PRESENCE-DEPRECATED": "warning" },
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "seen": "hello ada", "both": "init", "blank": "empty string is present" },
+    "domAnchored": [
+      { "selector": "#seen", "text": "hello ada" },
+      { "selector": "#both", "text": "init" },
+      { "selector": "#blank", "text": "empty string is present" }
+    ]
+  }
+}
