@@ -1,0 +1,12 @@
+// §42.4 statement 10 (S460 "a on F2, go") — the twins: an unresolved operand OUTSIDE a condition stays
+// provable-or-silent (S440 Q2), and the explicit fix inside one is admitted.
+<program>
+    function g() { }
+    function keep(x: bool) -> bool { return x }
+    function pick() -> bool {
+        const v = !g()
+        if (!(g() is given)) { return v }
+        return keep(!g())
+    }
+    <main><p>x</p></main>
+</program>

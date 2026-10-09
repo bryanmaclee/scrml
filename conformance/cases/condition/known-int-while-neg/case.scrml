@@ -1,0 +1,12 @@
+// §49.2.3 — an `int` `while` condition has no truthiness.
+<program>
+    function count(k: int) -> int {
+        let n: int = 0
+        while (k) {
+            n = n + 1
+            break
+        }
+        return n
+    }
+    <main><p>x</p></main>
+</program>

@@ -32,7 +32,10 @@ ${
     // Expressions (logic).
     // -------------------------------------------------------------------------
     export type BinOp:enum = { Add, Sub, Mul, Div, Mod, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Pipe }
-    export type UnOp:enum = { Not, Neg }
+    // s460: `IsGiven` / `IsNot` — the POSTFIX presence tests `x is given` /
+    // `x is not` (§42.2.2, §42.2.4; ruled S460 "a′, go": "the explicit pair
+    // for value positions / compounds"). Each is a `bool`.
+    export type UnOp:enum = { Not, Neg, IsGiven, IsNot }
 
     export type AExpr:struct = { nid: int, span: ASpan, k: AExprK }
     // An object-literal entry: `name: value`, or `...value` (spread = true, name "").

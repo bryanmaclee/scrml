@@ -1,0 +1,8 @@
+// §42.4 statement 7 / §42.10 — `!` takes a `bool`; a bare `T | not` is a presence test only as a WHOLE condition.
+<program>
+    function pick(a: string | not) -> int {
+        if (!a) { return 0 }
+        return 1
+    }
+    <main><p>x</p></main>
+</program>

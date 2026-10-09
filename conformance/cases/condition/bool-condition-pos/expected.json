@@ -1,0 +1,13 @@
+{
+  "id": "condition-bool-condition-pos",
+  "description": "§42.4: a `bool` condition is a boolean test — admitted.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 1: \"A condition whose value is a `bool` is true when the value is `true`.\" Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN"
+    ]
+  }
+}

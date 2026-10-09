@@ -1,0 +1,39 @@
+{
+  "id": "condition-presence-bare-optional-markup-pos",
+  "description": "§42.4: `if=@o.v` (`\"\"`) and `else-if=@o.n` (`0`) are presence tests over defined values — both elements render; `if=@flag` (`false`) is a boolean test and does not.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 2: the presence test \"is true when the value is not `not`\"; \"The defined values `\"\"`, `0`, `false`, `[]` and `{}` are PRESENT (§42.1.1)\"; \"The test SHALL lower to an absence check (§42.5), never to the host language's truthiness.\" Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "count": 1
+      },
+      {
+        "selector": "#b",
+        "count": 0
+      },
+      {
+        "selector": "#c",
+        "count": 1
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-condition-rule-s460",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=4"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

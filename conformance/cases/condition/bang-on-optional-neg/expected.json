@@ -1,0 +1,29 @@
+{
+  "id": "condition-bang-on-optional-neg",
+  "description": "§42.4: `!a` on `string | not` is E-OPERATOR-OPERAND-TYPE (write `a is not`).",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 7: \"As an operand of `!`, `&&` or `||` … a `T | not` value is not a boolean and SHALL be compile error `E-OPERATOR-OPERAND-TYPE`\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [
+      "E-OPERATOR-OPERAND-TYPE"
+    ],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN"
+    ],
+    "codeCounts": {
+      "E-OPERATOR-OPERAND-TYPE": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-condition-rule-s460",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-OPERATOR-OPERAND-TYPE' fired 0 time(s), expected exactly 1",
+          "missing:E-OPERATOR-OPERAND-TYPE"
+        ]
+      }
+    }
+  }
+}
