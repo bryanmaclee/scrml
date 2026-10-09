@@ -2177,3 +2177,16 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1176 verdict=carve-out by=S459-bryan date=2026-10-08 probe=docs-only README restructure (snippet gate 128/0; links 102/102) -->
 <!-- @review pr=1360 verdict=carve-out by=S459-bryan date=2026-10-08 probe=one-line package.json private:true -->
 <!-- @review pr=1364 verdict=carve-out by=S459-bryan date=2026-10-08 probe=docs-only dpa-queue entry -->
+<!-- @review pr=1355 verdict=carve-out by=S460-bryan date=2026-10-09 probe=wrap/hand-off docs only -->
+<!-- @review pr=1356 verdict=carve-out by=S460-bryan date=2026-10-09 probe=maps refresh docs only -->
+<!-- @review pr=1357 verdict=carve-out by=S460-bryan date=2026-10-09 probe=SPEC text ratified by bryan S458 "ratify 21.4" — describes behaviour #1352 shipped (reviewed then) -->
+<!-- @review pr=1358 verdict=carve-out by=S460-bryan date=2026-10-09 probe=wrap addendum docs only -->
+<!-- @review pr=1366 verdict=carve-out by=S460-bryan date=2026-10-09 probe=wrap docs only -->
+<!-- @review pr=1367 verdict=finding by=S460-bryan date=2026-10-09 probe=differential 6b4288421 vs c56f2c353: 115 Chromium inputs (20 intended changes), 48 emit users 0 diffs, size table; LAND-WITH-NITS (N1-N6 → #1370) -->
+<!-- @review pr=1368 verdict=carve-out by=S460-bryan date=2026-10-09 probe=docs-only gap filing; filer spot-checked cited lines -->
+<!-- @review pr=1369 verdict=finding by=S460-bryan date=2026-10-09 probe=differential 01b1933cd vs 63423d5fa: premise check (main crashes every callback-prop form), 2513-file corpus 0 newly failing, F1 show= narrowing fixed pre-land; PA file-set comparison of the landing branch -->
+<!-- @review pr=1370 verdict=finding by=S460-bryan date=2026-10-09 probe=differential b3a47d3b7 vs 02732712a: 172 Chromium inputs (19 intended), 48 emit users 0 diffs; Windows CRLF load failure found by CI and fixed at root (table built from data) before merge -->
+<!-- @review pr=1371 verdict=finding by=S460-bryan date=2026-10-09 probe=differential a356022dd vs 879b56893 (66 channel files + giti/flogence, 0 newly refused) → F1-F3 fixed → re-review proved the check cannot fail open vs the emitter -->
+<!-- @review pr=1372 verdict=finding by=S460-bryan date=2026-10-09 probe=differential d5c9ef382 vs 879b56893: SPEC-fidelity table, no fail-open in statement-6 blame, impl#1 byte-identical → nits + F2 → re-review 975ed70b2 LAND-WITH-NITS -->
+<!-- @review pr=1373 verdict=carve-out by=S460-bryan date=2026-10-09 probe=docs-only gap filing; 9/12 re-verified on main by the filer -->
+<!-- @review pr=1374 verdict=finding by=S460-bryan date=2026-10-09 probe=differential 1caa6677e vs 3d0e54e21: 313 probe conditions, 0 newly accepted (set difference re-derived by reviewer) -->
