@@ -1,0 +1,17 @@
+<program>
+
+  <channel name="a" onclient:open=onOpen(e)>
+    <ca> = 0
+    const onOpen = (e) => { @ca = 1 }
+  </channel>
+
+  <channel name="b" onserver:message=onOpen(m)>
+    <cb> = 0
+    server function onOpen(m) {
+      broadcast(m)
+    }
+  </channel>
+
+  <p>${@ca} ${@cb}</p>
+
+</program>

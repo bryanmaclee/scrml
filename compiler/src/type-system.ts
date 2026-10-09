@@ -9817,6 +9817,14 @@ function annotateNodes(
   appHasServerContext: boolean,
   /** §14.10 — imported functions' declared parameter types, for call-arg bare variants only. */
   importedFnSignatures?: Map<string, FnSignature>,
+  /**
+   * §38.10.3 — this file's imported functions, local name → the exporting file's
+   * DECLARATION (built in api.js from the import graph, through re-exports). Read
+   * by `checkChannelHandlerBindings` to resolve an imported `onclient:*` handler
+   * to its declaration for E-CHANNEL-006. Absent (e.g. the LSP's single-file
+   * `runTS`) → an imported handler is not resolvable here and is not judged.
+   */
+  importedFnDecls?: Map<string, ImportedFnDecl>,
 ): Map<string, ResolvedType> {
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
@@ -15643,6 +15651,128 @@ function annotateNodes(
   }
 
   /**
+   * §38.10.3 — E-CHANNEL-006: "A function designated as the handler for an
+   * `onclient:*` attribute SHALL NOT be declared `server function`. The compiler
+   * SHALL emit E-CHANNEL-006 and reject the program."
+   *
+   * The handler NAME is resolved to its DECLARATION node and judged by the
+   * declaration's own `server` keyword (`isServer`, set by the AST builder for
+   * `server function` and `server fn`) — never by source text. The SPEC sentence
+   * says "declared `server function`", so the keyword is the trigger; a plain
+   * function that route inference escalates is not judged here.
+   *
+   * Resolution walks scope REGIONS innermost-first. The first region that binds
+   * the name decides, and EVERY kind of binding counts — not only functions:
+   *   1. the channel's own body (its children, through logic blocks and nested
+   *      markup, not into a function body or a nested `<channel>`);
+   *   2. the enclosing file scope (the top-level nodes, same walk, not into any
+   *      `<channel>` body) — including the file's `import` declarations;
+   *   3. the bodies of the file's OTHER channels (functions and state cells
+   *      hoist file-wide, so a function declared there is what the name
+   *      reaches when nothing nearer binds it — codegen routes the call to it);
+   *   4. an import the walk did not see as a node (`importedFnDecls`).
+   * Within the deciding region: a value binding (`const` / `let` / `lin` / `~` /
+   * state cell, destructured names included) means the handler is NOT a
+   * function declaration — no verdict (a `const onOpen = (e) => …` in channel
+   * `a` is what `onclient:open=onOpen(e)` calls, even when channel `b` declares
+   * a `server function onOpen`). Otherwise a function declaration (or an import
+   * resolved to the exporter's declaration, built in api.js through re-exports)
+   * is judged by its `server` keyword.
+   */
+  type ChannelHandlerBindings = { fns: ASTNodeLike[]; values: number; imported: boolean };
+
+  function bindsName(n: ASTNodeLike, name: string): boolean {
+    if (typeof n.name === "string") return n.name === name;
+    if (isDestructurePattern(n.name)) {
+      for (const b of iterDestructuredNames(n.name as DestructurePatternShape)) if (b === name) return true;
+    }
+    return false;
+  }
+
+  const CHANNEL_HANDLER_VALUE_DECL_KINDS = new Set(["const-decl", "let-decl", "lin-decl", "tilde-decl", "state-decl"]);
+
+  /** Collect the bindings of `name` in one scope region (see the doc comment above). */
+  function collectHandlerBindings(nodes: unknown, name: string, out: ChannelHandlerBindings, stopAtChannels: boolean): void {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes as ASTNodeLike[]) {
+      if (!n || typeof n !== "object") continue;
+      if (n.kind === "function-decl") {
+        if (n.name === name) out.fns.push(n);
+        continue; // a function's body is its own scope
+      }
+      if (CHANNEL_HANDLER_VALUE_DECL_KINDS.has(n.kind as string) && bindsName(n, name)) out.values++;
+      if (n.kind === "import-decl") {
+        const specs = (n as ASTNodeLike).specifiers as Array<{ local?: string }> | undefined;
+        const names = n.names as unknown[] | undefined;
+        if ((Array.isArray(specs) && specs.some((s) => s && s.local === name))
+            || (Array.isArray(names) && names.includes(name))) out.imported = true;
+      }
+      if (stopAtChannels && n.tag === "channel") continue;
+      collectHandlerBindings(n.body, name, out, stopAtChannels);
+      collectHandlerBindings(n.children, name, out, stopAtChannels);
+    }
+  }
+
+  /** Region 3: the bodies of every `<channel>` in the file other than `self`. */
+  function collectOtherChannelBindings(nodes: unknown, self: ASTNodeLike, name: string, out: ChannelHandlerBindings): void {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes as ASTNodeLike[]) {
+      if (!n || typeof n !== "object" || n.kind === "function-decl") continue;
+      if (n.tag === "channel" && n !== self) {
+        collectHandlerBindings(n.children, name, out, false);
+        continue;
+      }
+      if (n.tag === "channel") continue; // `self` was region 1
+      collectOtherChannelBindings(n.body, self, name, out);
+      collectOtherChannelBindings(n.children, self, name, out);
+    }
+  }
+
+  function checkClientHandlerNotServer(channel: ASTNodeLike, attr: ASTNodeLike, attrName: string, value: ASTNodeLike): void {
+    if (value.kind !== "call-ref" && value.kind !== "call" && value.kind !== "variable-ref") return;
+    const callee = value.name;
+    if (typeof callee !== "string" || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(callee)) return;
+    const regions: Array<(out: ChannelHandlerBindings) => void> = [
+      (out) => collectHandlerBindings(channel.children, callee, out, true),
+      (out) => collectHandlerBindings(_allTopNodes, callee, out, true),
+      (out) => collectOtherChannelBindings(_allTopNodes, channel, callee, out),
+      (out) => { if (importedFnDecls?.has(callee)) out.imported = true; },
+    ];
+    let serverDecl: ASTNodeLike | undefined;
+    let imported = false;
+    for (const collect of regions) {
+      const found: ChannelHandlerBindings = { fns: [], values: 0, imported: false };
+      collect(found);
+      if (found.fns.length === 0 && found.values === 0 && !found.imported) continue;
+      // The deciding region. A value binding: the handler is not a function decl.
+      if (found.values > 0) return;
+      if (found.fns.length > 0) {
+        serverDecl = found.fns.find((d) => d.isServer === true);
+      } else {
+        const imp = importedFnDecls?.get(callee);
+        if (imp && imp.fnNode && imp.fnNode.isServer === true) { serverDecl = imp.fnNode; imported = true; }
+      }
+      break;
+    }
+    if (!serverDecl) return;
+    const span = ((value.span as Span | undefined) ?? (attr.span as Span | undefined)
+      ?? (channel.span as Span | undefined)
+      ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+    const keyword = serverDecl.fnKind === "fn" ? "server fn" : "server function";
+    const depFile = imported ? importedFnDecls?.get(callee)?.depFilePath : undefined;
+    const where = imported ? ` (imported from \`${depFile ? depFile.split(/[\\/]/).pop() : "another file"}\`)` : "";
+    errors.push(new TSError(
+      "E-CHANNEL-006",
+      `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but \`${callee}\` is declared ` +
+      `\`${keyword}\`${where}. An \`onclient:*\` handler runs in the browser, on the client-side WebSocket ` +
+      `(§38.10) — it SHALL NOT be a server function. Declare \`${callee}\` a plain ` +
+      `\`${serverDecl.fnKind === "fn" ? "fn" : "function"}\`; if a server round-trip is wanted, call a server ` +
+      `function from inside it.`,
+      span,
+    ));
+  }
+
+  /**
    * §38.6.1 / §38.10.2 — a channel handler attribute (`onserver:message=h(msg)`,
    * `onclient:open=h(e)`, …) names ONE binding: the first argument is the name
    * the compiler binds the injected payload / event object to (§38.6.1: "names
@@ -15674,6 +15804,7 @@ function annotateNodes(
    * at the channel is E-SCOPE-001) and so does not collide. Type names are a
    * separate namespace.
    */
+
   function checkChannelHandlerBindings(channel: ASTNodeLike, attrs: ASTNodeLike[]): void {
     for (const attr of attrs) {
       if (!attr || typeof attr.name !== "string") continue;
@@ -15681,6 +15812,7 @@ function annotateNodes(
       const isClient = attrName.startsWith("onclient:");
       if (!isClient && attrName !== "onserver:message") continue;
       const value = attr.value as ASTNodeLike | undefined;
+      if (isClient && value) checkClientHandlerNotServer(channel, attr, attrName, value);
       if (!value || value.kind !== "call-ref") continue;
       const pieces = Array.isArray(value.args) ? (value.args as unknown[]).map(String) : [];
       const span = ((value.span as Span | undefined) ?? (attr.span as Span | undefined)
@@ -27005,6 +27137,8 @@ function processFile(
   appHasServerContext?: boolean,
   /** §14.10 — imported functions' declared parameter types (resolveImportedFnSignatures). */
   importedFnSignatures?: Map<string, FnSignature>,
+  /** §38.10.3 — imported functions' declarations, local name → decl (E-CHANNEL-006). */
+  importedFnDecls?: Map<string, ImportedFnDecl>,
 ): { typedAst: TypedFileAST; errors: TSError[]; stateTypeRegistry: Map<string, ResolvedType> } {
   const errors: TSError[] = [];
   const hasServerContext = appHasServerContext ?? fileEstablishesServerContext(fileAST);
@@ -27193,6 +27327,7 @@ function processFile(
     machineRegistry,
     hasServerContext,
     importedFnSignatures,
+    importedFnDecls,
   );
 
   // §14.12.4 — Engine-cell carve-out for lifecycle annotation
@@ -27891,12 +28026,13 @@ export function runTS(input: {
     // when an importing file is processed. If not provided, cross-file types are absent
     // (pre-import-system behavior — single-file compilation still works correctly).
     const importedTypes = importedTypesByFile?.get(fileAST.filePath as string);
+    const importedFnDecls = importedFnDeclsByFile?.get(fileAST.filePath as string);
     const importedFnSignatures = resolveImportedFnSignatures(
-      importedFnDeclsByFile?.get(fileAST.filePath as string),
+      importedFnDecls,
       importedTypesByFile,
       importedFnRegistryCache,
     );
-    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext, importedFnSignatures);
+    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext, importedFnSignatures, importedFnDecls);
     typedFiles.push(typedAst);
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;

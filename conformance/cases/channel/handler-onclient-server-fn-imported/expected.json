@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-server-fn-imported",
+  "description": "§38.10.3 — an `onclient:*` handler IMPORTED from another `.scrml` module, where the exporter declares it `export server function`, fires E-CHANNEL-006 in the importing file. The handler name is resolved to the exporter's declaration through the import graph. (Multi-file: `helpers.scrml` is an aux import fixture.)",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §38.9",
+  "source-test": "compiler/tests/unit/channel-onclient-server-handler.test.js",
+  "rationale": "§38.10.3: a function designated as the handler for an `onclient:*` attribute SHALL NOT be declared `server function`; the compiler SHALL emit E-CHANNEL-006 and reject the program.",
+  "expect": {
+    "codes": ["E-CHANNEL-006"],
+    "severity": { "E-CHANNEL-006": "error" }
+  }
+}

@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1579 of 1579 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1584 of 1584 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1579 of 1579 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 591 | 37.4% |
-| UNSUPPORTED | 793 | 50.2% |
+| NOT-TWINNED | 596 | 37.6% |
+| UNSUPPORTED | 793 | 50.1% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -34,7 +34,7 @@ Legacy-dialect cases graded on their generated §66 twin: **711** — PASS 76 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (591 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (596 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 68 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -43,10 +43,10 @@ NOT-TWINNED by reason (591 cases; a case counts once per distinct reason):
 - 46 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - 40 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
 - 40 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
+- 36 — rhs-decl: declaration in a markup position (⚑ O38)
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
-- 31 — rhs-decl: declaration in a markup position (⚑ O38)
 - 28 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 26 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
@@ -102,7 +102,7 @@ NOT-TWINNED by reason (591 cases; a case counts once per distinct reason):
 | block-grammar | 7 | 3 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
-| channel | 39 | · | · | · | · | 27 | 12 | · | · |
+| channel | 44 | · | · | · | · | 32 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 67 | · | · | 2 | · | 64 | 1 | · | · |
 | condition | 21 | 18 | · | · | · | · | 3 | · | · |
@@ -1234,7 +1234,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (591)
+### NOT-TWINNED (596)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1264,6 +1264,11 @@ none
 - `channel/handler-onclient-arity` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-arity-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-arity-string-comma-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-server-fn` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-server-fn-imported` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-server-fn-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-server-fn-sibling-const-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-server-fn-toplevel` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-shadow` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-shadow-later-const-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-shadow-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
