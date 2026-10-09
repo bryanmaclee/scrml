@@ -40092,6 +40092,20 @@ property that holds an object non-configurable is refused (its contents could th
 > refined cell; **newly-rejecting** for a cyclic value, nesting beyond 4000 levels, an accessor, a prototype
 > change, or freezing / sealing a refined cell's value (corpus measurement: docs/changes/s459-refine-copy-in/progress.md).
 
+**Scope of the guarantee (S460).** The refinement guarantees hold for every value scrml can express. A
+value that arrives from host JS is copied to plain data on the way in — its own enumerable data, read
+once — and from then on it is the cell's own. A refined list's own properties are its elements and its
+`length`; any other own property written to a stored refined list (`constructor`, a symbol, a name) is
+refused, since it is not part of the value and would steer the list's own methods. Beyond that, a
+hostile host object — a getter or proxy trap that reaches back into the cell, a key object with a
+`toString`, a `Symbol.species` constructor — is not something the cell defends against: the cell is not
+a sandbox, as a runtime `^{}` body is not (§22.12, "Not a sandbox").
+
+> **Provenance:** ruling:user-voice-scrml.md S460 "a on copy-in" · precedent:§22.12 "Not a sandbox"
+> (S458 review F-A) · review:S460 copy-in rounds 1–3 · supersedes: nothing struck — §53 did not bound
+> the guarantee against host objects · **Direction of change: newly-rejecting** for an own property
+> other than an index or `length` written to a stored refined list.
+
 ### §53.3.4 Type Compatibility
 
 A `number(>0 && <10000)` value IS a `number`. The constrained type is a subtype of the base
