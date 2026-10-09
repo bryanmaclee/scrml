@@ -1,0 +1,13 @@
+<program>
+
+  server fn onClose(e) {
+    return 1
+  }
+
+  <channel name="chat" onclient:close=onClose(e)>
+    <count> = 0
+  </channel>
+
+  <p>${@count}</p>
+
+</program>
