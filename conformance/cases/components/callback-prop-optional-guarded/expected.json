@@ -1,0 +1,17 @@
+{
+  "id": "components-callback-prop-optional-guarded",
+  "description": "§15.11.4 (S459 round 6, F4) — an optional function-typed prop called under an absence check compiles and runs: `onGo && onGo()`, `if (onGo is some) { onGo() }` in a block arrow, `onGo ? onGo() : 0`, a handler statement `if (onGo) { onGo() }`, and the same guard in a body function. The instance that omits the prop does nothing on click; the instances that pass a callback call it every time (4 + 1).",
+  "language-version": "1.0",
+  "spec": "§15.11.4",
+  "rationale": "§15.11.4: \"An optional function-typed prop (declared with `?`) that is not provided at the call site SHALL have value `not` inside the component body. The component body SHALL guard against `not` before calling it.\" A guarded call is valid.",
+  "expect": {
+    "codes": ["W-COMPONENT-001"],
+    "notCodes": ["E-TYPE-031"],
+    "input": [
+      { "click": "#none .a" }, { "click": "#none .b" }, { "click": "#none .c2" }, { "click": "#none .s" },
+      { "click": "#some .a" }, { "click": "#some .b" }, { "click": "#some .c2" }, { "click": "#some .s" },
+      { "click": "#fn .f" }
+    ],
+    "domAnchored": [{ "selector": "#o", "text": "hhhhh" }]
+  }
+}

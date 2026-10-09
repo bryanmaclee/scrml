@@ -143,11 +143,11 @@ test("control — attributeName names a non-URL attribute: the value is written 
   expect(setTo()).toBe("javascript:20");
 });
 
-test("S457 review — a declared `onClick` / `ONCLICK` in `lift` and `<each>` is a listener: no handler text, the data never runs", async () => {
+test("S457 review — an undeclared `onClick` / `ONCLICK` (no `props` block; S458 \"D1\": a declared prop never reaches the root) in `lift` and `<each>` is a listener: no handler text, the data never runs", async () => {
   const app = mount(`<program>
 <items> = [{ id: 1, code: "window.__pwned = 1" }]
-const Btn = <button props={ onClick: string }>b</button>
-const Up = <button props={ ONCLICK: string }>u</button>
+const Btn = <button>b</button>
+const Up = <button>u</button>
 <ul id="b">\${ for (const it of @items) { lift <li><Btn onClick=it.code/></li> } }</ul>
 <ul id="u">\${ for (const it of @items) { lift <li><Up ONCLICK=\${it.code}/></li> } }</ul>
 <ul id="e"><each in=@items key=@.id as it><li><Btn onClick=it.code/></li></each></ul>
@@ -165,10 +165,10 @@ const Up = <button props={ ONCLICK: string }>u</button>
   expect(globalThis.window.__pwned).toBeUndefined();
 });
 
-test("S457 review — a declared `srcdoc` with data in `<each>` / `lift` is a compile error", () => {
+test("S457 review — an undeclared `srcdoc` (no `props` block) with data in `<each>` / `lift` is a compile error", () => {
   const app = mount(`<program>
 <items> = [{ id: 1, d: "hello" }]
-const Fr = <iframe props={ srcdoc: string }></iframe>
+const Fr = <iframe></iframe>
 <ul id="l">\${ for (const it of @items) { lift <li><Fr srcdoc=it.d/></li> } }</ul>
 </program>
 `);
@@ -176,10 +176,10 @@ const Fr = <iframe props={ srcdoc: string }></iframe>
   expect(app.clientJs).not.toMatch(/setAttribute\("srcdoc",/);
 });
 
-test("S457 review — a declared `href` in `lift` / `<each>` is still written, and guarded", async () => {
+test("S457 review — an undeclared `href` (no `props` block) in `lift` / `<each>` is written, and guarded", async () => {
   const app = mount(`<program>
 <items> = [{ id: 1, url: "/one" }]
-const Link = <a props={ href: string }>l</a>
+const Link = <a>l</a>
 <ul id="l">\${ for (const it of @items) { lift <li><Link href=it.url/></li> } }</ul>
 <ul id="e"><each in=@items key=@.id as it><li><Link href=it.url/></li></each></ul>
 </program>

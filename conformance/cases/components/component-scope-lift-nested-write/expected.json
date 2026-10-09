@@ -1,0 +1,13 @@
+{
+  "id": "components-component-scope-lift-nested-write",
+  "description": "§15.10.1 (S459 round 6, F1) — a `${}` nested INSIDE lifted markup declares into that markup's scope: after `${ let n = 0 }` inside `lift <div>…</div>`, the later sibling handlers write and read the LOCAL `n`, not the `bind n` prop. The parent cell `@v` stays 7. Before round 6 the nested block started a fresh empty scope and the handler wrote `@v` = 9, silently.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: \"From the point of declaration onward in the same scope, the local binding shadows the prop.\" §15.11.1: \"A local declaration, parameter or loop binder named like the prop is not the prop … and is writable.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-SCOPE-001"],
+    "input": [{ "click": ".c .w" }, { "click": ".c .r" }],
+    "domAnchored": [{ "selector": "#o", "text": "7/9" }]
+  }
+}

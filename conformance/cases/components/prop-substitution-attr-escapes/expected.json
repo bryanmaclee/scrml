@@ -1,0 +1,18 @@
+{
+  "id": "components-prop-substitution-attr-escapes",
+  "description": "§15.10.1 (S458 fourth round, F4) — a string literal with escapes, or with quotes, inside an attribute `${…}` of a component body round-trips in EVERY form, as it does outside a component: unquoted `title=${label + 'it\\'s'}` and `${label + \"\\\"q\"}` (were E-COMPONENT-021 'Unterminated tag': the component re-parse's opener scan did not honour escapes inside code strings), quoted `title=\"${label + \"\\\\\"}\"` and `title=\"${label + \"x\"}\"` (were E-SCOPE-001 on a truncated `label +`: the quoted-value reader ended the value at the first `\"` inside the interpolation), and the mixed `title=\"x${label + 'it\\'s'}y\"`.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1 substitutes the caller value for identifier references only; the rest of the attribute is the author's text and is preserved — a component body reads an attribute exactly as markup outside a component does.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001", "E-COMPONENT-021"],
+    "domAnchored": [
+      { "selector": ".c .a", "attr": { "title": "Lit's" } },
+      { "selector": ".c .b", "attr": { "title": "L\"q" } },
+      { "selector": ".c .d", "attr": { "title": "L\\" } },
+      { "selector": ".c .f", "attr": { "title": "Lx" } },
+      { "selector": ".c .e", "attr": { "title": "xLit'sy" } }
+    ]
+  }
+}

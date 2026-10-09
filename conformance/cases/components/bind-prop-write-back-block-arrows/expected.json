@@ -1,0 +1,19 @@
+{
+  "id": "components-bind-prop-write-back-block-arrows",
+  "description": "§15.11.1 (S458 F4) — a `bind` prop written inside a BLOCK-bodied arrow (`() => { n = 200 }`, a `.forEach(x => { n = n + x })` callback) writes the caller's bound cell, and a by-value prop read inside a block-bodied `.map(x => { return label + x })` is the caller's value (the arrow's own parameter `x` is not substituted). One instance: a component whose body declares `const`s cannot be instantiated twice (module-scope `const` redeclared) nor inside `<each>` (E-EACH-BODY-DECL-UNSUPPORTED) today — both pre-existing, the §66.15.1 per-instance-state carried divergence.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: 'Changes to the bindable prop inside the component SHALL propagate back to `@var` in the parent.' §15.10.1: props are substituted at every ExprNode position, 'Function/lambda return expressions' included, and 'A `lambda` parameter with the same name is in scope … the parameter shadows the prop.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [
+      { "click": "#t .g" }, { "click": "#t .a" }
+    ],
+    "state": { "v": 203 },
+    "domAnchored": [
+      { "selector": "#vals", "text": "203/0" },
+      { "selector": "#t .s", "text": "L1,L2" }
+    ]
+  }
+}

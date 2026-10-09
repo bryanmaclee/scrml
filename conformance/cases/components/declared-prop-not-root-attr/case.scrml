@@ -1,0 +1,34 @@
+<program>
+${ type Phase:enum = { Idle, Ready } }
+const Card = <div class="card" props={ title: string, href: string, disabled: boolean, id: string }>
+    <h2>${title}</h2><span class="cid">${id}</span>
+</>
+<u> = "/docs"
+<off> = false
+<phase>: Phase = .Ready
+<rows> = [{ id: 1, url: "/a", t: "A" }, { id: 2, url: "/b", t: "B" }]
+<main>
+    <section id="top">
+        <Card title="Top" href=${@u} disabled=@off id="c-top"/>
+        <Card title="Lit" href="/lit" disabled=${false} id="c-lit"/>
+    </section>
+    <ul id="each">
+        <each in=@rows key=@.id as r>
+            <li><Card title=r.t href=r.url disabled=@off id="c-each"/></li>
+        </each>
+    </ul>
+    <ol id="lift">
+        ${ for (r of @rows) { lift <li><Card title=r.t href=r.url disabled=@off id="c-lift"/></li> } }
+    </ol>
+    <div id="arm">
+        <match for=Phase on=@phase>
+            <Idle>
+                <p>idle</p>
+            </>
+            <Ready>
+                <Card title="Arm" href=${@u} disabled=@off id="c-arm"/>
+            </>
+        </match>
+    </div>
+</main>
+</program>

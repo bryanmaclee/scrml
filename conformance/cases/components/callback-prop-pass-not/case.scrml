@@ -1,0 +1,11 @@
+<program>
+<log> = ""
+${ function h() { @log = @log + "h" } }
+const C = <div class="c" props={ onGo?: () => void }>
+    <button class="g" onclick=${ if (onGo) { onGo() } else { @log = @log + "-" } }>g</button>
+    <button class="o" onclick=${() => onGo?.()}>o</button>
+</>
+<div id="a"><C onGo=${not}/></div>
+<div id="b"><C onGo=not/></div>
+<p id="o">${@log}</p>
+</program>

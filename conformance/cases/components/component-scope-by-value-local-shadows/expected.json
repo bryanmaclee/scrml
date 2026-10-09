@@ -1,0 +1,16 @@
+{
+  "id": "components-component-scope-by-value-local-shadows",
+  "description": "§15.10.1 / §15.11.1 (S459 M1) — ONE component scope for a by-value prop: after `${ let label = \"S\" }` the later markup text reads the local (S, not the caller's L), and a later handler WRITE `onclick=${() => label = \"Z\"}` writes the local — it is NOT E-COMPONENT-PROP-WRITE (the local is not the prop). Before S459 the markup read L while `r()` returned S, and the handler write was falsely refused.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: \"From the point of declaration onward in the same scope, the local binding shadows the prop.\" §15.11.1: \"A local declaration, parameter or loop binder named like the prop is not the prop (§15.10.1 Shadowing) and is writable.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-SCOPE-001"],
+    "input": [{ "click": ".c .b" }, { "click": ".c .w" }, { "click": ".c .b" }],
+    "domAnchored": [
+      { "selector": ".c .a", "text": "S" },
+      { "selector": "#o", "text": "S/S;Z/Z;" }
+    ]
+  }
+}

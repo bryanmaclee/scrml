@@ -202,11 +202,15 @@ function valueAttrElementIsLowerable(node: any, tag: string): boolean {
  * expansion paths): refuse, keeping the pre-i81 drop rather than risking a
  * miscompile.
  */
-function isDeclaredPropAttr(node: any, name: string): boolean {
+function isDeclaredPropAttr(node: any, _name: string): boolean {
   if (node?._expandedFrom == null) return false;
   const declared = node._componentPropNames;
   if (!Array.isArray(declared)) return true;
-  return declared.includes(name);
+  // S458 "D1" (§15.10): the expander takes every DECLARED call-site prop OFF the
+  // root's `attrs` (onto `_callSiteProps`), so an attribute still here that carries
+  // a declared prop's NAME is the component body writing its own root attribute
+  // (`const Link = <a href=${href} props={ href: string }>`) — markup, and it lowers.
+  return false;
 }
 
 // i81 (S268 fix-round finding 1) — JS globals that legitimately appear as free

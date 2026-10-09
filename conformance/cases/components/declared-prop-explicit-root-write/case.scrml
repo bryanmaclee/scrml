@@ -1,0 +1,30 @@
+<program>
+const L1 = <a class="l1" href=${href} props={ href: string, label: string }>${label}</>
+const L2 = <a class="l2" href=href props={ href: string, label: string }>${label}</>
+const L3 = <a class="l3" href="/p${href}" props={ href: string, label: string }>${label}</>
+const L4 = <span class="l4" props={ href: string, label: string }><a href=${href}>${label}</a></>
+<u> = "/docs"
+<rows> = [{ id: 1, url: "/a" }]
+<main>
+    <section id="expr">
+        <L1 href=${@u} label="x1"/>
+        <L2 href=${@u} label="x2"/>
+        <L3 href=${@u} label="x3"/>
+        <L4 href=${@u} label="x4"/>
+    </section>
+    <section id="cell">
+        <L1 href=@u label="y1"/>
+        <L3 href=@u label="y3"/>
+    </section>
+    <section id="lit">
+        <L1 href="/lit" label="z1"/>
+        <L3 href="/lit" label="z3"/>
+    </section>
+    <ul id="each">
+        <each in=@rows key=@.id as r>
+            <li><L1 href=r.url label="e1"/><L3 href=r.url label="e3"/></li>
+        </each>
+    </ul>
+    <button id="go" onclick=${ @u = "/next" }>go</button>
+</main>
+</program>

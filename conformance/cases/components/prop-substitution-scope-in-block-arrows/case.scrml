@@ -1,0 +1,32 @@
+<program>
+<items> = [{ id: 1, name: "ab" }, { id: 2, name: "cd" }]
+<out> = ""
+const C = <div class="c" props={ label: string }>
+    ${
+      function run() {
+        // object KEY named like the prop: never rewritten (label must stay label)
+        const keyed = [1].map(x => { const o = { label: 2 }; return o.label })
+        // regex content naming the prop: never rewritten
+        const rx = [1].map(x => { /* label stays a word in a comment */ return /label/.test("a label here") })
+        // a LOCAL that shadows the prop, then written: not the prop
+        const loc = [1].map(x => { let label = 10; label = label + 1; return label })
+        const inner = [1].map(x => { const label = "inner"; return label })
+        // nested parameters that shadow the prop (plain, arrow, destructured)
+        const nested = [1].map(x => {
+          function g(label) { return label + 1 }
+          const h = (label) => label * 2
+          const d = ({ label }) => label
+          return g(1) + h(2) + d({ label: 3 })
+        })
+        // a READ of the prop through shorthand, and inside a block arrow
+        const short = [1].map(x => { const o = { label }; return o.label + x })
+        // realistic: a list mapped to objects whose key is named like the prop
+        const rows = @items.map(it => { return { label: it.name.toUpperCase(), id: it.id } })
+        @out = [keyed[0], rx[0], loc[0], inner[0], nested[0], short[0], rows.map(r => r.label).join("+")].join("|")
+      }
+    }
+    <button class="r" onclick=run()>run</button>
+</>
+<C label="P"/>
+<p id="o">${@out}</p>
+</program>

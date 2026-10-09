@@ -1,0 +1,17 @@
+{
+  "id": "components-component-scope-lift-nested-read",
+  "description": "§15.10.1 (S459 round 6, F1) — read side: inside lifted markup, text before the nested `${ const label = \"S\" }` reads the prop (L); the later siblings — text and a quoted attribute — read the local (S). The lifted markup is its own scope: the component markup after the lift still reads the prop (L). Before round 6 every read inside the lift rendered L.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: \"From the point of declaration onward in the same scope, the local binding shadows the prop.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "domAnchored": [
+      { "selector": ".c .b", "text": "L" },
+      { "selector": ".c .t", "text": "S" },
+      { "selector": ".c .a", "attr": { "title": "t-S" } },
+      { "selector": ".c .after", "text": "L" }
+    ]
+  }
+}

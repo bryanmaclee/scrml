@@ -1,0 +1,18 @@
+<program>
+<log> = ""
+${ function h() { @log = @log + "h" } }
+const Bare = <div class="b" props={ onGo?: () => void }>
+    <button class="g" onclick=onGo()>g</button>
+</>
+const Lam = <div class="l" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => onGo()}>g</button>
+</>
+const Blk = <div class="k" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { onGo() }}>g</button>
+</>
+<Bare/>
+<Lam/>
+<Blk onGo=h/>
+<Blk onGo=h/>
+<p id="o">${@log}</p>
+</program>

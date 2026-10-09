@@ -1,0 +1,16 @@
+<program>
+<v> = 7
+<o> = ""
+const C = <div class="c" props={ bind n: number }>
+    ${
+      let n = 0
+      function bump() { n = n + 1; @o = String(n) }
+    }
+    <button class="k" onclick=bump()>k</button>
+    <button class="w" onclick=${() => n = 50}>w</button>
+    <button class="s" onclick=${ n = n + 100 }>s</button>
+    <button class="r" onclick=${() => @o = @o + "/" + String(n)}>r</button>
+</>
+<C bind:n=@v/>
+<p id="o">${@v}|${@o}</p>
+</program>

@@ -1,0 +1,14 @@
+<program>
+<o> = ""
+const C = <div class="c" props={ label: string }>
+    ${
+      let label = "S"
+      function r() { return label }
+    }
+    <p class="a">${label}</p>
+    <button class="w" onclick=${() => label = "Z"}>w</button>
+    <button class="b" onclick=${() => @o = @o + r() + "/" + label + ";"}>b</button>
+</>
+<C label="L"/>
+<p id="o">${@o}</p>
+</program>

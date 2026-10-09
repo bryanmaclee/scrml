@@ -1,0 +1,9 @@
+<program>
+<text> = "start"
+<snap> = ""
+const TextField = <input class="tf" type="text" bind:value=value props={ bind value: string }/>
+<TextField bind:value=@text/>
+<p id="o">${@text}</p>
+<button id="copy" onclick=${ @snap = @text }>copy</button>
+<button id="reset" onclick=${ @text = "reset" }>reset</button>
+</program>

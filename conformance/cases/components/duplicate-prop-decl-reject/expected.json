@@ -1,9 +1,9 @@
 {
   "id": "components-duplicate-prop-decl-reject",
-  "description": "§15.10 — the same prop name declared BOTH in the `props` block AND as a bare attribute on the component-def root element SHALL fire E-COMPONENT-012. `Badge`'s root `<span status=\"x\" ... props={ status: string }>` declares `status` twice. Reject (pos) half of the E-COMPONENT-012 pin; clean neg is components/duplicate-prop-decl-clean.",
+  "description": "§15.10 — the same prop name declared BOTH in the `props` block AND as a BARE (valueless, §15.1 `prop1`) attribute on the component-def root element SHALL fire E-COMPONENT-012. `Badge`'s root `<span status class=\"badge\" props={ status: string }>` declares `status` twice. Reject (pos) half of the E-COMPONENT-012 pin; clean neg is components/duplicate-prop-decl-clean; a VALUED root attribute is the body writing its root (components/declared-prop-explicit-root-write).",
   "language-version": "1.0",
   "spec": "§15.10",
-  "rationale": "§15.10: 'the same prop name SHALL NOT appear in both the props block and as a bare attribute on the root element (E-COMPONENT-012: duplicate prop declaration).' `status` appears as both a bare attribute value (\"x\") and a typed props-block entry.",
+  "rationale": "§15.10 (S458 \"D1\"): 'the same prop name SHALL NOT appear in both the props block and as a valueless (bare) attribute on the root element (E-COMPONENT-012: duplicate prop declaration).' `status` appears as both a bare attribute and a typed props-block entry.",
   "expect": {
     "codes": ["E-COMPONENT-012"]
   }

@@ -1,0 +1,17 @@
+<program>
+<v> = 0
+<w> = 0
+<xs> = [1, 2]
+const C = <div class="c" props={ bind n: number, label: string }>
+    ${
+      const setBig = () => { n = 200 }
+      function addAll() { @xs.forEach(x => { n = n + x }) }
+      const names = () => @xs.map(x => { return label + x })
+    }
+    <span class="s">${names().join(",")}</span>
+    <button class="g" onclick=setBig()>g</button>
+    <button class="a" onclick=addAll()>a</button>
+</>
+<div id="t"><C bind:n=@v label="L"/></div>
+<p id="vals">${@v}/${@w}</p>
+</program>

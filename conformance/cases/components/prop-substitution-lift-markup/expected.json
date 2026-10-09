@@ -1,0 +1,17 @@
+{
+  "id": "components-prop-substitution-lift-markup",
+  "description": "§15.10.1 (S458 fourth round, F9) — a prop referenced in `lift <li>…</li>` markup inside a component's logic block is substituted: bare, inside `if`, inside `for` (text and attribute `${…}`), and a loop binder named like the prop (`for (label of …)`) shadows it in the lifted markup. Before the fix the `lift-expr` walker returned markup targets unchanged (the 'handled by recursion' fallback only saw the `{ kind: \"markup\", node }` wrapper), so every lifted `label` stayed a bare identifier — a ReferenceError at load.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: 'Nested logic blocks inside markup inside logic blocks SHALL be walked recursively' and the substitution 'SHALL apply at every ExprNode position reachable from a logic-block body'; 'A `for-stmt` loop variable … shadows props within their respective scopes.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "domAnchored": [
+      { "selector": ".c .bare li", "text": "L" },
+      { "selector": ".c .cond li", "text": "L!" },
+      { "selector": ".c .loop li", "text": "L1" },
+      { "selector": ".c .shadow li", "text": "s" }
+    ]
+  }
+}

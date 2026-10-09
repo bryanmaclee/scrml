@@ -1,0 +1,12 @@
+<program>
+<v> = 7
+const C = <div props={ n: number, bind m: number }>
+    ${
+      function bump() { n = n + 1 }
+      function setM() { m = 3 }
+    }
+    <button onclick=bump()>+</button>
+    <button onclick=setM()>m</button>
+</>
+<C n=@v m=@v/>
+</program>

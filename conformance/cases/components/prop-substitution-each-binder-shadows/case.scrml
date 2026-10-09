@@ -1,0 +1,12 @@
+<program>
+<xs> = ["a", "b"]
+const C = <div class="c" props={ label: string, items: string[] }>
+    <ul class="in">
+        <each in=items as label>
+            <li title=${label + "!"}>${label}-${label.length}</li>
+        </each>
+    </ul>
+    <p class="out">${label}</p>
+</>
+<C label="L" items=@xs/>
+</program>

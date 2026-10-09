@@ -1,4 +1,4 @@
 <program>
-const Badge = <span status="x" class="badge" props={ status: string }>${status}</>
+const Badge = <span status class="badge" props={ status: string }>${status}</>
 <Badge status="y" />
 </program>
