@@ -35,3 +35,4 @@ Report: new FINAL_SHA, per-finding disposition with the proof (repro before/afte
 
 Address this before completing your current task.
 - 2026-10-09T16:50:30-06:00 F1: givenContinuesIsOperator — token-stream check (is = infix operator after an operand; not .is/?.is/key); tests is-given-member-is-s462
+- 2026-10-09T17:07:40-06:00 F2: is given("msg")/is some("msg") read via shared collectValidatorCallArgs; unit test + conformance forms/is-given-validator-inline-message; regen bootstrap-conformance + FACTS

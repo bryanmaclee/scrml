@@ -9577,6 +9577,77 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Advance past `:` and the STRING.
       return afterValidatorIdx + 2;
     }
+    // A validator call's arguments, from the `(` at scan index `openIdx` (S462: shared by
+    // the one-word call form `length(>=2)` and the two-word `is given("msg")`). Returns
+    // { args, lastTok, nextIdx } or null (unbalanced / malformed — the caller declines).
+    function collectValidatorCallArgs(openIdx) {
+      let parenDepth = 1;
+      let bracketDepth = 0;
+      let braceDepth = 0;
+      let argIdx = openIdx + 1;
+      // Per-arg accumulator + array of all collected args.
+      let curArgTexts = [];
+      const allArgs = [];
+      let lastTok = tokens[i + openIdx];
+      while (true) {
+        const at = tokens[i + argIdx];
+        if (!at || at.kind === "EOF") return null; // unbalanced — decline
+        if (at.kind === "PUNCT" && at.text === "(") parenDepth++;
+        if (at.kind === "PUNCT" && at.text === ")") {
+          parenDepth--;
+          if (parenDepth === 0) {
+            // Closing paren of the outer call. Flush the current arg
+            // (if any) and stop.
+            if (curArgTexts.length > 0) {
+              allArgs.push(curArgTexts.join(" ").trim());
+            }
+            lastTok = at;
+            argIdx++;
+            break;
+          }
+        }
+        if (at.kind === "PUNCT" && at.text === "[") bracketDepth++;
+        else if (at.kind === "PUNCT" && at.text === "]") {
+          if (bracketDepth === 0) return null; // malformed — decline
+          bracketDepth--;
+        }
+        else if (at.kind === "PUNCT" && at.text === "{") braceDepth++;
+        else if (at.kind === "PUNCT" && at.text === "}") {
+          if (braceDepth === 0) return null; // malformed — decline
+          braceDepth--;
+        }
+        // Top-level comma: split arg boundary. parenDepth === 1 means
+        // we are inside the outer call's arg list; bracketDepth/
+        // braceDepth === 0 means we are not inside a nested array/
+        // object literal. (`oneOf([.A, .B])` keeps `.A, .B` together
+        // because bracketDepth becomes 1 inside `[`.)
+        if (
+          at.kind === "PUNCT" && at.text === "," &&
+          parenDepth === 1 && bracketDepth === 0 && braceDepth === 0
+        ) {
+          allArgs.push(curArgTexts.join(" ").trim());
+          curArgTexts = [];
+          lastTok = at;
+          argIdx++;
+          continue;
+        }
+        // STRING tokens have their surrounding quotes stripped by the
+        // tokenizer; restore them via JSON.stringify so the joined raw
+        // text is parseable as a JS string literal in B9. Mirrors the
+        // default-expr collector treatment above (line ~3533). Without
+        // this, `pattern("[a-z]+")` would store `[a-z]+` and B9's
+        // expression-parser would fail to recognise it as a string lit.
+        curArgTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
+        lastTok = at;
+        argIdx++;
+      }
+      // Filter out any empty args produced by trailing-comma or
+      // adjacent-comma artifacts. Empty paren `f()` already produced
+      // an empty `allArgs` (the curArgTexts.length === 0 flush guard
+      // skipped). `f(,)` would push two empties — drop them.
+      const args = allArgs.filter((s) => s.length > 0);
+      return { args, lastTok, nextIdx: argIdx };
+    }
     // Phase A1a Step 6 — `default=expr` raw text + span (parsed into ExprNode by caller).
     let defaultExprRaw = null;
     let defaultExprSpan = null;
@@ -9993,71 +10064,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // OPERATOR token, not a paren-shaped construct, so it doesn't
           // confuse this splitter; it travels in the first arg as the only
           // arg, intact, for B9's relational-predicate sub-grammar parser.
-          let parenDepth = 1;
-          let bracketDepth = 0;
-          let braceDepth = 0;
-          let argIdx = scanIdx + 2;
-          // Per-arg accumulator + array of all collected args.
-          let curArgTexts = [];
-          const allArgs = [];
-          let lastTok = next;
-          while (true) {
-            const at = tokens[i + argIdx];
-            if (!at || at.kind === "EOF") return null; // unbalanced — decline
-            if (at.kind === "PUNCT" && at.text === "(") parenDepth++;
-            if (at.kind === "PUNCT" && at.text === ")") {
-              parenDepth--;
-              if (parenDepth === 0) {
-                // Closing paren of the outer call. Flush the current arg
-                // (if any) and stop.
-                if (curArgTexts.length > 0) {
-                  allArgs.push(curArgTexts.join(" ").trim());
-                }
-                lastTok = at;
-                argIdx++;
-                break;
-              }
-            }
-            if (at.kind === "PUNCT" && at.text === "[") bracketDepth++;
-            else if (at.kind === "PUNCT" && at.text === "]") {
-              if (bracketDepth === 0) return null; // malformed — decline
-              bracketDepth--;
-            }
-            else if (at.kind === "PUNCT" && at.text === "{") braceDepth++;
-            else if (at.kind === "PUNCT" && at.text === "}") {
-              if (braceDepth === 0) return null; // malformed — decline
-              braceDepth--;
-            }
-            // Top-level comma: split arg boundary. parenDepth === 1 means
-            // we are inside the outer call's arg list; bracketDepth/
-            // braceDepth === 0 means we are not inside a nested array/
-            // object literal. (`oneOf([.A, .B])` keeps `.A, .B` together
-            // because bracketDepth becomes 1 inside `[`.)
-            if (
-              at.kind === "PUNCT" && at.text === "," &&
-              parenDepth === 1 && bracketDepth === 0 && braceDepth === 0
-            ) {
-              allArgs.push(curArgTexts.join(" ").trim());
-              curArgTexts = [];
-              lastTok = at;
-              argIdx++;
-              continue;
-            }
-            // STRING tokens have their surrounding quotes stripped by the
-            // tokenizer; restore them via JSON.stringify so the joined raw
-            // text is parseable as a JS string literal in B9. Mirrors the
-            // default-expr collector treatment above (line ~3533). Without
-            // this, `pattern("[a-z]+")` would store `[a-z]+` and B9's
-            // expression-parser would fail to recognise it as a string lit.
-            curArgTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
-            lastTok = at;
-            argIdx++;
-          }
-          // Filter out any empty args produced by trailing-comma or
-          // adjacent-comma artifacts. Empty paren `f()` already produced
-          // an empty `allArgs` (the curArgTexts.length === 0 flush guard
-          // skipped). `f(,)` would push two empties — drop them.
-          const args = allArgs.filter((s) => s.length > 0);
+          const _call = collectValidatorCallArgs(scanIdx + 1);
+          if (_call === null) return null;
+          const { args, lastTok, nextIdx: argIdx } = _call;
           validators.push({
             name: validatorName,
             args,
@@ -10109,6 +10118,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               const vs = w.span.start + _isSomeBias;
               _isSomeSink.set(vs, { start: vs, end: vs + 4, kind: "validator" });
             }
+          }
+          // `is given("msg")` — the §55.10 Level-1 inline message, read exactly as
+          // `req("msg")` reads it (the catalog arity is "0+inline").
+          const paren = tokens[i + scanIdx + 2];
+          if (paren && paren.kind === "PUNCT" && paren.text === "(") {
+            const _call = collectValidatorCallArgs(scanIdx + 2);
+            if (_call === null) return null;
+            entry.args = _call.args;
+            entry.span = { ...entry.span, end: _call.lastTok.span.end };
+            validators.push(entry);
+            scanIdx = _call.nextIdx;
+            const recoveredIsCall = tryRecoverColonInlineMessage(scanIdx);
+            if (recoveredIsCall !== null) scanIdx = recoveredIsCall;
+            continue;
           }
           validators.push(entry);
           scanIdx += 2;
