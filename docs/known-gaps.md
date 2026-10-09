@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 6 |
-| MED | 561 | 5 |
-| LOW | 318 | 0 |
+| MED | 564 | 5 |
+| LOW | 327 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -23871,6 +23871,7 @@ Body-level declarations are emitted once under a shared name. Related to the §6
 ### g-component-body-given-match-unusable-s459 — `given` / `match` on a prop inside a component body fail E-COMPONENT-020/021/035, so §42.3.5's canonical narrowing forms are unusable in components — `NEW S459; MED; open (pre-existing)`
 Reviewer-executed (S459 D1 round-6 review), same on base and head.
 <!-- @gap id=g-component-body-given-match-unusable-s459 sev=MED status=open locus=compiler/src/component-expander.ts(parseComponentDef re-parse — PA-located-verify) prov=review:s459-d1-r6 -->
+**S460 also (review:S460-d1r7, re-run on main `3d0e54e21`): the diagnostic changed and now misnames the cause.** Inside a component, `onclick=${() => { given onGo :> { onGo() } }}` on an optional function prop `onGo?: () => void` now fails **E-SCOPE-001** (×2): "the body of `<C>` uses its prop `onGo` inside an expression the compiler could not parse … check its quotes and operators". The expression has no quoting or operator error. It is the `given` form, which SPEC §42.2.3 defines as valid. The message sends the author looking for a typo that is not there. Emitted from `compiler/src/component-expander.ts` (message text located, not traced). Reproducers: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-d1r7/q/g_given.scrml` and `g_match.scrml`. Note that `g_match.scrml` writes its arms with the legacy `=>` and commas (`match onGo { not => h(), _ => onGo() }`). The canonical `:>` form (`/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/d1/cm.scrml`) fails E-CODEGEN-INVALID-LOGIC instead. **The component is not the whole story.** A `given` or `match` in a block-bodied handler arrow also fails OUTSIDE any component, on a `<cb>: (() => void) | not` cell. The `given` case fails E-CODEGEN-INVALID-LOGIC "could not lower" (`/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/d1/ctl_g.scrml`). The `match … { not :> …  given f :> … }` case fails E-CODEGEN-INVALID-LOGIC "an un-lowered compiler placeholder reached the output" (`d1/om.scrml`). So fixing the component re-parse alone will turn E-SCOPE-001 into that codegen error. Both fail closed. This may be the same defect as [[g-top-level-given-emits-bare-name-s459]] / [[g-fail-in-arrow-or-statement-match-arm-not-lowered]]; not traced. The S460 brief rated the misnamed diagnostic LOW; the entry's MED is unchanged.
 
 ### g-each-block-arrow-handler-never-invoked-s459 — `onclick=${() => { … }}` inside `<each>` emits an arrow that is never invoked (silent; also outside components) — `NEW S459; MED; open (pre-existing)`
 Reviewer-executed (S459 D1 review, `q/eachblk.scrml`).
@@ -23937,13 +23938,15 @@ From dpa-070 D6. Fixture: `<dpa070>/wx/w01` (`<user>: { name: string } | not`, `
 **Severity HIGH.** This is the central soundness condition of S440 Q1 / S442 ("the presence test COUNTS AS the narrowing"), and condition (1) of the DD's design insight. When the write sits in a callee the author cannot see the hazard locally, and the compiler certifies the read as safe. Kotlin refuses smart casts on mutable properties for exactly this reason, and scrml `@cells` are mutable properties. scrml can do better than TS here, because it knows each callee's write set: it should drop the narrowing only when a call's write set touches the cell.
 
 ### G-MATCH-OPTIONAL-CELL-NARROWS-NOT-ARM-S460 — a `match` on a `T | not` cell narrows the WHOLE match body, including the `not` arm: `match @user { not :> { @user.name } … }` compiles clean and throws TypeError — `NEW S460; MED; open (pre-existing)`
-<!-- @gap id=g-match-optional-cell-narrows-not-arm-s460 sev=MED status=open locus=compiler/src/type-system.ts:matchHeaderCell(~:31144, + the narrowing use ~:31192; dPA-located, not traced here) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md -->
+<!-- @gap id=g-match-optional-cell-narrows-not-arm-s460 sev=MED status=open locus=compiler/src/presence-narrowing.ts:walkBodyNarrowed(match-stmt branch ~:233-236 — walks the WHOLE match body with the header key added, no per-arm split; read on main 3d0e54e21; was type-system.ts matchHeaderCell before #1369 moved it) prov=dd:scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md;review:S460-d1-land -->
 
 From dpa-070 D4. Fixtures: `<dpa070>/fx/f10b-match-not-arm-unsound.scrml` (compiles clean) and `<dpa070>/rx/r03` (runtime TypeError).
 
 **Expected:** only the `given @user :>` arm is narrowed. In the `not :>` arm, `@user` is `not`, so `@user.name` there is E-TYPE-046.
 
 **Actual:** `matchHeaderCell` returns the header cell, and the whole match body is treated as narrowed.
+
+**S460 also (locus moved; review:S460-d1-land, re-run on main `3d0e54e21`):** #1369 (S458 D1, one presence reader) moved this narrowing out of `type-system.ts` (`matchHeaderCell` no longer exists there) into the shared reader `compiler/src/presence-narrowing.ts`. The defect moved with it. `walkBodyNarrowed`'s `match-stmt` branch (~:233) calls `walkBodyNarrowed(n.body, withKey(present, receiverKey(n.headerExpr)), …)`, so every arm, the `not :>` arm included, is walked as narrowed. `<dpa070>/fx/f10b-match-not-arm-unsound.scrml` still compiles clean (exit 0, no E-TYPE-046). Because the reader is now shared, the component E-TYPE-031 check (§15.11.4) inherits the same over-narrowing. That consequence is inferred from the shared call path, not probed. Fix direction: narrow per arm. Add the header key only for a `given x :>` / payload arm; for a `not :>` arm, narrow to absence.
 
 **Severity MED.** The dossier rates it HIGH. The code is SPEC-invalid under §42.3.5 and is silently accepted, which is the legend's "missing safety guarantee" class. It sits one tier below the write-invalidation entry above because the hazard is visible on the page: the author wrote the read inside the `not` arm.
 
@@ -24124,4 +24127,168 @@ Pinned by the `conformance/cases/condition/*-neg` cases (including `unresolved-o
 
 **Narrowing divergence (added at landing, S460 differential review F1; agent-executed on impl#1, `bun compiler/src/cli.js compile`, re-run after merging origin/main `890b48308` — #1369's single presence reader changed the answer).** SPEC §42.2.2a, §42.3.5 item 2 and §42.4 statement 8 say `x is given` / `x is some` narrow `x` to `T` where true, including the right operand of `&&` / `||` and the children of a parenthesized `if=` test. On the merged impl#1: **narrows** (compiles clean) — `if (@user is some) { @s = @user.name }`, `if (@user is given) { … }`, `if (@user is not) return` then `@user.name`, bare `if (@user) { … }`, `@user ? @user.name : ""`, bare `<p if=@user>${@user.name}</p>`, and the compounds `if (@user is some && @n > 0) { @s = @user.name }`, `if (@user is given && @user.name != "") { … }`, `if (@user is not || @user.name == "") { return }` (at the branch base d5c9ef382, before #1369, the compounds were E-TYPE-046 too); **does NOT narrow** (E-TYPE-046) — `<p if=(@user is given)>${@user.name}</p>`, `<p if=(@user is some)>${@user.name}</p>`. This fails CLOSED (a spurious refusal, not a silent accept): the author can write the bare `if=@user` instead. The bootstrap narrows all of them (`compiler/self-host-v2/slice-m2/typer-s460.test.js` "compounds narrow"). SPEC marks these statements partly Nominal on impl#1.
 
-**Codegen defect found while probing (same landing; fails closed).** `const ok = @n is given && @b` (with `@n: int | not`, `@b: bool`) is E-CODEGEN-INVALID-LOGIC on impl#1 — the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`; the same line with `is some` compiles, and `if (@n is given && @b)` compiles. So §42.2.4's "impl#1 lowers `is given` as `is some`" does not hold in a value position followed by `&&`; SPEC §42.2.4 and §42.4 statement 8 say so. Reproducer: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-aprime-land/rep/i.scrml` (twin `h.scrml`). Locus not traced (likely the `is given` rewrite in `compiler/src/expression-parser.ts` `rewriteIsPredicates` vs a declaration-initializer path).
+**Codegen defect found while probing (same landing; fails closed).** `const ok = @n is given && @b` (with `@n: int | not`, `@b: bool`) is E-CODEGEN-INVALID-LOGIC on impl#1 — the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`; the same line with `is some` compiles, and `if (@n is given && @b)` compiles. So §42.2.4's "impl#1 lowers `is given` as `is some`" does not hold in a value position followed by `&&`; SPEC §42.2.4 and §42.4 statement 8 say so. Reproducer: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-aprime-land/rep/i.scrml` (twin `h.scrml`). Locus not traced (likely the `is given` rewrite in `compiler/src/expression-parser.ts` `rewriteIsPredicates` vs a declaration-initializer path). **Filed separately S460 (gaps-b):** [[g-impl1-is-given-and-value-position-codegen-s460]], which tracks it on its own.
+
+## §S460-b — S460 differential-review filings (2026-10-08; reviews of #1369 D1, #1370 meta-nits, #1371 onclient-shadow, #1372 a′; CI on the S460 landings)
+
+> - Every entry below was re-checked on main `3d0e54e21` (this branch's base) unless it says otherwise. The compiles used `bun compiler/src/cli.js compile`. The bootstrap checks used the `slice-m2` front end (`compiler/self-host-v2/slice-m2/lowered.js` `frontEnd`).
+> - The meta.emit entries were compiled against PR #1370's head `37095451c` (`land/s460-meta-nits`, unmerged), unpacked with `git archive` into `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/pr1370/`.
+> - Reviewer reproducers stay out of the repo, under `/home/bryan-maclee/.cache/scrml-agent-tmp/`. Probes written while filing are under `…/s460-gaps-b/`.
+> - Two items were merged into existing entries as "S460 also:" notes instead of new entries: the component `given` / `match` diagnostic (in [[g-component-body-given-match-unusable-s459]]) and the match-arm locus move (in [[g-match-optional-cell-narrows-not-arm-s460]]).
+
+### G-SPLITARGS-IGNORES-STRING-REGEX-COMMENT-CONTEXT-S460 — `splitArgs` cuts a call-attribute argument list at every depth-0 comma with no string / template / regex / comment awareness: `onclient:open=onOpen('a,b')` emits `onOpen('a, b')` (the literal is changed), `onOpen(e /* , y */)` emits a free `e`, and a regex argument is refused as two arguments — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-splitargs-ignores-string-regex-comment-context-s460 sev=MED status=open locus=compiler/src/ast-builder.js:splitArgs(~:4685 — a char loop tracking only ()[]{} depth; callers ~:4187, ~:4749, ~:4768, ~:7478) prov=review:S460-onclient-shadow -->
+
+Found by the S460 differential review of the onclient-shadow landing (#1371). Re-verified on main `3d0e54e21`.
+
+**Root cause (read, traced to the function):** `splitArgs` walks characters, counts `(` / `[` / `{` depth, and cuts at every depth-0 `,`. It has no state for strings, template literals, regex literals or comments. The pieces are trimmed and later re-joined with `, ` by the channel emitter. #1371's S239 fix F1 made the E-CHANNEL-005 / E-CHANNEL-HANDLER-SHADOW check re-parse the joined pieces. That repairs the arity count when the join parses. It does not repair the emitted text, and the brief recorded "splitArgs itself NOT changed (not a 2-line safe fix)".
+
+**Reproducers** (`/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-onclient/`). All results below are from main:
+- `r2/sr/s01.scrml`, `e/s4.scrml`: `onOpen('a,b')` compiles, and the client emits `_scrml_onOpen_3('a, b')`. The string the author wrote is not the string the handler receives. This is silent wrong output.
+- `r2/sr/s07.scrml`: `onOpen(e /* , y */)` compiles and emits `_scrml_onOpen_3(e /*, y */)`. `e` is not bound to the event (the listener parameter is `_scrml_event`), so the handler gets a free identifier: a ReferenceError at runtime, or a stray global.
+- `r2/sr/s04.scrml`: `onOpen(/a,b/)` → **E-CHANNEL-005** "passes 2 arguments" (`onOpen(/a, b/)`). That is an over-rejection: it is one regex argument.
+- `r2/sr/s05.scrml`, `s06.scrml`, `s13.scrml`, `s16.scrml`: `onOpen(')', e)`, `onOpen('(', e)`, `onOpen(')')`, `onOpen("a)b")` → **E-CTX-003** "Unclosed 'channel'" plus "Unclosed 'program'". A paren inside a quoted argument closes or opens the attribute early. That error comes from the attribute/tag scanner upstream of `splitArgs` (block-splitter; located, not traced), so two layers share the same blind spot.
+- The `e/s2.scrml` control: `onOpen(g("x,y"))` is emitted intact, because the comma sits at depth 1.
+
+**Expected:** an argument list is split by the expression parser (or a scanner that knows literals and comments), so literal text is emitted byte-for-byte and comments hide nothing.
+
+**Severity MED:** literal corruption and a free identifier at exit 0 (silent wrong output), on an uncommon but legal shape. The over-rejections fail closed.
+
+Related: [[g-channel-emitter-binds-first-arg-from-raw-piece-s460]] and [[g-channel-handler-args-emitted-raw-s460]] (the same call attribute, downstream), and [[g-sql-slot-reader-regex-division-misreads-s456]] (another hand-rolled lexer).
+
+### G-CHANNEL-EMITTER-BINDS-FIRST-ARG-FROM-RAW-PIECE-S460 — the channel emitter decides the handler's binding name from the raw first split piece (an identifier regex in `clientParamOf`; a bare `split(",")[0]` in `channelAttrParam`), while E-CHANNEL-005 / E-CHANNEL-HANDLER-SHADOW judge the PARSED argument list: two readers of one attribute — `NEW S460; LOW; open`
+<!-- @gap id=g-channel-emitter-binds-first-arg-from-raw-piece-s460 sev=LOW status=open locus=compiler/src/codegen/emit-channel.ts:channelAttrParam(~:330 — `String(v.args[0]).trim()` for call-ref, `v.args.split(",")[0]` for call) + emitChannelClientJs.clientParamOf(~:736, an identifier RegExp on that text); the checker is type-system.ts:checkChannelHandlerBindings(~:15185, parses `f(<pieces joined by ",">)`) prov=review:S460-onclient-shadow -->
+
+Found by the S460 onclient-shadow differential review. Read on main `3d0e54e21`: both functions were read, and the divergence was traced by reading, not probed.
+
+**Shape:** the type stage parses the argument list, decides whether argument 1 is a plain identifier, and reports a collision or an arity error on that verdict. The emitter does not consult that verdict. It re-derives the binding from the raw first piece with an identifier regex (client), or with a naive comma split (`channelAttrParam`, the `call` kind), and binds that name or `_scrml_event`. Where the two disagree, the checker has judged a program other than the one that runs. This is the two-readers-of-one-text class.
+
+**Severity LOW:** the review proved a divergence only on the strict side (the checker refuses, or both agree). No shape was found where the checker passes and the emitter binds differently. Fix direction: the type stage records the parsed binding (name or none) on the attribute node, and the emitter reads that record.
+
+Related: [[g-splitargs-ignores-string-regex-comment-context-s460]].
+
+### G-CHANNEL-HANDLER-ARGS-EMITTED-RAW-S460 — channel handler arguments are emitted as raw source text: `onclient:open=onOpen(@count)` fails E-CODEGEN-INVALID-LOGIC (`@` not lowered); `onserver:open=hello(who)` emits `await hello(who)` with `who` free on the server; E-CHANNEL-006 (an `onclient:*` handler declared `server function`) has no emit site — `NEW S460; MED; open (pre-existing)`
+<!-- @gap id=g-channel-handler-args-emitted-raw-s460 sev=MED status=open locus=compiler/src/codegen/emit-channel.ts:channelAttrToCall(~:310-325, joins the raw args; the onserver:* lifecycle emit + the emitChannelClientJs listener bodies) + searched:compiler/src(no `E-CHANNEL-006` emitter — grep finds the code only in SPEC.md §34 / §38.9) prov=review:S460-onclient-shadow;empirical:docs/changes/s460-onclient-shadow/progress.md-"Surfaced, not fixed" -->
+
+Source: `docs/changes/s460-onclient-shadow/progress.md`, "Final state → Surfaced, not fixed". All four parts were re-verified on main `3d0e54e21`. Probes are in `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/r3/`.
+1. `c1.scrml`: `onclient:open=onOpen(@count)` → **E-CODEGEN-INVALID-LOGIC**. The argument goes into the listener as raw text, and `@count` is never lowered to a cell read. This fails closed.
+2. `c2.scrml`: `onserver:open=hello(who)` compiles (exit 0). `.server.js` has `if (ws.data.__ch === "chat") { await hello(who); }`, where `who` is declared nowhere: a ReferenceError on the first connection. The same holds for `onserver:close`. E-CHANNEL-005 / -HANDLER-SHADOW cover only `onserver:message` and `onclient:*`, so nothing checks these arguments.
+3. `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-onclient/e/s3.scrml`: `onserver:message=h("a,b")` → **E-CODEGEN-INVALID-LOGIC**. The review reports that the server binds the first argument's TEXT as the payload name (`const "a = d…`). The parse gate catches it, so on main this fails closed.
+4. `c3.scrml`: `onclient:open=onOpen()` with `server function onOpen()` compiles (exit 0). The client listener calls `_scrml_fetch_onOpen_3()`, a POST round-trip on every socket open. SPEC §34 / §38.9 list **E-CHANNEL-006** for exactly this, and no compiler source emits it.
+
+**Expected:** handler arguments are parsed and lowered like any other expression (cells read, names resolved in the right scope). An `onserver:*` argument that is not the payload binding is resolved or refused. E-CHANNEL-006 fires.
+
+**Severity MED:** part 2 is a runtime ReferenceError at exit 0 (silent), and part 4 is an unenforced SPEC SHALL. Parts 1 and 3 fail closed.
+
+Related: [[g-splitargs-ignores-string-regex-comment-context-s460]].
+
+### G-EDG002-FALSE-POSITIVE-CELL-TO-ATTR-ONLY-PROP-S460 — E-DG-002 "`@u` is declared but never consumed" fires when the cell's only reader is a component prop that the body uses in an attribute, including SPEC §15.10's own `<Link href=${@u}/>` — `NEW S460; LOW; open`
+<!-- @gap id=g-edg002-false-positive-cell-to-attr-only-prop-s460 sev=LOW status=open locus=searched:compiler/src/dependency-graph.ts(E-DG-002 consumer census — does not count a call-site prop expression whose prop the expanded body reads only in an attribute; not traced) prov=review:S460-d1r7 -->
+
+Found by the S460 differential review of D1 round 7 (#1369). Re-verified on main `3d0e54e21`.
+
+Reproducers:
+- `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-d1r7/o/dg.scrml`: `const Link = <a class="lk" href=${href} props={ href: string }>go</a>`, `<u> = "/x"`, `<Link href=${@u}/>`. Result: warning **E-DG-002** "Reactive variable `@u` is declared but never consumed".
+- `o/dg2.scrml`: the same, with the attribute on a nested `<a>` inside a `<div>` root. Same warning.
+
+**Expected:** `@u` is consumed. It is passed to `href`, and `href` renders.
+
+**Actual:** the warning tells the author to delete or `_`-prefix a cell that is in use. Following that advice breaks the link.
+
+**Severity LOW** (the brief rated it LOW-MED): it is a warning, and the output is correct. The cost is a misleading instruction on the SPEC's own canonical example. It is filed one tier below MED because nothing is refused or mis-emitted.
+
+### G-BIND-ON-BYVALUE-PROP-DOUBLE-DIAGNOSTIC-S460 — `bind:value=n` on a by-value component prop reports E-COMPONENT-PROP-WRITE (correct) AND E-ATTR-010 "`bind:` requires a reactive `@` variable" (a cascade whose advice misleads) — `NEW S460; LOW; open`
+<!-- @gap id=g-bind-on-byvalue-prop-double-diagnostic-s460 sev=LOW status=open locus=searched:compiler/src/ast-builder.js,compiler/src/codegen/emit-html.ts(E-ATTR-010 emit sites),compiler/src/component-expander.ts(E-COMPONENT-PROP-WRITE) — not traced prov=review:S460-d1r7 -->
+
+Found by the S460 D1 r7 differential review. Re-verified on main `3d0e54e21`. Reproducer: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-d1r7/w/fwd_input_byval.scrml` (`const C = <div class="c" props={ n: string }><input class="g" bind:value=n/></>`, `<C n="a"/>`).
+
+**Actual:** 2 errors.
+- **E-COMPONENT-PROP-WRITE** names the real cause and the fix: declare `bind n: T` and bind it at the call site.
+- **E-ATTR-010** says the right-hand side must be an `@`-prefixed variable, e.g. `bind:value=@myVar`. Inside a component body a `bind` prop is written without `@`, so following this advice takes the author away from the fix.
+
+**Expected:** E-COMPONENT-PROP-WRITE alone. E-ATTR-010 is suppressed when the right-hand side names a prop of the enclosing component.
+
+**Severity LOW:** it fails closed, and one of the two messages is right.
+
+### G-BOOTSTRAP-NO-HOST-METHOD-CALLS-REFUSES-CORRECT-CODE-S460 — the bootstrap (self-host-v2 slice M2) has no host-method calls and no built-in method return types, so with the S460 a′ "provable-or-error" condition rule it refuses ordinary code: `const optional = seg.endsWith("?"); if (optional)` → E-BOOTSTRAP-UNSUPPORTED plus a cascading E-COND-NOT-BOOLEAN — `NEW S460; MED; open`
+<!-- @gap id=g-bootstrap-no-host-method-calls-refuses-correct-code-s460 sev=MED status=open locus=searched:compiler/self-host-v2/analyze.scrml(call typing admits only named fns / Date.now() / .filter / .map on a sequence; no host-method return table; checkCond's condBlamed does not blame a const whose initializer was refused) — not traced prov=review:S460-aprime;empirical:docs/changes/s460-presence-a-prime/progress.md-Phase-4 -->
+
+Source: `docs/changes/s460-presence-a-prime/progress.md`, Phase 4 self-count. Of the 17 new unresolved-condition sites, the ones in samples and stdlib are "unresolved because the bootstrap lacks a builtin method catalog (`seg.endsWith("?")`, `path.slice`)". Re-verified on main `3d0e54e21` with the slice-m2 front end. Probe: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/boot/b8.mjs`.
+- `function f(seg: string) { const optional = seg.endsWith("?")  if (optional) { … } }` → **E-BOOTSTRAP-UNSUPPORTED** "only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap", **plus E-COND-NOT-BOOLEAN** "a value whose type the compiler cannot resolve".
+- Annotating the local (`const optional: bool = …`) removes the E-COND-NOT-BOOLEAN cascade but not the E-BOOTSTRAP-UNSUPPORTED.
+- `s.trim()` and `s.slice(1)` get the same E-BOOTSTRAP-UNSUPPORTED. `.length` on a string adds a second one: "member access `.length` on a value that is not a struct".
+- Control: `const optional = seg == "?"` then `if (optional)` → clean.
+
+**Two defects:**
+1. The bootstrap has no catalog of string and array host methods (what impl#1 has as `HOST_METHOD_RETURNS` in `type-system.ts`, see [[g-typer-hostmethod-return-asis-and-anon-struct-poison]]). The call is refused, and even if it were admitted its type would be unresolved, which a′ now makes an error in a condition.
+2. The a′ blame logic (`condBlamed`) does not treat a local whose initializer was already refused as blamed, so the condition is reported a second time.
+
+**Severity MED:** this blocks the bootstrap from compiling ordinary adopter code (string handling in any form), and a′ widened the blast radius from "unsupported" to "an extra error at every condition that reads such a value". It is not a wrong-output bug: everything fails closed.
+
+### G-IMPL1-IS-GIVEN-AND-VALUE-POSITION-CODEGEN-S460 — impl#1: `const ok = @n is given && @b` → E-CODEGEN-INVALID-LOGIC (the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`); the `is some` spelling of the same line compiles — `NEW S460; LOW; open`
+<!-- @gap id=g-impl1-is-given-and-value-position-codegen-s460 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(rewriteIsPredicates — the `is given` rewrite on a declaration initializer; not traced) prov=review:S460-aprime;empirical:s460-aprime-land-impl1-compile -->
+
+First recorded inside [[g-impl1-condition-rule-s460]] ("Codegen defect found while probing"). Filed on its own so it can be fixed and closed separately from that carried divergence. Re-verified on main `3d0e54e21`.
+
+Reproducers: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-aprime-land/rep/i.scrml` (`@n: int | not = not`, `@b: bool = false`, `const ok = @n is given && @b` in a function) and its twin `h.scrml` (`is some`).
+- `i.scrml` → **E-CODEGEN-INVALID-LOGIC**. W-TYPE-031 reports that inference "stopped at identifier reference", so the initializer was cut after `@n` and the `&& @b` was emitted as a separate statement.
+- `h.scrml` → compiles (W-TYPE-031 stops at the `&&` binary, i.e. the whole expression was kept).
+- `if (@n is given && @b)` compiles (per the a′ landing).
+
+**Expected:** SPEC §42.2.4: `is given` ≡ `is some` in every position.
+
+**Severity LOW:** it fails closed, and the `is some` spelling works. But `is given` is the spelling the S460 ruling makes canonical for value positions and compounds, so this is the form a ruling-following author writes first.
+
+### G-META-EMIT-COMPILE-TIME-FOREIGN-CONTENT-BREAKOUT-S460 — the compile-time meta.emit judge does not model the HTML parser's foreign-content breakout: `emit("<svg><p><object id=\"title\"></object></p></svg>")` and `emit("<svg><p><map id=\"pm\"></map></p></svg>")` compile, though the browser parses that `<p>` (and its subtree) as HTML, where the same `id` is refused — `NEW S460; LOW; open (the <object> half is on main; the <map> half is present once #1370 lands)`
+<!-- @gap id=g-meta-emit-compile-time-foreign-content-breakout-s460 sev=LOW status=open locus=compiler/src/markup-attr-allow-list.js:_scrml_emit_child_ns(~:297 on main — inside an SVG parent, any child other than under foreignObject/desc/title stays SVG; the HTML breakout start tags (p, div, b, table, ul, …) are not modelled) prov=review:S460-meta-nits -->
+
+Finding R1 of the S460 differential review of #1370 (meta.emit follow-ups). Reproducers: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-metanits/ct4/`.
+
+| file | main `3d0e54e21` | #1370 head `37095451c` |
+|---|---|---|
+| `plain_object.scrml` (`<object id="title">`) | E-META-EVAL-002 | E-META-EVAL-002 |
+| `breakout_object.scrml` (`<svg><p><object id="title">`) | **compiles** | **compiles** |
+| `breakout_map.scrml` (`<svg><p><map id="pm">` + a page `<img usemap="#pm">`) | compiles (no map rule on main) | **compiles** |
+
+**Root cause (read, traced to the function):** `_scrml_emit_child_ns` returns SVG for every child of an SVG element except under `foreignObject` / `desc` / `title`. The HTML tree builder instead pops out of foreign content on a breakout start tag (`<p>`, `<div>`, `<b>`, `<table>`, …), so the browser builds an HTML `<object>` / `<map>` with that id. The reviewer reports that the runtime judge (which judges the parsed DOM) gets this right. So the compile-time judge admits markup the runtime would refuse, and the two judges disagree.
+
+**Severity LOW:** compile-time emit is the author's own literal markup, so this is not an injection path. It is a hole in a rule that claims to match the runtime. Fix: model the breakout tag set in `_scrml_emit_child_ns` (or judge a tree parsed by an HTML parser).
+
+### G-META-EMIT-SPEC-22-12-TEMPLATE-AND-RCDATA-DOC-S460 — §22.12 doc gaps in the #1370 text: (R2) `<template>` content that N5/N2a exempt goes live if page script clones it, and "Not a sandbox" does not say so; (R3) the strict-subset paragraph frames compile-time refusals as "malformed" markup, but `<textarea><map id="m"></map></textarea>` is valid HTML (RCDATA text) that compile time refuses and the runtime admits — `NEW S460; LOW; open (present once #1370 lands)`
+<!-- @gap id=g-meta-emit-spec-22-12-template-and-rcdata-doc-s460 sev=LOW status=open locus=compiler/SPEC.md(§22.12 "Not a sandbox" + the strict-subset paragraph, as rewritten on PR #1370 head 37095451c) prov=review:S460-meta-nits -->
+
+Findings R2 and R3 of the S460 #1370 differential review. Both are SPEC text changes; neither is a behaviour change.
+- **R2 (relayed, not re-verified; browser harness):** the review's `harness/run9.cjs` rows `v-tpl-input-action-clone` / `v-tpl-radio-clone` clone emitted `<template>` content into the page with page script, and the exempted markup then behaves like any live element (a form member named `action`, a radio in the page's group). The exemption is correct for scrml-emitted markup, which never clones. The §22.12 "Not a sandbox" list should say that page script cloning template content re-exposes what the exemption skipped.
+- **R3:** compile-time half verified on #1370 head: `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-metanits/ct3/textarea_map.scrml` → **E-META-EVAL-002** "`<map>` the attribute 'id'". On main it compiles, because main has no map rule. The runtime half (admitted, because the browser parses textarea content as text) is the reviewer's, from `harness/run9.cjs` row `v-textarea-content`, and was relayed, not re-verified. The paragraph should say that the compile-time judge is stricter than HTML inside RCDATA (`<textarea>`, `<title>`), not only for malformed input.
+
+**Severity LOW:** documentation precision. The behaviour fails closed at compile time.
+
+### G-META-EMIT-SVG-USE-RENDERS-PAGE-SVG-COPY-S460 — emitted `<svg><use href="#pagesvg"></use></svg>` renders a copy of a page SVG element by id; the meta.emit rules do not consider `<use>` references to elements outside the emitted fragment — `NEW S460; LOW; open (relayed, not re-verified)`
+<!-- @gap id=g-meta-emit-svg-use-renders-page-svg-copy-s460 sev=LOW status=open locus=searched:compiler/src/markup-attr-allow-list.js(the emit attribute verdicts; no `<use href>` fragment-reference rule found) — not traced prov=review:S460-meta-nits -->
+
+From the S460 #1370 differential review. The reviewer's browser harness `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-metanits/harness/run2.cjs` row `svg-use-page` puts `<svg style="display:none"><g id="pagesvg"><circle r="1"/></g></svg>` on the page, then emits `<svg><use href="#pagesvg"></use></svg>`, and the emitted fragment renders the page's shape. Compile-time fixtures: `…/s460-rev-metanits/ct/svg_use.scrml`, `svg_use_xlink.scrml`. The harness needs puppeteer and Chrome, so it was not re-run here.
+
+**Severity LOW:** a same-origin visual copy. No script runs (an SVG `<use>` shadow tree does not execute scripts), and the `data:` URL variant is a separate harness row (`run.cjs` `use-data`). Filed so the emit rules' "an emitted fragment cannot reach page elements" story names this exception, or refuses a fragment-reference `href` that points outside the fragment.
+
+### G-WINDOWS-EXECUTED-DB-TESTS-5S-TIMEOUT-S460 — executed-DB tests run on bun's default 5 s per-test timeout and time out on the Windows CI runner: two instances on S460 landings, each passing on re-run — `NEW S460; LOW; open`
+<!-- @gap id=g-windows-executed-db-tests-5s-timeout-s460 sev=LOW status=open locus=compiler/tests/conformance/conf-TENANT-SOURCE-FILTER.test.js,compiler/tests/unit/sql-one-statement.test.js(no explicit per-test timeout on the executed-DB tests) prov=empirical:s460-ci-windows-run-37877489519-attempt-1;empirical:s460-ci-windows-run-37885564157-attempt-1 -->
+
+Verified from the CI logs (`gh run view <id> --attempt 1 --log-failed`, `windows` job):
+- run 37877489519 (PR #1369, attempt 1): `CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile AND scope (EXECUTED, two tenants) > an UPDATE / DELETE with no active tenant is refused by name; nothing changes [5456 ms]` — "this test timed out after 5000ms". Attempt 2 passed.
+- run 37885564157 (attempt 1): `codegen defence in depth — a multi-statement body never reaches the driver > executed on Bun.SQL sqlite: the base emission ran BOTH inserts; the guarded emission throws and sends nothing` — timed out after 5000 ms (twice in the log).
+
+**Fix direction:** give executed-DB tests (compile, then a real driver round-trip) an explicit per-test timeout sized for the slowest runner. Do not raise the global default.
+
+**Severity LOW:** the Windows job is not a required check, and a re-run passes. The cost is a red X on landings and a re-run each time. Same class as [[g-flaky-timing-tests-s459]], [[g-windows-timer-audit-test-flaky-s454]] and [[g-specifier-resolution-test-hook-timeout-knife-edge]].
+
+### G-PARALLEL-PRS-CONFLICT-ON-COMMITTED-GENERATED-DOCS-S460 — every pair of parallel PRs conflicts on the committed generated docs (SPEC-INDEX line ranges, FACTS, bootstrap-conformance, the known-gaps §0 counts), so each landing forces a serial re-merge and regenerate of every other open PR — `NEW S460; LOW; open (process / tooling)`
+<!-- @gap id=g-parallel-prs-conflict-on-committed-generated-docs-s460 sev=LOW status=open locus=searched:scripts/regen-spec-index.ts,scripts/facts.ts,scripts/state.ts,scripts/bootstrap-conformance.ts prov=empirical:s460-landings-1370-1371-1372-copy-in-each-re-merged -->
+
+S460: #1370, #1371, #1372 and the copy-in branch were each re-merged against main after a sibling landed. In each case the conflicts were in generated files: `docs/SPEC-INDEX.md` (any SPEC edit shifts every later section's line range), the FACTS output, `docs/bootstrap-conformance.md`, and the `docs/known-gaps.md` §0 count table. None of them is hand-authored, but each is committed, so any two PRs that touch SPEC or gaps collide. The risk is more than wasted time: at S439, resolving a gap-count hunk with `--theirs` dropped a hand-written entry, and the regenerate hid the loss.
+
+**Options (not decided here; the PA's call):**
+- (a) Regenerate in CI and stop committing the generated files (or commit them only on main via a bot).
+- (b) A git merge driver for these paths that runs the regenerate script instead of a textual merge.
+- (c) Keep committing, but drop the volatile parts (SPEC-INDEX line ranges, absolute counts) so unrelated PRs stop touching the same lines.
+
+**Severity LOW:** no product impact. The cost is serialized landing and a recurring hand-merge step where a wrong `--theirs` can lose content.
