@@ -1944,6 +1944,8 @@ export interface LambdaParam {
   defaultValue?: ExprNode;
   isRest?: boolean;
   isLin?: boolean;     // §35.2.1 lin parameter
+  /** S458 — for a destructured parameter (`name: "__destructured__"`), the names it binds. */
+  boundNames?: string[];
 }
 
 // ---- Type Cast ----

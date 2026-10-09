@@ -4287,10 +4287,13 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
           };
 
           // §5.4: bind: directive validation
-          // §15.11.1: on component call sites (isComponent=true), defer E-ATTR-011 for
-          // unrecognized bind: names — CE validates against propsDecl (E-COMPONENT-013).
-          if (name.startsWith("bind:")) {
-            if (!BIND_DIRECTIVES.has(name) && !isComponent) {
+          // §15.11.1: on a component call site (isComponent=true) BOTH checks belong to the
+          // expander: the bind NAME against propsDecl (E-COMPONENT-013), and the bind
+          // TARGET against `bind:prop=@cell` (E-ATTR-010, one message — S458 round 4 N1;
+          // the element-form target check below offers a state path, which would
+          // contradict it).
+          if (name.startsWith("bind:") && !isComponent) {
+            if (!BIND_DIRECTIVES.has(name)) {
               errors.push(new TABError(
                 "E-ATTR-011",
                 `E-ATTR-011: \`${name}\` is not a supported bind directive. ` +
@@ -5645,6 +5648,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // child's init string. The `compoundBody` flag enables that boundary.
     const inCompoundBody = !!(opts && opts.compoundBody);
     const parts = [];
+    // S458 — the source-AS-WRITTEN form of each quoted STRING part (index → text). The
+    // `expr` join cooks a string's escapes (right for a JS value); a component
+    // definition's markup is re-parsed by the expander and must keep the literal as
+    // written (`title="${n + 'it\'s'}"`, `pattern="^\d+$"`), so it uses `exprSource`.
+    const sourceFormOfPart = new Map();
     const partLines = []; // parallel array: source line number for each part
     // GITI-039: parallel array of source spans for markup-region parts (the
     // span when angleDepth > 0 at push time, else `null`). joinWithNewlines
@@ -6666,6 +6674,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (lastTok.isTemplate) {
           parts.push("`" + lastTok.text + "`");
         } else {
+          if (lastTok.delim === '"' || lastTok.delim === "'") {
+            sourceFormOfPart.set(parts.length, lastTok.delim + lastTok.text + lastTok.delim);
+          }
           parts.push(reemitJsStringLiteral(lastTok.text));
         }
       } else {
@@ -6675,8 +6686,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       pushPartSpan();
     }
 
+    const expr = joinWithNewlines(parts, partLines, partSpans);
     return {
-      expr: joinWithNewlines(parts, partLines, partSpans),
+      expr,
+      exprSource: sourceFormOfPart.size === 0
+        ? expr
+        : joinWithNewlines(parts.map((p, i) => sourceFormOfPart.get(i) ?? p), partLines, partSpans),
       span: parts.length > 0 ? spanOf(startTok, lastTok) : spanOf(startTok, startTok),
     };
   }
@@ -6992,7 +7007,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Check for =
         if (peek().kind === "PUNCT" && peek().text === "=") {
           consume(); // =
-          const value = _parseLiftAttrValue(attrSpan, attrName, liftUnquotedState);
+          const value = _parseLiftAttrValue(attrSpan, attrName, liftUnquotedState, tag);
           if (value === null) return null;
           // S446 (S439 #4) — a `${…}` event handler on lifted markup carries its
           // §5.2.3 statement list (`value.handlerBlock`) exactly as top-level and
@@ -7234,7 +7249,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * reader (S458 review (d): the lift parser had its own reader of this text,
    * so the S457 rulings did not hold in lifted markup).
    */
-  function _parseLiftAttrValueShared(attrSpan, attrName, liftState) {
+  function _parseLiftAttrValueShared(attrSpan, attrName, liftState, liftTag = null) {
     const t = peek();
     if (!attrName || !liftState || !t || t.kind === "EOF" || !t.span || typeof t.span.start !== "number") return undefined;
     // Only an unquoted value is this reader's (live parity: the TAB tokenizer's
@@ -7302,7 +7317,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       { kind: "ATTR_EQ", text: "=", span: tokSpan(t.span.start, t.span.start) },
       { kind: r.kind, text: r.text, span: tokSpan(t.span.start, absEnd) },
     ];
-    const parsed = parseAttributes(toks, filePath, errors);
+    // A lifted COMPONENT use (`lift <li><Counter bind:count=@x/></li>`, an uppercase tag) is
+    // converted as a component call site, exactly as the TAB path converts it: its
+    // `bind:prop=@cell` belongs to the expander (§15.11.1), not the element bind table.
+    const parsed = parseAttributes(toks, filePath, errors, typeof liftTag === "string" && /^[A-Z]/.test(liftTag));
     const value = parsed.length > 0 ? parsed[0].value : { kind: "absent" };
     if (value && typeof value === "object") value._sharedReader = true;
     return value;
@@ -7341,8 +7359,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /** Parse one attribute value after `=` into a structured value object. */
-  function _parseLiftAttrValue(attrSpan, attrName, liftState) {
-    const _shared = _parseLiftAttrValueShared(attrSpan, attrName, liftState);
+  function _parseLiftAttrValue(attrSpan, attrName, liftState, liftTag = null) {
+    const _shared = _parseLiftAttrValueShared(attrSpan, attrName, liftState, liftTag);
     if (_shared !== undefined) return _shared;
     // C10 fix (gate-found-tail) — when collecting the tokens of a lift markup
     // attribute value into a `parts` array, STRING tokens carry their content
@@ -14682,7 +14700,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           });
         } else {
-        const { expr, span } = collectExpr();
+        const { expr, exprSource, span } = collectExpr();
         // Check if this is a component definition. Per SPEC §(component defs),
         // a component-def requires BOTH an uppercase-initial name AND markup RHS
         // (`const Button = < button>...</button>`). Uppercase names alone are
@@ -14696,7 +14714,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             id: ++counter.next,
             kind: "component-def",
             name,
-            raw: expr,
+            // S458 — the markup with its string literals AS WRITTEN (escapes kept); the
+            // expander re-parses this text, so a cooked `'it\'s'` / `\d` would change it.
+            raw: exprSource ?? expr,
             span: spanOf(startTok, peek()),
           });
         } else {

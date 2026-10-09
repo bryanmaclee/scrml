@@ -1,0 +1,17 @@
+<program>
+    const Modal = <div class="modal" props={ bind visible: boolean, title: string }>
+        <div class="modal-header">
+            <h2>${title}</h2>
+            <span class="state">${visible}</span>
+            <button class="close" onclick=${ visible = false }>Close</button>
+            <button class="toggle" onclick=${ visible = !visible }>Toggle</button>
+        </div>
+    </>
+    <showModal> = false
+    <other> = true
+    <button id="open" onclick=${ @showModal = true }>Open settings</button>
+    <p id="parent">${@showModal}</p>
+    <p id="other">${@other}</p>
+    <div id="m1"><Modal bind:visible=@showModal title="Settings"/></div>
+    <div id="m2"><Modal bind:visible=@other title="Other"/></div>
+</program>

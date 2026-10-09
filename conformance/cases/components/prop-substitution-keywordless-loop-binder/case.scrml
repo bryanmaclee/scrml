@@ -1,0 +1,16 @@
+<program>
+<v> = 7
+<w> = 5
+<out> = ""
+const C = <div class="c" props={ bind n: number, m: number }>
+    ${
+      function a() { let s = 0; for (n of [1, 2]) { s = s + n }; return s }
+      const g = () => { let s = 0; for (n of [3, 4]) { s = s + n }; return s }
+      const h = () => { let s = 0; for (m of [5, 6]) { s = s + m }; return s + m }
+      function run() { @out = [a(), g(), h(), n, m].join(",") }
+    }
+    <button class="r" onclick=run()>run</button>
+</>
+<C bind:n=@v m=@w/>
+<p id="o">${@out}</p>
+</program>

@@ -1,0 +1,14 @@
+{
+  "id": "components-bind-prop-destructured-local-shadows",
+  "description": "§15.10.1 / §15.11.1 (S458 fourth round, F5) — a DESTRUCTURED local named like a `bind` prop is the local, not the bind channel: `let { n } = …; n = 100`, `let [n] = …; n++`, a destructured function parameter `function f({ n }) { n = 50 }`, and a destructured `for (let [k, n] of …)` binder never write the caller's cell `@v`. Before the fix every one lowered to `_scrml_cs_reactive_set(\"v\", …)` (silent: compiles clean, @v ends 77 and b2 reads 101). Executed: @v stays 7; each local holds its own value.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1 Shadowing: 'A local `let`, `const`, … or function declaration with the same name appears earlier in the same lexical scope. From the point of declaration onward in the same scope, the local binding shadows the prop.' and 'A `for-stmt` loop variable … shadows props within their respective scopes.' A destructuring pattern declares every name it binds.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-ASSIGN-004", "E-SCOPE-001"],
+    "input": [{ "click": ".c .b1" }, { "click": ".c .b2" }, { "click": ".c .b3" }, { "click": ".c .b4" }],
+    "state": { "v": 7, "o1": 100, "o2": 2, "o3": 50, "o4": 78 },
+    "domAnchored": [{ "selector": "#o", "text": "7/100/2/50/78" }]
+  }
+}

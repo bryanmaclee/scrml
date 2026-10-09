@@ -779,16 +779,6 @@ export function stmtContainsLift(node: any): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface BindPropsWiring {
-  propName: string;
-  callerVar: string;
-  componentName: string;
-}
-
-// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -1643,7 +1633,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   }
 
   // Single-pass classification of markup nodes (replaces 5 independent AST walks)
-  const { lifecycleNodes, inputStateNodes, requestNodes, apiDeclNodes, timeoutNodes, bindPropsWirings, regionOrderedNodes } =
+  const { lifecycleNodes, inputStateNodes, requestNodes, apiDeclNodes, timeoutNodes, regionOrderedNodes } =
     classifyMarkupNodes(getNodes(fileAST));
 
   // Steps 5 + 5c are ONE source-ordered pass — §20.8.8 step 3.
@@ -1780,31 +1770,6 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
-  // Step 7: Generate bind: prop bidirectional wiring (§15.11.1)
-  if (bindPropsWirings.length > 0) {
-    lines.push("");
-    lines.push("// --- bind: prop bidirectional wiring (compiler-generated) ---");
-    for (const { propName, callerVar, componentName } of bindPropsWirings) {
-      const guardVar = genVar("bind_sync");
-      const propJs = JSON.stringify(propName);
-      const callerJs = JSON.stringify(callerVar);
-      lines.push(`// bind:${propName}=@${callerVar} (from ${componentName})`);
-      lines.push(`let ${guardVar} = false;`);
-      lines.push(`_scrml_effect(function() {`);
-      lines.push(`  const _v = _scrml_reactive_get(${callerJs});`);
-      lines.push(`  if (${guardVar}) return; ${guardVar} = true;`);
-      lines.push(`  _scrml_reactive_set(${propJs}, _v);`);
-      lines.push(`  ${guardVar} = false;`);
-      lines.push(`});`);
-      lines.push(`_scrml_effect(function() {`);
-      lines.push(`  const _v = _scrml_reactive_get(${propJs});`);
-      lines.push(`  if (${guardVar}) return; ${guardVar} = true;`);
-      lines.push(`  _scrml_reactive_set(${callerJs}, _v);`);
-      lines.push(`  ${guardVar} = false;`);
-      lines.push(`});`);
-    }
-  }
-
   // §20.8.3 link-boost (i27) NOTE: the delegated `_scrml_link_ensure_click()`
   // boot call is NOT emitted here. It MUST register its document-level click
   // listener AFTER the author's delegated onclick handlers so an author
@@ -1915,7 +1880,6 @@ interface WiringCollections {
   requestNodes: any[];
   apiDeclNodes: any[];
   timeoutNodes: any[];
-  bindPropsWirings: BindPropsWiring[];
   /**
    * The §6.7.2.1 region-associated bodies this walk classifies, in SOURCE
    * (declaration) order — the interleaving of `lifecycleNodes` and
@@ -1932,7 +1896,6 @@ interface WiringCollections {
  * Behavioral notes:
  * - Skips kind === "logic" block children (matches collectLifecycleNodes and
  *   collectInputStateNodes, the dominant behavior of 4/5 original collectors).
- * - _bindProps can appear on ANY markup node, not exclusive with tag classification.
  * - Valid scrml does not place timer/poll/request/timeout inside logic blocks,
  *   so the logic-block skip is safe for all well-formed AST.
  */
@@ -1943,7 +1906,6 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
     requestNodes: [],
     apiDeclNodes: [],
     timeoutNodes: [],
-    bindPropsWirings: [],
     regionOrderedNodes: [],
   };
 
@@ -2011,14 +1973,6 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
           result.timeoutNodes.push(node);
         }
 
-        // bindProps is not exclusive — any markup node can have _bindProps
-        if (Array.isArray(node._bindProps) && node._bindProps.length > 0) {
-          const componentName: string = node._expandedFrom ?? node.tag ?? "unknown";
-          for (const { propName, callerVar } of node._bindProps) {
-            result.bindPropsWirings.push({ propName, callerVar, componentName });
-          }
-        }
-
         // Recurse into markup children (carry the outlet-residence flag).
         if (Array.isArray(node.children)) {
           visit(node.children, childInsideOutlet);
@@ -2043,7 +1997,7 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
 
       // Phase A10 (S78, 2026-05-10) — descend into engine-decl.bodyChildren
       // so reactive-wiring nodes (lifecycle <timer>/<poll>, input-state
-      // <keyboard>/<mouse>/<gamepad>, <request>, <timeout>, _bindProps)
+      // <keyboard>/<mouse>/<gamepad>, <request>, <timeout>)
       // INSIDE engine state-child bodies are discovered. Without this
       // branch, non-renderable wiring elements declared inside arm bodies
       // would be silently dropped.

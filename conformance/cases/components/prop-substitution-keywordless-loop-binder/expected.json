@@ -1,0 +1,14 @@
+{
+  "id": "components-prop-substitution-keywordless-loop-binder",
+  "description": "§15.10.1 / §50.8.5 (S458 fourth round, F2) — a KEYWORDLESS loop binder `for (n of xs)` is a declaration (a `const`), so it shadows a same-named prop in BOTH substitution paths: the structured function body (`a`) and a block-bodied arrow (`g`, `h`, substituted on its parsed JS tree). Before the fix the JS-text path treated the binder as an assignment target: a by-value prop was refused E-ASSIGN-004 and a `bind` prop emitted `for(@v of …)` (invalid JS). Bind prop `n` (@v = 7) and by-value prop `m` (@w = 5) are untouched; after `h`'s loop `m` is the prop again (5 + 6 + 5 = 16).",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§17 (for/lift normative statements): 'A keywordless loop binder — `x` in `for (x of collection)` — is `const` (§50.8.5)'. §15.10.1: 'A `for-stmt` loop variable … shadows props within their respective scopes.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-ASSIGN-004", "E-SCOPE-001"],
+    "input": [{ "click": ".c .r" }],
+    "state": { "v": 7, "w": 5, "out": "3,7,16,7,5" },
+    "domAnchored": [{ "selector": "#o", "text": "3,7,16,7,5" }]
+  }
+}

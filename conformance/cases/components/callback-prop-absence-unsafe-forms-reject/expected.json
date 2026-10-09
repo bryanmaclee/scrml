@@ -1,0 +1,11 @@
+{
+  "id": "components-callback-prop-absence-unsafe-forms-reject",
+  "description": "§15.11.4 + §42.3.5 (S459 round 7) — a test that READS an optional function prop but does not prove it present is not an absence check; each of these is E-TYPE-031 (one per component, 7): the consequent of `onGo is not`; the right of `!onGo && …`; the right of `onGo || …`; the ALTERNATE of `onGo ? … : onGo()`; a member hop `onGo.call()`; a call inside the test itself `if (onGo())`; a call in a non-handler attribute value `class=${onGo()}`. Round 6's region-under-a-test model accepted the first three.",
+  "language-version": "1.0",
+  "spec": "§15.11.4",
+  "rationale": "§15.11.4: \"an unguarded call to a potentially-absent function-typed prop SHALL be a compile error (E-TYPE-031 …)\"; §42.3.5 defines absence-safe as an optional chain or a narrowing that proves presence.",
+  "expect": {
+    "codes": ["E-TYPE-031"],
+    "codeCounts": { "E-TYPE-031": 7 }
+  }
+}
