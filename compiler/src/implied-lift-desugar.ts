@@ -228,8 +228,12 @@ interface ArmPlan {
   arm: unknown[];
   markupNode: Record<string, unknown>;
   span: unknown;
-  /** s461 — the arm is a §42.2.3 `given` guard's body (see applyPlans). */
-  givenBody?: boolean;
+  /**
+   * s461 — keep the arm's pre-desugar pieces for the checkers (see applyPlans and
+   * `keepPiecesForArmsBaseNeverPlanned`): true for every arm the pre-s461 planner
+   * (no `given` cascade node) would NOT have desugared.
+   */
+  keepPieces?: boolean;
 }
 
 /** Nodes an arm may hold and still be "exactly one markup expression" in source. */
@@ -347,6 +351,70 @@ function isCascadeNode(n: Record<string, unknown>): boolean {
 }
 
 /**
+ * s461 — the PRE-s461 cascade test (`if-stmt` only). Used for one purpose: to
+ * re-run the planner as it stood before `given` became a cascade node, so the
+ * caller knows exactly which arms the pre-s461 pass would have desugared. See
+ * `keepPiecesForArmsBaseNeverPlanned`.
+ */
+function isIfCascadeNodeOnly(n: Record<string, unknown>): boolean {
+  return n.kind === "if-stmt";
+}
+
+/** Does this cascade reach a `given` guard anywhere through its arms? */
+function cascadeReachesGiven(n: Record<string, unknown>): boolean {
+  if (n.kind === "given-guard") return true;
+  for (const key of ["consequent", "alternate", "body"]) {
+    const arm = n[key];
+    if (!Array.isArray(arm)) continue;
+    for (const child of arm) {
+      const rec = child as Record<string, unknown> | null;
+      if (rec && isCascadeNode(rec) && cascadeReachesGiven(rec)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * s461 — THE ONE MECHANISM that keeps the checkers' coverage unchanged.
+ *
+ * The type system's `lift-expr` arm and the §42 presence reader do not descend
+ * into a lift's markup (a pre-existing hole that every `if`-arm implied lift has
+ * always lived in). Before s461 a cascade that involved a `given` guard was never
+ * desugared at all — a `given` root was not a cascade node, and an `if` cascade
+ * with a `given` holding markup in an arm DECLINED whole (armHoldsMarkup) — so the
+ * checkers judged every arm of it as raw `html-fragment` / `logic` pieces. Now
+ * those cascades plan, at any nesting depth (given→if, given→if→if, if→given,
+ * given→given, and the SIBLING arms of an `if` whose other arm holds a `given`).
+ *
+ * Rather than guess which of those arms are "below a given", the planner is re-run
+ * exactly as it stood before s461 (`isIfCascadeNodeOnly`). Every arm the old
+ * planner would have desugared gets no pieces (the checkers' view of it is
+ * unchanged — the existing hole). Every arm it would NOT have desugared keeps its
+ * pieces, which the checkers judge exactly as before. Coverage is therefore
+ * identical to the pre-s461 pass by construction, not by enumeration of shapes.
+ * A cascade that reaches no `given` plans identically under both predicates and
+ * is skipped (no re-run, no pieces).
+ */
+function keepPiecesForArmsBaseNeverPlanned(
+  root: Record<string, unknown>,
+  plans: ArmPlan[],
+  sourceText: string,
+  filePath: string,
+): void {
+  if (!cascadeReachesGiven(root)) return;
+  const basePlanned = new Set<unknown>();
+  if (isIfCascadeNodeOnly(root)) {
+    const basePlans: ArmPlan[] = [];
+    if (planIfCascade(root, sourceText, filePath, basePlans, { yes: false }, isIfCascadeNodeOnly)) {
+      for (const bp of basePlans) basePlanned.add(bp.arm);
+    }
+  }
+  for (const p of plans) {
+    if (!basePlanned.has(p.arm)) p.keepPieces = true;
+  }
+}
+
+/**
  * Collect the rewrite plan for a whole if-cascade — `else if` links and `if`s
  * NESTED inside an arm included (a nested `if` arm is not itself one
  * expression, so the outer arm is classified `null` while the inner arms plan;
@@ -361,6 +429,7 @@ function planIfCascade(
   filePath: string,
   out: ArmPlan[],
   seenNonMarkupValueArm: { yes: boolean } = { yes: false },
+  isCascade: (n: Record<string, unknown>) => boolean = isCascadeNode,
 ): boolean {
   for (const key of ["consequent", "alternate", "body"]) {
     const arm = ifNode[key];
@@ -376,14 +445,13 @@ function planIfCascade(
     if (plan === "declined") return false;
     if (plan) {
       if (seenNonMarkupValueArm.yes) return false;
-      if (ifNode.kind === "given-guard") plan.givenBody = true;
       out.push(plan);
       continue;
     }
     for (const child of arm) {
       const rec = child as Record<string, unknown> | null;
-      if (rec && isCascadeNode(rec)) {
-        if (!planIfCascade(rec, sourceText, filePath, out, seenNonMarkupValueArm)) return false;
+      if (rec && isCascade(rec)) {
+        if (!planIfCascade(rec, sourceText, filePath, out, seenNonMarkupValueArm, isCascade)) return false;
       }
     }
     // ⛑ THE ALL-OR-NOTHING INVARIANT HAS TO BE CHECKED HERE, NOT IN `planArm`.
@@ -404,7 +472,7 @@ function planIfCascade(
     // expression declines the WHOLE cascade, reverting it to pre-existing
     // behaviour. The nested-`if` recursion above still runs first, so the
     // genuine container case (an arm that IS a nested `if`) keeps working.
-    if (armHoldsMarkup(arm, sourceText)) return false;
+    if (armHoldsMarkup(arm, sourceText, isCascade)) return false;
   }
   return true;
 }
@@ -441,7 +509,11 @@ const MARKUP_OPENER_REJOINED = /<\s*\/?\s*[A-Za-z][A-Za-z0-9:-]*\s*[\s/>]/;
  *      when a piece carries no usable span.
  * Either one firing declines. Both are conservative-safe.
  */
-function armHoldsMarkup(arm: unknown[], sourceText: string): boolean {
+function armHoldsMarkup(
+  arm: unknown[],
+  sourceText: string,
+  isCascade: (n: Record<string, unknown>) => boolean = isCascadeNode,
+): boolean {
   for (const piece of arm as Record<string, unknown>[]) {
     if (!piece) continue;
     // ⛑ SCAN PER PIECE, AND SKIP `if-stmt` PIECES. A nested `if` is the genuine
@@ -450,7 +522,7 @@ function armHoldsMarkup(arm: unknown[], sourceText: string): boolean {
     // WHOLE extent instead declined every `else if` cascade and every nested-`if`
     // arm — the outer arm's extent spans the inner arms' markup — which broke two
     // shapes the fix had already covered. Measured, both directions.
-    if (isCascadeNode(piece)) continue;
+    if (isCascade(piece)) continue;
     if (piece.kind === "bare-expr") {
       const k = (piece.exprNode as Record<string, unknown> | undefined)?.kind;
       if (k === "markup" || k === "markup-value") return true;
@@ -476,7 +548,7 @@ function armHoldsMarkup(arm: unknown[], sourceText: string): boolean {
 export function impliedLiftCheckPieces(node: unknown): unknown[] | null {
   const r = node as Record<string, unknown> | null | undefined;
   if (!r || r.kind !== "lift-expr" || r._impliedLift !== true) return null;
-  const w = r._givenBodyPieces as { nodes?: unknown } | undefined;
+  const w = r._preDesugarPieces as { nodes?: unknown } | undefined;
   return w && Array.isArray(w.nodes) ? w.nodes : null;
 }
 
@@ -484,19 +556,20 @@ export function impliedLiftCheckPieces(node: unknown): unknown[] | null {
 function applyPlans(plans: ArmPlan[], counter: { next: number }): void {
   for (const p of plans) {
     renumber(p.markupNode, counter);
-    // s461 — a `given` body keeps its pre-desugar pieces (the `html-fragment` /
-    // `logic` run the parser produced) beside the lift, for the CHECKERS only.
-    // The type system's `lift-expr` arm and the §42 presence reader
-    // (presence-narrowing.ts) do not descend into a lift's markup, so without the
-    // pieces every read in a `given` body — `${@typo}` (E-STATE-UNDECLARED), an
-    // unguarded `${@o.opt.x}` (E-TYPE-046) — would stop being judged the moment
-    // the body started rendering: a newly-ACCEPTING change, which the s461
-    // lowering fix must not make. Those two consumers judge the pieces exactly as
-    // they did before (`impliedLiftCheckPieces`). An OBJECT wrapper, not an
-    // array, so the generic array-key walkers do not see the reads twice.
-    // The `if`-arm implied lift is untouched: its markup is unchecked today by
-    // that same hole (pre-existing; widening it is newly-REJECTING — reported).
-    const pieces = p.givenBody ? p.arm.slice() : null;
+    // s461 — an arm the pre-s461 pass would not have desugared keeps its
+    // pre-desugar pieces (the `html-fragment` / `logic` run the parser produced)
+    // beside the lift, for the CHECKERS only (`keepPiecesForArmsBaseNeverPlanned`).
+    // The type system's `lift-expr` arm and the §42 presence reader do not descend
+    // into a lift's markup, so without the pieces every read in such an arm —
+    // `${@typo}` (E-STATE-UNDECLARED), `${nosuch}` (E-SCOPE-001), an unguarded
+    // `${@o.opt.x}` (E-TYPE-046) — would stop being judged the moment it started
+    // rendering: a newly-ACCEPTING change the s461 lowering fix must not make. Both
+    // consumers judge the pieces exactly as before (`impliedLiftCheckPieces`). An
+    // OBJECT wrapper, not an array, so the generic array-key walkers do not see the
+    // reads twice. An arm the old pass already desugared gets none: its markup is
+    // unchecked today by that same hole (pre-existing; widening it is
+    // newly-REJECTING — reported).
+    const pieces = p.keepPieces ? p.arm.slice() : null;
     p.arm.length = 0;
     p.arm.push({
       id: ++counter.next,
@@ -507,7 +580,7 @@ function applyPlans(plans: ArmPlan[], counter: { next: number }): void {
       // the author. Consumers that want to distinguish them (diagnostic wording,
       // E-LIFT-002 multiplicity messaging) have the bit; nothing reads it yet.
       _impliedLift: true,
-      ...(pieces ? { _givenBodyPieces: { nodes: pieces } } : {}),
+      ...(pieces ? { _preDesugarPieces: { nodes: pieces } } : {}),
     });
   }
 }
@@ -559,6 +632,7 @@ export function desugarImpliedLiftMarkupArms(
           // uniform drop it replaces, because the working half argues the
           // construct is supported.
           if (planIfCascade(s, src, filePath, plans) && plans.length > 0) {
+            keepPiecesForArmsBaseNeverPlanned(s, plans, src, filePath);
             applyPlans(plans, counter);
             rewritten += plans.length;
           }

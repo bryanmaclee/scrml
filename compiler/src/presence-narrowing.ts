@@ -194,19 +194,21 @@ function guardKeys(markup: Rec, opts: PresenceNarrowingOptions): string[] {
 }
 
 /**
- * s461 — a `given` guard body whose single markup expression the §17.6.10 implied-
- * lift desugar (implied-lift-desugar.ts, CE head) rewrote to a `lift-expr` is
- * judged on the PRE-desugar pieces that lift carries (`impliedLiftCheckPieces`),
- * exactly as the body was judged before the desugar reached `given`. This walker
- * does not descend into a `lift-expr`'s `expr` object, so without this
- * `${ given @o :> { <p>${@o.opt.x}</p> } }` would stop firing E-TYPE-046 — a
- * newly-ACCEPTING change the s461 lowering fix must not make.
+ * s461 — an implied `lift` that the §17.6.10 desugar (implied-lift-desugar.ts, CE
+ * head) produced for an arm the PRE-s461 pass never desugared (any arm of a cascade
+ * that reaches a `given` guard, at any depth) carries that arm's pre-desugar pieces
+ * (`impliedLiftCheckPieces`). This walker does not descend into a `lift-expr`'s
+ * `expr` object, so it judges those pieces in the lift's place — exactly what it
+ * judged before s461 made the arm render. Without this, `${ given @o :> { <p>${@o.opt.x}</p> } }`
+ * (or the same under `given → if`) would stop firing E-TYPE-046: a newly-ACCEPTING
+ * change the s461 lowering fix must not make.
  *
- * That a `lift-expr`'s markup is unwalked in general (an explicit `lift <p>…</p>`,
- * an `if`-arm's implied lift) is a pre-existing coverage hole; closing it is
- * newly-REJECTING for those forms and is not done here (reported).
+ * Generic over position on purpose: it keys on the pieces being PRESENT, which the
+ * desugar decides in one place. A lift with no pieces (an explicit `lift`, an
+ * `if`-arm lift the old pass already made) is walked as before — its markup is a
+ * pre-existing coverage hole; closing it is newly-REJECTING and not done here.
  */
-function givenBodyForCheck(body: unknown[]): unknown[] {
+function expandCheckPieces(body: unknown[]): unknown[] {
   return body.flatMap((s) => impliedLiftCheckPieces(s) ?? [s]);
 }
 
@@ -246,7 +248,7 @@ export function walkNodeNarrowed(
     for (const v of (n.variables as string[] | undefined) ?? []) {
       inner = withKey(inner, opts.givenKey ? opts.givenKey(v) : opts.receiverKey({ kind: "ident", name: v }));
     }
-    walkBodyNarrowed(givenBodyForCheck((n.body as unknown[]) ?? []), inner, here, opts);
+    walkBodyNarrowed((n.body as unknown[]) ?? [], inner, here, opts);
     return;
   }
   if (n.kind === "match-stmt") {
@@ -280,7 +282,7 @@ export function walkBodyNarrowed(
 ): void {
   if (!Array.isArray(body)) return;
   let acc = present;
-  for (const node of body) {
+  for (const node of expandCheckPieces(body)) {
     walkNodeNarrowed(node, acc, span, opts);
     if (node && typeof node === "object") acc = withKeys(acc, earlyReturnKeys(node as Rec, opts));
   }
