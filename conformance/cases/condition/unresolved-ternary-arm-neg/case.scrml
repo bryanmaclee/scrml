@@ -1,0 +1,12 @@
+// §42.4 statement 10 (S460 "a on F2, go", PA reading) — the arms of a ternary that IS the condition's
+// value are inside the condition: an unresolved operand in an arm, or an unresolved bare arm, is reported.
+<program>
+    function g() { }
+    function pick(b: bool, ready: bool) -> int {
+        if (b ? !g() : ready) { return 1 }
+        if (b ? (g() && ready) : ready) { return 2 }
+        if ((b ? g() : ready) && ready) { return 3 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>
