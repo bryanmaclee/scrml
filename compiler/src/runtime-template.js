@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { aliasHostGlobalsInRuntimeText } from "./codegen/host-global-alias.ts";
 import { standardMarkupElementNamesLowercase, CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
+import { _SCRML_EMIT_FORM_MEMBERS } from "./dom-named-property-members.js";
 
 /**
  * Phase A1c Step C7 — pull the validator predicate runtime catalog into
@@ -40,21 +41,31 @@ export const URL_GUARD_RUNTIME_SOURCE = readFileSync(
 ).replace(/^export /gm, "");
 
 /**
- * S460 N6 — the ONE declaration of the generated dom-named-property-members.js the runtime needs:
- * `_SCRML_EMIT_FORM_MEMBERS`. The `_SCRML_EMIT_DOCUMENT_MEMBERS` half stays compile-time only (the
- * runtime gate passes `document: null`, which judges fail-closed). Cut by its exact generated first and
- * last lines; a generator change that moves them stops the build here rather than shipping a gate with
- * no form table.
+ * S460 N6 — the runtime's copy of the ONE table of the generated dom-named-property-members.js it
+ * needs: `_SCRML_EMIT_FORM_MEMBERS`. The `_SCRML_EMIT_DOCUMENT_MEMBERS` half stays compile-time only
+ * (the runtime gate passes `document: null`, which judges fail-closed).
+ *
+ * The table is imported as DATA and serialized here — never cut out of the generated file's source
+ * text (a line-shape cut broke on a CRLF checkout: the compiler failed to load on Windows). The
+ * serialization is the generator's own layout (`fmt` in scripts/gen-dom-named-property-members.cjs:
+ * the names in table order, JSON-quoted, packed into lines of at most 100 columns), so the emitted
+ * runtime is byte-stable across OSes and runs. A missing or empty table stops the build here rather
+ * than shipping a gate with no form table.
  */
-function metaEmitFormMembersSource() {
-  const src = readFileSync(join(__runtime_template_dir, "dom-named-property-members.js"), "utf8");
-  const start = src.indexOf("export const _SCRML_EMIT_FORM_MEMBERS = new Set([\n");
-  const end = start === -1 ? -1 : src.indexOf("\n]);\n", start);
-  if (start === -1 || end === -1) {
+export function metaEmitFormMembersDeclaration(table) {
+  if (!(table instanceof Set) || table.size === 0) {
     throw new Error("runtime-template.js: dom-named-property-members.js has no _SCRML_EMIT_FORM_MEMBERS " +
-      "declaration in the generated shape (regenerate it with scripts/gen-dom-named-property-members.cjs)");
+      "table (regenerate it with scripts/gen-dom-named-property-members.cjs)");
   }
-  return src.slice(start, end + "\n]);\n".length).replace(/^export /gm, "");
+  const lines = [];
+  let line = " ";
+  for (const n of table) {
+    const item = " " + JSON.stringify(String(n)) + ",";
+    if (line.length + item.length > 100) { lines.push(line); line = " "; }
+    line += item;
+  }
+  if (line.trim()) lines.push(line);
+  return "const _SCRML_EMIT_FORM_MEMBERS = new Set([\n" + lines.join("\n") + "\n]);\n";
 }
 
 /**
@@ -71,7 +82,7 @@ export const META_EMIT_GATE_RUNTIME_SOURCE =
   // S459 round 4 — the HTMLFormElement member table the id/name named-property rule reads (generated).
   // S460 N6: the FORM table only — the document half never decides a runtime verdict (see
   // markup-attr-allow-list.js `_scrml_emit_named_value_verdict`); compile time reads the document one.
-  metaEmitFormMembersSource() +
+  metaEmitFormMembersDeclaration(_SCRML_EMIT_FORM_MEMBERS) +
   readFileSync(join(__runtime_template_dir, "markup-attr-allow-list.js"), "utf8").replace(/^export /gm, "") +
   readFileSync(join(__runtime_template_dir, "runtime-meta-emit-gate.js"), "utf8").replace(/^export /gm, "");
 

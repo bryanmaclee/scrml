@@ -10,10 +10,11 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Window } from "happy-dom";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { compileScrml } from "../../src/api.js";
-import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { SCRML_RUNTIME, metaEmitFormMembersDeclaration } from "../../src/runtime-template.js";
+import { _SCRML_EMIT_FORM_MEMBERS } from "../../src/dom-named-property-members.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/meta-emit-nits-s460");
 beforeAll(() => { mkdirSync(FIXTURE_DIR, { recursive: true }); });
@@ -225,5 +226,28 @@ describe("S460 N6 — the runtime ships no document member table", () => {
       expect(slot().innerHTML).toBe("old");
       expect(logs.length).toBe(1);
     }
+  });
+});
+
+// The runtime's form table is serialized from the imported DATA, never cut out of the generated
+// file's source text (that cut failed on a CRLF checkout: the compiler did not load on Windows).
+describe("S460 N6 — the runtime form-member declaration is built from data", () => {
+  test("a missing or empty table stops the build (fail-closed)", () => {
+    for (const bad of [undefined, null, new Set(), ["action"], { action: 1 }]) {
+      expect(() => metaEmitFormMembersDeclaration(bad)).toThrow("no _SCRML_EMIT_FORM_MEMBERS table");
+    }
+  });
+  test("the declaration evaluates to the same members, in table order", () => {
+    const decl = metaEmitFormMembersDeclaration(_SCRML_EMIT_FORM_MEMBERS);
+    // eslint-disable-next-line no-new-func
+    const rebuilt = new Function(decl + "\nreturn _SCRML_EMIT_FORM_MEMBERS;")();
+    expect([...rebuilt]).toEqual([..._SCRML_EMIT_FORM_MEMBERS]);
+    expect(SCRML_RUNTIME).toContain(decl);
+  });
+  test("it is the generated file's own layout, and independent of the file's line endings", () => {
+    const decl = metaEmitFormMembersDeclaration(_SCRML_EMIT_FORM_MEMBERS);
+    expect(decl).not.toContain("\r");
+    const src = readFileSync(join(import.meta.dir, "../../src/dom-named-property-members.js"), "utf8").replace(/\r\n/g, "\n");
+    expect(src).toContain("export " + decl);
   });
 });
