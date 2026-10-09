@@ -37,3 +37,20 @@ Governing sentence, SPEC §17.2: "`show=` SHALL NOT narrow. Because the element 
 - Conformance added: components/callback-prop-show-guard-reject (E-TYPE-031 x3), components/callback-prop-if-guard-twin (executed: clicks -> "hh"; #none guarded elements count 0), reactive/optional-member-access-show-reject (E-TYPE-046 x1), reactive/optional-member-access-if-twin (executed).
 - Corpus (newly-rejecting direction), merge head manifest vs F1 tree, examples+samples+conformance+stdlib: 2513 common sources — 0 outcome changes, 0 diagnostic-code changes, 0 text changes, 7334/7334 artifacts byte-identical. S451's prediction (0 new E-TYPE-046/E-TYPE-031) holds.
 - gap g-impl1-show-narrows-s451 -> resolved (locus corrected to presence-narrowing.ts); §0 regen (LOW 314 -> 313); FACTS + bootstrap-conformance regenerated (1476 cases).
+- F1 commit: 981a873c1 (pre-commit gate 33411 pass / 58 skip / 12 todo / 0 fail).
+
+## Gates on F1 head 981a873c1 (final code head)
+- pre-commit core gate: 33411 pass / 0 fail
+- conformance/run.ts: 1426/1476 + 50 xfail, 0 FAIL
+- browser tier (`bun scripts/browser-baseline.ts --check`, the CI gate step): PASS — 48 asserted, 0 of 2 env-excluded observed. Direct `bun test compiler/tests/browser`: 1433 pass / 48 fail (= baseline). NOTE: the FIRST --check run (with the post-commit suite + 3 sibling suites running) refused with "bun reports 50 failure(s), this script parsed 49" — load flake; re-run clean.
+- host-global-scan --check: exit 0 — 2527 units x 6 modes, 6236 compiles, 119 threw (pinned by name, check passes), 9501 artifacts, 0 violations
+- types-gate --check: OK — 184 diagnostics (117 distinct), unchanged; baseline NOT rewritten
+- runtime-size-ratchet: 8 pass / 0 fail
+- e2e-render-map 259/0; self-host-v2 slice-m1 99/0 (+ lowered 99/0), m2 462/0, m3 60/0, m4 1229/0, codec 166/0, v2-lexer 337/0; lint-no-default-arm 0
+- todomvc compile + node --check OK; snippet-gate 128/128; corpus-compile-floor PASS
+- SPEC-INDEX / FACTS / bootstrap-conformance current; conflict-marker PASS; delta-lint PASS; s34-census --check-new PASS
+- state.ts --check: gap-counts PASS; recent-sessions (master-list) stale — same on origin/main (a wrap commit cannot list itself), not CI-gated, left untouched.
+
+## Residual SPEC deltas (NOT fixed, per brief)
+(a) show= narrowing — CLOSED by F1 (was: reproducers compiled clean on merge head 2bfa69469).
+(b) `match` narrowing covers the whole match body — CONFIRMED on 981a873c1 and on origin/main: presence-narrowing.ts `match-stmt` adds the header receiver for the whole body, including the `not` arm. Repro: `<user>: { name: string } | not = not` + `fn label() -> string { match @user { not :> @user.name  else :> "present" } }` -> exit 0, no E-TYPE-046; emitted `if (_scrml_match_3 === null || ...) return _scrml_cs_reactive_get("user").name;` (TypeError at runtime). Pre-existing on main (type-system's old walker had the same rule); round 7 inherited it.
