@@ -15,15 +15,15 @@ Mark each item `DONE <PR>` / `BLOCKED → auto-questions.md` / `PARKED <why>` as
 - `g-given-bool-expr-fail-runs-unconditionally-s460` (HIGH) — `given <bool-expr> :> fail` runs the fail unconditionally.
 - `g-narrowing-survives-writes-incl-callee-s460` (HIGH) — impl#1 keeps a narrowing across a write (incl. via a callee) → runtime TypeError. Drop narrowing on a write to the cell, using the callee's write set where known (dpa-070 §6 caveat i).
 - Done when: each merged, or BLOCKED with the fork stated.
-- **S461:** `given @cell` → DISPATCHED (`s461-given-cell-lowering`; reproduced on main 5a895f3). `given <bool> :>` → BLOCKED → auto-questions.md "given-bool-head" (corpus non-zero: 3 conformance cases; no fitting error code). narrowing-after-write → BLOCKED → auto-questions.md "narrowing-after-write" (no governing SPEC sentence — a SPEC amendment).
+- **S461:** `given @cell` → **DONE #1380** (`42d1a74`) after one fix round (review FIX-FIRST: diagnostics lost under given→if, PA-reproduced; re-review LAND-WITH-NITS). Match-arm `given @x :>` still dropped (different root, gap note). `given <bool> :>` → BLOCKED → auto-questions.md "given-bool-head" (corpus non-zero: 3 conformance cases; no fitting error code). narrowing-after-write → BLOCKED → auto-questions.md "narrowing-after-write" (no governing SPEC sentence — a SPEC amendment).
 
 ## 3. Ruled builds
 - **Runtime tree-shake** [S461: DISPATCHED `s461-runtime-tree-shake` after #1375/#1377 landed] (bryan S459 "measure first, 1 and 3 for sure" — option 3). Measured targets (S459): the errors chunk is always shipped and dead; scope→{timers,animation} edge; engine helpers in core; the mount chunk's false trigger. Gate: the runtime-size ratchet lowers; artifacts behaviour-identical (corpus differential).
 - `g-ship-strip-esm-chunks-after-strip-s459` [S461: **DONE #1377** (`e9a2011`) — review LAND-WITH-NITS, nits not blocking] — ESM per-route chunks are transformed after the strip (21 chunks keep a comment). Fix the order so §47.9.9 holds for ESM (conformance restoration, not a SPEC narrowing).
-- `g-splice-multi-arg-comma-expression-s459` — `splice(0,0,@p)` emitted as a comma expression (data loss).
+- `g-splice-multi-arg-comma-expression-s459` [S461: DISPATCHED `s461-splice-multi-arg`] — `splice(0,0,@p)` emitted as a comma expression (data loss).
 
 ## 4. Low-risk
 - `g-windows-executed-db-tests-5s-timeout-s460` [S461: **DONE #1378** (`d99dad0`) — 211 sites / 49 files; review = PA mechanical diff check] — explicit per-test timeout on executed-DB tests (test-only).
-- `g-channel-handler-args-emitted-raw-s460` [S461: PR #1379 OPEN — review FIX-FIRST (a `const` handler refused when a sibling channel has a same-named server fn; PA-reproduced); fix round in progress] — the E-CHANNEL-006 half only (SPEC already says SHALL; newly-rejecting → PA-ruled class needs MEASURED-zero corpus, else BLOCKED).
+- `g-channel-handler-args-emitted-raw-s460` [S461: **DONE #1379** (`afe2e92`) after one fix round (review FIX-FIRST: false positive on a `const` handler, PA-reproduced; re-review LAND-WITH-NITS)] — the E-CHANNEL-006 half only (SPEC already says SHALL; newly-rejecting → PA-ruled class needs MEASURED-zero corpus, else BLOCKED).
 
 ## Not for AUTO (needs bryan) — see auto-questions.md
