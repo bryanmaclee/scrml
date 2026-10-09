@@ -1,0 +1,14 @@
+{
+  "id": "condition-presence-bare-optional-if-ternary-pos",
+  "description": "§42.4: `if (a)` on `string | not` and `n ? 1 : 0` on `int | not` are presence tests — admitted, no E-COND-NOT-BOOLEAN.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 2: \"A condition that is, as a WHOLE (parentheses aside), a value of type `T | not` (`T` not `bool`) SHALL test presence\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN",
+      "E-OPERATOR-OPERAND-TYPE"
+    ]
+  }
+}

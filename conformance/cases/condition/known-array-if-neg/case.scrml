@@ -1,0 +1,8 @@
+// §42.4 statement 4 — a sequence in an `if` condition has no truthiness.
+<program>
+    function pick(xs: int[]) -> int {
+        if (xs) { return 1 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>

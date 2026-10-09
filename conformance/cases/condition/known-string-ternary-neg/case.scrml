@@ -1,0 +1,7 @@
+// §42.4 statement 4 — a `string` as a ternary test has no truthiness.
+<program>
+    function pick(s: string) -> int {
+        return s ? 1 : 0
+    }
+    <main><p>x</p></main>
+</program>

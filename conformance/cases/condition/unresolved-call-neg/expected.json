@@ -1,0 +1,26 @@
+{
+  "id": "condition-unresolved-call-neg",
+  "description": "§42.4: an unresolved condition type is E-COND-NOT-BOOLEAN — never silently accepted (S460 supersedes S440 Q2 for conditions).",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 5: \"A condition whose value's type the compiler cannot resolve — … a call whose return type is neither declared nor inferred … SHALL be compile error **E-COND-NOT-BOOLEAN**.\" Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [
+      "E-COND-NOT-BOOLEAN"
+    ],
+    "codeCounts": {
+      "E-COND-NOT-BOOLEAN": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-condition-rule-s460",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-COND-NOT-BOOLEAN' fired 0 time(s), expected exactly 1",
+          "missing:E-COND-NOT-BOOLEAN"
+        ]
+      }
+    }
+  }
+}

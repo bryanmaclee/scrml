@@ -1,0 +1,7 @@
+// §42.4 statement 10 (S460 "a on F2, go") / §17.1 — `if=!g()` over a call whose return type is unresolved.
+<program>
+    function g() { }
+    <main>
+        <p if=!g()>x</p>
+    </main>
+</program>

@@ -1,0 +1,26 @@
+{
+  "id": "condition-unresolved-call-markup-neg",
+  "description": "§17.1 / §42.4: `if=g()` with an unresolved type is E-COND-NOT-BOOLEAN (annotate `g` `-> bool`, or write `if=(g() is given)`).",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1: \"a value whose type the compiler cannot resolve is E-COND-NOT-BOOLEAN (§42.4)\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [
+      "E-COND-NOT-BOOLEAN"
+    ],
+    "codeCounts": {
+      "E-COND-NOT-BOOLEAN": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-condition-rule-s460",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-COND-NOT-BOOLEAN' fired 0 time(s), expected exactly 1",
+          "missing:E-COND-NOT-BOOLEAN"
+        ]
+      }
+    }
+  }
+}

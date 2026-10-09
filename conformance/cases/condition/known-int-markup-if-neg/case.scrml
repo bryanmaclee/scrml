@@ -1,0 +1,7 @@
+// §42.4 statement 4 / §17.1 — an `int` cell in `if=` has no truthiness.
+<program>
+    let <count:int=0/>
+    <main>
+        <p if=@count>x</p>
+    </main>
+</program>
