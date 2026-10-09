@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-page-form-text-pos",
+  "description": "§22.12 (S459 round 4 F1) positive — markup with no form control renders at an insertion point inside a page form.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Insertion inside a page form* refuses form-associated controls only. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#pf #hint b",
+        "text": "your"
+      }
+    ]
+  }
+}

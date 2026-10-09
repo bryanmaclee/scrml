@@ -1,0 +1,10 @@
+<program>
+<label> = "hi"
+<form id="pf">
+<div id="host">
+^{
+  meta.emit("<p id=\"hint\" class=\"h\">Enter <b>your</b> name</p>")
+}
+</div>
+</form>
+</program>

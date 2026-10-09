@@ -1,0 +1,13 @@
+{
+  "id": "meta-emit-reserved-attr-neg",
+  "description": "§22.4.1 (S458 \"your recs on all four\", item 3) — the `data-scrml-` attribute namespace is compiler-owned. A compile-time `emit()` whose output carries `DATA-SCRML-OUTLET=\"x\"` (upper case: the HTML tokenizer folds it to `data-scrml-outlet`) is refused with E-META-EVAL-002 by the same reader that judges the rest of emit() output.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: \"An attribute in `emit()` / `emit.raw()` output whose name begins with `data-scrml-` SHALL be `E-META-EVAL-002` … ASCII upper case folded to lower case\".",
+  "expect": {
+    "codes": ["E-META-EVAL-002"],
+    "notCodes": [],
+    "severity": { "E-META-EVAL-002": "error" }
+  }
+}

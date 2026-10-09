@@ -1,0 +1,25 @@
+{
+  "id": "meta-emit-runtime-form-member-name-rt",
+  "description": "§22.12 (S459 round 4 F2) — the same shape in runtime `meta.emit` output is refused: nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Named properties* + step 4. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host form",
+        "count": 0
+      },
+      {
+        "selector": "#host input",
+        "count": 0
+      }
+    ]
+  }
+}

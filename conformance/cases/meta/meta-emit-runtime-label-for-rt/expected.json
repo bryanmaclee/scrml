@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-label-for-rt",
+  "description": "§22.12 (S459 round 4 F1) — `for` on `<label>` in runtime `meta.emit` output is refused: a label click is a click on the page element its `for` names. Nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Attributes*: `for` on `<label>` is on no list — like `popovertarget` / `commandfor`, \"they act on another element of the page by id\"; on a violation the gate SHALL write NOTHING. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host label",
+        "count": 0
+      }
+    ]
+  }
+}

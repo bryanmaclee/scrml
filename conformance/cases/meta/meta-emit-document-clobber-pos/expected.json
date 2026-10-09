@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-document-clobber-pos",
+  "description": "§22.12 (S459 review F2) — page markup names elements `querySelector` / `implementation`, which can shadow `document.querySelector` / `document.implementation` (document named properties). The gate and the insertion read `document` only through accessors captured from the prototypes, so an admitted `meta.emit` string still renders at its placeholder.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 step 2: every `document` facility the gate and the insertion use is read through accessors markup cannot shadow. (ruling:user-voice-scrml.md S458 \"a\" + PA addendum 3 (S459 review of a7480c675))",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#host #ok", "text": "hi" }]
+  }
+}

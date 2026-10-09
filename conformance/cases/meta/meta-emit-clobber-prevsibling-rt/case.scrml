@@ -1,0 +1,8 @@
+<program>
+<label> = "hi"
+<div id="host">
+^{
+  meta.emit("<img src=\"x\" onerror=\"window.__pwn = 41\"><form><input name=\"previousSibling\"></form>")
+}
+</div>
+</program>

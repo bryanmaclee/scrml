@@ -1,0 +1,3 @@
+<program>
+^{ emit("<p online=\"x\">p</p>") }
+</program>
