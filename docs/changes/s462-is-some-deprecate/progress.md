@@ -1,1 +1,2 @@
 - 2026-10-09T14:54:45-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a52c99d3b87cb5d14; brief fetched
+- 2026-10-09T15:04:31-06:00 is-given gaps closed: ast-builder collectExpr given-after-is; rewrite.ts string fallback; unquoted-attr-value is given; parity test

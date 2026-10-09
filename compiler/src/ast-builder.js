@@ -6058,7 +6058,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             "return", "throw", "yield", "await", "new",
           ]);
           const _inRhsCtx = _RHS_CTX.has(_lastPart);
-          let _isExprAfterRhs = false;
+          // §42.2.4 (S460 a′ / S462): `given` right after `is` is the presence
+          // predicate `x is given` — the second word of ONE operator, never the
+          // start of a `given x :>` guard. Before this, the collection broke at
+          // it and `@b && @n is given` lowered to `@b && @n` (the test dropped,
+          // silently) while the `is some` spelling lowered correctly.
+          let _isExprAfterRhs = tok.text === "given" && _lastPart === "is";
           // `function`/`fn` are dual-form (decl OR expression); in RHS context
           // the upcoming `function`/`fn` opens a function EXPRESSION.
           if ((tok.text === "function" || tok.text === "fn") && _inRhsCtx) {
@@ -6905,7 +6910,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Guard (Bug M, 2026-04-26): `function` / `fn` after expression-RHS context
         // is a function expression — keep collecting. See collectExpr above.
         if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
-          let _isFnExprAfterRhs = false;
+          // §42.2.4 (S462): `is given` is one operator — see collectExpr.
+          let _isFnExprAfterRhs = tok.text === "given" && (parts[parts.length - 1]?.trim() ?? "") === "is";
           if (tok.text === "function" || tok.text === "fn") {
             const _lastPart = parts[parts.length - 1]?.trim() ?? "";
             const _RHS_CTX = new Set([
