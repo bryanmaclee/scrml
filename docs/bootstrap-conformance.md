@@ -7,26 +7,26 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1469 of 1469 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1486 of 1486 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 121 | 8.2% |
+| PASS | 135 | 9.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 526 | 35.8% |
-| UNSUPPORTED | 766 | 52.1% |
+| NOT-TWINNED | 526 | 35.4% |
+| UNSUPPORTED | 769 | 51.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 177; of those, 121 hold (68.4%). Runtime half executed on the bootstrap for 43 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 191; of those, 135 hold (70.7%). Runtime half executed on the bootstrap for 44 case(s).
 
-- **Vacuous** passes: 11 of 121 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **110**.
+- **Vacuous** passes: 11 of 135 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **124**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 537 · parse-reject 229.
+UNSUPPORTED by reason: bootstrap-unsupported 538 · parse-reject 231.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -105,6 +105,7 @@ NOT-TWINNED by reason (526 cases; a case counts once per distinct reason):
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 32 | · | · | 2 | · | 29 | 1 | · | · |
+| condition | 17 | 14 | · | · | · | · | 3 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -295,7 +296,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (121)
+### PASS / CODES-ONLY (135)
 
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
@@ -314,6 +315,20 @@ none
 - `capability/unknown-token` — PASS
 - `capability/unknown-token-mixed-with-valid` — PASS
 - `capability/valid-clean` — PASS
+- `condition/bang-on-optional-neg` — PASS
+- `condition/bool-condition-pos` — PASS
+- `condition/bool-or-not-bare-neg` — PASS
+- `condition/explicit-pair-value-positions-pos` — PASS
+- `condition/known-array-if-neg` — PASS
+- `condition/known-int-if-neg` — PASS
+- `condition/known-int-markup-if-neg` — PASS
+- `condition/known-string-ternary-neg` — PASS
+- `condition/presence-bare-optional-if-ternary-pos` — PASS
+- `condition/presence-bare-optional-markup-pos` — PASS
+- `condition/unresolved-call-markup-neg` — PASS
+- `condition/unresolved-call-neg` — PASS
+- `condition/unresolved-explicit-fix-pos` — PASS
+- `condition/unresolved-sql-row-neg` — PASS
 - `control-flow/ctrl-001-orphan-else-pos` — PASS · TWIN
 - `control-flow/ctrl-001-orphan-else-program-pos` — PASS
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
@@ -419,7 +434,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (766)
+### UNSUPPORTED (769)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -539,6 +554,9 @@ none
 - `channel/watches-unknown-table` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `codegen/cg-export-enum-library-rep` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `components/invalid-prop-decl-syntax-clean` — parse-reject: E-PARSE-EXPR: expected an expression, found `:`
+- `condition/known-int-while-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
+- `condition/presence-bare-optional-while-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
+- `condition/unresolved-unannotated-param-neg` — bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
 - `control-flow/ctrl-001-orphan-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-002-orphan-else-if-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<wizard`
 - `control-flow/ctrl-003-extend-past-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`

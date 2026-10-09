@@ -1,0 +1,8 @@
+// §42.4 statement 5 (S460) — an unannotated parameter as a bare condition.
+<program>
+    function pick(a) -> int {
+        if (a) { return 1 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>

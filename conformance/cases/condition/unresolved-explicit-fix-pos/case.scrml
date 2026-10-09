@@ -1,0 +1,9 @@
+// §42.4 statement 5 — the named fix for an unresolved condition: `x is given` over the value is a `bool` and is admitted.
+<program>
+    function g() { }
+    function pick() -> int {
+        if (g() is given) { return 1 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>

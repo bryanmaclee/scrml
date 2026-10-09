@@ -1,0 +1,14 @@
+// §42.4 statements 7-8, §42.2.4 — `x is given` / `x is not` in value positions (a `const`, a `return` operand) and compounds (`x is given && x > 0`, which narrows).
+<program>
+    function has(a: string | not) -> bool {
+        const ok: bool = a is given
+        const gone: bool = a is not
+        return ok && !gone
+    }
+    function both(a: int | not) -> int {
+        if (a is given && a > 0) { return a }
+        if (a is not) { return 0 }
+        return 1
+    }
+    <main><p>x</p></main>
+</program>

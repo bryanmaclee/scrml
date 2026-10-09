@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 244 | 6 |
-| MED | 554 | 4 |
+| MED | 554 | 5 |
 | LOW | 314 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -23908,3 +23908,10 @@ Agent-executed on origin/main (S459 D1 round-8 agent).
 
 ### g-top-level-given-emits-bare-name-s459 — top-level `${ given @a :> { <p>${@a.name}</p> } }` lowers the cell to a bare `a` (`if (a !== null && a !== undefined)`) → ReferenceError at load — `NEW S459; MED; open (agent-executed on the D1 branch tip; origin/main not re-checked)`
 <!-- @gap id=g-top-level-given-emits-bare-name-s459 sev=MED status=open locus=searched:emit-logic.ts given lowering — not traced prov=empirical:s459-d1-r8-agent -->
+
+## §S460-presence-a-prime — impl#1 divergence from the S460 condition rule (2026-10-08; ruling:user-voice-scrml.md S460 "a′, go"; SPEC §42.4 / §17.1 / §49.2.3 / §34 E-COND-NOT-BOOLEAN — change `docs/changes/s460-presence-a-prime/`. impl#1 is frozen for semantics (S447 TS accounting; S440 Truthiness Q2 *"Bootstrap enforces; impl#1 keeps today's behaviour"*): FILED, not scheduled; the bootstrap builds the rule)
+
+### g-impl1-condition-rule-s460 — impl#1 DIVERGENCE (filed, not fixed — S447 TS accounting / S440 Q2): impl#1 lowers every bare condition to JavaScript truthiness and emits no E-COND-NOT-BOOLEAN — not for a known non-bool type (S440 #4 (c)), not for a bare `bool | not` (S442), not for an unresolved type (S460) — and does not refuse `!` over a `T | not` (E-OPERATOR-OPERAND-TYPE, S440 Gotcha Q2); the §66 opener used by the markup cases does not parse — `NEW S460; MED; carried`
+<!-- @gap id=g-impl1-condition-rule-s460 sev=MED status=carried locus=compiler/src/(no condition-type rule — `if` / `while` / ternary / `if=` / `else-if=` tests lower to raw JS truthiness, e.g. `if (_scrml_cs_reactive_get("v"))`; no E-COND-NOT-BOOLEAN emitter; `!` over a `T | not` is not refused; the §66 opener `let <x:T=v/>` reports E-MARKUP-001) prov=empirical:s460-xfail-signatures-captured-by-conformance/run.ts---xfail-signature;ruling:user-voice-scrml.md-S460-a′-go -->
+
+Pinned by the `conformance/cases/condition/*-neg` cases and `presence-bare-optional-markup-pos` (each `xfail.impl1-ts`, signature captured with `bun conformance/run.ts --xfail-signature`). The bootstrap (`compiler/self-host-v2/analyze.scrml` `checkCond`) passes 14 of the 17 `condition/` cases; the other 3 are UNSUPPORTED there (the two `while` cases — the bootstrap has no `while` statement — and the unannotated-parameter case, whose parameter it refuses). **The silent half is the one that matters (dpa-070 caveat (ii)):** impl#1's truthiness lowering HIDES an optional holding `""` or `0` (`<p if=@v>` with `v: string | not = ""` does not render) where §42.4 statement 2 renders it; adopting the rule in impl#1 flips those sites with no diagnostic — the S460 measurement (`scrml-support/docs/deep-dives/dpa-070/s460-measure/RESULTS.md`, M2) lists the 145 `""`/`0`-capable sites. Not a security exception, not bootstrap-blocking: carried.

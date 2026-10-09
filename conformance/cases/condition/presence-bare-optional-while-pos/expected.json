@@ -1,0 +1,13 @@
+{
+  "id": "condition-presence-bare-optional-while-pos",
+  "description": "§49.2.3: a `while` condition is a condition (§42.4); `while (a)` on `int | not` is a presence test — admitted.",
+  "language-version": "1.0",
+  "spec": "§49.2.3",
+  "rationale": "§49.2.3: a `while` condition \"is a **condition** (§42.4) under the same rule as `if`: a `bool` …, or a bare `T | not` value — a presence test\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN"
+    ]
+  }
+}

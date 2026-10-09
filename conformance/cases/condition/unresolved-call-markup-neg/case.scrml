@@ -1,0 +1,7 @@
+// §42.4 statement 5 (S460) / §17.1 — `if=` over a call whose return type is neither declared nor inferred.
+<program>
+    function g() { }
+    <main>
+        <p if=g()>x</p>
+    </main>
+</program>

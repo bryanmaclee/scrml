@@ -1,0 +1,13 @@
+{
+  "id": "condition-unresolved-explicit-fix-pos",
+  "description": "§42.4: `g() is given` is an explicit presence test (a `bool`) even where `g()`'s type is unresolved — admitted.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 5 names the fixes: \"annotate the value … or write what is tested — `x is given` (is it present?) or `x == true` (is it true?)\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN"
+    ]
+  }
+}

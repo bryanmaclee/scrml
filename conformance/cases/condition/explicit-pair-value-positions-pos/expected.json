@@ -1,0 +1,15 @@
+{
+  "id": "condition-explicit-pair-value-positions-pos",
+  "description": "§42.4: the explicit pair is `bool`-valued — legal in value positions and as `&&` operands; `a is given && a > 0` narrows `a`.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 7: \"Compounds and value positions spell presence explicitly: `x is given` (present) / `x is not` (absent)\"; statement 8: \"`x is given` … narrows it to `T` where the test is true … including the right operand of `&&` / `||`\". Provenance: ruling:user-voice-scrml.md S460 \"a′, go\" (supersedes S440 Truthiness Q2 for conditions; keeps S440 #4 = (c), Q1, Gotcha Q2, S442).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN",
+      "E-OPERATOR-OPERAND-TYPE",
+      "E-OPERAND-NOT-NARROWED"
+    ]
+  }
+}
