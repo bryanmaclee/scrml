@@ -63,6 +63,11 @@ import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "conf-session-attr-scope-")); });
 afterAll(() => {
@@ -605,7 +610,7 @@ describe("CONF-SESSION-PROGRAM-ATTR-SCOPE §20.5.1 — program-scoped, not build
     } finally {
       process.chdir(cwdBefore);
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ── S438 — a `kind="tool"` program is not an application (`g-mw008-counts-headless-tool-programs`)

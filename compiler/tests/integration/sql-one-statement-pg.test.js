@@ -23,6 +23,11 @@ import { parseSchemaBlock, diffSchema, generateDbAuthoritativeDDL } from "../../
 import { wrapPrincipalTxn } from "../../src/codegen/db-authoritative.ts";
 import { rewriteSqlRefs } from "../../src/codegen/rewrite.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const PG_HOOK_TIMEOUT_MS = 120_000;
 const SOCK = "/var/run/postgresql";
 const PG_USER = process.env.PGUSER || process.env.USER || "postgres";
@@ -96,19 +101,19 @@ d("§8.1.2 one statement per ?{} — live Postgres under the §14.8.11 tier", ()
   test("control: a single-statement `.acrossTenants()` read under the tier sees tenant A only (RLS)", async () => {
     const { rows } = await runUnderTier(sql, rewriteSqlRefs(`?{${BT}select id, tenant_id, amount from invoices;${BT}}.acrossTenants()`, "_scrml_sql"));
     expect(tenantsIn(rows)).toEqual(["A"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("pre-S456 emission (tenant re-pin): Postgres runs both statements — tenant B's row reaches a tenant-A request", async () => {
     const { rows } = await runUnderTier(sql, `await _scrml_sql.unsafe(${JSON.stringify(TENANT_REPIN)})`);
     expect(tenantsIn(rows)).toEqual(["B"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("pre-S456 emission (role reset): every tenant's rows under a superuser / BYPASSRLS login", async () => {
     const su = (await sql`SELECT rolsuper OR rolbypassrls AS b FROM pg_roles WHERE rolname = current_user`)[0].b;
     if (!su) return; // the role reset reaches the login's own role; only a bypassing login reads all
     const { rows } = await runUnderTier(sql, `await _scrml_sql.unsafe(${JSON.stringify(ROLE_RESET)})`);
     expect(tenantsIn(rows)).toEqual(["A", "B"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   for (const [name, body] of [["tenant re-pin", TENANT_REPIN], ["role reset", ROLE_RESET]]) {
     for (const chain of [".acrossTenants()", ".acrossTenants().all()", ""]) {
@@ -117,7 +122,7 @@ d("§8.1.2 one statement per ?{} — live Postgres under the §14.8.11 tier", ()
         expect(emitted).not.toContain("set_config('scrml.tenant','B'");
         expect(emitted).not.toContain("set_config('role'");
         await expect(runUnderTier(sql, emitted)).rejects.toThrow("E-SQL-MULTIPLE-STATEMENTS");
-      });
+      }, EXECUTED_DB_TIMEOUT_MS);
     }
   }
 });

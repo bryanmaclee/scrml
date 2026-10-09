@@ -19,6 +19,11 @@ import { SQL } from "bun";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const SOCK = "/var/run/postgresql";
 const PG_USER = process.env.PGUSER || process.env.USER || "postgres";
 const SUFFIX = `${process.pid}`;
@@ -101,7 +106,7 @@ d("S455 \"a\" on Postgres — `::int` in a tenant query is accepted and still fi
     await check.unsafe("CREATE TABLE assets (id integer PRIMARY KEY, name text, tenant_id text)");
     await check.unsafe("INSERT INTO assets VALUES (1, 'A-asset', 'A'), (2, 'B-secret-asset', 'B')");
     dir = mkdtempSync(join(tmpdir(), "s455-cast-pg-"));
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   afterAll(async () => {
     for (const c of opened) { try { await c(); } catch { /* closed */ } }
     try { await check?.close(); } catch { /* closed */ }
@@ -122,7 +127,7 @@ d("S455 \"a\" on Postgres — `::int` in a tenant query is accepted and still fi
     const res = await req(routes.mine, cookie);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([{ name: "A-asset", n: 1 }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("on Postgres a SQLite built-in name (`julianday`) in a tenant query is refused — not a Postgres built-in", async () => {
     const app = await load("jd", "SELECT name, julianday(name) AS j FROM assets");
@@ -135,7 +140,7 @@ d("S455 \"a\" on Postgres — `::int` in a tenant query is accepted and still fi
     expect(leak[0].evil).toContain("B-secret-asset");                 // the database does run it
     const app = await load("relf", "SELECT assets.evil FROM assets");
     expect(app.errs.map((e) => e.code)).toContain("E-TENANT-SQL-SUBSET");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a `::` cast to a type that is not built in is refused", async () => {
     const app = await load("evil", "SELECT name, id::evil_t AS n FROM assets");

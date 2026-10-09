@@ -24,6 +24,11 @@ import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { safeRmSync } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_db_nearest_scope");
 const TEST_CSRF_TOKEN = "test-csrf-token-db-nearest-scope";
@@ -113,7 +118,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     if (domPolluted()) return;
     const mod = await load(serverJsPath);
     expect(await call(mod, "inner")).toEqual([{ who: "b" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("shape 2: `?{}` inside `<db src=b>` under `<program db=a>` runs on b", async () => {
     const { errors, serverJsPath } = compile(`<program db="./a.db">
@@ -131,7 +136,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     if (domPolluted()) return;
     const mod = await load(serverJsPath);
     expect(await call(mod, "inDb")).toEqual([{ who: "b" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("shape 3: `?{}` directly in `<program db=a>` beside a `<db src=b>` block runs on a; the one inside runs on b", async () => {
     const { errors, serverJsPath, text } = compile(`<program db="./a.db">
@@ -157,7 +162,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     const mod = await load(serverJsPath);
     expect(await call(mod, "outer")).toEqual([{ who: "a" }]);
     expect(await call(mod, "inDb")).toEqual([{ who: "b" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("shape 4: `<db src=b>` under a `<program>` with no db= runs on b", async () => {
     const { errors, serverJsPath } = compile(`<program>
@@ -175,7 +180,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     if (domPolluted()) return;
     const mod = await load(serverJsPath);
     expect(await call(mod, "inDb")).toEqual([{ who: "b" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("single database (common case) is unchanged: one `_scrml_sql` handle, queries hit it", async () => {
     const { errors, serverJsPath, text } = compile(`<program db="./a.db">
@@ -192,7 +197,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     if (domPolluted()) return;
     const mod = await load(serverJsPath);
     expect(await call(mod, "load")).toEqual([{ who: "a" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("two scopes naming the SAME database share one handle (one connection, one transaction guard)", async () => {
     const { errors, serverJsPath, text } = compile(`<program db="./a.db">
@@ -217,7 +222,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     const mod = await load(serverJsPath);
     expect(await call(mod, "outer")).toEqual([{ who: "a" }]);
     expect(await call(mod, "inDb")).toEqual([{ who: "a" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("MED-2: two `<db src=\":memory:\">` blocks are two databases — a table made in one is not in the other", async () => {
     const { errors, serverJsPath, text } = compile(`<program>
@@ -247,7 +252,7 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     const mod = await load(serverJsPath);
     expect(await call(mod, "makeOne")).toEqual([{ name: "t1" }]);
     expect(await call(mod, "makeTwo")).toEqual([{ name: "t2" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("HIGH-1: a db-authoritative program's queries are principal-wrapped on EVERY handle, the authoritative one included", () => {
     const { errors, text } = compile(`<program db="postgres://localhost/app">

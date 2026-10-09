@@ -21,6 +21,11 @@ import { programStatementCount, programStatementVerdicts } from "../../src/schem
 import { judgeDriverCall } from "../../src/codegen/sql-one-statement-guard.ts";
 import { sqlSkeleton } from "../../src/codegen/protect-flow.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const BT = "`";
 
 function compileToServer(source) {
@@ -130,21 +135,21 @@ describe("compile + run on Bun.SQL sqlite (the reviewer's shapes)", () => {
     const run = await runEmitted(r.serverJs);
     expect(run.threw).toContain("E-SQL-MULTIPLE-STATEMENTS");
     expect(run.leak).toBe(0);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("`…; DELETE FROM invoices /* } */` with `.acrossTenants()` — refused; every invoice survives", async () => {
     const r = compileToServer(app(`?{${BT}INSERT INTO notes (v) VALUES (\${ x + '{' }); DELETE FROM invoices /* } */${BT}}.acrossTenants().run()`));
     expect(r.codes).toContain("E-SQL-MULTIPLE-STATEMENTS");
     const run = await runEmitted(r.serverJs);
     expect(run.threw).toContain("E-SQL-MULTIPLE-STATEMENTS");
     expect(run.invoices).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("control: the single statement with `{` in the slot's string compiles clean and binds `a{`", async () => {
     const r = compileToServer(app(`?{${BT}INSERT INTO notes (v) VALUES (\${ x + '{' })${BT}}.run()`));
     expect(r.codes).toEqual([]);
     const run = await runEmitted(r.serverJs);
     expect(run.threw).toBe(null);
     expect(run.notes).toEqual(["a{"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("judgeDriverCall — the emitted call read by acorn", () => {

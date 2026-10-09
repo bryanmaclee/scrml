@@ -19,6 +19,11 @@ import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { emittedDbFile } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
 
@@ -99,5 +104,5 @@ describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () =
     } finally {
       if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

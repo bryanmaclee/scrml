@@ -26,6 +26,11 @@ import { fileURLToPath } from "url";
 import { Database } from "bun:sqlite";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(testDir, "../../src/cli.js");
 const _tmp = perRunTmp(resolve(testDir, "_tmp_session_store_sqlite_defaults"));
@@ -129,5 +134,5 @@ describe("executed — a login under a competing writer waits the lock out", () 
     expect(out.mode).toBe("wal");
     expect(out.status).toBe(200);
     expect(out.ms).toBeGreaterThanOrEqual(HOLD_MS - 50);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

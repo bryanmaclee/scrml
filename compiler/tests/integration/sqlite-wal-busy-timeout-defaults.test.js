@@ -38,6 +38,11 @@ import { compileScrml } from "../../src/api.js";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../src/codegen/sqlite-defaults.ts";
 import { standInHostAlias } from "../helpers/host-view.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Unique per RUN: the teardown below can legitimately fail with EBUSY on Windows
 // (a live sqlite handle holds the file), so a fixed path would find last run's
@@ -180,7 +185,7 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     }));
     expect(resp.status).toBe(200);
     expect(await waitForJournalMode(dbPath, "wal")).toBe("wal");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // ⛔ THE REGRESSION GUARD THAT MATTERS MOST HERE. The emitted `.server.js` is not
   // always loaded as an ESM module: the conformance runtime adapter evaluates it with
@@ -225,7 +230,7 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     // journal_mode=WAL is a PERSISTENT property of the file, so a fresh connection
     // observes it. This is the assertion the emitted TEXT cannot make for us.
     expect(await waitForJournalMode(dbPath, "wal")).toBe("wal");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("EXECUTED: a 5s busy-timeout waits out a lock another PROCESS holds", async () => {
     const { errors, serverPath, dbPath, root } = build("busy");

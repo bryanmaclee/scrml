@@ -36,6 +36,11 @@ import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { patchAndImport, closeOpenedDbHandles, safeRmSync } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_server_fn_calls");
 
@@ -180,7 +185,7 @@ describe("Issue #1 — server fn calling another server fn", () => {
       { ord: 1, name: "alpha" },
       { ord: 2, name: "beta" },
     ]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -550,5 +555,5 @@ ${body}
     // row.label ("alpha") == norm("alpha") ("alpha") → {ok:true}. The pre-fix bug
     // compared "alpha" against a Promise → always {mismatch:true}.
     expect(await resp.json()).toEqual({ ok: true });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

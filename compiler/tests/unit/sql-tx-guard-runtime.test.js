@@ -17,6 +17,11 @@ import { Database } from "bun:sqlite";
 
 import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines } from "../../src/codegen/sql-tx-guard.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 /** Evaluate the emitted runtime exactly as a server module carries it. */
 function loadRuntime() {
   const src = SQL_TX_GUARD_HELPER_LINES.join("\n");
@@ -154,7 +159,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     await b.promise;
     expect(b.value).toBe("b");
     expect(committed()).toEqual({ acc: [{ id: 1, bal: 10 }, { id: 2, bal: 0 }], log: ["b"] });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a plain read from another request never sees uncommitted rows (was: dirty read)", async () => {
     const inTx = latch();
@@ -174,7 +179,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     await a.promise;
     await read.promise;
     expect(read.value.map((r) => r.bal)).toEqual([10, 0]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("two concurrent transactions run one after the other (was: `cannot start a transaction within a transaction`)", async () => {
     const order = [];
@@ -206,7 +211,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     expect(b.error).toBeUndefined();
     expect(order).toEqual(["a:begin", "a:commit", "b:begin", "b:commit"]);
     expect(committed().acc[0].bal).toBe(22);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("re-entrant: the owning request's own statements (incl. a called server function) run inside its transaction without waiting", async () => {
     const peerServerFn = async (msg) => { await sql`INSERT INTO log (msg) VALUES (${msg})`; };
@@ -220,7 +225,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     });
     expect(r).toBe(1); // read its own uncommitted write
     expect(committed()).toEqual({ acc: [{ id: 1, bal: 10 }, { id: 2, bal: 0 }], log: [] }); // all rolled back together
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("FIFO: waiters are served in arrival order", async () => {
     const order = [];
@@ -244,14 +249,14 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     await Promise.all([a, ...ws]);
     expect(order).toEqual(["tx", 1, 2, 3, 4]);
     expect(committed().log).toEqual(["1", "2", "3", "4"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a failed BEGIN releases the connection", async () => {
     // a malformed BEGIN fails at the database: the lock must come back
     await expect(asRequest(async () => { await sql.unsafe("BEGIN NONSENSE"); })).rejects.toThrow();
     const after = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
     expect(after[0].n).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("backstop: a request that ends with its transaction open is rolled back, FAILS (never acks success), and frees the connection", async () => {
     const errors = [];
@@ -279,7 +284,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
       await sql.unsafe("COMMIT");
     });
     expect(committed().acc[0].bal).toBe(11);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("backstop on a THROWN handler: rolled back, freed, error still propagates", async () => {
     const origError = console.error;
@@ -296,7 +301,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     expect(committed().acc[0].bal).toBe(10);
     const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM log`);
     expect(n[0].n).toBe(0);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a streamed (SSE) response keeps its transaction past the handler's return", async () => {
     const streamDone = latch();
@@ -312,7 +317,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     expect(res.headers.get("Content-Type")).toBe("text/event-stream");
     await streamDone.wait;
     expect(committed().acc[0].bal).toBe(42);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a synchronous handler stays synchronous (WebSocket upgrade contract)", () => {
     const wrapped = rt._scrml_db_request_scope(() => undefined);
@@ -353,7 +358,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
       await sql.unsafe("COMMIT");
     });
     expect(committed().acc[0].bal).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("code outside any request shares one scope (unchanged among itself); requests stay isolated from it", async () => {
     await sql.unsafe("BEGIN");
@@ -366,7 +371,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     await sql.unsafe("ROLLBACK");
     await r.promise;
     expect(r.value[0].bal).toBe(10);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("S449 review F3: a BEGIN inside the request's open transaction nests — its COMMIT does not commit the outer one", async () => {
     await asRequest(async () => {
       await sql.unsafe("BEGIN");
@@ -390,7 +395,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     // and the connection is free afterwards
     const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
     expect(n[0].n).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   for (const [label, beginSql] of [["/* c */ BEGIN", "/* c */ BEGIN"], ["-- c\\nBEGIN", "-- c\nBEGIN"]]) {
     test(`S449 review F2: a commented ${label} still takes the lock (was: classified as a plain statement)`, async () => {
@@ -411,7 +416,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
       await a.promise;
       await b.promise;
       expect(committed()).toEqual({ acc: [{ id: 1, bal: 10 }, { id: 2, bal: 0 }], log: ["kept"] });
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 
   test("S449 review F2: SAVEPOINT with no transaction open (SQLite opens one) takes the lock; its RELEASE ends it", async () => {
@@ -441,7 +446,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
       console.error = origError;
     }
     expect(errors).toEqual([]); // released by RELEASE, not by the request-end backstop
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("S449 review F2: a commented COMMIT releases at once (no false 'left open' at request end)", async () => {
     const errors = [];
@@ -458,7 +463,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     }
     expect(errors).toEqual([]);
     expect(committed().acc[0].bal).toBe(12);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("S449 review F5: an async WebSocket callback that AWAITS its handler is covered by the backstop", async () => {
     const origError = console.error;
@@ -476,7 +481,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     expect(committed().acc[0].bal).toBe(10);
     const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
     expect(n[0].n).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("S449 review F1: _scrml_db_stream_end rolls back a stream scope's open transaction and frees the connection", async () => {
     const origError = console.error;
@@ -494,7 +499,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     expect(committed().acc[0].bal).toBe(10);
     const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
     expect(n[0].n).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("§19.10.6 — pooled drivers (Postgres / MySQL): a reserved connection per transaction", () => {

@@ -22,6 +22,11 @@ import { HOST_GLOBAL_ALIAS_DECL } from "../../src/codegen/host-global-alias.ts";
 import { generateToolJs } from "../../src/codegen/emit-tool.ts";
 import { Database } from "bun:sqlite";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const acorn = require("acorn");
 
 function compileSource(src, opts = {}) {
@@ -261,7 +266,7 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
     expect(ok.exitCode).toBe(0);                 // db query → return 0
     expect(ok.stdout.toString()).toContain("fleet: 3 tasks");
     try { rmSync(dir, { recursive: true }); } catch {}
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("Bun.serve tool: invoke-only harness stays alive (event loop not drained)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scrml-tool-r26-srv-"));
