@@ -18,12 +18,15 @@ Mark each item `DONE <PR>` / `BLOCKED → auto-questions.md` / `PARKED <why>` as
 - **S461:** `given @cell` → **DONE #1380** (`42d1a74`) after one fix round (review FIX-FIRST: diagnostics lost under given→if, PA-reproduced; re-review LAND-WITH-NITS). Match-arm `given @x :>` still dropped (different root, gap note). `given <bool> :>` → BLOCKED → auto-questions.md "given-bool-head" (corpus non-zero: 3 conformance cases; no fitting error code). narrowing-after-write → BLOCKED → auto-questions.md "narrowing-after-write" (no governing SPEC sentence — a SPEC amendment).
 
 ## 3. Ruled builds
-- **Runtime tree-shake** [S461: DISPATCHED `s461-runtime-tree-shake` after #1375/#1377 landed] (bryan S459 "measure first, 1 and 3 for sure" — option 3). Measured targets (S459): the errors chunk is always shipped and dead; scope→{timers,animation} edge; engine helpers in core; the mount chunk's false trigger. Gate: the runtime-size ratchet lowers; artifacts behaviour-identical (corpus differential).
+- **Runtime tree-shake** [S461: **DONE #1382** (`3a69352`) — shell 7,442 → 5,907 B; next target: the utilities chunk (~2,390 B to the 3,510 B floor)] (bryan S459 "measure first, 1 and 3 for sure" — option 3). Measured targets (S459): the errors chunk is always shipped and dead; scope→{timers,animation} edge; engine helpers in core; the mount chunk's false trigger. Gate: the runtime-size ratchet lowers; artifacts behaviour-identical (corpus differential).
 - `g-ship-strip-esm-chunks-after-strip-s459` [S461: **DONE #1377** (`e9a2011`) — review LAND-WITH-NITS, nits not blocking] — ESM per-route chunks are transformed after the strip (21 chunks keep a comment). Fix the order so §47.9.9 holds for ESM (conformance restoration, not a SPEC narrowing).
-- `g-splice-multi-arg-comma-expression-s459` [S461: DISPATCHED `s461-splice-multi-arg`] — `splice(0,0,@p)` emitted as a comma expression (data loss).
+- `g-splice-multi-arg-comma-expression-s459` [S461: **DONE #1381** (`853aaf2`) after two fix rounds; also closes g-push-object-literal-string-scope-s459 and the quote half of g-mutating-method-string-args-lose-their-quotes] — `splice(0,0,@p)` emitted as a comma expression (data loss).
 
 ## 4. Low-risk
 - `g-windows-executed-db-tests-5s-timeout-s460` [S461: **DONE #1378** (`d99dad0`) — 211 sites / 49 files; review = PA mechanical diff check] — explicit per-test timeout on executed-DB tests (test-only).
 - `g-channel-handler-args-emitted-raw-s460` [S461: **DONE #1379** (`afe2e92`) after one fix round (review FIX-FIRST: false positive on a `const` handler, PA-reproduced; re-review LAND-WITH-NITS)] — the E-CHANNEL-006 half only (SPEC already says SHALL; newly-rejecting → PA-ruled class needs MEASURED-zero corpus, else BLOCKED).
+
+## S461 result
+Everything AUTO may take is DONE (7 PRs: #1375 #1377 #1378 #1379 #1380 #1381 #1382). Remaining: the two blocked HIGH gaps in §2 (given-bool-head, narrowing-after-write) — both need bryan. The run stopped on pa-auto §4 "no item you may take". Candidate NEXT queue items once bryan rules: the §2 blocked pair; the utilities-chunk tree-shake (follow-on to #1382, ruled by S459); `g-escape-hatch-arg-text-rewrite-corrupts-strings-s461` (MED, needs a governing sentence check); the held S429 branch's remaining fixes (bryan's call).
 
 ## Not for AUTO (needs bryan) — see auto-questions.md

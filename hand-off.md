@@ -15,7 +15,7 @@ Plus the S460 carry-over: is-some retirement · given-as-presence retirement · 
 | item | state |
 |---|---|
 | AUTO queue | everything AUTO may take is DONE; the remaining items are blocked on bryan (§0). See `handOffs/auto-queue.md`. |
-| #1381 splice / argument lowering | {SPLICE_STATE} |
+| #1381 splice / argument lowering | **DONE #1381** (`853aaf2`) after two fix rounds (markup-comma split; `false <b` read as markup). N1 deferred → `g-escape-hatch-arg-text-rewrite-corrupts-strings-s461`. |
 | held S429 branch `origin/hold/s429-mutation-arg-string-quotes` @ `257dfeca` | NOT deleted, NOT landed. #1381 closes its quote half by another route; it still carries `@set` multi-arg lists, computed bracket indexes, `upload()` args, comments inside args, and the `loop-006-neg` labelled-for fix. Port them or drop the branch — bryan's call. |
 | remote branches the cloud proxy could not delete (403) | `land/s460-refine-copy-in`, `land/s461-*` (×6) — delete by hand. |
 
@@ -42,9 +42,10 @@ Nothing unblocked remains in the queue, so the chain stops on condition (a) rega
 - 4 cores: three agents + a full local suite saturate it (load ~15); suites run ~3× slower and timing tests flake.
 
 ## Worktrees + /tmp (6b / 6b′)
-Container is ephemeral; all landing/review/agent worktrees under `/home/user/scrml/.claude/worktrees/` die with it. Nothing unlanded lives only in a worktree (every agent branch's final commit is inside a merged PR, except #1381's if it is still open — its branch `land/s461-splice-multi-arg` is pushed).
+Container is ephemeral; all landing/review/agent worktrees under `/home/user/scrml/.claude/worktrees/` die with it. Nothing unlanded lives only in a worktree (every agent branch's final commit is inside a merged PR, all seven are merged).
 
 ## Gate at close
+6b′ temp-volume probe: /tmp top-level entries newer than boot = 0; /tmp/claude-0 = 837 files (cloud container, ephemeral — not comparable to the XPS series).
 Cloud `gate` green on every S461 merge. `tracking` failed once on #1382 at "Install deps" (pre-test, re-run green). `windows` failed once on #1378 in `headless-serve-bind-host.test.js` (untouched by the PR; green after a base merge). Maps: NOT refreshed (stamp `8ce6d61b5`, now ~30 commits stale — refresh before the next dispatch-heavy session).
 
 ---
