@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S460 — 2026-10-08/09 (bryan · ASUS; solo) — one presence test, D1 declared props, runtime meta.emit gated, channel handler bindings checked, an unattended-run profile
+
+**Landed (8 PRs, every code PR S239-reviewed):** #1367 runtime `meta.emit` gated (S458 "a" + S459 round 4) · #1368 gaps (dpa-070 §11 + copy-in review) · #1369 D1 — declared component props stay off the root, ONE §42.3.5 presence reader for optional props and cells, `show=` does not narrow · #1371 channel handler bindings — E-CHANNEL-005 enforced (it had no emit site) and extended to `onclient:*`, new E-CHANNEL-HANDLER-SHADOW · #1372 dpa-070 a′ + F2 — SPEC §42.4 one condition rule: bare `T | not` is the typed presence test, an unresolved condition type (or `!`/`&&`/`||` operand) is an ERROR, `x is given` / `x is not` the explicit pair (bootstrap; impl#1 Nominal) · #1373 gaps (12 review findings) · #1374 a′ follow-up — ternary arms walked, mixed-kind ternaries refused, 0 newly accepted · #1370 meta.emit follow-ups — `usemap`/`<map name|id>` refused, form-less radios, template exemption, compile-time form-member rule dropped (n4 b), the runtime member table built from data (a source-text slice broke the compiler on Windows CRLF; CI caught it).
+**In flight:** #1375 refinement copy-in (S459 "a" / S460 "a on copy-in") — final review LAND; re-merging main.
+**Rulings:** n4 b · D1 round 7 · a′ · copy-in (a) · F2 (a) · keep E-CHANNEL-HANDLER-SHADOW + both PA readings · mixed ternary refused (a) · AUTO tool (tmux later, cloud now). Record: scrml-support/user-voice-scrml.md §S460.
+**Measured:** 853 bare conditions — 22% genuinely untyped even under an ideal typer (95% unresolvable by impl#1 annotations) → a′ chose provable-or-error; 145 `""`/`0`-capable sites, 2 silent visible flips (scrml-support/docs/deep-dives/dpa-070/s460-measure/).
+**New:** `scrml-support/pa-auto.md` (the unattended AUTO boot profile) + a cloud probe that passed (bun, compile, branch push work; GitHub GraphQL blocked → REST); `handOffs/auto-queue.md` + `auto-questions.md`.
+
 ## S459 — 2026-10-08 (bryan · ASUS; solo, a dPA alongside) — the host-global alias and the ^{} allow-list landed, unquoted values read whole, shipped JS ~72% smaller, npm names reserved
 
 - **#1359** `^{}` meta blocks: a closed allow-list on the executed text; compile-time realm sealed; runtime meta API closed (S458 "1a").
