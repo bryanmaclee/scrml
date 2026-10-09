@@ -161,3 +161,65 @@ describe("(a) errors chunk ships by post-emit reference, not unconditionally", (
     expect(CHUNK_DEPENDENCIES.urlguard).toContain("errors");
   });
 });
+
+// ---------------------------------------------------------------------------
+// (b) the scope → {timers, animation} edge is retired
+// ---------------------------------------------------------------------------
+
+describe("(b) timers + animation ship by trigger, not through the scope edge", () => {
+  test("pages that use neither ship neither", () => {
+    for (const src of [COUNTER, SHELL]) {
+      const { runtime } = compileSource(src);
+      expect(runtime).not.toContain("function _scrml_timer_start");
+      expect(runtime).not.toContain("function _scrml_animation_frame");
+      // ...and the always-shipped teardown guards its calls instead of dangling.
+      expect(runtime).toContain('typeof _scrml_stop_scope_timers === "function"');
+      expect(runtime).toContain('typeof _scrml_cancel_animation_frames === "function"');
+    }
+  });
+
+  test("a <timer> page ships the timers chunk, and every timer helper it names is defined", () => {
+    const src = `<program>
+  <ticks> = 0
+  <timer interval=1000>\${ @ticks = @ticks + 1 }</timer>
+  <p>ticks \${@ticks}</p>
+</program>
+`;
+    const built = compileSource(src);
+    expect(built.client).toContain("_scrml_timer_start(");
+    expect(built.runtime).toContain("function _scrml_timer_start");
+    expect(built.runtime).toContain("function _scrml_stop_scope_timers");
+    expectNoDanglingFrom(["timers", "animation"], built);
+  });
+
+  test("an animationFrame page ships the animation chunk", () => {
+    const built = compileRepoFile("samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-in-element-091.scrml");
+    expect(built.client).toContain("animationFrame(");
+    expect(built.runtime).toContain("function animationFrame");
+    expect(built.runtime).toContain("function _scrml_cancel_animation_frames");
+    expectNoDanglingFrom(["timers", "animation"], built);
+  });
+
+  test("executed: a started timer ticks, and its scope teardown stops it", async () => {
+    const src = `<program>
+  <ticks> = 0
+  <timer interval=5>\${ @ticks = @ticks + 1 }</timer>
+  <p>ticks \${@ticks}</p>
+</program>
+`;
+    const { runtime, client } = compileSource(src);
+    expect(client).toContain("_scrml_timer_start(");
+    const live = new Set();
+    const si = (fn, ms) => { const h = setInterval(fn, ms); live.add(h); return h; };
+    const ci = (h) => { live.delete(h); clearInterval(h); };
+    const run = new Function("setInterval", "clearInterval", "window", `${runtime}
+      let n = 0;
+      _scrml_timer_start("scope-1", "t", 5, () => { n++; });
+      return { ticks: () => n, destroy: () => _scrml_destroy_scope("scope-1") };`);
+    const api = run(si, ci, { addEventListener() {} });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(api.ticks()).toBeGreaterThan(0);
+    api.destroy();
+    expect(live.size).toBe(0);
+  });
+});

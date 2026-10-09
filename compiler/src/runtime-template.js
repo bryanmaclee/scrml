@@ -1461,10 +1461,12 @@ function _scrml_destroy_scope(scopeId) {
   _scrml_cleanup_registry.delete(scopeId);
 
   // Step 2: Stop all timers for this scope (§6.7.2, step 2)
-  _scrml_stop_scope_timers(scopeId);
-
   // Step 4: Cancel all pending animation frames for this scope (§6.7.2, step 4)
-  _scrml_cancel_animation_frames(scopeId);
+  // Both registries are filled ONLY by their own chunks ('timers', 'animation'), so
+  // when a chunk is not shipped there is nothing of its kind to stop (S461: they no
+  // longer ride along with this always-included chunk).
+  if (typeof _scrml_stop_scope_timers === "function") _scrml_stop_scope_timers(scopeId);
+  if (typeof _scrml_cancel_animation_frames === "function") _scrml_cancel_animation_frames(scopeId);
 }
 
 // The if= mount scope currently being wired, or null outside a mount. Lives in

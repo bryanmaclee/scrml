@@ -1918,14 +1918,12 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     chunks.add("deep_reactive"); // _scrml_effect for the §65.6 theme-switch reflection
   }
 
-  // 6nz Bug P (S124, 2026-05-23) — close cross-chunk dependency edges before
-  // chunk-set consumption. The `scope` chunk (always-seeded — see
-  // context.ts:211) unconditionally calls `_scrml_stop_scope_timers` (timers
-  // chunk) and `_scrml_cancel_animation_frames` (animation chunk) inside
-  // `_scrml_destroy_scope`. Without this closure, a compile unit with no
-  // user-facing timer / animation-frame usage would tree-shake both chunks
-  // and crash on first reactive-scope teardown. Full edge table + audit
-  // shape lives at `codegen/runtime-chunks.ts:CHUNK_DEPENDENCIES`.
+  // Close cross-chunk dependency edges before chunk-set consumption (6nz Bug
+  // P, S124). Full edge table + audit shape lives at
+  // `codegen/runtime-chunks.ts:CHUNK_DEPENDENCIES`. (S461: the original
+  // `scope → timers/animation` edge is retired — `_scrml_destroy_scope` now
+  // guards both calls — and the edges are closed AGAIN after the post-emit
+  // reference gates in generateClientJs.)
   applyChunkDependencies(chunks);
 }
 
@@ -3116,6 +3114,18 @@ export function generateClientJs(ctx: CompileContext): string {
     // mutation; the registration call gates that chunk.
     ["_scrml_refine_register(", "deep_reactive"],
     ["_scrml_refine_register(", "refine"],
+    // S461 — `timers` and `animation` used to ride on EVERY page through the retired
+    // `scope → {timers, animation}` edge, which also masked any emitter the pre-emit
+    // walk misses (a `<timer>`/`<poll>` in a deferred arm body, a when-handler body).
+    // Now that they ship by trigger, the emitted text is the backstop, exactly as for
+    // the chunks above. `_scrml_timer_` covers start/stop/pause/resume + the registry;
+    // `animationFrame` is the §6.7.7 author-callable built-in (a bare substring:
+    // `requestAnimationFrame` spells it with a capital A and does not match).
+    ["_scrml_timer_", "timers"],
+    ["_scrml_stop_scope_timers(", "timers"],
+    ["animationFrame", "animation"],
+    ["_scrml_animation_frame(", "animation"],
+    ["_scrml_cancel_animation_frames(", "animation"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;

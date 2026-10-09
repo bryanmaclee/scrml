@@ -508,30 +508,29 @@ export const RUNTIME_CHUNKS: Record<RuntimeChunkName, string> = buildRuntimeChun
 // transitively reachable from an always-included chunk), the edge MUST be
 // recorded here.
 //
-// Edges as of S124:
-//
-//   scope → {timers, animation}
-//     `_scrml_destroy_scope` (scope chunk, always-included) calls
+// History — the S124 edge `scope → {timers, animation}`:
+//     `_scrml_destroy_scope` (scope chunk, always-included) called
 //     `_scrml_stop_scope_timers` (timers chunk) and
-//     `_scrml_cancel_animation_frames` (animation chunk). When a compile
-//     unit had no timer/animation-frame usage, both target chunks were
-//     tree-shaken and `_scrml_destroy_scope` crashed on first scope
-//     teardown — symptom: `ReferenceError: _scrml_stop_scope_timers is
-//     not defined` on every reactive scope cleanup, killing all
-//     subsequent reactive effects (6nz Bug P, every adopter app).
+//     `_scrml_cancel_animation_frames` (animation chunk) unguarded. When a
+//     compile unit had no timer/animation-frame usage, both target chunks were
+//     tree-shaken and `_scrml_destroy_scope` crashed on first scope teardown
+//     (6nz Bug P). The edge fixed the crash by shipping both chunks on every
+//     page. S461 fixed the ROOT instead: the two calls are `typeof`-guarded
+//     (a registry only its own chunk can fill is empty when the chunk is
+//     absent), and the edge is retired.
 //
-// Forward note: declaring an edge here makes the target chunk effectively
-// always-included whenever the source is. For `scope → timers/animation`
-// this is correct (scope is unconditionally seeded — see context.ts:211 —
-// so the conditional gates on timers/animation in detectRuntimeChunks
-// become moot for chunk-set composition, though they remain useful as
-// documentation of which features pull the chunk for non-transitive
-// reasons). For future edges where the source is itself conditional, the
-// closure logic correctly propagates only when the source actually fires.
+// Forward note: declaring an edge from an ALWAYS-INCLUDED chunk makes the
+// target always-included too — prefer guarding the call when the target's
+// state can only exist if the target chunk shipped.
 // ---------------------------------------------------------------------------
 
 export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkName[]>> = {
-  scope: ['timers', 'animation'],
+  // S461 — `scope: ['timers', 'animation']` RETIRED. It made both chunks ship on EVERY page
+  // (scope is always seeded) for one reason: `_scrml_destroy_scope` called their scope-teardown
+  // helpers unguarded. Those registries are populated only by the chunks' own start functions,
+  // so a page without the chunk has nothing to stop; the calls are now `typeof`-guarded in
+  // runtime-template.js, and the chunks ship by their own triggers (detectRuntimeChunks + the
+  // post-emit `_scrml_timer_` / `animationFrame` gates in emit-client.ts).
   // §22.4.1 (S458 "a"): `_scrml_meta_emit` (meta) calls `_scrml_meta_emit_insert` (metaemit), which
   // judges URL attributes with `_scrml_is_url_attr` / `_scrml_url_value_admitted` (urlguard).
   // metaemit also reports a refused emit through `_scrml_error_boundary_log` (errors).
