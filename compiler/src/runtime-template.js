@@ -40,6 +40,24 @@ export const URL_GUARD_RUNTIME_SOURCE = readFileSync(
 ).replace(/^export /gm, "");
 
 /**
+ * S460 N6 — the ONE declaration of the generated dom-named-property-members.js the runtime needs:
+ * `_SCRML_EMIT_FORM_MEMBERS`. The `_SCRML_EMIT_DOCUMENT_MEMBERS` half stays compile-time only (the
+ * runtime gate passes `document: null`, which judges fail-closed). Cut by its exact generated first and
+ * last lines; a generator change that moves them stops the build here rather than shipping a gate with
+ * no form table.
+ */
+function metaEmitFormMembersSource() {
+  const src = readFileSync(join(__runtime_template_dir, "dom-named-property-members.js"), "utf8");
+  const start = src.indexOf("export const _SCRML_EMIT_FORM_MEMBERS = new Set([\n");
+  const end = start === -1 ? -1 : src.indexOf("\n]);\n", start);
+  if (start === -1 || end === -1) {
+    throw new Error("runtime-template.js: dom-named-property-members.js has no _SCRML_EMIT_FORM_MEMBERS " +
+      "declaration in the generated shape (regenerate it with scripts/gen-dom-named-property-members.cjs)");
+  }
+  return src.slice(start, end + "\n]);\n".length).replace(/^export /gm, "");
+}
+
+/**
  * SPEC §22.4.1 (S458 "a") — the runtime `meta.emit(html)` gate. `runtime-meta-emit-gate.js` is inlined
  * verbatim (chunk 'metaemit', `export ` stripped), preceded by the two element tables it reads, built
  * here from the compiler's ONE element list (html-elements.js) — the list compile-time `emit()` output
@@ -50,8 +68,10 @@ export const META_EMIT_GATE_RUNTIME_SOURCE =
   JSON.stringify(standardMarkupElementNamesLowercase()) + ");\n" +
   "const _SCRML_CUSTOM_ELEMENT_NAME = " + String(CUSTOM_ELEMENT_NAME_PATTERN) + ";\n" +
   // S459 round 3 — the ONE attribute judge, shared with compile-time emit() (meta-eval.ts imports it).
-  // S459 round 4 — the document / form member tables the id/name named-property rule reads (generated).
-  readFileSync(join(__runtime_template_dir, "dom-named-property-members.js"), "utf8").replace(/^export /gm, "") +
+  // S459 round 4 — the HTMLFormElement member table the id/name named-property rule reads (generated).
+  // S460 N6: the FORM table only — the document half never decides a runtime verdict (see
+  // markup-attr-allow-list.js `_scrml_emit_named_value_verdict`); compile time reads the document one.
+  metaEmitFormMembersSource() +
   readFileSync(join(__runtime_template_dir, "markup-attr-allow-list.js"), "utf8").replace(/^export /gm, "") +
   readFileSync(join(__runtime_template_dir, "runtime-meta-emit-gate.js"), "utf8").replace(/^export /gm, "");
 

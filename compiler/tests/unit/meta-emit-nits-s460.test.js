@@ -97,3 +97,49 @@ describe("S460 N1 — runtime meta.emit: reference by name is refused", () => {
     });
   }
 });
+
+// N4 (ruling S460 "n4 b") — the compile-time form-member rule is dropped; the runtime keeps it.
+const N4_FORMS = [
+  ["contact form: name + email", '<form><input name="name"><input name="email" type="email"></form>'],
+  ["field named title", '<form><input name="title"></form>'],
+  ["field named action", '<form><input name="action"></form>'],
+  ["button id=submit", '<form><button id="submit">b</button></form>'],
+  ["field named lang inside a label", '<form><label>L <input name="lang"></label></form>'],
+];
+describe("S460 N4 — form-member field names: admitted at compile time, refused at run time", () => {
+  for (const [label, markup] of N4_FORMS) {
+    test(`compile time admits: ${label}`, () => {
+      expect(compile(emitOf(markup)).codes).toEqual([]);
+    });
+    test(`run time refuses: ${label}`, () => {
+      const { rt, logs, slot } = makePage();
+      rt._scrml_meta_emit("m1", markup);
+      expect(slot().innerHTML).toBe("old");
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain("inside a form that names a member of the form");
+    });
+  }
+  test("the document half still holds at compile time", () => {
+    const r = compile(emitOf('<object id="body"></object>'));
+    expect(r.codes).toContain("E-META-EVAL-002");
+  });
+});
+
+// N6 — the runtime chunk carries the form member table only.
+describe("S460 N6 — the runtime ships no document member table", () => {
+  test("SCRML_RUNTIME carries _SCRML_EMIT_FORM_MEMBERS, not _SCRML_EMIT_DOCUMENT_MEMBERS / documentProto", () => {
+    expect(SCRML_RUNTIME).toContain("const _SCRML_EMIT_FORM_MEMBERS = new Set([");
+    expect(SCRML_RUNTIME).not.toContain("_SCRML_EMIT_DOCUMENT_MEMBERS");
+    expect(SCRML_RUNTIME).not.toContain("documentProto");
+  });
+  test("document-named-property shapes are still refused at run time (by the name judge / element rule)", () => {
+    const shapes = ['<img name="querySelector" src="/a.png" alt="a">', '<img id="body" name="x" src="/a.png" alt="a">',
+      '<form name="cookie"></form>', '<object id="body"></object>', '<iframe name="x"></iframe>', '<embed name="x">'];
+    for (const html of shapes) {
+      const { rt, logs, slot } = makePage();
+      rt._scrml_meta_emit("m1", html);
+      expect(slot().innerHTML).toBe("old");
+      expect(logs.length).toBe(1);
+    }
+  });
+});

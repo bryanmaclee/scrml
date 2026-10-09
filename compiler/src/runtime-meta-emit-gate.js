@@ -26,7 +26,8 @@
 // This file is inlined into the client runtime verbatim (runtime-template.js, chunk 'metaemit',
 // `export ` stripped) after the 'urlguard' chunk, whose scheme reader it calls (`_scrml_is_url_attr`,
 // `_scrml_url_value_admitted` — runtime-url-guard.js; do NOT write a second URL reader here), and
-// after dom-named-property-members.js (`_SCRML_EMIT_DOCUMENT_MEMBERS`, `_SCRML_EMIT_FORM_MEMBERS`) and
+// after the `_SCRML_EMIT_FORM_MEMBERS` declaration of dom-named-property-members.js (the only one the
+// runtime carries — S460 N6) and
 // markup-attr-allow-list.js (`_scrml_emit_attr_name_verdict`, `_scrml_emit_attr_value_verdict`,
 // `_scrml_emit_named_value_verdict`, `_scrml_emit_is_form_control`, `_scrml_emit_fold_name`).
 // `_SCRML_META_EMIT_KNOWN_ELEMENTS` is defined immediately before this file's source by
@@ -116,14 +117,12 @@ function _scrml_meta_emit_dom() {
     createElement: method(D, "createElement"),
     body: getter(D, "body") || (w.HTMLDocument ? getter(w.HTMLDocument.prototype, "body") : null),
     createHTMLDocument: implProto ? method(implProto, "createHTMLDocument") : null,
-    // The live prototypes the named-property rule (S459 round 4 F2) asks `in` of, on top of the
-    // generated member tables: a real `document`'s prototype (HTMLDocument → Document → …) and
-    // HTMLFormElement's. Captured here, at load; data cannot reach them.
-    documentProto: typeof document !== "undefined" ? Object.getPrototypeOf(document) : null,
+    // The live prototype the named-property rule (S459 round 4 F2) asks `in` of, on top of the
+    // generated HTMLFormElement member table. Captured here, at load; data cannot reach it.
     formProto: w.HTMLFormElement ? w.HTMLFormElement.prototype : null,
   };
   for (const k in dom) {
-    if (dom[k] === null && k !== "templateContent" && k !== "documentProto" && k !== "formProto") return null;
+    if (dom[k] === null && k !== "templateContent" && k !== "formProto") return null;
   }
   return dom;
 }
@@ -151,10 +150,8 @@ function _scrml_meta_emit_inside_form(el) {
 function _scrml_meta_emit_violation(root, inPageForm) {
   const dom = _SCRML_META_EMIT_DOM;
   const call = (fn, self, a, b) => fn.call(self, a, b);
-  const members = {
-    document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: _SCRML_EMIT_FORM_MEMBERS,
-    documentProto: dom.documentProto, formProto: dom.formProto,
-  };
+  // `document: null`: no document table ships (S460 N6; why: `_scrml_emit_named_value_verdict`).
+  const members = { document: null, form: _SCRML_EMIT_FORM_MEMBERS, formProto: dom.formProto };
   const stack = []; // [node, insideAForm]
   let shadowing = "";
   const pushChildren = (parent, inForm) => {

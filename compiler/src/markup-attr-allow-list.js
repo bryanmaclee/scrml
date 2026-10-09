@@ -106,10 +106,7 @@ export const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
   minlength: ["input", "textarea"],
   multiple: ["input", "select"],
   muted: ["audio", "video"],
-  // `name` on `<map>` is NOT admitted (S460 N1): a map's name is what an `<img usemap="#name">`
-  // ANYWHERE in the page resolves to, so an emitted `<map name="pm">` would take over the areas of the
-  // page's `<img usemap="#pm">`; `id` on `<map>` is refused for the same reason (see the judge below).
-  // (`usemap` itself is on no list — see the header.)
+  // Not on `<map>` (S460 N1 — see the header).
   name: ["button", "fieldset", "input", "output", "select", "textarea", "details", "meta"],
   novalidate: ["form"],
   open: ["details", "dialog"],
@@ -203,10 +200,7 @@ export function _scrml_emit_attr_name_verdict(ns, tag, name) {
     return "a " + lowerName + "= attribute on <" + tag + "> (the data-scrml attribute namespace is " +
       "reserved for the compiler's own markers)";
   }
-  // A `<map>` is found BY its `id` as well as by its `name` (the HTML hash-name reference rule; Chromium
-  // 148: `<map id="pm">` with no name takes the clicks of the page's `<img usemap="#pm">`), so `id` — on
-  // every other element a global — is not admitted on an HTML `<map>` (S460 N1). With neither name nor
-  // id a map is referenced by nothing and is admitted.
+  // A `<map>` is found by `id` as well as `name` (hash-name reference; Chromium-verified S460 N1).
   if (lowerName === "id" && String(tag).toLowerCase() === "map" && ns !== _SCRML_EMIT_NS_SVG && ns !== _SCRML_EMIT_NS_MATHML) {
     return "an id= attribute on <map> (an <img usemap> anywhere in the page resolves to a map by its id " +
       "or name)";
@@ -281,18 +275,24 @@ export function _scrml_emit_is_form_control(ns, tag, isCustom) {
 // (lowercased) in namespace `ns`. `hasNameAttr`: the element also carries `name`. `inForm`: the element
 // sits inside a `<form>` — of the emitted tree, or (at run time) the page form around the insertion
 // point. `members` = { document, form }: the generated member tables (dom-named-property-members.js),
-// plus at run time { documentProto, formProto }: the live prototypes captured at load (`in` on them
-// reaches the platform's own members, data cannot). Returns "" or a reason naming the attribute and
-// the object it would shadow a member of (never the value).
+// plus at run time `formProto`: the live HTMLFormElement prototype captured at load (`in` on it
+// reaches the platform's own members, data cannot). Each phase passes only the table it needs (S460):
+// compile time `form: null` with `inForm` false (no form half there — ruling S460 "n4 b"); the runtime
+// `document: null` (the document half never decides a runtime verdict: `name` is admitted on none of
+// embed / form / iframe / img / object, and object / embed / iframe are refused elements). A `null`
+// table judges fail-closed. Returns "" or a reason naming the attribute and the object it would
+// shadow a member of (never the value).
 export function _scrml_emit_named_value_verdict(ns, tag, lowerName, value, hasNameAttr, inForm, isCustom, members) {
   if (lowerName !== "id" && lowerName !== "name") return "";
   if (ns && ns !== _SCRML_EMIT_NS_HTML) return "";
   const v = String(value);
   if (v === "") return "";
-  const isMember = (table, proto) => table.has(v) || (proto !== null && proto !== undefined && v in proto);
+  // A `null` table (a phase that does not carry it) is FAIL-CLOSED: every value counts as a member.
+  const isMember = (table, proto) => table === null || table === undefined || table.has(v)
+    || (proto !== null && proto !== undefined && v in proto);
   const ofDocument = (lowerName === "name" && _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME.has(tag))
     || (lowerName === "id" && (tag === "object" || (tag === "img" && hasNameAttr === true)));
-  if (ofDocument && isMember(members.document, members.documentProto)) {
+  if (ofDocument && isMember(members.document, null)) {
     return (lowerName === "id" ? "an " : "a ") + lowerName + "= value on <" + tag + "> that names a member of document (the element " +
       "would shadow that member)";
   }
