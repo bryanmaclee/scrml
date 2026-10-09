@@ -94,6 +94,8 @@ import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
 import { ifChainChildNodes } from "./ast-if-chain.js";
+import { describeServerTrigger } from "./escalation-reason-text.ts";
+import type { EscalationReason } from "./route-inference.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
 import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes, programHasServeAttr, getToolServeConfig, resolveServePort, collectToolProgramChannels } from "./tool-program.ts";
 // §38.13 (realtime feed over external DB writes) — synthesize the per-feed
@@ -1092,7 +1094,13 @@ interface RouteMap {
   // CPS-eligible functions and treat them as implicitly `!`-typed (failable).
   // The full structure of cpsSplit is in route-inference.ts CPSSplit; the type
   // here is loosely-typed because we only need to know whether it's non-null.
-  functions: Map<string, { boundary: "server" | "client"; cpsSplit?: unknown | null }>;
+  // §38.10.3 E-CHANNEL-006 (S462): `escalationReasons` is read to say WHY §12.2
+  // placed an `onclient:*` handler on the server (the route-inference type).
+  functions: Map<string, {
+    boundary: "server" | "client";
+    cpsSplit?: unknown | null;
+    escalationReasons?: EscalationReason[];
+  }>;
 }
 
 interface TypedFileAST extends FileAST {
@@ -15752,7 +15760,9 @@ function annotateNodes(
       (out) => collectOtherChannelBindings(_allTopNodes, channel, callee, out),
       (out) => { if (importedFnDecls?.has(callee)) out.imported = true; },
     ];
-    let serverDecl: ASTNodeLike | undefined;
+    // The deciding region's function declarations, each with the file it is
+    // declared in (the routeMap is keyed `${file}::${span.start}`).
+    let candidates: Array<{ decl: ASTNodeLike; file: string }> = [];
     let imported = false;
     for (const collect of regions) {
       const found: ChannelHandlerBindings = { fns: [], values: 0, imported: false };
@@ -15761,29 +15771,64 @@ function annotateNodes(
       // The deciding region. A value binding: the handler is not a function decl.
       if (found.values > 0) return;
       if (found.fns.length > 0) {
-        serverDecl = found.fns.find((d) => d.isServer === true);
+        candidates = found.fns.map((decl) => ({ decl, file: filePath }));
       } else {
         const imp = importedFnDecls?.get(callee);
-        if (imp && imp.fnNode && imp.fnNode.isServer === true) { serverDecl = imp.fnNode; imported = true; }
+        if (imp && imp.fnNode) { candidates = [{ decl: imp.fnNode, file: imp.depFilePath }]; imported = true; }
       }
       break;
     }
-    if (!serverDecl) return;
+    if (candidates.length === 0) return;
+
+    // §38.10.3 (S462 ruling "a"): the handler is rejected when it is DECLARED
+    // `server function` / `server fn`, OR when §12.2 PLACES it on the server.
+    // The placement is read from route inference's routeMap — the same
+    // decision codegen acts on — never re-derived here (a second "does it
+    // broadcast" reader would be a bypass the moment the two disagree).
+    const placedOnServer = (c: { decl: ASTNodeLike; file: string }) => {
+      const start = (c.decl.span as Span | undefined)?.start;
+      const entry = routeMap?.functions?.get(`${c.file}::${start}`);
+      return entry && entry.boundary !== "client" ? entry : undefined;
+    };
+    let hit: { decl: ASTNodeLike; file: string } | undefined;
+    let route: ReturnType<typeof placedOnServer>;
+    for (const c of candidates) {
+      const r = placedOnServer(c);
+      if (c.decl.isServer === true || r) { hit = c; route = r; break; }
+    }
+    if (!hit) return;
+    const serverDecl = hit.decl;
     const span = ((value.span as Span | undefined) ?? (attr.span as Span | undefined)
       ?? (channel.span as Span | undefined)
       ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+    const declared = serverDecl.isServer === true;
     const keyword = serverDecl.fnKind === "fn" ? "server fn" : "server function";
+    const plainKw = serverDecl.fnKind === "fn" ? "fn" : "function";
     const depFile = imported ? importedFnDecls?.get(callee)?.depFilePath : undefined;
     const where = imported ? ` (imported from \`${depFile ? depFile.split(/[\\/]/).pop() : "another file"}\`)` : "";
-    errors.push(new TSError(
-      "E-CHANNEL-006",
-      `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but \`${callee}\` is declared ` +
-      `\`${keyword}\`${where}. An \`onclient:*\` handler runs in the browser, on the client-side WebSocket ` +
-      `(§38.10) — it SHALL NOT be a server function. Declare \`${callee}\` a plain ` +
-      `\`${serverDecl.fnKind === "fn" ? "fn" : "function"}\`; if a server round-trip is wanted, call a server ` +
-      `function from inside it.`,
-      span,
-    ));
+    // Reasons other than the keyword itself: what §12.2 found in the body.
+    const inferred = (route?.escalationReasons ?? []).filter((r) => r.kind !== "explicit-annotation");
+    const fixes =
+      `Move the server work into an \`onserver:*\` handler (§38.6.1), or write a channel cell ` +
+      `instead — a channel-cell write runs on the client and syncs to every subscriber (§38.4, §38.10).`;
+    let message: string;
+    if (inferred.length === 0) {
+      // Declared `server`, and nothing in the body needs the server: dropping
+      // the keyword is the whole fix.
+      message =
+        `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but \`${callee}\` is declared ` +
+        `\`${keyword}\`${where}. An \`onclient:*\` handler runs in the browser, on the client-side WebSocket ` +
+        `(§38.10) — it SHALL NOT be a server function. Declare \`${callee}\` a plain \`${plainKw}\`; ` +
+        `if a server round-trip is wanted, call a server function from inside it.`;
+    } else {
+      const why = describeServerTrigger(inferred);
+      message =
+        `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but \`${callee}\`${where} ` +
+        `is placed on the server (§12.2): its body uses ${why}` +
+        `${declared ? `, and it is declared \`${keyword}\`` : ""}. An \`onclient:*\` handler runs in the ` +
+        `browser, on the client-side WebSocket (§38.10) — it SHALL NOT run on the server. ${fixes}`;
+    }
+    errors.push(new TSError("E-CHANNEL-006", message, span));
   }
 
   /**
