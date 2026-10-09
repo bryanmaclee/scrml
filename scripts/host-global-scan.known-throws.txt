@@ -11,6 +11,8 @@
 [esm] conformance/cases/body-top/template-cell-renders/case.scrml  # emit-client-esm: Unexpected character '@'
 [esm] conformance/cases/channel/dup-name-cross-file/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/channel/same-source-two-aliases/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
+[esm] conformance/cases/condition/known-int-markup-if-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/condition/presence-bare-optional-markup-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/control-flow/ctrl-001-orphan-else-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/control-flow/ctrl-002-orphan-else-if-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/control-flow/ctrl-003-extend-past-else-program-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
