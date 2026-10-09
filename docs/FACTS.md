@@ -21,12 +21,12 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | fact | value |
 |---|---|
 | compiler version | `0.8.0` |
-| live compiler source (`compiler/src`) | 315,764 lines across 272 files |
-| test files | 1,670 |
-| specification lines (`compiler/SPEC.md`) | 47,568 |
-| conformance cases | 1584 |
+| live compiler source (`compiler/src`) | 316,439 lines across 273 files |
+| test files | 1,671 |
+| specification lines (`compiler/SPEC.md`) | 47,630 |
+| conformance cases | 1592 |
 | standard-library modules | 21 |
-| CLI verbs | 12 |
+| CLI verbs | 13 |
 | LSP capabilities | 7 |
 | editor integrations | 2 |
 | deploy targets | 4 |
@@ -38,7 +38,7 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 <!-- @generated:facts-lists START (do not edit — `bun scripts/facts.ts --write`) -->
 **Standard-library modules** (21) — `auth` · `compiler` · `cron` · `crypto` · `data` · `format` · `fs` · `host` · `http` · `math` · `mcp` · `oauth` · `path` · `process` · `random` · `redis` · `regex` · `router` · `store` · `test` · `time`
 
-**CLI verbs** (12) — `build` · `compile` · `db-migrate` · `dev` · `fix` · `generate` · `init` · `introspect` · `migrate` · `promote` · `semdiff` · `serve`
+**CLI verbs** (13) — `build` · `compile` · `db-migrate` · `dev` · `fix` · `fix-given-presence` · `generate` · `init` · `introspect` · `migrate` · `promote` · `semdiff` · `serve`
 
 **LSP capabilities** (7) — `codeAction` · `completion` · `definition` · `documentSymbol` · `hover` · `semanticTokens` · `signatureHelp`
 
