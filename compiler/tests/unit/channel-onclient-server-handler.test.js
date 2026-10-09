@@ -153,6 +153,23 @@ describe(`${CODE} — an onclient:* handler declared server function`, () => {
     expect(hits(res).length).toBe(1);
   });
 
+  test("a server function declared in a SIBLING channel's body, nothing nearer binding the name", () => {
+    // Functions hoist file-wide; codegen routes `onOpen(e)` to the sibling's fetch stub.
+    const res = compile(`<program>
+  <channel name="a" onclient:open=onOpen(e)>
+    <ca> = 0
+  </channel>
+  <channel name="b">
+    <cb> = 0
+    server function onOpen(m) {
+      return 1
+    }
+  </channel>
+  <p>\${@ca} \${@cb}</p>
+</program>`);
+    expect(hits(res).length).toBe(1);
+  });
+
   test("an exported channel in a module is judged in the exporter, once", () => {
     const res = compileFiles({
       "app.scrml": `<program>
@@ -220,6 +237,83 @@ describe(`${CODE} — clean negatives`, () => {
 </program>`,
       "helpers.scrml": `\${
   export server function onErr(e) {
+    return 1
+  }
+}`,
+    });
+    expect(hits(res).length).toBe(0);
+  });
+
+  // A NON-function binding of the handler's name in a nearer scope region ends the
+  // lookup: the handler is that value, not the sibling channel's server function
+  // (S461 review false positive — main runs these correctly).
+  const SIBLING_SERVER = `  <channel name="b" onserver:message=onOpen(m)>
+    <cb> = 0
+    server function onOpen(m) {
+      broadcast(m)
+    }
+  </channel>`;
+
+  test("a `const` handler in the channel body; a sibling channel declares `server function` of the same name", () => {
+    const res = compile(`<program>
+  <channel name="a" onclient:open=onOpen(e)>
+    <ca> = 0
+    const onOpen = (e) => { @ca = 1 }
+  </channel>
+${SIBLING_SERVER}
+  <p>\${@ca} \${@cb}</p>
+</program>`);
+    expect(hits(res).length).toBe(0);
+    expect((res.errors || []).length).toBe(0);
+  });
+
+  test("a top-level `const` handler; a sibling channel declares `server function` of the same name", () => {
+    const res = compile(`<program>
+  const onOpen = (e) => { console.log(e) }
+  <channel name="chat" onclient:open=onOpen(e)>
+    <count> = 0
+  </channel>
+${SIBLING_SERVER}
+  <p>\${@count} \${@cb}</p>
+</program>`);
+    expect(hits(res).length).toBe(0);
+    expect((res.errors || []).length).toBe(0);
+  });
+
+  test("a `const` handler in a top-level `\${}` block; a sibling channel declares `server function` of the same name", () => {
+    const res = compile(`<program>
+  \${
+    const onOpen = (e) => { console.log(e) }
+  }
+  <channel name="chat" onclient:open=onOpen(e)>
+    <count> = 0
+  </channel>
+${SIBLING_SERVER}
+  <p>\${@count} \${@cb}</p>
+</program>`);
+    expect(hits(res).length).toBe(0);
+    expect((res.errors || []).length).toBe(0);
+  });
+
+  test("a top-level import of a plain function; a sibling channel declares `server function` of the same name", () => {
+    const res = compileFiles({
+      "app.scrml": `<program>
+\${
+  import { onOpen } from './helpers.scrml'
+}
+  <channel name="a" onclient:open=onOpen(e)>
+    <ca> = 0
+  </channel>
+  <channel name="b">
+    <cb> = 0
+    server function onOpen(m) {
+      return 1
+    }
+  </channel>
+  <p>\${@ca} \${@cb}</p>
+</program>`,
+      "helpers.scrml": `\${
+  export function onOpen(e) {
     return 1
   }
 }`,
