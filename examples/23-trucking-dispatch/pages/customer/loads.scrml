@@ -238,7 +238,7 @@
                                       </div>
                                       <div class="text-xs text-slate-500">
                                           ${l.commodity}
-                                          <span if=(l.weight_lbs) class="text-slate-400">
+                                          <span if=(l.weight_lbs is given && l.weight_lbs > 0) class="text-slate-400">
                                               · ${l.weight_lbs} lbs
                                           </>
                                       </div>
