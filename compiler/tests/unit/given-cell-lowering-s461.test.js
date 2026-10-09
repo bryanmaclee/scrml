@@ -295,3 +295,71 @@ describe("§5 what compiles is unchanged", () => {
     expect(serverJs).not.toContain(`_scrml_body["user"] !== null`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §6 fix round (review of 4c1813a): coverage below a given, at ANY depth
+// ---------------------------------------------------------------------------
+//
+// The first cut kept a given body's pre-desugar pieces only when the arm's DIRECT
+// parent was the given guard, so an `if` arm nested inside a given body — which
+// planIfCascade now reaches — lost E-TYPE-046 / E-STATE-UNDECLARED / E-SCOPE-001
+// (and its emitted `.opt.x` threw TypeError at runtime). The fix keeps the pieces
+// for every arm the pre-s461 pass would not have desugared
+// (implied-lift-desugar.ts `keepPiecesForArmsBaseNeverPlanned`), and both
+// checkers expand them wherever they sit.
+
+const NEST = `type In:struct = { x: string }
+type O:struct = { opt: In | not }
+type U:struct = { name: string }
+<o>: O | not = not
+<u>: U | not = not
+<a>: U | not = not
+<b>: U | not = not
+<c>: boolean = true
+<d>: boolean = false
+`;
+const nest = (body) => `<program>\n${NEST}<main><div>${body}</div></main>\n</program>\n`;
+
+describe("§6 diagnostics under a given are kept at every nesting depth", () => {
+  test("r1 given → if: E-STATE-UNDECLARED on `${@usr.name}`", () => {
+    expect(compileSource(nest(`\${ given @u :> { if (@c) { <p>\${@usr.name}</p> } } }`)).errors).toContain("E-STATE-UNDECLARED");
+  });
+
+  test("r2 given → if: E-TYPE-046 on `${@o.opt.x}`", () => {
+    expect(compileSource(nest(`\${ given @o :> { if (@c) { <p>\${@o.opt.x}</p> } } }`)).errors).toContain("E-TYPE-046");
+  });
+
+  test("r3 given → if/else: E-SCOPE-001 on `${nosuch}`", () => {
+    expect(compileSource(nest(`\${ given @u :> { if (@c) { <p>\${nosuch}</p> } else { <p>e</p> } } }`)).errors).toContain("E-SCOPE-001");
+  });
+
+  test("two levels: given → if → if: E-TYPE-046", () => {
+    expect(compileSource(nest(`\${ given @o :> { if (@c) { if (@d) { <p>\${@o.opt.x}</p> } } } }`)).errors).toContain("E-TYPE-046");
+  });
+
+  test("two levels: given → if/else → given: E-STATE-UNDECLARED", () => {
+    expect(compileSource(nest(`\${ given @o :> { if (@c) { <p>a</p> } else { given @u :> { <p>\${@nope.name}</p> } } } }`)).errors).toContain("E-STATE-UNDECLARED");
+  });
+
+  test("given → given: E-STATE-UNDECLARED on `${@bb.name}`", () => {
+    expect(compileSource(nest(`\${ given @a :> { given @b :> { <p>\${@bb.name}</p> } } }`)).errors).toContain("E-STATE-UNDECLARED");
+  });
+
+  test("if → given: E-STATE-UNDECLARED on `${@aa.name}`", () => {
+    expect(compileSource(nest(`\${ if (@c) { given @a :> { <p>\${@aa.name}</p> } } }`)).errors).toContain("E-STATE-UNDECLARED");
+  });
+
+  test("the SIBLING arm of an if whose other arm holds a given keeps its check (E-SCOPE-001)", () => {
+    expect(compileSource(nest(`\${ if (@c) { given @o :> { <p>a</p> } } else { <p>\${nosuch}</p> } }`)).errors).toContain("E-SCOPE-001");
+  });
+
+  test("the narrowed cell is still accepted two levels down (`@o.opt?.x` under given @o → if)", () => {
+    expect(compileSource(nest(`\${ given @o :> { if (@c) { <p>\${@o.opt?.x}</p> } } }`)).errors).toEqual([]);
+  });
+
+  test("given → if still renders (the lift is emitted)", () => {
+    const { errors, clientJs } = compileSource(nest(`\${ given @u :> { if (@c) { <p>\${@u.name}</p> } } }`));
+    expect(errors).toEqual([]);
+    expect(clientJs).toContain(`document.createElement("p")`);
+  });
+});
