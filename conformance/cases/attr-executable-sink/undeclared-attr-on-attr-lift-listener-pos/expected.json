@@ -1,0 +1,20 @@
+{
+  "id": "attr-executable-sink-undeclared-attr-on-attr-lift-listener-pos",
+  "description": "S457 review (PA ruling (a)): an UNDECLARED call-site attribute spelled `onClick` that falls through onto the expanded root of a component with no `props` block, in `lift` / `<each>`, is wired as a `click` listener — never written as handler text; a URL attribute (`href`) is written through the runtime guard; a non-sink attribute (`title`) is written. NOTE (S458 \"D1\"): this case was `declared-prop-on-attr-lift-listener-pos`, where `Btn`/`Link`/`Tip` DECLARED `onClick`/`href`/`title` in a `props` block and the case asserted those props reached the root. Under D1 a declared prop never reaches the root (§15.10), so the declared forms (`#bd` / `#hd` / `#td`) now assert ABSENCE; the sink behaviour is pinned through the undeclared fallthrough (O18 carry), which still writes the root.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457) event-handler text from data: \"In `<each>` rows and `lift` markup every attribute rule 1's name test makes an event handler (any case, `on:x` included) is wired as a listener for the lowercased event name, an undeclared call-site attribute written onto an expanded component root included\"; rule 3 guards the URL write. §15.10 (S458 \"D1\"): a declared prop is never written onto the root.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "domAnchored": [
+      { "selector": "#b button", "attr": { "onclick": null } },
+      { "selector": "#e button", "attr": { "onclick": null } },
+      { "selector": "#h a", "attr": { "href": "/one" } },
+      { "selector": "#t span", "attr": { "title": "tip" } },
+      { "selector": "#bd button.d", "attr": { "onclick": null } },
+      { "selector": "#hd a.d[href]", "count": 0 },
+      { "selector": "#td span.d[title]", "count": 0 }
+    ]
+  }
+}

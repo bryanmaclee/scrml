@@ -1,0 +1,11 @@
+{
+  "id": "components-callback-prop-show-guard-reject",
+  "description": "§15.11.4 / §17.2 (S460 F1) — `show=` is NOT an absence check for an optional function-typed prop. A `show=` element exists while its condition is false (hidden, not removed), so its own attributes, its handlers and its children are evaluated when the prop is `not`: `<span show=fmt title=${fmt()}>` evaluates `fmt()` at render, `<button show=onGo onclick=onGo()>` calls on click, and a `show=onGo` ancestor does not guard a child handler. Each unguarded call is E-TYPE-031 (one per call site, 3). Before F1 the shared presence reader treated `show=` like `if=`, these compiled clean, and an omitted prop threw `null()` at render / on click. Twin: callback-prop-if-guard-twin.",
+  "language-version": "1.0",
+  "spec": "§17.2",
+  "rationale": "§17.2: \"`show=` SHALL NOT narrow. Because the element and its children exist and are evaluated while `expr` is false, a binding tested by `show=` keeps its un-narrowed type inside the element (§42.3.5)\". §15.11.4: \"an unguarded call to a potentially-absent function-typed prop SHALL be a compile error (E-TYPE-031: cannot call a value of type `fn | not` without an absence check).\"",
+  "expect": {
+    "codes": ["E-TYPE-031"],
+    "codeCounts": { "E-TYPE-031": 3 }
+  }
+}

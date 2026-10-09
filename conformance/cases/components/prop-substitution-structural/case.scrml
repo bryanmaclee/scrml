@@ -1,0 +1,21 @@
+<program>
+<a> = 3
+<y> = "Y"
+<rows> = ["r1"]
+const Q = <span class="q" title=${n * 2} props={ n: number }>q</span>
+const Q2 = <span class="q2" title="v=${n*2}" props={ n: number }>q</span>
+const L = <a class="l" href=${href} props={ href: string, label: string }>${label}</a>
+const T = <span class="t" title="${label + ' label'}" props={ label: string }>t</span>
+const V = <span class="v" title="${visible ? 'visible' : 'hidden'}" props={ visible: boolean }>v</span>
+<div id="top">
+    <Q n=${@a + 1}/>
+    <Q2 n=${@a + 1}/>
+    <T label=${@y}/>
+    <V visible=${true}/>
+</div>
+<ul id="rows">
+    <each in=@rows as label>
+        <li><L href=${"/x/" + label} label=${@y}/></li>
+    </each>
+</ul>
+</program>

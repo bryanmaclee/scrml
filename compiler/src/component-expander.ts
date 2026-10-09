@@ -46,10 +46,16 @@ import { placeholderParam } from "./placeholder-nonce.ts";
 import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
-import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
-import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
+import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
+import {
+  substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader,
+} from "./component-prop-js-substitute.ts";
+import { boundNamesOf, declareIn } from "./binding-names.ts";
+import { walkBodyNarrowed, type NarrowSpan } from "./presence-narrowing.ts";
 import type {
   Span,
   FileAST,
@@ -293,6 +299,130 @@ function collectBodyEngines(reparsedAst: FileAST): BodyEngine[] {
  * module-level value is safe; it is reset at the top of every `runCEFile` call.
  */
 let _currentFileEngineMountNames: Set<string> = new Set();
+
+/**
+ * S458 F3 — the `const <name>` DERIVED cells of the file currently being expanded
+ * (`state-decl` with `isConst` + `shape: "derived"`, as SYM registers them for
+ * E-DERIVED-WRITE). A component `bind:prop=@d` of one of them is refused at the bind
+ * site: the bind channel writes the caller's cell, and a derived cell is not writable.
+ * Same lifetime discipline as `_currentFileEngineMountNames` (reset per `runCEFile`).
+ * (A reactive cell cannot be exported, E-EXPORT-001, so the file is the whole scope.)
+ */
+let _currentFileDerivedCellNames: Set<string> = new Set();
+/** S459 round 6 (F3) — the current file's source text + path, to place a body diagnostic. */
+let _currentFileSource: { path: string; text: string } | null = null;
+
+/** 1-based line / col of `offset` in `text`. */
+function lineColAt(text: string, offset: number): { line: number; col: number } {
+  let line = 1;
+  let lastNl = -1;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) { line++; lastNl = i; }
+  }
+  return { line, col: offset - lastNl };
+}
+
+/**
+ * S459 rounds 6–7 (F3, items 2 and 5) — the SOURCE span of a node of a component body
+ * re-parse. The re-parse reads a NORMALIZED copy of the body (comments dropped, whitespace
+ * re-laid: `if (x)` → `if(x)`, `</>` → `< / >`), so its offsets do not address the file.
+ * The node's normalized text is located in the definition's own source range instead,
+ * WHITESPACE-INSENSITIVELY and skipping source comments (an occurrence inside a `//` /
+ * block comment is not one the re-parse saw; a `//` inside a `"…"` value — a URL — is
+ * not a comment): the k-th occurrence there, where k is its occurrence index in the
+ * normalized body. Falls back to the definition's start (with its line/col computed from
+ * the source) when the definition is in another file or the text is not found.
+ */
+interface SquashedText { chars: string; offs: number[] }
+function squashSource(text: string, from: number, to: number): SquashedText {
+  let chars = "";
+  const offs: number[] = [];
+  let i = from;
+  let inStr = false;
+  while (i < to) {
+    const c = text[i];
+    if (inStr) {
+      if (c === "\\" && i + 1 < to) { chars += c + text[i + 1]; offs.push(i, i + 1); i += 2; continue; }
+      if (c === "\"") inStr = false;
+      if (!/\s/.test(c)) { chars += c; offs.push(i); }
+      i++;
+      continue;
+    }
+    if (c === "\"") { inStr = true; chars += c; offs.push(i); i++; continue; }
+    if (c === "/" && text[i + 1] === "/") { while (i < to && text[i] !== "\n") i++; continue; }
+    if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? to : Math.min(to, end + 2);
+      continue;
+    }
+    if (!/\s/.test(c)) { chars += c; offs.push(i); }
+    i++;
+  }
+  return { chars, offs };
+}
+function squash(text: string): string { return text.replace(/\s+/g, ""); }
+
+function defStartSpan(defSpan: Span): Span {
+  const src = _currentFileSource;
+  if (!src || !defSpan || (defSpan.file && defSpan.file !== src.path) || typeof defSpan.start !== "number") return defSpan;
+  const { line, col } = lineColAt(src.text, defSpan.start);
+  return { ...defSpan, line, col };
+}
+
+/** Locate normalized-body text [start, end) in the definition's source; null when not found. */
+function locateNormalizedInSource(defSpan: Span, normalizedBody: string, start: number, end: number): Span | null {
+  const src = _currentFileSource;
+  if (!src || !defSpan || (defSpan.file && defSpan.file !== src.path)) return null;
+  if (!(end > start) || end > normalizedBody.length) return null;
+  const needle = squash(normalizedBody.slice(start, end));
+  if (!needle) return null;
+  const prefix = squash(normalizedBody.slice(0, start));
+  let occurrence = 0;
+  for (let i = (prefix + needle).indexOf(needle); i >= 0 && i < prefix.length; i = (prefix + needle).indexOf(needle, i + 1)) occurrence++;
+  const from = defSpan.start ?? 0;
+  const to = Math.min(src.text.length, (defSpan.end ?? src.text.length) + 1);
+  const sq = squashSource(src.text, from, to);
+  let at = -1;
+  let p = 0;
+  for (let k = 0; k <= occurrence; k++) {
+    at = sq.chars.indexOf(needle, p);
+    if (at < 0) return null;
+    p = at + 1;
+  }
+  const s0 = sq.offs[at];
+  const s1 = sq.offs[at + needle.length - 1] + 1;
+  const { line, col } = lineColAt(src.text, s0);
+  return { file: src.path, start: s0, end: s1, line, col };
+}
+
+function bodyDiagnosticSourceSpan(defSpan: Span, normalizedBody: string, start: number | undefined, end: number | undefined): Span {
+  if (typeof start === "number" && typeof end === "number") {
+    const at = locateNormalizedInSource(defSpan, normalizedBody, start, end);
+    if (at) return at;
+  }
+  return defStartSpan(defSpan);
+}
+
+function collectFileDerivedCellNames(ast: FileAST): Set<string> {
+  const names = new Set<string>();
+  const seen = new WeakSet<object>();
+  const visit = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    const r = n as Record<string, unknown>;
+    if (r.kind === "state-decl" && r.isConst === true && r.shape === "derived" && typeof r.name === "string") {
+      names.add(r.name);
+    }
+    for (const k of Object.keys(r)) {
+      if (k === "span" || k === "_record" || k === "parent") continue;
+      const v = r[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(ast.nodes ?? []);
+  return names;
+}
 
 /** Collect the set of same-file engine mount names from a file's machineDecls. */
 function collectFileEngineMountNames(ast: FileAST): Set<string> {
@@ -1250,7 +1380,7 @@ export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string
-): { nodes: MarkupNode[]; errors: CEError[]; bodyEngines: BodyEngine[] } {
+): { nodes: MarkupNode[]; errors: CEError[]; bodyEngines: BodyEngine[]; normalizedBody?: string } {
   try {
     // s457 4a (S458 F7) — whitespace-dependent refusals judged on the body
     // text BEFORE normalizeTokenizedRaw, which strips the space before a `>`.
@@ -1291,6 +1421,7 @@ export function parseComponentBody(
       // §15.13.5 / §51.0.K — engines declared inside the re-parsed body (both
       // the structural `engine-decl` form and the `${ <engine/> }` lift form).
       bodyEngines: collectBodyEngines(reparsed.ast),
+      normalizedBody: normalized,
     };
   } catch (e) {
     const err = e as Error;
@@ -1318,7 +1449,24 @@ function parseComponentDef(
   const { name, raw, span, defChildren } = def;
   if (!name || !raw) return null;
 
-  const { nodes, errors: parseErrors, bodyEngines } = parseComponentBody(raw, name, filePath);
+  const { nodes, errors: allParseErrors, bodyEngines, normalizedBody: nb } = parseComponentBody(raw, name, filePath);
+  const normalizedBody = nb ?? "";
+
+  // S459 L2 — an attribute-level refusal (E-ATTR-001: a single-quoted value, which is not
+  // an attribute-string delimiter) is reported under its OWN code, exactly as outside a
+  // component; the attribute recovered as `absent`, so the body is not "malformed".
+  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001");
+  for (const e of allParseErrors) {
+    if (e.code !== "E-ATTR-001") continue;
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    ceErrors.push(makeCEError(
+      "E-ATTR-001",
+      `${e.message.replace(/^E-ATTR-001:\s*/, "E-ATTR-001: ")} (in component \`${name}\`)`,
+      // F3 — at the attribute value's own source position, not the definition's.
+      // (the error's span addresses the normalized body the re-parse read).
+      bodyDiagnosticSourceSpan(defSpan, normalizedBody, e.span?.start, e.span?.end),
+    ));
+  }
 
   // §15.13.5 / §51.0.K — a component body SHALL NOT instantiate an engine. Fire
   // E-COMPONENT-ENGINE-SCOPE per body engine (structural + lift forms), for both
@@ -1463,8 +1611,196 @@ function parseComponentDef(
   // Secondary nodes (index 1+) are stored verbatim — no props attr stripping needed
   const storedNodes: MarkupNode[] = [storedPrimary as MarkupNode, ...nodes.slice(1)];
 
+  // §15.11.4 / §42.3.5 (S459 round 7) — an optional function prop is `fn | not` in the body;
+  // a call of it must be absence-safe. Judged once per DEFINITION (used or not).
+  if (propsDecl) {
+    checkOptionalFnPropCalls(
+      storedNodes, propsDecl, normalizedBody, span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }, name, ceErrors,
+    );
+  }
+
   return { nodes: storedNodes, propsDecl, defChildren: defChildren || [] };
 }
+
+/**
+ * S459 round 7 — §15.11.4: "An optional function-typed prop (declared with `?`) that is not
+ * provided at the call site SHALL have value `not` inside the component body. The component
+ * body SHALL guard against `not` before calling it; an unguarded call to a potentially-absent
+ * function-typed prop SHALL be a compile error (E-TYPE-031 …)." "Guarded" is §42.3.5's
+ * absence-safety, decided by THE §42 presence-narrowing reader (presence-narrowing.ts), the
+ * same walker E-TYPE-046 uses for a `T | not` cell — so a prop is judged exactly as a
+ * possibly-`not` cell is:
+ *   (1) "Optional chaining the access itself — … `recv?.method(...)`" — `onGo?.()`;
+ *   (2) "Narrowing … via any canonical presence-discrimination: the `if=` markup guard
+ *       (§42.4), `given recv :> { ... }`, an `if (recv is not) return` / `is some`
+ *       early-return, or a `match recv …` arm" — plus the `is some` / truthy consequent, the
+ *       else of a negated test, a ternary consequent and a `&&` right operand.
+ * Which identifiers ARE the prop is the expander's own one scope model: the body is
+ * substituted with a unique marker per optional function prop (a local / parameter named
+ * like the prop is never marked), and the narrowing walker tracks the markers.
+ * Reported at each offending call (its source position, as for the body E-ATTR-001).
+ */
+const OPT_FN_MARK = "@__scrml_optfn__";
+function checkOptionalFnPropCalls(
+  nodes: MarkupNode[],
+  propsDecl: PropDecl[],
+  normalizedBody: string,
+  defSpan: Span,
+  componentName: string,
+  ceErrors: CEError[],
+): void {
+  const optional = propsDecl.filter((d) => d.optional && !d.isSnippet && isFunctionType(d.type));
+  if (optional.length === 0) return;
+  const markerMap = new Map<string, ExprNode>(optional.map((d) => [
+    d.name,
+    { kind: "ident", name: OPT_FN_MARK + d.name, span: { file: defSpan.file ?? "", start: 0, end: 0, line: 1, col: 1 } } as unknown as ExprNode,
+  ]));
+  // A pure substitution pass: no prop-write / unsubstitutable bookkeeping.
+  const prevCtx = _propWriteCtx;
+  _propWriteCtx = null;
+  let marked: ASTNode[];
+  try {
+    marked = nodes.map((n) => substituteProps(n as unknown as ASTNode, new Map<string, string>(), markerMap, new Set<string>()));
+  } finally {
+    _propWriteCtx = prevCtx;
+  }
+  // The body re-parse leaves attribute values as raw text (no `exprNode`, no handler
+  // statement list — substitution rewrites raw text). Give the MARKED copy the trees TAB
+  // would build, from the same parsers: handler values through the one handler statement
+  // parser, every other expression value through the expression parser.
+  // Substitution shares every unchanged subtree with the stored body, so the copy is made
+  // private before anything is attached to it (the stored body must stay as re-parsed).
+  try { marked = structuredClone(marked); } catch { return; }
+  const parseAttrExprs = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) parseAttrExprs(x); return; }
+    const r = n as Record<string, unknown>;
+    if (r.kind === "markup" && Array.isArray(r.attrs)) {
+      for (const a of r.attrs as AttrNode[]) {
+        const v = a?.value as { kind?: string; raw?: string; exprNode?: ExprNode } | undefined;
+        if (v && v.kind === "expr" && typeof v.raw === "string" && v.raw.includes(OPT_FN_MARK)) {
+          // A handler value is a statement list (§5.2.3) — the type system's own check view
+          // (`parseHandlerStatementsForCheck`: an arrow value yields its BODY); any other
+          // value is one expression.
+          const stmts = typeof a.name === "string" && isEventHandlerAttrName(a.name)
+            ? parseHandlerStatementsForCheck({ kind: "expr", raw: v.raw }, defSpan.file ?? "") : null;
+          if (stmts) (v as unknown as Record<string, unknown>).handlerBlock = { stmts };
+          else if (!v.exprNode) {
+            try { const e = parseExprToNode(v.raw, defSpan.file ?? "", 0); if (e) v.exprNode = e; } catch { /* keep raw */ }
+          }
+        }
+      }
+    }
+    for (const k of Object.keys(r)) { if (k !== "span" && r[k] && typeof r[k] === "object") parseAttrExprs(r[k]); }
+  };
+  parseAttrExprs(marked);
+  const keyOf = (node: unknown): string | null => {
+    const r = node as { kind?: string; name?: string } | undefined;
+    return r && r.kind === "ident" && typeof r.name === "string" && r.name.startsWith(OPT_FN_MARK)
+      ? r.name.slice(OPT_FN_MARK.length) : null;
+  };
+  // Item 2 (round 7) — each offending call is reported at its own source position. Spans
+  // inside a re-parsed `${}` block are block-relative, so a call is placed through its
+  // ANCHOR (the attribute value or logic block that holds it — body-relative spans): the
+  // anchor's text is located in the source, then the call is the i-th call / member hop of
+  // the prop inside it (i counted over every such use the walk meets in that anchor, guarded
+  // or not, in walk order = source order).
+  type Anchor = { start: number; end: number };
+  const anchorOf = new WeakMap<object, Anchor>();
+  const markAnchors = (n: unknown, anchor: Anchor | null): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) markAnchors(x, anchor); return; }
+    const r = n as Record<string, unknown>;
+    let here = anchor;
+    const sp = r.span as { start?: number; end?: number } | undefined;
+    if (r.kind === "logic" && sp && typeof sp.start === "number" && typeof sp.end === "number") here = { start: sp.start, end: sp.end };
+    if (here) anchorOf.set(r, here);
+    if (r.kind === "markup" && Array.isArray(r.attrs)) {
+      for (const at of r.attrs as AttrNode[]) {
+        const v = at?.value as unknown as Record<string, unknown> | undefined;
+        const vs = v?.span as { start?: number; end?: number } | undefined;
+        markAnchors(v, v && vs && typeof vs.start === "number" && typeof vs.end === "number" ? { start: vs.start, end: vs.end } : here);
+      }
+    }
+    for (const k of Object.keys(r)) {
+      if (k === "span" || k === "attrs") continue;
+      if (r[k] && typeof r[k] === "object") markAnchors(r[k], here);
+    }
+  };
+  markAnchors(marked, null);
+  let lastAnchor: Anchor | null = null;
+  const usesPerAnchor = new Map<Anchor, number>();
+  const offending: Array<{ prop: string; anchor: Anchor | null; index: number }> = [];
+  walkBodyNarrowed(marked as unknown[], new Set<string>(), defSpan, {
+    receiverKey: keyOf,
+    givenKey: (v: string) => (optional.some((d) => d.name === v) ? v : null),
+    onExpr: (n, present) => {
+      const a = anchorOf.get(n);
+      if (a) lastAnchor = a;
+      // A call of the prop (`onGo()`) or a member hop through it (`onGo.call()`) that is
+      // not optional-chained and not under a narrowing that proves it present.
+      const recv = n.kind === "call" ? n.callee : n.kind === "member" ? n.object : null;
+      const k = recv ? keyOf(recv) : null;
+      if (!k) return;
+      const anchor = lastAnchor;
+      const index = anchor ? (usesPerAnchor.get(anchor) ?? 0) : 0;
+      if (anchor) usesPerAnchor.set(anchor, index + 1);
+      if (n.optional !== true && !present.has(k)) offending.push({ prop: k, anchor, index });
+    },
+    // A block-bodied arrow the parser kept as an escape hatch: its statements, parsed by the
+    // one handler statement parser (tokenizeLogic + parseLogicBody).
+    expandOpaque: (n) => blockArrowStatements(n),
+  });
+  const seen = new Set<string>();
+  for (const o of offending) {
+    const at = locatePropUse(defSpan, normalizedBody, o.anchor, o.prop, o.index);
+    const key = `${o.prop}@${at.start}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const decl = optional.find((d) => d.name === o.prop);
+    ceErrors.push(makeCEError(
+      "E-TYPE-031",
+      `E-TYPE-031: the body of \`<${componentName}>\` calls its optional function prop \`${o.prop}\` ` +
+      `(\`${o.prop}?: ${decl?.type ?? "fn"}\`) without an absence check — cannot call a value of type ` +
+      `\`fn | not\` (§15.11.4). Make the call absence-safe (§42.3.5): \`${o.prop}?.()\`, ` +
+      `\`if (${o.prop}) { ${o.prop}() }\`, \`if (${o.prop} is not) return\`, or an \`if=${o.prop}\` guard on ` +
+      `the element — or make the prop required.`,
+      at,
+    ));
+  }
+}
+
+/** The source span of the `index`-th call / member use of `prop` inside `anchor`. */
+function locatePropUse(defSpan: Span, normalizedBody: string, anchor: { start: number; end: number } | null, prop: string, index: number): Span {
+  const region = anchor ? locateNormalizedInSource(defSpan, normalizedBody, anchor.start, anchor.end) : null;
+  const src = _currentFileSource;
+  if (!region || !src) return region ?? defStartSpan(defSpan);
+  const esc = prop.replace(/[$]/g, "\\$");
+  const re = new RegExp(`(?<![\\w$.@])${esc}\\s*(?:\\?\\.\\s*)?[(.]`, "g");
+  const text = src.text.slice(region.start ?? 0, region.end ?? 0);
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (i === index) {
+      const s0 = (region.start ?? 0) + m.index;
+      const { line, col } = lineColAt(src.text, s0);
+      return { file: src.path, start: s0, end: s0 + prop.length, line, col };
+    }
+    i++;
+  }
+  return region;
+}
+
+/**
+ * The statements of an arrow the parser kept as an escape hatch (a block-bodied arrow), by
+ * the type system's own check view — an arrow yields its BODY (`parseHandlerStatementsForCheck`).
+ */
+function blockArrowStatements(n: Record<string, unknown>): unknown[] | null {
+  const raw = typeof n.raw === "string" ? n.raw : "";
+  if (!raw.includes(OPT_FN_MARK) || !raw.includes("=>")) return null;
+  return parseHandlerStatementsForCheck({ kind: "expr", raw }, "");
+}
+
 
 function buildComponentRegistry(
   componentDefs: ExtendedComponentDefNode[],
@@ -1533,12 +1869,194 @@ function applyPropSubstitutions(text: string, props: Map<string, string>): strin
  * not an expression and must not have a word that happens to match a prop name
  * rewritten. Only `${...}` interiors are expression context.
  */
-function substituteInterpSegments(text: string, props: Map<string, string>): string {
-  if (props.size === 0 || !text.includes("${")) return text;
-  return text.replace(/\$\{([^}]*)\}/g, (_match: string, inner: string) => {
-    const subbed = substitutePropsInRawExpr(inner, props);
-    return "${" + subbed + "}";
-  });
+/**
+ * S458 "D1" — the props whose TEXT may be spliced whole into a quoted attribute.
+ *
+ * `applyPropSubstitutions` replaces a whole `${name}` segment of a QUOTED attribute by
+ * the prop's text. That is correct only for a literal value (`"lit"` → `/p/lit`); a
+ * reactive / expression value spliced as text becomes its SOURCE spelling (`/p/@u`,
+ * `/p/r.url` — g-component-prop-in-quoted-attr-substitutes-source-text-s456), so such a
+ * prop stays an interpolation and is substituted structurally inside its segment
+ * (`substituteInterpSegments`). A prop is EXPRESSION-valued when the caller wrote a
+ * `variable-ref` / `expr` / `call-ref` value (a `bind:` prop included); a caller string
+ * literal, a declared default and an absent optional's fill are literal (byte-identical
+ * to before). Built once per expansion (`expandComponentNode`) and registered against
+ * that expansion's ExprNode map; `substituteProps` looks it up.
+ */
+interface AttrTextPropMaps { literal: Map<string, string>; }
+const attrTextPropMapsByExprMap = new WeakMap<Map<string, ExprNode>, AttrTextPropMaps>();
+function registerAttrTextPropMaps(
+  props: Map<string, string>,
+  propExprMap: Map<string, ExprNode>,
+  callerAttrs: AttrNode[],
+): void {
+  const expressionValued = new Set<string>();
+  for (const a of callerAttrs ?? []) {
+    if (!a || !a.name || !a.value) continue;
+    const k = a.value.kind;
+    if (k === "variable-ref" || k === "expr" || k === "call-ref") {
+      expressionValued.add(a.name.startsWith("bind:") ? a.name.slice(5) : a.name);
+    }
+  }
+  const literal = new Map<string, string>();
+  for (const [name, value] of props.entries()) {
+    if (!expressionValued.has(name)) literal.set(name, value);
+  }
+  attrTextPropMapsByExprMap.set(propExprMap, { literal });
+  stringPropsByExprMap.set(propExprMap, props);
+}
+
+/**
+ * S458 (fourth round) — the string `props` map of the expansion an ExprNode map belongs
+ * to, so the statement walker (which carries only the ExprNode map and a shadow set) can
+ * hand markup it meets — a `lift <li>…</li>` target, a markup child of an `if` / `for`
+ * body — to `substituteProps` with the SAME scope.
+ */
+const stringPropsByExprMap = new WeakMap<Map<string, ExprNode>, Map<string, string>>();
+
+/**
+ * S458 (fourth round) — the prop maps as seen inside a scope where `shadow` names are
+ * bound (a loop / each binder, a local, a parameter): the shadowed props are simply ABSENT,
+ * so no substitution path below — markup text, attribute values, nested logic, nested
+ * `<each>` — can rewrite them. Unchanged maps are returned as-is.
+ */
+function scopedPropMaps(
+  props: Map<string, string>,
+  propExprMap: Map<string, ExprNode> | undefined,
+  shadow: Iterable<string>,
+): { props: Map<string, string>; propExprMap: Map<string, ExprNode> | undefined } {
+  const hidden = [...shadow].filter((n) => props.has(n) || (propExprMap?.has(n) ?? false));
+  if (hidden.length === 0) return { props, propExprMap };
+  const drop = new Set(hidden);
+  const p2 = new Map([...props].filter(([k]) => !drop.has(k)));
+  if (!propExprMap) return { props: p2, propExprMap };
+  const e2 = new Map([...propExprMap].filter(([k]) => !drop.has(k)));
+  const literal = attrTextPropMaps(props, propExprMap).literal;
+  attrTextPropMapsByExprMap.set(e2, { literal: new Map([...literal].filter(([k]) => !drop.has(k))) });
+  stringPropsByExprMap.set(e2, p2);
+  return { props: p2, propExprMap: e2 };
+}
+
+/** Substitute props in a markup node met by the statement walker, under its shadow set. */
+function substitutePropsInMarkupFromStmt(
+  node: ASTNode,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): ASTNode {
+  const props = stringPropsByExprMap.get(propExprMap) ?? new Map<string, string>();
+  const scoped = scopedPropMaps(props, propExprMap, shadowed);
+  // S459 round 6 (F1) — the markup gets its OWN scope, seeded from the statement's shadow
+  // set: a `${}` nested inside lifted markup declares into it, and its later siblings (and
+  // their handlers) see the local — the same one-scope rule as the component body.
+  return substituteProps(node, scoped.props, scoped.propExprMap, new Set(shadowed));
+}
+function attrTextPropMaps(props: Map<string, string>, propExprMap?: Map<string, ExprNode>): AttrTextPropMaps {
+  const registered = propExprMap ? attrTextPropMapsByExprMap.get(propExprMap) : undefined;
+  return registered ?? { literal: props };
+}
+
+/**
+ * S458 F1 — substitute the prop references inside every `${…}` segment of a QUOTED
+ * attribute value (or a template literal), each segment through the ONE structural
+ * substituter (`substituteExprText`). Literal text outside `${…}` is never touched.
+ */
+function substituteInterpSegments(
+  text: string,
+  propExprMap: Map<string, ExprNode> | undefined,
+  shadowed: Set<string> = new Set(),
+): string {
+  if (!propExprMap || propExprMap.size === 0 || !text.includes("${")) return text;
+  return rewriteTemplateInterpolations(text, propExprMap, shadowed);
+}
+
+/**
+ * S458 F1 — THE structural prop substituter for expression TEXT (Project Rule 7:
+ * don't ask the text what the tree already knows).
+ *
+ * The text is parsed with scrml's own expression parser; every identifier node that
+ * names a prop (and is not shadowed) is replaced by the caller's expression NODE in
+ * one simultaneous pass (`substitutePropsInExprNode` never re-scans a substituted
+ * node, so a caller's own `label` inside `href=${"/x/" + label}` is not captured),
+ * string / template-literal content is never touched, and the result is re-emitted
+ * from the tree, so precedence is structural (`n * 2` with `n=${@a + 1}` →
+ * `(@a + 1) * 2`). Unchanged text is returned verbatim (no re-formatting churn).
+ *
+ * When the expression parser leaves the WHOLE text as an escape hatch (a block-bodied
+ * arrow `() => { … }`), the text is substituted on its parsed JS tree with a scope model
+ * (`substitutePropsInJsSource`). Text that parses neither way — or that the expression
+ * parser read only a PREFIX of (`n + 'it's'` stops at `'it'`) — is never rewritten: a
+ * prop it references is refused (`noteUnsubstitutable`), the rest is returned verbatim.
+ * There is no text-scanning substitution.
+ */
+function substituteExprText(
+  text: string,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): string {
+  if (!text || propExprMap.size === 0) return text;
+  let parsed: ExprNode | null = null;
+  try { parsed = parseExprToNode(text, "", 0); } catch { parsed = null; }
+  if (parsed && hasLostTrailingContent(parsed)) parsed = null;
+  if (parsed && parsed.kind !== "escape-hatch") {
+    try {
+      const before = emitStringFromTree(parsed);
+      const after = emitStringFromTree(substitutePropsInExprNode(parsed, propExprMap, shadowed));
+      return after === before ? text : after;
+    } catch { parsed = null; }
+  }
+  return substituteJsTextOrRefuse(text, false, propExprMap, shadowed);
+}
+
+/**
+ * S458 (third round) — substitute props in JS-shaped source text on its PARSED tree
+ * (`substitutePropsInJsSource`: scope model, Identifier references only, exact node
+ * offsets). A text that does not parse is returned unchanged, and every prop it
+ * references is recorded as UNSUBSTITUTABLE (refused at the end of the expansion).
+ */
+/** Every identifier NAME an ExprNode tree references (lambda parameters not excluded). */
+function exprNodeIdentNames(node: unknown, out: string[] = []): string[] {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) { for (const x of node) exprNodeIdentNames(x, out); return out; }
+  const r = node as Record<string, unknown>;
+  if (r.kind === "ident" && typeof r.name === "string") out.push(r.name);
+  for (const k of Object.keys(r)) {
+    if (k === "span") continue;
+    const v = r[k];
+    if (v && typeof v === "object") exprNodeIdentNames(v, out);
+  }
+  return out;
+}
+
+function substituteJsTextOrRefuse(
+  text: string,
+  asProgram: boolean,
+  propExprMap: Map<string, ExprNode>,
+  shadowed: Set<string>,
+): string {
+  if (!text || propExprMap.size === 0) return text;
+  const hooks = {
+    replacementFor: (name: string) => {
+      const node = propExprMap.get(name);
+      if (!node) return null;
+      const s = emitStringFromTree(node);
+      // A PRIMARY expression keeps its own shape (an assignment target `@cell = …` must
+      // stay one); every other value — an operator expression, a number (`5.x` would not parse),
+      // the absence literal `not` (`not()` would lower as the `not` OPERATOR, S459 r7) — is
+      // grouped so it keeps its own meaning and precedence where it lands.
+      const primary = node.kind === "ident" || node.kind === "member" || node.kind === "call"
+        || node.kind === "index" || node.kind === "array"
+        || (node.kind === "lit" && !["number", "not", "null", "undefined"].includes(String((node as LitExpr).litType)));
+      return primary ? s : `(${s})`;
+    },
+    onWrite: (name: string) => notePropWrite(name),
+  };
+  // A handler value may be a STATEMENT (`if (@r > 0) act()`), not an expression.
+  const out = substitutePropsInJsSource(text, asProgram, shadowed, hooks)
+    ?? (asProgram ? null : substitutePropsInJsSource(text, true, shadowed, hooks));
+  if (out !== null) return out;
+  const referenced = propNamesReferencedInUnparsedText(text, (n) => !shadowed.has(n) && propExprMap.has(n));
+  for (const name of referenced) noteUnsubstitutable(name, text);
+  return text;
 }
 
 /**
@@ -1702,6 +2220,39 @@ function buildPropExprMap(
  * appears to contain a `${...}` segment referencing a prop, but keep the original
  * tree if re-parse fails.
  */
+/**
+ * S458 F2 — which props a component body may WRITE during the expansion in progress.
+ *
+ * §15.11.1: "A bindable prop declares that the component may write back to the
+ * caller's reactive variable through this channel"; §15.13.2: non-`bind` props are
+ * "captured once at mount". So a body write is legal only for a prop the CALLER bound
+ * with `bind:prop=@cell` — decided by the caller's attribute, never by whether the
+ * substituted expression happens to be an `@ident`. Any other written prop is recorded
+ * and `expandComponentNode` refuses it. Set only while `expandComponentNode`
+ * substitutes (CE is single-file, non-reentrant per expansion); `null` elsewhere.
+ */
+let _propWriteCtx: {
+  declared: Set<string>;
+  bound: Set<string>;
+  written: Set<string>;
+  /** S458 third round — props referenced in text that could not be parsed (prop → that text). */
+  unsubstitutable: Map<string, string>;
+} | null = null;
+function notePropWrite(name: string): void {
+  if (!_propWriteCtx) return;
+  if (_propWriteCtx.declared.has(name) && !_propWriteCtx.bound.has(name)) _propWriteCtx.written.add(name);
+}
+function noteUnsubstitutable(name: string, text: string): void {
+  if (!_propWriteCtx) return;
+  if (!_propWriteCtx.unsubstitutable.has(name)) _propWriteCtx.unsubstitutable.set(name, text);
+}
+function noteWriteTarget(target: ExprNode, propExprMap: Map<string, ExprNode>, shadowed: Set<string>): void {
+  if (target && target.kind === "ident") {
+    const nm = (target as IdentExpr).name;
+    if (!shadowed.has(nm) && propExprMap.has(nm)) notePropWrite(nm);
+  }
+}
+
 function substitutePropsInExprNode(
   node: ExprNode,
   propExprMap: Map<string, ExprNode>,
@@ -1740,6 +2291,16 @@ function substitutePropsInExprNode(
         if (rewritten !== eh.raw) {
           return { ...eh, raw: rewritten } satisfies EscapeHatchExpr;
         }
+      }
+      // S458 F4 (third round) — every other escape hatch (a block-bodied arrow or function
+      // expression `x => { … }`, which codegen emits from `raw`; a text the parser could not
+      // structure) is substituted on its PARSED JS tree with a scope model — locals,
+      // parameters (destructured too), `for (let …)` binders, object keys, member names,
+      // string / regex / comment content are never rewritten. A raw that does not parse is
+      // left as written and a prop it references is refused.
+      if (eh.nativeKind !== "TemplateLiteral" && typeof eh.raw === "string" && eh.raw.trim() !== "") {
+        const rewritten = substituteJsTextOrRefuse(eh.raw, false, propExprMap, shadowed);
+        if (rewritten !== eh.raw) return { ...eh, raw: rewritten } satisfies EscapeHatchExpr;
       }
       return eh;
     }
@@ -1785,6 +2346,7 @@ function substitutePropsInExprNode(
     }
     case "unary": {
       const n = node as UnaryExpr;
+      if (n.op === "++" || n.op === "--") noteWriteTarget(n.argument, propExprMap, shadowed);
       return { ...n, argument: substitutePropsInExprNode(n.argument, propExprMap, shadowed) } satisfies UnaryExpr;
     }
     case "binary": {
@@ -1797,6 +2359,7 @@ function substitutePropsInExprNode(
     }
     case "assign": {
       const n = node as AssignExpr;
+      noteWriteTarget(n.target, propExprMap, shadowed);
       return {
         ...n,
         target: substitutePropsInExprNode(n.target, propExprMap, shadowed),
@@ -1852,7 +2415,8 @@ function substitutePropsInExprNode(
         return p;
       });
       const innerShadowed = new Set(shadowed);
-      for (const p of n.params) innerShadowed.add(p.name);
+      // Every name every parameter binds, destructured ones included (binding-names.ts).
+      declareIn(innerShadowed, n.params);
       let newBody: LambdaExpr["body"];
       if (n.body.kind === "expr") {
         newBody = { kind: "expr", value: substitutePropsInExprNode(n.body.value, propExprMap, innerShadowed) };
@@ -1885,16 +2449,12 @@ function substitutePropsInExprNode(
 
 /**
  * F-COMPONENT-004: Rewrite the contents of `${...}` interpolations inside a
- * raw template-literal source text, applying prop-name substitutions to
- * identifier references. The substitution is text-level for simplicity
- * (templates carry raw text); we replace bare identifier reads only.
+ * raw template-literal (or quoted-attribute) source text.
  *
- * Heuristic: for each `${...}` segment, we apply a regex-based substitution
- * that replaces identifier-shaped tokens matching declared props with the
- * emitStringFromTree() of the substituted ExprNode. This is a best-effort
- * rewrite — complex expressions inside `${...}` (e.g. with their own lambdas
- * and shadowing) are not perfectly handled; the substitution is conservative
- * and only replaces bare identifier reads not preceded by `.` (member access).
+ * The scan below only SEGMENTS the text: it finds each top-level `${…}` (respecting
+ * nested braces, quotes and escapes) and leaves the literal spans verbatim. Each
+ * segment's expression is substituted by the structural substituter
+ * (`substituteExprText`, S458) — never by matching prop names in the text.
  */
 function rewriteTemplateInterpolations(
   raw: string,
@@ -1940,7 +2500,9 @@ function rewriteTemplateInterpolations(
         j++;
       }
       const exprText = raw.slice(start, Math.max(start, j - 1));
-      const rewritten = rewriteIdentsInRawExpr(exprText, propExprMap, shadowed);
+      // S458 F1 — each segment through the structural substituter (text fallback
+      // only when the segment does not parse).
+      const rewritten = substituteExprText(exprText, propExprMap, shadowed);
       out.push("${" + rewritten + "}");
       i = j;
       continue;
@@ -1952,121 +2514,60 @@ function rewriteTemplateInterpolations(
 }
 
 /**
- * Rewrite identifier references in a raw expression-text fragment. Replaces
- * bare identifier tokens matching declared props (and not shadowed, not
- * preceded by `.`) with the emit-string form of the substituted ExprNode.
- * This is a token-level pass suitable for template-interpolation contents
- * where re-parse-and-re-emit would risk altering whitespace and semantics.
- *
- * KNOWN HEURISTIC LIMITS (leading-identifier scan, not a full parser — shared
- * with the long-standing template-interpolation caller, so PRE-EXISTING, not new
- * to the when-handler callers; filed as
- * g-component-prop-rawexpr-heuristic-substitution-edges):
- *   - an object-literal KEY equal to a prop name is rewritten (`{label: v}` →
- *     `{<value>: v}`; shorthand `{label}` becomes invalid). It is not
- *     distinguished from a value read.
- *   - a `` ` `` / `"` / `'` inside a REGEX literal (`/["`]/`) is mis-scanned as a
- *     string/template opener.
- *   - an unterminated `${` in the backtick branch appends one spurious `}`.
- * The common cases (`prop`, `x.prop`, `mylabel`, plain-string contents, and a
- * `${prop}` interpolation) are handled correctly. Full parse-hardening is out of
- * scope for the substitution fix.
+ * S458 (fourth round) — a destructuring pattern's DEFAULT values are expressions read in
+ * the enclosing scope (binding-names.ts rule 4). Codegen emits a pattern default from its
+ * `default` source text (emit-destructure-pattern.ts), so the text is substituted (on its
+ * parse — `substituteExprText`), and `defaultExpr` is kept in step for the type system.
  */
-function rewriteIdentsInRawExpr(
-  text: string,
+function substitutePropsInDestructurePattern(
+  pat: unknown,
   propExprMap: Map<string, ExprNode>,
   shadowed: Set<string>,
-): string {
-  // Empty-map early-out (mirrors rewriteTemplateInterpolations): no prop can
-  // match, so the text is returned verbatim.
-  if (!text || propExprMap.size === 0) return text;
-  // \b(name)\b but ensure not preceded by `.` (member access) and not inside a
-  // plain string literal. A backtick TEMPLATE is NOT skipped wholesale — its
-  // `${…}` interpolations carry live expressions we must recurse into.
-  let out = "";
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const ch = text[i];
-    // Skip plain (single/double-quoted) string-literal contents verbatim.
-    if (ch === '"' || ch === "'") {
-      const q = ch;
-      out += ch;
-      i++;
-      while (i < n) {
-        const c = text[i];
-        if (c === "\\") { out += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-        out += c;
-        i++;
-        if (c === q) break;
-      }
-      continue;
+): unknown {
+  if (!pat || typeof pat !== "object") return pat;
+  const r = pat as Record<string, unknown>;
+  const withDefault = (el: Record<string, unknown>): Record<string, unknown> => {
+    let out = el;
+    if (typeof el.default === "string" && el.default.trim() !== "") {
+      const d = substituteExprText(el.default, propExprMap, shadowed);
+      if (d !== el.default) out = { ...out, default: d };
     }
-    // Backtick TEMPLATE: literal spans stay verbatim, but each `${…}`
-    // interpolation is an expression — recurse prop substitution into it.
-    // Without this, a prop referenced ONLY inside a template interpolation in a
-    // handler body (e.g. `send(\`done: ${label}\`)`) leaked as a bare identifier.
-    if (ch === "`") {
-      out += ch;
-      i++;
-      while (i < n) {
-        const c = text[i];
-        if (c === "\\") { out += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-        if (c === "`") { out += c; i++; break; }
-        if (c === "$" && text[i + 1] === "{") {
-          // Collect the interpolation expression, respecting nested braces,
-          // string literals and nested templates, then recurse into it.
-          out += "${";
-          i += 2;
-          let depth = 1;
-          let seg = "";
-          while (i < n && depth > 0) {
-            const d = text[i];
-            if (d === "\\") { seg += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-            if (d === "{") { depth++; seg += d; i++; continue; }
-            if (d === "}") { depth--; if (depth === 0) { i++; break; } seg += d; i++; continue; }
-            if (d === '"' || d === "'" || d === "`") {
-              const q = d; seg += d; i++;
-              while (i < n) {
-                const s = text[i];
-                if (s === "\\") { seg += text.slice(i, Math.min(i + 2, n)); i += 2; continue; }
-                seg += s; i++;
-                if (s === q) break;
-              }
-              continue;
-            }
-            seg += d; i++;
-          }
-          out += rewriteIdentsInRawExpr(seg, propExprMap, shadowed) + "}";
-          continue;
-        }
-        out += c;
-        i++;
-      }
-      continue;
+    if (el.defaultExpr && typeof el.defaultExpr === "object") {
+      out = { ...out, defaultExpr: substitutePropsInExprNode(el.defaultExpr as ExprNode, propExprMap, shadowed) };
     }
-    // Identifier start (incl. @ for reactive vars)
-    if (/[A-Za-z_$@]/.test(ch)) {
-      let j = i;
-      // Allow leading @ then ident chars
-      if (ch === "@") j++;
-      while (j < n && /[A-Za-z0-9_$]/.test(text[j])) j++;
-      const word = text.slice(i, j);
-      // Check predecessor: skip if preceded by `.` (member access)
-      let k = out.length - 1;
-      while (k >= 0 && /\s/.test(out[k])) k--;
-      const precededByDot = k >= 0 && out[k] === ".";
-      if (!precededByDot && !shadowed.has(word) && propExprMap.has(word)) {
-        const sub = propExprMap.get(word) as ExprNode;
-        out += emitStringFromTree(sub);
-      } else {
-        out += word;
-      }
-      i = j;
-      continue;
+    if (el.kind === "nested" && el.pattern) {
+      out = { ...out, pattern: substitutePropsInDestructurePattern(el.pattern, propExprMap, shadowed) };
     }
-    out += ch;
-    i++;
+    return out;
+  };
+  if (r.kind === "destructure-array" && Array.isArray(r.elements)) {
+    return { ...r, elements: (r.elements as Record<string, unknown>[]).map((e) => (e && typeof e === "object" ? withDefault(e) : e)) };
+  }
+  if (r.kind === "destructure-object" && Array.isArray(r.properties)) {
+    return { ...r, properties: (r.properties as Record<string, unknown>[]).map((e) => (e && typeof e === "object" ? withDefault(e) : e)) };
+  }
+  return pat;
+}
+
+/**
+ * S458 (fourth round) — one function-declaration parameter entry: its default (`n = k`,
+ * read in the parameter scope) and any destructuring defaults are substituted; the names
+ * it binds are never rewritten.
+ */
+function substitutePropsInParamEntry(
+  p: unknown,
+  propExprMap: Map<string, ExprNode>,
+  paramScope: Set<string>,
+): unknown {
+  if (!p || typeof p !== "object") return p;
+  const e = p as Record<string, unknown>;
+  let out = e;
+  if (typeof e.defaultValue === "string" && e.defaultValue.trim() !== "") {
+    const d = substituteExprText(e.defaultValue, propExprMap, paramScope);
+    if (d !== e.defaultValue) out = { ...out, defaultValue: d };
+  }
+  if (e.name && typeof e.name === "object") {
+    out = { ...out, name: substitutePropsInDestructurePattern(e.name, propExprMap, paramScope) };
   }
   return out;
 }
@@ -2143,10 +2644,10 @@ const WHEN_HANDLER_DEFAULT_BINDING: Record<string, string | undefined> = {
 
 /**
  * Substitute component prop refs into a bodyRaw-emitting `when …` handler node.
- * Rewrites `bodyRaw` (the string codegen actually emits) via
- * `rewriteIdentsInRawExpr` — leading-identifier discipline (`label`→caller
- * value; `x.label` / `mylabel` / plain-string contents untouched; `${…}`
- * template interpolations recursed into). The handler binding shadows a
+ * Rewrites `bodyRaw` (the string codegen actually emits) on its PARSED tree
+ * (`substituteJsTextOrRefuse`, S458: scope model, Identifier references only; a body
+ * that does not parse is left as written and a prop it references is refused). The
+ * handler binding shadows a
  * same-named prop — the EXPLICIT binding when present, else the default name
  * codegen will synthesize (WHEN_HANDLER_DEFAULT_BINDING), so a prop named
  * `data` / `e` under an omitted binding does not clobber the handler parameter.
@@ -2164,7 +2665,7 @@ function substitutePropsInWhenHandler(
   const boundName = n.binding ?? WHEN_HANDLER_DEFAULT_BINDING[n.kind];
   if (boundName) inner.add(boundName);
   const nextRaw = typeof n.bodyRaw === "string"
-    ? rewriteIdentsInRawExpr(n.bodyRaw, propExprMap, inner)
+    ? substituteJsTextOrRefuse(n.bodyRaw, true, propExprMap, inner)
     : n.bodyRaw;
   const nextExpr = n.bodyExpr ? substitutePropsInExprNode(n.bodyExpr, propExprMap, inner) : n.bodyExpr;
   return { ...(stmt as object), bodyRaw: nextRaw, bodyExpr: nextExpr } as unknown as LogicStatement;
@@ -2206,15 +2707,18 @@ function substitutePropsInLogicStmt(
       const n = stmt as LetDeclNode | ConstDeclNode | TildeDeclNode | LinDeclNode | ReactiveDeclNode;
       const newInit = subInExpr(n.initExpr);
       const newNode = { ...n, initExpr: newInit } as typeof n;
-      // After this declaration, the name shadows any same-named prop for subsequent stmts.
-      // Reactive vars use @-prefix; we add both forms to be safe (if prop name is `count`,
-      // a `@count` reactive declaration shadows further refs).
+      // A destructuring pattern's DEFAULTS are expressions read in the enclosing scope
+      // (binding-names.ts rule 4) — substituted before the pattern's names shadow.
+      if (n.name && typeof n.name === "object") {
+        (newNode as { name: unknown }).name = substitutePropsInDestructurePattern(n.name, propExprMap, shadowed);
+      }
+      // After this declaration, every name it binds — a plain name or every name of a
+      // destructuring pattern, nested / renamed / rest included (binding-names.ts, the
+      // SAME answer the JS-text substituter uses) — shadows a same-named prop for the
+      // statements that follow (§15.10.1). A reactive `@count` shadows `@count`.
       if (n.name) {
-        if (n.kind === "state-decl") {
-          shadowed.add("@" + n.name);
-        } else {
-          shadowed.add(n.name);
-        }
+        if (n.kind === "state-decl" && typeof n.name === "string") shadowed.add("@" + n.name);
+        else declareIn(shadowed, n.name);
       }
       return newNode;
     }
@@ -2231,17 +2735,17 @@ function substitutePropsInLogicStmt(
     }
     case "function-decl": {
       const n = stmt as FunctionDeclNode;
-      // Function params shadow props inside the body.
-      const innerShadowed = new Set(shadowed);
-      for (const p of n.params ?? []) {
-        // Param strings may be "name" or "name: Type" or "name = default"
-        const m = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(p);
-        if (m) innerShadowed.add(m[1]);
-      }
-      const newBody = substitutePropsInLogicStmts(n.body, propExprMap, innerShadowed);
-      // The function name shadows props in subsequent statements.
+      // The function's own name shadows from its header on, its body included
+      // (binding-names.ts rule 1).
       if (n.name) shadowed.add(n.name);
-      return { ...n, body: newBody } satisfies FunctionDeclNode;
+      // Every name every parameter binds — a parameter entry is a name, a `{ name:
+      // DestructurePattern }` entry, or source text (binding-names.ts) — shadows the prop
+      // in the body and in the parameter defaults (rule 2).
+      const innerShadowed = new Set(shadowed);
+      declareIn(innerShadowed, n.params ?? []);
+      const newParams = (n.params ?? []).map((p) => substitutePropsInParamEntry(p, propExprMap, innerShadowed));
+      const newBody = substitutePropsInLogicStmts(n.body, propExprMap, innerShadowed);
+      return { ...n, params: newParams as typeof n.params, body: newBody } satisfies FunctionDeclNode;
     }
     case "if-stmt":
     case "if-expr": {
@@ -2258,10 +2762,16 @@ function substitutePropsInLogicStmt(
       const n = stmt as ForExprNode | ForStmtNode;
       // Loop variable shadows props inside the body.
       const innerShadowed = new Set(shadowed);
-      if ((n as ForStmtNode).variable) innerShadowed.add((n as ForStmtNode).variable);
+      // A plain or destructured loop variable (binding-names.ts rule 3).
+      const loopVar = (n as ForStmtNode).variable;
+      if (loopVar) declareIn(innerShadowed, loopVar);
+      // S458 N2 — a C-style header's own binder (`for (let n = 0; n < 3; n++)`) shadows
+      // the prop in the header and the body; read from the parsed header.
+      const header = (n as ForStmtNode & { iterable?: string }).iterable;
+      if (typeof header === "string") for (const b of bindingNamesOfForHeader(header)) innerShadowed.add(b);
       const cStyle = (n as ForStmtNode).cStyleParts;
       const newCStyle = cStyle ? {
-        initExpr: substitutePropsInExprNode(cStyle.initExpr, propExprMap, shadowed),
+        initExpr: substitutePropsInExprNode(cStyle.initExpr, propExprMap, innerShadowed),
         condExpr: substitutePropsInExprNode(cStyle.condExpr, propExprMap, innerShadowed),
         updateExpr: substitutePropsInExprNode(cStyle.updateExpr, propExprMap, innerShadowed),
       } : undefined;
@@ -2345,16 +2855,21 @@ function substitutePropsInLogicStmt(
     }
     case "lift-expr": {
       const n = stmt as LiftExprNode;
-      // LiftTarget can be inline markup or an expression; we only walk the expr case.
-      // Markup target case is handled by recursion into MarkupNode children via substituteProps.
+      // S458 (fourth round, F9) — a lift TARGET is substituted HERE, in the statement's
+      // scope (a `for` binder / local named like a prop shadows it in the lifted markup).
+      // LiftTarget = `{ kind: "markup", node }` | `{ kind: "expr", expr, exprNode? }`.
       const tgt = (n as any).expr;
+      if (tgt && typeof tgt === "object" && tgt.kind === "markup" && tgt.node && typeof tgt.node === "object") {
+        return { ...n, expr: { ...tgt, node: substitutePropsInMarkupFromStmt(tgt.node as ASTNode, propExprMap, shadowed) } } as LiftExprNode;
+      }
+      if (tgt && typeof tgt === "object" && tgt.kind === "expr") {
+        const next: Record<string, unknown> = { ...tgt };
+        if (tgt.exprNode) next.exprNode = substitutePropsInExprNode(tgt.exprNode as ExprNode, propExprMap, shadowed);
+        if (typeof tgt.expr === "string" && tgt.expr.trim() !== "") next.expr = substituteExprText(tgt.expr, propExprMap, shadowed);
+        return { ...n, expr: next } as unknown as LiftExprNode;
+      }
       if (tgt && typeof tgt === "object" && tgt.kind && (tgt.kind === "ident" || tgt.kind === "lit" || tgt.kind === "binary" || tgt.kind === "call" || tgt.kind === "member" || tgt.kind === "lambda" || tgt.kind === "ternary")) {
         return { ...n, expr: substitutePropsInExprNode(tgt as ExprNode, propExprMap, shadowed) } as LiftExprNode;
-      }
-      // Otherwise recurse via substituteProps for the markup-target case
-      if (tgt && typeof tgt === "object" && tgt.kind === "markup") {
-        // We need access to the (string) props for markup recursion; the caller
-        // (substituteProps) will handle this case via its array-walk fallback.
       }
       return n;
     }
@@ -2380,7 +2895,7 @@ function substitutePropsInLogicStmt(
             }
             return {
               ...(arm as object),
-              ...(typeof a.handler === "string" ? { handler: rewriteIdentsInRawExpr(a.handler, propExprMap, armShadowed) } : {}),
+              ...(typeof a.handler === "string" ? { handler: substituteJsTextOrRefuse(a.handler, true, propExprMap, armShadowed) } : {}),
               ...(a.handlerExpr ? { handlerExpr: substitutePropsInExprNode(a.handlerExpr, propExprMap, armShadowed) } : {}),
             } as typeof arm;
           })
@@ -2432,10 +2947,10 @@ function substitutePropsInLogicStmt(
       } satisfies TransactionBlockNode;
     }
     case "markup":
-      // Defer to substituteProps for markup nodes that appear as logic-body children.
-      // We do not have the (string) props map here — return as-is; the outer
-      // substituteProps walker will descend into markup via its array-walk fallback.
-      return stmt;
+    case "state":
+      // A markup node that is a logic-body child (at any depth — an `if` / `for` body
+      // included) is substituted in the statement's scope (S458 fourth round).
+      return substitutePropsInMarkupFromStmt(stmt as unknown as ASTNode, propExprMap, shadowed) as unknown as LogicStatement;
     case "meta": {
       const n = stmt as MetaNode;
       return {
@@ -2462,9 +2977,27 @@ function substitutePropsInLogicStmt(
 function substituteProps(
   node: ASTNode,
   props: Map<string, string>,
-  propExprMap?: Map<string, ExprNode>,
+  propExprMap: Map<string, ExprNode> | undefined,
+  // REQUIRED (S459 round 6): every entry passes the scope it substitutes in, so no
+  // caller can silently start a fresh empty scope.
+  bodyScope: Set<string>,
 ): ASTNode {
   if (!node || typeof node !== "object") return node;
+  // S459 H1 — ONE component scope. `bodyScope` holds every name declared so far, in
+  // source order, at component-body scope (the top level of any `${}` block in the
+  // body). §15.10.1: "From the point of declaration onward in the same scope, the
+  // local binding shadows the prop", and markup after a component logic block is
+  // the SAME scope (§15.10.1's Greeter example reads `greeting` in later markup).
+  // So a shadowed prop is ABSENT from the maps for this node and everything under it
+  // — later `${}` blocks, text interpolation, attribute values, handler expressions,
+  // lifted markup — and §15.11.1 "A local declaration, parameter or loop binder named
+  // like the prop is not the prop … and is writable" holds by construction (a write
+  // to it is never recorded as a prop write, never lowered onto the caller's cell).
+  if (bodyScope.size > 0) {
+    const scoped = scopedPropMaps(props, propExprMap, bodyScope);
+    props = scoped.props;
+    propExprMap = scoped.propExprMap;
+  }
   // g-each-component-body-invalid-js (STEP 2-B): also proceed when only the
   // ExprNode map is populated. Expression-valued props (call-ref / member chain)
   // never enter the string `props` map, so a component whose ONLY prop is
@@ -2477,7 +3010,9 @@ function substituteProps(
 
   // Text nodes: substitute in value
   if (cloned.kind === "text") {
-    const newVal = applyPropSubstitutions((cloned.value as string) ?? "", props);
+    // A whole `${name}` segment is spliced as TEXT only for a LITERAL prop value (S458): a
+    // reactive / expression value spliced as text would be its source spelling.
+    const newVal = applyPropSubstitutions((cloned.value as string) ?? "", attrTextPropMaps(props, propExprMap).literal);
     if (newVal !== cloned.value) {
       cloned.value = newVal;
     }
@@ -2499,21 +3034,25 @@ function substituteProps(
         // parameter, which the substitution respects.
         const props = outerProps;
         const propExprMap = outerPropExprMap;
+        const literalProps = attrTextPropMaps(outerProps, outerPropExprMap).literal;
         if (attr.value.kind === "string-literal") {
-          // First the whole-prop-name `${name}` substitution (string values).
-          let newVal = applyPropSubstitutions(attr.value.value, props);
+          // First the whole-prop-name `${name}` substitution — LITERAL values only
+          // (S458 "D1": a reactive / expression value is rewritten inside its `${…}`
+          // segment below and stays an interpolation, never spliced as source text).
+          let newVal = applyPropSubstitutions(attr.value.value, literalProps);
           // g-each-inline-component-prop-member-unsubstituted (Approach B, step 1):
           // a string-literal markup attr may carry `${expr}` interpolations whose
           // expr references a prop as a member-access BASE (`href="/x/${load.id}"`)
           // or a call-arg (root `class="pill ${cls(status)}"`). The whole-name pass
           // above only rewrites a bare `${load}`. Substitute prop refs as LEADING
           // identifiers INSIDE each `${...}` segment (leaving `.field` tails, sigil
-          // members, and longer-identifier substrings alone — same discipline as
-          // substitutePropsInRawExpr). The for-arg cascade (`load`->`l`, then the
-          // transitive Badge's `status`->`load.status`->`l.status`) flows through
-          // the OUTER-FIRST walkAndExpand order. The raw `${}` still ships literal
-          // out of CE; the loop markup emitters (emit-lift / emit-each) lower it.
-          newVal = substituteInterpSegments(newVal, props);
+          // members, and longer-identifier substrings alone). S458 F1: each segment
+          // goes through the STRUCTURAL substituter (parsed, one simultaneous pass,
+          // string-literal content untouched, precedence kept). The for-arg cascade
+          // (`load`->`l`, then the transitive Badge's `status`->`load.status`->`l.status`)
+          // flows through the OUTER-FIRST walkAndExpand order. The raw `${}` still ships
+          // literal out of CE; the loop markup emitters (emit-lift / emit-each) lower it.
+          newVal = substituteInterpSegments(newVal, propExprMap);
           if (newVal !== attr.value.value) {
             return { ...attr, value: { ...attr.value, value: newVal } };
           }
@@ -2530,6 +3069,27 @@ function substituteProps(
         // handler arg, conditional, or bind target.
         if (propExprMap && attr.value.kind === "call-ref") {
           const callVal = attr.value as { name: string; args: string[]; argExprNodes?: ExprNode[]; span: ExprSpan };
+          // S459 M2 — the CALLEE of the bare event-attribute call form is a prop reference
+          // too: `<button onclick=onDismiss()>` with `props={ onDismiss: () => void }`
+          // (§15.11.4's own example) calls the CALLER's value. It goes through the same
+          // structural map as every other prop read — no text fallback, no second reader:
+          // a plain-name value stays a call-ref to that name (lowered exactly as if the
+          // body had written `onclick=handleDismiss()`); any other value becomes an `expr`
+          // whose tree is the call with the substituted callee.
+          const calleeProp = typeof callVal.name === "string" ? propExprMap.get(callVal.name) : undefined;
+          if (calleeProp) {
+            const argNodes0 = Array.isArray(callVal.argExprNodes) ? callVal.argExprNodes : [];
+            const newArgNodes0 = argNodes0.map((a) => substitutePropsInExprNode(a, propExprMap, new Set()));
+            const newArgs0 = newArgNodes0.length === (callVal.args ?? []).length
+              ? newArgNodes0.map((a) => emitStringFromTree(a as ExprNode))
+              : callVal.args;
+            if (calleeProp.kind === "ident" && /^[A-Za-z_$][\w$]*$/.test((calleeProp as IdentExpr).name)) {
+              return { ...attr, value: { ...callVal, name: (calleeProp as IdentExpr).name, args: newArgs0, argExprNodes: newArgNodes0 } };
+            }
+            const span0 = callVal.span ?? (calleeProp as { span?: ExprSpan }).span;
+            const callNode = { kind: "call", span: span0, callee: calleeProp, args: newArgNodes0, optional: false } as unknown as ExprNode;
+            return { ...attr, value: { kind: "expr", raw: emitStringFromTree(callNode), refs: [], exprNode: callNode, span: callVal.span } };
+          }
           const argNodes = callVal.argExprNodes;
           if (Array.isArray(argNodes) && argNodes.length > 0) {
             let changed = false;
@@ -2560,6 +3120,22 @@ function substituteProps(
           const bareName = varVal.name.startsWith("@") ? varVal.name.slice(1) : varVal.name;
           if (propExprMap.has(bareName)) {
             const propExpr = propExprMap.get(bareName)!;
+            // §15.11.1 (S458): a body `bind:value=value` forwarding a bindable prop
+            // whose caller BOUND it (`bind:value=@text`) stays a `bind:` to that CELL
+            // (a variable-ref `@text`), so the element's two-way binding writes the
+            // caller's cell — not an expression, which `bind:` rejects (E-ATTR-010).
+            // F2: decided by the CALLER's attribute — a `bind:` on a by-value prop is a
+            // body WRITE to it, recorded and refused (`expandComponentNode`).
+            if (typeof attr.name === "string" && attr.name.startsWith("bind:")) {
+              notePropWrite(bareName);
+              if (
+                _propWriteCtx && _propWriteCtx.bound.has(bareName)
+                && propExpr.kind === "ident" && typeof (propExpr as IdentExpr).name === "string"
+                && (propExpr as IdentExpr).name.startsWith("@")
+              ) {
+                return { ...attr, value: { ...varVal, name: (propExpr as IdentExpr).name, exprNode: propExpr } };
+              }
+            }
             let raw = "";
             try {
               raw = emitStringFromTree(propExpr);
@@ -2599,21 +3175,17 @@ function substituteProps(
           // -> IdentExpr `l` => `l.status`; string prop `row="x"` -> LitExpr "x" =>
           // `"x".name`). Only commit when the substitution actually changed the leading
           // identifier — a plain free identifier (no matching prop) is left untouched.
-          if (substitutePropsInRawExpr(varVal.name, props) !== varVal.name) {
-            try {
-              const parsed = parseExprToNode(varVal.name, filePath ?? "", varVal.span?.start ?? 0);
-              const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
-              const raw = emitStringFromTree(replaced);
-              if (raw !== varVal.name) {
-                return { ...attr, value: { kind: "expr", raw, refs: [], exprNode: replaced, span: varVal.span } };
+          // S458 F1: detection and rewrite are both structural (`substituteExprText`).
+          {
+            const subbed = substituteExprText(varVal.name, propExprMap, new Set());
+            if (subbed !== varVal.name) {
+              let parsed: ExprNode | null = null;
+              try { parsed = parseExprToNode(varVal.name, filePath ?? "", varVal.span?.start ?? 0); } catch { parsed = null; }
+              if (parsed && parsed.kind !== "escape-hatch") {
+                const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
+                return { ...attr, value: { kind: "expr", raw: subbed, refs: [], exprNode: replaced, span: varVal.span } };
               }
-            } catch (_e) {
-              // Parse/emit failure — fall back to the leading-identifier raw rewrite
-              // (still better than leaving the prop unsubstituted).
-              const subbed = substitutePropsInRawExpr(varVal.name, props);
-              if (subbed !== varVal.name) {
-                return { ...attr, value: { ...varVal, name: subbed } };
-              }
+              return { ...attr, value: { ...varVal, name: subbed } };
             }
           }
         }
@@ -2650,57 +3222,34 @@ function substituteProps(
           // downstream consumes it as the member-access base. When an exprNode is
           // present the structured path above already handled it.
           if (!exprVal.exprNode && typeof exprVal.raw === "string") {
-            // g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot (S378-peter).
-            // This is an EXPRESSION context. The legacy raw-text rewrite below splices a
-            // STRING-LITERAL prop's value as a BARE identifier (`note`->`present`), which
-            // is a ReferenceError that throws in `_scrml_boot` and silently kills the
-            // whole page (exit 0 at compile). It cannot simply be quoted in the text,
-            // either: a §42 predicate lowering downstream (`is some` -> `!== null`) is a
-            // text transform keyed on an identifier LHS, so `"present" is some` survives
-            // literally into invalid JS.
+            // S458 F1 — ONE structural substituter (`substituteExprText`): parsed with
+            // scrml's §42-aware parser, identifier nodes replaced in one simultaneous
+            // pass, string-literal content untouched, precedence structural; a raw that
+            // does not parse is left as written and a prop it references is refused.
             //
-            // When — and ONLY when — a string-literal prop actually appears in this raw,
-            // route through the STRUCTURED path: parse with scrml's own §42-aware parser
-            // (it models `is some`/`==`/member as nodes and constant-folds a literal
-            // operand), substitute at the node level, and attach the exprNode so the
-            // if=/show= emitter lowers from the node — the string prop becomes the quoted
-            // literal / folded predicate rather than a bare identifier. Every other case
-            // (var / member / call props, incl. the loop-emitter raws with `@.` sigils
-            // this branch was built for) keeps the byte-identical legacy raw rewrite.
-            let usedStructured = false;
-            const stringPropInRaw = (() => {
-              if (!propExprMap) return false;
-              for (const [name, node] of propExprMap.entries()) {
-                if (!name || !node || node.kind !== "lit" || (node as LitExpr).litType !== "string") continue;
-                const re = new RegExp(`(^|[^.A-Za-z0-9_$])(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![A-Za-z0-9_$])`);
-                if (re.test(exprVal.raw)) return true;
-              }
-              return false;
-            })();
-            if (stringPropInRaw) {
+            // g-string-prop-in-is-some-lowers-to-bare-identifier-kills-boot (S378-peter):
+            // when a STRING-LITERAL prop is referenced, the substituted exprNode is
+            // attached so the if=/show= emitter lowers from the node (a §42 predicate
+            // lowering is a text transform keyed on an identifier LHS, so the quoted
+            // literal must not reach it as text). Every other case updates `raw` only,
+            // which the loop emitters consume as before.
+            const subbed = substituteExprText(exprVal.raw, propExprMap, new Set());
+            if (subbed !== exprVal.raw) {
+              // Does the raw REFERENCE a string-literal prop? Answered from the parsed
+              // tree's identifier nodes, not from the text.
               let parsed: ExprNode | null = null;
               try { parsed = parseExprToNode(exprVal.raw, exprVal.span?.file ?? "", exprVal.span?.start ?? 0); } catch { parsed = null; }
-              if (parsed && parsed.kind !== "escape-hatch") {
-                // Route through the structured path whenever a string prop name appears
-                // in the raw — including when it only appears INSIDE a string literal.
-                // substitutePropsInExprNode leaves string-literal nodes untouched, so a
-                // non-reference like `("has note here")` (prop `note`) round-trips
-                // verbatim; the legacy raw rewrite below would instead rewrite the word
-                // inside the string (`note`->`x`) and emit a double-paren bare splice.
-                // The structured path is therefore the SAFE lowering for this shape, not
-                // just the primary `title=(label)` identifier case (S239 #2544/#2547).
-                const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
-                let raw = exprVal.raw;
-                try { raw = emitStringFromTree(replaced); } catch { /* keep original */ }
-                usedStructured = true;
-                return { ...attr, value: { ...exprVal, raw, exprNode: replaced } };
+              if (parsed && parsed.kind !== "escape-hatch" && !hasLostTrailingContent(parsed)) {
+                const refsStringProp = exprNodeIdentNames(parsed).some((name) => {
+                  const v = propExprMap.get(name);
+                  return !!v && v.kind === "lit" && (v as LitExpr).litType === "string";
+                });
+                if (refsStringProp) {
+                  const replaced = substitutePropsInExprNode(parsed, propExprMap, new Set());
+                  return { ...attr, value: { ...exprVal, raw: subbed, exprNode: replaced } };
+                }
               }
-            }
-            if (!usedStructured) {
-              const subbed = substitutePropsInRawExpr(exprVal.raw, props);
-              if (subbed !== exprVal.raw) {
-                return { ...attr, value: { ...exprVal, raw: subbed } };
-              }
+              return { ...attr, value: { ...exprVal, raw: subbed } };
             }
           }
         }
@@ -2708,7 +3257,11 @@ function substituteProps(
       });
     }
     if (Array.isArray(cloned.children)) {
-      cloned.children = (cloned.children as ASTNode[]).map((child: ASTNode) => substituteProps(child, props, propExprMap));
+      // Children in SOURCE ORDER through the one component scope (S459 H1): a child
+      // logic block's top-level declarations shadow for every later sibling and its
+      // subtree. A plain element creates no scope (outside a component, too, a `${}`
+      // declaration inside a nested element is read by later markup at file scope).
+      cloned.children = (cloned.children as ASTNode[]).map((child: ASTNode) => substituteProps(child, props, propExprMap, bodyScope));
     }
     return cloned as unknown as ASTNode;
   }
@@ -2717,23 +3270,17 @@ function substituteProps(
   // inside ExprNode subtrees. Without this, identifier references to props inside
   // logic-block bodies would error at TS as undeclared.
   if (cloned.kind === "logic" && propExprMap && Array.isArray(cloned.body)) {
-    const newBody = substitutePropsInLogicStmts(
-      cloned.body as LogicStatement[],
-      propExprMap,
-      new Set<string>(),
-    );
+    // The block's top level IS component-body scope (S459 H1): the names its statements
+    // declare (let / const / tilde / lin / `@` / function, any pattern — binding-names.ts)
+    // are carried out into `bodyScope` for everything after the block. Nested scopes
+    // (function bodies, `if` / `for` bodies, lambdas) stay inside the statement walker.
+    const blockScope = new Set<string>(bodyScope);
+    const newBody = (cloned.body as LogicStatement[]).map((stmt) =>
+      substitutePropsInLogicStmt(stmt, propExprMap!, blockScope));
+    for (const name of blockScope) bodyScope.add(name);
+    // Markup body items and `lift` targets are substituted by the statement walker, in
+    // their statement's scope (S458 fourth round).
     cloned.body = newBody;
-    // Also recurse into any markup children embedded as body items (e.g. lift target markup)
-    cloned.body = (cloned.body as LogicStatement[]).map((item: any) => {
-      if (item && typeof item === "object" && (item.kind === "markup" || item.kind === "state")) {
-        return substituteProps(item as ASTNode, props, propExprMap) as LogicStatement;
-      }
-      // Lift-expr with markup target: descend into the markup
-      if (item && item.kind === "lift-expr" && item.expr && typeof item.expr === "object" && (item.expr.kind === "markup" || item.expr.kind === "state")) {
-        return { ...item, expr: substituteProps(item.expr as ASTNode, props, propExprMap) } as LogicStatement;
-      }
-      return item;
-    });
     return cloned as unknown as ASTNode;
   }
 
@@ -2757,25 +3304,38 @@ function substituteProps(
   //   at module scope). Substitute the prop into those string fields here, then
   //   fall through to the generic array-recursion for the child node lists.
   if (cloned.kind === "each-block" || cloned.kind === "match-block") {
-    for (const field of ["inExprRaw", "ofExprRaw", "keyExprRaw", "asName", "onExprRaw"]) {
+    // S458 (fourth round, F7) — `<each … as x>`: `x` is a DECLARATION (the item binder).
+    // It is never substituted, and inside the each body (and its `key=`, read per item)
+    // it shadows a same-named prop (binding-names.ts rule 3). `in=` / `of=` are read in
+    // the enclosing scope.
+    const binder = cloned.kind === "each-block" && typeof cloned.asName === "string" ? boundNamesOf(cloned.asName) : [];
+    const inner = scopedPropMaps(props, propExprMap, binder);
+    for (const field of ["inExprRaw", "ofExprRaw", "keyExprRaw", "onExprRaw"]) {
       const cur = cloned[field];
       if (typeof cur === "string" && cur.length > 0) {
-        const sub = substitutePropsInRawExpr(cur, props);
+        // S458 F1: the expression fields go through the structural substituter
+        // (an expression-valued caller `items=${@list}` is in `propExprMap` only).
+        const map = field === "keyExprRaw" ? inner.propExprMap : propExprMap;
+        const sub = map && map.size > 0 ? substituteExprText(cur, map, new Set()) : cur;
         if (sub !== cur) cloned[field] = sub;
       }
     }
-    // Recurse into the structural child node lists + the optional <empty> child.
+    // Recurse into the structural child node lists + the optional <empty> child. An
+    // each body / each match arm is its OWN scope (S459 H1): it sees the component scope
+    // so far, and a declaration inside it does not escape to later siblings — a copy of
+    // the set per body (and per arm), never the set itself.
     for (const key of ["templateChildren", "bodyChildren", "arms"]) {
       if (Array.isArray(cloned[key])) {
+        const listScope = new Set<string>(bodyScope);
         cloned[key] = (cloned[key] as unknown[]).map((item: unknown) =>
           item && typeof item === "object" && (item as Record<string, unknown>).kind
-            ? substituteProps(item as ASTNode, props, propExprMap)
+            ? substituteProps(item as ASTNode, inner.props, inner.propExprMap, key === "arms" ? new Set(bodyScope) : listScope)
             : item,
         );
       }
     }
     if (cloned.emptyChild && typeof cloned.emptyChild === "object" && (cloned.emptyChild as Record<string, unknown>).kind) {
-      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap);
+      cloned.emptyChild = substituteProps(cloned.emptyChild as ASTNode, props, propExprMap, new Set(bodyScope));
     }
     return cloned as unknown as ASTNode;
   }
@@ -2786,7 +3346,7 @@ function substituteProps(
     if (Array.isArray(cloned[key])) {
       cloned[key] = (cloned[key] as unknown[]).map((item: unknown) => {
         if (item && typeof item === "object" && (item as Record<string, unknown>).kind) {
-          return substituteProps(item as ASTNode, props, propExprMap);
+          return substituteProps(item as ASTNode, props, propExprMap, bodyScope);
         }
         return item;
       });
@@ -2794,35 +3354,6 @@ function substituteProps(
   }
 
   return cloned as unknown as ASTNode;
-}
-
-/**
- * each-in-enclosing-scope (S153) — substitute prop references inside a structural
- * raw-expression string (an each-block's `in=`/`of=`/`key=`/`as=` value, or a
- * match-block's `on=` value).
- *
- * `props` maps prop-name → caller value (e.g. `items` → `@todos`). We replace
- * each prop name appearing as a STANDALONE leading identifier with its caller
- * value, so `items` → `@todos` and `items.foo` → `@todos.foo`, but NOT:
- *   - a member-access tail (`x.items` keeps `.items` — `items` there is a field),
- *   - the contextual sigil member (`@.items` keeps `.items`),
- *   - a substring of a longer identifier (`myitems` is untouched).
- *
- * The negative-lookbehind on `.`/word-char + word-boundary trailing edge gives
- * exactly that. Conservative — when no prop matches, the string is returned as-is.
- */
-function substitutePropsInRawExpr(raw: string, props: Map<string, string>): string {
-  if (!raw || props.size === 0) return raw;
-  let out = raw;
-  for (const [name, value] of props.entries()) {
-    if (!name) continue;
-    // Match `name` as a standalone leading identifier: not preceded by `.` or a
-    // word char (so `@.name` / `x.name` / `myname` are excluded), and followed by
-    // a non-ident char or end (so the full identifier is `name`, not `nameX`).
-    const re = new RegExp(`(^|[^.A-Za-z0-9_$])(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![A-Za-z0-9_$])`, "g");
-    out = out.replace(re, (_m, pre) => `${pre}${value}`);
-  }
-  return out;
 }
 
 
@@ -2983,6 +3514,21 @@ function expandComponentNode(
       }
       continue;
     }
+    // §15.11.1 `bind:propName=@var` (S458): the bindable prop IS the caller's cell
+    // inside the body — every read AND write of `propName` is substituted with `@var`,
+    // so `visible = false` in a body handler writes `@showModal` and reads stay
+    // reactive. (Keyed by the PROP name; a plain `bind:` value is E-ATTR-010.)
+    if (attr.name.startsWith("bind:")) {
+      if (attr.value && attr.value.kind === "variable-ref" && attr.value.name.startsWith("@")) {
+        props.set(attr.name.slice(5), attr.value.name);
+      } else if (attr.value && attr.value.kind !== "absent") {
+        // S458 (fourth round, N1) — a bind target that is not a cell is refused ONCE, below
+        // (E-ATTR-010). For recovery the prop reads as absent (`not`) in the body, so the
+        // refusal is not followed by cascading "undeclared `n`" diagnostics.
+        props.set(attr.name.slice(5), "null");
+      }
+      continue;
+    }
     // For other attributes: extract string value for prop substitution
     if (attr.value && attr.value.kind === "string-literal") {
       props.set(attr.name, attr.value.value);
@@ -3122,8 +3668,46 @@ function expandComponentNode(
             "E-COMPONENT-010",
             `E-COMPONENT-010: Required prop \`${decl.name}\` (type: ${decl.type}) is missing ` +
             `at \`<${componentName}/>\` call site. ` +
-            `Declare it as \`${decl.name}="value"\` on the call site.`,
+            // S459 round 6 (L4) — a `bind` prop is supplied by binding a cell, not a value.
+            (decl.bindable
+              ? `Bind it at the call site: \`<${componentName} bind:${decl.name}=@cell/>\`.`
+              : `Declare it as \`${decl.name}="value"\` on the call site.`),
             node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+      }
+
+      // S459 round 6 (F4) — §15.11.4: "The compiler SHALL verify at the call site that the
+      // value provided for a function-typed prop is assignable to the declared function
+      // signature. A type mismatch SHALL be E-TYPE-031." A LITERAL (string / number /
+      // boolean / array / object) is never a function; a name or other expression is
+      // judged downstream (its type is not known here).
+      for (const attr of callerAttrs) {
+        if (!attr || !attr.name || !attr.value) continue;
+        const decl = propsDecl.find((p: PropDecl) => p.name === attr.name);
+        if (!decl || decl.isSnippet || !isFunctionType(decl.type)) continue;
+        const v = attr.value as { kind: string; value?: string; exprNode?: ExprNode; raw?: string };
+        let litShown: string | null = null;
+        // S459 round 7 — `not` inhabits an OPTIONAL function prop's type (`fn | not`,
+        // §15.11.4: an omitted optional prop "SHALL have value `not`"), so passing it is
+        // admitted there; a required function prop does not admit it.
+        const isNotValue = (v.kind === "expr" && v.exprNode && v.exprNode.kind === "lit"
+            && ["not", "null", "undefined"].includes(String((v.exprNode as LitExpr).litType)))
+          || (v.kind === "variable-ref" && (v as { name?: string }).name === "not");
+        if (isNotValue && decl.optional) continue;
+        if (isNotValue) litShown = "not";
+        else if (v.kind === "string-literal") litShown = `"${v.value ?? ""}"`;
+        else if (v.kind === "expr" && v.exprNode
+          && (v.exprNode.kind === "lit" || v.exprNode.kind === "array" || v.exprNode.kind === "object")) {
+          litShown = String(v.raw ?? emitStringFromTree(v.exprNode));
+        }
+        if (litShown !== null) {
+          ceErrors.push(makeCEError(
+            "E-TYPE-031",
+            `E-TYPE-031: \`${attr.name}=${litShown}\` passes a non-function value to the ` +
+            `function-typed prop \`${attr.name}: ${decl.type}\` of \`<${componentName}>\` (§15.11.4). ` +
+            `Pass a function: \`${attr.name}=handlerName\` or \`${attr.name}=\${(…) => …}\`.`,
+            attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
           ));
         }
       }
@@ -3143,8 +3727,13 @@ function expandComponentNode(
         }
       }
 
-      // E-COMPONENT-012: Duplicate prop name in props block and bare attribute on def root
-      const defNodeAttrs = (def.nodes[0].attrs ?? []).filter((a: AttrNode) => a && a.name !== "class");
+      // E-COMPONENT-012: Duplicate prop name in props block and BARE (valueless, §15.1
+      // `prop1`) attribute on def root. A VALUED root attribute with a declared prop's
+      // name (`href=${href}`, `href=href`, `href="/p/${href}"`) is the body WRITING its
+      // root attribute, not a second declaration (§15.10, S458 "D1").
+      const defNodeAttrs = (def.nodes[0].attrs ?? []).filter(
+        (a: AttrNode) => a && a.name !== "class" && (!a.value || a.value.kind === "absent"),
+      );
       for (const defAttr of defNodeAttrs) {
         if (declaredNames.has(defAttr.name)) {
           ceErrors.push(makeCEError(
@@ -3182,9 +3771,52 @@ function expandComponentNode(
           if (attr.value.kind === "variable-ref" && !attr.value.name.startsWith("@")) {
             ceErrors.push(makeCEError(
               "E-ATTR-010",
-              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable. ` +
-              `\`${attr.value.name}\` is not reactive. ` +
-              `Use \`@${attr.value.name}\` or remove the \`bind:\` prefix.`,
+              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
+              `\`bind:${propName}=@cell\`). \`${attr.value.name}\` is not a cell. ` +
+              `Bind a cell (\`@${attr.value.name}\` if that is the cell you mean), or pass the value without \`bind:\`.`,
+              attrSpan,
+            ));
+          } else if (attr.value.kind === "variable-ref" && !/^@[A-Za-z_$][\w$]*$/.test(attr.value.name)) {
+            // §15.11.1 grammar: `component-bind-attr ::= 'bind:' identifier '=' '@' identifier`
+            // — a whole cell, not a member / index path (`bind:n=@v.k`).
+            ceErrors.push(makeCEError(
+              "E-ATTR-010",
+              `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
+              `\`bind:${propName}=@cell\`). \`${attr.value.name}\` is a path into a cell, not a cell. ` +
+              `Bind a whole cell, or pass the value without \`bind:\`.`,
+              attrSpan,
+            ));
+          } else if (attr.value.kind === "variable-ref" && _currentFileDerivedCellNames.has(attr.value.name.slice(1))) {
+            // S458 F3 — a `bind:` channel WRITES the caller's cell (§15.11.1); a
+            // `const <name>` derived cell is not writable (§6.6.8). Refused at the bind
+            // site, with the code a direct write gets.
+            ceErrors.push(makeCEError(
+              "E-DERIVED-WRITE",
+              `E-DERIVED-WRITE: \`${attr.name}=${attr.value.name}\` binds a derived reactive value. ` +
+              `A \`bind:\` prop writes back to the caller's cell (§15.11.1), and \`const <name>\` ` +
+              `bindings are immutable (SPEC §6.6.8 + §34). Bind a writable cell, or pass ` +
+              `\`${propName}=${attr.value.name}\` by value.`,
+              attrSpan,
+            ));
+          } else if (attr.value.kind === "expr" || attr.value.kind === "call-ref") {
+            // S458 — `bind:n=${@w + 1}` / `bind:n=f()`: an expression has no cell to write.
+            const shown = attr.value.kind === "expr" ? String(attr.value.raw ?? "") : `${attr.value.name}(…)`;
+            // S459 L4 — `bind:n=${@v}`: the value IS a whole cell, only wrapped in an
+            // interpolation; the grammar (§15.11.1 `'bind:' identifier '=' '@' identifier`)
+            // takes the bare cell. Say so, rather than calling the cell an expression.
+            const ev = attr.value.kind === "expr" ? (attr.value as { exprNode?: ExprNode }).exprNode : undefined;
+            const wrappedCell = ev && ev.kind === "ident" && /^@[A-Za-z_$][\w$]*$/.test((ev as IdentExpr).name)
+              ? (ev as IdentExpr).name
+              : (/^\s*@[A-Za-z_$][\w$]*\s*$/.test(shown) ? shown.trim() : "");
+            ceErrors.push(makeCEError(
+              "E-ATTR-010",
+              wrappedCell
+                ? `E-ATTR-010: \`${attr.name}\` takes the bare cell (§15.11.1: \`bind:${propName}=@cell\`), ` +
+                  `not an interpolation. Write \`bind:${propName}=${wrappedCell}\`.`
+                : `E-ATTR-010: \`${attr.name}\` requires a reactive \`@\` variable (§15.11.1: ` +
+                  `\`bind:${propName}=@cell\`). \`${shown}\` is an expression, not a cell — a \`bind:\` ` +
+                  `prop is written back, and an expression cannot be. Bind a cell, or pass the value ` +
+                  `without \`bind:\`.`,
               attrSpan,
             ));
           } else if (attr.value.kind === "string-literal") {
@@ -3225,9 +3857,28 @@ function expandComponentNode(
   // logic-block substitution. The string-form `props` map is still used for
   // markup-text and string-literal-attr substitution.
   const propExprMap = buildPropExprMap(props, callerAttrs, def.propsDecl, filePath ?? (node.span?.file ?? ""), node.span ?? { file: filePath ?? "", start: 0, end: 0, line: 1, col: 1 });
+  registerAttrTextPropMaps(props, propExprMap, callerAttrs);
+
+  // S458 F2 — record every body WRITE to a declared prop while substituting; only a
+  // prop the caller bound with `bind:prop=@cell` may be written (§15.11.1, §15.13.2).
+  const prevWriteCtx = _propWriteCtx;
+  const writeCtx = {
+    declared: new Set(((def.propsDecl ?? []) as PropDecl[]).map((p: PropDecl) => p.name)),
+    bound: new Set(
+      callerAttrs
+        .filter((a: AttrNode) => a && typeof a.name === "string" && a.name.startsWith("bind:"))
+        .map((a: AttrNode) => a.name.slice(5)),
+    ),
+    written: new Set<string>(),
+    unsubstitutable: new Map<string, string>(),
+  };
+  _propWriteCtx = writeCtx;
 
   // Clone and substitute props into the definition's primary root node
-  let expanded = substituteProps(defNode, props, propExprMap) as MarkupNode;
+  // S459 H1 — ONE component scope, shared by the primary root and every secondary root
+  // in source order (see `substituteProps`).
+  const componentScope = new Set<string>();
+  let expanded = substituteProps(defNode, props, propExprMap, componentScope) as MarkupNode;
 
   // Merge class attribute:
   // Find the base class on the definition root element.
@@ -3248,8 +3899,31 @@ function expandComponentNode(
 
   // Merge caller attrs onto the expanded node:
   // - class: already handled via mergeClasses
+  // - a DECLARED prop (§15.10 `props` block; `bind:name` counts as `name`) is the
+  //   component's INPUT, never an attribute of the expanded root (§15.10, S458 "D1";
+  //   §66.14 rule 4 — use-site attributes are construction). It is consumed by prop
+  //   substitution above and leaves the root's `attrs` here, at the ONE merge every
+  //   expansion path goes through, so no emitter can write it. A body that wants the
+  //   value on its root writes it there (`href=${href}`), and that def attr survives
+  //   the merge. The caller's attr nodes are kept on `_callSiteProps` for the checks
+  //   that judge what the caller wrote (scope, handler-reference diagnostics).
   // - all other caller attrs override def attrs (caller wins for non-class conflicts)
-  const callerNonClassAttrs = callerAttrs.filter((a: AttrNode) => a && a.name !== "class");
+  const rootDeclaredPropNames = new Set(
+    (def.propsDecl ?? []).map((p: PropDecl) => p.name),
+  );
+  const isCallSiteDeclaredProp = (a: AttrNode): boolean =>
+    rootDeclaredPropNames.has(a.name.startsWith("bind:") ? a.name.slice(5) : a.name);
+  // A `bind:` whose target is not an `@` cell was already refused (E-ATTR-010, one
+  // message — S458 N1); it is not handed on to be judged again as an expression.
+  const isRefusedBindTarget = (a: AttrNode): boolean =>
+    a.name.startsWith("bind:") && !!a.value && a.value.kind !== "absent"
+    && !(a.value.kind === "variable-ref" && (a.value as { name: string }).name.startsWith("@"));
+  const callSiteProps = callerAttrs.filter(
+    (a: AttrNode) => a && a.name && a.name !== "class" && isCallSiteDeclaredProp(a) && !isRefusedBindTarget(a),
+  );
+  const callerNonClassAttrs = callerAttrs.filter(
+    (a: AttrNode) => a && a.name !== "class" && !isCallSiteDeclaredProp(a),
+  );
   const defNonClassAttrs = (expanded.attrs ?? []).filter((a: AttrNode) => a && a.name !== "class");
 
   // Build merged attrs: start with def attrs (non-class), then override with caller attrs
@@ -3298,17 +3972,13 @@ function expandComponentNode(
     );
   }
 
-  // §15.11.1: collect bind: prop wiring metadata for codegen
-  // _bindProps: Array<{ propName: string, callerVar: string }>
-  // propName is the component's prop name, callerVar is the @var name (without @)
-  const _bindProps: Array<{ propName: string; callerVar: string }> = [];
-  for (const attr of callerAttrs) {
-    if (!attr || !attr.name || !attr.name.startsWith("bind:")) continue;
-    const propName = attr.name.slice(5);
-    if (attr.value && attr.value.kind === "variable-ref" && attr.value.name.startsWith("@")) {
-      _bindProps.push({ propName, callerVar: attr.value.name.slice(1) }); // strip @
-    }
-  }
+  // §15.11.1 (S458): NO `_bindProps` sync metadata. A `bind:propName=@var` prop is
+  // substituted with `@var` throughout the body (the props-map build above), so the
+  // body reads and writes the caller's cell directly — the two-way channel IS the
+  // cell. The former codegen sync mirrored the caller's cell into a GLOBAL cell
+  // named after the prop (`visible`), which every instance shared: two instances
+  // bound to different cells cross-wrote each other through it, and the body's
+  // `visible = false` never reached it (an undeclared JS global).
 
   // Resolve `if=` conditions that reference optional snippet props at compile time.
   // When an element has `if=(not (propName is not))` and the optional snippet prop
@@ -3387,21 +4057,68 @@ function expandComponentNode(
     ...(def.propsDecl && def.propsDecl.length > 0
       ? { _componentPropNames: def.propsDecl.map((p: PropDecl) => p.name) }
       : {}),
-    ...(_bindProps.length > 0 ? { _bindProps } : {}),
+    // S458 "D1" — the caller's declared-prop attr nodes, OFF `attrs` (see the merge
+    // above). Read by the type system only; no emitter reads this field.
+    ...(callSiteProps.length > 0 ? { _callSiteProps: callSiteProps } : {}),
     ...(__propContractChecks.length > 0 ? { __propContractChecks } : {}),
   } as MarkupNode;
 
   // Expand secondary root nodes: prop substitution only, no attr/class/children merging
   const secondaryNodes: MarkupNode[] = extraDefNodes.map((extraNode: MarkupNode) => ({
-    ...(substituteProps(extraNode, props, propExprMap) as MarkupNode),
+    ...(substituteProps(extraNode, props, propExprMap, componentScope) as MarkupNode),
     id: ++counter.next,
     isComponent: false,
     _expandedFrom: componentName,
     _expansionSiteSpan: node.span,
   }));
 
+  // S458 F2 — refuse every body write to a prop the caller did not bind with `bind:`
+  // (by-value, or an unbound bindable prop): E-COMPONENT-PROP-WRITE (§15.11.1, §34 —
+  // ruling user-voice S458 "your recs on both D1 codes"). A write is never lowered onto
+  // the caller's cell.
+  _propWriteCtx = prevWriteCtx;
+  for (const name of writeCtx.written) {
+    const decl = ((def.propsDecl ?? []) as PropDecl[]).find((p: PropDecl) => p.name === name);
+    // S459 L4 — the message names what THIS call site did (passed by value, or omitted)
+    // and the one fix that applies (a `bind` prop only needs binding at the call site).
+    const passed = callerAttrs.some((a: AttrNode) => a && a.name === name);
+    const how = passed ? "which this call site passes by value" : "which this call site does not bind (it omits the prop)";
+    const why = decl && decl.bindable
+      ? `\`${name}\` is declared \`bind ${name}\`, but without \`bind:${name}=@cell\` at the call ` +
+        `site there is no cell to write: impl#1 has no per-instance cell for an unbound bindable ` +
+        `prop (§66.15.1 carried divergence). Bind it at the call site ` +
+        `(\`<${componentName} bind:${name}=@cell/>\`), or copy the prop into a cell the component owns.`
+      : `\`${name}\` is a by-value prop — captured once at mount (§15.13.2) — and only a ` +
+        `\`bind\` prop the caller binds may be written (§15.11.1). Declare \`bind ${name}: T\` and ` +
+        `bind it at the call site (\`<${componentName} bind:${name}=@cell/>\`), or copy the prop ` +
+        `into a cell the component owns.`;
+    ceErrors.push(makeCEError(
+      "E-COMPONENT-PROP-WRITE",
+      `E-COMPONENT-PROP-WRITE: the body of \`<${componentName}>\` writes its prop \`${name}\`, ` +
+      `${how}. ${why}`,
+      node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+
+  // S458 (third round) — a prop referenced in text the compiler cannot parse is NOT
+  // text-substituted; the identifier would reach the page unbound, so it is refused:
+  // E-SCOPE-001, whose §34 row names this case (ruling user-voice S458 "your recs on
+  // both D1 codes").
+  for (const [name, text] of writeCtx.unsubstitutable) {
+    const shown = text.length > 80 ? text.slice(0, 77) + "..." : text;
+    ceErrors.push(makeCEError(
+      "E-SCOPE-001",
+      `E-SCOPE-001: the body of \`<${componentName}>\` uses its prop \`${name}\` inside an ` +
+      `expression the compiler could not parse (\`${shown}\`), so the prop cannot be ` +
+      `substituted there and \`${name}\` would be unbound at runtime. Rewrite the expression ` +
+      `(check its quotes and operators), or move it into a function in the component body.`,
+      node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
+  }
+
   return [expandedNode, ...secondaryNodes];
 }
+
 
 /**
  * Inject caller children into the expanded component markup tree.
@@ -3662,7 +4379,10 @@ function _injectChildrenWalk(
               try { argNode = parseExprToNode(renderParamMatch.argExpr, filePath ?? "", child.span?.start ?? 0); } catch { argNode = null; }
               if (argNode) {
                 const paramMap = new Map<string, ExprNode>([[snippet.paramName, argNode]]);
-                nodes = nodes.map((n) => substituteProps(n, new Map<string, string>(), paramMap));
+                // S459 H1 — one scope across the snippet body, in source order (a body
+                // declaration named like the param shadows it for what follows).
+                const snippetScope = new Set<string>();
+                nodes = nodes.map((n) => substituteProps(n, new Map<string, string>(), paramMap, snippetScope));
               }
             }
             result.push(...nodes);
@@ -4425,6 +5145,8 @@ export function runCEFile(
   // can divert an uppercase mount tag that names a same-file engine (`<Phase/>`)
   // away from the misleading E-COMPONENT-020 to E-COMPONENT-ENGINE-SCOPE.
   _currentFileEngineMountNames = ast ? collectFileEngineMountNames(ast) : new Set();
+  _currentFileDerivedCellNames = ast ? collectFileDerivedCellNames(ast) : new Set();
+  _currentFileSource = typeof tabOutput._sourceText === "string" ? { path: filePath, text: tabOutput._sourceText } : null;
 
   const ceErrors: CEError[] = [];
 

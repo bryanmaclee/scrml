@@ -2050,6 +2050,9 @@ export function emitMarkupElement(ctx, tagFrame, startPos, endPos, children) {
     // still attribute-shaped.
     block.attrs = tagFrame.opener?.attrs ?? [];
     block.tokenizedAttrs = tagFrame.opener?.tokenizedAttrs ?? [];
+    // S459 L2 — attribute-level refusals (a single-quoted value: E-ATTR-001)
+    // ride `opener.attrDiagnostics` and are reported once, by recognizeOpener
+    // (tag-frame.js), alongside the s457 4a unquoted-value refusals.
     // F7.a (v0.6) — carry the opener's TagKind onto the Markup block. The
     // markup-vs-state discriminator: a `< Ident ...>` opener (space after
     // `<` — SPEC §4.3) gets TagKind.StateOpener. The M5 swap reads this to

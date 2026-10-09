@@ -1,0 +1,12 @@
+{
+  "id": "components-single-quoted-attr-in-component-reject",
+  "description": "§5 (S459 L2) — a single-quoted attribute value in a component body (`title='${label}x'`) is E-ATTR-001, exactly as outside a component. Before S459 the component re-parse shredded it into valueless attributes (`<i class=\"a\" title x>`) at exit 0, silently.",
+  "language-version": "1.0",
+  "spec": "§5",
+  "rationale": "SPEC §5 (S111 quoted-text model): \"The attribute quoted-string form is `\"`-only (double-quote; single-quote is not an attribute-string delimiter).\" Outside a component the same attribute is E-ATTR-001.",
+  "expect": {
+    "codes": ["E-ATTR-001"],
+    "codeCounts": { "E-ATTR-001": 1 },
+    "notCodes": ["E-COMPONENT-021"]
+  }
+}

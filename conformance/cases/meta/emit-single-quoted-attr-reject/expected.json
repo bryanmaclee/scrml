@@ -1,0 +1,10 @@
+{
+  "id": "meta-emit-single-quoted-attr-reject",
+  "description": "§5 / §22 (S459 round 6, F2) — markup produced by a compile-time `^{ emit(...) }` is re-parsed by the same native attribute reader as a component body, so a single-quoted attribute value in it (`<p class='x' …>`) is refused: E-META-EVAL-002 naming the underlying E-ATTR-001. Before S459 round 5 the reader shredded it into valueless attributes (`<p class x id=\"m\">`) at exit 0. A language-wide consequence of the round-5 L2 fix: `'` is not an attribute-string delimiter anywhere.",
+  "language-version": "1.0",
+  "spec": "§5",
+  "rationale": "SPEC §5 (S111 quoted-text model): \"The attribute quoted-string form is `\"`-only (double-quote; single-quote is not an attribute-string delimiter).\" Emitted meta markup is scrml markup and follows the same rule.",
+  "expect": {
+    "codes": ["E-META-EVAL-002"]
+  }
+}

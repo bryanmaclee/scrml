@@ -1,0 +1,14 @@
+<program>
+<v> = 7
+<o> = ""
+const C = <div class="c" props={ bind n: number }>
+    ${ let n = 0 }
+    <i>x</i>
+    ${ function f() { n = 5; @o = String(n) } }
+    <button class="k" onclick=f()>k</button>
+    ${ function g() { n = n + 1; @o = @o + "," + String(n) } }
+    <button class="g" onclick=g()>g</button>
+</>
+<C bind:n=@v/>
+<p id="o">${@v}/${@o}</p>
+</program>

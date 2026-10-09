@@ -1,0 +1,16 @@
+{
+  "id": "components-prop-substitution-string-escapes",
+  "description": "§15.10.1 (S458 third round, N3) — an escape inside a string literal in a component body's quoted attribute round-trips through expansion exactly as the same attribute written outside a component: `title=\"${n + 'it\\'s'}\"` renders `ait's` (it used to be cooked to `'it's'` before the expander re-parsed the body — then truncated to `'it'`, or E-CODEGEN-INVALID-LOGIC), and `data-pat=\"^\\d+$\"` keeps one backslash (it used to double).",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1 substitutes the caller value for identifier references only; everything else in the attribute is the author's text and is preserved — the component's `<span>` and the plain `<span>` render identically.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-SCOPE-001"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".c", "attr": { "title": "ait's", "data-pat": "^\\d+$" } },
+      { "selector": ".d", "attr": { "title": "ait's", "data-pat": "^\\d+$" } }
+    ]
+  }
+}

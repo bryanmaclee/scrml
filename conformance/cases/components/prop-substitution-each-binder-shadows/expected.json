@@ -1,0 +1,15 @@
+{
+  "id": "components-prop-substitution-each-binder-shadows",
+  "description": "§15.10.1 / §17.7 (S458 fourth round, F7) — `<each in=items as label>` inside a component with a prop `label`: the binder is a DECLARATION — it is never substituted, and inside the each body (text, attribute `${…}`, member access) `label` is the ITEM, while outside the each `label` is still the prop. Before the fix the binder name was text-rewritten (`(\"L\", idx) => …`-shaped loop callback) while the body kept `label` — a load-time error, compiled clean.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1 Shadowing: 'A `for-stmt` loop variable, `match-arm` binding, … shadows props within their respective scopes.' The `<each>` item binder (`as x`, §17.7) is the markup form of a loop variable.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "domAnchored": [
+      { "selector": ".c .in li", "text": "a-1" },
+      { "selector": ".c .out", "text": "L" }
+    ]
+  }
+}

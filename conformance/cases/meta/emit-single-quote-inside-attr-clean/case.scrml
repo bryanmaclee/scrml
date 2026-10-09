@@ -1,0 +1,3 @@
+<program>
+^{ emit("<p id=\"m\" title=\"go('a')\">hi</p>") }
+</program>

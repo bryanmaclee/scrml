@@ -1,0 +1,10 @@
+<program>
+<show> = true
+const C = <div class="c" props={ label: string }>
+    <ul class="bare">${ lift <li>${label}</li> }</ul>
+    <ul class="cond">${ if (@show) { lift <li title=${label + "?"}>${label}!</li> } }</ul>
+    <ul class="loop">${ for (x of [1, 2]) { lift <li>${label}${x}</li> } }</ul>
+    <ul class="shadow">${ for (label of ["s"]) { lift <li>${label}</li> } }</ul>
+</>
+<C label="L"/>
+</program>

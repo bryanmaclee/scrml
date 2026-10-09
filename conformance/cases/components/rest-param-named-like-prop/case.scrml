@@ -1,0 +1,10 @@
+<program>
+<o> = ""
+${ function top(...xs) { return xs.length } }
+const C = <div class="c" props={ n: number }>
+    ${ function g(...n) { return n.length } }
+    <button class="b" onclick=${() => @o = String(g(1, 2, 3)) + "/" + String(n) + "/" + String(top(1, 2))}>b</button>
+</>
+<C n=${4}/>
+<p id="o">${@o}</p>
+</program>

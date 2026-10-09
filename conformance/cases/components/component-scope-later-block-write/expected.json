@@ -1,0 +1,13 @@
+{
+  "id": "components-component-scope-later-block-write",
+  "description": "§15.10.1 (S459 H1) — ONE component scope: `let n` declared at component-body top level shadows the `bind n` prop in every LATER `${}` block of the body, not only in its own statement list. The later functions write the LOCAL `n`; the parent cell `@v` stays 7. Before S459 the later block resolved `n` to the prop and wrote the parent's cell (`_scrml_cs_reactive_set(\"v\", 5)`), silently.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: \"From the point of declaration onward in the same scope, the local binding shadows the prop.\" §15.11.1: \"A local declaration, parameter or loop binder named like the prop is not the prop (§15.10.1 Shadowing) and is writable.\" §15.10.1's Greeter example: markup after a component logic block is the same scope.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-PROP-WRITE", "E-SCOPE-001"],
+    "input": [{ "click": ".c .k" }, { "click": ".c .g" }],
+    "domAnchored": [{ "selector": "#o", "text": "7/5,6" }]
+  }
+}

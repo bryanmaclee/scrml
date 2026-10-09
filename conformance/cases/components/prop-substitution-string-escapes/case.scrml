@@ -1,0 +1,6 @@
+<program>
+<v> = "a"
+const C = <span class="c" title="${n + 'it\'s'}" data-pat="^\d+$" props={ n: string }>c</span>
+<C n=@v/>
+<span class="d" title="${@v + 'it\'s'}" data-pat="^\d+$">d</span>
+</program>

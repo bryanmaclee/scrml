@@ -1,0 +1,27 @@
+{
+  "id": "components-declared-prop-explicit-root-write",
+  "description": "§15.10 (S458 \"D1\") — a component body writes a root (or inner) attribute FROM a same-named declared prop explicitly: `href=${href}`, `href=href`, quoted `href=\"/p${href}\"`, and an inner `<a href=${href}>`. None fires E-COMPONENT-012, and each attribute carries the CALLER's value — an `${expr}` caller, a bare `@cell` caller (reactive: it follows the cell), a literal caller, and an `<each>` row member. Pins the two explicit-write miscompiles the S458 deep-dive found (an `${expr}` caller left the body's `href` unbound) and the quoted-attribute source-text splice (`/p@u`, g-component-prop-in-quoted-attr-substitutes-source-text-s456).",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10: 'A root attribute that carries a VALUE and a declared prop's name … is the component body writing its own root attribute, not a second declaration, and SHALL NOT fire E-COMPONENT-012.' §15.10.1: prop references are substituted with the caller-side value at every position, so the written attribute holds the caller's value.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-012", "E-SCOPE-001"],
+    "input": [{ "click": "#go" }],
+    "state": { "u": "/next" },
+    "domAnchored": [
+      { "selector": "#expr .l1", "attr": { "href": "/next" }, "text": "x1" },
+      { "selector": "#expr .l2", "attr": { "href": "/next" }, "text": "x2" },
+      { "selector": "#expr .l3", "attr": { "href": "/p/next" }, "text": "x3" },
+      { "selector": "#expr .l4 a", "attr": { "href": "/next" }, "text": "x4" },
+      { "selector": "#expr .l4", "count": 1 },
+      { "selector": "#expr .l4[href]", "count": 0 },
+      { "selector": "#cell .l1", "attr": { "href": "/next" } },
+      { "selector": "#cell .l3", "attr": { "href": "/p/next" } },
+      { "selector": "#lit .l1", "attr": { "href": "/lit" } },
+      { "selector": "#lit .l3", "attr": { "href": "/p/lit" } },
+      { "selector": "#each .l1", "attr": { "href": "/a" } },
+      { "selector": "#each .l3", "attr": { "href": "/p/a" } }
+    ]
+  }
+}
