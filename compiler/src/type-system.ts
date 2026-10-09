@@ -15785,16 +15785,30 @@ function annotateNodes(
     // The placement is read from route inference's routeMap — the same
     // decision codegen acts on — never re-derived here (a second "does it
     // broadcast" reader would be a bypass the moment the two disagree).
-    const placedOnServer = (c: { decl: ASTNodeLike; file: string }) => {
+    //
+    // §12.2 Trigger 5 EXEMPTION (ruling:user-voice-scrml.md S462 "a", fix round
+    // 1): a handler placed on the server ONLY by caller-context propagation is
+    // not judged. Route inference does not count the `onclient:` attribute (or
+    // a markup `${f()}` reference) as a CLIENT caller, so Trigger 5 can place a
+    // shared pure helper on the server that SPEC Trigger 5 would keep ambient;
+    // refusing it would refuse a correct program for a placement defect. The
+    // exemption lasts until the caller-context fork
+    // (g-5c-caller-context-promotes-a-derived-read-helper-to-the-server) is
+    // ruled; see g-t5-onclient-and-markup-refs-not-client-callers-s462. A DIRECT
+    // trigger (T1/T2/T3/T7, an `onserver:*` handler) still refuses, T5 or not.
+    const isCallerContext = (r: EscalationReason) =>
+      r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation";
+    const directReasonsOf = (c: { decl: ASTNodeLike; file: string }): EscalationReason[] => {
       const start = (c.decl.span as Span | undefined)?.start;
       const entry = routeMap?.functions?.get(`${c.file}::${start}`);
-      return entry && entry.boundary !== "client" ? entry : undefined;
+      if (!entry || entry.boundary === "client") return [];
+      return (entry.escalationReasons ?? []).filter((r) => r.kind !== "explicit-annotation" && !isCallerContext(r));
     };
     let hit: { decl: ASTNodeLike; file: string } | undefined;
-    let route: ReturnType<typeof placedOnServer>;
+    let directReasons: EscalationReason[] = [];
     for (const c of candidates) {
-      const r = placedOnServer(c);
-      if (c.decl.isServer === true || r) { hit = c; route = r; break; }
+      const r = directReasonsOf(c);
+      if (c.decl.isServer === true || r.length > 0) { hit = c; directReasons = r; break; }
     }
     if (!hit) return;
     const serverDecl = hit.decl;
@@ -15806,13 +15820,8 @@ function annotateNodes(
     const plainKw = serverDecl.fnKind === "fn" ? "fn" : "function";
     const depFile = imported ? importedFnDecls?.get(callee)?.depFilePath : undefined;
     const where = imported ? ` (imported from \`${depFile ? depFile.split(/[\\/]/).pop() : "another file"}\`)` : "";
-    // Reasons other than the keyword itself: what §12.2 found in the body.
-    const inferred = (route?.escalationReasons ?? []).filter((r) => r.kind !== "explicit-annotation");
-    const fixes =
-      `Move the server work into an \`onserver:*\` handler (§38.6.1), or write a channel cell ` +
-      `instead — a channel-cell write runs on the client and syncs to every subscriber (§38.4, §38.10).`;
     let message: string;
-    if (inferred.length === 0) {
+    if (directReasons.length === 0) {
       // Declared `server`, and nothing in the body needs the server: dropping
       // the keyword is the whole fix.
       message =
@@ -15821,27 +15830,13 @@ function annotateNodes(
         `(§38.10) — it SHALL NOT be a server function. Declare \`${callee}\` a plain \`${plainKw}\`; ` +
         `if a server round-trip is wanted, call a server function from inside it.`;
     } else {
-      // §12.2 Trigger 5 places a function with only server callers; the body
-      // itself may need nothing from the server, so the remedy differs.
-      const bodyReasons = inferred.filter(
-        (r) => !(r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation"),
-      );
       const kwNote = declared ? ` It is also declared \`${keyword}\`.` : "";
-      const head =
+      message =
         `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but §12.2 places \`${callee}\`${where} ` +
-        `on the server`;
-      const tail =
-        ` An \`onclient:*\` handler runs in the browser, on the client-side WebSocket (§38.10) — it SHALL NOT ` +
-        `run on the server.`;
-      if (bodyReasons.length > 0) {
-        message = `${head} (trigger: ${describeServerTrigger(bodyReasons)}).${kwNote}${tail} ${fixes}`;
-      } else {
-        message =
-          `${head} (trigger: every function that calls it is server-side — §12.2 Trigger 5, ` +
-          `caller-context propagation).${kwNote}${tail} Do not call \`${callee}\` from server code — the \`${attrName}\` ` +
-          `attribute already calls it; give the server function its own logic, or move the shared server work ` +
-          `into an \`onserver:*\` handler (§38.6.1).`;
-      }
+        `on the server (trigger: ${describeServerTrigger(directReasons)}).${kwNote} An \`onclient:*\` handler runs ` +
+        `in the browser, on the client-side WebSocket (§38.10) — it SHALL NOT run on the server. Move the server ` +
+        `work into an \`onserver:*\` handler (§38.6.1), or write a channel cell instead — a channel-cell write runs ` +
+        `on the client and syncs to every subscriber (§38.4, §38.10).`;
     }
     errors.push(new TSError("E-CHANNEL-006", message, span));
   }

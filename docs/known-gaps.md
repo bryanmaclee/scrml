@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 6 |
-| MED | 564 | 5 |
-| LOW | 327 | 0 |
+| MED | 565 | 5 |
+| LOW | 328 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24316,3 +24316,57 @@ Found on the S462 reproducer: `onclient:open=onOpen(e)` with `function onOpen(e)
 **Fix direction (not decided):** treat `broadcast()` / `disconnect()` as prohibited side effects in the `fn` body check (newly-rejecting — needs a ruling and a corpus measurement), which also stops the lint suggesting `fn` for them. A lint-only skip would be a second "does it broadcast" reader.
 
 **Severity LOW:** no silent misbehaviour measured — the `fn` still runs on the server and broadcasts. The cost is a purity contract that does not hold and a lint that can recommend breaking it.
+
+**S462 fix round 1 (F4) — the SPEC and impl#1 also disagree on placement.** §12.2 Trigger 7's scope clause says the trigger applies "NOT to `fn`", yet impl#1 places `fn announce() { broadcast({ joined: true }) }` (inside a `<channel>` body, called from a client `function go()` on a button) on the SERVER: `announce` gets `__ri_route_announce_1`, its body (with the §38.6 `broadcast` binding) is in `server.js`, and `go` awaits `_scrml_fetch_announce_3()` (probe `fnb.scrml`, same directory as above). Behaviour not changed here. Whichever way the purity question is ruled, the Trigger 7 scope clause and the implementation should be made to agree (either the clause names `fn`, or a hub call in a `fn` is refused).
+
+### G-T5-ONCLIENT-AND-MARKUP-REFS-NOT-CLIENT-CALLERS-S462 — an `onclient:` attribute or a markup `${f()}` reference does not count as a CLIENT caller for §12.2 Trigger 5, so a shared pure helper is placed on the server: a socket open or a render does a POST round-trip (a §38.10.2 violation for the `onclient:` case) — `NEW S462; MED; open`
+<!-- @gap id=g-t5-onclient-and-markup-refs-not-client-callers-s462 sev=MED status=open locus=compiler/src/route-inference.ts:5741(Step 5c directClientCount counts inverseCallerMap function-body edges only)+route-inference.ts:5399(markupReferencedNames — gates only indirect escalation, never counted as a direct client caller)+compiler/src/codegen/emit-channel.ts:collectChannelAttrHandlerNames(the onclient set is not consulted by 5c) prov=review:S462-s239-channel-006-inferred;ruling:user-voice-scrml.md-S462-"a"(fix round 1, T5 exemption) -->
+
+SPEC §12.2 Trigger 5: *"A function with at least one client-classified caller SHALL remain ambient."* An `onclient:*` attribute registers its handler as `ws.onopen`/`onclose`/`onerror` inside the client IIFE (§38.10.2), and a markup interpolation `${fmt(2)}` calls `fmt` during render — both are client call sites. Route inference's Step 5c counts neither, so a function whose only *function* caller is server-side is promoted. Reproducer (S462 review):
+
+```scrml
+<program>
+${
+  function fmt(e) { return 1 }
+  server function boot() { return fmt(1) }
+}
+<channel name="c" onclient:open=fmt(e)>
+    <joined> = 0
+</>
+<p>${@joined} ${fmt(2)}</p>
+<button onclick=boot()>b</button>
+</program>
+```
+
+compiles at exit 0 with `fmt` server-placed: `ws.onopen` and the render call a fetch stub. **E-CHANNEL-006 deliberately does not fire here** (ruling S462 "a", fix round 1: a handler placed ONLY by Trigger 5 is exempt until this is decided — §38.10.3), so main's behaviour is preserved byte-for-byte.
+
+**Why it is not simply "count them as client callers":** measured S462 — treating the `onclient:` attribute as a direct client caller keeps `onOpen` ambient, and then the server function calls an `onOpen` that `server.js` never defines (a ReferenceError at request time, exit 0). The same happens today to any ambient function a server function calls (control: a cell-writing `bump()` called from a `?{}` server function and from a client function). That is the placement fork recorded in [[g-5c-caller-context-promotes-a-derived-read-helper-to-the-server]] (refuse vs dual-place); this gap is its `onclient:` + markup-reference instance and should be ruled with it. When it is ruled, drop the Trigger 5 exemption from `type-system.ts` `checkClientHandlerNotServer` (`isCallerContext`) and §38.10.3.
+
+**Severity MED:** silent placement change (a round trip per socket open or render) at exit 0; no data leak measured.
+
+### G-CHANNEL-SAME-NAME-FUNCTIONS-NOT-DISTINGUISHED-S462 — two `<channel>` bodies that declare same-named functions are not distinguished: placement and handler binding are keyed by NAME, so the wrong channel's function can be bound, and §12.2 Trigger 7 judges the name, not the declaration — `NEW S462; LOW; open (pre-existing)`
+<!-- @gap id=g-channel-same-name-functions-not-distinguished-s462 sev=LOW status=open locus=compiler/src/codegen/emit-channel.ts:446(collectChannelFunctionMap — Map<fnName, channelName>, last write wins)+compiler/src/route-inference.ts:4937(Step 3 Trigger 7 looks the function up by name) prov=review:S462-s239-channel-006-inferred(F2) -->
+
+Reproducer (S462 review):
+
+```scrml
+<program>
+<channel name="a" onclient:open=onOpen(e)>
+    <joined> = 0
+    ${ function onOpen(e) { @joined = @joined + 1 } }
+</>
+<channel name="b">
+    <hits> = 0
+    ${ function onOpen(e) { broadcast({ hits: 1 }) } }
+</>
+<p>${@joined}</p>
+<button onclick=onOpen(1)>go</button>
+</program>
+```
+
+- **Base `42d1a7459`:** `ws.onopen` and the button both bind to channel `b`'s `onOpen` — the BROADCASTING one — emitted on the client calling an undefined `broadcast` (the removed name-keyed onclient exemption also exempted `b`'s function, because `a`'s attribute named `onOpen`).
+- **After `s462-channel-006-inferred`:** `ws.onopen` and the button bind to `a`'s client `onOpen` (correct), and `b`'s `onOpen` gains a server route plus a client fetch stub nothing calls. Accepted at review as more correct (progress.md, fix round 1, F2).
+
+What remains is the name keying itself: two same-named declarations in one file's channel bodies are one entry in `collectChannelFunctionMap`, and which one a reference reaches is decided by emit order, not scope. Fix direction: key by declaration (span / node identity) and resolve each reference by the §38.10.3 innermost-first rule. Possibly a duplicate-declaration error is the right answer instead — functions hoist file-wide (§38.10.2), so two channel-body `onOpen`s are arguably one name declared twice; needs a ruling.
+
+**Severity LOW:** needs two same-named functions in one file; reproduced only by construction.

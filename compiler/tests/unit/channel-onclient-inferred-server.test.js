@@ -146,24 +146,38 @@ describe(`${CODE} — an onclient:* handler §12.2 places on the server`, () => 
     expect(d[0].message).toContain("the protected field `password_hash`");
   });
 
-  test("Trigger 5: the handler's only function caller is server-side", () => {
+  test("a DIRECT trigger plus Trigger 5: refused, naming the direct trigger", () => {
     const res = compile(`<program db="sqlite:./app.db">
 <channel name="c" onclient:open=onOpen(e)>
     <joined> = 0
-    \${ function onOpen(e) { @joined = 1 } }
+    \${ function onOpen(e) { const rows = ?{\`SELECT id FROM users\`}.all(); return rows.length } }
 </>
 \${
-    function save() {
-        const rows = ?{\`SELECT id FROM users\`}.all()
-        onOpen(rows)
-    }
+  server function boot() { return onOpen(1) }
 }
-<button onclick=save()>go</button>
+<p>\${@joined}</p>
+<button onclick=boot()>b</button>
+</program>`);
+    const d = expectOneError(res);
+    expect(d.message).toContain("a `?{}` SQL query");
+    expect(d.message).not.toContain("Trigger 5");
+  });
+
+  test("Trigger 7 inside a NESTED function declaration places the handler (fix round 1, F3)", () => {
+    const res = compile(`<program>
+<channel name="c" onclient:open=onOpen(e)>
+    <joined> = 0
+    \${
+        function onOpen(e) {
+            function tell() { broadcast({ joined: true }) }
+            tell()
+        }
+    }
+</>
 <p>\${@joined}</p>
 </program>`);
     const d = expectOneError(res);
-    expect(d.message).toContain("§12.2 Trigger 5");
-    expect(d.message).toContain("Do not call `onOpen` from server code");
+    expect(d.message).toContain("`broadcast()`");
   });
 
   test("an IMPORTED plain function whose body §12.2 places on the server", () => {
@@ -203,6 +217,60 @@ describe(`${CODE} — an onclient:* handler §12.2 places on the server`, () => 
 });
 
 describe(`${CODE} — handlers that stay on the client compile`, () => {
+  // §12.2 Trigger 5 EXEMPTION (ruling:user-voice-scrml.md S462 "a", fix round 1):
+  // a handler placed on the server ONLY by caller-context propagation is not
+  // judged — route inference does not count the onclient: attribute (or a
+  // markup reference) as a client caller. Placement is main's, unchanged.
+  test("Trigger 5 only: the handler's only function caller is server-side — NOT refused", () => {
+    const res = compile(`<program db="sqlite:./app.db">
+<channel name="c" onclient:open=onOpen(e)>
+    <joined> = 0
+    \${ function onOpen(e) { @joined = 1 } }
+</>
+\${
+    function save() {
+        const rows = ?{\`SELECT id FROM users\`}.all()
+        onOpen(rows)
+    }
+}
+<button onclick=save()>go</button>
+<p>\${@joined}</p>
+</program>`);
+    expect(hits(res).length).toBe(0);
+  });
+
+  test("Trigger 5 only: a shared pure helper named by onclient: and a server function — NOT refused", () => {
+    const res = compile(`<program>
+\${
+  function fmt(e) { return 1 }
+  server function boot() { return fmt(1) }
+}
+<channel name="c" onclient:open=fmt(e)>
+    <joined> = 0
+</>
+<p>\${@joined} \${fmt(2)}</p>
+<button onclick=boot()>b</button>
+</program>`);
+    expect(hits(res).length).toBe(0);
+    expect((res.errors || []).length).toBe(0);
+  });
+
+  test("Trigger 5 only: a channel-body handler called only from a server function — NOT refused", () => {
+    const res = compile(`<program>
+<channel name="c" onclient:open=onOpen(e)>
+    <joined> = 0
+    \${ function onOpen(e) { return 1 } }
+</>
+\${
+  server function boot() { return onOpen(1) }
+}
+<p>\${@joined}</p>
+<button onclick=boot()>b</button>
+</program>`);
+    expect(hits(res).length).toBe(0);
+    expect((res.errors || []).length).toBe(0);
+  });
+
   test("a handler that writes a channel cell (client-side sync, §38.4)", () => {
     const res = compile(`<program>
 <channel name="c" onclient:open=onOpen(e)>
@@ -257,5 +325,32 @@ describe(`${CODE} — handlers that stay on the client compile`, () => {
 <p>\${@joined}</p>
 </program>`);
     expect(hits(res).length).toBe(0);
+  });
+});
+
+describe("§12.2 Trigger 7 — a hub call in a NESTED function declaration places the parent (fix round 1, F3)", () => {
+  test("a channel publisher whose nested helper calls broadcast() runs on the server; the client has no bare broadcast()", () => {
+    const res = compile(`<program>
+<channel name="c">
+    <joined> = 0
+    \${
+        function announce() {
+            function tell() { broadcast({ joined: true }) }
+            tell()
+        }
+    }
+    <button onclick=announce()>a</button>
+</>
+<p>\${@joined}</p>
+</program>`);
+    expect((res.errors || []).length).toBe(0);
+    const outs = res.outputs instanceof Map ? [...res.outputs.values()] : Object.values(res.outputs || {});
+    const client = outs.map((o) => o.clientJs || "").join("\n");
+    const server = outs.map((o) => o.serverJs || "").join("\n");
+    // Before: `function tell() { broadcast(...) }` shipped in client.js, where
+    // `broadcast` is not defined.
+    expect(client).not.toMatch(/(^|[^.\w$])broadcast\s*\(/m);
+    expect(server).toContain("function tell()");
+    expect(server).toMatch(/__ri_route_announce_/);
   });
 });

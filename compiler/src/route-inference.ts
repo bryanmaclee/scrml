@@ -2264,8 +2264,10 @@ function extractReactiveAssignmentCellName(node: LogicStatement): string | null 
  * Over-fire discipline (LOAD-BEARING):
  *   - READS of a channel cell do NOT escalate; WRITES no longer escalate either.
  *     Only the two broadcast/disconnect built-in calls escalate here.
- *   - Does NOT descend into nested `function-decl` bodies — each declaration is
- *     analyzed for its own direct triggers (mirrors `walkBodyForTriggers`).
+ *   - DOES descend into nested `function-decl` bodies (S462 fix round 1): a
+ *     nested declaration is emitted inline in its parent and is not itself a
+ *     channel function, so a hub call inside it places the PARENT (mirrors
+ *     `walkBodyForTriggers`' nested-`?{}` rule).
  *   - Returns AT MOST ONE reason; a single reason keeps the diagnostic surface
  *     clean.
  *
@@ -2309,9 +2311,15 @@ function detectChannelBroadcastReason(
       }
     }
 
-    // Do NOT recurse into nested function-decl bodies — each is analyzed for
-    // its own direct triggers.
-    if (node.kind === "function-decl") return;
+    // A nested `function-decl` body IS descended (S462 fix round 1, F3). A
+    // nested declaration is emitted INLINE inside its parent (collect.ts does
+    // not lift it to its own route) and is never in `collectChannelFunctionMap`,
+    // so it is never judged by this trigger on its own: skipping it left
+    // `function onOpen(e) { function tell() { broadcast(…) } tell() }` on the
+    // client calling an undefined `broadcast`. The parent must carry the
+    // reason — the same rule `walkBodyForTriggers` applies to a nested `?{}`
+    // (the OUTERMOST enclosing function that lexically contains the server op
+    // escalates). The generic array-field recursion below reaches `body`.
 
     // Recurse into array-valued children (if/for/while bodies, etc.).
     for (const key of Object.keys(node)) {
