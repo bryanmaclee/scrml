@@ -48,7 +48,8 @@ function compileFiles(inputFiles, inputDir, opts) {
   const result = compileScrml({ inputFiles, outputDir: outDir, write: true, log: () => {}, ...opts });
   const hard = result.errors.filter((e) => e.severity !== "warning");
   expect(hard).toEqual([]);
-  const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+  const runtimePath = result.runtimeFilename ? join(outDir, result.runtimeFilename) : null;
+  const runtime = runtimePath && existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "";
   const clients = [];
   for (const [, out] of result.outputs) if (out && out.clientJs) clients.push(out.clientJs);
   return { result, runtime, client: clients.join("\n") };
@@ -137,6 +138,30 @@ describe("(a) errors chunk ships by post-emit reference, not unconditionally", (
     const named = /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/.test(client);
     expect(runtime.includes("class _ScrmlError")).toBe(named);
     expectNoDanglingFrom(["errors"], { runtime, client });
+  });
+
+  test("a reference introduced AFTER runtime assembly (the auto-await IIFE lift) still pulls the chunk", () => {
+    // Measured by the S461 corpus sweep: the auto-await stage wraps `@cell = serverFn() !{…}`
+    // in `(async () => {…})().catch(… _scrml_error_boundary_log …)` on the FINAL client text,
+    // after the first reference scan. 25 corpus pages shipped that call with no definition
+    // until generateClientJs re-ran the gates over the final body.
+    const src = `<program auth="none">
+  \${
+    server function getUser(id) { return { id: id } }
+  }
+  <user> = not
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
+</program>
+`;
+    for (const embedRuntime of [false, true]) {
+      const built = compileSource(src, { embedRuntime });
+      expect(built.client).toContain(".catch(_scrml_async_err => _scrml_error_boundary_log(");
+      if (embedRuntime) {
+        expect(built.client).toContain("function _scrml_error_boundary_log");
+      } else {
+        expect(built.runtime).toContain("function _scrml_error_boundary_log");
+      }
+    }
   });
 
   test("every chunk whose own helpers report through _scrml_error_boundary_log pulls 'errors'", () => {

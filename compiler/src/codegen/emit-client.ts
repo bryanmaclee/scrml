@@ -52,6 +52,166 @@ import { judgeDefinitionsFor } from "./emit-predicates.ts";
 const ERRORS_CHUNK_REFERENCE =
   /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/;
 
+const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
+  ["_scrml_structural_eq(", "equality"],
+  ["_scrml_reset(", "reset"],
+  ["_scrml_message_for", "messages"],
+  // §17.1 if= mount/unmount. `_scrml_find_if_marker(` is the ONE token every
+  // emitted conditional controller carries — standalone `if=` AND `if-chain`,
+  // mount-mode AND display-mode branches (emit-event-wiring.ts:1475 / :1981) —
+  // so it gates the whole family without enumerating them. Belt-and-braces with
+  // the pre-emit AST walk above: this scan sees the emitted text, so it also
+  // covers a controller minted from the binding registry rather than a walkable
+  // AST shape.
+  ["_scrml_find_if_marker(", "ifmount"],
+  // g-when-handler-body-invisible-to-chunk-detection (S372 follow-up) — a
+  // client `navigate(...)` lowers to `_scrml_navigate_soft(` / `_scrml_navigate(`
+  // (rewrite.ts), both DEFINED in the `utilities` chunk. That chunk's pre-emit
+  // gate (detectFromNode `case "bare-expr"`, exprNodeContainsCall "navigate")
+  // only fires for a `navigate()` that is a walkable `bare-expr` AST node. A
+  // `when @dep changes { … }` / `when message from <#w> { … }` handler body is
+  // NOT stored as child bare-expr nodes — it lives only as `bodyRaw` (string) +
+  // `bodyExpr` (STATEMENT 1's ExprNode). So a `navigate()` anywhere in a
+  // when-handler body (single-statement OR statements 2+, the latter newly
+  // EMITTED by #693/#695) is invisible to the pre-emit walk → the `utilities`
+  // chunk is tree-shaken → the emitted `_scrml_navigate_soft(` reference throws
+  // `ReferenceError` on first dependency change. Unlike `reset`/`equality`,
+  // `utilities` has no scope-dependency backstop (CHUNK_DEPENDENCIES) and was
+  // not in this post-emit table, so nothing caught it. Scanning the emitted body
+  // (ground truth, AST-shape-immune — the exact rationale of this table) closes
+  // it. Reference-GATED: a navigate-free page emits neither token and still
+  // tree-shakes `utilities` out — no over-inclusion. The runtime placeholder
+  // slot is still empty here, so this scans only emitted client code, never the
+  // chunk's own `_scrml_navigate` definition.
+  ["_scrml_navigate_soft(", "utilities"],
+  ["_scrml_navigate(", "utilities"],
+  // g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ … lift … }`
+  // block inside a `<match>` arm is stored RAW at TAB and lowered only at CG
+  // time (the same deferred-arm shape as GITI-036 above), so the pre-emit
+  // `case "lift-expr"` walk never sees its lift and the `lift` chunk — which
+  // DEFINES `_scrml_lift_target` / `_scrml_lift` — was tree-shaken, leaving
+  // the emitted group's `_scrml_lift_target = …` a ReferenceError the moment
+  // the arm rendered. Every emitted lift group assigns `_scrml_lift_target`
+  // (and the nested-group driver saves it), so the bare name gates the whole
+  // family; a lift-free page references neither and still tree-shakes it out.
+  ["_scrml_lift_target", "lift"],
+  // The nested-lift drivers (`_scrml_lift_scoped_run` / `_scrml_lift_item_run`,
+  // emit-reactive-wiring.ts NESTED_LIFT_RUN_HELPERS) construct effects with
+  // `_scrml_effect` / `_scrml_effect_static` (the `deep_reactive` chunk) even
+  // when the lifted block itself reads nothing reactive — e.g. an engine arm
+  // lifting over its payload binding. The driver's definition carries this
+  // call-form token, so it gates exactly the files that emit the drivers.
+  ["_scrml_lift_scoped_run(", "deep_reactive"],
+  // g-arm-directive-binding-reads-arm-name — an arm-bound logic factory
+  // (emit-event-wiring `armLogicFactoryName`) applies its binding under
+  // `_scrml_effect`. The binding lives in a deferred arm body the pre-emit
+  // walk counts only as a registry entry, and an `<engine>` page with no other
+  // reactive surface shipped without `deep_reactive`: `_scrml_effect is not
+  // defined` on the first arm entry. The factory name gates exactly the files
+  // that emit one.
+  ["_scrml_armb_", "deep_reactive"],
+  // §5.2 rule 3 (S457) — a URL-attribute write the compiler could not prove safe is routed
+  // through `_scrml_safe_url(` (codegen/url-attr-guard.ts), DEFINED in the `urlguard` chunk. The
+  // call is emitted by many lowerings (top level, arms, <each> rows, lift), so the emitted text is
+  // the one exact signal; a page with no such write ships without the chunk.
+  ["_scrml_safe_url(", "urlguard"],
+  // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls `_scrml_url_shape_ok(`
+  // (emit-predicates.ts), defined in the same `urlguard` chunk (runtime-url-guard.js). The check is
+  // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text
+  // is the one exact signal.
+  ["_scrml_url_shape_ok(", "urlguard"],
+  // §53 (S458 2a-fix F2) — a refined cell holds its object / array behind the
+  // deep-reactive proxy (`_scrml_deep_reactive`), whose traps re-judge an in-place
+  // mutation; the registration call gates that chunk.
+  ["_scrml_refine_register(", "deep_reactive"],
+  ["_scrml_refine_register(", "refine"],
+  // S461 — `timers` and `animation` used to ride on EVERY page through the retired
+  // `scope → {timers, animation}` edge, which also masked any emitter the pre-emit
+  // walk misses (a `<timer>`/`<poll>` in a deferred arm body, a when-handler body).
+  // Now that they ship by trigger, the emitted text is the backstop, exactly as for
+  // the chunks above. `_scrml_timer_` covers start/stop/pause/resume + the registry;
+  // `animationFrame` is the §6.7.7 author-callable built-in (a bare substring:
+  // `requestAnimationFrame` spells it with a capital A and does not match).
+  ["_scrml_timer_", "timers"],
+  ["_scrml_stop_scope_timers(", "timers"],
+  ["animationFrame", "animation"],
+  ["_scrml_animation_frame(", "animation"],
+  ["_scrml_cancel_animation_frames(", "animation"],
+  // S461 — the §51.12 / §51.14 machine helpers left 'core' for the 'machine' chunk. Every
+  // emitter of them (emit-logic `<machine>` arming, emit-expr / rewrite `replay(...)`) writes
+  // the helper name into the client text, so the text is the trigger. (The 'engine' chunk's
+  // own calls are covered by the engine → machine edge.)
+  ["_scrml_machine_", "machine"],
+  ["_scrml_replay(", "machine"],
+];
+
+/**
+ * Seed every runtime chunk the given emitted CLIENT text names (the table above, the
+ * `reconciliation` gate, the `errors` gate). Returns true when it added a chunk. The
+ * caller closes CHUNK_DEPENDENCIES afterwards. Pure over its inputs; idempotent.
+ *
+ * Called TWICE by generateClientJs (S461): over the emitted `lines`, and again over the
+ * FINAL client body — several stages rewrite the body after the runtime is assembled
+ * (the auto-await IIFE lift wraps a reactive-server assignment in
+ * `.catch(… _scrml_error_boundary_log …)`, the async-combinator footer, …), and a
+ * reference those stages introduce is invisible to the first scan. The corpus sweep
+ * measured exactly that: 25 pages calling `_scrml_error_boundary_log` with no 'errors'
+ * chunk until the second scan existed.
+ */
+function gateChunksByEmittedReference(texts: Iterable<unknown>, chunks: Set<string>): boolean {
+  const strs: string[] = [];
+  for (const t of texts) if (typeof t === "string") strs.push(t);
+  const names = (needle: string) => strs.some((t) => t.includes(needle));
+  let added = false;
+  const add = (c: string) => { if (!chunks.has(c)) { chunks.add(c); added = true; } };
+  // §20.6 `log` / §52.8 `ssr` — the same substring signals as the early gates in
+  // generateClientJs, repeated here so the late scan covers them too.
+  if (!chunks.has("log") && names("_scrml_log(")) add("log");
+  if (!chunks.has("ssr") && names("_scrml_ssr_")) add("ssr");
+  for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
+    if (!chunks.has(chunkName) && names(helperRef)) add(chunkName);
+  }
+  // g-lift-inside-each-row-or-match-arm-silently-dropped (S427) +
+  // g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime (S429) — a
+  // `_scrml_reconcile_list(` call can be emitted from a shape the pre-emit
+  // for-stmt / each walk (`detectFromNode`) never visits: a keyed
+  // `for (… of @cell) { lift … }` in a deferred arm body, AND an `<each>` inside
+  // a ternary markup expression (`${ @show ? <ul><each …/></ul> : "" }`), whose
+  // markup lives in an ExprNode the walk does not descend. Either way the client
+  // CALLS the function while the `reconciliation` chunk that DEFINES it is
+  // tree-shaken → `ReferenceError` at init, page empty, exit 0. S427 scoped this
+  // gate to nested-lift files to keep #1022's blast radius to its locus; the
+  // emitted text is ground truth for every producer, so it is now unconditional.
+  // `deep_reactive` rides with it, as at every pre-emit site that adds
+  // `reconciliation`: the chunk reads `_scrml_tracking_paused` / calls
+  // `_scrml_effect_static` unguarded, the chunk-dependency table does not record
+  // that edge (the S427 sites predate this function).
+  if (!chunks.has("reconciliation") && names("_scrml_reconcile_list(")) {
+    add("reconciliation");
+    add("deep_reactive");
+  }
+
+  // S461 — POST-EMIT `errors` chunk gate. The 'errors' chunk (the §19 built-in
+  // error classes + the §19.6.8 `_scrml_error_boundary_log` /
+  // `_scrml_error_boundary_uncaught` reporters) was seeded into EVERY page; a
+  // page that names none of them paid ~470 B gzip for nothing. Its references
+  // are emitted by many lowerings (server-fn call IIFEs, errorBoundary wiring,
+  // async `on mount`, engine `effect=`, session.destroy, the js-async listener
+  // seam, author code naming a class), so the emitted text is the one exact
+  // signal — the rationale of the table above.
+  //
+  // Word-bounded, and a name directly inside quotes does not count: every
+  // server-fn stub emits the STRING `variant: "NetworkError"`, which is a tag,
+  // not a reference to the class, and counting it would re-ship the chunk on
+  // every server page. A member read (`x.NetworkError`) is not a reference
+  // either. Over-inclusion is the only failure direction left (a comment or an
+  // author binding of the same name) and it is safe: the chunk ships as before.
+  // The chunks whose own helpers report through `_scrml_error_boundary_log`
+  // pull 'errors' by CHUNK_DEPENDENCIES edge (runtime-chunks.ts), closed by the caller.
+  if (!chunks.has("errors") && strs.some((t) => ERRORS_CHUNK_REFERENCE.test(t))) add("errors");
+  return added;
+}
+
 export type { EncodingContext } from "./type-encoding.ts";
 export type { CompileContext } from "./context.ts";
 
@@ -3048,157 +3208,11 @@ export function generateClientJs(ctx: CompileContext): string {
     const _judgeDefs = judgeDefinitionsFor(lines.join("\n"));
     if (_judgeDefs) lines.push("", _judgeDefs);
   }
-  const POST_EMIT_HELPER_CHUNK_GATES: Array<[string, string]> = [
-    ["_scrml_structural_eq(", "equality"],
-    ["_scrml_reset(", "reset"],
-    ["_scrml_message_for", "messages"],
-    // §17.1 if= mount/unmount. `_scrml_find_if_marker(` is the ONE token every
-    // emitted conditional controller carries — standalone `if=` AND `if-chain`,
-    // mount-mode AND display-mode branches (emit-event-wiring.ts:1475 / :1981) —
-    // so it gates the whole family without enumerating them. Belt-and-braces with
-    // the pre-emit AST walk above: this scan sees the emitted text, so it also
-    // covers a controller minted from the binding registry rather than a walkable
-    // AST shape.
-    ["_scrml_find_if_marker(", "ifmount"],
-    // g-when-handler-body-invisible-to-chunk-detection (S372 follow-up) — a
-    // client `navigate(...)` lowers to `_scrml_navigate_soft(` / `_scrml_navigate(`
-    // (rewrite.ts), both DEFINED in the `utilities` chunk. That chunk's pre-emit
-    // gate (detectFromNode `case "bare-expr"`, exprNodeContainsCall "navigate")
-    // only fires for a `navigate()` that is a walkable `bare-expr` AST node. A
-    // `when @dep changes { … }` / `when message from <#w> { … }` handler body is
-    // NOT stored as child bare-expr nodes — it lives only as `bodyRaw` (string) +
-    // `bodyExpr` (STATEMENT 1's ExprNode). So a `navigate()` anywhere in a
-    // when-handler body (single-statement OR statements 2+, the latter newly
-    // EMITTED by #693/#695) is invisible to the pre-emit walk → the `utilities`
-    // chunk is tree-shaken → the emitted `_scrml_navigate_soft(` reference throws
-    // `ReferenceError` on first dependency change. Unlike `reset`/`equality`,
-    // `utilities` has no scope-dependency backstop (CHUNK_DEPENDENCIES) and was
-    // not in this post-emit table, so nothing caught it. Scanning the emitted body
-    // (ground truth, AST-shape-immune — the exact rationale of this table) closes
-    // it. Reference-GATED: a navigate-free page emits neither token and still
-    // tree-shakes `utilities` out — no over-inclusion. The runtime placeholder
-    // slot is still empty here, so this scans only emitted client code, never the
-    // chunk's own `_scrml_navigate` definition.
-    ["_scrml_navigate_soft(", "utilities"],
-    ["_scrml_navigate(", "utilities"],
-    // g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ … lift … }`
-    // block inside a `<match>` arm is stored RAW at TAB and lowered only at CG
-    // time (the same deferred-arm shape as GITI-036 above), so the pre-emit
-    // `case "lift-expr"` walk never sees its lift and the `lift` chunk — which
-    // DEFINES `_scrml_lift_target` / `_scrml_lift` — was tree-shaken, leaving
-    // the emitted group's `_scrml_lift_target = …` a ReferenceError the moment
-    // the arm rendered. Every emitted lift group assigns `_scrml_lift_target`
-    // (and the nested-group driver saves it), so the bare name gates the whole
-    // family; a lift-free page references neither and still tree-shakes it out.
-    ["_scrml_lift_target", "lift"],
-    // The nested-lift drivers (`_scrml_lift_scoped_run` / `_scrml_lift_item_run`,
-    // emit-reactive-wiring.ts NESTED_LIFT_RUN_HELPERS) construct effects with
-    // `_scrml_effect` / `_scrml_effect_static` (the `deep_reactive` chunk) even
-    // when the lifted block itself reads nothing reactive — e.g. an engine arm
-    // lifting over its payload binding. The driver's definition carries this
-    // call-form token, so it gates exactly the files that emit the drivers.
-    ["_scrml_lift_scoped_run(", "deep_reactive"],
-    // g-arm-directive-binding-reads-arm-name — an arm-bound logic factory
-    // (emit-event-wiring `armLogicFactoryName`) applies its binding under
-    // `_scrml_effect`. The binding lives in a deferred arm body the pre-emit
-    // walk counts only as a registry entry, and an `<engine>` page with no other
-    // reactive surface shipped without `deep_reactive`: `_scrml_effect is not
-    // defined` on the first arm entry. The factory name gates exactly the files
-    // that emit one.
-    ["_scrml_armb_", "deep_reactive"],
-    // §5.2 rule 3 (S457) — a URL-attribute write the compiler could not prove safe is routed
-    // through `_scrml_safe_url(` (codegen/url-attr-guard.ts), DEFINED in the `urlguard` chunk. The
-    // call is emitted by many lowerings (top level, arms, <each> rows, lift), so the emitted text is
-    // the one exact signal; a page with no such write ships without the chunk.
-    ["_scrml_safe_url(", "urlguard"],
-    // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls `_scrml_url_shape_ok(`
-    // (emit-predicates.ts), defined in the same `urlguard` chunk (runtime-url-guard.js). The check is
-    // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text
-    // is the one exact signal.
-    ["_scrml_url_shape_ok(", "urlguard"],
-    // §53 (S458 2a-fix F2) — a refined cell holds its object / array behind the
-    // deep-reactive proxy (`_scrml_deep_reactive`), whose traps re-judge an in-place
-    // mutation; the registration call gates that chunk.
-    ["_scrml_refine_register(", "deep_reactive"],
-    ["_scrml_refine_register(", "refine"],
-    // S461 — `timers` and `animation` used to ride on EVERY page through the retired
-    // `scope → {timers, animation}` edge, which also masked any emitter the pre-emit
-    // walk misses (a `<timer>`/`<poll>` in a deferred arm body, a when-handler body).
-    // Now that they ship by trigger, the emitted text is the backstop, exactly as for
-    // the chunks above. `_scrml_timer_` covers start/stop/pause/resume + the registry;
-    // `animationFrame` is the §6.7.7 author-callable built-in (a bare substring:
-    // `requestAnimationFrame` spells it with a capital A and does not match).
-    ["_scrml_timer_", "timers"],
-    ["_scrml_stop_scope_timers(", "timers"],
-    ["animationFrame", "animation"],
-    ["_scrml_animation_frame(", "animation"],
-    ["_scrml_cancel_animation_frames(", "animation"],
-    // S461 — the §51.12 / §51.14 machine helpers left 'core' for the 'machine' chunk. Every
-    // emitter of them (emit-logic `<machine>` arming, emit-expr / rewrite `replay(...)`) writes
-    // the helper name into the client text, so the text is the trigger. (The 'engine' chunk's
-    // own calls are covered by the engine → machine edge.)
-    ["_scrml_machine_", "machine"],
-    ["_scrml_replay(", "machine"],
-  ];
-  for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
-    if (ctx.usedRuntimeChunks.has(chunkName)) continue;
-    for (const _ln of lines) {
-      if (typeof _ln === "string" && _ln.includes(helperRef)) {
-        ctx.usedRuntimeChunks.add(chunkName);
-        break;
-      }
-    }
-  }
-  // g-lift-inside-each-row-or-match-arm-silently-dropped (S427) +
-  // g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime (S429) — a
-  // `_scrml_reconcile_list(` call can be emitted from a shape the pre-emit
-  // for-stmt / each walk (`detectFromNode`) never visits: a keyed
-  // `for (… of @cell) { lift … }` in a deferred arm body, AND an `<each>` inside
-  // a ternary markup expression (`${ @show ? <ul><each …/></ul> : "" }`), whose
-  // markup lives in an ExprNode the walk does not descend. Either way the client
-  // CALLS the function while the `reconciliation` chunk that DEFINES it is
-  // tree-shaken → `ReferenceError` at init, page empty, exit 0. S427 scoped this
-  // gate to nested-lift files to keep #1022's blast radius to its locus; the
-  // emitted text is ground truth for every producer, so it is now unconditional.
-  // `deep_reactive` rides with it, as at every pre-emit site that adds
-  // `reconciliation`: the chunk reads `_scrml_tracking_paused` / calls
-  // `_scrml_effect_static` unguarded, the chunk-dependency table does not record
-  // that edge, and `applyChunkDependencies` has already run by this point.
-  if (!ctx.usedRuntimeChunks.has("reconciliation")) {
-    for (const _ln of lines) {
-      if (typeof _ln === "string" && _ln.includes("_scrml_reconcile_list(")) {
-        ctx.usedRuntimeChunks.add("reconciliation");
-        ctx.usedRuntimeChunks.add("deep_reactive");
-        break;
-      }
-    }
-  }
-
-  // S461 — POST-EMIT `errors` chunk gate. The 'errors' chunk (the §19 built-in
-  // error classes + the §19.6.8 `_scrml_error_boundary_log` /
-  // `_scrml_error_boundary_uncaught` reporters) was seeded into EVERY page; a
-  // page that names none of them paid ~470 B gzip for nothing. Its references
-  // are emitted by many lowerings (server-fn call IIFEs, errorBoundary wiring,
-  // async `on mount`, engine `effect=`, session.destroy, the js-async listener
-  // seam, author code naming a class), so the emitted text is the one exact
-  // signal — the rationale of the table above.
-  //
-  // Word-bounded, and a name directly inside quotes does not count: every
-  // server-fn stub emits the STRING `variant: "NetworkError"`, which is a tag,
-  // not a reference to the class, and counting it would re-ship the chunk on
-  // every server page. A member read (`x.NetworkError`) is not a reference
-  // either. Over-inclusion is the only failure direction left (a comment or an
-  // author binding of the same name) and it is safe: the chunk ships as before.
-  // The chunks whose own helpers report through `_scrml_error_boundary_log`
-  // pull 'errors' by CHUNK_DEPENDENCIES edge (runtime-chunks.ts), closed below.
-  if (!ctx.usedRuntimeChunks.has("errors")) {
-    for (const _ln of lines) {
-      if (typeof _ln === "string" && ERRORS_CHUNK_REFERENCE.test(_ln)) {
-        ctx.usedRuntimeChunks.add("errors");
-        break;
-      }
-    }
-  }
+  // The post-emit reference gates (module-level POST_EMIT_HELPER_CHUNK_GATES +
+  // gateChunksByEmittedReference, above generateClientJs). S461 moved the table to
+  // module level so the SAME gates also run over the final client body (end of this
+  // function).
+  gateChunksByEmittedReference(lines, ctx.usedRuntimeChunks);
   // S461 — close the dependency edges again: the post-emit gates above add
   // chunks (reset, ssr, urlguard, ...) AFTER `detectRuntimeChunks` already ran
   // `applyChunkDependencies`, and those chunks carry edges of their own.
@@ -4460,6 +4474,24 @@ export function generateClientJs(ctx: CompileContext): string {
   clientStage(ctx, "async-combinator-inject", () => {
     const block = asyncCombinatorHelperBlock(clientCode);
     if (block) clientCode = clientCode + block;
+  });
+
+  // S461 — LATE reference gate. The runtime was assembled (and spliced into the
+  // runtime slot) before the post-assembly rewrites above — the mangle, the
+  // auto-await IIFE lift, the import prune, the combinator footer — and those can
+  // introduce runtime references of their own (the auto-await lift's
+  // `.catch(… _scrml_error_boundary_log …)` is the measured case). Re-run the same
+  // gates over the FINAL body; when they add a chunk, re-assemble the runtime in its
+  // slot so the embedded runtime and the shared-runtime union (index.ts reads
+  // ctx.usedRuntimeChunks) both carry it.
+  clientStage(ctx, "late-reference-gate", () => {
+    const at = clientCode.indexOf(runtimeSource);
+    const body = at >= 0 ? clientCode.slice(0, at) + clientCode.slice(at + runtimeSource.length) : clientCode;
+    if (!gateChunksByEmittedReference([body], ctx.usedRuntimeChunks)) return;
+    applyChunkDependencies(ctx.usedRuntimeChunks);
+    if (at >= 0) {
+      clientCode = clientCode.slice(0, at) + assembleRuntime(ctx.usedRuntimeChunks) + clientCode.slice(at + runtimeSource.length);
+    }
   });
 
   // S22 §1a slice 2: release the per-file variant registry.
