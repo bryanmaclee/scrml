@@ -14,6 +14,14 @@
 - [x] self-count (bootstrap front end single-file, base 3d0e54e21 vs head, E-COND-NOT-BOOLEAN +
       E-OPERATOR-OPERAND-TYPE): self-host-v2 65 files 0 delta; conformance 1574 files: only the new case
       (+3/-1); examples 71: 0; samples 880: 0; stdlib 53: 0.
+- [x] PA correction (52a0877ce): strict direction only — the mixed-arm acceptance (`if (@b ? @o.n : @c)`) removed;
+      an unresolved ternary with no arm reported falls back to the base whole-ternary refusal. Runtime presence-arm
+      test replaced by refusal tests; §42.4 st.10 provenance now newly-rejecting only. Proof: bootstrap front end
+      over 2643 corpus files + 133 probe conditions (probe/c8–c11 incl. every N1 test shape × if / if= / show= /
+      ternary test), base 3d0e54e21 vs head — newly accepted 0; newly rejected 7 (all probe cases of the N1
+      shapes); corpus: only the new conformance case's diagnostics moved.
+- [x] merge origin/main 8e9e69e34 (#1373) — 72543614e; known-gaps auto-merged, both sides present; generated
+      docs current.
 - [x] gates: core (pre-commit 33755 tests pass), conformance 1472 pass + 65 xfail / 1537, 0 FAIL, bootstrap CI
       suites green, bootstrap-conformance --check current, types:check OK (184 unchanged), s34-census PASS,
       facts / SPEC-INDEX / severity current, host-global-scan 0 violations.
