@@ -45946,7 +45946,8 @@ declaration's markup appears only where an instance is used (`<x …/>`) or the 
 
 A plain markup use `<x …/>` (or `<x …>…</x>`) of a declaration is a **NEW INSTANCE** everywhere. Its attributes
 are that instance's values (construction, §66.14) — each is that field's initializer for that instance (§66.9
-rule 8). Its children are slot content (§66.15.2).
+rule 8). An attribute the declaration does not declare is refused (`E-DECL-USE-ATTR`, §66.6.9). Its children are
+slot content (§66.15.2).
 
 #### 66.6.2 `<*x>` is the existing one
 
@@ -46000,7 +46001,14 @@ window (§66.21).
 A `<*x>` reference cannot write: an attribute that would set a value of the referenced instance is a compile
 error (`E-DECL-STAR-REF-ATTR-WRITE`, §66.20). Writes go through logic (§66.11).
 
-> ⚑ **OPEN (not ruled) — O18: which attributes a `<*x>` reference may carry at all.** Q1 forbids writes.
+An attribute on a `<*x>` reference that names no field of `x` is refused too (`E-DECL-USE-ATTR`, §66.6.9).
+
+> ✅ **RULED S462 — O18** (bryan: *"I really like X so I accept your rec as a ratified path to X"*, dpa-069): an
+> undeclared attribute on a plain use or on a `<*x>` reference is `E-DECL-USE-ATTR` — §66.6.9 states the rule. One
+> residue stays open: whether `if=` / `else-if=` / `else` may gate a `<*x>` reference (§66.22, O18-r). The prior
+> OPEN text follows for the record.
+>
+> *(superseded S462)* **O18: which attributes a `<*x>` reference may carry at all.** Q1 forbids writes.
 > `if=` on a plain USE is legal (it appears in the PA text answered "yes" for #18/#24/#25:
 > `<dropdown as=country if=@showCountry …/>`). Whether `if=` / `class=` / `style=` / `key=` are legal on a `<*x>`
 > reference, and whether `class=` / `style=` / `key=` on a plain use are markup attributes or construction
@@ -46013,6 +46021,58 @@ error (`E-DECL-STAR-REF-ATTR-WRITE`, §66.20). Writes go through logic (§66.11)
 > §6.4.1 reading); **(b)** a data-only instance that renders nothing — note that a Q5 `as=`-bound instance is
 > addressed from logic and need not render at all, so a render-less declaration instantiated for its state
 > (`<counter as=c/>`) is a coherent use. Not decided here.
+
+#### 66.6.9 A use carries only what its declaration declares (O18)
+
+> **Provenance:** ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to
+> X"* (dpa-069, O18; the PA's 7-item package, items 1, 5 and 6) · dd: undeclared-use-site-attributes-o18-dpa-069-2026-10-08
+> §7 · supersedes: §66.6.7's O18 OPEN block; ruling:S435 (the §66.15.1 class-merging carry-over row — reversed
+> there, out loud); §66.14 rule 4's unqualified "use-site attributes are construction — always allowed" (now "a
+> **declared** use-site attribute") · **Direction of change:** newly-rejecting, on the §66 dialect only. impl#1
+> does not implement §66, so no program impl#1 accepts changes meaning; the bootstrap already refused an
+> undeclared attribute on a plain use and now also refuses one on a `<*x>` reference (it was dropped silently).
+> Measured corpus impact: `docs/changes/s462-decl-use-attr-refuse/`.
+
+1. **A plain use carries three kinds of attribute, and nothing else:**
+   - the declaration's **declared** attributes and child fields — construction (§66.14 rule 4, §66.9 rule 8);
+   - **`as=`** — the instance's handle (§66.7.2);
+   - the conditional-chain attributes **`if=` / `else-if=` / `else`** (§17.1; ruled for a use at S435 #18/#24/#25,
+     §66.6.7).
+2. **Any other attribute on a plain use is `E-DECL-USE-ATTR`** (§66.20) — an Error, fail-closed. That includes
+   `class` and `class:name=`, `style`, `id`, `aria-*`, `data-*`, every `on…` handler, `bind:…`, `show=`, URL
+   attributes (`href`, `src`, …), `srcdoc`, `key=` (rule 4) and a misspelled field name (`<card titel="Q3"/>`).
+   A use is not an element. Its attributes are values of the new instance; they are never markup attributes of
+   what its `renders` produces. **Nothing falls through** to an element of `renders` — not onto a root, not
+   merged into one, not by name.
+3. **A `<*x>` reference** makes no instance, so it carries neither construction nor a handle: an attribute naming
+   a field of `x` is `E-DECL-STAR-REF-ATTR-WRITE` (§66.6.7), and any other attribute — `as=` included (address
+   the existing instance as `@x`, §66.7.1) — is `E-DECL-USE-ATTR`. Whether `if=` / `else-if=` / `else` may gate a
+   `<*x>` reference is the one O18 residue left open (§66.22, O18-r).
+4. **`key=` on a use is never a DOM attribute and never a reconciliation key.** An instance inside an `<each>`
+   row is keyed by the row's `key=` (§66.7.3, §17.7.5); a `key=` written on the use itself is an undeclared
+   attribute, `E-DECL-USE-ATTR`, like any other. (Whether `key` may be DECLARED as a field name is O41, §66.2.3;
+   a declared field named `key` would be construction under rule 1.)
+5. **What a component author writes instead** is a declared field, placed where the `renders` wants it:
+
+   ```scrml
+   <card title:string wide:bool=false testid:string=""/>
+   renders <div class=(wide ? "card wide" : "card") data-testid=testid>${title}</div>
+
+   <card title="Q3" wide=true testid="q3-card"/>     // ok — every attribute is declared
+   <card title="Q3" class="wide"/>                   // E-DECL-USE-ATTR — `class` is not declared
+   <card titel="Q3"/>                                 // E-DECL-USE-ATTR — a typo is refused, not written
+   ```
+
+   `class` and `style` cannot be declared (§66.2.3), so a caller's styling reaches a declaration only through a
+   declared field or through the ratified forwarding destination (§66.15.3, not yet built).
+6. **Scope — the §66 dialect only.** impl#1's legacy component form `const X = <root …>` keeps its §15 behaviour
+   through its §63 window (§66.21): §15.5's class merging, §15.10's `E-COMPONENT-011` for a component with a
+   `props` block, and a propless component's call-site attributes written onto its root. `E-DECL-USE-ATTR` does
+   not fire on that form.
+7. **Security (non-normative consequence).** Since no use-site attribute reaches an element, every executable sink
+   in a §66 program — an `on…` attribute, a URL attribute, `srcdoc` — is an attribute an author wrote in a body or
+   a `renders`, where §5.2's checks already see it. §5.2's clauses about "a call-site attribute written onto an
+   expanded component root" concern only the legacy form of rule 6.
 
 ### 66.7 Addressing instances from logic — `@name`, `as=`, lists and conditionals
 
