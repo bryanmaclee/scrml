@@ -145,25 +145,30 @@ function _scrml_meta_emit_inside_form(el) {
 // accessors. `inPageForm`: the insertion point sits inside a page `<form>` (S459 round 4 F1) — then a
 // form-associated control anywhere in the tree is refused (it would join that form's submission and
 // named properties: an injected `<input type=hidden name=amount>` fed the page form's FormData, an
-// injected `<button type=submit>` submitted it). A named-property `id` / `name` (F2) is reported only
+// injected `<button type=submit>` submitted it) — except inside an HTML `<template>`'s inert content
+// (S460 N5). A named-property `id` / `name` (F2) is reported only
 // when the walk finds nothing else, so a refusal names what such a shadowing would have hidden.
 function _scrml_meta_emit_violation(root, inPageForm) {
   const dom = _SCRML_META_EMIT_DOM;
   const call = (fn, self, a, b) => fn.call(self, a, b);
   // `document: null`: no document table ships (S460 N6; why: `_scrml_emit_named_value_verdict`).
   const members = { document: null, form: _SCRML_EMIT_FORM_MEMBERS, formProto: dom.formProto };
-  const stack = []; // [node, insideAForm]
+  // [node, insideAForm, insideTemplateContent]. Template content is inert — it joins no form and no
+  // radio group — so the page-form rule, the form half of the named-property rule and the radio-group
+  // rule do not apply inside it (S460 N5); every other rule does.
+  const stack = [];
   let shadowing = "";
-  const pushChildren = (parent, inForm) => {
+  const pushChildren = (parent, inForm, inTemplate) => {
     const kids = [];
     for (let c = call(dom.firstChild, parent); c; c = call(dom.nextSibling, c)) kids.push(c);
-    for (let k = kids.length - 1; k >= 0; k--) stack.push([kids[k], inForm]);
+    for (let k = kids.length - 1; k >= 0; k--) stack.push([kids[k], inForm, inTemplate]);
   };
-  pushChildren(root, inPageForm === true);
+  pushChildren(root, inPageForm === true, false);
   while (stack.length > 0) {
     const entry = stack.pop();
     const node = entry[0];
     let inForm = entry[1];
+    const inTemplate = entry[2];
     const type = call(dom.nodeType, node);
     if (type === 1) {
       // Names are folded the way the HTML tokenizer folds them — ASCII only (a KELVIN SIGN stays
@@ -175,7 +180,7 @@ function _scrml_meta_emit_violation(root, inPageForm) {
       if (!_SCRML_META_EMIT_KNOWN_ELEMENTS.has(tag) && !isCustom) {
         return "a <" + tag + "> element (not a standard HTML / SVG / MathML element or a custom element)";
       }
-      if (inPageForm === true && _scrml_emit_is_form_control(ns, tag, isCustom)) {
+      if (inPageForm === true && inTemplate !== true && _scrml_emit_is_form_control(ns, tag, isCustom)) {
         return "a <" + tag + "> element inserted inside a page <form> (a form control there would join " +
           "that form's submission)";
       }
@@ -204,19 +209,33 @@ function _scrml_meta_emit_violation(root, inPageForm) {
           return "a " + name + "= URL on <" + tag + "> whose scheme is not admitted";
         }
       }
+      // A radio button outside any form joins the radio group of every form-less radio of the same
+      // name in the page — checking it unchecks the page's (S460 N2a). Inside an emitted `<form>` its
+      // group is that form's (a page form around the insertion point already refused it above).
+      if (tag === "input" && ns === _SCRML_EMIT_NS_HTML && inForm !== true && inTemplate !== true) {
+        let inputType = "";
+        let groupName = "";
+        for (let i = 0; i < read.length; i++) {
+          if (read[i][0] === "type") inputType = _scrml_emit_fold_name(read[i][1]);
+          if (read[i][0] === "name") groupName = read[i][1];
+        }
+        if (inputType === "radio" && groupName !== "") {
+          return "a name= on an <input type=radio> outside any form (it would join a radio group of the page)";
+        }
+      }
       if (tag === "form" && ns === _SCRML_EMIT_NS_HTML) inForm = true;
       // Only an HTML `<template>` has a content fragment (the getter throws on an SVG / MathML element
       // named `template`, which is an ordinary element whose children are walked below).
       if (tag === "template" && ns === _SCRML_EMIT_NS_HTML && dom.templateContent !== null) {
         const content = call(dom.templateContent, node);
-        if (content) stack.push([content, inForm]);
+        if (content) stack.push([content, false, true]);
       }
     } else if (type === 11) {
       // a template's content fragment — its children are judged like any others
     } else if (type !== 3 && type !== 8) {
       return "a node of type " + type;
     }
-    pushChildren(node, inForm);
+    pushChildren(node, inForm, inTemplate);
   }
   return shadowing;
 }

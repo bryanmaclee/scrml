@@ -125,6 +125,90 @@ describe("S460 N4 — form-member field names: admitted at compile time, refused
   });
 });
 
+// N5 — inert template content joins no form: the page-form rule does not apply inside it; every other
+// rule does.
+describe("S460 N5 — template content inside a page form", () => {
+  const ADMITTED_IN_PAGE_FORM = [
+    ["an input inside a template", '<template><input name="q"></template>'],
+    ["a submit button inside a template", '<template><button type="submit">go</button></template>'],
+    ["an img id naming a form member inside a template", '<template><img id="action" src="/a.png" alt="a"></template>'],
+    ["a nested template", '<template><div><template><input name="q"></template></div></template>'],
+  ];
+  for (const [label, html] of ADMITTED_IN_PAGE_FORM) {
+    test(`admitted: ${label}`, () => {
+      const { rt, logs, slot, document } = makePage(PAGE_FORM);
+      rt._scrml_meta_emit("m1", html);
+      expect(logs).toEqual([]);
+      expect(slot().innerHTML).toBe(html);
+      // nothing joined the page form
+      expect(document.getElementById("pf").elements.length).toBe(0);
+    });
+  }
+  const STILL_REFUSED = [
+    ["an event handler inside a template", '<template><img src=x onerror="window.__pwn=1"></template>', "onerror"],
+    ["a javascript: URL inside a template", '<template><a href="javascript:window.__pwn=1">x</a></template>', "href= URL"],
+    ["a control beside a template", '<template><p>t</p></template><input name="q">', "inside a page <form>"],
+    ["a control in a template's sibling subtree", '<div><template></template><b><input name="q"></b></div>', "inside a page <form>"],
+  ];
+  for (const [label, html, fragment] of STILL_REFUSED) {
+    test(`still refused: ${label}`, () => {
+      const { rt, logs, slot } = makePage(PAGE_FORM);
+      rt._scrml_meta_emit("m1", html);
+      expect(slot().innerHTML).toBe("old");
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain(fragment);
+    });
+  }
+  test("outside a page form: a form-member name inside a template in an emitted form is admitted (inert)", () => {
+    const { rt, logs, slot } = makePage();
+    rt._scrml_meta_emit("m1", '<form><template><input name="action"></template></form>');
+    expect(logs).toEqual([]);
+    expect(slot().innerHTML).toBe('<form><template><input name="action"></template></form>');
+  });
+  test("compile time: the same template markup compiles clean", () => {
+    expect(compile(emitOf('<template><input name="q"></template>')).codes).toEqual([]);
+    expect(compile(emitOf('<form><template><input name="action"></template></form>')).codes).toEqual([]);
+  });
+});
+
+// N2(a) — a form-less radio joins the page's form-less radio group of that name: refused at run time.
+describe("S460 N2a — runtime meta.emit refuses a named radio outside any form", () => {
+  const REFUSED_RADIO = [
+    ["a named radio", '<input type="radio" name="plan" value="evil" checked>'],
+    ["type in upper case", '<input type="RADIO" name="plan">'],
+    ["nested in admitted markup", '<p><label>x <input type=radio name=plan></label></p>'],
+    ["foster-parented out of an emitted form", '<table><form><input type="radio" name="plan"></form></table>'],
+  ];
+  for (const [label, html] of REFUSED_RADIO) {
+    test(`refused: ${label}`, () => {
+      const { rt, logs, slot } = makePage('<input type="radio" name="plan" id="pa" checked><span data-scrml-meta="m1">old</span>');
+      rt._scrml_meta_emit("m1", html);
+      expect(slot().innerHTML).toBe("old");
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain("input type=radio");
+      expect(logs[0]).not.toContain("plan");
+    });
+  }
+  const ADMITTED_RADIO = [
+    ["a radio group inside an emitted form", '<form><input type="radio" name="plan" value="a"><input type="radio" name="plan" value="b"></form>'],
+    ["a radio with no name", '<input type="radio" value="a">'],
+    ["a radio with an empty name", '<input type="radio" name="" value="a">'],
+    ["a named checkbox (no group)", '<input type="checkbox" name="plan">'],
+    ["a radio inside a template", '<template><input type="radio" name="plan"></template>'],
+  ];
+  for (const [label, html] of ADMITTED_RADIO) {
+    test(`admitted: ${label}`, () => {
+      const { rt, logs, document } = makePage('<input type="radio" name="plan" id="pa" checked><span data-scrml-meta="m1">old</span>');
+      rt._scrml_meta_emit("m1", html);
+      expect(logs).toEqual([]);
+      expect(document.getElementById("pa").checked).toBe(true);
+    });
+  }
+  test("compile time does not apply the radio rule (author markup; the source form around the ^{} is unknown)", () => {
+    expect(compile(emitOf('<input type="radio" name="plan" value="a">')).codes).toEqual([]);
+  });
+});
+
 // N6 — the runtime chunk carries the form member table only.
 describe("S460 N6 — the runtime ships no document member table", () => {
   test("SCRML_RUNTIME carries _SCRML_EMIT_FORM_MEMBERS, not _SCRML_EMIT_DOCUMENT_MEMBERS / documentProto", () => {

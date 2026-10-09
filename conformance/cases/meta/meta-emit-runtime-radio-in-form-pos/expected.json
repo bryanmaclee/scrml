@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-radio-in-form-pos",
+  "description": "§22.12 (S460 N2a) positive — a radio group inside an emitted `<form>` is admitted (its group is that form's).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Radio groups*: only a named radio with no form ancestor is refused. (S460 differential review N2(a), PA-dispatched)",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host #ef input",
+        "count": 2
+      }
+    ]
+  }
+}
