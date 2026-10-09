@@ -280,6 +280,58 @@ describe("N1 — a write that throws changes nothing", () => {
     expect(throwsContract(() => { rt.state[k][1].n = -5; })).toBe(true);
     expect(throwsContract(() => { rt.state[k][0].n = -5; })).toBe(true);
   });
+
+  test("S460 L-A: a REFUSED path write through a shared sub-object does not un-share it (identity, sharing, places unchanged)", () => {
+    const rt = load(page(`<rows>: L[] = []`), "la-refused");
+    const k = rt.key("rows");
+    const o = { u: "o", n: 4 };
+    rt.set(k, [o, o]);
+    const e = rt.state[k][0];
+    expect(rt.state[k][1]).toBe(e);
+    expect(throwsContract(() => rt.set(k, rt.deepSet(rt.state[k], [0, "n"], -5)))).toBe(true);
+    expect(rt.state[k][0]).toBe(e);                         // the place kept its object
+    expect(rt.state[k][1]).toBe(e);                         // still shared
+    expect(rt.plain("rows")).toEqual([{ u: "o", n: 4 }, { u: "o", n: 4 }]);
+    e.n = 7;                                                // a held reference reaches every place
+    expect(rt.plain("rows")).toEqual([{ u: "o", n: 7 }, { u: "o", n: 7 }]);
+    // place counts unchanged: the object stays in the cell until its LAST place is removed
+    rt.state[k].pop();
+    expect(throwsContract(() => { e.n = -1; })).toBe(true);
+    rt.state[k].pop();
+    e.n = -1;                                               // no place left: the caller's
+    expect(rt.plain("rows")).toEqual([]);
+  });
+
+  test("S460 L-A: a valid path write still un-shares ([9, 4]); refused nested / length / hole writes un-share nothing", () => {
+    const rt = load(page(`<rows>: L[] = []`), "la-valid");
+    const k = rt.key("rows");
+    const o = { u: "o", n: 4 };
+    rt.set(k, [o, o]);
+    rt.set(k, rt.deepSet(rt.state[k], [0, "n"], 9));
+    expect(rt.plain("rows")).toEqual([{ u: "o", n: 9 }, { u: "o", n: 4 }]);
+    expect(rt.state[k][0]).not.toBe(rt.state[k][1]);
+
+    const g = load(page(`<g>: L[][] = []`), "la-nested");
+    const gk = g.key("g");
+    const arr = [o, o];
+    o.n = 4;
+    g.set(gk, [arr, arr]);
+    const h0 = g.state[gk][0], he = h0[0];
+    expect(throwsContract(() => g.set(gk, g.deepSet(g.state[gk], [0, 1, "n"], -5)))).toBe(true);
+    expect(throwsContract(() => g.set(gk, g.deepSet(g.state[gk], [0, "length"], 3)))).toBe(true);   // holes read as `not`
+    expect(throwsContract(() => g.set(gk, g.deepSet(g.state[gk], [0, 5], { u: "z", n: 1 })))).toBe(true);
+    expect(() => g.set(gk, g.deepSet(g.state[gk], [0, "length"], 1.5))).toThrow(RangeError);
+    expect(g.state[gk][0]).toBe(h0);
+    expect(g.state[gk][1]).toBe(h0);
+    expect(g.state[gk][0][0]).toBe(he);
+    expect(g.state[gk][0][1]).toBe(he);
+    he.n = 7;
+    expect(g.plain("g")).toEqual([[{ u: "o", n: 7 }, { u: "o", n: 7 }], [{ u: "o", n: 7 }, { u: "o", n: 7 }]]);
+    // and the valid nested write un-shares only the place it names
+    g.set(gk, g.deepSet(g.state[gk], [0, 1, "n"], 9));
+    expect(g.plain("g")).toEqual([[{ u: "o", n: 7 }, { u: "o", n: 9 }], [{ u: "o", n: 7 }, { u: "o", n: 7 }]]);
+    expect(throwsContract(() => { g.state[gk][1][0].n = -1; })).toBe(true);
+  });
 });
 
 describe("ownership — what is in the cell is exactly what its current value holds", () => {

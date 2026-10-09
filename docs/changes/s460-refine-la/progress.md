@@ -1,3 +1,5 @@
 # progress — s460-refine-la
 
 - 2026-10-08 start; branch s460-refine-la from 3a302511a + merge origin/main (386c14a65); bun install + pretest OK.
+- 2026-10-08 locus: runtime-template.js `_scrml_deep_set` wrapper (refine chunk) — its walk called `_scrml_refine_unshare` per shared step BEFORE the leaf write was judged by the proxy set. Hypothesis held.
+- fix: walk is read-only; leaf write judged on staged shallow copies (linked into the raw value only for the judgement, then unlinked); un-share installed only after the judgement passes. `_scrml_refine_set_length` split -> `_scrml_refine_judge_length` (judge-only). Reproducer i5 before [4,7] -> after [7,7]; b3 stillShared/id0same false -> true. Full reviewer driver: only i5/b3 change. Sibling probes (nested L[][], length holes, invalid length, hole index, __proto__, Map fallback after a shared step): all un-shared on refusal before, none after. Proxy-trap siblings (push/splice/defineProperty/delete/Object.assign/element overwrite/whole write) judge before any bookkeeping — no defect.

@@ -7013,33 +7013,85 @@ if (typeof _scrml_deep_set === "function") {
         (typeof _scrml_reactivity_rules === "object" && _scrml_reactivity_rules[p.key])) {
       return _scrml_deep_set_unjudged(obj, path, value);
     }
-    // the walk reads through the proxies untracked (a write is not a read of the path)
+    // The walk only READS (through the proxies, untracked: a write is not a read of the
+    // path); nothing is changed until the leaf write has been judged (N1).
     const walk = function () {
       let c = _scrml_deep_reactive(raw);
+      const steps = [];
+      let shared = false;
       for (let i = 0; i < path.length - 1; i++) {
-        let next = c[path[i]];
+        const next = c[path[i]];
         const nr = _scrml_refine_raw(next);
         if (!_scrml_refine_is_record(nr) || !_scrml_refine_place.has(nr)) return null;
         // a sub-object the value shares (stored at more than one place): the path names ONE
-        // place, so that place gets its own copy first (the write does not reach the others)
+        // place, so that place gets its own copy (the write does not reach the others); below
+        // a copied container every container is shared with the original, so is copied too
         const q = _scrml_refine_place.get(nr);
-        if (q.n > 1 || q.more !== null) next = _scrml_refine_unshare(c, path[i], nr, q);
+        if (!shared && (q.n > 1 || q.more !== null)) shared = true;
+        steps.push({ key: path[i], nr: nr, q: q, unshare: shared });
         c = next;
+      }
+      return { c: c, steps: steps, shared: shared };
+    };
+    const w = typeof _scrml_untracked === "function" ? _scrml_untracked(walk) : walk();
+    if (w === null) return _scrml_deep_set_unjudged(obj, path, value);
+    const prop = path[path.length - 1];
+    if (!w.shared) {
+      w.c[prop] = value; // judged by the proxy's set
+      return _scrml_deep_reactive(raw);
+    }
+    // Judge the leaf write against the place's own copies BEFORE any copy is installed:
+    // a refused write leaves values, identities, sharing and place counts as they were.
+    const staged = _scrml_refine_stage_unshare(raw, w.steps);
+    const v = _scrml_refine_judge_staged(raw, w.steps, staged, prop, value);
+    const install = function () {
+      let c = _scrml_deep_reactive(raw);
+      for (let i = 0; i < w.steps.length; i++) {
+        const s = w.steps[i];
+        c = s.unshare ? _scrml_refine_unshare(c, s.key, s.nr, _scrml_refine_place.get(s.nr), staged[i]) : c[s.key];
       }
       return c;
     };
-    const c = typeof _scrml_untracked === "function" ? _scrml_untracked(walk) : walk();
-    if (c === null) return _scrml_deep_set_unjudged(obj, path, value);
-    c[path[path.length - 1]] = value;
+    const c = typeof _scrml_untracked === "function" ? _scrml_untracked(install) : install();
+    c[prop] = v; // the judged value (a copy, or the checked length): judged the same again
     return _scrml_deep_reactive(raw);
   };
 }
-// Give the place \`key\` of judging proxy \`c\` its own shallow copy of shared stored
+// The shallow copies a path write through shared containers will install (one per
+// step that is un-shared; null for a step that is not): built, not yet placed.
+function _scrml_refine_stage_unshare(raw, steps) {
+  const staged = [];
+  for (const s of steps) {
+    staged.push(s.unshare ? (Array.isArray(s.nr) ? s.nr.slice() : Object.assign(Object.getPrototypeOf(s.nr) === null ? Object.create(null) : {}, s.nr)) : null);
+  }
+  return staged;
+}
+// Judge \`leaf[prop] = value\` as made at the place the path names (its staged copies
+// linked into the raw value for the judgement, then unlinked; throws when refused,
+// nothing changed). Returns what the commit writes: the admitted copy (a length: the
+// checked number).
+function _scrml_refine_judge_staged(raw, steps, staged, prop, value) {
+  const links = [];
+  let parent = raw;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (staged[i] !== null) { links.push({ at: parent, key: s.key, was: parent[s.key] }); parent[s.key] = staged[i]; parent = staged[i]; }
+    else parent = s.nr;
+  }
+  try {
+    const last = steps[steps.length - 1];
+    const p = { key: last.q.key, d: last.q.d, parent: null, n: 1, more: null };
+    if (Array.isArray(parent) && prop === "length") return _scrml_refine_judge_length(parent, p, value);
+    return _scrml_refine_prepare(parent, p, prop, value);
+  } finally {
+    for (let i = links.length - 1; i >= 0; i--) links[i].at[links[i].key] = links[i].was;
+  }
+}
+// Give the place \`key\` of judging proxy \`c\` its own shallow copy \`sh\` of shared stored
 // object \`nr\` (place q): the copy's children are the same stored objects, now held
 // at one more place. Same content, so nothing is judged. Returns the copy's proxy.
-function _scrml_refine_unshare(c, key, nr, q) {
+function _scrml_refine_unshare(c, key, nr, q, sh) {
   const cr = _scrml_refine_raw(c);
-  const sh = Array.isArray(nr) ? nr.slice() : Object.assign(Object.getPrototypeOf(nr) === null ? Object.create(null) : {}, nr);
   _scrml_refine_place.set(sh, { key: q.key, d: q.d, parent: cr, n: 1, more: null });
   for (const k of Object.keys(sh)) {
     const x = sh[k];
@@ -7110,6 +7162,18 @@ function _scrml_refine_set_length(inner, raw, p, value) {
   const len = raw.length;
   // not a valid length: the write throws its RangeError before anything changes
   if (n >>> 0 !== n) return Reflect.set(inner, "length", n, inner);
+  _scrml_refine_judge_length(raw, p, n);
+  const removed = n < len ? raw.slice(n) : null;
+  const ok = Reflect.set(inner, "length", n, inner);
+  if (ok && removed !== null) for (const x of removed) _scrml_refine_release(raw, x);
+  return ok;
+}
+// Judge \`raw.length = value\` (place p) without making it: throws when refused (an
+// invalid length: its RangeError). Returns the length.
+function _scrml_refine_judge_length(raw, p, value) {
+  const n = Number(value);
+  const len = raw.length;
+  if (n >>> 0 !== n) throw new RangeError("Invalid array length");
   const el = _scrml_refine_child(p.d, raw, "0");
   // lengthening leaves holes, which read as \`not\` (§42)
   if (n > len && el !== null && el !== _scrml_refine_free && !el.ok(undefined)) {
@@ -7119,10 +7183,7 @@ function _scrml_refine_set_length(inner, raw, p, value) {
     const before = raw.slice();
     _scrml_refine_whole(p, function () { raw.length = n; }, function () { _scrml_refine_restore_array(raw, before); });
   }
-  const removed = n < len ? raw.slice(n) : null;
-  const ok = Reflect.set(inner, "length", n, inner);
-  if (ok && removed !== null) for (const x of removed) _scrml_refine_release(raw, x);
-  return ok;
+  return n;
 }
 // One property write \`raw[prop] = value\` on a stored object (place p): the copy it
 // stores, judged; null descriptor -> the whole cell is judged with it.
