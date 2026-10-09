@@ -1,0 +1,27 @@
+# AUTO queue — the only work an AUTO (unattended) run may take
+
+Contract: `../scrml-support/pa-auto.md`. Written by the S460 wrap (2026-10-09). Work top to bottom; parallel where write footprints are disjoint.
+Every code item: isolated dispatch (F4 block) → S239 differential review on a frozen tree → land only when clean + cloud `gate` green.
+Mark each item `DONE <PR>` / `BLOCKED → auto-questions.md` / `PARKED <why>` as you go.
+
+## 1. Land copy-in — PR #1375 (if still open)
+- Rests on: bryan S459 "a, go" + S460 "a on copy-in"; final S239 review LAND (S460).
+- Branch `land/s460-refine-copy-in`. If it conflicts with main: merge main (keep BOTH `refine` and `metaemit` runtime chunks), regenerate generated docs by script, re-prove the runtime-template.js guard (only main-originated hunks differ from cd06606be), re-run gates, push, merge when green.
+- Done when: #1375 merged.
+
+## 2. HIGH gaps that restore SPEC conformance (one dispatch each; each needs the governing sentence quoted)
+- `g-top-level-given-emits-bare-name-s459` (HIGH) — `given @cell :>` lowers to a bare name → ReferenceError; SPEC §42.3.5's own example. Fix the lowering (emit-logic.ts ~:3943, PA-located-verify).
+- `g-given-bool-expr-fail-runs-unconditionally-s460` (HIGH) — `given <bool-expr> :> fail` runs the fail unconditionally.
+- `g-narrowing-survives-writes-incl-callee-s460` (HIGH) — impl#1 keeps a narrowing across a write (incl. via a callee) → runtime TypeError. Drop narrowing on a write to the cell, using the callee's write set where known (dpa-070 §6 caveat i).
+- Done when: each merged, or BLOCKED with the fork stated.
+
+## 3. Ruled builds
+- **Runtime tree-shake** (bryan S459 "measure first, 1 and 3 for sure" — option 3). Measured targets (S459): the errors chunk is always shipped and dead; scope→{timers,animation} edge; engine helpers in core; the mount chunk's false trigger. Gate: the runtime-size ratchet lowers; artifacts behaviour-identical (corpus differential).
+- `g-ship-strip-esm-chunks-after-strip-s459` — ESM per-route chunks are transformed after the strip (21 chunks keep a comment). Fix the order so §47.9.9 holds for ESM (conformance restoration, not a SPEC narrowing).
+- `g-splice-multi-arg-comma-expression-s459` — `splice(0,0,@p)` emitted as a comma expression (data loss).
+
+## 4. Low-risk
+- `g-windows-executed-db-tests-5s-timeout-s460` — explicit per-test timeout on executed-DB tests (test-only).
+- `g-channel-handler-args-emitted-raw-s460` — the E-CHANNEL-006 half only (SPEC already says SHALL; newly-rejecting → PA-ruled class needs MEASURED-zero corpus, else BLOCKED).
+
+## Not for AUTO (needs bryan) — see auto-questions.md
