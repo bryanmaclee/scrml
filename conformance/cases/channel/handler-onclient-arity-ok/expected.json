@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-arity-ok",
+  "description": "§38.10.2 clean neg — `onclient:*` calls with one argument (the event binding) or none compile with no E-CHANNEL-005. The delta from `channel/handler-onclient-arity` is the argument count.",
+  "language-version": "1.0",
+  "spec": "§38.10.1, §38.10.2",
+  "source-test": "compiler/tests/unit/channel-handler-binding-arity.test.js",
+  "rationale": "§38.10.1: the parameter name in the call expression is bound to the event object; with no parameter the event object is not passed. Zero or one argument is the whole well-formed set.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-005"]
+  }
+}

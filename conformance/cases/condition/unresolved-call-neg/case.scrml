@@ -1,0 +1,9 @@
+// §42.4 statement 5 (S460) — a call whose return type is neither declared nor inferred, as a bare condition.
+<program>
+    function g() { }
+    function pick() -> int {
+        if (g()) { return 1 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>

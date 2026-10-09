@@ -1,0 +1,26 @@
+{
+  "id": "condition-unresolved-ternary-arm-neg",
+  "description": "§42.4 statement 10: the arms of a ternary that is the condition's value (or an operand of its `!` / `&&` / `||`) are inside the condition — an unresolved arm or arm operand is E-COND-NOT-BOOLEAN, once per site.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 10: \"A ternary that IS the condition's value, or an operand in its `!` / `&&` / `||` chain, is inside the condition: each arm is that value when taken … `if (@b ? !g() : @c)`, `if (@b ? (g() && @c) : @c)`, `if (@b ? g() : @c)` and `if ((@b ? g() : @c) && @c)` each report `g()`\". Provenance: ruling:user-voice-scrml.md S460 \"a on F2, go\" (PA reading: ternary arms of the condition's value are inside the condition).",
+  "expect": {
+    "codes": [
+      "E-COND-NOT-BOOLEAN"
+    ],
+    "codeCounts": {
+      "E-COND-NOT-BOOLEAN": 3
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-condition-rule-s460",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-COND-NOT-BOOLEAN' fired 0 time(s), expected exactly 3",
+          "missing:E-COND-NOT-BOOLEAN"
+        ]
+      }
+    }
+  }
+}

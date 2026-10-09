@@ -1,0 +1,9 @@
+// §42.4 statement 5 (S460) — a value from the SQL boundary with no scrml type (§42.9), as a bare condition.
+<program db="./app.db">
+    function pick() -> int {
+        const r = ?{`SELECT a FROM t`}.get() !{ _ :> not }
+        if (r) { return 1 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>

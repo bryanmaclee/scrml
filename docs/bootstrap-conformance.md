@@ -7,26 +7,26 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1517 of 1517 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1546 of 1546 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 121 | 8.0% |
+| PASS | 139 | 9.0% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 56 | 3.7% |
+| FAIL | 56 | 3.6% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 563 | 37.1% |
-| UNSUPPORTED | 777 | 51.2% |
+| NOT-TWINNED | 571 | 36.9% |
+| UNSUPPORTED | 780 | 50.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 177; of those, 121 hold (68.4%). Runtime half executed on the bootstrap for 43 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 195; of those, 139 hold (71.3%). Runtime half executed on the bootstrap for 44 case(s).
 
-- **Vacuous** passes: 11 of 121 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **110**.
+- **Vacuous** passes: 11 of 139 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **128**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 543 · parse-reject 234.
+UNSUPPORTED by reason: bootstrap-unsupported 544 · parse-reject 236.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -34,7 +34,7 @@ Legacy-dialect cases graded on their generated §66 twin: **698** — PASS 76 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (563 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (571 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 67 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -46,8 +46,8 @@ NOT-TWINNED by reason (563 cases; a case counts once per distinct reason):
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
+- 31 — rhs-decl: declaration in a markup position (⚑ O38)
 - 28 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
-- 23 — rhs-decl: declaration in a markup position (⚑ O38)
 - 21 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
@@ -102,9 +102,10 @@ NOT-TWINNED by reason (563 cases; a case counts once per distinct reason):
 | block-grammar | 7 | 3 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
-| channel | 31 | · | · | · | · | 19 | 12 | · | · |
+| channel | 39 | · | · | · | · | 27 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 67 | · | · | 2 | · | 64 | 1 | · | · |
+| condition | 21 | 18 | · | · | · | · | 3 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -295,7 +296,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (121)
+### PASS / CODES-ONLY (139)
 
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
@@ -314,6 +315,24 @@ none
 - `capability/unknown-token` — PASS
 - `capability/unknown-token-mixed-with-valid` — PASS
 - `capability/valid-clean` — PASS
+- `condition/bang-on-optional-neg` — PASS
+- `condition/bool-condition-pos` — PASS
+- `condition/bool-or-not-bare-neg` — PASS
+- `condition/explicit-pair-value-positions-pos` — PASS
+- `condition/known-array-if-neg` — PASS
+- `condition/known-int-if-neg` — PASS
+- `condition/known-int-markup-if-neg` — PASS
+- `condition/known-string-ternary-neg` — PASS
+- `condition/presence-bare-optional-if-ternary-pos` — PASS
+- `condition/presence-bare-optional-markup-pos` — PASS
+- `condition/unresolved-call-markup-neg` — PASS
+- `condition/unresolved-call-neg` — PASS
+- `condition/unresolved-explicit-fix-pos` — PASS
+- `condition/unresolved-operand-markup-neg` — PASS
+- `condition/unresolved-operand-not-neg` — PASS
+- `condition/unresolved-operand-outside-condition-pos` — PASS
+- `condition/unresolved-sql-row-neg` — PASS
+- `condition/unresolved-ternary-arm-neg` — PASS
 - `control-flow/ctrl-001-orphan-else-pos` — PASS · TWIN
 - `control-flow/ctrl-001-orphan-else-program-pos` — PASS
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
@@ -419,7 +438,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (777)
+### UNSUPPORTED (780)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -539,6 +558,9 @@ none
 - `channel/watches-unknown-table` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `codegen/cg-export-enum-library-rep` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `components/invalid-prop-decl-syntax-clean` — parse-reject: E-PARSE-EXPR: expected an expression, found `:`
+- `condition/known-int-while-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
+- `condition/presence-bare-optional-while-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
+- `condition/unresolved-unannotated-param-neg` — bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
 - `control-flow/ctrl-001-orphan-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-002-orphan-else-if-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<wizard`
 - `control-flow/ctrl-003-extend-past-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
@@ -1199,7 +1221,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (563)
+### NOT-TWINNED (571)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1226,6 +1248,14 @@ none
 - `channel/dup-name-cross-file` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/export-reactive-ref-name` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/export-string-literal-name` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-arity` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-arity-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-arity-string-comma-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-shadow` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-shadow-later-const-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-shadow-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onserver-message-arity` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onserver-message-arity-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/inside-page` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/inside-program` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/module-file-top-level` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)

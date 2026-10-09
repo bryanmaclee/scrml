@@ -1,0 +1,11 @@
+// §42.4 statements 2, 9 — `if=@x` / `else-if=@x` on a `T | not` are presence tests; `""` and `0` are PRESENT (§42.1.1), so both render.
+<program>
+    type O:struct = { let v: string | not, let n: int | not }
+    let <o:O=({ v: "", n: 0 })/>
+    let <flag:bool=false/>
+    <main>
+        <p id="a" if=@o.v>v</p>
+        <p id="b" if=@flag>flag</p>
+        <p id="c" else-if=@o.n>n</p>
+    </main>
+</program>

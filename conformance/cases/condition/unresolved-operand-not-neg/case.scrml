@@ -1,0 +1,10 @@
+// §42.4 statement 10 (S460 "a on F2, go") — an operand of `!` / `&&` in a condition whose type is unresolved.
+<program>
+    function g() { }
+    function pick(ready: bool) -> int {
+        if (!g()) { return 1 }
+        if (ready && g()) { return 2 }
+        return 0
+    }
+    <main><p>x</p></main>
+</program>

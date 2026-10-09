@@ -1,0 +1,14 @@
+<program>
+
+  <x> = 5
+
+  <channel name="chat" onclient:open=onOpen(x, 1)>
+    <count> = 0
+    function onOpen(e, n) {
+      @count = n
+    }
+  </channel>
+
+  <p>${@count} ${@x}</p>
+
+</program>

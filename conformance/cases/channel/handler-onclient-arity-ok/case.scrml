@@ -1,0 +1,18 @@
+<program>
+
+  <channel name="chat" onclient:open=onOpen(e) onclient:close=onClose() onclient:error=onError(err)>
+    <status> = "connecting"
+    function onOpen(e) {
+      @status = "connected"
+    }
+    function onClose() {
+      @status = "disconnected"
+    }
+    function onError(err) {
+      @status = "error"
+    }
+  </channel>
+
+  <p>${@status}</p>
+
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-shadow-later-const-ok",
+  "description": "§38.10.2 clean neg — a `const` declared LATER in the file is not visible at the `<channel>` (reading it there is E-SCOPE-001), so an `onclient:*` binding of the same name hides nothing and E-CHANNEL-HANDLER-SHADOW does not fire. Contrast state cells and functions, which hoist and do collide.",
+  "language-version": "1.0",
+  "spec": "§38.10.2",
+  "source-test": "compiler/tests/unit/channel-handler-binding-shadow.test.js",
+  "rationale": "§38.10.2: the binding name SHALL NOT name a declaration visible at the channel's position; a later `const` / `let` is not visible there.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-HANDLER-SHADOW"]
+  }
+}

@@ -1,0 +1,8 @@
+// §42.4 statement 1 — a `bool` is a boolean test in an `if` and a ternary.
+<program>
+    function pick(b: bool) -> int {
+        if (b) { return 1 }
+        return b ? 1 : 0
+    }
+    <main><p>x</p></main>
+</program>
