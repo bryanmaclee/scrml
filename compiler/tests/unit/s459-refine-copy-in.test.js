@@ -465,6 +465,102 @@ describe("user code inside a write runs before the write touches the cell", () =
   });
 });
 
+// S460 round 3 (ruling "a on copy-in"): keys are converted once on entry; internals never
+// consult a stored array's species; a refined list holds only its indexes and length.
+describe("keys converted once; species-free internals; a refined list holds only its elements", () => {
+  const species = (make) => class { static get [Symbol.species]() { return make; } };
+  const sinkProxy = (data) => new Proxy(data, { defineProperty() { return true; }, set() { return true; } });
+
+  test("R1: a path key object's toString runs once, on entry — what it grabs stays judged", () => {
+    const rt = load(page(`<rows>: L[] = []`), "r1");
+    const k = rt.key("rows");
+    const o = { u: "o", n: 4 };
+    rt.set(k, [o, o]);
+    const grabbed = [];
+    const key = { toString() { grabbed.push(rt.state[k][0]); return "0"; } };
+    rt.set(k, rt.deepSet(rt.state[k], [key, "n"], 9));
+    expect(grabbed.length).toBe(1);
+    for (const h of grabbed) expect(throwsContract(() => { h.n = -5; })).toBe(true);
+    expect(rt.plain("rows")).toEqual([{ u: "o", n: 9 }, { u: "o", n: 4 }]);
+  });
+
+  test("a refined list refuses any own property but its indexes and length (constructor, a symbol, a name)", () => {
+    const rt = load(page(`<rows>: L[] = []\n  <ls>: number(>0)[] = [1, 2]`), "nonindex");
+    const k = rt.key("rows"), lk = rt.key("ls");
+    rt.set(k, [{ u: "a", n: 1 }]);
+    expect(throwsContract(() => { rt.state[k].constructor = function () {}; })).toBe(true);
+    expect(throwsContract(() => { rt.state[lk].constructor = function () {}; })).toBe(true);
+    expect(throwsContract(() => { rt.state[k][Symbol.isConcatSpreadable] = false; })).toBe(true);
+    expect(throwsContract(() => { rt.state[k].foo = 1; })).toBe(true);
+    expect(throwsContract(() => Object.defineProperty(rt.state[k], "foo", { value: 1, writable: true, enumerable: true, configurable: true }))).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(rt.state[k], "constructor")).toBe(false);
+    // admission copies only the elements
+    const a = [{ u: "b", n: 2 }];
+    a.constructor = function () {};
+    a.foo = 1;
+    rt.set(k, a);
+    expect(Object.prototype.hasOwnProperty.call(rt.state[k], "constructor")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(rt.state[k], "foo")).toBe(false);
+  });
+
+  test("R4: an un-share copy is never made by the array's species", () => {
+    const rt = load(page(`<gg>: L[][] = []`), "r4");
+    const k = rt.key("gg");
+    const row = [{ u: "a", n: 1 }];
+    rt.set(k, [row, row]);
+    let made = 0;
+    const Ev = species(function () { made++; return new Proxy([{ u: "a", n: 1 }], { get(t, p) { return p === "0" ? { u: "EVIL", n: -5 } : Reflect.get(t, p); } }); });
+    try { rt.state[k][0].constructor = Ev; } catch (e) { /* refused */ }
+    rt.set(k, rt.deepSet(rt.state[k], [0, 0, "u"], "z"));
+    expect(made).toBe(0);
+    expect(rt.plain("gg")).toEqual([[{ u: "z", n: 1 }], [{ u: "a", n: 1 }]]);
+  });
+
+  test("Q2: sort never installs a species-made array", () => {
+    const rt = load(page(`<rows>: L[] = []`), "q2");
+    const k = rt.key("rows");
+    rt.set(k, [{ u: "b", n: 2 }, { u: "a", n: 1 }]);
+    let calls = 0;
+    const Ev = species(function (n) { calls++; return calls === 2 ? sinkProxy([{ u: "EVIL", n: -5 }, { u: "EVIL", n: -6 }]) : new Array(n); });
+    try { rt.state[k].constructor = Ev; } catch (e) { /* refused */ }
+    rt.state[k].sort(() => 0);
+    expect(calls).toBe(0);
+    expect(rt.plain("rows")).toEqual([{ u: "b", n: 2 }, { u: "a", n: 1 }]);
+    expect(throwsContract(() => { rt.state[k][0].n = -7; })).toBe(true);
+  });
+
+  test("Q3 / Q5: what splice / a shorter length removes is read from the stored array, never a species result", () => {
+    for (const how of ["splice", "length"]) {
+      const rt = load(page(`<rows>: L[] = []`), "q35-" + how);
+      const k = rt.key("rows");
+      rt.set(k, [{ u: "a", n: 1 }, { u: "b", n: 2 }, { u: "c", n: 3 }]);
+      const victim = rt.state[k][how === "splice" ? 1 : 0];
+      const Ev = species(function () { return sinkProxy([victim]); });
+      try { rt.state[k].constructor = Ev; } catch (e) { /* refused */ }
+      if (how === "splice") rt.state[k].splice(0, 0); else rt.state[k].length = 2;
+      expect(rt.plain("rows")).toEqual(how === "splice"
+        ? [{ u: "a", n: 1 }, { u: "b", n: 2 }, { u: "c", n: 3 }]
+        : [{ u: "a", n: 1 }, { u: "b", n: 2 }]);
+      expect(throwsContract(() => { victim.n = -5; })).toBe(true);   // still in the cell: still judged
+    }
+  });
+
+  test("pop / splice hand a removed element back as the cell hands it out: one still stored elsewhere stays judged", () => {
+    for (const how of ["pop", "splice"]) {
+      const rt = load(page(`<rows>: L[] = []`), "removed-" + how);
+      const k = rt.key("rows");
+      const o = { u: "o", n: 4 };
+      rt.set(k, [o, o]);
+      const x = how === "pop" ? rt.state[k].pop() : rt.state[k].splice(0, 1)[0];
+      expect(throwsContract(() => { x.n = -5; })).toBe(true);
+      expect(rt.plain("rows")).toEqual([{ u: "o", n: 4 }]);
+      rt.state[k].pop();
+      x.n = -5;                                                 // no place left: the caller's
+      expect(rt.plain("rows")).toEqual([]);
+    }
+  });
+});
+
 describe("ownership — what is in the cell is exactly what its current value holds", () => {
   test("an element removed in place is the caller's again; one still in the cell is judged", () => {
     const rt = load(page(`<rows>: L[] = []`), "removed");

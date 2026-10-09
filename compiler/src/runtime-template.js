@@ -7041,7 +7041,14 @@ if (typeof _scrml_deep_set === "function") {
     };
     return typeof _scrml_untracked === "function" ? _scrml_untracked(walk) : walk();
   };
-  _scrml_deep_set = function (obj, path, value) {
+  _scrml_deep_set = function (obj, keys, value) {
+    // Every key becomes a property key ONCE, here, before anything else (a key object's
+    // toString is user code): only these converted keys are used afterwards.
+    let path = keys;
+    if (keys && keys.length > 0) {
+      path = [];
+      for (let i = 0; i < keys.length; i++) { const k = keys[i]; path.push(typeof k === "symbol" ? k : String(k)); }
+    }
     let raw = _scrml_refine_raw(obj);
     const p = inPlace(raw, path);
     if (p === undefined) return _scrml_deep_set_unjudged(obj, path, value);
@@ -7066,11 +7073,13 @@ if (typeof _scrml_deep_set === "function") {
     // a refused write leaves values, identities, sharing and place counts as they were.
     const staged = _scrml_refine_stage_unshare(raw, w.steps);
     const v = _scrml_refine_judge_staged(raw, w.steps, staged, prop, pre);
+    // Installed: FRESH shallow copies, never the staged objects that were linked into the
+    // value during the judgement (nothing made or reached in that window is ever stored).
     const install = function () {
       let c = _scrml_deep_reactive(raw);
       for (let i = 0; i < w.steps.length; i++) {
         const s = w.steps[i];
-        c = s.unshare ? _scrml_refine_unshare(c, s.key, s.nr, _scrml_refine_place.get(s.nr), staged[i]) : c[s.key];
+        c = s.unshare ? _scrml_refine_unshare(c, s.key, s.nr, _scrml_refine_place.get(s.nr), _scrml_refine_shallow(s.nr)) : c[s.key];
       }
       return c;
     };
@@ -7084,9 +7093,21 @@ if (typeof _scrml_deep_set === "function") {
 function _scrml_refine_stage_unshare(raw, steps) {
   const staged = [];
   for (const s of steps) {
-    staged.push(s.unshare ? (Array.isArray(s.nr) ? s.nr.slice() : _scrml_refine_shallow_record(s.nr)) : null);
+    staged.push(s.unshare ? _scrml_refine_shallow(s.nr) : null);
   }
   return staged;
+}
+// A shallow copy of stored array / record \`r\` (the un-share copy).
+function _scrml_refine_shallow(r) {
+  return Array.isArray(r) ? _scrml_refine_clone(r, 0, r.length) : _scrml_refine_shallow_record(r);
+}
+// A fresh plain array of a[from..to), holes kept — an index loop into a new [], never
+// slice() / map() / an iterator, so no \`constructor\` / Symbol.species of \`a\` is consulted.
+function _scrml_refine_clone(a, from, to) {
+  const out = [];
+  for (let i = from; i < to; i++) if (i in a) out[i - from] = a[i];
+  out.length = to > from ? to - from : 0;
+  return out;
 }
 // A shallow copy of stored record \`r\`: same prototype (null or Object.prototype), and
 // each own enumerable key DEFINED, not assigned — a \`__proto__\` key is data, never the
@@ -7146,23 +7167,51 @@ function _scrml_refine_mutate(inner, raw, p, prop, method, args) {
   // native call: the native call itself then runs none, so it never works on an array
   // that code changed under it, and what it removes is exactly what it returns.
   let call = args;
-  if (prop === "push" || prop === "unshift") call = args.map(admit);
-  else if (prop === "splice") {
-    call = args.slice();
-    if (call.length > 0) call[0] = +call[0];  // ToNumber, as splice does (a BigInt / Symbol throws)
-    if (call.length > 1) call[1] = +call[1];
-    for (let i = 2; i < call.length; i++) call[i] = admit(call[i]);
+  if (prop === "push" || prop === "unshift" || prop === "splice") {
+    call = [];
+    for (let i = 0; i < args.length; i++) call.push(args[i]);
+    if (prop === "splice") {
+      if (call.length > 0) call[0] = +call[0];  // ToNumber, as splice does (a BigInt / Symbol throws)
+      if (call.length > 1) call[1] = +call[1];
+    }
+    for (let i = prop === "splice" ? 2 : 0; i < call.length; i++) call[i] = admit(call[i]);
   }
   if (el === null) {
-    const before = raw.slice();
+    const before = _scrml_refine_clone(raw, 0, raw.length);
     _scrml_refine_whole(p, function () { Array.prototype[prop].apply(raw, call); },
       function () { _scrml_refine_restore_array(raw, before); });
   }
+  // What the call removes, read from the stored array BEFORE it (never from the native
+  // result, whose array a species constructor could make): released after it, and handed
+  // back as the cell hands its elements out (one still stored elsewhere stays judged).
+  const len = raw.length;
+  let removed = null;
+  if (prop === "pop") removed = len > 0 ? _scrml_refine_clone(raw, len - 1, len) : [];
+  else if (prop === "shift") removed = len > 0 ? _scrml_refine_clone(raw, 0, 1) : [];
+  else if (prop === "splice") {
+    const r = _scrml_refine_splice_range(len, call);
+    removed = _scrml_refine_clone(raw, r.start, r.start + r.count);
+  }
   const out = method.apply(inner, call);
-  if (prop === "pop" || prop === "shift") _scrml_refine_release(raw, out);
-  else if (prop === "splice") for (const x of out) _scrml_refine_release(raw, x);
-  // sort / reverse return the array itself: hand back the cell's proxy, never the raw array
-  return out === raw ? _scrml_deep_reactive(raw) : out;
+  if (removed === null) {
+    // sort / reverse return the array itself: hand back the cell's proxy, never the raw array
+    return out === raw ? _scrml_deep_reactive(raw) : out;
+  }
+  for (let i = 0; i < removed.length; i++) if (i in removed) _scrml_refine_release(raw, removed[i]);
+  if (prop !== "splice") return removed.length > 0 ? _scrml_deep_reactive(removed[0]) : undefined;
+  const res = [];
+  for (let i = 0; i < removed.length; i++) if (i in removed) res[i] = _scrml_deep_reactive(removed[i]);
+  res.length = removed.length;
+  return res;
+}
+// splice's start / deleteCount (already numbers) for an array of length \`len\` (ECMA-262).
+function _scrml_refine_splice_range(len, call) {
+  const int = function (x) { x = Math.trunc(x); return x !== x ? 0 : x; };
+  if (call.length === 0) return { start: 0, count: 0 };
+  const rel = int(call[0]);
+  const start = rel < 0 ? Math.max(len + rel, 0) : Math.min(rel, len);
+  const count = call.length === 1 ? len - start : Math.min(Math.max(int(call[1]), 0), len - start);
+  return { start: start, count: count };
 }
 // sort: the comparator (or the default string order) is user code, so it runs on a
 // clone, never on the stored array (the cell's elements handed to it as the cell hands
@@ -7180,8 +7229,8 @@ function _scrml_refine_sort(inner, raw, p, el, method, args) {
   const order = typeof cmp === "function"
     ? function (a, b) { return cmp(_scrml_deep_reactive(a), _scrml_deep_reactive(b)); }
     : function (a, b) { const x = str(_scrml_deep_reactive(a)), y = str(_scrml_deep_reactive(b)); return x < y ? -1 : x > y ? 1 : 0; };
-  const before = raw.slice();
-  const next = raw.slice();
+  const before = _scrml_refine_clone(raw, 0, raw.length);
+  const next = _scrml_refine_clone(raw, 0, raw.length);
   Array.prototype.sort.call(next, order);
   let same = raw.length === before.length;
   for (let i = 0; same && i < before.length; i++) same = (i in raw) === (i in before) && raw[i] === before[i];
@@ -7201,7 +7250,7 @@ function _scrml_refine_sort(inner, raw, p, el, method, args) {
 // fill / copyWithin: the call is worked out on a plain clone first (native
 // semantics), then every slot it changes is written with its own copy.
 function _scrml_refine_rewrite(inner, raw, p, el, admit, prop, args) {
-  const next = raw.slice();
+  const next = _scrml_refine_clone(raw, 0, raw.length);
   Array.prototype[prop].apply(next, args);
   const at = [], vals = [], olds = [];
   for (let i = 0; i < next.length; i++) {
@@ -7216,7 +7265,7 @@ function _scrml_refine_rewrite(inner, raw, p, el, admit, prop, args) {
   // what each slot holds NOW: admitting ran user code (a value's getters), which may have written a slot
   for (let k = 0; k < at.length; k++) olds.push(raw[at[k]]);
   if (el === null) {
-    const before = raw.slice();
+    const before = _scrml_refine_clone(raw, 0, raw.length);
     _scrml_refine_whole(p, function () {
       for (let k = 0; k < at.length; k++) { if (vals[k] === _scrml_refine_place) delete raw[at[k]]; else raw[at[k]] = vals[k]; }
     }, function () { _scrml_refine_restore_array(raw, before); });
@@ -7235,7 +7284,7 @@ function _scrml_refine_set_length(inner, raw, p, value) {
   // not a valid length: the write throws its RangeError before anything changes
   if (n >>> 0 !== n) return Reflect.set(inner, "length", n, inner);
   _scrml_refine_judge_length(raw, p, n);
-  const removed = n < len ? raw.slice(n) : null;
+  const removed = n < len ? _scrml_refine_clone(raw, n, len) : null;
   const ok = Reflect.set(inner, "length", n, inner);
   if (ok && removed !== null) for (const x of removed) _scrml_refine_release(raw, x);
   return ok;
@@ -7252,7 +7301,7 @@ function _scrml_refine_judge_length(raw, p, value) {
     throw _scrml_refine_error(_scrml_refine_judges[p.key], undefined);
   }
   if (el === null) {
-    const before = raw.slice();
+    const before = _scrml_refine_clone(raw, 0, raw.length);
     _scrml_refine_whole(p, function () { raw.length = n; }, function () { _scrml_refine_restore_array(raw, before); });
   }
   return n;
@@ -7262,6 +7311,13 @@ function _scrml_refine_judge_length(raw, p, value) {
 function _scrml_refine_prepare(raw, p, prop, value) {
   const j = _scrml_refine_judges[p.key];
   const isArr = Array.isArray(raw);
+  // A list's value is its elements: on a refined array the only own properties are its
+  // indexes and \`length\` (admission copies nothing else). Any other — \`constructor\`, a
+  // symbol, a name — is not part of the value and would steer the array's own methods
+  // (Symbol.species): refused.
+  if (isArr && !_scrml_refine_is_index(prop)) {
+    throw _scrml_refine_error(j, value, "a property other than an index or length on a refined list (" + String(prop) + ")");
+  }
   if (!isArr && prop === "__proto__" && !Object.prototype.hasOwnProperty.call(raw, prop)) {
     throw _scrml_refine_error(j, value, "a new prototype (the prototype of a refined value cannot be changed)");
   }
@@ -7347,13 +7403,13 @@ const _scrml_refine_handler = {
     let nd, removed = null, old;
     if (isArr && prop === "length") {
       const n = Number(desc.value);
-      if (n >>> 0 === n && n < raw.length) removed = raw.slice(n);
+      if (n >>> 0 === n && n < raw.length) removed = _scrml_refine_clone(raw, n, raw.length);
       const el = _scrml_refine_child(p.d, raw, "0");
       if (n >>> 0 === n && n > raw.length && el !== null && el !== _scrml_refine_free && !el.ok(undefined)) {
         throw _scrml_refine_error(_scrml_refine_judges[p.key], undefined);
       }
       if (el === null) {
-        const before = raw.slice();
+        const before = _scrml_refine_clone(raw, 0, raw.length);
         _scrml_refine_whole(p, function () { raw.length = n; }, function () { _scrml_refine_restore_array(raw, before); });
       }
       nd = Object.assign({}, desc, { value: n });
