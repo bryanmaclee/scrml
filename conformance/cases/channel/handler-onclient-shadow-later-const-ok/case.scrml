@@ -1,0 +1,14 @@
+<program>
+
+  <channel name="chat" onclient:open=onOpen(K)>
+    <count> = 0
+    function onOpen(e) {
+      @count = 1
+    }
+  </channel>
+
+  ${ const K = 3 }
+
+  <p>${@count} ${K}</p>
+
+</program>

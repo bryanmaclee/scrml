@@ -49,7 +49,35 @@ describe(`${CODE} — the binding name collides with a declaration in scope`, ()
     const d = shadow(res);
     expect(d.length).toBe(1);
     expect(d[0].message).toContain("state cell `<x>`");
+    // The advice reads a cell with its sigil.
+    expect(d[0].message).toContain("write `@x` inside `onOpen`");
     expect((res.errors || []).some((e) => e.code === CODE)).toBe(true);
+  });
+
+  test("a state cell declared LATER in the file (cells hoist, §6.9)", () => {
+    const res = compile(`<program>
+  <channel name="chat" onclient:open=onOpen(later)>
+    <count> = 0
+    function onOpen(e) { @count = @later }
+  </channel>
+  <p>\${@count}</p>
+  <later> = 1
+</program>`);
+    expect(shadow(res).length).toBe(1);
+  });
+
+  test("a function declared later inside a <page> (functions hoist)", () => {
+    const res = compile(`<program>
+  <channel name="chat" onclient:open=onOpen(helper)>
+    <count> = 0
+    function onOpen(ev) { @count = helper() }
+  </channel>
+  <page>
+    \${ function helper() { return 1 } }
+    <p>\${helper()} \${@count}</p>
+  </page>
+</program>`);
+    expect(shadow(res).length).toBe(1);
   });
 
   test("a cell declared in the channel's own body", () => {
@@ -137,6 +165,38 @@ describe(`${CODE} — clean`, () => {
     <count> = 0
     function onOpen(ev) { @count = other(ev) }
   </>
+  <p>\${@count}</p>
+</program>`);
+    expect(shadow(res)).toEqual([]);
+  });
+
+  // S460 review F2 — only a declaration VISIBLE at the channel collides. A
+  // const / let declared later in the file is not (reading it there is E-SCOPE-001).
+  for (const [label, decl] of [
+    ["a later program-level `${ const K }`", "${ const K = 3 }"],
+    ["a later `${ let K }`", "${ let K = 3 }"],
+    ["a later const inside a <div>", "<div>${ const K = 1 }</div>"],
+  ]) {
+    test(`${label} is not visible at the channel`, () => {
+      const res = compile(`<program>
+  <channel name="chat" onclient:open=onOpen(K)>
+    <count> = 0
+    function onOpen(e) { @count = 1 }
+  </channel>
+  ${decl}
+  <p>\${@count}</p>
+</program>`);
+      expect(shadow(res)).toEqual([]);
+    });
+  }
+
+  test("a binding inside a string-with-comma argument is not a binding", () => {
+    const res = compile(`<program>
+  <x> = 1
+  <channel name="chat" onclient:open=onOpen('x,y')>
+    <count> = 0
+    function onOpen(v) { @count = @x }
+  </channel>
   <p>\${@count}</p>
 </program>`);
     expect(shadow(res)).toEqual([]);

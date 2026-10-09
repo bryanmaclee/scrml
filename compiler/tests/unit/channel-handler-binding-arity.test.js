@@ -60,7 +60,7 @@ describe("E-CHANNEL-005 — onclient:* arity (S458)", () => {
       const d = ch005(res);
       expect(d.length).toBe(1);
       expect(d[0].message).toContain(attr);
-      expect(d[0].message).toContain("§38.10.1");
+      expect(d[0].message).toContain("§38.10.2");
       expect((res.errors || []).some((e) => e.code === "E-CHANNEL-005")).toBe(true);
     });
   }
@@ -81,6 +81,25 @@ describe("E-CHANNEL-005 — onclient:* arity (S458)", () => {
     const res = compile(channelProgram(`onclient:open=onOpen(e) onclient:close=onClose() onclient:error=onError(err)`));
     expect(ch005(res)).toEqual([]);
     expect(res.errors || []).toEqual([]);
+  });
+});
+
+describe("E-CHANNEL-005 — the argument list is parsed, not comma-split (S460 review F1)", () => {
+  // The attribute splitter cuts at every top-level comma, including one inside a
+  // string; the count comes from parsing the call, so a one-argument call whose
+  // string holds a comma is one argument.
+  for (const call of [`onOpen('a,b')`, `onOpen("a,b")`]) {
+    test(`onclient:open=${call} is ONE argument — no E-CHANNEL-005`, () => {
+      expect(ch005(compile(channelProgram(`onclient:open=${call}`)))).toEqual([]);
+    });
+  }
+
+  test("a comma inside a string does not hide a real second argument", () => {
+    const d = ch005(compile(channelProgram(`onclient:open=onOpen('a,b', 2)`)));
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("passes 2 arguments");
+    // The suggested fix keeps the first argument whole.
+    expect(d[0].message).toContain("onclient:open=onOpen('a,b')");
   });
 });
 

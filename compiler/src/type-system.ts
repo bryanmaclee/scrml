@@ -9388,8 +9388,6 @@ function annotateNodes(
 ): Map<string, ResolvedType> {
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
-  // §38.10.2 — deferred `onclient:*` binding-name collision checks (judged after the walk).
-  const channelBindingChecks: Array<{ name: string; attrName: string; callee: string; span: Span; scope: Scope }> = [];
 
   // §65.6 (css-wave1-theme-tokens) — `<theme for=@cell>` variant-set ownership.
   // Built once, consulted at the `state-decl` case so a `<mode> = .Light` cell
@@ -15136,26 +15134,36 @@ function annotateNodes(
   }
 
   /**
-   * §38.6.1 / §38.10.1 — a channel handler attribute (`onserver:message=h(msg)`,
+   * §38.6.1 / §38.10.2 — a channel handler attribute (`onserver:message=h(msg)`,
    * `onclient:open=h(e)`, …) names ONE binding: the first argument is the name
    * the compiler binds the injected payload / event object to (§38.6.1: "names
    * the value the compiler will inject, not a variable already in scope").
    *
+   * The argument list is read by PARSING it, not from `value.args`: those pieces
+   * come from the attribute splitter (`splitArgs`), which cuts at every
+   * top-level comma — including one inside a string (`onOpen('a,b')` gives two
+   * pieces). The pieces are re-joined and parsed as one call; that call's
+   * argument nodes are what is counted and inspected. If that parse fails (an
+   * argument the expression parser cannot read), the split pieces are used —
+   * the same pieces the emitter writes out (emit-channel.ts `channelAttrToCall`),
+   * so the judgement matches what would run.
+   *
    * ARITY (E-CHANNEL-005): `onserver:message` and every `onclient:*` call
    * carries at most one argument. A second argument has no meaning — on the
    * server it was emitted as a free identifier (a ReferenceError at the first
-   * message); on the client it was passed through verbatim. The count is the
-   * parsed argument list of the `call-ref` value, not the source text.
+   * message); on the client it was passed through verbatim.
    *
    * COLLISION (E-CHANNEL-HANDLER-SHADOW, `onclient:*`, S458): a first argument
-   * that is an identifier and names a declaration in scope at the `<channel>` —
-   * a state cell, a top-level / program-body binding, a function, an import —
-   * would silently shadow that declaration in the listener. Judged against the
-   * type stage's own scope chain (the parsed first-argument node, never the
-   * source text). The scope object is captured here and judged after the file
-   * walk, so a declaration that FOLLOWS the channel in source order (a
-   * channel-body function, a later top-level function) is seen too. Type names
-   * are a separate namespace and do not collide.
+   * that is a plain identifier and names a declaration VISIBLE at the channel's
+   * position would be silently hidden by the listener's binding. "Visible" is
+   * the answer the type stage's own name resolution gives at this point of the
+   * walk (`checkLogicExprIdents`): the scope chain as it stands here — which
+   * already holds every state cell (hoisted by `preBindReactiveStateCells`) and
+   * every declaration earlier in source order — plus the file's function names
+   * (`fnAllDeclared`, the hoisted-function set that resolver consults). A
+   * `const` / `let` declared LATER in the file is not visible here (reading it
+   * at the channel is E-SCOPE-001) and so does not collide. Type names are a
+   * separate namespace.
    */
   function checkChannelHandlerBindings(channel: ASTNodeLike, attrs: ASTNodeLike[]): void {
     for (const attr of attrs) {
@@ -15165,31 +15173,59 @@ function annotateNodes(
       if (!isClient && attrName !== "onserver:message") continue;
       const value = attr.value as ASTNodeLike | undefined;
       if (!value || value.kind !== "call-ref") continue;
-      const args = Array.isArray(value.args) ? (value.args as unknown[]) : [];
+      const pieces = Array.isArray(value.args) ? (value.args as unknown[]).map(String) : [];
       const span = ((value.span as Span | undefined) ?? (attr.span as Span | undefined)
         ?? (channel.span as Span | undefined)
         ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
       const callee = typeof value.name === "string" ? value.name : "handler";
-      if (args.length > 1) {
+      // The argument list, parsed whole (see the doc comment). `null` = unparseable.
+      let argNodes: ASTNodeLike[] | null = null;
+      if (pieces.length > 0) {
+        // Re-joined with a bare `,` — the splitter cut exactly there and trimmed only
+        // the outer edges, so a string such as `'a,b'` comes back byte-for-byte.
+        const call = parseExprToNode(`f(${pieces.join(",")})`, filePath, span.start ?? 0) as unknown as ASTNodeLike;
+        const parsedArgs = call && call.kind === "call" && Array.isArray(call.args) ? (call.args as ASTNodeLike[]) : null;
+        if (parsedArgs && parsedArgs.every((a) => a && a.kind !== "escape-hatch")) argNodes = parsedArgs;
+      } else {
+        argNodes = [];
+      }
+      const argCount = argNodes ? argNodes.length : pieces.length;
+      if (argCount > 1) {
+        const argTexts = argNodes ? argNodes.map((a) => emitStringFromTree(a as never)) : pieces;
         errors.push(new TSError(
           "E-CHANNEL-005",
-          `E-CHANNEL-005: \`${attrName}=${callee}(${args.map(String).join(", ")})\` passes ${args.length} arguments. ` +
+          `E-CHANNEL-005: \`${attrName}=${callee}(${argTexts.join(", ")})\` passes ${argCount} arguments. ` +
           `A channel handler call binds at most ONE name: its first argument is the name the ` +
-          `${isClient ? "event object" : "parsed message payload"} is bound to (§${isClient ? "38.10.1" : "38.6.1"}), ` +
-          `and there is nothing to bind a second argument to. Write \`${attrName}=${callee}(${String(args[0])})\` ` +
+          `${isClient ? "event object" : "parsed message payload"} is bound to (§${isClient ? "38.10.2" : "38.6.1"}), ` +
+          `and there is nothing to bind a second argument to. Write \`${attrName}=${callee}(${argTexts[0]})\` ` +
           `and read any other value inside \`${callee}\`.`,
           span,
         ));
         continue;
       }
-      if (!isClient) continue;
-      const argNodes = Array.isArray(value.argExprNodes) ? (value.argExprNodes as ASTNodeLike[]) : [];
+      if (!isClient || !argNodes) continue;
       const first = argNodes[0];
       // Only a plain identifier is a binding — `@cell` / `.Variant` / a literal is an
       // ARGUMENT the listener passes (codegen binds `_scrml_event` then; emit-channel.ts).
       if (!first || first.kind !== "ident" || typeof first.name !== "string") continue;
-      if (first.name.startsWith("@")) continue;
-      channelBindingChecks.push({ name: first.name, attrName, callee, span, scope: scopeChain.current });
+      const name = first.name;
+      if (name.startsWith("@")) continue;
+      const entry = scopeChain.lookup(name);
+      const kind = entry && entry.kind !== "type" ? entry.kind : fnAllDeclared.has(name) ? "function" : null;
+      if (!kind) continue;
+      const what = kind === "reactive" ? `the state cell \`<${name}>\``
+        : kind === "function" ? `the function \`${name}\``
+        : kind === "import" ? `the import \`${name}\``
+        : `the declaration \`${name}\``;
+      const readAs = kind === "reactive" ? `@${name}` : name;
+      errors.push(new TSError(
+        "E-CHANNEL-HANDLER-SHADOW",
+        `E-CHANNEL-HANDLER-SHADOW: \`${attrName}=${callee}(${name})\` binds the WebSocket event object to ` +
+        `\`${name}\`, which is already ${what}, visible at this \`<channel>\` — the binding would silently hide it, ` +
+        `and the handler would receive the event, not ${what} (§38.10.2). Name the binding something not already ` +
+        `declared, e.g. \`${attrName}=${callee}(e)\`; to use ${what}, write \`${readAs}\` inside \`${callee}\`.`,
+        span,
+      ));
     }
   }
 
@@ -15757,26 +15793,6 @@ function annotateNodes(
 
   for (const node of topNodes) {
     visitNode(node);
-  }
-
-  // §38.10.2 (S458) — the deferred `onclient:*` binding-name collision judge
-  // (see `checkChannelHandlerBindings`). The captured scope now holds every
-  // declaration of the channel's lexical position, source order regardless.
-  for (const chk of channelBindingChecks) {
-    const entry = chk.scope.lookup(chk.name);
-    if (!entry || entry.kind === "type") continue;
-    const what = entry.kind === "reactive" ? `the state cell \`<${chk.name}>\``
-      : entry.kind === "function" ? `the function \`${chk.name}\``
-      : entry.kind === "import" ? `the import \`${chk.name}\``
-      : `the declaration \`${chk.name}\``;
-    errors.push(new TSError(
-      "E-CHANNEL-HANDLER-SHADOW",
-      `E-CHANNEL-HANDLER-SHADOW: \`${chk.attrName}=${chk.callee}(${chk.name})\` binds the WebSocket event object to ` +
-      `\`${chk.name}\`, which is already ${what} in scope at this \`<channel>\` — the binding would silently hide it, ` +
-      `and the handler would receive the event, not ${what} (§38.10.2). Name the binding something not already ` +
-      `declared, e.g. \`${chk.attrName}=${chk.callee}(e)\`, and read \`${chk.name}\` inside \`${chk.callee}\`.`,
-      chk.span,
-    ));
   }
 
   // Also annotate typeDecl nodes that may exist only in fileAST.typeDecls.
