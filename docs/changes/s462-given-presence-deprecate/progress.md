@@ -1,0 +1,1 @@
+- 2026-10-09T14:51:35-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ac9f4db4c9dce5860; brief fetched. next: bun install, pretest, maps
