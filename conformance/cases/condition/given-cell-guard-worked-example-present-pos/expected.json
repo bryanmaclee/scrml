@@ -1,0 +1,18 @@
+{
+  "id": "condition-given-cell-guard-worked-example-present-pos",
+  "description": "§42.3.5 worked example `${ given @user :> { <p>${@user.name}</p> } }` on a `User | not` CELL: after a click sets @user present, the guarded markup body renders the narrowed cell's field, and a handler's `given @user :> { … }` body runs. Pre-s461 impl#1 lowered the cell head to an undeclared bare JS name (ReferenceError at load and on click) and dropped the markup body.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 worked example: `${ given @user :> { <p>${@user.name}</p> } } // OK — narrowed to present inside the guard`. §42.2.3: \"Inside the body, each named variable is narrowed — the `| not` component is removed from each variable's type. No variable is rebound to a new name; each identifier is narrowed in place.\" §42.5: `given x :> body` → `if (x !== null && x !== undefined) { body }` — the presence test reads the variable named, here the cell.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-046", "E-STATE-UNDECLARED", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#login" }, { "click": "#greet" }],
+    "state": { "user": { "name": "ada" }, "msg": "hi ada" },
+    "domAnchored": [
+      { "selector": "#guard .who", "count": 1 },
+      { "selector": "#guard .who", "text": "ada" },
+      { "selector": "#msg", "text": "hi ada" }
+    ]
+  }
+}
