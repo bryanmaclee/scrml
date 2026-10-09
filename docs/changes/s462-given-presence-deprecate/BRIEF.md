@@ -35,3 +35,18 @@ PR #1380 (branch `land/s461-given-cell-lowering`, another session's) fixes `give
 
 ## Report
 WORKTREE_PATH · FINAL_SHA · files touched · corpus count measured (command + files) · inert proof (artifact diff command + result) · locus hypothesis held/refined/wrong · bootstrap disposition · anything you chose that sets direction (for bryan's veto).
+
+## ADDENDUM (S462, ruling Q4 'a')
+
+ADDED SCOPE for s462-given-presence-deprecate — bryan ruled S462 "a" on the non-identifier `given` head (same locus as your work, so it is folded into your branch).
+
+First: append this whole message verbatim to docs/changes/s462-given-presence-deprecate/BRIEF.md under a heading "## ADDENDUM (S462, ruling Q4 'a')" and commit it.
+
+The ruling (scrml-support/user-voice-scrml.md §S462): gap g-given-bool-expr-fail-runs-unconditionally-s460 (HIGH). Today `given id < 0 :> fail LoadError.NotFound` compiles to a presence test on `id` with an empty body, a stray `0;`, and a `fail` that ALWAYS runs. Governing sentence, SPEC §42.2.3: "A `given` head SHALL contain only an identifier-list." Direction: newly-rejecting (conformance restoration).
+1. WIDEN E-SYNTAX-044 (currently "property path in a `given` head", reserved/fired — check which) to "any `given` head that is not an identifier-list" — in BOTH logic and markup-`${}` contexts. Message names the fix: `if (<cond>) { … }`. Update its §34 row and the §42.2.3 "Property path note" text. NO new code name. E-SYNTAX-045 (the `=` rebind reject) stays as is. Precedence: a non-identifier head gets E-SYNTAX-044 (the deprecation W-code may also fire or not — state your choice; prefer the error alone).
+2. Migrate the 3 conformance cases that use the shape to `if (cond) { fail … }`: conformance/cases/error/failable-match-nonexhaustive-ok, failable-match-nonexhaustive-err, propagate-incompat-variants (they assert other codes; their asserted codes must be unchanged after migration — verify). Also check docs/changes/derived-engine-expression-form-2026-06-13/repro/11-call.scrml — it is a historical repro; leave it unless a test compiles it, and report.
+3. SPEC §4.11.4 (`given` Keyword — Static-Predicate Guard, the `<machine>` rule-body guard; says "`given` SHALL NOT be used outside machine rule bodies") contradicts §42.2.3 and describes the REMOVED `<machine>` (S305/S307). Mark it SUPERSEDED in place: a banner stating `<machine>` was removed S305/S307, the section is historical, and `given` is governed by §42.2.3 (in-place guard soft-deprecated S462); keep the text below the banner. Provenance line: `ruling:user-voice-scrml.md S462 "a"`.
+4. Gap g-given-outside-machine-rule-body-mislowers-silently (`given n { n > 10 :> … }` shapes): check whether the widened E-SYNTAX-044 now refuses it; if so annotate/resolve with evidence.
+5. MEASURE corpus impact of the refusal by compiling (not grepping) samples/ examples/ stdlib/ conformance/ + ../scrml-support/docs/gauntlets/gauntlet-r25/*.scrml; report count + files. Non-zero beyond the 3 conformance cases → report, do not migrate unilaterally.
+6. Conformance case: the bool head refused (logic + markup); identifier-list head still accepted.
+Include all of this in your final report as its own section.
