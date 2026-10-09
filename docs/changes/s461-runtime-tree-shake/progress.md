@@ -31,3 +31,28 @@ core 2,132 · utilities 3,767 · errors 469 · timers 373 · scope 161 · animat
 Remaining gap to the 3,510 B floor after all four: ~2,390 B, almost all of it the `utilities` chunk
 (deep_set / debounced / throttled / upload ride with the soft-nav engine the shell needs). Not one of the
 four inherited targets — recorded as a follow-up, not built.
+
+## Phase 2 — BUILD (all four targets CONFIRMED and built; one commit each)
+
+- (a) `432d7da` errors chunk by post-emit reference (`ERRORS_CHUNK_REFERENCE`, word-bounded, quoted
+  variant tags excluded) + edges reset/ssr/urlguard/metaemit → errors (their own `typeof`-guarded
+  `_scrml_error_boundary_log` reports — a missing edge would silently DROP a log, a behaviour change);
+  `applyChunkDependencies` re-run after the post-emit gates and on the shared-runtime union.
+- (b) `65574a9` `scope → {timers, animation}` edge retired; `_scrml_destroy_scope` typeof-guards the two
+  teardown calls (their registries are filled only by their own chunks). New post-emit gates
+  `_scrml_timer_`, `_scrml_stop_scope_timers(`, `animationFrame`, `_scrml_animation_frame(`,
+  `_scrml_cancel_animation_frames(` — the edge had been masking any emitter the pre-emit walk misses.
+- (c) `ca10a59` new `machine` chunk (right after core, chunk order = text order) holding
+  `_scrml_machine_timers/_clear_timer/_arm_timer/_arm_initial` + `_scrml_replay`; post-emit gates
+  `_scrml_machine_`, `_scrml_replay(`; edge engine → machine (`<onTimeout>` helpers).
+- (d) `7ec643f` mount / vendor-ref / prefetch activate only under `ctx.emitPerRoute` (the splitter's own
+  condition) — the splitter is their ONLY caller. Same root covers all three; per-route builds unchanged.
+- ratchet `d217d0f`: 7,630 → 6,095 B ceiling.
+
+### The sweep caught a real instance of the failure class (fixed in `0044ef3`)
+First branch sweep: **25 pages with an UNGUARDED `_scrml_error_boundary_log` call and no 'errors' chunk**
+(e.g. `conformance/cases/protect/assign-refresh-runtime`). Cause: the auto-await IIFE lift rewrites the
+client body AFTER `assembleRuntime` and adds `.catch(_scrml_async_err => _scrml_error_boundary_log(…))`,
+which the first reference scan never saw. Root fix: the gate table moved to module level
+(`gateChunksByEmittedReference`) and runs a second time over the FINAL body, re-assembling the runtime in
+its slot when it adds a chunk. Regression test pins both embed and shared-runtime modes.
