@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 6 |
 | MED | 564 | 5 |
-| LOW | 325 | 0 |
+| LOW | 327 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24176,6 +24176,8 @@ Related: [[g-splitargs-ignores-string-regex-comment-context-s460]].
 
 **S461 (AUTO) — part 4 RESOLVED, parts 1–3 still open:** E-CHANNEL-006 now fires when an `onclient:*` handler resolves (channel body → file top level → import) to a `server function` / `server fn`; `compiler/src/type-system.ts` `checkClientHandlerNotServer` beside E-CHANNEL-005. prov=pa-ruled:spec §38.10.3 "A function designated as the handler for an `onclient:*` attribute SHALL NOT be declared `server function`. The compiler SHALL emit E-CHANNEL-006 and reject the program." · newly-rejecting · corpus MEASURED zero (3303 non-stdlib + 53 stdlib files compiled; 0 newly failing outside the 3 new `-err` cases; every accepted program byte-identical). Change-id `s461-e-channel-006`. Not covered: a plain `function` handler that route inference promotes to the server (auto-questions.md "promoted-onclient-handler"); the LSP single-file path does not judge imported handlers; the bootstrap has none of the channel handler checks.
 
+**S462 — the "not covered" promoted-handler case is now covered:** E-CHANNEL-006 also fires when §12.2 places an `onclient:*` handler on the server (Triggers 1, 2, 3, 5, 7 tested), read from route inference's routeMap; route inference no longer exempts an onclient handler from Trigger 7. Change-id `s462-channel-006-inferred`, prov=ruling:user-voice-scrml.md S462 "a" · newly-rejecting · corpus measured 0 newly refused (2633 files). Parts 1–3 remain open; the bootstrap half is filed as [[g-bootstrap-no-channel-handler-checks-s462]].
+
 Source: `docs/changes/s460-onclient-shadow/progress.md`, "Final state → Surfaced, not fixed". All four parts were re-verified on main `3d0e54e21`. Probes are in `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/r3/`.
 1. `c1.scrml`: `onclient:open=onOpen(@count)` → **E-CODEGEN-INVALID-LOGIC**. The argument goes into the listener as raw text, and `@count` is never lowered to a cell read. This fails closed.
 2. `c2.scrml`: `onserver:open=hello(who)` compiles (exit 0). `.server.js` has `if (ws.data.__ch === "chat") { await hello(who); }`, where `who` is declared nowhere: a ReferenceError on the first connection. The same holds for `onserver:close`. E-CHANNEL-005 / -HANDLER-SHADOW cover only `onserver:message` and `onclient:*`, so nothing checks these arguments.
@@ -24298,3 +24300,19 @@ S460: #1370, #1371, #1372 and the copy-in branch were each re-merged against mai
 - (c) Keep committing, but drop the volatile parts (SPEC-INDEX line ranges, absolute counts) so unrelated PRs stop touching the same lines.
 
 **Severity LOW:** no product impact. The cost is serialized landing and a recurring hand-merge step where a wrong `--theirs` can lose content.
+
+### G-BOOTSTRAP-NO-CHANNEL-HANDLER-CHECKS-S462 — the bootstrap (`compiler/self-host-v2/`) has none of the channel handler checks: no E-CHANNEL-005, E-CHANNEL-HANDLER-SHADOW or E-CHANNEL-006 (declared or §12.2-placed), and no handler-name resolution to build them on — `NEW S462; LOW; open (bootstrap twin)`
+<!-- @gap id=g-bootstrap-no-channel-handler-checks-s462 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `E-CHANNEL-00[56]`, `E-CHANNEL-HANDLER-SHADOW`, `onclient` — zero hits; the only channel diagnostic is E-CHANNEL-OUTSIDE-PROGRAM at analyze.scrml:1425) prov=empirical:s462-channel-006-inferred -->
+
+impl#1 emits all three from `compiler/src/type-system.ts` (`checkChannelHandlerBindings`, `checkClientHandlerNotServer`). Since S462 (change-id `s462-channel-006-inferred`, ruling:user-voice-scrml.md S462 "a") E-CHANNEL-006 also fires when §12.2 places the handler on the server; impl#1 reads that from route inference's routeMap. A bootstrap twin needs (1) the handler-name resolution order of §38.10.3 (channel body → file top level → other channels' bodies → import), and (2) the bootstrap's own §12.2 placement (`analyze.scrml` already places functions for §12.4 checks, ~:13873) to read — not a second "does it broadcast" detector. Not small, so not twinned in the S462 change. The conformance cases (`channel/handler-onclient-*`) are NOT-TWINNED in `docs/bootstrap-conformance.md` (rhs-decl, ⚑ O38) before they reach this gap.
+
+**Severity LOW:** impl#1 enforces the rule; the gap is bootstrap parity only.
+
+### G-FN-PURITY-BLIND-TO-CHANNEL-HUB-CALLS-S462 — the §48.3 `fn` body check does not count `broadcast()` / `disconnect()` as side effects, so `fn announce() { broadcast(…) }` compiles clean and I-FN-PROMOTABLE can suggest `fn` for a function that publishes to every subscriber — `NEW S462; LOW; open`
+<!-- @gap id=g-fn-purity-blind-to-channel-hub-calls-s462 sev=LOW status=open locus=compiler/src/lint-i-fn-promotable.js:runIFnPromotable(probes checkFnBodyProhibitions; skips only the routeMap server set)+searched:compiler/src/type-system.ts(checkFnBodyProhibitions — no broadcast/disconnect term found; not traced further) prov=empirical:s462-channel-006-inferred(/home/bryan-maclee/.cache/scrml-agent-tmp/s462-channel-006-inferred/r/fnb.scrml);ruling-side-finding:user-voice-scrml.md-S462-"a" -->
+
+Found on the S462 reproducer: `onclient:open=onOpen(e)` with `function onOpen(e) { broadcast({ joined: true }) }` drew `I-FN-PROMOTABLE — function onOpen body meets the fn body constraints`. **That instance is closed by `s462-channel-006-inferred`:** the lint skips functions route inference places on the server, and the handler was only off that list because route inference exempted onclient handlers from §12.2 Trigger 7 — the exemption is gone (the program is now refused with E-CHANNEL-006). **The root is not closed:** `fn announce() { broadcast({ joined: true }) }` inside a `<channel>` body compiles with no `E-FN-*` diagnostic (probe `fnb.scrml` above; the `fn` is server-placed and runs the broadcast from an HTTP route). A channel hub call publishes to, or drops, every subscriber — it is not pure under §48.3, and §12.2 Trigger 7's scope clause ("NOT to `fn`") assumes a `fn` cannot contain one.
+
+**Fix direction (not decided):** treat `broadcast()` / `disconnect()` as prohibited side effects in the `fn` body check (newly-rejecting — needs a ruling and a corpus measurement), which also stops the lint suggesting `fn` for them. A lint-only skip would be a second "does it broadcast" reader.
+
+**Severity LOW:** no silent misbehaviour measured — the `fn` still runs on the server and broadcasts. The cost is a purity contract that does not hold and a lint that can recommend breaking it.

@@ -1,0 +1,12 @@
+<program>
+
+  <channel name="lobby" onclient:open=onOpen(e)>
+    <joined> = 0
+    function onOpen(e) {
+      broadcast({ joined: true })
+    }
+  </channel>
+
+  <p>${@joined}</p>
+
+</program>
