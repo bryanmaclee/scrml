@@ -60,6 +60,11 @@ import { parse as acornParse } from "acorn";
 import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // A FRESH directory per run (S438) — see helpers/per-run-tmp.js: a fixed path left
 // `items.db` behind on Windows (afterAll EBUSY) and the next run's `CREATE TABLE items`
@@ -526,7 +531,7 @@ describe("auth=\"required\" — the handler answers a real 200 JSON Response ove
       db.close();
       expect(rows.some((x) => x.name === "alpha-http")).toBe(true);
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a void (no-`return`) body still produces a well-formed Response", async () => {
     if (domPolluted()) return;
@@ -540,7 +545,7 @@ describe("auth=\"required\" — the handler answers a real 200 JSON Response ove
       // `Server.fetch` throws `fetch() returned an empty value` on that.
       expect(await expectJsonResponse(res)).toBe(null);
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("protect= without an explicit auth= — the predicate is wider than auth=", () => {
@@ -583,7 +588,7 @@ describe("protect= without an explicit auth= — the predicate is wider than aut
       // value must never have moved the redact after `JSON.stringify`.
       for (const row of body) expect(row.secret).toBeUndefined();
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the RAW serialized payload never contains the protected value", async () => {
     if (domPolluted()) return;
@@ -598,7 +603,7 @@ describe("protect= without an explicit auth= — the predicate is wider than aut
       // show the secret here even if the parsed object looked clean.
       expect(await res.text()).not.toContain("hunter2");
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("auth= AND protect= together", () => {
@@ -621,7 +626,7 @@ describe("auth= AND protect= together", () => {
       for (const row of body) expect(row.secret).toBeUndefined();
       expect(rawText).not.toContain("hunter2");
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("no-auth control — the useBaselineCsrf path must be UNCHANGED", () => {
@@ -640,7 +645,7 @@ describe("no-auth control — the useBaselineCsrf path must be UNCHANGED", () =>
       // by the `useBaselineCsrf` branch, not by the branch that changed.
       expect(readSetCookie(res, "scrml_csrf")).toBeTruthy();
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("session establishment — the sid cookie survives the response envelope", () => {
@@ -691,7 +696,7 @@ describe("session establishment — the sid cookie survives the response envelop
       expect(who.isAuth).toBe(true);
       expect(who.userId).toBe("u-42");
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("emission shape — every server-fn route handler terminates in a Response", () => {
@@ -811,5 +816,5 @@ describe("a body-built Response is passed THROUGH, never re-enveloped", () => {
       // …and specifically NOT the fail-open shape.
       expect(res.status).not.toBe(200);
     } finally { stop(); }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

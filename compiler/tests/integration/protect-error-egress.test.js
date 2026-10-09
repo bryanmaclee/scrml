@@ -22,6 +22,11 @@ import { compileScrml } from "../../src/api.js";
 import { generateServerEntry } from "../../src/commands/build.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 // Harness isolation (no expectation changes). This file serves REAL HTTP through
 // `Bun.serve` + the native `fetch` / `Request` / `Response`. Bun runs every test
 // file in ONE process, and an earlier file can leave happy-dom's globals installed
@@ -133,7 +138,7 @@ describe("§14.8.9 P3 — an error never carries a protected value to the client
     } finally {
       s.stop();
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("an uncaught handler error answers the prod entry's fixed 500, even in development mode", async () => {
     const s = await serve(' auth="none"', prodErrorHandler());
@@ -145,7 +150,7 @@ describe("§14.8.9 P3 — an error never carries a protected value to the client
     } finally {
       s.stop();
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a non-protect app keeps the §19.9.5 message (nothing to protect)", () => {
     const dir = mkdtempSync(join(tmpdir(), "scrml-protect-error-np-"));
@@ -200,7 +205,7 @@ describe("§14.8.9 round 7 — `scrml dev` never echoes an error message", () =>
     expect(body).not.toContain(SECRET);
     expect(JSON.parse(body)).toEqual({ error: "Internal server error" });
     expect(logged.join("\n")).toContain(SECRET); // the developer still sees it, server-side
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the dev serve config's error: handler answers the fixed 500, never the message", async () => {
     const { buildServeConfig } = await import("../../src/commands/dev.js");
@@ -264,7 +269,7 @@ function getCps() {
     } finally {
       s.stop();
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // S443 round 6c — `JSON.stringify` invokes `toJSON` after the redact walk; these
@@ -308,7 +313,7 @@ ${J.map(([n]) => `<button onclick=\${ @resultCell = ${n}() }>${n}</button>`).joi
     } finally {
       s.stop();
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // S443 round 6e — a function stored on a row runs with `this` = the row. MEASURED
@@ -389,5 +394,5 @@ describe("§14.8.9 round 6e — `this` in a function stored on a row, all three 
       expect([p, b[1], b[2].includes(SECRET) || b[2].includes("4321")]).toEqual([p, 200, false]);
     }
     expect(hit("loadTo")[2]).toContain('"ada"'); // the toJSON ran, on a stripped `this`
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

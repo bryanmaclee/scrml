@@ -29,6 +29,11 @@ import { Database } from "bun:sqlite";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 // ⚑ `server` is written explicitly on the enveloped fns: a body-escalated `!` fn (no
 // `server` modifier) gets NO §8.9.2 envelope today, although W-DEPRECATED-SERVER-MODIFIER
 // calls the modifier redundant (filed S449, g-implicit-envelope-requires-explicit-server-modifier).
@@ -187,7 +192,7 @@ beforeAll(async () => {
   serverJs = await Bun.file(join(outDir, "app.server.js")).text();
   const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Date.now()}`);
   routes = mod.routes || [];
-});
+}, EXECUTED_DB_TIMEOUT_MS);
 
 afterAll(() => {
   try { holdServer?.stop(true); } catch { /* stopped */ }
@@ -221,7 +226,7 @@ describe("S449 C — concurrent requests never share a transaction (§19.10.6)",
     expect(ar.status === 500 || ar.threw !== undefined).toBe(true); // A failed (PK) and rolled back
     expect(br).toEqual({ status: 200, body: 1 });
     expect(committed()).toEqual({ acc: [10, 0], log: ["acknowledged"] });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("symptom 2: a second implicit envelope waits instead of failing `cannot start a transaction within a transaction`", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -236,7 +241,7 @@ describe("S449 C — concurrent requests never share a transaction (§19.10.6)",
     expect(await a.promise).toEqual({ status: 200, body: 0 });
     expect(await b.promise).toEqual({ status: 200, body: 0 });
     expect(committed().acc).toEqual([500, 500]); // A committed first (110/100), then B overwrote
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("symptom 3: a read arriving mid-transaction never sees its uncommitted writes (was: dirty read of 999/999)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -252,7 +257,7 @@ describe("S449 C — concurrent requests never share a transaction (§19.10.6)",
     const rr = await r.promise;
     expect(rr.status).toBe(200);
     expect(rr.body.map((x) => x.balance)).toEqual([10, 0]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a stalled request upload holds NO transaction: other envelopes run while it waits", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -266,7 +271,7 @@ describe("S449 C — concurrent requests never share a transaction (§19.10.6)",
     stalled.release();
     expect((await stalled.p).status).toBe(200);
     expect(committed().acc).toEqual([500, 500]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("S449 D — a `fail` exit rolls the implicit per-handler transaction back (§8.9.2)", () => {
@@ -283,7 +288,7 @@ describe("S449 D — a `fail` exit rolls the implicit per-handler transaction ba
     expect(r.body.__scrml_error).toBe(true);
     expect(r.body.variant).toBe("Rejected");
     expect(committed().acc).toEqual([10, 0]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`?` propagating a callee's failure counts as a fail exit: reverted", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -292,7 +297,7 @@ describe("S449 D — a `fail` exit rolls the implicit per-handler transaction ba
     expect(r.body.__scrml_error).toBe(true);
     expect(r.body.variant).toBe("TooBig");
     expect(committed().acc).toEqual([10, 0]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("successful completion still commits", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -301,7 +306,7 @@ describe("S449 D — a `fail` exit rolls the implicit per-handler transaction ba
     expect(committed().acc).toEqual([500, 500]);
     expect(await call("implicitPropagate", { n: 7 })).toEqual({ status: 200, body: 7 });
     expect(committed().acc).toEqual([600, 600]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("after a fail exit the connection is free (no transaction left open)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -316,7 +321,7 @@ describe("S449 D — a `fail` exit rolls the implicit per-handler transaction ba
       db.close();
     }
     expect(await call("plainWrite", { msg: "after" })).toEqual({ status: 200, body: 1 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("S449 C opt-in — `transactions=` on <program> (§19.10.6)", () => {

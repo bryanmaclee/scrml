@@ -24,6 +24,11 @@ import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 function compile(src) {
   const dir = mkdtempSync(join(tmpdir(), "session-b2b3-"));
   const file = join(dir, "app.scrml");
@@ -192,7 +197,7 @@ describe("B2 — emit + EXECUTE: the index + optional lowered reads RUN (not jus
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("no emitted app.server.js contains a bare undefined `session` reference", () => {
     const { serverJs } = compile(EXEC_APP);

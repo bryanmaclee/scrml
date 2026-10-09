@@ -28,6 +28,11 @@ import { Database } from "bun:sqlite";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 // The #357 reproducer: an ORDINARY `session.isAuth` (AST-lowered) AND an INTERPOLATED
 // `${session.userId}` (text-carried, the bug) in one server fn.
 const MIX_APP = (dbPath) => `<program db="${dbPath}">
@@ -146,7 +151,7 @@ describe("GH #357 — session inside a ?{} SQL interpolation", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("ordinary position unchanged: `session.isAuth` false-path early-returns (no leak of the SQL row)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -165,7 +170,7 @@ describe("GH #357 — session inside a ?{} SQL interpolation", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("index form keeps `.get()`: `session[reqKey]` reads the record value but NEVER discloses `sid`/`_rec` (confidentiality)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -203,7 +208,7 @@ describe("GH #357 — session inside a ?{} SQL interpolation", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // ⚠ KNOWN GAP — g-session-get-reserved-key-read-disclosure (ROUTED-TO-BRYAN).
   // This test DOCUMENTS CURRENT (leaky) behavior, it does not endorse it: a
@@ -231,5 +236,5 @@ describe("GH #357 — session inside a ?{} SQL interpolation", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

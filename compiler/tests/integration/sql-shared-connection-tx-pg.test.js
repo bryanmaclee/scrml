@@ -27,6 +27,11 @@ import { SQL } from "bun";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const SOCK = "/var/run/postgresql";
 const PG_USER = process.env.PGUSER || process.env.USER || "postgres";
 const SUFFIX = `${process.pid}`;
@@ -193,7 +198,7 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     dir = mkdtempSync(join(tmpdir(), "s449-pg-tx-"));
     serialized = await load("serialized", "");
     concurrent = await load("concurrent", ' transactions="concurrent"');
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   afterAll(async () => {
     try { holdServer?.stop(true); } catch { /* stopped */ }
@@ -218,14 +223,14 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     await seed();
     expect(await call(serialized, "implicitFail", { n: 0 })).toEqual({ status: 200, body: 0 });
     expect((await committed()).acc).toEqual([110, 100]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("D on Postgres: a `fail` exit rolls the envelope back", async () => {
     await seed();
     const r = await call(serialized, "implicitFail", { n: 1 });
     expect(r.body.variant).toBe("Rejected");
     expect((await committed()).acc).toEqual([10, 0]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("S449 review F3: an inner BEGIN/COMMIT nests as a savepoint — a later `fail` rolls the whole envelope back (was: persisted [300, 200])", async () => {
     await seed();
@@ -237,7 +242,7 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     expect(await call(serialized, "outerFail", { n: 0 })).toEqual({ status: 200, body: 0 });
     expect(await committed()).toEqual({ acc: [300, 200], log: ["inner"] });
     expect(await call(serialized, "implicitFail", { n: 0 })).toEqual({ status: 200, body: 0 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("serialized: a plain write from another request does NOT wait and survives the transaction's ROLLBACK", async () => {
     await seed();
@@ -250,7 +255,7 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     h.release.open();
     await a.promise;
     expect(await committed()).toEqual({ acc: [10, 0], log: ["pool"] });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("serialized: a second transaction WAITS for the first", async () => {
     await seed();
@@ -264,7 +269,7 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     expect((await a.promise).status).toBe(200);
     expect((await b.promise).status).toBe(200);
     expect(await committed()).toEqual({ acc: [110, 100], log: ["b", "b"] });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("opt-in transactions=\"concurrent\": a second transaction does NOT wait", async () => {
     await seed();
@@ -277,5 +282,5 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     h.release.open();
     expect((await a.promise).status).toBe(200);
     expect(await committed()).toEqual({ acc: [110, 100], log: ["b", "b"] });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

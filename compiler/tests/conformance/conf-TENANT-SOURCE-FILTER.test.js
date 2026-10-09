@@ -39,6 +39,11 @@ import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { SERVER_TENANT_HELPER } from "../../src/codegen/tenant-egress.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
 
@@ -150,7 +155,7 @@ async function buildApp(source) {
 }
 
 let app = null;
-beforeAll(async () => { app = await buildApp(PROGRAM); });
+beforeAll(async () => { app = await buildApp(PROGRAM); }, EXECUTED_DB_TIMEOUT_MS);
 
 const CSRF = "conf-tenant-source-csrf";
 async function call(name, { cookie = "", body = {} } = {}, target = app) {
@@ -207,22 +212,22 @@ describe("CONF-TENANT-SOURCE-FILTER — UNPINNED request: zero rows, whatever th
   test("C4: the rows AND the names extracted from them are empty", async () => {
     expect(await call("rowsOut")).toEqual([]);
     expect(await call("namesOut")).toEqual([]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("a count, an aggregate-in-code, a joined string and a serialized string see nothing", async () => {
     expect(await call("countOut")).toBe(0);
     expect(await call("costOut")).toBe(0);
     expect(await call("joinedNames")).toBe("");
     expect(await call("rawText")).toBe("[]");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("`.get()` → not; a JOIN → no rows; a peer server function → no rows", async () => {
     expect(await call("getById", { body: { id: 1 } })).toBeNull();
     expect(await call("firstOut")).toBeNull();
     expect(await call("ordersOut")).toEqual([]);
     expect(await call("viaPeer")).toBe(0);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test(".acrossTenants() still reads every tenant", async () => {
     expect((await call("allTenants")).map((r) => r.tenant_id)).toEqual(["A", "B"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 async function sse(name, cookie = "") {
@@ -239,10 +244,10 @@ async function sse(name, cookie = "") {
 describe("CONF-TENANT-SOURCE-FILTER — an SSE stream (server function*) is scoped to its request", () => {
   test("unpinned → the streamed value is built from zero rows", async () => {
     expect(await sse("assetFeed")).toEqual([[]]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("pinned B → only B's names are streamed", async () => {
     expect(await sse("assetFeed", await pin("B"))).toEqual([["B-secret-asset"]]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("CONF-TENANT-SOURCE-FILTER — request PINNED to a tenant: only that tenant's rows", () => {
@@ -250,7 +255,7 @@ describe("CONF-TENANT-SOURCE-FILTER — request PINNED to a tenant: only that te
     const a = await pin("A");
     expect(await call("rowsOut", { cookie: a })).toEqual([{ id: 1, name: "A-secret-asset", tenant_id: "A" }]);
     expect(await call("namesOut", { cookie: a })).toEqual(["A-secret-asset"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("count / sum / join / serialize are A's alone (B's cost 500 never enters the sum)", async () => {
     const a = await pin("A");
     expect(await call("countOut", { cookie: a })).toBe(1);
@@ -259,7 +264,7 @@ describe("CONF-TENANT-SOURCE-FILTER — request PINNED to a tenant: only that te
     // reading 6: the floor-ADDED tenant_id column is gone before server code sees
     // the row — a string built from the rows does not carry it.
     expect(await call("rawText", { cookie: a })).toBe('[{"id":1,"name":"A-secret-asset"}]');
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("reading 1: `.get()` of another tenant's primary key → not; the first row is the first AFTER the filter", async () => {
     const a = await pin("A");
     const b = await pin("B");
@@ -267,24 +272,24 @@ describe("CONF-TENANT-SOURCE-FILTER — request PINNED to a tenant: only that te
     expect(await call("getById", { cookie: a, body: { id: 1 } })).toEqual({ id: 1, name: "A-secret-asset" });
     // ORDER BY id puts A's row 1 first in the table; B's first row is still B's own.
     expect(await call("firstOut", { cookie: b })).toEqual({ id: 2, name: "B-secret-asset" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("reading 3: a JOIN row is kept only when EVERY tenant source is the active tenant; a LEFT JOIN miss drops", async () => {
     const a = await pin("A");
     // order 11 (A) → asset 2 (B): dropped; order 12 (A) → no asset: dropped.
     expect(await call("ordersOut", { cookie: a })).toEqual([{ id: 10, label: "A-order", name: "A-secret-asset" }]);
     const b = await pin("B");
     expect(await call("ordersOut", { cookie: b })).toEqual([{ id: 20, label: "B-order", name: "B-secret-asset" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("a server function called in-process (a peer, no request parameter) is scoped to the caller's request", async () => {
     // B: one asset (from the peer) × 100 + one order (read directly).
     expect(await call("viaPeer", { cookie: await pin("B") })).toBe(101);
     // A: one asset × 100 + three orders.
     expect(await call("viaPeer", { cookie: await pin("A") })).toBe(103);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test(".acrossTenants() reads every tenant for a pinned request too", async () => {
     expect((await call("allTenants", { cookie: await pin("A") })).map((r) => r.name))
       .toEqual(["A-secret-asset", "B-secret-asset"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // The S354 raw-egress EVASION (g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate):
@@ -323,7 +328,7 @@ describe("CONF-TENANT-SOURCE-FILTER — a hand-built Response carries only the r
     expect(await call("rawResponse", {}, ev)).toEqual([]);
     const a = await pin("A", ev);
     expect(await call("rawResponse", { cookie: a }, ev)).toEqual([{ id: 1, name: "A-secret-asset" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -402,7 +407,7 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — H2: the §8.10 loop hoist cannot bypa
       return found
     }`, "h2");
     expect(out).toBe("executed");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("CONF-TENANT-SOURCE-FILTER r2 — H3 / L2: aggregates are an allow-list, not a name list", () => {
@@ -426,17 +431,17 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — H4: GROUP BY tenant_id is read struct
     const p = await buildApp(probeProgram(`    function h4ok() { return ?{\`SELECT tenant_id, count(*) AS n FROM assets GROUP BY tenant_id\`}.all() }`));
     expect(fatal(p.result)).toEqual([]);
     expect(await call("h4ok", { cookie: await pin("A", p) }, p)).toEqual([{ tenant_id: "A", n: 1 }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("CONF-TENANT-SOURCE-FILTER r2 — L1: the filter key cannot be forged by the projection", () => {
   test("`SELECT *, 'A' AS tenant_id` does not admit B's row for A", async () => {
     await expectRefusedOrNoLeak(`    function l1a() { return ?{\`SELECT *, 'A' AS tenant_id FROM assets\`}.all() }`, "l1a");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("`SELECT id, name, 'A' AS tenant_id` does not admit B's row for A", async () => {
     const out = await expectRefusedOrNoLeak(`    function l1b() { return ?{\`SELECT id, name, 'A' AS tenant_id FROM assets\`}.all() }`, "l1b");
     expect(out).toBe("executed");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("an author projection naming the reserved key alias is refused", async () => {
     const p = await buildApp(probeProgram(`    function l1c() { return ?{\`SELECT id, 'A' AS __scrml_tenant_0 FROM assets\`}.all() }`));
     expect(fatal(p.result)).toContain("E-TENANT-AGG");
@@ -448,7 +453,7 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — L3: a string literal is data, not SQL
     const p = await buildApp(probeProgram(`    function l3() { return ?{\`SELECT id, name FROM assets WHERE name != '(SELECT 1 FROM assets)'\`}.all() }`));
     expect(fatal(p.result)).toEqual([]);
     expect(await call("l3", { cookie: await pin("A", p) }, p)).toEqual([{ id: 1, name: "A-secret-asset" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -504,14 +509,14 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — INSERT with no active tenant is a nam
     const a = await pin("A", p);
     expect(await call("addViaPeer", { cookie: a }, p)).toBe(2);
     expect(await call("countAll", {}, p)).toContain("own-new:A");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("with no active tenant: refused by name, nothing written", async () => {
     const p = await buildApp(probeProgram(INSERTS));
     const r = await callRaw("addOwn", {}, p);
     expect(JSON.stringify(r)).not.toContain("ReferenceError");
     expect(r.status === 200).toBe(false);
     expect(await call("countAll", {}, p)).toEqual(["A-secret-asset:A", "B-secret-asset:B"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("outside ANY request (boot / a background job): the shipped write key refuses by name", async () => {
     const H = new Function("const _scrml_g = globalThis;\n" + SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_write_key };")();
     expect(() => H._scrml_tenant_write_key()).toThrow(/E-TENANT-WRITE \(runtime\)/);
@@ -521,7 +526,7 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — INSERT with no active tenant is a nam
     const p = await buildApp(probeProgram(INSERTS));
     expect(await call("addAcrossExplicit", {}, p)).toBe("added");
     expect(await call("countAll", {}, p)).toContain("job-made:B");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test(".acrossTenants() WITHOUT the tenant column: refused at compile (E-TENANT-WRITE)", async () => {
     const p = await buildApp(probeProgram(`    function addAcrossBare() {
       ?{\`INSERT INTO assets (name, cost) VALUES ('orphan', 3)\`}.acrossTenants().run()
@@ -576,7 +581,7 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — a kind=\"tool\" program runs outside 
     expect(fatal(r)).toEqual([]);
     const run = Bun.spawnSync(["bun", join(dir, "out", "tool.js")], { cwd: dir });
     expect(run.stdout.toString().trim()).toBe("0:2");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -638,7 +643,7 @@ describe("CONF-TENANT-SOURCE-FILTER r3 — every lexical bypass is refused at co
     const p = await buildApp(probeProgram(`    function q() { return ?{${BT}SELECT "count"(*) AS c FROM assets${BT}}.acrossTenants().get() }`));
     expect(fatal(p.result)).toEqual([]);
     expect(await call("q", {}, p)).toEqual({ c: 2 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile AND scope (EXECUTED, two tenants)", () => {
@@ -677,7 +682,7 @@ describe("CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile
     expect(await call("grp", { cookie: a }, p)).toEqual([{ tenant_id: "A", n: 1 }]);
     const b = await pin("B", p);
     expect(await call("rd", { cookie: b, body: { x: 0 } }, p)).toEqual([{ id: 2, n: "b-secret-asset" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("writes: INSERT is injected; UPDATE / DELETE touch only the active tenant's rows (a WHERE naming B's row too)", async () => {
     const p = await buildApp(probeProgram(OK));
     expect(fatal(p.result)).toEqual([]);
@@ -691,7 +696,7 @@ describe("CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile
     expect(await call("del", { cookie: a, body: { i: 2 } }, p)).toBe("ok");
     rows = await call("everything", {}, p);
     expect(rows).toEqual([{ id: 2, name: "B-secret-asset", tenant_id: "B" }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   test("an UPDATE / DELETE with no active tenant is refused by name; nothing changes", async () => {
     const p = await buildApp(probeProgram(OK));
     for (const [fn, body] of [["upd", { n: "x" }], ["del", { i: 1 }]]) {
@@ -699,7 +704,7 @@ describe("CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile
       expect(r.status === 200).toBe(false);
     }
     expect((await call("everything", {}, p)).map((r) => r.name)).toEqual(["A-secret-asset", "B-secret-asset"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -768,7 +773,7 @@ describe("CONF-TENANT-SOURCE-FILTER r4 — a table-level ON CONFLICT REPLACE can
     expect(fatal(p.result)).toEqual([]);
     expect(p.server).toContain("UPDATE OR ABORT assets SET name = 'B-secret-asset' WHERE (id = 1) AND tenant_id = ${_scrml_tenant_write_key()}");
     expect(p.server).toContain("INSERT OR ABORT INTO assets (name, cost, tenant_id) VALUES ('B-secret-asset', 1, ${_scrml_tenant_write_key()})");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
   for (const fn of ["steal", "stealIns"]) {
     test(`${fn}: A's statement fails with the constraint error; B's row survives`, async () => {
       const p = await buildCustom(DDL, R4_SEED, BODY);
@@ -779,7 +784,7 @@ describe("CONF-TENANT-SOURCE-FILTER r4 — a table-level ON CONFLICT REPLACE can
         { id: 1, name: "A-secret-asset", tenant_id: "A" },
         { id: 2, name: "B-secret-asset", tenant_id: "B" },
       ]);
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });
 
@@ -839,5 +844,5 @@ describe("CONF-TENANT-SOURCE-FILTER r4 — functions that can run SQL from a str
     const ok = await buildApp(probeProgram(r3read(`SELECT tenant_id, count(*) AS n, sum(cost) AS s FROM assets GROUP BY tenant_id`)));
     expect(fatal(ok.result)).toEqual([]);
     expect(await call("q", { cookie: await pin("A", ok) }, ok)).toEqual([{ tenant_id: "A", n: 1, s: 10 }]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

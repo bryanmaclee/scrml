@@ -35,6 +35,11 @@ import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
 const _tmp = perRunTmp(resolve(testDir, "_tmp_db_src_path"));
@@ -152,7 +157,7 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     } finally {
       process.chdir(cwdBefore);
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("single-dir project: the root-level db opens beside app.scrml, module-relative", () => {
     const root = resolve(TMP_ROOT, `single-${++counter}`);

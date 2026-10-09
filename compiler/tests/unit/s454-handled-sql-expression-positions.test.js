@@ -42,6 +42,11 @@ import {
   GUARD_MARKER,
 } from "../../src/expression-parser.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 // Scratch lives under os.tmpdir() — the S448 per-process temp root the test
 // preload owns (compiler/tests/helpers/tmp-root-preload.js) — never in the repo.
 let TMP_ROOT = "";
@@ -327,7 +332,7 @@ describe("§3 RUNTIME — a row / no row / a query that fails to run", () => {
           const c = compile(sources[label]);
           expect(c.codes).toEqual([]);
           expect(await runRoute(c, fnName, state)).toEqual(expected);
-        });
+        }, EXECUTED_DB_TIMEOUT_MS);
       }
     }
   }
@@ -538,7 +543,7 @@ describe("§6 F1 — a non-total handler is refused; an unmatched failure is nev
     expect(c.codes).toEqual([]);
     expect(await runRoute(c, "total", "row")).toEqual({ id: 7 });
     expect(await runRoute(compile(src), "total", "fail")).toBe("QF");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("defence in depth: an expression-position handler re-raises a variant no arm names", () => {
     const c = compile(`<program>
@@ -616,7 +621,7 @@ describe("§8 F3 — parameters and floor helpers run OUTSIDE the attempt", () =
     const out = await runRouteRaw(c, "byKey", "row", JSON.stringify({ o: {} }));
     expect(JSON.stringify(out)).not.toContain("FALLBACK");
     expect(out.threw ?? out.text).toMatch(/undefined|TypeError|null/i);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the emitted shape evaluates parameters as call arguments and shapes rows after the try", () => {
     const c = compile(program(`
@@ -660,5 +665,5 @@ describe("§8 F3 — parameters and floor helpers run OUTSIDE the attempt", () =
     const out = await runRouteRaw({ dir, serverPath }, "wipe", "none");
     expect(JSON.stringify(out)).not.toContain("FALLBACK");
     expect(out.threw ?? out.text).toContain("E-TENANT-WRITE");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

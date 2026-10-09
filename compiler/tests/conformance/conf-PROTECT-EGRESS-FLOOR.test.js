@@ -37,6 +37,11 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
 
@@ -167,7 +172,7 @@ beforeAll(async () => {
   const routes = {};
   for (const r of mod.routes) routes[r.path.replace(/^.*__ri_route_/, "").replace(/_\d+$/, "")] = r;
   app = { result, routes };
-});
+}, EXECUTED_DB_TIMEOUT_MS);
 
 const CSRF = "conf-protect-floor-csrf";
 // Pin a request to an authenticated session (a protect= app auto-gates every
@@ -229,7 +234,7 @@ describe("CONF-PROTECT-EGRESS-FLOOR — resolved origin: protected column stripp
       // a non-protected column survived
       const survivor = ("name" in row) || ("body" in row);
       expect(survivor).toBe(true);
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });
 
@@ -259,7 +264,7 @@ describe("CONF-PROTECT-EGRESS-FLOOR — fail-closed wholesale strip: protected v
       // served, the row(s) were just emptied, not errored or passed through.
       expect(Array.isArray(json)).toBe(true);
       expect(json.length).toBeGreaterThanOrEqual(1);
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });
 
@@ -328,7 +333,7 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 unknown statements: protected value
       expect(json.length).toBeGreaterThanOrEqual(1);
       // wholesale: no column of the row survives
       expect(Object.keys(json[0])).toEqual([]);
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });
 
@@ -351,7 +356,7 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 resolved: trailing `;`", () => {
       expect(row, "expected a row in the response").toBeTruthy();
       expect("passwordHash" in row).toBe(false);
       expect(row.name).toBe("alice");
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });
 
@@ -426,6 +431,6 @@ describe("CONF-PROTECT-EGRESS-FLOOR — S454 r2: quoted RETURNING target resolve
       expect(row, "expected a row in the response").toBeTruthy();
       expect("passwordHash" in row).toBe(false);
       expect(row.name).toBe(who);
-    });
+    }, EXECUTED_DB_TIMEOUT_MS);
   }
 });

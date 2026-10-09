@@ -26,6 +26,11 @@ import { Database } from "bun:sqlite";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(testDir, "..", "..", "..");
 
@@ -220,7 +225,7 @@ beforeAll(async () => {
   compileErrors = (result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "") && e.severity !== "warning");
   const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Date.now()}`);
   routes = mod.routes || [];
-});
+}, EXECUTED_DB_TIMEOUT_MS);
 
 afterAll(() => {
   try { if (dir) rmSync(dir, { recursive: true, force: true }); } catch { /* EBUSY on Windows — the OS reclaims it */ }
@@ -240,7 +245,7 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
     expect(r.body).toBe(null);
     expect(balances()).toEqual({ 1: 6, 2: 4 });
     expect(noTransactionLeftOpen()).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`fail` nested in an `if` ROLLs BACK: state unchanged, error variant returned", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -252,7 +257,7 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
     // the debit to -90 ran INSIDE the transaction and must be undone
     expect(balances()).toEqual({ 1: 10, 2: 0 });
     expect(noTransactionLeftOpen()).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`?` propagation ROLLs BACK (§19.5.2: `?` is a `fail`)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -264,7 +269,7 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
     const ok = await call("viaPropagate", { amount: 5 });
     expect(ok.status).toBe(200);
     expect(balances()).toEqual({ 1: 555, 2: 556 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`fail` in an EXPRESSION-position `match` arm ROLLs BACK, and nothing after it runs; the other arm COMMITs", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -277,7 +282,7 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
     await call("viaMatch", { mode: "Normal" });
     expect(balances()).toEqual({ 1: 777, 2: 778 });
     expect(logRows()).toEqual(["after-match"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a SQL error ROLLs BACK before it propagates; no lock is left behind", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -291,7 +296,7 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
     const ok = await call("transfer", { from: 1, to: 2, amount: 1 });
     expect(ok.status).toBe(200);
     expect(balances()).toEqual({ 1: 9, 2: 1 });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 /**
@@ -323,7 +328,7 @@ describe("S453/B1a — leaving a transaction by return / break / continue, EXECU
     expect(r.body).toBe(42);              // the exit proceeds
     expect(logRows()).toEqual([]);        // and the block's write is undone
     expect(noTransactionLeftOpen()).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the SAME block completing normally COMMITs (the control for the test above)", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -333,7 +338,7 @@ describe("S453/B1a — leaving a transaction by return / break / continue, EXECU
     expect(r.body).toBe(0);
     expect(logRows()).toEqual(["in-tx", "tail"]);
     expect(noTransactionLeftOpen()).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`break` out of the block ROLLs BACK; the same loop without the break COMMITs both passes", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -345,7 +350,7 @@ describe("S453/B1a — leaving a transaction by return / break / continue, EXECU
     seed();
     await call("viaBreak", { stop: false });
     expect(logRows()).toEqual(["loop-tx", "loop-tail", "loop-tx", "loop-tail"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`continue` out of the block ROLLs BACK every pass; without it both passes COMMIT", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -357,7 +362,7 @@ describe("S453/B1a — leaving a transaction by return / break / continue, EXECU
     seed();
     await call("viaContinue", { stop: false });
     expect(logRows()).toEqual(["c-tx", "c-tail", "c-tx", "c-tail"]);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the return EXPRESSION is evaluated INSIDE the transaction, and the block still rolls back", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -369,7 +374,7 @@ describe("S453/B1a — leaving a transaction by return / break / continue, EXECU
     expect(r.body).toBe(1);
     expect(logRows()).toEqual([]);
     expect(noTransactionLeftOpen()).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("`return` from inside a `!{}` handler arm in the block ROLLs BACK and leaves the function", async () => {
     if (typeof globalThis.document !== "undefined") return;
@@ -379,7 +384,7 @@ describe("S453/B1a — leaving a transaction by return / break / continue, EXECU
     expect(r.body).toBe(7);               // the arm's `return` really exited
     expect(logRows()).toEqual([]);        // 'ga' undone, 'ga-tail' never ran
     expect(noTransactionLeftOpen()).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 describe("S450 — §19.10.4 compile errors through the real pipeline", () => {

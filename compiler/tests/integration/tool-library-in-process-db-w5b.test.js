@@ -25,6 +25,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { join } from "path";
 import { tmpdir } from "os";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 function compileMultiToDist(files, entryOrder, extra = {}) {
   const dir = mkdtempSync(join(tmpdir(), "w5b-inproc-"));
   const dist = join(dir, "dist");
@@ -110,7 +115,7 @@ describe("W5b — tool imports a db-bound library (in-process `?{}`)", () => {
       const created = run.stderr.toString().split("\n").filter((l) => l.startsWith("scrml: created new database "));
       expect(created).toEqual([`scrml: created new database ${join(dir, "w5b.db")} (declared as "sqlite:./w5b.db" in dblib.scrml)`]);
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // (2) flogence fsp-core shape — <foreign lang> + <db src> + ?{} + _{} + pure fn
   // imported by a tool: the `?{}` runs in-process, the `_{}` inlines (async IIFE),
@@ -166,7 +171,7 @@ function main(args: string[]): number {
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString()).toContain("routed:F1:2 task#7");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // (3) D5 GENERALIZE — the `.server.js` ss1 module value export emits the db fn as
   // a real in-process callable (the server-side consumer half). A `.mjs` importing
@@ -196,7 +201,7 @@ console.log("srv count=" + (await countItems()) + " score=" + scoreOf(await coun
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString()).toContain("srv count=3 score=6");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // (4) BLAST-RADIUS — a browser build (no tool entry) importing a db lib fn does
   // NOT regress: the client artifacts stay free of `?{}` / `_scrml_sql` / `new SQL`
@@ -329,7 +334,7 @@ function main(args: string[]): number {
       expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("report=2");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(#1b) orchestrator fixpoint — .server.js ss1 report() also awaits loadRows", () => {
     const { result, dist, dir } = compileMultiToDist({ orlib: OR_LIB, ortool: OR_TOOL }, ["ortool", "orlib"]);
@@ -383,7 +388,7 @@ function main(args: string[]): number {
       expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("label=x:alpha");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // (#3) a `?{}`-init export const is FAIL-CLOSED (E-CG-006), never silently
   // dropped (the parser splits it; its `.get()`/`.all()` accessor is lost).
@@ -430,7 +435,7 @@ function main(args: string[]): number {
       expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("status=Open c=0");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // (#5) a `?{}` library with NO `<db src>` routed in-process fails LOUD
   // (E-SQL-009), NOT a silent `new SQL(":memory:")` (empty-db bad output).

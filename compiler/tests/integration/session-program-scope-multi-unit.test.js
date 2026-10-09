@@ -43,6 +43,11 @@ import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Unique per RUN: the teardown can legitimately fail with EBUSY on Windows (the
 // emitted module caches a live `bun:sqlite` handle on `globalThis` for the process
@@ -214,7 +219,7 @@ describe("§20.5 — ONE durable session store per PROGRAM, not per compilation 
     }, {});
     expect(rWho.status).toBe(200);
     expect(await rWho.json()).toEqual({ auth: true, uid: "u-1" });
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------

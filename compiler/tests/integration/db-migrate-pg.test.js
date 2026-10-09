@@ -36,6 +36,11 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { SQL } from "bun";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const SOCK = "/var/run/postgresql";
 const PG_USER = process.env.PGUSER || process.env.USER || "postgres";
 const SUFFIX = `${process.pid}`;
@@ -163,7 +168,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
       return await tx`SELECT count(*)::int AS n FROM invoices`;
     });
     expect(rows[0].n).toBe(0);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("(b) bounded role WITH set_config(tenantA) → ONLY tenant-A rows", async () => {
     const rows = await m.begin(async (tx) => {
@@ -173,7 +178,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     });
     expect(rows.length).toBe(2);
     expect(rows.every((r) => r.tenant_id === TENANT_A)).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // S288 — g-db-migrate-check-constraint-oneof-pattern sub-bug 1. The fixture's
   // `kind` column uses the CANONICAL scrml string quote (`"`), which is SQL's
@@ -200,7 +205,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
       if (e !== ROLLBACK) throw e;
     }
     expect(accepted).toBe(1);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("S288: the applied CHECK REJECTS a value outside the oneOf set", async () => {
     let threw = null;
@@ -216,7 +221,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     }
     expect(threw).not.toBeNull();
     expect(String(threw?.message ?? threw)).toMatch(/check constraint/i);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("the thin _scrml_migrations ledger recorded object-authorship", async () => {
     const rows = await m`SELECT object_kind, object_name FROM "_scrml_migrations" ORDER BY id`;
@@ -226,7 +231,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     expect(kinds).toContain("policy");
     // Authorship answers "did scrml author scrml_tenant_iso" — the fence's table-grain sibling.
     expect(rows.some((r) => r.object_name.includes("scrml_tenant_iso"))).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("re-running db-migrate is idempotent (desired-state reconcile) and stays enforced", async () => {
     const proc = Bun.spawn(
@@ -245,7 +250,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
       return await tx`SELECT count(*)::int AS n FROM invoices`;
     });
     expect(rows[0].n).toBe(2);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
 
 // ── SECURITY (PA-found HIGH) — a malicious live-DB column name must NOT break out
@@ -336,7 +341,7 @@ d("§14.8.11 M2 SECURITY — malicious live-DB identifier cannot inject via db-m
     const names = rows.map((r) => r.policyname);
     expect(names).toContain("scrml_tenant_iso");
     expect(names).not.toContain("pleak");
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("tenant isolation HOLDS through the malicious migration (bounded no-GUC → 0 rows)", async () => {
     const rows = await m.begin(async (tx) => {
@@ -345,5 +350,5 @@ d("§14.8.11 M2 SECURITY — malicious live-DB identifier cannot inject via db-m
     });
     // If the injection had installed `pleak ON invoices USING (true)`, this would be 3.
     expect(rows[0].n).toBe(0);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

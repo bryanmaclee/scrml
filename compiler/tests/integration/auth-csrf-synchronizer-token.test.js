@@ -29,6 +29,11 @@ import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
 const _tmp = perRunTmp(resolve(testDir, "_tmp_auth_csrf_sync"));
@@ -257,5 +262,5 @@ describe("round-trip — auth-path CSRF actually validates end-to-end", () => {
     const rows = db.query("SELECT name FROM items").all();
     db.close();
     expect(rows.some((x) => x.name === "alpha")).toBe(true);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

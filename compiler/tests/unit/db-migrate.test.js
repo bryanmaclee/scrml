@@ -20,6 +20,11 @@ import { buildAST } from "../../src/ast-builder.js";
 import { extractDesiredSchema } from "../../src/codegen/db-authoritative.ts";
 import { parseSchemaBlock, diffSchema } from "../../src/schema-differ.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 function astOf(src) {
   return buildAST(splitBlocks("test.scrml", src)).ast;
 }
@@ -209,7 +214,7 @@ describe("db-migrate: SQLite apply smoke", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("a db-authoritative table against a SQLite target fails closed (E-DBAUTH-SQLITE)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scrml-m2-sqlite-"));

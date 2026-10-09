@@ -33,6 +33,11 @@ import {
 } from "../../src/commands/dev.js";
 import { TENANT_GATE_LINES, createTenantGate } from "../../src/codegen/tenant-startup-check.ts";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 const BT = "`";
 
 describe("one gate, two hosts", () => {
@@ -124,7 +129,7 @@ describe("scrml dev's app server refuses while an undeclared tenant table exists
     await loadServerRoutes(dist);
     const config = buildServeConfig({ port: 0 }, dist);
     fetchApp = (path) => config.fetch(new Request(`http://localhost${path}`), null);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   afterAll(async () => {
     console.error = origError;
@@ -149,7 +154,7 @@ describe("scrml dev's app server refuses while an undeclared tenant table exists
     expect(JSON.stringify(await health.json())).not.toContain("invoices");
     expect(logged.join("\n")).toContain('E-DEPLOY-DB-TENANT-UNDECLARED: database ./app.db holds "invoices"');
     expect(logged.join("\n")).not.toContain('holds "assets"');
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("renaming the column clears it: the health probe re-checks, then the app is served", async () => {
     const fix = new Database(db);
@@ -159,5 +164,5 @@ describe("scrml dev's app server refuses while an undeclared tenant table exists
     expect(health.status).toBe(200);
     expect((await health.json()).status).toBe("ok");
     expect((await fetchApp("/app.html")).status).toBe(200);
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

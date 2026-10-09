@@ -32,6 +32,11 @@ import { Database } from "bun:sqlite";
 
 import { compileScrml } from "../../src/api.js";
 
+// Executed-DB tests (compile, then a real driver round-trip) and the hooks that build them
+// declare their own budget: bun's 5 s default is too tight on the slow Windows CI runner
+// (g-windows-executed-db-tests-5s-timeout-s460). Per test, never a raised global default.
+const EXECUTED_DB_TIMEOUT_MS = 30_000;
+
 // S325 (g-authed-server-fn-route-returns-bare-value-not-response): a route
 // handler SHALL return a `Response`. Every read below used to be written
 // `r instanceof Response ? await r.json() : r` — a tolerance that let a
@@ -243,7 +248,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // S239-2 FIX A (role bleed) + FIX B (identity-vs-preference rotation).
   test("destroy;set drops the prior role; preference-set keeps the sid + old session authed", async () => {
@@ -310,7 +315,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // B1 (S266) — cookie-name-boundary: an un-anchored `/scrml_sid=([^;]+)/` matched
   // the FIRST substring, so a PREFIXED cookie (`Xscrml_sid=<attackerSid>`) or a
@@ -376,7 +381,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   // B3 (S266) — role decoupled from auth: `session.set("role", x)` with NO userId
   // minted a record `{role}` with no userId, and `role` read independent of `isAuth`
@@ -430,5 +435,5 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
-  });
+  }, EXECUTED_DB_TIMEOUT_MS);
 });
