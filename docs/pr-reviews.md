@@ -2169,3 +2169,11 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1352 verdict=finding by=S458-bryan date=2026-10-08 probe=differential r1 (F1 re-export cycle → runtime crash, PA-reproduced; F2–F4) + r2 (N1 missing-file re-export, PA-verified fixed) — all fixed before landing; corpus 0 newly failing -->
 <!-- @review pr=1353 verdict=carve-out by=S458-bryan date=2026-10-08 probe=test-only Windows EBUSY tolerance in one afterAll -->
 <!-- @review pr=1354 verdict=finding by=S458-bryan date=2026-10-08 probe=differential r1 (F-A tail after `)` silently dropped the check, PA-reproduced; F-B..F-F) + r2 (R2-1/R2-2, PA-verified fixed); corpus 2418 sources 0 outcome changes -->
+<!-- @review pr=1359 verdict=finding by=S459-bryan date=2026-10-08 probe=differential vs 3a4a3639a — ~30 escape probes refused on HEAD; realm sealed (no process/require/fs/import()); nits to the follow-up -->
+<!-- @review pr=1361 verdict=finding by=S459-bryan date=2026-10-08 probe=two differential reviews — alias r3 vs 3a4a3639a (Bun 1.2/1.4, Node, Deno, Chromium classic/esm/embed, docker, CSP) + merge vs 49b7fcc1d with a full _scrml_-prefix trust sweep (14 reader groups; 1 widened, fixed; 20 alias spellings refused) -->
+<!-- @review pr=1362 verdict=finding by=S459-bryan date=2026-10-08 probe=PA read of the full script diff; agent bite proof (count-hidden thrower → exit 2) -->
+<!-- @review pr=1363 verdict=finding by=S459-bryan date=2026-10-08 probe=S458 rounds 1-3 + S459 merge review vs 6fcde7f7e (rename on 25 shapes; 66-host-name page identical to main in Chromium; 0 compile-outcome changes) -->
+<!-- @review pr=1365 verdict=finding by=S459-bryan date=2026-10-08 probe=differential vs 6fcde7f7e — 45 adversarial ASI/regex/HTML-comment inputs executed: 0 behaviour diffs; 3,994 third-party files 0 fallbacks; corpus token-identical; --keep-comments byte-identical -->
+<!-- @review pr=1176 verdict=carve-out by=S459-bryan date=2026-10-08 probe=docs-only README restructure (snippet gate 128/0; links 102/102) -->
+<!-- @review pr=1360 verdict=carve-out by=S459-bryan date=2026-10-08 probe=one-line package.json private:true -->
+<!-- @review pr=1364 verdict=carve-out by=S459-bryan date=2026-10-08 probe=docs-only dpa-queue entry -->

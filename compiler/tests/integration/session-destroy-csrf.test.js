@@ -54,7 +54,11 @@ function build(label, source) {
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src", "app.scrml"), source);
   const dist = join(root, "dist");
-  const r = Bun.spawnSync(["bun", CLI, "build", join(root, "src"), "-o", dist], { stdout: "pipe", stderr: "pipe" });
+  // `--keep-comments` (S459, §47.9.9): the client half of PROBE cuts the @session projection
+  // out of the bundle by its `// --- @session reactive projection` comment marker, which the
+  // default production strip removes. The server half is unaffected (server code is never
+  // stripped), and the stripped bundle is token-identical to this one.
+  const r = Bun.spawnSync(["bun", CLI, "build", join(root, "src"), "-o", dist, "--keep-comments"], { stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`scrml build failed:\n${r.stdout}\n${r.stderr}`);
   const clientFile = readdirSync(dist).find((f) => /^app\.client\..*\.js$/.test(f));
   return { root, dist, clientJs: readFileSync(join(dist, clientFile), "utf-8") };

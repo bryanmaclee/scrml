@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S459 — 2026-10-08 (bryan · ASUS; solo, a dPA alongside) — the host-global alias and the ^{} allow-list landed, unquoted values read whole, shipped JS ~72% smaller, npm names reserved
+
+- **#1359** `^{}` meta blocks: a closed allow-list on the executed text; compile-time realm sealed; runtime meta API closed (S458 "1a").
+- **#1361** host-global alias: compiler references to `fetch`/`document`/`Response`/… go through `_scrml_g`, unreachable by user names (S457 2a); a full `_scrml_`-prefix trust sweep after the merge with #1359 found and fixed one widened reader. **#1362** the alias gate pins its 119 known-throwing compiles by name.
+- **#1363** unquoted attribute values read whole through one reader; bare/inline-block handlers do not bind `event` (`E-EVENT-UNBOUND`); the host-global rename exception removed (S457 3a/4a).
+- **#1365** `scrml build` ships comment/whitespace-stripped browser JS, proven token-identical (§47.9.9): shell runtime 26,211 → 7,442 B gzip -9, TodoMVC 47,662 → 13,445, trucking-dispatch client JS 230,863 → 146,192; ratchet ceiling 26,268 → 7,630 (bryan: "measure first, 1 and 3 for sure").
+- **#1176** README tightened to linked pages under `docs/readme/` (Quick start kept); **#1360** `"private": true`; **#1364** dpa-070 (one presence test) banked — the dPA then completed 065/068/069/070 (advisory, awaiting bryan).
+- npm: `scrml` and `create-scrml` 0.0.1 stubs published as STAGED releases (bryan to approve on npmjs.com).
+- In flight (branches committed): D1 declared props (round 7 done; round 8 stopped — it contradicted the S440 presence ruling), meta.emit gate round 4, refinement copy-in (ruled S459 "a, go") fix round.
+
 ## S456 — 2026-10-06/07 (bryan · ASUS; solo, across a reboot) — tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting made per-row-equivalent, flogence's silent null slice
 
 Seven rulings (user-voice §S456). Every code landing went through at least one S239 round; four needed two to five. The recurring defect: two readers of one text disagree, and the disagreement is a bypass. Each fix made the checked text the text the runtime executes.

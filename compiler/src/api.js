@@ -90,6 +90,7 @@ import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
+import { shipText, shipStripFallbackWarning } from "./codegen/ship-strip.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -1349,6 +1350,21 @@ function _compileScrmlImpl(options = {}) {
      * to runCG; surfaced via the `--module-format=classic|esm` CLI flag.
      */
     moduleFormat = "classic",
+    /**
+     * S459 (SPEC §47.9.9) — strip comments + non-required whitespace from every
+     * JavaScript artifact a browser loads: the shared runtime, each `.client.js`,
+     * each per-route chunk, the chunk-activation script and each worker bundle.
+     * Behaviour-neutral by construction (`codegen/ship-strip.ts`: the token stream
+     * is re-joined verbatim, line structure kept, and the result is PROVEN
+     * token-identical before it ships — fail closed). Every strip happens at the
+     * artifact's final-bytes point, BEFORE its content hash, so hashes name the
+     * shipped bytes and the §2.2.1 emit gate judges them. `.server.js`, library /
+     * tool `.js` and source maps are untouched; a page bundle with a source map
+     * is left unstripped (the map would no longer line up). OFF by default (the
+     * dev / inspection compile stays readable); `scrml build` turns it on,
+     * `scrml compile --minify` opts in.
+     */
+    stripShippedJs = false,
     /**
      * Pre-write commit decision (g-session-config-refusal-still-writes-dist).
      * Called ONCE, after every compile diagnostic is known and before the first
@@ -3320,6 +3336,10 @@ function _compileScrmlImpl(options = {}) {
     // (default) keeps the shared runtime byte-identical to pre-arc output;
     // `"esm"` emits it as an ES module. Surfaced via `--module-format`.
     moduleFormat,
+    // S459 (§47.9.9) — runCG strips the artifacts it hashes itself (runtime, per-route
+    // chunks, chunk boot script); page + worker bundles are stripped below, after the
+    // import rewrites, by `shipClient`.
+    stripShippedJs,
     // C15 — pass MOD's exportRegistry so codegen can identify cross-file
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.
@@ -3884,6 +3904,26 @@ function _compileScrmlImpl(options = {}) {
     // (which raises E-CG-015) does not run over a gate-rejected output set.
     let emitGateFailed = false;
 
+    // S459 (§47.9.9) — the production strip for page bundles + worker bundles, applied as the
+    // LAST transform of their bytes (after the relative / stdlib import rewrites, which are the
+    // final edits to the text) and BEFORE everything that reads or names those bytes: the emit
+    // gate below, the #82 content-hash pre-pass, the write. The gate and the write each derive
+    // the final bytes (the same calls, the same directory), so the strip is memoised on its input
+    // text: both see one result and a fallback warns once. A bundle carrying a source map is
+    // left as emitted — stripping would desynchronise the map from the file it describes.
+    const shipMemo = new Map();
+    const shipClient = (artifact, text, hasSourceMap = false) => {
+      if (!stripShippedJs || hasSourceMap || typeof text !== "string" || text.length === 0) return text;
+      const memo = shipMemo.get(text);
+      if (memo !== undefined) return memo;
+      const out = shipText(text, true, artifact, (a, m, reason) => {
+        const w = shipStripFallbackWarning(a, m, reason);
+        allErrors.push({ stage: "CG", code: w.code, message: w.message, file: a, severity: "warning" });
+      });
+      shipMemo.set(text, out);
+      return out;
+    };
+
     // -------------------------------------------------------------------------
     // Emitted-JS parse gate (Approach A -- ratified S141, A+D;
     // gate-emitted-js-parse-invariant-2026-05-29). Runs BEFORE any file write
@@ -3986,11 +4026,14 @@ function _compileScrmlImpl(options = {}) {
         if (output.clientJs) {
           let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
           c = rewriteStdlibImports(c, gateDir, outputDir, bundledStdlib);
+          // S459 — the gate judges the SHIPPED bytes (stripped under a production build).
+          c = shipClient(`${base}.client.js`, c, Boolean(output.clientJsMap));
           pushArtifact(filePath, `${base}.client.js`, c);
           // §4.12.4 — the page's nested-program worker bundles are browser JS too.
           if (output.workerBundles) {
             for (const [name, workerJs] of output.workerBundles) {
-              pushArtifact(filePath, workerBundleFilename(filePath, name), workerJs);
+              const wName = workerBundleFilename(filePath, name);
+              pushArtifact(filePath, wName, shipClient(wName, workerJs));
             }
           }
         }
@@ -4208,6 +4251,8 @@ function _compileScrmlImpl(options = {}) {
             const { targetDir, fullPath } = pathFor(filePath, ".client.js");
             let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
+            // S459 — strip BEFORE the hash: the content address names the shipped bytes.
+            c = shipClient(`${basename(filePath, ".scrml")}.client.js`, c, Boolean(output.clientJsMap));
             const hash = fnv1aHash(c);
             finalClientByFile.set(filePath, { contents: c, hash });
             const relUn = toPosixRel(fullPath);
@@ -4318,8 +4363,10 @@ function _compileScrmlImpl(options = {}) {
         if (!hashAssets || moduleFormat !== "esm" || !js) return js;
         const { targetDir } = pathFor(chunkFilePath, ".client.js");
         const chunkDir = toPosixRel(targetDir); // "" at dist root, "dispatch" nested
+        // `\s*`, not `\s+`: a production build strips the bytes first (S459, §47.9.9), and
+        // the stripped text reads `from"./types.client.js"` — still an ES import clause.
         return js.replace(
-          /(\bfrom\s+")([^"]+?\.client\.js)(")/g,
+          /(\bfrom\s*")([^"]+?\.client\.js)(")/g,
           (m, pre, ref, post) => {
             if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//") || ref.startsWith("/")) {
               return m; // scheme-qualified, protocol-relative, or root-absolute
@@ -4405,6 +4452,7 @@ function _compileScrmlImpl(options = {}) {
           } else {
             let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
+            c = shipClient(`${basename(filePath, ".scrml")}.client.js`, c, Boolean(output.clientJsMap));
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
           }
           // §4.12.4 — each nested `<program name=…>` worker is a separate bundle,
@@ -4415,7 +4463,8 @@ function _compileScrmlImpl(options = {}) {
           // content-hashed: the URL is baked into the client bundle's bytes.
           if (output.workerBundles) {
             for (const [name, workerJs] of output.workerBundles) {
-              if (writeOutput(filePath, workerBundleSuffix(name), workerJs)) fileCount++;
+              const shipped = shipClient(workerBundleFilename(filePath, name), workerJs);
+              if (writeOutput(filePath, workerBundleSuffix(name), shipped)) fileCount++;
             }
           }
         }

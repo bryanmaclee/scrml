@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `f03cd108c` — wrap(s459): hand-off, changelog, delta-log [3940]-[3954], review markers, strip gaps resolved — **LOCAL-ONLY**
 - `3a4a3639a` — wrap(s458): addendum — post-reset rulings, #1355–#1357, branch landing order (#1358) — **pushed**
 - `46ed1f8ff` — wrap(s457): injection sinks and SQL checks moved to the text the runtime executes, `__scrml_` reserved, failed compiles write nothing — 8 PRs, four branches in flight (#1349) — **pushed**
 - `9d1a633ff` — wrap(s456): tenant and attribute injection sinks closed by allow-lists, §8.10 hoisting per-row-equivalent, flogence's silent null slice (#1338) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `babb40672` — wrap(s454): three fail-open floors closed, U1b built end to end, the Types gate made blocking — and the hand-off rotated (509 KB → 43 KB) (#1306) — **pushed**
 - `859f60f79` — wrap(s453): addendum — the routed family is CLOSED by S454, and the two "this box" hazards are fixed (#1300) — **pushed**
 - `b35593879` — wrap(s452): one pattern-arm spelling across the language, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary (#1294) — **pushed**
-- `54ba32715` — wrap(s451): the U1 rulings in the SPEC, the error model and U1a in the bootstrap, a wrong-database security fix in impl#1 (#1271) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
