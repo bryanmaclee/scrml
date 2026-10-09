@@ -10631,10 +10631,117 @@ ${
         // test inside a region that already narrowed it (trivially true) —
         // ruled S442, "`if=@color` is legal".
         if (isCondHandle(env, c)) return markPresence(ts, c.nid)
+        return condOperands(env, c, what, condWhole(env, c, v, what, ts))
+    }
+
+    fn condWhole(env: TEnv, c: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
         return match v {
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
             .Unknown :> condUnresolved(env, c, what, ts)
+        }
+    }
+
+    // s460 F2 — RULED S460 ("a on F2, go"): "inside a condition, an operand of
+    // `!` / `&&` / `||` whose type cannot be resolved is the same ERROR
+    // (E-COND-NOT-BOOLEAN, unresolved message) … Operands OUTSIDE conditions
+    // stay provable-or-silent (S440 Q2)" (§42.4 statement 10). The walk starts
+    // at the condition and goes down through `!` / `&&` / `||` only: a nested
+    // logical operator is walked, any other operand (a call, a name, a
+    // comparison, a ternary) is judged by the type the typer recorded for it.
+    // So `!(g() && @b)` reaches `g()`; `f(!g())` does not (that `!` is an
+    // argument, a value position). Parentheses are not nodes — transparent.
+    // A ternary's TEST is a condition of its own (checkCond via typeTernary),
+    // so it gets this walk there; its arms are values, not operands.
+    // Statement 6 per operand: suppressed when an Error lies within THAT
+    // operand (condBlamed); a logical operator the binder never resolved (a
+    // refused region) stops the walk. A known non-bool / `not` operand is
+    // checkBoolOperand's (E-OPERATOR-OPERAND-TYPE / E-OPERAND-NOT-NARROWED).
+    fn condOperands(env: TEnv, c: AExpr, what: string, ts: TypeState) -> TypeState {
+        const k: AExprK = c.k
+        return match k {
+            .Unary(op: o, e: x) :> condNotOperand(env, c, o, x, what, ts)
+            .Binary(op: o, l: l, r: r) :> condLogicOperands(env, c, o, l, r, what, ts)
+            .Name(name: n) :> ts
+            .At(name: n) :> ts
+            .AtItem :> ts
+            .Num(raw: r) :> ts
+            .Str(v: s) :> ts
+            .Bool(v: b) :> ts
+            .NotLit :> ts
+            .Recovered :> ts
+            .Variant(name: n) :> ts
+            .Member(obj: o) :> ts
+            .Call(callee: f) :> ts
+            .Ternary(test: x) :> ts
+            .Assign(target: x) :> ts
+            .ArrayLit(elems: es) :> ts
+            .ObjectLit(props: ps) :> ts
+            .Spread(e: sx) :> ts
+            .Index(obj: ix) :> ts
+            .Lambda(params: lp) :> ts
+            .Sql(q: q) :> ts
+            .Handled(h: x) :> ts
+        }
+    }
+
+    fn condNotOperand(env: TEnv, c: AExpr, o: UnOp, x: AExpr, what: string, ts: TypeState) -> TypeState {
+        if (o != UnOp.Not) return ts
+        if (refusedRead(env, c)) return ts
+        return condOperand(env, x, "`!`", what, ts)
+    }
+
+    fn condLogicOperands(env: TEnv, c: AExpr, o: BinOp, l: AExpr, r: AExpr, what: string, ts: TypeState) -> TypeState {
+        let opName: string = ""
+        if (o == BinOp.And) opName = "`&&`"
+        if (o == BinOp.Or) opName = "`||`"
+        if (opName == "") return ts
+        if (refusedRead(env, c)) return ts
+        return condOperand(env, r, opName, what, condOperand(env, l, opName, what, ts))
+    }
+
+    // One operand: a nested `!` / `&&` / `||` is walked; anything else is
+    // judged — an unresolved one is E-COND-NOT-BOOLEAN unless blamed.
+    fn condOperand(env: TEnv, x: AExpr, opName: string, what: string, ts: TypeState) -> TypeState {
+        if (isLogical(x)) return condOperands(env, x, what, ts)
+        if (!unresolvedVT(exprType0(ts, x.nid))) return ts
+        if (condBlamed(env, x, ts)) return ts
+        return report(ts, env, x.span, "E-COND-NOT-BOOLEAN", "this operand of " + opName + " in " + what + " is a value whose type the compiler cannot resolve, and `!` / `&&` / `||` in a condition take a `bool` — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a on F2, go\")")
+    }
+
+    fn unresolvedVT(v: VType) -> boolean {
+        return match v {
+            .Known(t: x) :> false
+            .Absent :> false
+            .Unknown :> true
+        }
+    }
+
+    fn isLogical(x: AExpr) -> boolean {
+        const k: AExprK = x.k
+        return match k {
+            .Unary(op: o) :> o == UnOp.Not
+            .Binary(op: o) :> o == BinOp.And || o == BinOp.Or
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: f) :> false
+            .Ternary(test: x2) :> false
+            .Assign(target: x2) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x2) :> false
         }
     }
 

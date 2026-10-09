@@ -201,6 +201,53 @@ describe("S460 — `!` / `&&` / `||` take booleans only: a bare `T | not` is a p
   });
 });
 
+// S460 F2 — ruled "a on F2, go" (user-voice-scrml.md §S460): inside a CONDITION, an operand of `!` / `&&` /
+// `||` whose type cannot be resolved is E-COND-NOT-BOOLEAN (unresolved message), like a bare unresolved
+// condition; operands OUTSIDE a condition stay provable-or-silent (S440 Q2). SPEC §42.4 statement 10.
+describe("S460 F2 — an unresolved operand of `!` / `&&` / `||` in a condition is E-COND-NOT-BOOLEAN", () => {
+  const G = "    function g() { }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
+  const inIf = (cond) => codes(G + `    function f() { if (${cond}) { @m = 1 } }`);
+  test("fires — `!g()`, `g() && @b`, `g() || false` in an `if`", () => {
+    expect(inIf("!g()")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(inIf("g() && @b")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(inIf("@b && g()")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(inIf("g() || false")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("fires — markup `if=!g()`, `show=(g() && @b)`, a ternary test", () => {
+    expect(codes(G, "<p if=!g()>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(G, "<p show=(g() && @b)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(codes(G + "    function f() { @m = (g() && @b) ? 1 : 0 }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("nested logical operators are walked — `!(g() && @b)` is ONE report, at `g()`", () => {
+    const r = run(prog(G + "    function f() { if (!(g() && @b)) { @m = 1 } }"));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(inIf("g() && g()")).toEqual(["E-COND-NOT-BOOLEAN", "E-COND-NOT-BOOLEAN"]);
+  });
+  test("the message: an operand, the type is unresolved, the fixes, the ruling", () => {
+    const m = diags(G + "    function f() { if (!g()) { @m = 1 } }")[0].message;
+    expect(m).toContain("operand of `!`");
+    expect(m).toContain(UNRESOLVED_MSG);
+    expect(m).toContain("annotate");
+    expect(m).toContain("x is given");
+    expect(m).toContain("x == true");
+    expect(m).toContain("a on F2");
+  });
+  test("twins — `!(g() is given)` and `@b && @c` (bools) are legal", () => {
+    expect(inIf("!(g() is given)")).toEqual([]);
+    expect(inIf("@b && @c")).toEqual([]);
+    expect(inIf("(g() is given) && @b")).toEqual([]);
+  });
+  test("twins — OUTSIDE a condition an unresolved operand stays silent (S440 Q2): a value, an argument inside a condition", () => {
+    expect(codes(G + "    function f() { @b = !g() }")).toEqual([]);
+    expect(codes(G + "    function f() { @b = g() && @c }")).toEqual([]);
+    expect(codes(G + "    function h(x: bool) -> bool { return x }\n    function f() { if (h(!g())) { @m = 1 } }")).toEqual([]);
+  });
+  test("statement 6 per operand — an operand an error already explains is not reported again", () => {
+    expect(inIf("zz && @b")).toEqual(["E-SCOPE-001"]);
+    expect(inIf("!nope()")).toEqual(["E-SCOPE-001"]);
+  });
+});
+
 // At RUNTIME: `x is given` / `x is not` are absence checks — `""` and `0` are PRESENT (S89, §42.1.1).
 const EXPLICIT = `<program>
     type O:struct = { let v: string | not, let n: int | not }

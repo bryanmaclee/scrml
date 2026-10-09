@@ -1,0 +1,26 @@
+{
+  "id": "condition-unresolved-operand-not-neg",
+  "description": "§42.4 statement 10: an unresolved operand of a condition's `!` / `&&` is E-COND-NOT-BOOLEAN, once per operand.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 10: \"Inside a condition … an operand of `!`, `&&` or `||` whose type the compiler cannot resolve SHALL be compile error **E-COND-NOT-BOOLEAN**\". Provenance: ruling:user-voice-scrml.md S460 \"a on F2, go\" (extends S460 \"a′, go\" from the bare condition to the operands of its `!` / `&&` / `||` chain).",
+  "expect": {
+    "codes": [
+      "E-COND-NOT-BOOLEAN"
+    ],
+    "codeCounts": {
+      "E-COND-NOT-BOOLEAN": 2
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-condition-rule-s460",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-COND-NOT-BOOLEAN' fired 0 time(s), expected exactly 2",
+          "missing:E-COND-NOT-BOOLEAN"
+        ]
+      }
+    }
+  }
+}

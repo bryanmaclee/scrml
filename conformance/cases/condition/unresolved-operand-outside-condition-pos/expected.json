@@ -1,0 +1,13 @@
+{
+  "id": "condition-unresolved-operand-outside-condition-pos",
+  "description": "§42.4 statement 10: `const v = !g()` and `keep(!g())` are value positions (silent); `if (!(g() is given))` is the explicit fix — admitted.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.4 statement 10: \"Operands outside a condition (`const v = !g()`, …) stay provable-or-silent.\" Provenance: ruling:user-voice-scrml.md S460 \"a on F2, go\" (\"Operands OUTSIDE conditions stay provable-or-silent (S440 Q2)\").",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-COND-NOT-BOOLEAN"
+    ]
+  }
+}
