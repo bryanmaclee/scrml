@@ -41,13 +41,10 @@ const emitOf = (markup) => `<program>\n^{ emit(${JSON.stringify(markup)}) }\n</p
 const REFUSED = [
   // F1
   ["label for=", '<label for="danger">x</label>', "for="],
-  // F2 — named properties of a form (an emitted form) / of document
-  ["input name= a form member, inside an emitted form", '<form><input name="action"></form>', "inside a form"],
-  ["input name=name inside an emitted form", '<form><label>N <input name="name"></label></form>', "inside a form"],
-  ["button id= a form member, inside an emitted form", '<form><button id="submit">b</button></form>', "inside a form"],
-  ["img id= a form member, inside an emitted form", '<form><img id="elements" src="/a.png" alt="a"></form>', "inside a form"],
-  ["custom element id= inside an emitted form", '<form><x-field id="method"></x-field></form>', "inside a form"],
+  // F2 — named properties of document. (The form half is not a compile-time rule since S460 "n4 b":
+  // those shapes are in ADMITTED below and stay refused at run time — meta-emit-nits-s460.test.js.)
   ["object id= a document member", '<object id="title"></object>', "member of document"],
+  ["img name= a document member", '<img name="querySelector" src="/a.png" alt="a">', "name="],
   ["id in the reserved _scrml namespace (any element)", '<div id="_scrml_x">x</div>', "_scrml"],
   // F4 — the runtime's URL judge
   ["href javascript:", '<a href="javascript:alert(1)">x</a>', "href= URL"],
@@ -78,7 +75,13 @@ const ADMITTED = [
   ["div id=hidden / section id=focus / p id=constructor", '<div id="hidden">a</div><section id="focus">b</section><p id="constructor">c</p>'],
   ["input name=name outside a form", '<input name="name">'],
   ["img id=title outside a form", '<img id="title" src="/a.png" alt="a">'],
-  ["a form with ordinary control names", '<form><input name="q" id="q"><select name="s"><option value="1">1</option></select><button type="submit" name="go">go</button></form>'],
+  // S460 "n4 b" — compile-time emit() output is the author's markup: form-member field names are admitted.
+  ["input name=action inside an emitted form", '<form><input name="action"></form>'],
+  ["a contact form: name / email / title / submit", '<form><label>N <input name="name"></label><input name="email" type="email"><input name="title"><button id="submit">b</button></form>'],
+  ["img id=elements inside an emitted form", '<form><img id="elements" src="/a.png" alt="a"></form>'],
+  ["custom element id=method inside an emitted form", '<form><x-field id="method"></x-field></form>'],
+  ["a form member name inside a <template> in an emitted form", '<form><template><input name="action"></template></form>'],
+  ["a form with ordinary control names",'<form><input name="q" id="q"><select name="s"><option value="1">1</option></select><button type="submit" name="go">go</button></form>'],
   ["meta name=Description / DC.title / msapplication-TileColor", '<meta name="Description" content="x"/><meta name="DC.title" content="x"/><meta name="msapplication-TileColor" content="#000"/>'],
   ["https / relative / mailto / fragment hrefs", '<a href="https://e.com/">a</a><a href="/r">b</a><a href="mailto:a@b.c">c</a><a href="#t">d</a>'],
   ["srcset of http(s) / relative candidates", '<img srcset="/a.png 1x, https://e.com/b.png 2x" alt="a">'],
@@ -127,6 +130,21 @@ describe("S459 round 4 — the shared named-property judge", () => {
     expect(_scrml_emit_named_value_verdict(H, "div", "id", "action", false, true, false, M)).toBe("");
     expect(_scrml_emit_named_value_verdict(H, "my-el", "id", "action", false, true, true, M)).not.toBe("");
     expect(_scrml_emit_named_value_verdict(_SCRML_EMIT_NS_SVG, "a", "id", "action", false, true, false, M)).toBe("");
+  });
+  test("S460: a phase that carries no table judges that half fail-closed", () => {
+    // run time: document: null — every document-named-property shape is refused, any value
+    const RT = { document: null, form: _SCRML_EMIT_FORM_MEMBERS };
+    expect(_scrml_emit_named_value_verdict(H, "img", "name", "photo", false, false, false, RT)).not.toBe("");
+    expect(_scrml_emit_named_value_verdict(H, "object", "id", "anything", false, false, false, RT)).not.toBe("");
+    // ... and every other shape is judged exactly as with the table
+    expect(_scrml_emit_named_value_verdict(H, "img", "id", "photo", false, false, false, RT)).toBe("");
+    expect(_scrml_emit_named_value_verdict(H, "div", "id", "body", false, false, false, RT)).toBe("");
+    expect(_scrml_emit_named_value_verdict(H, "input", "name", "action", false, true, false, RT)).not.toBe("");
+    expect(_scrml_emit_named_value_verdict(H, "input", "name", "q", false, true, false, RT)).toBe("");
+    // compile time: form: null, inForm always false — the form half is never asked
+    const CT = { document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: null };
+    expect(_scrml_emit_named_value_verdict(H, "input", "name", "action", false, false, false, CT)).toBe("");
+    expect(_scrml_emit_named_value_verdict(H, "img", "name", "body", false, false, false, CT)).not.toBe("");
   });
   test("a live prototype extends the table (run time)", () => {
     const proto = { onlyInThisBrowser: 1 };

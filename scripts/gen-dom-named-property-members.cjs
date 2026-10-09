@@ -3,10 +3,10 @@
 //
 // SPEC §22.12 (S459 round 4, review F2): an `id` / `name` value on an element that becomes a NAMED
 // PROPERTY of `document` or of a form is refused when it names a member of that object (it would
-// shadow the member: Document and HTMLFormElement are [LegacyOverrideBuiltIns]). The runtime gate reads
-// membership from the live prototypes; the COMPILER has no DOM, so compile-time `emit()` output is
-// judged against this table, and the runtime refuses a table name as well (so whatever compile time
-// refuses, run time refuses too). The table is every property name — own and inherited, to
+// shadow the member: Document and HTMLFormElement are [LegacyOverrideBuiltIns]). The COMPILER has no
+// DOM, so compile-time `emit()` output is judged against the document table; the runtime gate judges
+// the form half against the form table plus the live prototype (S460: each phase ships only the half
+// that can decide one of its verdicts). The table is every property name — own and inherited, to
 // Object.prototype — of a real `document` and of `HTMLFormElement.prototype`, read from Chromium.
 //
 // Usage: CHR=/path/to/chrome-headless-shell node scripts/gen-dom-named-property-members.cjs
@@ -52,10 +52,12 @@ const puppeteer = require(path.join(__dirname, "..", "node_modules", "puppeteer"
 // SPEC §22.12 (S459 round 4, review F2): every property name — own and inherited, to
 // Object.prototype — of a real \`document\` and of \`HTMLFormElement.prototype\`. An \`id\` / \`name\`
 // value that becomes a named property of \`document\` or of a form is refused when it is on the
-// matching list (it would shadow that member). Used by BOTH phases: compile-time \`emit()\` output
-// (meta-eval.ts, the compiler has no DOM) and the runtime \`meta.emit\` gate (inlined verbatim, \`export \`
-// stripped, into the 'metaemit' chunk), which ALSO consults the live prototype — so a name either
-// phase refuses here, the runtime refuses too.
+// matching list (it would shadow that member). Each phase reads the half it judges (S460): the
+// DOCUMENT table is compile-time only (meta-eval.ts, the compiler has no DOM; at run time that half
+// never decides a verdict, so the runtime passes \`null\`, which judges fail-closed); the FORM table is
+// runtime only (runtime-template.js inlines that ONE declaration, \`export \` stripped, into the
+// 'metaemit' chunk, and the gate ALSO consults the live prototype; compile-time \`emit()\` output has no
+// form-member rule — ruling S460 "n4 b").
 //
 // Plain \`const\` declarations only; \`_SCRML_\`-prefixed (runtime source).
 

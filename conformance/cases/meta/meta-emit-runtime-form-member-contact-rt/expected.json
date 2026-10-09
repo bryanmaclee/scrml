@@ -1,0 +1,25 @@
+{
+  "id": "meta-emit-runtime-form-member-contact-rt",
+  "description": "§22.12 (S460 \"n4 b\") — the markup compile time admits (meta-emit-form-member-name-pos: `<input name=\"name\">` inside an emitted form) is refused in runtime `meta.emit` output, where the string is data: `name` names an HTMLFormElement member. Nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Named properties*: the form half is a run-time rule; dropping it at compile time removed a compile-time refusal only, so compile-time refusals stay a subset of run-time refusals. (ruling:user-voice-scrml.md S460 \"n4 b\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host form",
+        "count": 0
+      },
+      {
+        "selector": "#host input",
+        "count": 0
+      }
+    ]
+  }
+}

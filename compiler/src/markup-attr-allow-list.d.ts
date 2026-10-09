@@ -25,5 +25,5 @@ export declare function _scrml_emit_named_value_verdict(
   hasNameAttr: boolean,
   inForm: boolean,
   isCustom: boolean,
-  members: { document: Set<string>; form: Set<string>; documentProto?: object | null; formProto?: object | null },
+  members: { document: Set<string> | null; form: Set<string> | null; formProto?: object | null },
 ): string;

@@ -1,0 +1,25 @@
+{
+  "id": "meta-emit-runtime-page-form-template-pos",
+  "description": "§22.12 (S460 N5) positive — a control inside an emitted `<template>` is admitted at an insertion point inside a page form: inert template content joins no form.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Insertion inside a page form*: the rule does not apply to an HTML `<template>`'s content; every other rule does. (S460 differential review N5, PA-dispatched)",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#pf #hint",
+        "text": "t"
+      },
+      {
+        "selector": "#pf template#row",
+        "count": 1
+      }
+    ]
+  }
+}

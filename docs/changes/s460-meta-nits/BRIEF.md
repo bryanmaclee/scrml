@@ -1,0 +1,26 @@
+## CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE
+1. `pwd` MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`; `git rev-parse --show-toplevel` equals it; else STOP + report.
+2. `git fetch origin land/s460-meta-r4 && git checkout -B s460-meta-nits FETCH_HEAD`; verify `git rev-parse --short HEAD` == `b1648b778` (PR #1367's head — round 4 of the runtime meta.emit gate, merged with main). If PR #1367 has merged to main by the time you finish, `git merge origin/main` before your final gates.
+3. `bun install`; `bun run pretest` plainly from the worktree dir (`bun --cwd <p> run` without `=` silently no-ops).
+4. Absolute paths under your worktree only; never `cd` into `/home/bryan-maclee/scrmlMaster/scrml`; no `git stash`; no pattern `pkill`/`killall`; never `--no-verify` or hooksPath overrides. `TMPDIR=/home/bryan-maclee/.cache/scrml-agent-tmp/s460-meta-nits/` per command.
+5. First commit: this prompt verbatim → `docs/changes/s460-meta-nits/BRIEF.md` + `progress.md` (`WIP(s460-meta-nits): start at $(pwd)`). Commit after each unit; code + its tests = one commit; append timestamped progress lines.
+
+## MAPS — REQUIRED FIRST READ
+`.claude/maps/primary.map.md` + its Task-Shape Routing for meta / runtime. Loci are hypotheses; report load-bearing or not.
+
+## Context
+Read `docs/changes/s459-meta-emit-r4/BRIEF.md` + `progress.md` (round 4) and SPEC §22.4.1 / §22.12 (incl. "Not a sandbox" residuals) / §34 E-META-EVAL-002. bryan's standing rulings: runtime meta.emit is gated by the same CLOSED rule as compile-time emit(); compile-time refusals are a strict subset of runtime refusals; the generated DOM member table ships in the runtime (fail-closed). S460 differential review found the items below; reproducers in `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-rev-meta4/` (harness `harness/run7.cjs` cases usemap-page-area, radio-page-group, map-hijack, pageform-template-input; compile-time probes `ct/`, `ct2/`; runner scripts `ctrun.sh`, `ctrun2.sh`; Chromium path in the harness). Read, copy to your scratch; do not edit theirs.
+
+## Tasks
+- **N1 (MED) — refuse the reference-by-name class that F1a started.** Emitted `<img usemap="#m">` + a click runs a page `<area onclick>` (acts on a page element by reference — same class as `<label for>`, which round 4 refused). Refuse `usemap` and `<map name>` in emitted markup, BOTH phases, with the same diagnostic shape as `label for`. Also N2(b): emitted `<map name="pm">` hijacking a page `<img usemap="#pm">` is covered by the same refusal. Fail-closed: if the attribute allow-list is the mechanism, ensure these are simply not admitted rather than adding a deny entry. Measure corpus impact by compiling every `meta.emit`/`emit(` user in samples/ + examples/ (expect 0; report).
+- **N2(a) (LOW) — form-less radio group.** Emitted `<input type=radio name=X>` outside any form unchecks a page form-less radio in group X. Decide by measurement: if refusing `name=` on emitted radio inputs that are not inside an emitted form is a closed, small rule, implement it in both phases; otherwise do NOT implement and instead add it to §22.12's "Not a sandbox" residual list. Report which and why.
+- **N3 (LOW) — SPEC wording.** The strict-subset sentence: compile-time refuses but runtime admits for malformed markup (foster-parented `<table><form><input name=action></form></table>`, duplicate attributes). Runtime admission was verified safe. Add "for well-formed markup" (or equivalent precise wording) to the strict-subset sentence; add a conformance-free note. No code change.
+- **N5 (LOW) — over-refusal.** `<template><input name="q"></template>` emitted inside a page form is refused as a page-form insertion; inert template content cannot join a form. Exempt content inside an emitted `<template>` from the page-form insertion rule (both phases), keeping every OTHER rule applied to template content (round 4 F3 walks template content — keep that).
+- **N6 (LOW) — dead runtime bytes.** At runtime the DOCUMENT half of the generated member table (~5.5 KB raw / ~1.9 KB gzip) plus the `documentProto` capture can never decide a verdict (`name` not admitted on img/form/iframe/embed/object; object/embed/iframe refused elements). Verify that claim by reading `_scrml_emit_named_value_verdict` and the admitted-attribute set; if it holds, drop the document half from the RUNTIME chunk only (compile time keeps it). Prove the verdict set is unchanged with the full Chromium input table from the round-4 harness (base vs head: 0 outcome changes except N1/N5). Report gzip sizes before/after. If the claim does not hold, report and leave it.
+- **NOT in scope:** N4 (compile-time form-member refusal of `<input name="name">` inside an emitted form) — held for bryan. N4b (`label for` within the fragment) — accepted.
+
+## Gates
+Pre-commit core gate; `bun conformance/run.ts` 0 FAIL (add conformance cases for N1 and N5, codes-half + runtime-half where the harness supports it); `bun scripts/host-global-scan.ts --check`; `bun run types:check`; browser tier exactly as `.github/workflows/ci.yml`'s browser step; runtime-size ratchet test.
+
+## Report
+Final SHA, files, per-item outcome (done / residual-documented / not-done + why), corpus count, sizes, Chromium table delta, gate counts. Context budget ~350k tokens.

@@ -3,10 +3,12 @@
 // SPEC §22.12 (S459 round 4, review F2): every property name — own and inherited, to
 // Object.prototype — of a real `document` and of `HTMLFormElement.prototype`. An `id` / `name`
 // value that becomes a named property of `document` or of a form is refused when it is on the
-// matching list (it would shadow that member). Used by BOTH phases: compile-time `emit()` output
-// (meta-eval.ts, the compiler has no DOM) and the runtime `meta.emit` gate (inlined verbatim, `export `
-// stripped, into the 'metaemit' chunk), which ALSO consults the live prototype — so a name either
-// phase refuses here, the runtime refuses too.
+// matching list (it would shadow that member). Each phase reads the half it judges (S460): the
+// DOCUMENT table is compile-time only (meta-eval.ts, the compiler has no DOM; at run time that half
+// never decides a verdict, so the runtime passes `null`, which judges fail-closed); the FORM table is
+// runtime only (runtime-template.js inlines that ONE declaration, `export ` stripped, into the
+// 'metaemit' chunk, and the gate ALSO consults the live prototype; compile-time `emit()` output has no
+// form-member rule — ruling S460 "n4 b").
 //
 // Plain `const` declarations only; `_SCRML_`-prefixed (runtime source).
 
