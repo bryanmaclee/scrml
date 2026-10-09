@@ -103,3 +103,9 @@
   the branch). Base failed loudly there because the quotes were already lost. The same corruption happens on base
   for a `const r = …` initialiser, so the root is the escape-hatch text rewrite, not this list.
 
+- Fix round 1 gates (no --bail). Core suite on the branch: 31618 pass / 10 fail / 132 skip / 12 todo. The 10
+  failures are the same set as base d99dad0 (dev-db-no-side-file ×5, headless-serve-bind-host ×1,
+  promote-safety-harness ×1, tenant-floor-project-set ×3). conformance 1516/1580 pass, 64 xfail, 0 FAIL/XPASS/UNPINNED.
+  types:check unchanged (184). facts --check PASS (regenerated). bootstrap-conformance --check current.
+  regen-spec-index --check OK. The corpus differential was re-run (2620 files): the only changes are
+  reactive/mutating-method-string-arg (E-SCOPE-001 → clean) and the branch-only new case. 0 newly-rejecting files.
