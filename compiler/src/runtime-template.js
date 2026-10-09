@@ -7006,17 +7006,19 @@ function _scrml_refine_check(name, value) {
 // keeps copy-on-write: the set then copies and judges the whole new value.
 if (typeof _scrml_deep_set === "function") {
   const _scrml_deep_set_unjudged = _scrml_deep_set;
-  _scrml_deep_set = function (obj, path, value) {
-    const raw = _scrml_refine_raw(obj);
+  // The cell's value, if a path write on it is made in place (else undefined).
+  const inPlace = function (raw, path) {
     const p = _scrml_refine_is_record(raw) && path && path.length > 0 ? _scrml_refine_live(raw) : undefined;
     if (p === undefined || p.parent !== null || _scrml_refine_shared_roots.has(raw) || typeof _scrml_deep_reactive !== "function" ||
-        (typeof _scrml_reactivity_rules === "object" && _scrml_reactivity_rules[p.key])) {
-      return _scrml_deep_set_unjudged(obj, path, value);
-    }
-    // The walk only READS (through the proxies, untracked: a write is not a read of the
-    // path); nothing is changed until the leaf write has been judged (N1).
+        (typeof _scrml_reactivity_rules === "object" && _scrml_reactivity_rules[p.key])) return undefined;
+    return p;
+  };
+  // The walk only READS (through the proxies, untracked: a write is not a read of the
+  // path) and runs no user code: what it walks is stored data.
+  const walkOf = function (raw, path) {
     const walk = function () {
       let c = _scrml_deep_reactive(raw);
+      let leaf = _scrml_refine_place.get(raw);
       const steps = [];
       let shared = false;
       for (let i = 0; i < path.length - 1; i++) {
@@ -7030,20 +7032,40 @@ if (typeof _scrml_deep_set === "function") {
         if (!shared && (q.n > 1 || q.more !== null)) shared = true;
         steps.push({ key: path[i], nr: nr, q: q, unshare: shared });
         c = next;
+        leaf = q;
       }
-      return { c: c, steps: steps, shared: shared };
+      const lr = _scrml_refine_raw(c);
+      const prop = path[path.length - 1];
+      const isLen = Array.isArray(lr) && prop === "length";
+      return { c: c, steps: steps, shared: shared, isLen: isLen, cd: isLen ? null : _scrml_refine_child(leaf.d, lr, prop) };
     };
-    const w = typeof _scrml_untracked === "function" ? _scrml_untracked(walk) : walk();
-    if (w === null) return _scrml_deep_set_unjudged(obj, path, value);
+    return typeof _scrml_untracked === "function" ? _scrml_untracked(walk) : walk();
+  };
+  _scrml_deep_set = function (obj, path, value) {
+    let raw = _scrml_refine_raw(obj);
+    const p = inPlace(raw, path);
+    if (p === undefined) return _scrml_deep_set_unjudged(obj, path, value);
+    const w1 = walkOf(raw, path);
+    if (w1 === null) return _scrml_deep_set_unjudged(obj, path, value);
     const prop = path[path.length - 1];
+    // FIRST take what is written — its copy (or, for a length, its number). This is the
+    // only step that runs user code (a getter, a proxy trap, valueOf), and it runs while
+    // the cell's bookkeeping is whole; whatever that code does to the cell (a write, a
+    // removal, a path write of its own) is made, and judged, before this write.
+    const pre = w1.isLen ? Number(value) : _scrml_refine_copy(value, p.key, w1.cd, null, null, null);
+    // Then walk the cell's value as it is NOW, and write the copy (copying a copy runs no user code).
+    const now = _scrml_refine_raw(_scrml_state[p.key]);
+    const w = inPlace(now, path) === undefined ? null : walkOf(now, path);
+    if (w === null || w.isLen !== w1.isLen || w.cd !== w1.cd) return _scrml_deep_set_unjudged(_scrml_state[p.key], path, pre);
+    raw = now;
     if (!w.shared) {
-      w.c[prop] = value; // judged by the proxy's set
+      w.c[prop] = pre; // judged by the proxy's set
       return _scrml_deep_reactive(raw);
     }
     // Judge the leaf write against the place's own copies BEFORE any copy is installed:
     // a refused write leaves values, identities, sharing and place counts as they were.
     const staged = _scrml_refine_stage_unshare(raw, w.steps);
-    const v = _scrml_refine_judge_staged(raw, w.steps, staged, prop, value);
+    const v = _scrml_refine_judge_staged(raw, w.steps, staged, prop, pre);
     const install = function () {
       let c = _scrml_deep_reactive(raw);
       for (let i = 0; i < w.steps.length; i++) {
@@ -7078,8 +7100,9 @@ function _scrml_refine_shallow_record(r) {
 }
 // Judge \`leaf[prop] = value\` as made at the place the path names (its staged copies
 // linked into the raw value for the judgement, then unlinked; throws when refused,
-// nothing changed). Returns what the commit writes: the admitted copy (a length: the
-// checked number).
+// nothing changed). \`value\` is already the write's own copy (plain stored data) or a
+// number, so NO user code runs while the staged copies are linked without places.
+// Returns what the commit writes: the admitted copy (a length: the checked number).
 function _scrml_refine_judge_staged(raw, steps, staged, prop, value) {
   const links = [];
   let parent = raw;
@@ -7118,13 +7141,17 @@ function _scrml_refine_mutate(inner, raw, p, prop, method, args) {
   const el = _scrml_refine_child(p.d, raw, "0");
   const admit = function (v) { return _scrml_refine_admit(p, raw, el, v); };
   if (prop === "fill" || prop === "copyWithin") return _scrml_refine_rewrite(inner, raw, p, el, admit, prop, args);
+  if (prop === "sort") return _scrml_refine_sort(inner, raw, p, el, method, args);
+  // User code (an inserted value's getters, a start's valueOf) runs HERE, before the
+  // native call: the native call itself then runs none, so it never works on an array
+  // that code changed under it, and what it removes is exactly what it returns.
   let call = args;
   if (prop === "push" || prop === "unshift") call = args.map(admit);
-  else if (prop === "splice" && args.length > 2) call = args.slice(0, 2).concat(args.slice(2).map(admit));
-  else if (prop === "sort" && typeof args[0] === "function") {
-    // the comparator sees the cell's elements as the cell hands them out (judging proxies), never raw
-    const cmp = args[0];
-    call = [function (a, b) { return cmp(_scrml_deep_reactive(a), _scrml_deep_reactive(b)); }];
+  else if (prop === "splice") {
+    call = args.slice();
+    if (call.length > 0) call[0] = +call[0];  // ToNumber, as splice does (a BigInt / Symbol throws)
+    if (call.length > 1) call[1] = +call[1];
+    for (let i = 2; i < call.length; i++) call[i] = admit(call[i]);
   }
   if (el === null) {
     const before = raw.slice();
@@ -7136,6 +7163,40 @@ function _scrml_refine_mutate(inner, raw, p, prop, method, args) {
   else if (prop === "splice") for (const x of out) _scrml_refine_release(raw, x);
   // sort / reverse return the array itself: hand back the cell's proxy, never the raw array
   return out === raw ? _scrml_deep_reactive(raw) : out;
+}
+// sort: the comparator (or the default string order) is user code, so it runs on a
+// clone, never on the stored array (the cell's elements handed to it as the cell hands
+// them out — judging proxies, never raw). The order found is then written. If that
+// code changed the array meanwhile, the order it was computed for no longer exists:
+// the sort writes nothing (a comparator that changes the array leaves the order
+// implementation-defined, ECMA-262 Array.prototype.sort).
+function _scrml_refine_sort(inner, raw, p, el, method, args) {
+  const cmp = args[0];
+  if (cmp !== undefined && typeof cmp !== "function") return method.apply(inner, args); // its TypeError; nothing changed
+  const str = function (x) {
+    if (typeof x === "symbol") throw new TypeError("Cannot convert a Symbol value to a string");
+    return String(x);
+  };
+  const order = typeof cmp === "function"
+    ? function (a, b) { return cmp(_scrml_deep_reactive(a), _scrml_deep_reactive(b)); }
+    : function (a, b) { const x = str(_scrml_deep_reactive(a)), y = str(_scrml_deep_reactive(b)); return x < y ? -1 : x > y ? 1 : 0; };
+  const before = raw.slice();
+  const next = raw.slice();
+  Array.prototype.sort.call(next, order);
+  let same = raw.length === before.length;
+  for (let i = 0; same && i < before.length; i++) same = (i in raw) === (i in before) && raw[i] === before[i];
+  if (!same) return _scrml_deep_reactive(raw);
+  if (el === null) {
+    _scrml_refine_whole(p, function () { for (let i = 0; i < next.length; i++) { if (i in next) raw[i] = next[i]; else delete raw[i]; } },
+      function () { _scrml_refine_restore_array(raw, before); });
+  }
+  // the same elements, in the same container: no place changes
+  for (let i = 0; i < next.length; i++) {
+    if (i in next) { if (!(i in raw) || raw[i] !== next[i]) Reflect.set(inner, String(i), next[i], inner); }
+    else if (i in raw) Reflect.deleteProperty(inner, String(i));
+  }
+  if (typeof _scrml_trigger === "function") { _scrml_trigger(raw, "length"); _scrml_trigger(raw, "sort"); }
+  return _scrml_deep_reactive(raw);
 }
 // fill / copyWithin: the call is worked out on a plain clone first (native
 // semantics), then every slot it changes is written with its own copy.
@@ -7151,8 +7212,9 @@ function _scrml_refine_rewrite(inner, raw, p, el, admit, prop, args) {
     }
     at.push(i);
     vals.push(has ? admit(next[i]) : _scrml_refine_place); // _scrml_refine_place = "a hole"
-    olds.push(raw[i]);
   }
+  // what each slot holds NOW: admitting ran user code (a value's getters), which may have written a slot
+  for (let k = 0; k < at.length; k++) olds.push(raw[at[k]]);
   if (el === null) {
     const before = raw.slice();
     _scrml_refine_whole(p, function () {
@@ -7243,8 +7305,9 @@ const _scrml_refine_handler = {
     const p = _scrml_refine_live(raw);
     if (p === undefined) return Reflect.set(inner, prop, value, inner);
     if (Array.isArray(raw) && prop === "length") return _scrml_refine_set_length(inner, raw, p, value);
-    const old = raw[prop];
-    const ok = Reflect.set(inner, prop, _scrml_refine_prepare(raw, p, prop, value), inner);
+    const c = _scrml_refine_prepare(raw, p, prop, value); // runs user code (the value's getters)
+    const old = raw[prop]; // read AFTER it: that code may itself have written raw[prop]
+    const ok = Reflect.set(inner, prop, c, inner);
     if (ok) _scrml_refine_release(raw, old);
     return ok;
   },
@@ -7281,8 +7344,7 @@ const _scrml_refine_handler = {
     }
     if (!("value" in desc) && has) return Reflect.defineProperty(inner, prop, desc); // attributes only: the value is unchanged
     const isArr = Array.isArray(raw);
-    const old = raw[prop];
-    let nd, removed = null;
+    let nd, removed = null, old;
     if (isArr && prop === "length") {
       const n = Number(desc.value);
       if (n >>> 0 === n && n < raw.length) removed = raw.slice(n);
@@ -7296,7 +7358,8 @@ const _scrml_refine_handler = {
       }
       nd = Object.assign({}, desc, { value: n });
     } else {
-      nd = Object.assign({}, desc, { value: _scrml_refine_prepare(raw, p, prop, desc.value) });
+      nd = Object.assign({}, desc, { value: _scrml_refine_prepare(raw, p, prop, desc.value) }); // runs user code
+      old = raw[prop]; // read AFTER it: that code may itself have written raw[prop]
     }
     const ok = Reflect.defineProperty(inner, prop, nd);
     if (ok) {

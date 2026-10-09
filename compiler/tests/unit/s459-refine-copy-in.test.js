@@ -372,6 +372,99 @@ describe("N1 — a write that throws changes nothing", () => {
   });
 });
 
+// S460 N-1/N-2/N-3 + siblings: user code (a written value's getters, a valueOf, a sort
+// comparator) runs only while the cell's bookkeeping is whole; what it does to the
+// cell is made — and judged — on its own, before the write that ran it.
+describe("user code inside a write runs before the write touches the cell", () => {
+  const rPage = (label) => load(page(`type R:struct = { l: L, m: number(>0) }\n  <rs>: R[] = []`), label);
+  const shared = (rt) => {
+    const k = rt.key("rs");
+    const o = { l: { u: "a", n: 1 }, m: 1 };
+    rt.set(k, [o, o]);
+    return k;
+  };
+  const pathWrite = (rt, k, path, v) => rt.set(k, rt.deepSet(rt.state[k], path, v));
+
+  test("N-1: a getter's write into the shared row during a path write is judged (refused), never stored", () => {
+    const rt = rPage("n1");
+    const k = shared(rt);
+    let inner = "none";
+    pathWrite(rt, k, [0, "l"], { u: "g", get n() { try { rt.state[k][0].m = -5; } catch (e) { inner = String(e.message); } return 5; } });
+    expect(inner).toMatch(/^E-CONTRACT-001-RT/);
+    expect(rt.plain("rs")).toEqual([{ l: { u: "g", n: 5 }, m: 1 }, { l: { u: "a", n: 1 }, m: 1 }]);
+  });
+
+  test("N-1b: a reference a getter takes during a path write stays judged", () => {
+    const rt = rPage("n1b");
+    const k = shared(rt);
+    let h;
+    pathWrite(rt, k, [0, "l"], { u: "g", get n() { h = rt.state[k][0]; return 5; } });
+    expect(h).toBe(rt.state[k][1]);                       // the shared row, which row 1 still holds
+    expect(throwsContract(() => { h.m = -5; })).toBe(true);
+    expect(rt.plain("rs")).toEqual([{ l: { u: "g", n: 5 }, m: 1 }, { l: { u: "a", n: 1 }, m: 1 }]);
+  });
+
+  test("N-2: a getter's own path write lands (judged) and the outer write is made after it", () => {
+    const rt = rPage("n2");
+    const k = shared(rt);
+    pathWrite(rt, k, [0, "l"], { u: "g", get n() { pathWrite(rt, k, [0, "m"], 3); return 5; } });
+    expect(rt.plain("rs")).toEqual([{ l: { u: "g", n: 5 }, m: 3 }, { l: { u: "a", n: 1 }, m: 1 }]);
+    const rt2 = rPage("n2w");
+    const k2 = shared(rt2);
+    pathWrite(rt2, k2, [0, "l"], { u: "g", get n() { rt2.set(k2, [{ l: { u: "w", n: 2 }, m: 2 }]); return 5; } });
+    expect(rt2.plain("rs")).toEqual([{ l: { u: "g", n: 5 }, m: 2 }]);   // into the cell's value as the getter left it
+  });
+
+  test("N-3: a getter that shifts the array mid-write: the write goes to the row now at the path", () => {
+    const rt = rPage("n3");
+    const k = rt.key("rs");
+    const o = { l: { u: "a", n: 1 }, m: 1 };
+    rt.set(k, [o, o, { l: { u: "z", n: 9 }, m: 9 }]);
+    pathWrite(rt, k, [0, "l"], { u: "g", get n() { rt.state[k].shift(); return 5; } });
+    expect(rt.plain("rs")).toEqual([{ l: { u: "g", n: 5 }, m: 1 }, { l: { u: "z", n: 9 }, m: 9 }]);
+    expect(throwsContract(() => { rt.state[k][0].m = -1; })).toBe(true);
+  });
+
+  test("an element / defineProperty write whose value's getter overwrites the same slot releases what is there, once", () => {
+    for (const how of ["set", "define"]) {
+      const rt = load(page(`<rows>: L[] = []`), "slot-" + how);
+      const k = rt.key("rows");
+      const o = { u: "o", n: 4 };
+      rt.set(k, [o, o]);
+      const e1 = rt.state[k][1];
+      const v = { u: "g", get n() { rt.state[k][0] = { u: "c", n: 1 }; return 2; } };
+      if (how === "set") rt.state[k][0] = v;
+      else Object.defineProperty(rt.state[k], "0", { value: v, writable: true, enumerable: true, configurable: true });
+      expect(rt.plain("rows")).toEqual([{ u: "g", n: 2 }, { u: "o", n: 4 }]);
+      expect(throwsContract(() => { e1.n = -5; })).toBe(true);   // o is still at row 1: still judged
+    }
+  });
+
+  test("splice coerces its start before the call: a valueOf that pops leaves no hole", () => {
+    const rt = load(page(`<rows>: L[] = []`), "splice-valueof");
+    const k = rt.key("rows");
+    rt.set(k, [{ u: "a", n: 1 }, { u: "b", n: 2 }, { u: "c", n: 3 }]);
+    rt.state[k].splice({ valueOf() { rt.state[k].pop(); return 0; } }, 1);
+    expect(rt.plain("rows")).toEqual([{ u: "b", n: 2 }]);
+    expect(rt.state[k].length).toBe(1);
+  });
+
+  test("a sort comparator that changes the array: no element comes back without being judged", () => {
+    for (const decl of [`<rows>: L[] = []`, `type U:struct = { u: string, n: number(>0) | string }\n  <rows>: U[] = []`]) {
+      const rt = load(page(decl), "sort-cmp");
+      const k = rt.key("rows");
+      rt.set(k, [{ u: "c", n: 3 }, { u: "b", n: 2 }, { u: "a", n: 1 }]);
+      let held, done = false;
+      rt.state[k].sort((x, y) => { if (!done) { done = true; held = rt.state[k][2]; rt.state[k].pop(); } return x.n - y.n; });
+      expect(rt.state[k].some((z) => z === held)).toBe(false);
+      expect(rt.plain("rows")).toEqual([{ u: "c", n: 3 }, { u: "b", n: 2 }]);
+      rt.state[k].sort((x, y) => x.n - y.n);                  // an ordinary sort still sorts
+      expect(rt.plain("rows")).toEqual([{ u: "b", n: 2 }, { u: "c", n: 3 }]);
+      expect(throwsContract(() => { rt.state[k][0].n = -1; })).toBe(true);
+    }
+  });
+});
+
 describe("ownership — what is in the cell is exactly what its current value holds", () => {
   test("an element removed in place is the caller's again; one still in the cell is judged", () => {
     const rt = load(page(`<rows>: L[] = []`), "removed");
