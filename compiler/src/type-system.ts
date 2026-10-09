@@ -3840,10 +3840,14 @@ function stampRefinedReturns(node: unknown, judge: JudgeType, fn: string, depth 
   }
 }
 
+// Function nodes already desugared — held here, not as a key on the node, so the AST
+// carries no field a consumer (the self-host-v2 ingest) would have to know about.
+const _refineDesugared = new WeakSet<object>();
+
 function desugarFnRefinements(n: ASTNodeLike): void {
   const rec = n as Record<string, unknown>;
-  if (rec.__refineDesugared === true) return;
-  rec.__refineDesugared = true;
+  if (_refineDesugared.has(rec)) return;
+  _refineDesugared.add(rec);
   const body = rec.body as unknown[] | undefined;
   if (!Array.isArray(body)) return;
   const fnName = typeof rec.name === "string" && rec.name ? rec.name : "<anonymous>";
