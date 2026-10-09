@@ -1,0 +1,3 @@
+<program>
+^{ emit("<img usemap=\"#m\" src=\"/a.png\" alt=\"a\">") }
+</program>

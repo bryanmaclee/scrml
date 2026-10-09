@@ -4342,3 +4342,20 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3952] disp · meta.emit round 4 (PA-ruled F1–F5) · refinement copy-in fix round (MED-1/2) · D1 round 8 (STOPPED)
 [3953] state · npm scrml + create-scrml 0.0.1 STAGED (bryan approves on npmjs.com)
 [3954] state · S459 WRAP — 8 PRs; three arcs in flight on branches; five dPA verdicts awaiting bryan (070 first)
+[3955] state · S460 boot — D1/meta r4/copy-in parked on branches; S459 PA's D1 "land r7" overrode bryan's newest ruling on its own authority — put back to bryan
+[3956] ruling · S460 "n4 b" — compile-time emit() form-member rule dropped; runtime refusal stays · @adv:g-runtime-meta-emit-innerhtml-ungated-s458
+[3957] land · #1367 runtime meta.emit gated (S458 a + S459 r4) · @adv:g-runtime-meta-emit-innerhtml-ungated-s458
+[3958] land · #1368 gaps — dpa-070 §11 defects + copy-in findings (15 new, 6 updated)
+[3959] ruling · S460 "go, land round 7" — D1 decoupled from the presence axiom; measurements dispatched · @adv:dpa-070
+[3960] ruling · S460 "a′, go" — ONE presence test: typed bare x on T|not; unresolved condition type = ERROR (supersedes S440 Q2 for conditions) · @adv:dpa-070
+[3961] land · #1369 D1 declared props + one presence reader + show= does not narrow · @adv:g-impl1-show-narrows-s451
+[3962] ruling · S460 "a on copy-in" — refinement guarantee bounded to scrml-expressible values; one final root round
+[3963] ruling · S460 "a on F2" — unresolved operands of !/&&/|| in a condition are errors · @adv:dpa-070
+[3964] ruling · S460 "keep the code, accept both readings" — E-CHANNEL-HANDLER-SHADOW kept; is some narrows; show= is a condition
+[3965] land · #1371 onclient:* arity + E-CHANNEL-HANDLER-SHADOW (S458 item 1)
+[3966] land · #1372 a′ + F2 — SPEC §42.4 one condition rule; bootstrap provable-or-error · @adv:dpa-070
+[3967] land · #1373 gaps — 12 S460 review findings
+[3968] ruling · S460 "a" — mixed-kind condition ternary refused
+[3969] land · #1374 a′ ternary follow-up — arms walked, 0 newly accepted · @adv:dpa-070
+[3970] land · #1370 meta.emit follow-ups (usemap/map, radios, template, n4 b, CRLF-safe member table)
+[3971] state · AUTO profile built: scrml-support/pa-auto.md + cloud probe passed (routine trig_01XT9rCqxDwuYFbfj5Jr4bSC); GitHub GraphQL blocked in cloud → REST

@@ -1,0 +1,3 @@
+<program>
+^{ emit("<form id=\"contact\"><input name=\"name\"><input name=\"email\" type=\"email\"><input name=\"action\"></form>") }
+</program>

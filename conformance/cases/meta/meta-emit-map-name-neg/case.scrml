@@ -1,0 +1,3 @@
+<program>
+^{ emit("<map name=\"pm\"><area shape=\"rect\" coords=\"0,0,1,1\" href=\"/x\" alt=\"a\"></map>") }
+</program>

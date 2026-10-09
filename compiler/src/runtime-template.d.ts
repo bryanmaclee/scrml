@@ -31,3 +31,6 @@ export declare const RUNTIME_FILENAME: "scrml-runtime.js";
 
 /** S457 — the runtime URL scheme guard source (runtime-url-guard.js), inlined as the `urlguard` chunk. */
 export declare const URL_GUARD_RUNTIME_SOURCE: string;
+
+/** S460 N6 — the runtime declaration of the form member table, serialized from the imported Set. */
+export declare function metaEmitFormMembersDeclaration(table: unknown): string;

@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-form-member-name-pos",
+  "description": "§22.4.1 (S460 \"n4 b\") — compile-time `emit()` output is the author's markup: a control named like an HTMLFormElement member (`name`, `action`) inside an emitted `<form>` is admitted, as the same form is in source. (Was meta-emit-form-member-name-neg, S459 round 4 F2.) The runtime refusal of the same markup is meta-emit-runtime-form-member-name-rt.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: the *Named properties* rule holds in compile-time `emit()` output for its `document` half only; the form half is a run-time rule (§22.12). Compile-time refusals stay a subset of run-time refusals. (ruling:user-voice-scrml.md S460 \"n4 b\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#contact input",
+        "count": 3
+      }
+    ]
+  }
+}

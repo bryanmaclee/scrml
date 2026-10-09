@@ -1,0 +1,9 @@
+<program>
+<label> = "hi"
+<input type="radio" name="plan" value="a" id="pa" checked>
+<div id="host">
+^{
+  meta.emit("<input type=\"radio\" name=\"plan\" value=\"e\" checked>")
+}
+</div>
+</program>

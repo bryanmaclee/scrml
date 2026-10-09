@@ -1,3 +1,45 @@
+# scrml — Session 460 (bryan · ASUS-Vivobook) — WRAP (at ~72% context, bryan: "keep going to 85, then wrap")
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S459 below. Rulings: `scrml-support/user-voice-scrml.md` §S460 (9 rulings). Board `S460-bryan.md`. Changelog §S460. Delta-log `[3955]`–`[3971]`. Solo session.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. An AUTO cloud run may have happened before you read this
+This wrap armed (or tried to arm) the first real AUTO run: a one-time cloud routine ~10 min after the wrap, contract `../scrml-support/pa-auto.md`, work list `handOffs/auto-queue.md`, questions `handOffs/auto-questions.md`. **Check first:** routines at https://claude.ai/code/routines, the queue's DONE/BLOCKED marks, new PRs, `active-sessions/S*-auto.md`. Anything it landed went through the normal S239 + gate path; anything it parked is in auto-questions.md.
+
+### 1. In flight at wrap
+| item | where | state | next |
+|---|---|---|---|
+| **refinement copy-in** | PR #1375, branch `land/s460-refine-copy-in` (agent worktree `agent-a2b8e6f4e512bc88b`, branch `s460-refine-la`) | final S239 review **LAND**; re-merging main after #1370 when the wrap began | merge when gate green (AUTO queue item 1). If it conflicts: keep BOTH `refine` + `metaemit` runtime chunks; re-prove the runtime-template.js guard vs cd06606be |
+| bryan's questions | `handOffs/auto-questions.md` | is-some retirement · given-as-presence retirement · impl#1 adopts the S460 rule? · dpa-065 / 068 / 069 | one at a time |
+
+### 2. Next builds (all in auto-queue.md)
+HIGH conformance gaps (`given @cell` ReferenceError · `given <bool> :> fail` · narrowing survives writes) → runtime tree-shake (S459 option 3) → ESM strip-order → `splice` comma expression → Windows DB-test timeouts → E-CHANNEL-006.
+
+## What landed (8 PRs)
+#1367 #1368 #1369 #1370 #1371 #1372 #1373 #1374 — details changelog §S460.
+
+## 🔭 DURABLE
+**A dead agent and a busy agent look identical from the PA's chair.** Two agents finished their work and their hand-backs never arrived; the PA reported them "still running" for ~11 hours off stale notifications until bryan asked. Verify in-flight state from the BRANCH (last commit time, ls-remote, PR head + checks), never from the last notification. A bounded timer that reads the branches is the cheap guard.
+**A relayed premise inside a ruling is still a relayed premise.** S459 asked bryan to rule D1 strict on a PA claim that missed S440; the S459 PA then "fixed" it by overriding bryan's newest ruling on its own authority. The right move both times was to put the conflict back to bryan with the evidence — done at S460 boot (D1 → round 7, then the a′ axiom with measurements).
+**Measure the flip condition before ruling an axiom.** dpa-070's panel said "E unless the unresolved share is material"; measuring it (22% genuine, 95% for impl#1) turned (a) into (a′) — provable-or-error — which no voice had proposed.
+**Four review rounds on one mechanism = put the BOUNDARY to bryan** (copy-in): the fifth round was replaced by a scope ruling + one generic root round, and the next review came back LAND.
+**Committed generated docs serialize every landing.** Each of #1370/#1371/#1372/copy-in needed a re-merge after the previous landed (SPEC-INDEX line ranges, FACTS, bootstrap-conformance, known-gaps §0). Filed g-parallel-prs-conflict-on-committed-generated-docs-s460.
+
+## ⚑ MISSES (mine)
+1. ★★ Reported two finished agents as running for ~11 h (above).
+2. ★ Dispatched twice from a scrml-support CWD → worktree in the wrong repo (both caught by the F4 remote check). Rule now: `cd scrml` in the same turn as every dispatch.
+3. ★ A CI wait loop used an unsupported `gh pr checks --json` flag — every poll errored and the loop read the error as "pending" for 30 min (the base §8 indistinguishable-failure shape). Loops now key on the exit code (0 pass / 8 pending / else stop).
+4. ★ Relayed "main accepts the callback-prop forms" without checking — it compiled them, but they crashed at runtime (the reviewer's premise check caught it).
+
+## Worktrees + /tmp (6b / 6b′)
+Retained: `agent-a2b8e6f4e512bc88b` (copy-in, PR #1375 open). Frozen review trees `s460-rev-*` and landed agent worktrees can be removed (dry-run first). /tmp probe not run this wrap.
+
+## Gate at close
+Cloud `gate` green on every S460 merge (Windows flaked twice on executed-DB 5 s timeouts — filed; one real Windows break, the CRLF one, fixed before merge). Review markers written for #1355–#1358 #1366–#1374. pa-ruled count: 3 (unchanged). Maps: NOT refreshed this wrap (stamp predates S459) — refresh before the next dispatch-heavy session.
+
+---
+
 # scrml — Session 459 (bryan · ASUS-Vivobook) — WRAP (at ~85% context, by plan)
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S458 below. Rulings: `scrml-support/user-voice-scrml.md` §S459 (~12 entries). Board `S459-bryan.md`. Changelog §S459. Delta-log `[3940]`–`[3955]`. Solo session (a dPA ran alongside on bryan's command).

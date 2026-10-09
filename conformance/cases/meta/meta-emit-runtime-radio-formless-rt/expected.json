@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-radio-formless-rt",
+  "description": "§22.12 (S460 N2a) — a named `<input type=radio>` outside any form in runtime `meta.emit` output is refused: it would join the page's form-less radio group of that name (checking it unchecks the page's). Nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Radio groups*. (S460 differential review N2(a), PA-dispatched — measured closed rule)",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host input",
+        "count": 0
+      }
+    ]
+  }
+}

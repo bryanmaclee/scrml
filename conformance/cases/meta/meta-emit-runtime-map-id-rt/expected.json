@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-runtime-map-id-rt",
+  "description": "§22.12 (S460 N1) — `id` on `<map>` in runtime `meta.emit` output is refused (Chromium-verified: a `<map id>` with no name captures a page `<img usemap>`): nothing written.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Attributes*: `id`, a global on every other element, is refused on `<map>`. (ruling:user-voice-scrml.md S458 \"a\" (runtime meta.emit held to the same closed rule as compile-time emit()) — S460 differential review N1, PA-dispatched: the reference-by-name class of S459 round 4 F1 (`<label for>`))",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host map",
+        "count": 0
+      }
+    ]
+  }
+}

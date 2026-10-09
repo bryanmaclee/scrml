@@ -1,0 +1,17 @@
+{
+  "id": "meta-emit-map-name-neg",
+  "description": "§22.4.1 (S460 N1) — `name` on `<map>` in compile-time `emit()` output is E-META-EVAL-002: an emitted map would capture the areas of a page `<img usemap>`.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.12 *Attributes*: `name` and `id` on `<map>` are refused (a map is found by either). (ruling:user-voice-scrml.md S458 \"a\" (runtime meta.emit held to the same closed rule as compile-time emit()) — S460 differential review N1, PA-dispatched: the reference-by-name class of S459 round 4 F1 (`<label for>`))",
+  "expect": {
+    "codes": [
+      "E-META-EVAL-002"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-META-EVAL-002": "error"
+    }
+  }
+}

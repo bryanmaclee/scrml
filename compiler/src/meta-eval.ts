@@ -49,9 +49,10 @@ import {
   _scrml_emit_fold_name, _scrml_emit_reserved_attr_name, _SCRML_EMIT_NS_HTML,
   _scrml_emit_named_value_verdict,
 } from "./markup-attr-allow-list.js";
-// S459 round 4 (F2) — the generated document / HTMLFormElement member tables the named-property rule
-// reads (the compiler has no DOM; the runtime gate reads the same tables plus the live prototypes).
-import { _SCRML_EMIT_DOCUMENT_MEMBERS, _SCRML_EMIT_FORM_MEMBERS } from "./dom-named-property-members.js";
+// S459 round 4 (F2) — the generated `document` member table the named-property rule reads (the compiler
+// has no DOM). Compile time judges the document half only (S460 "n4 b"); the runtime gate judges the
+// form half, from the generated HTMLFormElement table plus the live prototype.
+import { _SCRML_EMIT_DOCUMENT_MEMBERS } from "./dom-named-property-members.js";
 // S459 round 4 (F4) — the ONE §5.2 URL judge, the one the runtime meta.emit gate applies.
 import { _scrml_is_url_attr, _scrml_url_value_admitted } from "./runtime-url-guard.js";
 import { CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
@@ -961,11 +962,14 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
     reported.add(message);
     errors.push(new MetaEvalError(code, message, site));
   };
-  const members = { document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: _SCRML_EMIT_FORM_MEMBERS };
-  // `inForm`: an emitted `<form>` encloses this list (S459 round 4 F2 — a control's id / name becomes a
-  // named property of that form). The page around a compile-time `^{}` is author source, judged as
-  // source; only the run-time gate knows a page form around a `meta.emit` insertion point (F1).
-  const visit = (list: unknown[], parentNs: string = _SCRML_EMIT_NS_HTML, parentTag: string = "", inForm: boolean = false): void => {
+  // The named-property rule at compile time is its DOCUMENT half only (ruling S460 "n4 b"): the form
+  // half — a control's id / name naming an HTMLFormElement member inside an emitted `<form>` — is not a
+  // compile-time rule. Compile-time `emit()` output is the author's own markup, so
+  // `<form><input name="name"><input name="email"></form>` is admitted here exactly as the same form is
+  // in source. The runtime `meta.emit` gate keeps the form half (its string is data), so a compile-time
+  // refusal stays a refusal at run time. `form: null` + `inForm` false: the form half is never asked.
+  const members = { document: _SCRML_EMIT_DOCUMENT_MEMBERS, form: null };
+  const visit = (list: unknown[], parentNs: string = _SCRML_EMIT_NS_HTML, parentTag: string = ""): void => {
     for (const n0 of list) {
       if (!n0 || typeof n0 !== "object") continue;
       const n = n0 as Record<string, unknown>;
@@ -1021,10 +1025,10 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
             const literal = String((v as { value?: unknown }).value ?? "");
             const lowerName = _scrml_emit_fold_name(String(a.name));
             const namedVerdict = _scrml_emit_named_value_verdict(ns, lowerTag, lowerName, literal, hasNameAttr,
-              inForm, isCustom, members);
+              false, isCustom, members);
             if (namedVerdict !== "") {
               refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output gives ${namedVerdict} (§22.12). Rename ` +
-                `it — on these elements an \`id\` / \`name\` becomes a named property of \`document\` or of the form, ` +
+                `it — on these elements an \`id\` / \`name\` becomes a named property of \`document\`, ` +
                 `and one spelled like a member hides that member from every script that reads it.`);
               continue;
             }
@@ -1052,7 +1056,7 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
           }
         }
         if (Array.isArray(n.children)) {
-          visit(n.children, ns, lowerTag, inForm || (lowerTag === "form" && ns === _SCRML_EMIT_NS_HTML));
+          visit(n.children, ns, lowerTag);
         }
         continue;
       }

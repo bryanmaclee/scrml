@@ -1,0 +1,10 @@
+<program>
+<label> = "hi"
+<form id="pf">
+<div id="host">
+^{
+  meta.emit("<template id=\"row\"><input name=\"q\"></template><p id=\"hint\">t</p>")
+}
+</div>
+</form>
+</program>

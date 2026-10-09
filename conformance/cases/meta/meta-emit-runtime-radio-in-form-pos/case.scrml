@@ -1,0 +1,8 @@
+<program>
+<label> = "hi"
+<div id="host">
+^{
+  meta.emit("<form id=\"ef\"><input type=\"radio\" name=\"plan\" value=\"a\"><input type=\"radio\" name=\"plan\" value=\"b\"></form>")
+}
+</div>
+</program>
