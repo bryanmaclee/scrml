@@ -1750,6 +1750,19 @@ function checkOptionalFnPropCalls(
     // A block-bodied arrow the parser kept as an escape hatch: its statements, parsed by the
     // one handler statement parser (tokenizeLogic + parseLogicBody).
     expandOpaque: (n) => blockArrowStatements(n),
+    // S462 (§42.3.5) — a write to the narrowed prop ends its narrowing. A prop is a LOCAL
+    // of the body: only an assignment to it writes it (a call cannot rebind a local; and a
+    // by-value prop write is itself E-COMPONENT-PROP-WRITE).
+    endsAt: (n) => {
+      // The marker is `@`-spelled, so a substituted `onGo = …` statement parses as the
+      // reactive-assignment form (`state-decl` / `reactive-assign`); in an expression it
+      // is an `assign`.
+      const k = n.kind === "assign" ? keyOf(n.target)
+        : n.kind === "state-decl" && typeof n.name === "string" ? keyOf({ kind: "ident", name: "@" + n.name })
+        : n.kind === "reactive-assign" && typeof n.target === "string" ? keyOf({ kind: "ident", name: "@" + n.target })
+        : null;
+      return k ? [k] : null;
+    },
   });
   const seen = new Set<string>();
   for (const o of offending) {

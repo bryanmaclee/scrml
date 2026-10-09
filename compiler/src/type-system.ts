@@ -89,7 +89,8 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { boundNamesOf } from "./binding-names.ts";
-import { walkBodyNarrowed } from "./presence-narrowing.ts";
+import { walkBodyNarrowed, narrowingEndedAt } from "./presence-narrowing.ts";
+import { buildNarrowingEndsAt } from "./narrowing-write-set.ts";
 import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
@@ -31785,13 +31786,13 @@ function checkOptionalMemberAccess(
   }
 
   // Fire the diagnostic for one bare hop through a possibly-`not` receiver.
-  function fire(receiverText: string, span: Span): void {
+  function fire(receiverText: string, span: Span, endedNote = ""): void {
     errors.push(new TSError(
       "E-TYPE-046",
       `E-TYPE-046: member access through \`${receiverText}\`, whose type admits \`not\` ` +
       `(a plain-optional \`T | not\` receiver). An unguarded dereference would fault at runtime. ` +
       `Optional-chain the access (\`${receiverText}?.…\`) to propagate absence, or narrow the ` +
-      `receiver to prove presence (\`if=\` / \`given\` / \`is not\` / \`match\`). (§42.3.5)`,
+      `receiver to prove presence (\`if=\` / \`given\` / \`is not\` / \`match\`). (§42.3.5)` + endedNote,
       span,
     ));
   }
@@ -31822,6 +31823,10 @@ function checkOptionalMemberAccess(
   };
   walkBodyNarrowed(topNodes as unknown[], new Set<string>(), fileSpan, {
     receiverKey,
+    // S462 (§42.3.5) — a write to a narrowed cell ends its narrowing: `@cell = …`,
+    // `reset(@cell)`, a call of a function of this file whose write set holds the cell,
+    // and a call whose write set cannot be determined (ends every narrowing).
+    endsAt: buildNarrowingEndsAt(topNodes as unknown[], { receiverKey }),
     // An `if=` guard names the cell bare or `@`-prefixed (§42.4).
     guardKey: (node: unknown): string | null => {
       const t = node as { kind?: string; name?: string } | undefined;
@@ -31838,7 +31843,15 @@ function checkOptionalMemberAccess(
       const recv = resolveValueInfo(n.object);
       if (!recv.optional) return;
       const cell = bareCellName(n.object);
-      if (!(cell && present.has(cell))) fire(receiverLabel(n.object), span as Span);
+      if (cell && present.has(cell)) return;
+      // S462 — a receiver that WAS narrowed and then written: name the write (the root
+      // cause), not only "narrow the receiver".
+      const ended = cell ? narrowingEndedAt(present, cell) : undefined;
+      fire(receiverLabel(n.object), span as Span, ended
+        ? (ended.unresolved
+          ? ` The narrowing of \`@${cell}\` ended at line ${ended.span.line ?? "?"}: a call there runs code whose writes cannot be determined (a function value, an imported or unknown function), so it may set \`@${cell}\` to \`not\` — a write ends the narrowing from that point (§42.3.5). Test \`@${cell}\` again after the call, or read it before.`
+          : ` The narrowing of \`@${cell}\` ended at line ${ended.span.line ?? "?"}: \`@${cell}\` is written there (directly, in a nested block, or by a function that writes it) — a write ends the narrowing from that point (§42.3.5). Test \`@${cell}\` again after the write.`)
+        : "");
     },
   });
 }
