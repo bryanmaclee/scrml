@@ -34,3 +34,4 @@ F5 (LOW nit): `<mid: string is some>` (typed compound field) gets the expression
 Report: new FINAL_SHA, per-finding disposition with the proof (repro before/after), tests + gates re-run (pre-commit, conformance, browser-tier, types:check, bootstrap slices).
 
 Address this before completing your current task.
+- 2026-10-09T16:50:30-06:00 F1: givenContinuesIsOperator — token-stream check (is = infix operator after an operand; not .is/?.is/key); tests is-given-member-is-s462

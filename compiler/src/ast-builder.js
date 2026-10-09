@@ -5808,6 +5808,37 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return collectExpr();
   }
 
+  /**
+   * §42.2.4 (S462) — is the `given` at peek() the second word of the presence
+   * operator `x is given`? Only when the token before it is the `is` KEYWORD used
+   * as the INFIX operator: `is` must itself follow an operand, and must not be a
+   * member name (`o.is`, `o?.is`) or an object key (`{ is: 1 }` — then `:` follows
+   * `is`, never `given`). Read from the token stream, never from the joined text:
+   * `@n = o.is⏎given o :> {…}` is a member read followed by a guard statement.
+   */
+  function givenContinuesIsOperator() {
+    const g = peek();
+    if (!g || g.kind !== "KEYWORD" || g.text !== "given") return false;
+    let k = -1;
+    while (peek(k) && peek(k).kind === "COMMENT") k--;
+    const isTok = peek(k);
+    if (!isTok || isTok.kind !== "KEYWORD" || isTok.text !== "is") return false;
+    k--;
+    while (peek(k) && peek(k).kind === "COMMENT") k--;
+    const before = peek(k);
+    if (!before || i + k < 0) return false;
+    // A member name: `.is` / `?.is`.
+    if (before.kind === "PUNCT" && before.text === ".") return false;
+    if (before.kind === "OPERATOR" && (before.text === "?." || before.text === "?.(" || before.text === "?.[")) return false;
+    // The operand `is` tests must END a value: a name, a literal, `)` / `]`, an
+    // `@cell`, or a value keyword. After an operator / `(` / `,` / a statement
+    // keyword, `is` is not an infix operator.
+    if (before.kind === "IDENT" || before.kind === "AT_IDENT" || before.kind === "NUMBER" || before.kind === "STRING") return true;
+    if (before.kind === "PUNCT" && (before.text === ")" || before.text === "]")) return true;
+    if (before.kind === "KEYWORD" && (before.text === "true" || before.text === "false" || before.text === "this" || before.text === "not")) return true;
+    return false;
+  }
+
   function collectExpr(stopAt = null, opts = null) {
     // Phase A1a Step 11.0a — when called from inside a Variant C compound
     // body, the RHS of a child state-decl must terminate at the next
@@ -6231,7 +6262,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // start of a `given x :>` guard. Before this, the collection broke at
           // it and `@b && @n is given` lowered to `@b && @n` (the test dropped,
           // silently) while the `is some` spelling lowered correctly.
-          let _isExprAfterRhs = tok.text === "given" && _lastPart === "is";
+          let _isExprAfterRhs = givenContinuesIsOperator();
           // `function`/`fn` are dual-form (decl OR expression); in RHS context
           // the upcoming `function`/`fn` opens a function EXPRESSION.
           if ((tok.text === "function" || tok.text === "fn") && _inRhsCtx) {
@@ -7079,7 +7110,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // is a function expression — keep collecting. See collectExpr above.
         if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
           // §42.2.4 (S462): `is given` is one operator — see collectExpr.
-          let _isFnExprAfterRhs = tok.text === "given" && (parts[parts.length - 1]?.trim() ?? "") === "is";
+          let _isFnExprAfterRhs = givenContinuesIsOperator();
           if (tok.text === "function" || tok.text === "fn") {
             const _lastPart = parts[parts.length - 1]?.trim() ?? "";
             const _RHS_CTX = new Set([
