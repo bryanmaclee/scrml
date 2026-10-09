@@ -34,3 +34,12 @@ F7: noted (the 4 gauntlet fixtures were migrated though they tested `given`; cov
 
 Report: new FINAL_SHA; per finding before/after; F1 corpus measurement (command + files); gates re-run.
 - F7 recorded: gauntlet 087/088/094/095 were `given` tests migrated by the fix rule; the deprecated-form coverage moved to conformance/cases/condition/given-presence-deprecated-{guard,arm,markup} + given-head-names-accepted (no change needed).
+- FIX ROUND 1 done (code 7c28aa068):
+  - F1: brace-less standalone guard body → E-SYNTAX-044 (impl#1 type-system + bootstrap); match arm `given x :> expr` not refused. Corpus measured by compiling (corpus-snap.mjs over corpus3.txt = 3501 tracked .scrml excl self-host-v2 + 4 gauntlet-r25 → head5.jsonl; count044.mjs head5 vs base/head3): 0 newly refused sites. Gap marker prov records it; gap stays resolved.
+  - Severity → Info (impl#1, bootstrap severity table, §34/§42.6/§42.7/§42.2.3, tests, 3 conformance expected.json).
+  - F2: predicate-tail `given` reads no names → no false W, `foo(ok)` now emitted as its own statement (was swallowed into an empty guard). `const ok = a` (the cut itself) remains — sibling branch; re-verify after merging main.
+  - F3: `x is⏎ given` → E-SYNTAX-044 naming the line-break cause; re-check after the merge (sibling's collectExpr fix).
+  - F4: §63.7 bullet lists the markup-guard dropped body (plain value too); annotated under g-impl1-given-match-arm-body-dropped-s462 with locus.
+  - F5: fix-rule net masks string contents; guard-shaped strings are not blockers.
+  - F6: W-GIVEN-ARROW-LEGACY §34 row corrected (in-match `given x =>` arm fired nothing at base).
+  - Gates: pre-commit 33934/0; commands+e2e 785/0; slices 2066/0 + lowered 99/0; condition conformance 15 pass + 15 xfail (pre-existing); bootstrap given cases 5 PASS / 2 UNSUPPORTED; census/spec-index/facts/severity/bootstrap report regenerated.
