@@ -28,3 +28,19 @@ F4 startup gate · `bun install` + `bun run pretest` from the worktree CWD · co
 
 ## Report
 WORKTREE_PATH · FINAL_SHA · files · governing sentences quoted · per-defect before/after · corpus measurement (semantics-changed sites listed) · D1/D5/D6/D9 status · locus held/refined/wrong.
+
+## ADDENDUM (S462 ruling dpa-068 W1)
+
+ADDED SCOPE for s462-stmt-match-leave — bryan ruled dpa-068 "2 W1" (S462). Append this message verbatim to docs/changes/s462-stmt-match-leave/BRIEF.md under "## ADDENDUM (S462 ruling dpa-068 W1)" and commit. It REPLACES the "do not implement W1 / do not change D1/D5/D6/D9" lines of your brief — but ONLY in the order below.
+
+The ruling (scrml-support/user-voice-scrml.md §S462): §18.2 `arm-body ::= expression | block-body | leave-stmt`; `leave-stmt ::= 'return' expression? | 'fail' variant-expr | 'break' Label? | 'continue' Label?`. Arms only: `match` arms (statement, decl and value position), `!{}` handler arms, engine message arms. `fail`'s operand is REQUIRED and starts on the same line. An operand ends where an expression arm ends: at the line break unless the line ends in a §7.2.2 rule-2 continuation token, at `}`, or at a same-line arm head. Legality by context via the existing §7 rules (`return` needs an enclosing function — a message arm keeps refusing it with the real legality code, not E-CODEGEN; `fail` needs a `!` function; `break`/`continue` need an enclosing loop). `lift` is EXCLUDED from the leave set. §18.4 gains verbatim: "A leaving arm (a leave-stmt, or a block that leaves on every path) contributes no type to the arm unification." Canonical spelling: bare for a single leave, braced for anything longer — if an existing `scrml fix` rule emits `{ return }` arms (F8, the `.Transport(_) :> { return }` output), leave it until acceptance lands, then report whether it should switch (do not change it).
+Provenance for the SPEC edits: `> **Provenance:** ruling:user-voice-scrml.md S462 "2 W1" · dd:scrml-support/docs/deep-dives/arm-body-leave-stmt-widening-dpa-068-2026-10-08.md`.
+
+ORDER (part of the ruling — sequencing is load-bearing):
+1. FIRST finish the pole-independent fixes already in your brief (D2/D3/D4/D8/D10/D12 + the given-arm body drop if same lowering). Commit them.
+2. THEN SPEC text (§18.2 grammar, §18.4 sentence, §19.4.5 / §51.0.S.2.3 cross-refs, correct the §19.10.4 `:20417` unbraced `fail` example to whatever is now canonical; §19.11's unbraced `lift` arms stay as-is with a note that `lift` is outside the leave set and owes its own ruling).
+3. THEN compiler acceptance, impl#1 AND bootstrap: D1 (impl#1 bare `fail` in a statement match → proper lowering, not `return fail.V(...)`), bare `return`/`break`/`continue` in every arm kind lowered correctly through the NEW inline lowering (never by text splicing — D8 shows text splicing changes meaning), D5 (bootstrap: an arm-body branch for `return`/`break`/`continue` like `fail` has, replacing the bogus E-SCOPE-001), D6 bootstrap bare `fail` (now legal — fix the code comment that cites a removed SPEC spelling), D9 (`const fail = 1` accepted though `fail` is a keyword — report only, don't change unless trivially a parse-error restoration with measured-zero corpus).
+4. Acceptance is complete ONLY when the dPA probes pass in BOTH compilers: c01–c07, b01–b04 and the d01 continuation probe (reconstruct them from the deep-dive §3/§9; add them as conformance cases with runtime halves proving the function/loop really leaves and `fail` really propagates).
+5. MEASURE corpus impact (artifacts + diagnostics, base vs head, full corpus incl. gauntlet-r25); newly-accepting is intended; any semantics change at an existing site comes back to the PA.
+
+If you are past ~60% context when you reach step 3, STOP after step 2: commit, progress.md, report — the PA will dispatch step 3 fresh.
