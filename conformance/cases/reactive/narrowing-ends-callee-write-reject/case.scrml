@@ -1,0 +1,17 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function clear() { @user = not }
+    function outer() { clear() }
+    function show() {
+        if (@user is given) {
+            outer()
+            @out = @user.name
+        }
+    }
+}
+<button id="b" onclick=show()>go</button>
+<p id="o">${@out}</p>
+</program>

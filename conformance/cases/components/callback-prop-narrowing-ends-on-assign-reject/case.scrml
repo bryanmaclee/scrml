@@ -1,0 +1,6 @@
+<program>
+const C = <div class="c" props={ onGo?: () => void }>
+    <button class="g" onclick=${() => { if (onGo is some) { onGo = not; onGo() } }}>g</button>
+</>
+<C/>
+</program>

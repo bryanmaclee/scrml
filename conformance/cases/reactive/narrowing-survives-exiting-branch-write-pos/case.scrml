@@ -1,0 +1,18 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function show(c: bool) {
+        if (@user is given) {
+            if (c) {
+                @user = not
+                return
+            }
+            @out = @user.name
+        }
+    }
+}
+<button id="b" onclick=show(false)>go</button>
+<p id="o">${@out}</p>
+</program>
