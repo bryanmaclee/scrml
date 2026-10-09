@@ -159,27 +159,51 @@ const LOOP_KINDS = new Set(["for-stmt", "for-expr", "while-stmt", "do-while-stmt
  * of "a write ends the narrowing", shared by the walk below and by every consumer that
  * summarises a function body (its write set).
  */
-export function endsWithin(node: unknown, opts: Pick<PresenceNarrowingOptions, "endsAt">): NarrowEnds {
+export function endsWithin(
+  node: unknown,
+  opts: Pick<PresenceNarrowingOptions, "endsAt">,
+  allPaths = false,
+): NarrowEnds {
   if (!opts.endsAt || !node || typeof node !== "object") return NO_ENDS;
-  // Memoised per options object (the walk asks again for every enclosing level). A
-  // consumer whose `endsAt` answers change (a write-set fixpoint) passes a fresh object.
-  let memo = ENDS_MEMO.get(opts);
-  if (!memo) { memo = new WeakMap(); ENDS_MEMO.set(opts, memo); }
+  // Memoised per options object and mode (the walk asks again for every enclosing
+  // level). A consumer whose `endsAt` answers change (a write-set fixpoint) passes a
+  // fresh object.
+  const memos = allPaths ? ENDS_MEMO_ALL : ENDS_MEMO;
+  let memo = memos.get(opts);
+  if (!memo) { memo = new WeakMap(); memos.set(opts, memo); }
   const hit = memo.get(node as object);
   if (hit) return hit;
-  const out = endsWithinUncached(node, opts);
+  const out = endsWithinUncached(node, opts, allPaths);
   memo.set(node as object, out);
   return out;
 }
 
-const ENDS_MEMO = new WeakMap<object, WeakMap<object, NarrowEnds>>();
+/**
+ * S462 fix round 1 (F1) — what a piece of code MAY write on ANY path, an exiting branch
+ * included: the write set of a function body, a lambda body, a deferred body. A
+ * function's write set is a may-write set — `if (c) { @user = not; return }` writes
+ * `@user` even though the rest of the body never sees it. (`endsWithin` without
+ * `allPaths` answers the other question — what reaches the rest of THIS list.)
+ */
+export function mayWriteWithin(node: unknown, opts: Pick<PresenceNarrowingOptions, "endsAt">): NarrowEnds {
+  return endsWithin(node, opts, true);
+}
 
-function endsWithinUncached(node: object, opts: Pick<PresenceNarrowingOptions, "endsAt">): NarrowEnds {
+const ENDS_MEMO = new WeakMap<object, WeakMap<object, NarrowEnds>>();
+const ENDS_MEMO_ALL = new WeakMap<object, WeakMap<object, NarrowEnds>>();
+
+/** Node kinds whose `body` is a list of mutually exclusive arms (one runs). */
+const ARM_LIST_KINDS = new Set(["match-stmt", "match-expr"]);
+
+function endsWithinUncached(node: object, opts: Pick<PresenceNarrowingOptions, "endsAt">, allPaths: boolean): NarrowEnds {
   if (!opts.endsAt) return NO_ENDS;
+  const sub = (x: unknown): NarrowEnds => endsWithin(x, opts, allPaths);
+  // In the "rest of this list" mode a branch / arm that always exits never reaches it.
+  const reaches = (body: unknown): boolean => allPaths || !exits(body);
   if (Array.isArray(node)) {
     let acc: NarrowEnds = NO_ENDS;
     for (const el of node) {
-      acc = unionEnds(acc, endsWithin(el, opts));
+      acc = unionEnds(acc, sub(el));
       if (acc === "all") return acc;
     }
     return acc;
@@ -193,21 +217,33 @@ function endsWithinUncached(node: object, opts: Pick<PresenceNarrowingOptions, "
     if (own && own.length > 0) acc = new Set(own);
   }
   if (n.kind === "if-stmt" || n.kind === "if-expr") {
-    // A branch that always exits never reaches the rest of the list.
-    acc = unionEnds(acc, endsWithin(n.condExpr, opts));
-    if (!exits(n.consequent)) acc = unionEnds(acc, endsWithin(n.consequent, opts));
-    if (!exits(n.alternate)) acc = unionEnds(acc, endsWithin(n.alternate, opts));
+    acc = unionEnds(acc, sub(n.condExpr));
+    if (reaches(n.consequent)) acc = unionEnds(acc, sub(n.consequent));
+    if (reaches(n.alternate)) acc = unionEnds(acc, sub(n.alternate));
+    return acc;
+  }
+  if (typeof n.kind === "string" && ARM_LIST_KINDS.has(n.kind)) {
+    acc = unionEnds(acc, sub(n.headerExpr));
+    acc = unionEnds(acc, sub(n.scrutineeExprs));
+    for (const arm of (n.body as unknown[] | undefined) ?? []) {
+      const armBody = (arm as Rec | undefined)?.body;
+      if (reaches(armBody)) acc = unionEnds(acc, sub(arm));
+      if (acc === "all") return acc;
+    }
     return acc;
   }
   if (n.kind === "markup") {
     // Attributes (event handlers) run later; the children render where the element stands.
-    return unionEnds(acc, endsWithin(n.children, opts));
+    return unionEnds(acc, sub(n.children));
   }
+  // A `defer` body runs at its block's exit (§19.16.2): its writes are part of what the
+  // enclosing block does (the walk below does not apply them in place — see
+  // walkBodyNarrowed), so they are counted here, with the rest of the node.
   for (const key of Object.keys(n)) {
     if (key === "span") continue;
     const v = n[key];
     if (v && typeof v === "object") {
-      acc = unionEnds(acc, endsWithin(v, opts));
+      acc = unionEnds(acc, sub(v));
       if (acc === "all") return acc;
     }
   }
@@ -226,13 +262,22 @@ export function narrowsWhen(
   cond: unknown,
   truth: boolean,
   receiverKey: (n: unknown) => string | null,
+  endsOf?: (n: unknown) => NarrowEnds,
 ): string[] {
   let c = cond as Rec | undefined;
   while (c && c.kind === "paren" && c.expr) c = c.expr as Rec;
   if (!c) return [];
   if (c.kind === "binary") {
-    if (c.op === "&&") return truth ? [...narrowsWhen(c.left, true, receiverKey), ...narrowsWhen(c.right, true, receiverKey)] : [];
-    if (c.op === "||") return truth ? [] : [...narrowsWhen(c.left, false, receiverKey), ...narrowsWhen(c.right, false, receiverKey)];
+    // S462 (fix round 1, F5c) — evaluation order: the left operand's facts hold only
+    // until the right operand writes; the right operand's facts hold from its own test
+    // on ("from that point"). So `wipe() && @user is given` narrows `@user`, and
+    // `@user is given && wipe()` does not (when `wipe` writes it).
+    const ordered = (side: boolean): string[] => [
+      ...keysWithoutEnds(narrowsWhen(c!.left, side, receiverKey, endsOf), endsOf ? endsOf(c!.right) : NO_ENDS),
+      ...narrowsWhen(c!.right, side, receiverKey, endsOf),
+    ];
+    if (c.op === "&&") return truth ? ordered(true) : [];
+    if (c.op === "||") return truth ? [] : ordered(false);
     if (c.op === "is-some" || c.op === "is-not") {
       const key = receiverKey(c.left);
       return key && (truth === (c.op === "is-some")) ? [key] : [];
@@ -248,7 +293,7 @@ export function narrowsWhen(
     return [];
   }
   if (c.kind === "unary" && (c.op === "!" || c.op === "not") && c.prefix !== false) {
-    return narrowsWhen(c.argument, !truth, receiverKey);
+    return narrowsWhen(c.argument, !truth, receiverKey, endsOf);
   }
   const key = receiverKey(c);
   return key && truth ? [key] : [];
@@ -298,13 +343,20 @@ export function walkExprNarrowed(
   }
   const n = node as Rec;
   if (typeof n.kind === "string") opts.onExpr(n, present, span);
+  if (typeof n.kind === "string" && ARM_LIST_KINDS.has(n.kind)) {
+    // S462 (F5a) — a value-position `match`: the header, then the arms as alternatives.
+    walkExprNarrowed(n.headerExpr, present, span, opts);
+    const after = withoutEnds(present, endsWithin(n.headerExpr, opts), atOf(n.headerExpr, span));
+    walkAlternatives((n.body as unknown[]) ?? [], after, span, opts);
+    return;
+  }
   if (n.kind === "ternary" || n.kind === "conditional") {
     const cond = (n.condition ?? n.test) as unknown;
     walkExprNarrowed(cond, present, span, opts);
     const condEnds = endsWithin(cond, opts);
     const after = withoutEnds(present, condEnds, atOf(cond, span));
-    walkExprNarrowed(n.consequent, withKeys(after, keysWithoutEnds(narrowsWhen(cond, true, opts.receiverKey), condEnds)), span, opts);
-    walkExprNarrowed(n.alternate, withKeys(after, keysWithoutEnds(narrowsWhen(cond, false, opts.receiverKey), condEnds)), span, opts);
+    walkExprNarrowed(n.consequent, withKeys(after, facts(cond, true, opts)), span, opts);
+    walkExprNarrowed(n.alternate, withKeys(after, facts(cond, false, opts)), span, opts);
     return;
   }
   if (n.kind === "binary" && (n.op === "&&" || n.op === "||")) {
@@ -312,7 +364,7 @@ export function walkExprNarrowed(
     walkExprNarrowed(n.left, present, span, opts);
     const leftEnds = endsWithin(n.left, opts);
     const after = withoutEnds(present, leftEnds, atOf(n.left, span));
-    walkExprNarrowed(n.right, withKeys(after, keysWithoutEnds(narrowsWhen(n.left, n.op === "&&", opts.receiverKey), leftEnds)), span, opts);
+    walkExprNarrowed(n.right, withKeys(after, facts(n.left, n.op === "&&", opts)), span, opts);
     return;
   }
   if (n.kind === "lambda" && n.body && typeof n.body === "object" && (n.body as Rec).kind === "block") {
@@ -359,10 +411,15 @@ function exits(stmts: unknown): boolean {
   });
 }
 
+/** A condition's facts when it is `truth`, in evaluation order (F5c). */
+function facts(cond: unknown, truth: boolean, opts: PresenceNarrowingOptions): string[] {
+  return narrowsWhen(cond, truth, opts.receiverKey, (x) => endsWithin(x, opts));
+}
+
 /** The receivers an `if (D) <exit>` early return narrows for the rest of the list. */
 function earlyReturnKeys(node: Rec, opts: PresenceNarrowingOptions): string[] {
   if (node.kind !== "if-stmt" || !exits(node.consequent)) return [];
-  return narrowsWhen(node.condExpr, false, opts.receiverKey);
+  return facts(node.condExpr, false, opts);
 }
 
 function guardKeys(markup: Rec, opts: PresenceNarrowingOptions): string[] {
@@ -465,20 +522,25 @@ export function walkNodeNarrowed(
     return;
   }
   if (n.kind === "match-stmt") {
-    walkBodyNarrowed((n.body as unknown[]) ?? [], withKey(present, opts.receiverKey(n.headerExpr)), here, opts);
+    // S462 (F5a) — the arms are ALTERNATIVES: one runs, so a write in one arm does not
+    // end a narrowing in a sibling arm (after the match, `endsWithin` takes the union).
+    walkAlternatives((n.body as unknown[]) ?? [], withKey(present, opts.receiverKey(n.headerExpr)), here, opts);
     return;
   }
   if (n.kind === "if-stmt" || n.kind === "if-expr") {
-    // `present` already lost what the condition writes; a narrowing the condition
-    // proves before such a write is not kept either (fail closed).
-    const condEnds = endsWithin(n.condExpr, opts);
-    walkBodyNarrowed((n.consequent as unknown[]) ?? [], withKeys(present, keysWithoutEnds(narrowsWhen(n.condExpr, true, opts.receiverKey), condEnds)), here, opts);
-    walkBodyNarrowed((n.alternate as unknown[]) ?? [], withKeys(present, keysWithoutEnds(narrowsWhen(n.condExpr, false, opts.receiverKey), condEnds)), here, opts);
+    // `present` already lost what the condition writes; the condition's facts are taken
+    // in evaluation order (`facts`): a test after a write in the condition narrows.
+    walkBodyNarrowed((n.consequent as unknown[]) ?? [], withKeys(present, facts(n.condExpr, true, opts)), here, opts);
+    walkBodyNarrowed((n.alternate as unknown[]) ?? [], withKeys(present, facts(n.condExpr, false, opts)), here, opts);
     return;
   }
   for (const k of CHILD_KEYS) {
     const v = n[k];
-    if (Array.isArray(v)) walkBodyNarrowed(v, present, here, opts);
+    // `arms` (a handling form's arms, a guarded expression's arms) are alternatives.
+    if (Array.isArray(v)) {
+      if (k === "arms") walkAlternatives(v, present, here, opts);
+      else walkBodyNarrowed(v, present, here, opts);
+    }
   }
   for (const k of Object.keys(n)) {
     if (CHILD_KEYS.includes(k) || EXPR_KEYS.includes(k) || k === "attrs" || k === "children" || k === "span") continue;
@@ -501,12 +563,30 @@ export function walkBodyNarrowed(
 ): void {
   if (!Array.isArray(body)) return;
   let acc = present;
-  for (const node of expandCheckPieces(body)) {
+  const pieces = expandCheckPieces(body);
+  for (let i = 0; i < pieces.length; i++) {
+    const node = pieces[i];
+    const r = node as Rec | undefined;
+    if (r && typeof r === "object" && r.kind === "defer-stmt") {
+      // S462 (F5b) — a deferred body runs at the block's EXIT (§19.16.2), not here: its
+      // writes end nothing for the statements after it in this list (they still count
+      // for what the whole block does — `endsWithin` — so they end the narrowing AFTER
+      // the block). It runs after the rest of the list, so it is judged with what the
+      // rest of the list may write already ended.
+      walkNodeNarrowed(node, withoutEnds(acc, mayWriteWithin(pieces.slice(i + 1), opts), atOf(r, span)), span, opts);
+      continue;
+    }
     walkNodeNarrowed(node, acc, span, opts);
-    if (node && typeof node === "object") {
-      acc = withoutEnds(acc, endsWithin(node, opts), atOf(node, span));
-      const r = node as Rec;
-      acc = withKeys(acc, keysWithoutEnds(earlyReturnKeys(r, opts), r.kind === "if-stmt" ? endsWithin(r.condExpr, opts) : NO_ENDS));
+    if (r && typeof r === "object") {
+      acc = withoutEnds(acc, endsWithin(r, opts), atOf(r, span));
+      // An early return's facts hold for the rest of the list — less what the `else`
+      // branch (which runs on the way here) may write.
+      acc = withKeys(acc, keysWithoutEnds(earlyReturnKeys(r, opts), r.kind === "if-stmt" ? endsWithin(r.alternate, opts) : NO_ENDS));
     }
   }
+}
+
+/** Walk mutually exclusive arms: each with the same presence set (one of them runs). */
+function walkAlternatives(arms: unknown[], present: ReadonlySet<string>, span: NarrowSpan, opts: PresenceNarrowingOptions): void {
+  for (const arm of arms) walkNodeNarrowed(arm, present, span, opts);
 }

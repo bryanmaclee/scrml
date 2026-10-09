@@ -90,7 +90,7 @@ import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { boundNamesOf } from "./binding-names.ts";
 import { walkBodyNarrowed, narrowingEndedAt } from "./presence-narrowing.ts";
-import { buildNarrowingEndsAt } from "./narrowing-write-set.ts";
+import { buildNarrowingEndsAt, arrayShape, recordShape, PRIM_SHAPE, UNKNOWN_SHAPE, type ValueShape } from "./narrowing-write-set.ts";
 import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
@@ -27489,7 +27489,7 @@ function processFile(
       typeRegistry,
       optionalEngineCellNames,
     );
-    checkOptionalMemberAccess(optionalTopNodes, receivers, errors, fileSpan);
+    checkOptionalMemberAccess(optionalTopNodes, receivers, errors, fileSpan, typeRegistry);
   }
 
   // §52.4.4 / §52.11 — E-AUTH-001: a client-local `@var` used as a bound
@@ -31708,6 +31708,39 @@ function collectPlainOptionalReceivers(
   return { optionalCells, cellStructs, optionalMapCells };
 }
 
+/**
+ * S462 fix round 1 (F3 / F4) — what the §42.3.5 write-set reader may assume about a value
+ * of a written type: whether a built-in method called on it runs no scrml code (a
+ * primitive, an array), and whether it is function-free (no function anywhere in it — safe
+ * to hand to a built-in as data). Anything not proven is unknown (fail closed).
+ */
+function valueShapeOfType(t: ResolvedType | null | undefined, depth = 0): ValueShape {
+  if (!t || typeof t !== "object" || depth > 8) return UNKNOWN_SHAPE;
+  switch (t.kind) {
+    case "primitive":
+      return PRIM_SHAPE;
+    case "array":
+      return arrayShape(valueShapeOfType((t as ArrayType).element, depth + 1));
+    case "struct": {
+      const st = t as StructType;
+      return recordShape(!typeContainsFunctionField(st), (name) => {
+        const f = st.fields.get(name);
+        return f ? valueShapeOfType(f, depth + 1) : null;
+      });
+    }
+    case "union": {
+      const members = (t as UnionType).members.filter((m) => m && m.kind !== "not");
+      if (members.length === 1) return valueShapeOfType(members[0], depth + 1);
+      return UNKNOWN_SHAPE;
+    }
+    case "enum":
+    case "map":
+      return recordShape(!typeContainsFunctionField(t), () => null);
+    default:
+      return UNKNOWN_SHAPE;
+  }
+}
+
 /** Describes the VALUE an expression node produces, for per-hop resolution. */
 interface ReceiverValueInfo {
   /** True when the produced value's static type admits `not` (possibly-`not`). */
@@ -31727,6 +31760,7 @@ function checkOptionalMemberAccess(
   receivers: OptionalReceiverSet,
   errors: TSError[],
   fileSpan: Span,
+  typeRegistry?: Map<string, ResolvedType>,
 ): void {
   const { optionalCells, cellStructs, optionalMapCells } = receivers;
   if (optionalCells.size === 0 && optionalMapCells.size === 0) return;
@@ -31826,7 +31860,10 @@ function checkOptionalMemberAccess(
     // S462 (§42.3.5) — a write to a narrowed cell ends its narrowing: `@cell = …`,
     // `reset(@cell)`, a call of a function of this file whose write set holds the cell,
     // and a call whose write set cannot be determined (ends every narrowing).
-    endsAt: buildNarrowingEndsAt(topNodes as unknown[], { receiverKey }),
+    endsAt: buildNarrowingEndsAt(topNodes as unknown[], {
+      receiverKey,
+      typeShape: typeRegistry ? (ann: string) => valueShapeOfType(resolveTypeExpr(ann, typeRegistry)) : undefined,
+    }),
     // An `if=` guard names the cell bare or `@`-prefixed (§42.4).
     guardKey: (node: unknown): string | null => {
       const t = node as { kind?: string; name?: string } | undefined;

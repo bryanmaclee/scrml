@@ -1750,9 +1750,11 @@ function checkOptionalFnPropCalls(
     // A block-bodied arrow the parser kept as an escape hatch: its statements, parsed by the
     // one handler statement parser (tokenizeLogic + parseLogicBody).
     expandOpaque: (n) => blockArrowStatements(n),
-    // S462 (§42.3.5) — a write to the narrowed prop ends its narrowing. A prop is a LOCAL
-    // of the body: only an assignment to it writes it (a call cannot rebind a local; and a
-    // by-value prop write is itself E-COMPONENT-PROP-WRITE).
+    // S462 (§42.3.5) — a write to the narrowed prop ends its narrowing; here only a direct
+    // assignment is read as one. A call is NOT read as ending it — not because a call
+    // cannot rebind the prop (a closure can: `const z = () => { onGo = not }; z()`), but
+    // because EVERY write of a prop in the body, wherever it stands, is already refused as
+    // E-COMPONENT-PROP-WRITE, so no compiling program reaches such a call.
     endsAt: (n) => {
       // The marker is `@`-spelled, so a substituted `onGo = …` statement parses as the
       // reactive-assignment form (`state-decl` / `reactive-assign`); in an expression it

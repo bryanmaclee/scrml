@@ -357,7 +357,206 @@ const C = <div class="c" props={ onGo?: () => void }>
     expect(codes(comp(`() => { if (onGo is some) { onGo = not; onGo() } }`))).toContain("E-TYPE-031");
   });
 
-  test("a narrowed prop survives a call (a call cannot rebind a local)", () => {
+  test("a narrowed prop survives a call (every prop write is already E-COMPONENT-PROP-WRITE)", () => {
     expect(codes(comp(`() => { if (onGo is some) { console.log("x"); onGo() } }`))).not.toContain("E-TYPE-031");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 1 (S239 differential review of 0006c9243). Each case: before = the count on
+// 0006c9243, after = this commit.
+// ---------------------------------------------------------------------------
+function prog2(logic) {
+  return `<program>
+type User:struct = { name: string }
+type K:enum = { A, B }
+<user>: User | not = { name: "a" }
+<out> = ""
+<k>: K = .A
+\${
+${logic}
+}
+<p>\${@out}</p>
+</program>
+`;
+}
+const n046 = (logic) => e046(prog2(logic)).length;
+
+describe("S462 fix round 1 — fail-open holes closed", () => {
+  test("F1: a write in a callee's RETURNING branch is in its write set (may-write)", () => {
+    expect(n046(`
+    function clear() { if (@out == "") { @user = not
+            return } }
+    function show() { if (@user is given) { clear()
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F2: a parameter named like a file function does not borrow its write set", () => {
+    expect(n046(`
+    function noop() { @out = "x" }
+    function clear() { @user = not }
+    function apply(noop) { if (@user is given) { noop()
+            @out = @user.name } }
+    function go() { apply(clear) }`)).toBe(1);
+  });
+
+  test("F2: a local alias named like a file function", () => {
+    expect(n046(`
+    function noop() { @out = "x" }
+    function clear() { @user = not }
+    function show() { const noop = clear
+        if (@user is given) { noop()
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F2: an arrow parameter named like a file function", () => {
+    expect(n046(`
+    function noop() -> bool { @out = "x"
+        return true }
+    function clear() -> bool { @user = not
+        return true }
+    function show() { const run = (noop) => (@user is given && noop() && @user.name == "a")
+        const b = run(clear) }`)).toBe(1);
+  });
+
+  test("F2 / F5d: an inner function resolves to ITSELF, not to a same-named outer one", () => {
+    // inner writes, outer does not → fires
+    expect(n046(`
+    function clear() { @out = "x" }
+    function show() {
+        function clear() { @user = not }
+        if (@user is given) { clear()
+            @out = @user.name } }`)).toBe(1);
+    // outer writes, inner does not → survives (was joined before)
+    expect(n046(`
+    function clear() { @user = not }
+    function show() {
+        function clear() { @out = "x" }
+        if (@user is given) { clear()
+            @out = @user.name } }`)).toBe(0);
+  });
+
+  test("F3: a built-in method NAME on a receiver of unknown type is not trusted", () => {
+    expect(n046(`
+    function clear() { @user = not }
+    function show() { const api = { get: clear }
+        if (@user is given) { api.get()
+            @out = @user.name } }`)).toBe(1);
+    expect(n046(`
+    function clear() { @user = not }
+    function show() { const api = { clear: clear }
+        if (@user is given) { api.clear()
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F3 twin: a built-in method on a receiver KNOWN to be a built-in value is trusted", () => {
+    expect(n046(`
+    function show(s: string, xs: int[]) { if (@user is given) {
+            const t = s.trim().toUpperCase()
+            const ys = xs.filter((x) => x > 1).map((x) => x + 1)
+            const z = @user.name.trim()
+            @out = @user.name + t } }`)).toBe(0);
+  });
+
+  test("F4: a function handed to a built-in outside a callback position is assumed called", () => {
+    expect(n046(`
+    function wipe() -> string { @user = not
+        return "" }
+    function show() { if (@user is given) { const s = JSON.stringify(1, wipe)
+            @out = @user.name } }`)).toBe(1);
+    expect(n046(`
+    function wipe() -> string { @user = not
+        return "" }
+    function show() { if (@user is given) { const s = String({ toString: wipe })
+            @out = @user.name } }`)).toBe(1);
+    expect(n046(`
+    function wipe() -> string { @user = not
+        return "" }
+    function show(xs: int[]) { if (@user is given) { const g = Object.groupBy(xs, (x) => wipe())
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F4: a value of unknown type handed to a built-in may be a function", () => {
+    expect(n046(`
+    function show(v) { if (@user is given) { const s = String(v)
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F4 twin: data of a known function-free type handed to a built-in", () => {
+    expect(n046(`
+    function show(n: int, s: string) { if (@user is given) { const t = String(n) + JSON.stringify([s, 1])
+            @out = @user.name + t } }`)).toBe(0);
+  });
+});
+
+describe("S462 fix round 1 — spurious rejections removed", () => {
+  test("F5a: match arms are alternatives — a write in one arm does not reach a sibling", () => {
+    expect(n046(`
+    function clear() { @user = not }
+    function show() { if (@user is given) {
+            match @k {
+                .A :> { clear() }
+                .B :> { @out = @user.name }
+            } } }`)).toBe(0);
+  });
+
+  test("F5a twin: after the match, the union of the arms applies", () => {
+    expect(n046(`
+    function clear() { @user = not }
+    function show() { if (@user is given) {
+            match @k {
+                .A :> { clear() }
+                .B :> { @out = "b" }
+            }
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F5b: a defer body runs at the block's exit — it ends nothing inside the block", () => {
+    expect(n046(`
+    function show() { if (@user is given) {
+            defer { @user = not }
+            @out = @user.name } }`)).toBe(0);
+  });
+
+  test("F5b twin: a defer's write ends the narrowing AFTER its block", () => {
+    expect(n046(`
+    function show(c: bool) { if (@user is given) {
+            if (c) { defer { @user = not }
+                @out = "x" }
+            @out = @user.name } }`)).toBe(1);
+  });
+
+  test("F5b: a defer body is judged after the rest of its block's writes", () => {
+    expect(n046(`
+    function clear() { @user = not }
+    function show() { if (@user is given) {
+            defer { @out = @user.name }
+            clear() } }`)).toBe(1);
+  });
+
+  test("F5c: a test AFTER a write in the same condition narrows (if and ternary)", () => {
+    expect(n046(`
+    function wipe() -> bool { @user = not
+        return true }
+    function show() { if (wipe() && @user is given) { @out = @user.name } }`)).toBe(0);
+    expect(n046(`
+    function wipe() -> bool { @user = not
+        return true }
+    function show() { @out = (wipe() && @user is given) ? @user.name : "" }`)).toBe(0);
+  });
+
+  test("F5c twin: a test BEFORE a write in the same condition does not", () => {
+    expect(n046(`
+    function wipe() -> bool { @user = not
+        return true }
+    function show() { if (@user is given && wipe()) { @out = @user.name } }`)).toBe(1);
+  });
+
+  test("early return: the else branch's write ends the early-return narrowing", () => {
+    expect(n046(`
+    function clear() { @user = not }
+    function show(c: bool) {
+        if (@user is not) { return } else { clear() }
+        @out = @user.name }`)).toBe(1);
   });
 });

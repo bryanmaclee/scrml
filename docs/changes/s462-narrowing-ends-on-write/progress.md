@@ -31,3 +31,4 @@ Nit: component path comment — "a call cannot rebind a local" is false (`const 
 Divergence to REPORT (do not change the bootstrap unless trivial): impl#1 trusts built-in globals; the bootstrap fails closed on them (`String(1)` / `parseInt` in a narrowed block add E-OPERAND-NOT-NARROWED in the slice). Say whether after F3/F4 impl#1 and the bootstrap agree.
 
 Report: new FINAL_SHA; per finding: before/after with the repro; the re-measured corpus table (new fires per limb, files+lines); gates re-run (pre-commit, conformance, browser-tier, types:check, bootstrap slices). If you exceed ~70% context, commit + progress.md + report what remains.
+2026-10-09T17:02:56-06:00 FIX ROUND 1: F1 (mayWriteWithin), F2 (scope-resolved callees), F3 (receiver shapes), F4 (args assumed called), F5a/b/c, else-branch early-return, nit — unit 45 green; types OK; corpus re-measure: 0 new on the 2701 pre-existing files (only the 6 new reject cases fire)
