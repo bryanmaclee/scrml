@@ -47,3 +47,30 @@
 - `bun run types:check`: OK, 184 diagnostics unchanged.
 - browser tier: base 1429 pass / 50 fail, head 1433 pass / 50 fail; the 50 failure NAMES are identical (diffed). `scripts/browser-baseline.ts --check` refuses on a pre-existing parser/harness count disagreement (48 vs 47), unrelated.
 - `bun scripts/facts.ts --check` was STALE (counts) → `--write` (commit fa60be3). `bun scripts/bootstrap-conformance.ts --check` STALE (3 new cases) → `--write` (f4639ff). `regen-spec-index.ts --check` OK (no SPEC edit).
+
+## Fix round 1 — review of the landed merge 4c1813a (ca3ce45 onto main d99dad0)
+- BLOCKING (reviewer + PA, executed): a `given` body holding an `if` with markup arms lost its diagnostics. `planIfCascade` reaches the nested `if-stmt` from a given-guard, but `givenBody` was set only when the arm's DIRECT parent was the given-guard, so the nested if-arm lifts carried no pieces. Repro r2 `${ given @o :> { if (@c) { <p>${@o.opt.x}</p> } } }`: base E-TYPE-046 exit 1; ca3ce45 exit 0 with a runtime TypeError. r1 (E-STATE-UNDECLARED) and r3 (E-SCOPE-001) were the same.
+- Measured scope of the defect, larger than reported: a diagnostic matrix (below) on ca3ce45 lost 53 code entries across given→if, given→if/else, given→if→if, the ELSE-IF arm of an if whose other arm holds a given (`ifElseIfGiven`), and the SIBLING arm of an if whose other arm holds a given (`ifGivenSibling`). The sibling and else-if classes are not "under a given" at all. Before s461, any cascade involving a given DECLINED whole (a given was not a cascade node, and `armHoldsMarkup` saw its markup), so the checkers judged every arm of it as pieces. A fix that only threads an "under a given" flag would still lose them.
+- ROOT FIX, one mechanism (`implied-lift-desugar.ts` `keepPiecesForArmsBaseNeverPlanned`): for a cascade that reaches a given anywhere (`cascadeReachesGiven`), re-run the planner with the PRE-s461 cascade predicate (`isIfCascadeNodeOnly`; `planIfCascade` and `armHoldsMarkup` now take the predicate). Every arm the old planner would NOT have desugared keeps its pre-desugar pieces (`_preDesugarPieces`, renamed from `_givenBodyPieces`). Checker coverage is therefore identical to pre-s461 by construction, not by listing shapes. A cascade reaching no given is untouched (no re-run, no pieces). Checkers: presence-narrowing.ts now expands pieces generically in `walkBodyNarrowed` (keyed only on their presence; the given-only special case is removed). The type-system `lift-expr` arm already visited them generically.
+- Unit tests §6 (10 new): r1, r2, r3, given→if→if, given→if/else→given, given→given, if→given, sibling arm, the narrowed cell still accepted two levels down, given→if still renders. On ca3ce45, 5 of them fail (r1, r2, r3, given→if→if, sibling).
+- DIAGNOSTIC MATRIX (`diagmatrix.mjs`): 15 payloads × 14 positions = 210 programs, compiled on base 5a895f3 and head, comparing error+warning code multisets.
+  - Payloads: E-STATE-UNDECLARED read, E-SCOPE-001 read, E-TYPE-046 on the narrowed cell's optional field, E-TYPE-046 on an un-narrowed cell, an attribute `@undeclared`, a handler `nosuchFn()`, `@.`, a read of a different un-narrowed cell, clean, `<img>`, a nested `if=` element with a typo, a nested `if=` with E-TYPE-046, `<each>` in the body, `.length` chain, try/catch in a handler.
+  - Positions: direct, direct `=>`, given→if, given→if/else, given→if→if, given→given, given→if/else→given, if→given, if→given sibling, if/else-if→given, if→given(no markup) sibling, multi-name given, plain if, plain if/else.
+  - Result head vs base: 0 lost error codes. The only differences:
+    - (a) LOST E-DG-002 ×8 — a WARNING whose premise became false. Base claimed `@c` "never consumed" although `<p if=@c>` in the given body reads it; that body now renders, so `@c` is consumed. Verified by name.
+    - (b) GAINED E-SYNTAX-064 ×11 — `${@.x}` (the `<each>`-only sigil) in a given-involved cascade. Base compiled it at exit 0 only because the body was dropped. It now renders, and the existing lift-expr `@.` scan fires exactly as it does for a plain if-arm (`plainIf__atDot` fires on base too). This is NEWLY-REJECTING; the alternative is shipping an unlowerable `@.`. Reported for the PA.
+  - ca3ce45 vs base on the same matrix: 53 lost code entries (now 0).
+- Emitted artifacts: the 20 earlier probes are byte-identical between ca3ce45 and the fix (pieces are checker-only).
+
+## Semantics-changed class (reviewer N1 — intended §17.6.10 change, recorded)
+Shapes that rendered nothing (or crashed) before and now render:
+- a markup `given` body on a CELL head (the reported shape);
+- a markup `given` body on a LOCAL / parameter head (`given x :> { <p/> }` in `${}`);
+- an `if` arm containing a `given` (base declined the whole cascade, so every arm was dropped; now every arm renders);
+- a `given` nested in a given / if arm at any depth;
+- an engine state body that contains such a guard (now wires, per the reviewer).
+Direction: semantics-changed toward the contract (§42.3.5 worked example, §17.6.10). Compile-time accept/reject is unchanged except the E-SYNTAX-064 gain in (b) above.
+
+## Recorded only (reviewer N3)
+- A DERIVED-cell head lowers the guard through `_scrml_derived_get("d")` (emitIdent's derived branch), while the body's reads of the same cell go through `_scrml_reactive_get`. This is the existing if-arm pattern (an `if (@d)` condition vs its body); not changed here.
+- Fix-round gates (head ad2ce6c + docs): unit+integration+conformance: 31480 pass / 10 fail / 132 skip / 12 todo. The 10 are the same environment-only failures as base; there are no new failures, and defer-binder-completeness passes. `conformance/run.ts`: 1484/1549 pass, 65 xfail, exit 0. types:check OK (184, unchanged). Browser: 1437 pass / 48 fail, and those 48 failure names are a SUBSET of base's 50 (0 new). bootstrap-conformance current. FACTS.md regenerated (line count).
