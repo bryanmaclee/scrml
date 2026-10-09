@@ -4,3 +4,4 @@
 2026-10-09T15:56:17-06:00 conformance: 12 S462 cases (6 reject + 6 pos, incl. E-TYPE-031 prop-assign); locals case dropped — g-etype046-write-lhs-and-fn-param is status=open (xfail needs carried)
 2026-10-09T16:11:11-06:00 bootstrap: unresolvable-call limb added (callKeys/hasFnNamed/tUnnarrowCells; unreachable in slice — function values refused); slice m1/m2/m1-lowered/m3/m4/codec green; bootstrap-conformance regenerated (12 new cases NOT-TWINNED: rhs-decl / component-const)
 2026-10-09T16:25:05-06:00 docs: known-gaps flip (resolved) + 2 new gaps (deferred-closure, await-yield); SPEC-INDEX + FACTS + gap-counts regenerated (master-list left to PA)
+2026-10-09T16:26:38-06:00 verify: types:check OK; browser-baseline --check PASS (48 asserted); todomvc compiles; bootstrap slices green; final report next
