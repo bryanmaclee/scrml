@@ -1,2 +1,4 @@
 - 2026-10-09T14:54:45-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a52c99d3b87cb5d14; brief fetched
 - 2026-10-09T15:04:31-06:00 is-given gaps closed: ast-builder collectExpr given-after-is; rewrite.ts string fallback; unquoted-attr-value is given; parity test
+- 2026-10-09T15:33:40-06:00 validator is-given/is-some parse; W-IS-SOME-DEPRECATED lint (token sink + confirm + TAB emit); hints steer to is given; tests
+- 2026-10-09T15:48:44-06:00 fix-is-some rule + registration; corpus migrated (stdlib/examples/samples/conformance/dashboard/docs snippets/self-host-v2; 4 deliberate is-some samples kept); README/tutorial mirrors; SPEC §42/§55/§34/§63.7 + examples; bootstrap is-some parse + W twin; conformance cases x4; SPEC-INDEX/FACTS/bootstrap-conformance/severity regen; known-gaps 2 resolved; inert proof 54/54 units identical (53 byte-identical, 1 after fold) + analyze/parse verified via rule

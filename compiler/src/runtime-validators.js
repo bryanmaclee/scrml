@@ -14,7 +14,7 @@
  *   - SPEC §55.1 — universal-core vocabulary table (14 predicates)
  *   - SPEC §55.9 — `ValidationError` enum (per-predicate error tag)
  *   - SPEC §55.12 — short-circuit + composition (C7's territory; not C6's)
- *   - SPEC §42.2.5 — `is some` vs `req` distinct semantics
+ *   - SPEC §42.2.5 — `is given` vs `req` distinct semantics
  *   - PA-SCRML-PRIMER §8 — auto-synth + 14-predicate confirmation
  *   - compiler/src/validator-catalog.ts — compile-time single source of truth
  *
@@ -56,9 +56,9 @@
  * unwraps the thunk at fire time so the predicate sees the latest reactive
  * value. Literals and array-of-values pass through unchanged.
  *
- * # `is some` vs `req` (§42.2.5)
+ * # `is given` vs `req` (§42.2.5)
  *
- *   value          | req           | is some
+ *   value          | req           | is given  (`is some`: soft-deprecated spelling, S462)
  *   ---------------+---------------+--------
  *   null           | fail Required | fail NotSome
  *   undefined      | fail Required | fail NotSome
@@ -69,7 +69,7 @@
  *
  * # Short-circuit semantics (§55.12) — NOT C6's territory
  *
- * "When `req` (or `is some`) FAILS on an empty / null cell, the remaining
+ * "When `req` (or `is given`) FAILS on an empty / null cell, the remaining
  *  validators are SKIPPED."
  *
  * That orchestration is C7's job (the per-cell validator runner). This catalog
@@ -83,7 +83,7 @@
  *   2. Evaluate predicate args (resolving cross-field thunks, literal values, array literals).
  *   3. Call `fire(cellValue, ...args)`.
  *   4. If non-null, append the returned object to the cell's `errors[]` array.
- *   5. Apply §55.12 short-circuit: if `req`/`is some` failed and the cell value
+ *   5. Apply §55.12 short-circuit: if `req`/`is given` failed and the cell value
  *      was empty/null, stop walking the remaining validators.
  *   6. Apply Level-1 inline-message override extraction (B13's `inlineOverride`)
  *      at MESSAGE rendering time (C10) — NOT here. This catalog produces the
@@ -189,7 +189,7 @@ export function fireReq(value) {
 }
 
 /**
- * `is some` — value EXISTS (null/undefined fail). `""` IS some.
+ * `is given` — value EXISTS (null/undefined fail). `""` IS given.
  * SPEC §55.1 + §42.2.5.
  */
 export function fireIsSome(value) {
@@ -204,7 +204,7 @@ export function fireIsSome(value) {
 export function fireLength(value, relPred) {
   if (value === null || value === undefined) {
     // Treat null/undefined length as 0 — same as empty. Failures here are
-    // typically suppressed by §55.12 short-circuit when req/is some fail.
+    // typically suppressed by §55.12 short-circuit when req/is given fail.
     return runRelationalPredicate(0, relPred)
       ? null
       : { tag: "LengthFailed", predicate: relPred };
@@ -353,11 +353,11 @@ export function fireNotIn(value, set) {
  * The 14 universal-core predicate runtime fire functions, keyed by the
  * source-level predicate name (matching the compile-time catalog).
  *
- * Multi-word names ("is some") match verbatim.
+ * Multi-word names ("is given") match verbatim.
  */
 export const VALIDATOR_RUNTIME = Object.freeze({
   req: fireReq,
-  "is some": fireIsSome,
+  "is given": fireIsSome,
   length: fireLength,
   pattern: firePattern,
   min: fireMin,
@@ -378,7 +378,7 @@ export const VALIDATOR_RUNTIME = Object.freeze({
  */
 export const VALIDATOR_RUNTIME_NAMES = Object.freeze([
   "req",
-  "is some",
+  "is given",
   "length",
   "pattern",
   "min",
@@ -399,7 +399,7 @@ export const VALIDATOR_RUNTIME_NAMES = Object.freeze([
  * is not a universal-core predicate (e.g., a stdlib library predicate
  * like `email` — those have a separate runtime path).
  *
- * @param {string} name — source-level predicate name (e.g. "req", "is some")
+ * @param {string} name — source-level predicate name (e.g. "req", "is given")
  * @param {*} value — the cell value
  * @param {...*} args — predicate-specific positional args (already evaluated by C7)
  * @returns {null | object | undefined}

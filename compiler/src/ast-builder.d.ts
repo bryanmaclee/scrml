@@ -60,11 +60,14 @@ export declare function attachHandlerStatementListsInTree(
   options?: { synthesizeExprNode?: boolean },
 ): void;
 
+/** One `is some` spelling the builder's token streams saw (S462) — a candidate, confirmed against source by is-some-deprecation.ts. */
+export interface LegacyIsSomeSite { start: number; end: number; kind: "expr" | "validator" }
+
 /** Build a FileAST from Block Splitter output. */
 export declare function buildAST(
   bsOutput: { filePath: string; blocks: Block[] },
   tokenizerOverrides?: unknown,
-): { filePath: string; ast: FileAST; errors: TABError[] };
+): { filePath: string; ast: FileAST; errors: TABError[]; legacyIsSomeSites?: LegacyIsSomeSite[] };
 
 /** Pipeline-contract alias of `buildAST`. */
 export declare function runTAB(input: { filePath: string; blocks: Block[] }): { filePath: string; ast: FileAST; errors: TABError[] };

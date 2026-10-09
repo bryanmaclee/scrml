@@ -5000,7 +5000,7 @@ const _scrml_messages_registered = Object.create(null);
 // nothing rather than an Object.prototype member (S459).
 const _SCRML_TAG_TO_VALIDATOR = Object.assign(Object.create(null), {
   Required:        "req",
-  NotSome:         "is some",
+  NotSome:         "is given",
   LengthFailed:    "length",
   PatternMismatch: "pattern",
   MinFailed:       "min",

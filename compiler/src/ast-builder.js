@@ -662,6 +662,171 @@ let tokenizeError = _defaultTokenizeError;
 let tokenizePassthrough = _defaultTokenizePassthrough;
 
 // ---------------------------------------------------------------------------
+// §42.2.2a / §55.1 / §63 (S462) — the soft-deprecated `is some` spelling
+// ---------------------------------------------------------------------------
+//
+// `x is some` (expression) and the `<x is some>` validator are soft-deprecated
+// spellings of `is given` (ruling:user-voice-scrml.md S462 "a, validator too,
+// go"). Both parse IDENTICALLY to `is given`; the expression parser lowers both
+// to the one `is-some` presence node, so the AST cannot say which was written.
+// The SPELLING is recorded here, from impl#1's own tokens: every `is` KEYWORD
+// immediately followed by the IDENT `some`, in a token stream this builder
+// tokenized at its real source offset (a logic body, an error / test body, an
+// attribute's expression value). Prose is never tokenized as logic, and a
+// string / comment interior is one token, so neither can produce a pair.
+//
+// The sink is keyed by the absolute offset of the `some` token, so a region
+// tokenized twice (a re-tokenized error body, a nested build) records ONE site.
+// It is set for the duration of the outermost buildAST and shared by nested
+// ones. The sites are NOT diagnostics: api.js confirms each against the file's
+// source text (is-some-deprecation.ts) and fires W-IS-SOME-DEPRECATED once per
+// confirmed site; `scrml fix` (commands/fix-is-some.js) rewrites the same
+// confirmed sites. An offset the source does not confirm is dropped by both.
+let _isSomeSink = null;
+// A SUB-PARSE (an `<each>` body, a `<match>` arm body re-split from its raw text)
+// tokenizes a substring at substring-relative offsets. `withIsSomeBase` adds the
+// substring's file offset to what it records; a sub-parse whose file offset is
+// unknown (a synthesized source) records nothing (`_isSomeMuted`). A buildAST
+// nested inside another for the same file is muted unless a caller opened it
+// with `withIsSomeBase` (`_isSomeNestedOk`).
+let _isSomeBias = 0;
+let _isSomeMuted = 0;
+let _isSomeNestedOk = false;
+
+/** Run `fn` with recorded `is some` offsets shifted by `base` (null / negative: record nothing). */
+function withIsSomeBase(base, fn) {
+  const pb = _isSomeBias;
+  const pm = _isSomeMuted;
+  const pn = _isSomeNestedOk;
+  if (typeof base === "number" && base >= 0) _isSomeBias = pb + base;
+  else _isSomeMuted = pm + 1;
+  _isSomeNestedOk = true;
+  try {
+    return fn();
+  } finally {
+    _isSomeBias = pb;
+    _isSomeMuted = pm;
+    _isSomeNestedOk = pn;
+  }
+}
+
+/** Record every `is` `some` token pair of an impl#1 token stream (real source offsets). */
+function noteIsSomeTokens(tokens, kind = "expr") {
+  if (!_isSomeSink || _isSomeMuted > 0 || !Array.isArray(tokens)) return;
+  for (let k = 0; k + 1 < tokens.length; k++) {
+    const a = tokens[k];
+    if (!a || a.kind !== "KEYWORD" || a.text !== "is") continue;
+    const b = tokens[k + 1];
+    if (!b || b.kind !== "IDENT" || b.text !== "some" || !b.span) continue;
+    const start = b.span.start + _isSomeBias;
+    const end = b.span.end + _isSomeBias;
+    if (typeof start !== "number" || typeof end !== "number" || end - start !== 4) continue;
+    if (!_isSomeSink.has(start)) _isSomeSink.set(start, { start, end, kind });
+  }
+  // A child block this stream only REFERENCES (a component body `const C = <div …>…</>`,
+  // whose markup the builder keeps as raw text until component expansion) is read here,
+  // from its own block — its spans are the file's.
+  for (const t of tokens) {
+    if (t && t.kind === "BLOCK_REF" && t.block) noteIsSomeInBlockTree(t.block, 0);
+  }
+}
+
+/**
+ * Record the `is some` pairs of a block subtree from its own text: a markup / state
+ * opener's expression-valued attributes, and every logic child's body. Text children
+ * (prose) are never read. Re-reading a block the builder also tokenizes is harmless —
+ * the sink is keyed by offset.
+ */
+function noteIsSomeInBlockTree(block, depth) {
+  if (!_isSomeSink || _isSomeMuted > 0 || !block || depth > 64) return;
+  if (typeof block.raw !== "string" || !block.span || !block.raw.includes("some")) return;
+  if (block.type === "markup" || block.type === "state") {
+    let toks = [];
+    try {
+      toks = tokenizeAttributes(block.raw, block.span.start, block.span.line ?? 1, block.span.col ?? 1, block.type);
+    } catch {
+      toks = [];
+    }
+    for (const t of toks) {
+      if (!t || !t.span) continue;
+      if (t.kind === "ATTR_EXPR" || t.kind === "ATTR_BLOCK") noteIsSomeInAttrRaw(t.text, t.span);
+      else if (t.kind === "ATTR_STRING") noteIsSomeInAttrString(t.text, t.span);
+    }
+    for (const c of block.children ?? []) noteIsSomeInBlockTree(c, depth + 1);
+  } else if (block.type === "logic" || block.type === "error-effect" || block.type === "test") {
+    const prefixLen = block.raw.startsWith("${") || block.raw.startsWith("!{") || block.raw.startsWith("~{") ? 2 : 1;
+    let toks;
+    try {
+      toks = tokenizeLogic(block.raw.slice(prefixLen, block.raw.length - 1), block.span.start + prefixLen, block.span.line ?? 1, (block.span.col ?? 1) + prefixLen, block.children ?? []);
+    } catch {
+      return;
+    }
+    noteIsSomeTokens(toks);
+  }
+}
+
+/**
+ * Record the `is some` pairs of an attribute value's expression text. `raw` is
+ * the value token's text and `valSpan` its span (delimiters included); `raw`
+ * sits at `valSpan.start + delim` when the token text is the source slice
+ * minus `delim` leading and trailing delimiter characters. A token whose text
+ * is not such a slice (a cooked string) is skipped — never placed by guess.
+ */
+function noteIsSomeInAttrRaw(raw, valSpan) {
+  if (!_isSomeSink || typeof raw !== "string" || !valSpan || !raw.includes("some")) return;
+  const len = (valSpan.end ?? 0) - (valSpan.start ?? 0);
+  const extra = len - raw.length;
+  // 0: `(…)` / bare; 2: `"…"` / `{…}`; 3: `${…}`.
+  const lead = extra === 0 ? 0 : extra === 2 ? 1 : extra === 3 ? 2 : -1;
+  if (lead < 0) return;
+  let toks;
+  try {
+    toks = tokenizeLogic(raw, valSpan.start + lead, valSpan.line ?? 1, (valSpan.col ?? 1) + lead, []);
+  } catch {
+    return;
+  }
+  noteIsSomeTokens(toks);
+}
+
+/**
+ * The `${…}` interpolations of a quoted attribute string (`title="v: ${x is some}"`):
+ * each interior is tokenized at its own offset. Only the interpolation interiors
+ * are code; the literal text around them is never tokenized.
+ */
+function noteIsSomeInAttrString(text, valSpan) {
+  if (!_isSomeSink || typeof text !== "string" || !valSpan || !text.includes("${") || !text.includes("some")) return;
+  // The token text must be the source slice between the quotes, or offsets are unknown.
+  if ((valSpan.end ?? 0) - (valSpan.start ?? 0) !== text.length + 2) return;
+  const base = valSpan.start + 1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "$" || text[i + 1] !== "{") continue;
+    let depth = 1;
+    let j = i + 2;
+    let q = null;
+    while (j < text.length && depth > 0) {
+      const c = text[j];
+      if (q !== null) {
+        if (c === "\\") { j += 2; continue; }
+        if (c === q) q = null;
+      } else if (c === '"' || c === "'" || c === "`") q = c;
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      j++;
+    }
+    if (depth !== 0) return;
+    const inner = text.slice(i + 2, j - 1);
+    let toks;
+    try {
+      toks = tokenizeLogic(inner, base + i + 2, valSpan.line ?? 1, 1, []);
+    } catch {
+      return;
+    }
+    noteIsSomeTokens(toks);
+    i = j - 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Pre-tokenization preprocessing
 // ---------------------------------------------------------------------------
 
@@ -4167,6 +4332,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             value = parseCapabilitiesAttrValue(valTok.text, valSpan, filePath, errors);
           } else if (valTok.kind === "ATTR_STRING") {
             value = { kind: "string-literal", value: valTok.text, span: valSpan };
+            noteIsSomeInAttrString(valTok.text, valSpan);
             // E-ATTR-002: boolean attribute with a quoted string value
             if (BOOLEAN_ATTRS.has(name)) {
               errors.push(new TABError(
@@ -4211,6 +4377,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               // Token text is the inner of `{...}` (delimiter `{` skipped),
               // so baseOffset = valSpan.start + 1.
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
+              noteIsSomeInAttrRaw(raw, valSpan);
               value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
               // §5.2.4 (S450) — a statement list on a NON-handler attribute.
               checkAttrMultiStatement(name, value, filePath, errors, true, effectIsLogicBlock);
@@ -4234,6 +4401,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // relative index within the token text and the token spans don't
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
+            noteIsSomeInAttrRaw(raw, valSpan);
             value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
             // §5.2.4 (S450) — a statement list on a NON-handler attribute.
             checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true, effectIsLogicBlock);
@@ -6627,7 +6795,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // this right (`!=` → `is not not`), so the message and the recovery in this same
       // block contradicted each other.
       //
-      // The advised form is `is some`, not the double-negative: SPEC.md:24944 (§45) —
+      // The advised form is `is given` (S462 — `is some` is its soft-deprecated spelling), not the double-negative: SPEC.md:24944 (§45) —
       // "`is some` exists to avoid the double-negative `not (x is not)`" — and §42.2.5
       // makes `is some` the canonical "value EXISTS" test.
       //
@@ -6648,7 +6816,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // they cannot drift apart again.
           const advice = tok.text === "=="
             ? "`is not` to check for absence"
-            : "`is some` to check for presence";
+            : "`is given` to check for presence";
           errors.push(new TABError(
             "E-EQ-002",
             `E-EQ-002: \`${tok.text} not\` is not valid — use ${advice} (§45).`,
@@ -9885,6 +10053,38 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const recoveredBare = tryRecoverColonInlineMessage(scanIdx);
         if (recoveredBare !== null) scanIdx = recoveredBare;
         continue;
+      }
+
+      // §55.1 — the two-word presence validator `is given` (canonical, S462) and
+      // its soft-deprecated spelling `is some` (§63 Stage 1, W-IS-SOME-DEPRECATED).
+      // Both spellings are ONE predicate: the entry's `name` is the canonical
+      // "is given"; `legacySpelling` records an `is some` for the lint and the
+      // `scrml fix` rule. Before S462 neither spelling was read here — `is` is a
+      // KEYWORD, so the scan declined and the cell was silently never declared
+      // (every later read blamed: E-SCOPE-001 / E-STATE-UNDECLARED).
+      if (t.kind === "KEYWORD" && t.text === "is") {
+        const w = tokens[i + scanIdx + 1];
+        const isSome = w && w.kind === "IDENT" && w.text === "some";
+        const isGiven = w && w.kind === "KEYWORD" && w.text === "given";
+        if (isSome || isGiven) {
+          const entry = {
+            name: "is given",
+            args: null,
+            span: { ...t.span, end: w.span.end },
+          };
+          if (isSome) {
+            entry.legacySpelling = { start: w.span.start, end: w.span.end, line: w.span.line, col: w.span.col };
+            if (_isSomeSink && _isSomeMuted === 0 && typeof w.span.start === "number") {
+              const vs = w.span.start + _isSomeBias;
+              _isSomeSink.set(vs, { start: vs, end: vs + 4, kind: "validator" });
+            }
+          }
+          validators.push(entry);
+          scanIdx += 2;
+          const recoveredIs = tryRecoverColonInlineMessage(scanIdx);
+          if (recoveredIs !== null) scanIdx = recoveredIs;
+          continue;
+        }
       }
 
       // Anything else: decline. KEYWORDS (including `is`/`not`), AT_IDENT,
@@ -17579,6 +17779,7 @@ function _nestedHandlersIn(tokens, from, to, filePath) {
     const start = t.span?.start ?? t.block.span?.start ?? 0;
     try {
       const inner = tokenizeError(raw.slice(2, raw.length - 1), start + 2, t.span?.line ?? 1, (t.span?.col ?? 1) + 2);
+      noteIsSomeTokens(inner);
       const arms = parseErrorTokens(inner, filePath);
       if (arms.length > 0) out.push({ raw, arms });
     } catch {
@@ -19448,7 +19649,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
                 // attached, so no S153 phantom each-block), and only the
                 // SUBPARSE_FORWARDED_CODES errors are forwarded.
                 try {
-                  const _diagTab = buildAST(_splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw));
+                  const _diagTab = withIsSomeBase(
+                    typeof _bodyFileStart === "number" && _bodyFileStart >= 0 ? _bodyFileStart : null,
+                    () => buildAST(_splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw)),
+                  );
                   if (_diagTab && Array.isArray(_diagTab.errors)) {
                     _forwardSubparseErrors(_diagTab.errors, errors, _bodyFileStart, block);
                   }
@@ -19475,7 +19679,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             let armNodes = [];
             try {
               const reBs = _splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw);
-              const reTab = buildAST(reBs);
+              const reTab = withIsSomeBase(
+                typeof arm.bodyContentStart === "number" && _armsRawFileStart >= 0 ? _armsRawFileStart + arm.bodyContentStart : null,
+                () => buildAST(reBs),
+              );
               if (reTab && reTab.ast && Array.isArray(reTab.ast.nodes)) armNodes = reTab.ast.nodes;
               // S437 — this re-parse's errors are otherwise dropped; forward
               // the codes no downstream validator re-derives, rebased to file
@@ -20440,10 +20647,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // downstream resolver inspects.
           const _subBs = _splitBlocksForP2Form1(filePath, _bodyRawForReparse);
           const _subErrors = [];
-          for (const subBlock of _subBs.blocks) {
-            const subNode = buildBlock(subBlock, filePath, "markup", counter, _subErrors);
-            if (subNode) bodyChildren.push(subNode);
-          }
+          withIsSomeBase(_bodyRawFileStart >= 0 ? _bodyRawFileStart : null, () => {
+            for (const subBlock of _subBs.blocks) {
+              const subNode = buildBlock(subBlock, filePath, "markup", counter, _subErrors);
+              if (subNode) bodyChildren.push(subNode);
+            }
+          });
           // _subErrors intentionally discarded — see comment block above —
           // EXCEPT the codes no downstream validator re-derives (S437),
           // rebased to file coordinates like the nodes below.
@@ -21867,6 +22076,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const _ppBodyOffset = block.span.start + _ppBodyShift;
       const _rawBody = block.raw.slice(prefixLen, block.raw.length - 1);
       const _childBlocksForPP = Array.isArray(block.children) ? block.children : [];
+      // S462 — the `<#name>` replacement below shifts every later token's span, so
+      // the `is some` sites are read from the ORIGINAL body text, with the child
+      // blocks at their original spans (snapshotted before the re-shift).
+      const _isSomeOrigKids = _rawBody.includes("<#") && _rawBody.includes("some")
+        ? _childBlocksForPP.map((c) => (c && c.span ? { ...c, span: { ...c.span } } : c))
+        : null;
       const _BLOCKREF_PP_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta", "foreign"]);
       const _childRanges = [];
       for (const _c of _childBlocksForPP) {
@@ -21988,6 +22203,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       }
 
       let tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
+      if (bodyRaw === _rawBody) {
+        noteIsSomeTokens(tokens);
+      } else if (_isSomeOrigKids !== null) {
+        try {
+          noteIsSomeTokens(tokenizeLogic(_rawBody, bodyOffset, bodyLine, bodyCol, _isSomeOrigKids));
+        } catch { /* a site not placed is not reported — never guessed */ }
+      }
       // S441 round 4 — the COVERAGE invariant, at the token level: the logic
       // tokenizer silently DROPS characters it has no token for (`★ ✓ →`,
       // `©`, `🎉`), so body-top text made of them vanished at exit 0. Every
@@ -22354,6 +22576,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // Parse the try body as logic nodes
         const bodyOffset = block.span.start + 2;
         const tryTokens = tokenizeLogic(tryBodyRaw, bodyOffset, block.span.line, block.span.col + 2, []);
+        noteIsSomeTokens(tryTokens);
         const tryBody = parseLogicBody(tryTokens, filePath, [], block, counter, errors, "logic");
 
         return {
@@ -22368,6 +22591,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const bodyRaw = rawContent.slice(0, rawContent.length - 1); // strip trailing `}`
         const bodyOffset = block.span.start + 2;
         const tokens = tokenizeError(bodyRaw, bodyOffset, block.span.line, block.span.col + 2);
+        noteIsSomeTokens(tokens);
         const legacyArms = parseErrorTokens(tokens, filePath, errors);
         return {
           id: ++counter.next,
@@ -22411,6 +22635,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const bodyCol = block.span.col + 2;
 
       const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, block.children);
+      noteIsSomeTokens(tokens);
       const testGroup = parseTestBody(tokens, filePath, span, errors);
 
       return {
@@ -22906,10 +23131,64 @@ function collectHoisted(nodes) {
 /**
  * Build a FileAST from Block Splitter output.
  *
+ * The result also carries `legacyIsSomeSites` — the offsets of every `is some`
+ * spelling this build's token streams saw (§42.2.2a / §55.1 / §63, S462; see
+ * `_isSomeSink`). They are candidates, not diagnostics: a consumer confirms each
+ * against the file's source (is-some-deprecation.ts). A build nested inside
+ * another for the SAME file shares the outer sink (one site, one record); a
+ * nested build of a different file gets its own, so offsets never mix files.
+ *
  * @param {{ filePath: string, blocks: import('./block-splitter.js').Block[] }} bsOutput
- * @returns {{ filePath: string, ast: FileAST, errors: TABError[] }}
+ * @returns {{ filePath: string, ast: FileAST, errors: TABError[], legacyIsSomeSites: Array<{start:number,end:number,kind:string}> }}
  */
+let _isSomeSinkFile = null;
 export function buildAST(bsOutput, tokenizerOverrides) {
+  const file = bsOutput?.filePath ?? null;
+  const shared = _isSomeSink !== null && _isSomeSinkFile === file;
+  const savedSink = _isSomeSink;
+  const savedFile = _isSomeSinkFile;
+  if (!shared) {
+    _isSomeSink = new Map();
+    _isSomeSinkFile = file;
+  }
+  const sink = _isSomeSink;
+  const savedBias = _isSomeBias;
+  const savedMuted = _isSomeMuted;
+  const savedNestedOk = _isSomeNestedOk;
+  if (!shared) {
+    _isSomeBias = 0;
+    _isSomeMuted = 0;
+  } else if (!_isSomeNestedOk) {
+    // A same-file nested build nobody placed: its offsets are its own text's.
+    _isSomeMuted = savedMuted + 1;
+  }
+  _isSomeNestedOk = false;
+  try {
+    // The file's own block tree, read first at its true offsets: a markup opener's
+    // expression attributes and every logic body. (The builder later re-splits some
+    // regions — a component body, an `<each>` body — from text whose offsets are its
+    // own; those re-reads only ADD candidates, and source confirmation drops a
+    // misplaced one.)
+    if (!shared && Array.isArray(bsOutput?.blocks)) {
+      for (const b of bsOutput.blocks) noteIsSomeInBlockTree(b, 0);
+    }
+    const result = _buildASTImpl(bsOutput, tokenizerOverrides);
+    if (result && typeof result === "object") {
+      result.legacyIsSomeSites = [...sink.values()].sort((a, b) => a.start - b.start);
+    }
+    return result;
+  } finally {
+    _isSomeBias = savedBias;
+    _isSomeMuted = savedMuted;
+    _isSomeNestedOk = savedNestedOk;
+    if (!shared) {
+      _isSomeSink = savedSink;
+      _isSomeSinkFile = savedFile;
+    }
+  }
+}
+
+function _buildASTImpl(bsOutput, tokenizerOverrides) {
   const { filePath, blocks } = bsOutput;
 
   // When self-hosted tokenizer overrides are provided, install them as the

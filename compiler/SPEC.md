@@ -229,7 +229,7 @@ The compiler SHALL NOT emit JavaScript that fails to parse. A successful compile
 
 This invariant is enforced by an in-process parse gate: after codegen produces the final artifacts, the compiler parses each one and, on any parse failure, aborts the compile with `E-CODEGEN-INVALID-LOGIC` (§34) and writes no codegen output artifacts. The gate is a backstop: it catches malformed (unparseable) emission and un-lowered compiler placeholders (below), not other semantically-incorrect-but-parseable emission. The gate is **active by default** (S142): every compile parses its emitted artifacts unless the operational opt-out below is supplied. (Ratified S141; default-ON S142; implemented by `compiler/src/codegen/validate-emit.ts`, mirroring the `E-META-EVAL-002` reparse-emitted precedent of §22.4.)
 
-**Un-lowered placeholders (S457).** The gate SHALL also refuse, with `E-CODEGEN-INVALID-LOGIC`, an artifact that contains an identifier of the form `__scrml_<name>__` in any position: reference, binding, property name or object key. A string or comment that contains such a word is not an identifier and does not count. The compiler writes such identifiers as internal placeholders, for example `__scrml_is_some__(x)` for `x is some`, so its parser can read scrml operators. Every one must be lowered before emission, and none exists at run time. An artifact that still contains one parses, but it is a construct the compiler did not lower, and at run time it throws ReferenceError (or, behind a `.catch`, silently never runs). The test is by shape alone, with no exemptions. Every compiler placeholder carries a per-compilation unguessable token (§47.1.1), and only that form is recognised and lowered, so an author cannot spell one. A `__scrml_<name>__` an author writes is an ordinary identifier that nothing lowers. §47.1.1 refuses it where the reservation check inspects it. Anywhere else, for example an object key or opaque `_{}` foreign code, this gate refuses it once it reaches an artifact. When the name the gate found also appears in the author's source text, the diagnostic says so and asks for a rename. Otherwise it reports an un-lowered compiler placeholder, spelled without its token so the message is the same on every run, and asks for a bug report. The compiler's own locals use the `__scrml_<name>` form without the trailing `__` (e.g. `__scrml_is_v`) and do not match.
+**Un-lowered placeholders (S457).** The gate SHALL also refuse, with `E-CODEGEN-INVALID-LOGIC`, an artifact that contains an identifier of the form `__scrml_<name>__` in any position: reference, binding, property name or object key. A string or comment that contains such a word is not an identifier and does not count. The compiler writes such identifiers as internal placeholders, for example `__scrml_is_some__(x)` for `x is given`, so its parser can read scrml operators. Every one must be lowered before emission, and none exists at run time. An artifact that still contains one parses, but it is a construct the compiler did not lower, and at run time it throws ReferenceError (or, behind a `.catch`, silently never runs). The test is by shape alone, with no exemptions. Every compiler placeholder carries a per-compilation unguessable token (§47.1.1), and only that form is recognised and lowered, so an author cannot spell one. A `__scrml_<name>__` an author writes is an ordinary identifier that nothing lowers. §47.1.1 refuses it where the reservation check inspects it. Anywhere else, for example an object key or opaque `_{}` foreign code, this gate refuses it once it reaches an artifact. When the name the gate found also appears in the author's source text, the diagnostic says so and asks for a rename. Otherwise it reports an un-lowered compiler placeholder, spelled without its token so the message is the same on every run, and asks for a bug report. The compiler's own locals use the `__scrml_<name>` form without the trailing `__` (e.g. `__scrml_is_v`) and do not match.
 > **Provenance:** ruling:user-voice-scrml.md S457 "a for __scrml_" (the reservation that makes a pure shape test sound) · supersedes: "The gate is a syntactic backstop only — it catches malformed (unparseable) emission, not semantically-incorrect-but-parseable emission." (narrowed to name the placeholder refusal). Adopter issue #1333. Direction of change: **newly-rejecting** for programs whose emission leaked a placeholder. Measured (S457): 0 of the 2361 `.scrml` files under `samples/`, `examples/` and `conformance/` are refused by it. Known live leak now refused rather than shipped: a `[:]` map literal inside a block-bodied function expression (`__scrml_map_lit__`).
 
 **No runnable artifact from a compile that reports an error (S451).** A compile that reports one or more diagnostics of **Error** severity (§34) SHALL NOT produce a runnable artifact. After such a compile, either no output file of that compile exists, or the compile wrote no file — an output directory left by an earlier compile is left exactly as it was, neither overwritten in part nor deleted. This holds for the whole compile, not per file: if any file of a multi-file compile reports an error, no file of that compile is written. Diagnostics of Warning or Info severity do not trigger it.
@@ -2814,7 +2814,7 @@ const <badge>     = <span class="badge">${@userName}</span>    // markup-typed d
 <todos>: Todo[]          // → []  (unchanged from S152)
 ```
 
-- `<name>: T` is exact sugar for `<name>: T = <canonical-empty-of-T>`; the explicit form remains valid and compiles identically. A canonical-empty cell `is some` (§9.4/§42.2.5) — `""`/`0`/`false`/`[]` are DEFINED values (§42.1.1), NOT absence.
+- `<name>: T` is exact sugar for `<name>: T = <canonical-empty-of-T>`; the explicit form remains valid and compiles identically. A canonical-empty cell `is given` (§9.4/§42.2.5) — `""`/`0`/`false`/`[]` are DEFINED values (§42.1.1), NOT absence.
 - **`date` / `timestamp`** (registered string-shaped primitives) have no meaningful canonical empty → `not` (next bullet). scrml has no `float`/`real` type and no anonymous *record* annotation type — every record-shaped cell is a named `:struct`, which has required fields and therefore no canonical empty → `not`. (The value-native *map* type `[K:V]` — §59 — is a distinct keyed-collection annotation, not a record; its empty form is the `[:]` map literal.)
 
 **No-canonical-empty types → `not`.** A bare `T` with no canonical empty — a named `:struct` (`{}` does not inhabit its required fields), an `:enum` (the compiler must not pick a default variant — engines choose the start via `initial=`, §51.0.E), `date`/`timestamp`, an opaque/custom/`lin` type — initializes to **`not`** and the cell acquires an **implicit `(not to T)` lifecycle** (§14.12):
@@ -7856,7 +7856,7 @@ c = stepped(c)
 
 1. **A line break ends a statement.** At statement level a statement SHALL end at the first line break that follows a complete statement, unless rule 2 continues it. A statement also ends at a `;` (rule 6) and at the `}` that closes its enclosing statement list. A `//` comment or whitespace between the statement's last token and the line break does not change this.
 2. **Continuation is explicit, at the END of a line.** A statement SHALL continue onto the next line only when the last token of the line (ignoring a trailing `//` comment) is a **continuation token** — exactly this closed list:
-   - a binary (infix) operator: `+` `-` `*` `/` `%` `**` `==` `!=` `===` `!==` `<` `>` `<=` `>=` `&&` `||` `??` `&` `|` `^` `<<` `>>` `>>>` `in` `instanceof`, and scrml's `is` (§42; `@x is not` / `@x is some` are complete — `not` / `some` end the expression);
+   - a binary (infix) operator: `+` `-` `*` `/` `%` `**` `==` `!=` `===` `!==` `<` `>` `<=` `>=` `&&` `||` `??` `&` `|` `^` `<<` `>>` `>>>` `in` `instanceof`, and scrml's `is` (§42; `@x is not` / `@x is given` — and the soft-deprecated `@x is some` — are complete: `not` / `given` / `some` end the expression);
    - `=` and every compound assignment operator (`+=` `-=` `*=` `/=` `%=` `**=` `&&=` `||=` `??=` `&=` `|=` `^=` `<<=` `>>=` `>>>=`);
    - member access `.` and optional chaining `?.`;
    - the conditional operator's `?` and `:`. A conditional `?` has whitespace before it (`ready ?`). A `?` written directly against the end of its operand, with no whitespace (`load(id)?`), is the §19.5 propagation operator: a complete postfix expression that ends the statement like any other operand. Adjacency decides the role, as the whitespace before a `:`-shorthand `:` does (§4.14);
@@ -13896,7 +13896,7 @@ Lifecycle annotation on **function-return type position** is NORMATIVELY support
 | Presence-progression | `not` (e.g., `(not to T)`) | **Discrimination IS transition** — `given u = expr {}`, `if (u is not)` early-return, OR `match u { ... }` AUTO-MARKS the transition |
 | Variant-progression | An enum variant (e.g., `(.VariantA to .VariantB)`) | **Explicit `transition(u)`** — call the `transition()` built-in after discriminating the source variant |
 
-**Why the split?** Presence-progression already has a canonical scrml shape for discrimination — `is not` / `is some` / `given` / `match` (§42). The act of writing `given u = loadUser() {}` already SAYS "I have proven this is present." Requiring a separate marker call would be redundant ceremony — it would duplicate the type-narrowing the compiler already performed. Variant-progression has no such cohesive shape (the source enum's discriminator IS its variant tag, not a presence test), so an explicit caller-side `transition(u)` provides the per-access transition signal.
+**Why the split?** Presence-progression already has a canonical scrml shape for discrimination — `is not` / `is given` / `given` / `match` (§42). The act of writing `given u = loadUser() {}` already SAYS "I have proven this is present." Requiring a separate marker call would be redundant ceremony — it would duplicate the type-narrowing the compiler already performed. Variant-progression has no such cohesive shape (the source enum's discriminator IS its variant tag, not a presence test), so an explicit caller-side `transition(u)` provides the per-access transition signal.
 
 **The `transition()` built-in** is a compile-time-only marker. It produces zero runtime code; the compiler tracks per-access transition state symbolically. Calling `transition(u)` on a binding whose type is NOT a lifecycle-annotated value is silently elided (no diagnostic). Calling `transition(u)` on a presence-progression value is legal but redundant (the discrimination already transitioned it); the compiler MAY emit `W-LIFECYCLE-REDUNDANT-TRANSITION` (RESERVED, not yet emitted).
 
@@ -17406,7 +17406,7 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   identifier. In particular the conventional regex-result binding SHALL compile without change:
   ```scrml
   const match = raw.match(/(\d+)/)
-  const first = match is some ? match[1] : "fallback"   // `match` is the identifier; `is some` is §42
+  const first = match is given ? match[1] : "fallback"   // `match` is the identifier; `is given` is §42
   ```
   `match` used as a member (`obj.match`), a call (`raw.match(re)`), an index (`match[1]`), a function
   or object-method name (`function match(a, b) { … }`), a parameter, or an assignment target is the
@@ -19377,9 +19377,9 @@ ${
 
 <div>
     ${
-        if (<#userLoad>.error is some) {
+        if (<#userLoad>.error is given) {
             lift <div>Could not load the user</>
-        } else if (@user is some) {
+        } else if (@user is given) {
             lift <h1>${@user.name}</h1>
         } else {
             lift <p>Loading…</p>
@@ -19797,7 +19797,7 @@ function notifyOrder(orderId: number) {
 <request id="notify" deps=[@currentOrderId]>${ @notifiedId = notifyOrder(@currentOrderId) }</>
 <div>
     ${
-        if (<#notify>.error is some) {
+        if (<#notify>.error is given) {
             lift <div>Notification failed; logged but email pending</>
             lift <button onclick=${<#notify>.refetch()}>Retry</>
         }
@@ -19816,7 +19816,7 @@ function notifyOrder(orderId: number) {
    }
    <request id="profileLoad" deps=[@currentUserId]>${ @profile = fetchProfile(@currentUserId) }</>
    <div>
-       ${ if (<#profileLoad>.error is some) { lift <div>Failed to load profile</> } }
+       ${ if (<#profileLoad>.error is given) { lift <div>Failed to load profile</> } }
    </div>
    ```
    *(S451 — supersedes path 1 "**`<errorBoundary>` markup wrapper**: `<errorBoundary fallback={<div>Failed to load profile</>}> ${loadProfile(@currentUserId)} </>`": a render-time server call is E-VALUE-SERVER-CALL (§13.7). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
@@ -26289,6 +26289,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
 | W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` (its default `arm-pipe` rule, `compiler/src/commands/fix-arm-pipe.js`, landed #1285) deletes the leading `\|`, writes a paren-free binder as `.V(m)`, rewrites a bare `\| e :>` as `_ e :>`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (the old name was never emitted; S454 currency — supersedes "(never emitted under either name)", which #1285 made false). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). **Emitted by impl#1** (S452, `s452-arm-pipe-deprecation`) — `!{}` arms: type-system.ts `checkArmPipeLegacy` (every arm record carrying `legacyPipe` — guarded-expr, standalone error-effect, or a handler nested in an arm body via ast-builder.js `_nestedHandlersIn`) (set by ast-builder.js `parseErrorTokens` on its `\|` path); message arms: symbol-table.ts per-state message-arm validation, from `MessageArmEntry.legacyPipe` (set by engine-statechild-parser.ts `parseMessageArms`); message text via type-system.ts `armPipeLegacyMessage`. Emitted by the bootstrap for the `!{}` arm at `compiler/self-host-v2/parse.scrml` (the arm parser's pipe lint, s452-boot-arm-pipe; the bootstrap does not parse engine message arms, so it has no message-arm emit site). | Info |
 | E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder) and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S452 in impl#1 (`arm-pipe`, commands/fix-arm-pipe.js `fixArmPipe`; a default rule, each rewritten file verified by an impl#1 compile before and after — byte-identical artifacts); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
+| W-IS-SOME-DEPRECATED | §42.2.2a, §55.1, §63.7 | The presence spelling `is some` — the expression form `x is some` (§42.2.2a) or the §55.1 validator `<x is some>` — is SOFT-DEPRECATED (§63.1 Stage 1): it is the same-meaning spelling of `is given`, and it parses identically (same AST, emitted code, run-time behaviour, narrowing; the validator is the same predicate with the same `.NotSome` tag). One lint per site; the message names `is given`, `scrml fix`, and §42.2.2a (expression) or §55.1 (validator). Resolution: write `is given`, or run `scrml fix` (its default `is-some` rule, `compiler/src/commands/fix-is-some.js`: the word `some` after `is` becomes `given`; each rewritten file verified by an impl#1 compile before and after — identical artifacts). ONE code for both surfaces: one word, one replacement. A `some` in a comment, a string or markup prose is not a site. **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go". **Emitted by impl#1** (S462, `s462-is-some-deprecate`) at stage TAB, `compiler/src/api.js` via `compiler/src/is-some-deprecation.ts` `isSomeDeprecationDiagnostics` — one per site of `ast-builder.js` `legacyIsSomeSites` (an `is` KEYWORD followed by the IDENT `some` in impl#1's own token streams) confirmed against the source by `confirmIsSomeSites`. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (the postfix presence test, s462). | Info |
+| E-IS-SOME-DEPRECATED | §42.2.2a, §55.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `is some` spelling (expression and validator). Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S462 in impl#1 (`is-some`, `compiler/src/commands/fix-is-some.js` `fixIsSome`); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go". **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context (an in-`match` `given`-arm already fires `W-MATCH-ARROW-LEGACY`). Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) | Info |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
 | W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `const <name> = expr`, or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `const <name>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
@@ -26511,7 +26513,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-EQ-002 | §45 | `== not` used instead of `is not`. The absence check uses the keyword form `x is not`, not equality against the `not` sentinel. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`; also `compiler/src/ast-builder.js`.) | Error |
 | E-EQ-003 | §45 | `==` applied to a type containing function fields. Functions are not comparable for value-equality in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Error |
 | E-EQ-004 | §45 | `===` operator used in scrml source. scrml has a single equality operator `==` (with strict type-matching); the `===` triple-equals form is not valid. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`; also `compiler/src/ast-builder.js`.) | Error |
-| E-EQ-005 | §45.5 | `is <value>` — a literal (`x is 0`, `x is "text"`, `x is true`) or value-expression (`x is @other`) RHS on the `is` keyword, used where `==` is meant. `is` is the absence / variant-discrimination keyword (`is not` / `is some` / `is .Variant`), NOT a value-equality operator (limit-the-primitive, §14.1.1). Mirror of E-EQ-002 (`x == not` → `x is not`). Before this rule `x is 0` mis-lowered silently to a misleading `E-DG-002` / internal `E-CODEGEN-INVALID-LOGIC`. Resolution: use `==` (`x == 0`). (S237 — ruling `docs/known-gaps.md` `g-is-literal-rhs-if-condition-drop`; wired S237.) | Error |
+| E-EQ-005 | §45.5 | `is <value>` — a literal (`x is 0`, `x is "text"`, `x is true`) or value-expression (`x is @other`) RHS on the `is` keyword, used where `==` is meant. `is` is the absence / variant-discrimination keyword (`is not` / `is given` / `is .Variant`), NOT a value-equality operator (limit-the-primitive, §14.1.1). Mirror of E-EQ-002 (`x == not` → `x is not`). Before this rule `x is 0` mis-lowered silently to a misleading `E-DG-002` / internal `E-CODEGEN-INVALID-LOGIC`. Resolution: use `==` (`x == 0`). (S237 — ruling `docs/known-gaps.md` `g-is-literal-rhs-if-condition-drop`; wired S237.) | Error |
 | W-EQ-001 | §45 | `==` applied to `asIs`-typed values. Equality on `asIs` defers to runtime `===` semantics in JS output; the warning surfaces the loss of compile-time guarantees. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Warning |
 | W-EQ-PAYLOAD-VARIANT | §45, §45.5, §45.7 | `==`/`!=` against a payload-variant CONSTRUCTOR reference (`@phase == Phase.Serving` where `Serving(angle: int)` carries payload). The reference is the constructor function, not a value, so the structural comparison (§45.4) is statically ALWAYS false (`!=` → always-true) — silently. Steer to `is .Variant` (§45.5) or `match` (§18). Unit variants are NOT affected (they lower to a string tag and compare normally). Non-fatal — partitions into `result.warnings` (W- prefix + severity:warning). (Catalog addition ss16 C4; emitted at `compiler/src/type-system.ts` `checkEqPayloadVariantOperands`.) | Warning |
 | E-CG-006 | §47 | Codegen: a server-boundary or client-boundary function emits code that violates a codegen invariant (e.g., a `transaction` block in a client-boundary function, an unresolvable scheduling primitive, missing route-name binding). The error message names the specific violation. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-functions.ts`, `compiler/src/codegen/emit-library.ts`, `compiler/src/codegen/emit-client.ts`, `compiler/src/codegen/scheduling.ts`.) | Error |
@@ -31180,7 +31182,7 @@ The canonical rule (§42.1) forbids the absence tokens `null` and `undefined` an
 
 **Normative statements:**
 
-- The empty string `""` is a DEFINED value — a string of length zero. It IS a `string`. It is NOT absence. A cell containing `""` `is some` (per §42.2.2a) — the cell holds a value.
+- The empty string `""` is a DEFINED value — a string of length zero. It IS a `string`. It is NOT absence. A cell containing `""` `is given` (per §42.2.2a) — the cell holds a value.
 - The numeric zero `0` is a DEFINED value — a `number` whose magnitude is zero. It is NOT absence.
 - The boolean `false` is a DEFINED value — a `boolean` whose truth value is false. It is NOT absence.
 - The empty array `[]` is a DEFINED value — an `Array<T>` of length zero. It is NOT absence.
@@ -31191,7 +31193,7 @@ The canonical rule (§42.1) forbids the absence tokens `null` and `undefined` an
 
 **Predicate consequences (cross-ref §42.2.5):**
 
-| Value | `is some` | `is not` | `req` |
+| Value | `is given` | `is not` | `req` |
 |---|---|---|---|
 | `not` | FALSE | TRUE | FALSE |
 | `""` | TRUE (defined) | FALSE | FALSE (rejects empty) |
@@ -31202,7 +31204,7 @@ The canonical rule (§42.1) forbids the absence tokens `null` and `undefined` an
 | `"hello"` | TRUE | FALSE | TRUE |
 | `42` | TRUE | FALSE | TRUE |
 
-`is some` answers "does the cell hold a value?" — defined values (including empty ones) answer TRUE. `is not` answers "is the cell empty of value?" — only `not` answers TRUE. `req` answers "is the value MEANINGFUL?" — and rejects the empty string specifically (§42.2.5, §55.1).
+`is given` answers "does the cell hold a value?" — defined values (including empty ones) answer TRUE. (`is some`, its soft-deprecated spelling, answers identically — §42.2.2a.) `is not` answers "is the cell empty of value?" — only `not` answers TRUE. `req` answers "is the value MEANINGFUL?" — and rejects the empty string specifically (§42.2.5, §55.1).
 
 **Audit guidance (S89 migration sweeps):** Sweeps that mechanically rewrite `null`/`undefined` to `not` SHALL NOT touch any of `""`, `0`, `false`, `[]`, `{}`. These are NOT absence tokens; rewriting them is a semantic-meaning change, not a naming-token change. Cross-ref §42.7 enumerated source-shape categories — those categories list `null` and `undefined` tokens specifically, NOT the defined-value forms above.
 
@@ -31223,26 +31225,38 @@ ${ if (x is not) { handleAbsence() } }
 
 `is not` is a two-keyword operator parsed as a single boolean test.
 
-#### 42.2.2a Checking for Presence — `is some`
+#### 42.2.2a Checking for Presence — `is given` (`is some` soft-deprecated)
 
-`expr is some` is the positive counterpart to `expr is not`. It evaluates to `true` when `expr` is not the absence value `not`, and `false` when `expr` is `not`.
+> **lang: deprecated — the `is some` spelling (§63 Stage 1, SOFT-DEPRECATED, S462).** `expr is some` is the
+> soft-deprecated spelling of `expr is given` (§42.2.4). It parses IDENTICALLY — the same AST, the same emitted
+> code, the same run-time behaviour, the same narrowing — and every site SHALL surface the info-level lint
+> **W-IS-SOME-DEPRECATED** (§34), naming `is given`, `scrml fix` and this section. The reserved end-of-window code
+> is **E-IS-SOME-DEPRECATED** (§34; named, not scheduled, never fired before a §62 MAJOR event schedules it —
+> §63.2). `scrml fix` rewrites every site (its default `is-some` rule, `compiler/src/commands/fix-is-some.js`):
+> the word `some` after `is` becomes `given`; nothing else changes. The §55.1 validator `<x is some>` retires on
+> the same window (§55.1). No removal version is named (§63.2). The canonical spelling is `expr is given`, which
+> stays `lang: 1.0`.
+> **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go" — *"the expression form `x is some` is SOFT-DEPRECATED through the SPEC §63 lifecycle — W-lint (parses and runs identically), a reserved E-code in §34, a `scrml fix` rewrite → `x is given`. AND the §55.1 universal-core validator predicate `is some` retires on the same window to `is given`."* · supersedes (text): *"Whether `is some` retires is NOT ruled; it keeps working."* (§42.2.2a provenance below) and *"`expr is some` is a same-meaning spelling of it (its retirement is not ruled; it keeps working)"* (§42.2.4). **Direction of change: inert** — no program's acceptance or meaning moves; a W-lint is added at each `is some` site.
+
+`expr is given` — written `expr is some` in its soft-deprecated spelling — is the positive counterpart to `expr is not`. It evaluates to `true` when `expr` is not the absence value `not`, and `false` when `expr` is `not`.
 
 ```scrml
-${ if (@name is some) { displayName(@name) } }
+${ if (@name is given) { displayName(@name) } }
 ```
 
 **Normative statements:**
 
-- `expr is some` SHALL evaluate to `true` when `expr` is not `not`, and `false` when `expr` is `not`.
-- `expr is some` is definitionally equivalent to `not (expr is not)`. The compiler MAY desugar either form to a single absence check.
-- `expr is some` — and its same-meaning spelling `expr is given` (§42.2.4) — narrows a place `expr` from `T | not` to `T` where it is true, as §42.3.5 item 2 and §42.4 statement 8 state. **Status on impl#1 — partly Nominal:** impl#1 narrows the block form `if (@user is some) { … }` / `if (@user is given) { … }`, the `if (x is not) return` early-return, and the right operand of a compound (`if (@user is some && @n > 0) { @user.name }`, since #1369's single presence reader); it does NOT narrow the children of a parenthesized attribute test (`<p if=(@user is given)>${@user.name}</p>`, likewise `if=(@user is some)`) — E-TYPE-046 there (carried gap `g-impl1-condition-rule-s460`). The bootstrap narrows all of them.
-- `is some` is a two-keyword operator parsed as a single boolean test, symmetric to `is not`.
+- `expr is given` (and its soft-deprecated spelling `expr is some`) SHALL evaluate to `true` when `expr` is not `not`, and `false` when `expr` is `not`.
+- `expr is given` is definitionally equivalent to `not (expr is not)`. The compiler MAY desugar either form to a single absence check.
+- `expr is some` SHALL parse and behave identically to `expr is given` in every position, and SHALL surface W-IS-SOME-DEPRECATED (Info, §34) at each site (§63.1 Stage 1; S462).
+- `expr is given` — and its soft-deprecated same-meaning spelling `expr is some` — narrows a place `expr` from `T | not` to `T` where it is true, as §42.3.5 item 2 and §42.4 statement 8 state. **Status on impl#1 — partly Nominal:** impl#1 narrows the block form `if (@user is some) { … }` / `if (@user is given) { … }`, the `if (x is not) return` early-return, and the right operand of a compound (`if (@user is some && @n > 0) { @user.name }`, since #1369's single presence reader); it does NOT narrow the children of a parenthesized attribute test (`<p if=(@user is given)>${@user.name}</p>`, likewise `if=(@user is some)`) — E-TYPE-046 there (carried gap `g-impl1-condition-rule-s460`). The bootstrap narrows all of them.
+- `is given` (and `is some`) is a two-keyword operator parsed as a single boolean test, symmetric to `is not`.
 
 > **Provenance:** ruling:user-voice-scrml.md S460 "a′, go" (*"The explicit pair for value positions / compounds: `x is given` (positive) / `x is not` (absence)"* — a compound `x is given && x.n > 0` needs the explicit positive to narrow) · supersedes: ruling:user-voice-scrml.md S440 Truthiness Q2 (conditions only) · supersedes (text): *"`expr is some` does NOT narrow the type of `expr`. To narrow from `T | not` to `T`, use `given expr :> { ... }` (§42.2.3)."* **How the struck sentence fell, stated honestly:** the S460 ruling makes `is given` narrow (the compound needs it); `is some` narrowing is NOT in the ruling's words — it follows from the `is given` ≡ `is some` alias (§42.2.4: one meaning for an alias pair) under the S460 ruling — a PA reading when written, since **ratified:** ruling:user-voice-scrml.md S460 "keep the code, accept both readings, go" (item 2: *"`is some` narrows — ACCEPTED, as the alias of `is given` under S460 a′"*). The struck sentence also contradicted §42.3.5 item 2, but that contradiction is weaker evidence than it looks: the S237 user ruling (*"A, and spec ?. properly"*) ratified Option A, whose recorded narrowing list is `if=` / `given` / `is not` / `match` — **`is some` is not in it; the PA added it to item 2 when writing the S237 text**. What does support the reading is impl#1, whose E-TYPE-046 reader narrows the simple `if (x is some) { … }` block (dpa-070 D12 / D11). **Direction of change: newly-accepting** (a member read under an `is some` / `is given` test is no longer refused where a reader honoured the struck sentence). Whether `is some` retires is NOT ruled; it keeps working.
 
-**Design note:** `is some` exists to avoid the double-negative `not (x is not)` in common presence checks.
+**Design note:** `is given` exists to avoid the double-negative `not (x is not)` in common presence checks.
 
-**Codegen:** `x is some` → `x !== null && x !== undefined` in JavaScript output.
+**Codegen:** `x is given` (and `x is some`) → `x !== null && x !== undefined` in JavaScript output.
 
 #### 42.2.3 Checking for Presence — `given`
 
@@ -31310,34 +31324,36 @@ Whether `given` accepts property paths (e.g., `given obj.field =>`) is under con
 
 **Added:** 2026-04-10 — DQ-12 normative statement.
 
-`is not` and `is some` MAY be applied to any expression, not only simple identifiers. The compiler evaluates the expression once, caches the result, and performs the absence check on the cached value.
+`is not` and `is given` (and its soft-deprecated spelling `is some`, §42.2.2a) MAY be applied to any expression, not only simple identifiers. The compiler evaluates the expression once, caches the result, and performs the absence check on the cached value.
 
 ```scrml
 if ((arr.find(x => x.id == id)) is given) { ... }
 if ((regex.exec(str)) is not) { handleNoMatch() }
-if ((getUser(id)) is some) { renderUser() }
+if ((getUser(id)) is given) { renderUser() }
 ```
 
 **Normative statements:**
 
-- `expr is not` and `expr is some` SHALL be valid for any expression `expr`, including method calls, function calls, array access, and binary expressions.
+- `expr is not` and `expr is given` (and `expr is some`) SHALL be valid for any expression `expr`, including method calls, function calls, array access, and binary expressions.
 - The compiler SHALL evaluate `expr` exactly once. Any side effects of `expr` occur exactly once.
 - Parentheses around a compound expression — `(expr) is not` — are accepted and have no special meaning beyond grouping.
-- `expr is given` is THE explicit presence test, the positive of `expr is not`: it is `true` when `expr` is not `not`. It is valid wherever `expr is not` is — a condition, a compound condition (`&&` / `||` operand), and every value position (a `const`, a `return`, an argument, an attribute value). `expr is some` is a same-meaning spelling of it (its retirement is not ruled; it keeps working). In a condition, a bare `T | not` value is already a presence test (§42.4); the explicit form is what compounds and value positions use (§42.4 statement 7).
+- `expr is given` is THE explicit presence test, the positive of `expr is not`: it is `true` when `expr` is not `not`. It is valid wherever `expr is not` is — a condition, a compound condition (`&&` / `||` operand), and every value position (a `const`, a `return`, an argument, an attribute value). `expr is some` is its soft-deprecated same-meaning spelling (§42.2.2a; S462 — it parses identically and surfaces W-IS-SOME-DEPRECATED). In a condition, a bare `T | not` value is already a presence test (§42.4); the explicit form is what compounds and value positions use (§42.4 statement 7).
 
-> **Provenance:** ruling:user-voice-scrml.md S460 "a′, go" (*"The explicit pair for value positions / compounds: `x is given` (positive) / `x is not` (absence)"*; PA reading recorded with the ruling: *"'a′' ratifies the a′ text as written, incl. `is given` as THE explicit positive"*) · supersedes: ruling:user-voice-scrml.md S440 Truthiness Q2 (conditions only) · supersedes (text): *"`(expr) is given` is a valid alias for `(expr) is some` in an inline boolean position."* **Direction of change: newly-accepting** (`is given` in every position `is some` takes). **Status:** impl#1 parses and lowers `is given` as `is some` (`compiler/src/expression-parser.ts` `rewriteIsPredicates`) — except in a value position followed by `&&` (`const ok = @n is given && @b` emits malformed JS, E-CODEGEN-INVALID-LOGIC; the `is some` spelling lowers; filed under `g-impl1-condition-rule-s460`); the bootstrap parses `x is given` / `x is not` (`compiler/self-host-v2/parse.scrml`, S460).
+> **Provenance:** ruling:user-voice-scrml.md S460 "a′, go" (*"The explicit pair for value positions / compounds: `x is given` (positive) / `x is not` (absence)"*; PA reading recorded with the ruling: *"'a′' ratifies the a′ text as written, incl. `is given` as THE explicit positive"*) · supersedes: ruling:user-voice-scrml.md S440 Truthiness Q2 (conditions only) · supersedes (text): *"`(expr) is given` is a valid alias for `(expr) is some` in an inline boolean position."* **Direction of change: newly-accepting** (`is given` in every position `is some` takes). **Status:** impl#1 parses and lowers `is given` exactly as `is some` in every position (`compiler/src/expression-parser.ts` `rewriteIsPredicates`; S462 closed the positions where it did not — a value position followed by `&&`, a `return (…) is given`, an `<each>` row attribute, a value-form match arm, the string-rewrite fallback and a bare unquoted `if=`; `g-impl1-is-given-and-value-position-codegen-s460` resolved, pinned by `compiler/tests/unit/is-given-parity-s462.test.js`); the bootstrap parses `x is given` / `x is not` (`compiler/self-host-v2/parse.scrml`, S460) and, since S462, `x is some` with W-IS-SOME-DEPRECATED.
 
 > **Provenance (`is some` as the same-meaning alias, narrowing like `is given`):** ruling:user-voice-scrml.md S460 "keep the code, accept both readings, go" (item 2).
 
-**Implementation note (DQ-12 Phase A):** The current compiler implements parenthesized compound operands — `(expr) is not`, `(expr) is some`, `(expr) is not not` — by rewriting them to a temp-var form that guarantees single evaluation. Bare compound expressions without parentheses (e.g., `regex.exec(str) is not`) are not yet supported and are tracked as DQ-12 Phase B; using bare compound expressions without parens will produce incorrect JS output until Phase B is complete.
+**Implementation note (DQ-12 Phase A):** The current compiler implements parenthesized compound operands — `(expr) is not`, `(expr) is given` / `(expr) is some`, `(expr) is not not` — by rewriting them to a temp-var form that guarantees single evaluation. Bare compound expressions without parentheses (e.g., `regex.exec(str) is not`) are not yet supported and are tracked as DQ-12 Phase B; using bare compound expressions without parens will produce incorrect JS output until Phase B is complete.
 
-#### 42.2.5 `is some` vs `req` — distinct predicates (L5 clarification)
+#### 42.2.5 `is given` vs `req` — distinct predicates (L5 clarification)
 
-**Added 2026-05-04 (S57 Stage 0b D3, L5).** `is some` and `req` are NOT synonyms. Both predicates exist in the validator vocabulary; both are needed; they enforce different things.
+**Added 2026-05-04 (S57 Stage 0b D3, L5).** `is given` and `req` are NOT synonyms. Both predicates exist in the validator vocabulary; both are needed; they enforce different things. (S462: this subsection was written for `is some`, the soft-deprecated spelling of `is given` — §42.2.2a, §55.1; everything below holds for both spellings.)
 
-| Predicate | Meaning | Empty string `""` | null / undefined |
+> **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go" · supersedes (text): the subsection's `is some` wording (heading, table, example and prose). **Direction of change: inert.**
+
+| Predicate | Meaning | Empty string `""` | `not` (null / undefined at the JS boundary) |
 |---|---|---|---|
-| `is some` (§42.2.2a) | Value EXISTS — null/undefined fail | TRUE (`""` IS some — the cell holds a value) | FALSE |
+| `is given` (§42.2.2a; soft-deprecated spelling `is some`) | Value EXISTS — `not` fails | TRUE (`""` IS given — the cell holds a value) | FALSE |
 | `req` (§55.1) | Value is NON-EMPTY / MEANINGFUL | FALSE (`""` fails req) | FALSE |
 
 **Worked example — the difference matters:**
@@ -31348,24 +31364,24 @@ if ((getUser(id)) is some) { renderUser() }
 </>
 
 ${
-  if (@signup.name is some) { ... }       // TRUE — @signup.name holds the string ""
+  if (@signup.name is given) { ... }      // TRUE — @signup.name holds the string ""
   if (@signup.name req)     { ... }       // FALSE — "" fails the req predicate
 }
 ```
 
-For state cells with declared defaults, `is some` is always TRUE — the cell holds its default value, which IS some value (even if it's the empty string). `req` rejects the empty string regardless of whether a default was declared.
+For state cells with declared defaults, `is given` is always TRUE — the cell holds its default value, which IS a value (even if it's the empty string). `req` rejects the empty string regardless of whether a default was declared.
 
 **Three native forms of "exists / required" semantic across loci** (the user's reframe):
 
 | Locus | Native form | Enforcement |
 |---|---|---|
 | Schema column (§39.5.7) | `not null` (SQL-mirror) or `req` (shared-core, lowers to `NOT NULL` + `CHECK (col != '')`) | DBMS at INSERT/UPDATE |
-| State-cell validator (§55.2) | `req` (form-required, rejects empty) and/or `is some` (existence — uncommon, mostly for `T \| not` cells) | Reactive form-validity gating |
+| State-cell validator (§55.2) | `req` (form-required, rejects empty) and/or `is given` (existence — uncommon, mostly for `T \| not` cells) | Reactive form-validity gating |
 | Refinement type (§53) | `string.length(>0)` or similar predicate form on the type | Compile-time + runtime boundary |
 
 These are NOT synonyms in 2-way redundancy. They are **native vocabularies in three loci**, each enforcing in its layer's context. A field MAY have all three — schema `not null` + form-validator `req` + refinement-type `string.length(>0)` — and each fires independently in its locus.
 
-**Cross-ref §55.1** for the universal-core predicate listing (where `req` and `is some` appear side-by-side).
+**Cross-ref §55.1** for the universal-core predicate listing (where `req` and `is given` appear side-by-side).
 **Cross-ref §39.5.7** for schema-column shared-core lowering.
 **Cross-ref §53.6.1** for refinement-type firing semantics.
 
@@ -31466,7 +31482,7 @@ A **condition** is the test of an `if` / `else if` statement, a `while` / `do �
 5. **An unresolved type is an error.** A condition whose value's type the compiler cannot resolve — an unannotated parameter, a call whose return type is neither declared nor inferred, a value that crosses the JavaScript boundary with no scrml type (§42.9), or a value typed `asIs` / `unknown` (§7.5.2) — SHALL be compile error **E-COND-NOT-BOOLEAN**. The message SHALL say that the type could not be resolved and SHALL name the fixes: annotate the value (a parameter type, a return type), or write what is tested — `x is given` (is it present?) or `x == true` (is it true?). A condition is never silently accepted because its type is unknown.
 6. **No second report.** A condition SHALL NOT also be reported under statement 5 when the compiler has already reported **any Error-severity diagnostic whose span lies within the condition** — of any code: a parse error, an undeclared name or field, a refused operator (`E-OPERATOR-OPERAND-TYPE`), a state write in a render position (`E-VALUE-WRITES-STATE`), a wrong argument count (`E-CALL-ARITY`), and so on — or when the condition reads a declaration whose written type was refused (`E-TYPE-UNKNOWN`, reported at the declaration, not in the condition), calls a function whose written return type was refused, or sits in a construct already refused (an `if=` the compiler does not admit on that element, a region the binder skipped). **This is not fail-open:** every case above has already reported an Error, so the build still fails; the rule only keeps one root cause from being reported twice.
 7. **A whole condition, not an operand.** The presence test of statement 2 is the meaning of a bare `T | not` ONLY as the whole condition. As an operand of `!`, `&&` or `||` (and `and` / `or`) a `T | not` value is not a boolean and SHALL be compile error `E-OPERATOR-OPERAND-TYPE` (S440 Gotcha Q2: *"`!`, `&&`, `||` (and `and`/`or`) take booleans only"*). Compounds and value positions spell presence explicitly: `x is given` (present) / `x is not` (absent) — `if (@x is given && @x.n > 0)`, `const ready = @user is given`, `if (u is not) return`.
-8. **The explicit pair narrows.** `x is given` and `x is not` are `bool`-valued. Where `x` is a place (a local, a parameter, a cell or a member path), `x is given` narrows it to `T` where the test is true and `x is not` where it is false — including the right operand of `&&` / `||` and the rest of a block after `if (x is not) return` (§42.3.5 item 2). **Partly Nominal on impl#1:** impl#1 narrows an `if (x is given) { … }` / `is some` block, an `if (x is not) return` early-return, and the right operand of `&&` / `||` (`if (@user is some && @n > 0) { @user.name }`, `if (@user is not || @user.name == "")`), but NOT the children of a parenthesized attribute test (`<p if=(@user is given)>${@user.name}</p>` is E-TYPE-046 there); and a `const ok = @n is given && @b` value position fails to lower on impl#1 (E-CODEGEN-INVALID-LOGIC — the `is some` spelling lowers); carried gap `g-impl1-condition-rule-s460`. The bootstrap narrows every case this statement names.
+8. **The explicit pair narrows.** `x is given` and `x is not` are `bool`-valued. Where `x` is a place (a local, a parameter, a cell or a member path), `x is given` narrows it to `T` where the test is true and `x is not` where it is false — including the right operand of `&&` / `||` and the rest of a block after `if (x is not) return` (§42.3.5 item 2). **Partly Nominal on impl#1:** impl#1 narrows an `if (x is given) { … }` / `is some` block, an `if (x is not) return` early-return, and the right operand of `&&` / `||` (`if (@user is some && @n > 0) { @user.name }`, `if (@user is not || @user.name == "")`), but NOT the children of a parenthesized attribute test (`<p if=(@user is given)>${@user.name}</p>` is E-TYPE-046 there); carried gap `g-impl1-condition-rule-s460`. (The value-position `const ok = @n is given && @b` lowers since S462.) The bootstrap narrows every case this statement names.
 9. **Markup quoting.** A bare unquoted condition attribute is atomic-only (§5.2): `<div if=@x>` is the presence test; the explicit forms are parenthesized — `<div if=(@x is given)>`, `<div if=(@x is not)>`.
 10. **An unresolved operand of `!` / `&&` / `||` in a condition is an error.** Inside a condition (every position this section names, `show=` included), an operand of `!`, `&&` or `||` whose type the compiler cannot resolve SHALL be compile error **E-COND-NOT-BOOLEAN**, with the statement-5 message (the type could not be resolved; annotate it, or write `x is given` / `x == true`) — `if (!g())`, `if (g() && @ready)`, `if (g() || false)`, `<p if=!g()>`, `<p show=(g() && @b)>` with `g` declaring no return type. The operands reached are those of the condition's own `!` / `&&` / `||` chain: a nested `!` / `&&` / `||` is walked through (`!(g() && @b)` reports `g()`); parentheses are grouping only; any other operand — a call, a name, a comparison — is judged by its own type. A ternary that IS the condition's value, or an operand in its `!` / `&&` / `||` chain, is inside the condition: each arm is that value when taken, so each arm is judged as the place the ternary stands in (statements 1–5 for a whole condition, this statement for an operand) and its own `!` / `&&` / `||` chain is walked — `if (@b ? !g() : @c)`, `if (@b ? (g() && @c) : @c)`, `if (@b ? g() : @c)` and `if ((@b ? g() : @c) && @c)` each report `g()`. Walking the arms adds reports and never removes one: a ternary whose arms do not join to one type is still refused as a whole under statement 5 when no arm is itself reported — `if (@b ? @o.n : @c)` with `@o.n: int | not` and `@c: bool` is E-COND-NOT-BOOLEAN although each arm alone would be a legal condition. A `!` / `&&` / `||` that is NOT part of that chain — inside a call argument (`if (h(!g()))`), an index, or a ternary in a value position (`const v = @b ? !g() : @c`) — is a value position, and an operand there stays provable-or-silent (S440 Truthiness Q2). A ternary's TEST is itself a condition, so this statement applies to it. Statement 6 applies per operand: no report when an Error-severity diagnostic lies within that operand, when it reads a refused declaration, or when the operator stands in a construct already refused. A known non-`bool` operand is statement 7's (`E-OPERATOR-OPERAND-TYPE`). Operands outside a condition (`const v = !g()`, `@b = g() && @c`) stay provable-or-silent.
 
@@ -31521,6 +31537,10 @@ ${
 | E-TYPE-046 | Member access (`.field` / `[key]` / `.method(...)`) through a plain-optional (`T \| not` / `T?`) receiver without optional-chain (`?.`) or narrowing (`if=` / `given` / `is not` / `match`) — §42.3.5 (S237) | Error |
 | E-MATCH-012 | `match` on `T | not` type lacks a `not` arm and lacks an `else` arm | Error |
 | E-COND-NOT-BOOLEAN | A condition (`if` / `while` / ternary test / `if=` / `else-if=`) whose value is not shown to be a `bool` or a bare `T \| not` presence test: a bare `bool \| not`, any other known type, or a type the compiler cannot resolve — as the whole condition or as an operand of its `!` / `&&` / `||` chain (§42.4 statements 5 and 10; S460 "a′, go", "a on F2, go"). Nominal on impl#1; emitted by the bootstrap | Error |
+| W-IS-SOME-DEPRECATED | The soft-deprecated presence spelling `x is some` (or the §55.1 validator `<x is some>`); parses identically to `is given` (§42.2.2a; S462). Full text §34 | Info |
+| E-IS-SOME-DEPRECATED | **Reserved** (§63.2) end-of-window code for the `is some` spelling; not scheduled, never fired (§63.7) | Error |
+
+> **Provenance (S462 rows W-/E-IS-SOME-DEPRECATED):** ruling:user-voice-scrml.md S462 "a, validator too, go". **Direction of change: inert** (a lint is added; no program's acceptance or meaning moves).
 
 > **Provenance (S460 row E-COND-NOT-BOOLEAN):** ruling:user-voice-scrml.md S460 "a′, go" · supersedes: ruling:user-voice-scrml.md S440 Truthiness Q2 (conditions only) · keeps S440 #4 = (c), S442. Row added to this table (the code itself was accepted S442, §66.20; full text §34). **Direction of change: newly-rejecting** — Nominal on impl#1 (carried gap `g-impl1-condition-rule-s460`).
 
@@ -31548,7 +31568,7 @@ ${
 
   **(3) Inside `${...}` interpolation segments of attribute string-literals** — both shapes (1) and (2) above SHALL be rejected when they appear inside a `${...}` segment of a `class="..."` / `title="..."` / similar string-quoted attribute value. (Closed by W3.2 — F-NULL-004, 2026-04-30.) Example: `<div class="${@x == null ? a : b}">` SHALL emit E-SYNTAX-042.
 
-  **Suppression rule:** The compiler-internal synthetic `lit { litType: "null" }` operands generated by the `is not` / `is some` / `is not not` desugaring (the right operand of these binary forms in the AST) are NOT real scrml source tokens and SHALL NOT trigger E-SYNTAX-042.
+  **Suppression rule:** The compiler-internal synthetic `lit { litType: "null" }` operands generated by the `is not` / `is given` (`is some`) / `is not not` desugaring (the right operand of these binary forms in the AST) are NOT real scrml source tokens and SHALL NOT trigger E-SYNTAX-042.
 
   The compiler SHALL NOT silently accept any of the above shapes in one position while rejecting it in another.
 - `x is not` SHALL be the only normative absence check.
@@ -31583,9 +31603,9 @@ ${
 
 - scrml-absence (`not`) is represented as JavaScript `null` at runtime per §42.5 above. This is the canonical scaffold encoding ratified by §42.1 exclusions (S89).
 - A scrml-author inspecting a variable via browser DevTools, the JavaScript Console, or any JS-host debugger SHALL see the JS bit-pattern (`null`) — NOT the scrml-language token (`not`). This is the **expected** behavior under the scaffold encoding; the JS-host debugger is unaware of scrml semantics.
-- scrml-language predicates classify correctly regardless of the bit-pattern surface: `x is some` returns `false` for the cell, `x is not` returns `true`, `given x :> ...` skips the body, `match x { not => ..., given x :> ... }` enters the `not` arm. The scrml-author's source-level reasoning is not affected.
+- scrml-language predicates classify correctly regardless of the bit-pattern surface: `x is given` returns `false` for the cell, `x is not` returns `true`, `given x :> ...` skips the body, `match x { not => ..., given x :> ... }` enters the `not` arm. The scrml-author's source-level reasoning is not affected.
 - Native scrml debugger experience (a debugger that re-presents `null` as the scrml token `not` in its UI) is a **post-v1.0 self-host concern** — the eventual from-scratch scrml self-host (per pa.md self-host-is-from-scratch rule, S89 user ruling) MAY choose any presentation idiom for the absence sentinel in its native debugger. The TypeScript scaffold compiler does not invest in DevTools instrumentation; the JS `null` bit-pattern surface is accepted as the scaffold-lifetime trade-off.
-- **Adopter guidance:** When debugging a scrml program at the JavaScript layer (sourcemaps disabled, runtime introspection, network-payload inspection), treat a JS `null` value as the canonical surface form of scrml `not`. At the scrml source layer, continue writing `is some` / `is not` / `given` / `not`-arm match — those continue to mean what they say.
+- **Adopter guidance:** When debugging a scrml program at the JavaScript layer (sourcemaps disabled, runtime introspection, network-payload inspection), treat a JS `null` value as the canonical surface form of scrml `not`. At the scrml source layer, continue writing `is given` / `is not` / `given` / `not`-arm match — those continue to mean what they say.
 
 ### 42.9 JS Interop Boundary
 
@@ -31888,7 +31908,7 @@ The compiler derives structural comparability automatically:
 
 `==` compares two values of the same type: `direction1 == direction2`. `is` checks a value against a literal variant: `direction is .North`. Both are valid and serve different use cases.
 
-**The `is` RHS is bounded (S237).** The right operand of `is` SHALL be one of: the absence sentinel `not` (`x is not`, §42.2.2), the presence keyword `some` / `given` — including the `not not` double-negation (`x is some`, §42.2.2a / §42.2.4), or an enum-variant pattern `.Variant` / `.Variant(payload)` (§45.5, §18). A **value** on the right of `is` — a literal (`x is 0`, `x is "text"`, `x is true`) or a value-expression (`x is @other`) — is NOT valid: `is` is the absence / variant-discrimination keyword, not a value-equality operator (the limit-the-primitive axiom, §14.1.1 — `is` stays sharp; value equality is `==`). A value RHS on `is` SHALL be compile error **E-EQ-005**, steering to `==` (`x == 0`). This is the mirror of E-EQ-002 (`x == not` → `x is not`): each keyword has one job, and using `is` for value-equality (or `==` for absence) is a hard error with a fix-it. Rationale: before this rule `x is 0` mis-lowered silently — surfacing as a misleading `E-DG-002` ("declared but never consumed") or an internal `E-CODEGEN-INVALID-LOGIC` — instead of a clean "use `==`" diagnostic.
+**The `is` RHS is bounded (S237).** The right operand of `is` SHALL be one of: the absence sentinel `not` (`x is not`, §42.2.2), the presence keyword `given` (`x is given`, §42.2.2a / §42.2.4; `some` is its soft-deprecated spelling, S462) — including the `not not` double-negation, or an enum-variant pattern `.Variant` / `.Variant(payload)` (§45.5, §18). A **value** on the right of `is` — a literal (`x is 0`, `x is "text"`, `x is true`) or a value-expression (`x is @other`) — is NOT valid: `is` is the absence / variant-discrimination keyword, not a value-equality operator (the limit-the-primitive axiom, §14.1.1 — `is` stays sharp; value equality is `==`). A value RHS on `is` SHALL be compile error **E-EQ-005**, steering to `==` (`x == 0`). This is the mirror of E-EQ-002 (`x == not` → `x is not`): each keyword has one job, and using `is` for value-equality (or `==` for absence) is a hard error with a fix-it. Rationale: before this rule `x is 0` mis-lowered silently — surfacing as a misleading `E-DG-002` ("declared but never consumed") or an internal `E-CODEGEN-INVALID-LOGIC` — instead of a clean "use `==`" diagnostic.
 
 ### 45.6 Identity Comparison
 
@@ -31902,7 +31922,7 @@ There is no identity comparison operator in scrml. The reactive runtime handles 
 | E-EQ-002 | `== not` used instead of `is not` | Error |
 | E-EQ-003 | `==` applied to type containing function fields | Error |
 | E-EQ-004 | `===` operator used (not valid in scrml) | Error |
-| E-EQ-005 | `is <value>` — a literal (`x is 0`) or value-expression (`x is @other`) RHS on `is` used instead of `==`. `is` is for absence (`is not`/`is some`) + variant (`is .Variant`), not value equality. Mirror of E-EQ-002. (§45.5, S237) | Error |
+| E-EQ-005 | `is <value>` — a literal (`x is 0`) or value-expression (`x is @other`) RHS on `is` used instead of `==`. `is` is for absence (`is not`/`is given`) + variant (`is .Variant`), not value equality. Mirror of E-EQ-002. (§45.5, S237) | Error |
 | W-EQ-001 | `==` on `asIs`-typed values | Warning |
 | W-EQ-PAYLOAD-VARIANT | `==`/`!=` against a payload-variant CONSTRUCTOR reference (`@phase == Phase.Serving` where `Serving` carries payload). The reference is the ctor function, not a value, so the structural comparison (§45.4) is ALWAYS false (`!=` → always true) — silently. Steer to `is .Variant` (§45.5) or `match` (§18). Unit variants are NOT affected (they compare as string tags). Warning-level — non-fatal (routes to `result.warnings`). (Added ss16 C4.) | Warning |
 
@@ -32053,7 +32073,7 @@ seq           ::= 1 or 2 base36 characters [0-9a-z]  (see §47.4)
 - **S440 ruling (#9) — REFERENCES are refused too; stdlib is exempt by path.** A user-authored scrml program SHALL NOT **reference** a name that begins with `_scrml_` either — the reservation above covers references as well as declarations, under the same code, **`E-NAME-COLLIDES-RESERVED-PREFIX`** (emitted by impl#1 since S454, #1301). **Standard-library source is exempt by path:** a file of the scrml standard library (the `stdlib/` source tree) MAY declare and reference `_scrml_` names (it references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`).
   > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 9) — *"`_scrml_` → reject references as well as declarations; stdlib exempt by path"* · supersedes: the S439 #7 OPEN block (above, struck).
 - **S457 ruling — the `__scrml_` identifier namespace is RESERVED too.** A user-authored scrml program SHALL NOT **declare** or **reference** a name that begins with `__scrml_` (double underscore). It is the namespace of the compiler's internal placeholders and locals (`__scrml_is_some__`, `__scrml_map_lit__`, `__scrml_is_v`, …). The code (**`E-NAME-COLLIDES-RESERVED-PREFIX`**), the parsed-tree check, its inspected and not-inspected positions, and the `stdlib/` exemption by path are those of the `_scrml_` bullets above. With both prefixes reserved, the emitted-artifact gate (§2.2.1) can refuse any `__scrml_<name>__` identifier as an un-lowered compiler placeholder by shape alone. Direction of change: **newly-rejecting**. Measured (S457, every `.scrml` under `samples/`, `examples/`, `conformance/`): one program newly refused, the conformance case `server-db/sql-hoisted-loop-allow-list-rt`, which read `row.__scrml_batch_key` to test a SQL alias that collides with the compiler's hoisting key alias. It now reads the column positionally (`Object.values(row)[0]`) and keeps the collision under test.
-  - **Compiler placeholders are unforgeable.** The expression parser rewrites scrml operators it cannot hand to the JS parser directly into placeholder calls and identifiers: `x is some`, `match`, `[:]`, `~`, `.Variant`, `render name()`, `<#id>`, and an expression-position `?{}` or `!{}`. Later stages recognise these by name and lower them, and some carry code inside string arguments, such as `match` arms and `!{}` handler text. Every placeholder name SHALL carry a token the compiler draws from a cryptographic random source once per compilation, for example `__scrml_match_k3f…__`. The compiler SHALL recognise and lower only that form. The token SHALL be fresh for each compilation, so a token seen in an earlier compile is only a name to a later one in the same process (serve, watch, dev). It SHALL NOT appear in anything the compiler emits or returns: artifacts (including those written for a failed compile), diagnostics, console output, and serve/LSP replies all carry the placeholder without it.
+  - **Compiler placeholders are unforgeable.** The expression parser rewrites scrml operators it cannot hand to the JS parser directly into placeholder calls and identifiers: `x is given`, `match`, `[:]`, `~`, `.Variant`, `render name()`, `<#id>`, and an expression-position `?{}` or `!{}`. Later stages recognise these by name and lower them, and some carry code inside string arguments, such as `match` arms and `!{}` handler text. Every placeholder name SHALL carry a token the compiler draws from a cryptographic random source once per compilation, for example `__scrml_match_k3f…__`. The compiler SHALL recognise and lower only that form. The token SHALL be fresh for each compilation, so a token seen in an earlier compile is only a name to a later one in the same process (serve, watch, dev). It SHALL NOT appear in anything the compiler emits or returns: artifacts (including those written for a failed compile), diagnostics, console output, and serve/LSP replies all carry the placeholder without it.
     - **What an author's spelling does.** `__scrml_match__(p, ".A => …")` written by an author is an ordinary unknown identifier. Nothing lowers it, so its strings stay strings.
     - **Where it is refused.** This reservation refuses it where the tree check inspects it. The §2.2.1 gate refuses it wherever else it reaches an artifact.
     - **The only exemption.** The tree check exempts the compiler's own token-bearing names, which are written into the parsed tree inside escape-hatch raw text, as the `!{}` handler marker call, or as a masked `.Variant`.
@@ -34201,9 +34221,9 @@ any other logic context: they target the nearest enclosing loop and obey the fun
 boundary rule.
 ## 50. Assignment as Expression
 
-**Added:** 2026-04-07. Motivated by self-hosting the compiler's `ast-builder.js`, which uses the `while ((m = re.exec(str)) is some)` regex iteration pattern throughout (scrml form; the underlying JS API returns `null`/match-array and the JS-interop boundary per §42.9 surfaces the `null` outcome as `not`). Without assignment-as-expression, these patterns require a rewrite into a less natural two-statement form that diverges from idiomatic algorithmic code.
+**Added:** 2026-04-07. Motivated by self-hosting the compiler's `ast-builder.js`, which uses the `while ((m = re.exec(str)) is given)` regex iteration pattern throughout (scrml form; the underlying JS API returns `null`/match-array and the JS-interop boundary per §42.9 surfaces the `null` outcome as `not`). Without assignment-as-expression, these patterns require a rewrite into a less natural two-statement form that diverges from idiomatic algorithmic code.
 
-**S89 normative refresh (2026-05-13):** The original §50 (2026-04-07) presented this pattern using `!== null` literals. Per the §42 canonical rule (`null` is NOT a valid scrml token in any source position), the canonical scrml form is `is some` (presence check) — both forms compile to equivalent JavaScript after the §42.9 interop boundary normalises `null` ⇒ `not`.
+**S89 normative refresh (2026-05-13):** The original §50 (2026-04-07) presented this pattern using `!== null` literals. Per the §42 canonical rule (`null` is NOT a valid scrml token in any source position), the canonical scrml form is `is given` (presence check; written `is some` until S462, which soft-deprecated that spelling — §42.2.2a) — both forms compile to equivalent JavaScript after the §42.9 interop boundary normalises `null` ⇒ `not`.
 
 ### 50.1 Overview
 
@@ -34212,7 +34232,7 @@ In scrml, a bare assignment (`x = value`) MAY appear in any expression position.
 The primary motivating use case is the regex iteration idiom:
 
 ```scrml
-while ((m = re.exec(str)) is some) {
+while ((m = re.exec(str)) is given) {
     // process match m
 }
 ```
@@ -34282,7 +34302,7 @@ The compiler distinguishes intentional assignment-in-condition from accidental a
 
 - **`if (x = expr)`** — triggers W-ASSIGN-001.
 
-The double-parens requirement applies only when assignment appears as the **outermost** expression inside the condition. Assignment nested inside a larger expression (e.g., `while ((m = re.exec(str)) is some)`) is NOT subject to the double-parens requirement because the assignment is not the outermost expression — the `is some` operator is outermost.
+The double-parens requirement applies only when assignment appears as the **outermost** expression inside the condition. Assignment nested inside a larger expression (e.g., `while ((m = re.exec(str)) is given)`) is NOT subject to the double-parens requirement because the assignment is not the outermost expression — the `is given` operator is outermost.
 
 Formally: W-ASSIGN-001 is triggered when the direct child of the while/if condition's parens is an `assign-expr` node (i.e., the root of the condition expression tree is `=`). When the assign-expr appears at any non-root position in the condition expression tree, no warning is triggered.
 
@@ -34365,7 +34385,7 @@ Assignment expressions are typed values and MAY appear wherever a value of their
 - As an element of an array literal: `[a = 1, b = 2]` — initializes `a` and `b` and collects the values.
 - As the condition of a ternary: `(flag = computeFlag()) ? onTrue : onFalse`.
 - As the right-hand side of another assignment (chaining, §50.3.2).
-- As the operand of any comparison or absence-check: `(m = re.exec(str)) is some`.
+- As the operand of any comparison or absence-check: `(m = re.exec(str)) is given`.
 
 #### 50.4.3 Declaration Forms Are Not Typed Expressions
 
@@ -34381,7 +34401,7 @@ Assignment to variables declared inside a `fn` body is valid as an expression. T
 fn scanMatches(str, re) {
     let results = []
     let m = not
-    while ((m = re.exec(str)) is some) {
+    while ((m = re.exec(str)) is given) {
         results.push(m[0])
     }
     let out = <ScanResult>
@@ -34429,7 +34449,7 @@ Assignment-as-expression is a direct passthrough to JavaScript. JavaScript has n
 | `x = value` (in expression position) | `x = value` |
 | `a = b = value` | `a = b = value` |
 | `@x = value` (in expression position) | `__set_x(value)` (reactive setter call, returns assigned value) |
-| `while ((m = re.exec(str)) is some)` | `while ((m = re.exec(str)), m !== null && m !== undefined)` (single-evaluation temp form per §42.2.4) |
+| `while ((m = re.exec(str)) is given)` | `while ((m = re.exec(str)), m !== null && m !== undefined)` (single-evaluation temp form per §42.2.4) |
 
 The double-parentheses form in conditions compiles identically to single-parentheses in JavaScript output. The outer parens are the while/if condition's required syntax; the inner parens are the assignment expression. The compiled output is `while ((x = expr))` which is standard JavaScript.
 
@@ -34611,7 +34631,7 @@ ${
         const re = new RegExp(pattern, "g")
         let results = []
         let m = not
-        while ((m = re.exec(str)) is some) {
+        while ((m = re.exec(str)) is given) {
             results.push(m[0])
         }
         return results
@@ -34619,9 +34639,9 @@ ${
 }
 ```
 
-Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the while condition — `is some` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the while's required syntax.
+Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the while condition — `is given` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the while's required syntax.
 
-Compiled JavaScript output (abbreviated; `is some` lowers per §42.5 with single-evaluation temp form per §42.2.4):
+Compiled JavaScript output (abbreviated; `is given` lowers per §42.5 with single-evaluation temp form per §42.2.4):
 ```javascript
 while ((m = re.exec(str), m !== null && m !== undefined)) {
     results.push(m[0]);
@@ -34696,7 +34716,7 @@ fn parseTokens(input) {
     const tokenRe = /\w+/g
     let tokens = []
     let m = not
-    while ((m = tokenRe.exec(input)) is some) {
+    while ((m = tokenRe.exec(input)) is given) {
         let t   = <Token>
         t.value = m[0]
         t.start = m.index
@@ -34742,7 +34762,7 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 - **§45 (Equality Semantics)** — `==` is the structural equality operator. `=` is assignment. W-ASSIGN-001 exists specifically because `=` and `==` are visually similar and `=` in a condition is usually a defect. The warning bridges the two sections.
 - **§48 (The `fn` Keyword — Pure Functions)** — E-FN-003 (outer-scope mutation) applies to assignment-as-expression identically to statement-form assignment. The expression form does not weaken `fn`'s constraints. §50.5 specifies the interaction in full.
 - **§35 (Linear Types — `lin`)** — `lin` variables cannot be reassigned in any form. Assignment-as-expression to a `lin` variable is E-LIN-004. Separate from `lin`'s consumption rules: expression-form assignment is a re-assignment, not a consumption read. §50.6 specifies the interaction in full.
-- **§49 (`while`, `break`, `continue`)** — The primary real-world motivation for this feature is the `while ((m = re.exec(str)) is some)` pattern (presence check after assignment; the underlying JS regex API's `null` outcome is normalised to `not` at the §42.9 interop boundary). §49 specifies `while` statement semantics; §50 extends the condition position to permit assignment expressions. The two sections compose: a valid `while` condition is either a non-assignment expression or a double-parenthesized assignment expression.
+- **§49 (`while`, `break`, `continue`)** — The primary real-world motivation for this feature is the `while ((m = re.exec(str)) is given)` pattern (presence check after assignment; the underlying JS regex API's `null` outcome is normalised to `not` at the §42.9 interop boundary). §49 specifies `while` statement semantics; §50 extends the condition position to permit assignment expressions. The two sections compose: a valid `while` condition is either a non-assignment expression or a double-parenthesized assignment expression.
 - **§6 (Reactivity — The `@` Sigil)** — Assignment-as-expression to `@variables` triggers reactive update as a side effect. The reactive update is synchronous within the assignment; the expression produces the plain value. The reactive scheduler then propagates the change to dependent computations per §6.7.
 - **§7 (Logic Contexts)** — Assignment-as-expression is valid inside any `${}` logic context, `fn` body (subject to §48 constraints), and `function` body. It is not valid in `?{}` SQL contexts or `_{}` foreign code contexts (which are governed by their own syntactic rules).
 
@@ -39749,9 +39769,9 @@ sense: the author wrote it, and its failure is `<#id>.error` (§6.7.7); `@x.erro
 
   <div>
     ${
-      if (@driver.error is some) {
+      if (@driver.error is given) {
         lift <p class="error">Could not load the driver</p>     // the placeholder (not) stayed — rule 3
-      } else if (@driver is some) {
+      } else if (@driver is given) {
         lift <p>${@driver.current_status}</p>
       } else {
         lift <p>Loading…</p>
@@ -41839,7 +41859,7 @@ vs runtime, blocking vs reporting), not the validator name.
 | Predicate | Meaning | Example use | Error tag on failure |
 |---|---|---|---|
 | `req` | Non-empty value (`""` fails; absence value `not` fails — §42) | `<name req>` | `.Required` |
-| `is some` | Value exists (absence value `not` fails — §42). `""` IS some — coexists with `req`. | `<x is some>` | `.NotSome` |
+| `is given` | Value exists (absence value `not` fails — §42). `""` IS given — coexists with `req`. `is some` is its soft-deprecated spelling (below). | `<x is given>` | `.NotSome` |
 | `length(predicate)` | String/array length matches the inner predicate | `<name length(>=2)>` | `.LengthFailed(predicate)` |
 | `pattern(regex)` | String matches the regex | `<email pattern(/^[^@]+@[^@]+$/)>` | `.PatternMismatch(regex)` |
 | `min(n)` | Numeric minimum | `<age min(18)>` | `.MinFailed(n)` |
@@ -41847,6 +41867,15 @@ vs runtime, blocking vs reporting), not the validator name.
 | `gt(expr)`, `lt(expr)`, `gte(expr)`, `lte(expr)` | Comparisons (cross-field via predicate args) | `<endDate gte(@startDate)>` | `.GtFailed(expected)` etc. |
 | `eq(expr)`, `neq(expr)` | Equality / inequality | `<confirm eq(@password)>` | `.EqFailed(expected)` / `.NeqFailed(forbidden)` |
 | `oneOf([...])`, `notIn([...])` | Set membership | `<role oneOf([.Admin, .Editor])>` | `.OneOfFailed(set)` / `.NotInFailed(set)` |
+
+> **lang: deprecated — the validator spelling `is some` (§63 Stage 1, SOFT-DEPRECATED, S462).** `<x is some>` is
+> the soft-deprecated spelling of `<x is given>`: the same predicate, the same `.NotSome` error tag (§55.9), the
+> same short-circuit (§55.12), the same program. Each site SHALL surface **W-IS-SOME-DEPRECATED** (Info, §34 — the
+> code shared with the expression form, §42.2.2a); the reserved end-of-window code is **E-IS-SOME-DEPRECATED**.
+> `scrml fix` (default rule `is-some`) rewrites `is some` → `is given`. No removal version is named (§63.2). The
+> `ValidationError.NotSome` tag is NOT renamed by this deprecation (a matchable run-time tag rename is a separate
+> break; not ruled).
+> **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go" — *"AND the §55.1 universal-core validator predicate `is some` retires on the same window to `is given`."* · supersedes (text): the row's `is some` / `<x is some>` spelling. **Direction of change: newly-accepting** on impl#1, which before S462 read NEITHER spelling in a declaration opener (the scan declined on the `is` keyword and the cell silently vanished, every read reporting E-SCOPE-001 / E-STATE-UNDECLARED); both now declare the cell (`compiler/src/ast-builder.js` `scanStructuralDeclLookahead`).
 
 **Application as bare attributes.** Validators apply as bare attributes on a state-cell
 declaration (`<name req length(>=2)>`); each predicate is positional and order-independent
@@ -42373,7 +42402,7 @@ Validators on a single cell COMPOSE — a non-empty value can fail both `length`
 `pattern` simultaneously, producing TWO error tags in `errors`. Default
 `<errors of=...>` shows only the first; `<errors of=... all/>` shows all.
 
-**Short-circuit rule:** when `req` (or `is some`) FAILS on an empty cell or a cell
+**Short-circuit rule:** when `req` (or `is given` — spelled `is some` in its soft-deprecated form) FAILS on an empty cell or a cell
 holding `not` (§42), the remaining validators are SKIPPED. Only `.Required` (or
 `.NotSome`) is reported.
 Reasoning: the other validators on an empty value are vacuous noise.
@@ -42622,7 +42651,7 @@ blocked — so `req` means in scrml what `required` means in plain HTML, and `eq
    reading — dpa-058c §11.1 left `lift` unchecked; PA to confirm)*.
 2. **`novalidate` does not define the gate set.** It is its own S442 (3) rule. Every `novalidate` form is a gated
    form (a lowered attribute implies a bound validated value), but a gated form need not carry `novalidate`: one
-   whose bound validators lower to nothing (`eq(…)`, `gt(…)`, `oneOf([…])`, `is some`, a custom validator, an
+   whose bound validators lower to nothing (`eq(…)`, `gt(…)`, `oneOf([…])`, `is given`, a custom validator, an
    inexact `pattern`) is gated without it (§55.17.3).
    > **Provenance (amended S447):** ruling:user-voice-scrml.md S447 "RULED — \"your recs on the gate calls\": the four §55.17 OPEN items" item 1 · **supersedes:** this
    > rule's earlier text "These forms — and only these — are gated forms".
@@ -43742,12 +43771,12 @@ Reading is **bracket-native** (allocation-free, terse, composes with existing ab
 
 ```scrml
 const fare = @fareByLane["DAL-001"]              // -> Money | not   (key-miss yields not)
-given f = @fareByLane["DAL-001"] { use(f) }      // composes with given / is some — ZERO new rules
+given f = @fareByLane["DAL-001"] { use(f) }      // composes with given / is given — ZERO new rules
 const f2 = @fareByLane.getOr("DAL-001", 0)       // fallback-read in one expression
 const have = @fareByLane.has("DAL-001")          // -> bool
 ```
 
-- `@m[k]` evaluates to **`ValT | not`** (§42): a present key yields its value; a key-miss yields `not`. This composes with `given` / `is some` / `match` and with `(not to T)` narrowing — no new discrimination rules.
+- `@m[k]` evaluates to **`ValT | not`** (§42): a present key yields its value; a key-miss yields `not`. This composes with `given` / `is given` / `match` and with `(not to T)` narrowing — no new discrimination rules.
 - `.getOr(k, default)` returns the value or the supplied default in one expression.
 - `.has(k) → bool` reports presence. It is the **disambiguator** for `[K: V|not]` maps: the map read type is `ValT | not` regardless of whether `ValT` itself admits `not` (union-`not` normalization, §42 amendment — `(V|not)|not` is `V|not`). Therefore a bare bracket-read on a `[K: V|not]` map cannot distinguish a stored `not` value from an absent key; `.has(k)` decides it.
 - `.size → int` is the entry count. The map count member is `.size`, whereas the array length member is `.length` (§6.5.4). This divergence is **intentional** — it mirrors the JS `Map.size` / `Array.length` split — not an oversight.
@@ -44672,6 +44701,17 @@ Applying the machine to the existing corpus:
   and by the bootstrap (`!{}` arms). The rule is mechanical (delete the `|`; a paren-free binder `.V m` → `.V(m)`; arms that
   shared a line onto their own lines). *(Provenance: ruling:user-voice-scrml.md S452 "c looks right" — *"multiple
   syntaxs in logic dosnt work for me. yes, cononical version."*)*
+- **`W-IS-SOME-DEPRECATED` (`x is some` → `x is given`, §42.2.2a; the validator `<x is some>` → `<x is given>`, §55.1) — added S462:**
+  SOFT, unscheduled; reserved `E-IS-SOME-DEPRECATED` named, unfired; **gate-blocked** until its `scrml fix` rule is
+  verified-landed (§63.4) — the rule LANDED with the lint (`compiler/src/commands/fix-is-some.js`, a default rule of
+  `scrml fix`); §63.4 verification is not claimed. W-IS-SOME-DEPRECATED is emitted by impl#1 (expression and validator)
+  and by the bootstrap (expression). The rule is mechanical (the word `some` after `is` becomes `given`). The corpus
+  was migrated in the same landing (`samples/`, `examples/`, `stdlib/`, `conformance/`, `dashboard/`,
+  `docs/readme-snippets/`, `docs/tutorial-snippets/`, `compiler/self-host-v2/`); fixtures that exist to exercise
+  the `is some` spelling keep it. The `ValidationError.NotSome` tag (§55.9) is not renamed by this deprecation.
+  *(Provenance: ruling:user-voice-scrml.md S462 "a, validator too, go" — *"the expression form `x is some` is
+  SOFT-DEPRECATED through the SPEC §63 lifecycle … AND the §55.1 universal-core validator predicate `is some` retires
+  on the same window to `is given`."*)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 

@@ -167,23 +167,21 @@ describe("usage-analyzer — validators (per-predicate flags)", () => {
     expect(u.validators.req).toBe(true);
   });
 
-  test('"is some" (multi-word bareword) fires validators["is some"] when validator-entry name matches', () => {
-    // `is some` as a state-decl bareword is currently DEFERRED in the parser
-    // (per ast-builder.js note: "is some two-word predicate — rejected by
-    // bareword scan; deferred"). We test the walker contract directly: when
-    // a validator-entry with name="is some" lands on the AST (future B-step
-    // landing), the flag fires. We synthesize the AST shape here to verify
-    // the walker's validator-name dispatch.
+  test('"is given" (multi-word bareword) fires validators["is given"] when validator-entry name matches', () => {
+    // S462: the state-decl scan reads `<x is given>` and its soft-deprecated
+    // spelling `<x is some>` (ast-builder.js scanStructuralDeclLookahead) and
+    // names both "is given". The walker contract is tested directly on a
+    // synthesized AST shape.
     const fileAST = {
       filePath: "/synth.scrml",
       nodes: [{
         kind: "state-decl",
         name: "opt",
-        validators: [{ name: "is some", args: null }],
+        validators: [{ name: "is given", args: null }],
       }],
     };
     const u = analyzeUsage(fileAST);
-    expect(u.validators["is some"]).toBe(true);
+    expect(u.validators["is given"]).toBe(true);
   });
 
   test("length (call-form) fires validators.length", () => {

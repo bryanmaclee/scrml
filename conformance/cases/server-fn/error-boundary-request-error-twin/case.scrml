@@ -11,7 +11,7 @@ ${
 <request id="nameLoad" deps=[]>
     ${ @name = loadName("1") }
 </>
-<div class="eb-fallback" if=${<#nameLoad>.error is some}>Could not load profile</>
-<p class="eb-name" if=${<#nameLoad>.data is some}>${@name}</>
+<div class="eb-fallback" if=${<#nameLoad>.error is given}>Could not load profile</>
+<p class="eb-name" if=${<#nameLoad>.data is given}>${@name}</>
 <footer class="eb-footer">End</>
 </program>

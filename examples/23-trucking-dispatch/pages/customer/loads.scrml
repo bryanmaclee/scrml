@@ -71,7 +71,7 @@
         // GLOBAL broadcast (one `<customerEvents>` cell, all events); each payload
         // carries `targetCustomerId` so the customer UI filters to its own account
         // (per channels/customer-events.scrml). Empty until the account loads.
-        const <currentCustomerEvents> = @customerEvents.filter(ev => @currentCustomer is some && ev.targetCustomerId == @currentCustomer.id)
+        const <currentCustomerEvents> = @customerEvents.filter(ev => @currentCustomer is given && ev.targetCustomerId == @currentCustomer.id)
         <loadRows> = []
         <loaded> = false
         <errorMessage> = ""
@@ -169,7 +169,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is given)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -182,7 +182,7 @@
                   <span class="text-xs text-slate-500">
                       Live: <strong>${@currentCustomerEvents.length}</strong>
                   </span>
-                  <button if=(@currentCustomerEvents is some && (@currentCustomerEvents.length > @lastSeenCustomerEventCount))
+                  <button if=(@currentCustomerEvents is given && (@currentCustomerEvents.length > @lastSeenCustomerEventCount))
                       onclick=ackCustomerEvents()
                       class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium">
                       Refresh

@@ -69,7 +69,7 @@ ${
      */
     export function required(message) {
         return makeRule((value) => {
-            const valid = value is some && value != ""
+            const valid = value is given && value != ""
             return { valid, message: message || "This field is required" }
         })
     }
