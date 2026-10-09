@@ -138,6 +138,17 @@ export interface CompileContext {
    */
   reachabilityRecord?: ReachabilityRecord | null;
   /**
+   * S461 — true when this compile runs the per-route artifact splitter
+   * (`CgInput.emitPerRoute`, `--emit-per-route`). The splitter is the ONLY
+   * emitter of `_scrml_chunk_mount(` / `_scrml_vendor_require(` /
+   * `_scrml_prefetch_tier1(` / `_scrml_prefetch_tier2(`, so `detectRuntimeChunks`
+   * activates the 'mount' / 'vendor-ref' / 'prefetch' runtime chunks only when it
+   * is set. Before S461 they were activated from the reachability record alone,
+   * which is populated on EVERY compile — so ~every page shipped a 'mount' chunk
+   * nothing called. Defaults to false.
+   */
+  emitPerRoute?: boolean;
+  /**
    * S91 A-4.4 — set to `true` by `emit-html.ts` when at least one
    * internal `<a href="/...">` was wired with `data-scrml-prefetch="..."`
    * during HTML emission for this file. Two downstream consumers read it:
@@ -279,6 +290,7 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // so downstream consumers (A-4 codegen wave) can read the shape without
     // a null-guard; A-2.2+ replaces this with the actual closure analysis.
     reachabilityRecord: partial.reachabilityRecord ?? emptyReachabilityRecord(),
+    emitPerRoute: partial.emitPerRoute ?? false,
     // A-4.4 — `<a data-scrml-prefetch>` emission flag. Defaults to false;
     // `emit-html.ts` flips it to true when at least one internal `<a href>`
     // resolves to a `RouteMap.pages` urlPattern.

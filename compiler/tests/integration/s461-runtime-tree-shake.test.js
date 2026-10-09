@@ -303,3 +303,48 @@ describe("(c) machine helpers ship only where something names them", () => {
     expectNoDanglingFrom(["machine", "engine"], built);
   });
 });
+
+// ---------------------------------------------------------------------------
+// (d) the route-splitter-only chunks are activated only when the splitter runs
+// ---------------------------------------------------------------------------
+
+const LINKED_SHELL = `<program>
+  <nav><a href="/">home</a> <a href="/about">about</a></nav>
+  <h1>App shell</h1>
+  <outlet/>
+</program>
+`;
+
+describe("(d) mount / vendor-ref / prefetch ship only under emitPerRoute", () => {
+  test("a default build ships none of them (the false trigger), and calls none of them", () => {
+    for (const src of [SHELL, LINKED_SHELL]) {
+      const { runtime, client } = compileSource(src);
+      expect(client).not.toMatch(/_scrml_chunk_mount\(|_scrml_vendor_require\(|_scrml_prefetch_tier[12]\(/);
+      expect(runtime).not.toContain("function _scrml_chunk_mount");
+      expect(runtime).not.toContain("function _scrml_vendor_require");
+      expect(runtime).not.toContain("function _scrml_prefetch_tier1");
+    }
+  });
+
+  test("under emitPerRoute, every route chunk's mount / prefetch call has its definition in the runtime", () => {
+    const inputDir = mkdtempSync(join(TMP, "per-route-"));
+    const filePath = join(inputDir, "app.scrml");
+    writeFileSync(filePath, LINKED_SHELL);
+    const outDir = join(inputDir, "dist");
+    const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, write: true, emitPerRoute: true, log: () => {} });
+    expect(result.errors.filter((e) => e.severity !== "warning")).toEqual([]);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    const shipped = topLevelDecls(runtime);
+    let calls = 0;
+    for (const chunk of (result.chunks ?? new Map()).values()) {
+      const payload = chunk.payloadJs ?? "";
+      for (const name of ["_scrml_chunk_mount", "_scrml_vendor_require", "_scrml_prefetch_tier1", "_scrml_prefetch_tier2", "_scrml_fetch_chunk"]) {
+        if (payload.includes(`${name}(`)) {
+          calls++;
+          expect({ name, defined: shipped.has(name) }).toEqual({ name, defined: true });
+        }
+      }
+    }
+    expect(calls).toBeGreaterThan(0);
+  });
+});

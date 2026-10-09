@@ -1078,7 +1078,14 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     );
   }
   const reach = ctx.reachabilityRecord;
-  if (reach && reach.closures && ctx.filePath) {
+  // S461 — every chunk this block (and the hasPrefetchableLinks gate below) activates is
+  // referenced ONLY from per-route splitter output (`_scrml_chunk_mount(` /
+  // `_scrml_vendor_require(` / `_scrml_prefetch_tier1(` / `_scrml_prefetch_tier2(`,
+  // route-splitter.ts). The reachability record is populated on every compile, but the
+  // splitter runs only under `emitPerRoute` — so without this gate a default build shipped
+  // a 'mount' chunk on nearly every page (and 'prefetch' on every page with an internal
+  // link) that nothing called. The admission scan itself is unchanged.
+  if (ctx.emitPerRoute && reach && reach.closures && ctx.filePath) {
     // A-4.7 — `mount` + `vendor-ref` activation. The two chunk-side
     // record-keeping helpers (`_scrml_chunk_mount`, `_scrml_vendor_require`)
     // are referenced from atom-emitter output baked into the per-(EP,
@@ -1152,7 +1159,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   // The same `prefetch` chunk also covers `_scrml_prefetch_tier1`
   // (A-4.3) — single marker, both runtime functions in the same chunk
   // range; see `runtime-chunks.ts:CHUNK_MARKERS.prefetch`.
-  if (ctx.hasPrefetchableLinks) {
+  if (ctx.emitPerRoute && ctx.hasPrefetchableLinks) {
     chunks.add("prefetch");
   }
 

@@ -2798,6 +2798,8 @@ export function runCG(input: CgInput): CgOutput {
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
         usedRuntimeChunks: new Set(['core', 'scope']),
+        // S461 — the route-splitter-only runtime chunks key on this (emit-client.ts).
+        emitPerRoute: emitPerRoute && !!reachabilityRecordInput,
         // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
         // discriminate cross-file engine mount sites from local components / HTML.
         exportRegistry: exportRegistryInput,
