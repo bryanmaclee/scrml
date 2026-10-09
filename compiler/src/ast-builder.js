@@ -5583,6 +5583,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * parsed to its own ExprNode. A spread argument (`...@items`, the OPERATOR
    * `...` leading the argument) becomes a `spread` ExprNode around its operand.
    *
+   * A MARKUP VALUE argument (`push(<li>Hello, ${@who}</li>)`, §1.4 / §7.4) is
+   * ATOMIC: from its opening tag to its matching close, every token is markup
+   * content, so a `,` `(` `)` in its TEXT is never a delimiter. The element
+   * extent is tracked on tokens with collectExpr's ELEMENT-NESTING scheme:
+   * `<` IDENT/KEYWORD opens an element (outside markup only when the previous
+   * token of the argument does not end a value, the `a < b` guard), `</`
+   * closes one (its `>` ends the markup), `/>` self-closes, and a void element
+   * (`<br>`) closes at its own `>`. A `${…}` inside markup is ONE BLOCK_REF
+   * token, so its commas are never seen here. The markup tokens are rejoined
+   * by source adjacency (`joinWithNewlines` with spans) so the text stays as
+   * written for `parseExprWithMarkupValues`.
+   *
    * (s461 — this replaces a collector that joined every token's text and parsed
    * the WHOLE list as ONE expression: a JS SequenceExpression whose value is the
    * last argument, so `@ls.splice(0, 0, @p)` lowered to `splice((0, 0, p))` and
@@ -5594,31 +5606,82 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * text joined by `, ` (the legacy string mirror).
    */
   function collectReactiveArrayMutationArgs() {
+    // Each group is one argument: `{ toks, markup }`, `markup[i]` true when
+    // `toks[i]` is inside a markup element (its tag tokens included).
     const groups = [];
-    let cur = [];
+    let cur = { toks: [], markup: [] };
     let depth = 0;
+    // Markup element tracking (collectExpr's element-nesting scheme).
+    let angleDepth = 0;          // open elements
+    let pendingVoidClose = false; // the next `>` closes a void element
+    let pendingCloseGt = false;   // the outermost element closed; its `>` is next
+    const isPunct = (tok, text) => !!tok && tok.kind === "PUNCT" && tok.text === text;
+    const endsValue = (tok) => !!tok && (
+      tok.kind === "IDENT" || tok.kind === "AT_IDENT" || tok.kind === "NUMBER" || tok.kind === "STRING" ||
+      isPunct(tok, ")") || isPunct(tok, "]"));
     while (peek().kind !== "EOF") {
-      const t = consume();
-      if (t.kind === "COMMENT") continue;
-      if (t.kind !== "STRING" && typeof t.text === "string" && t.text.trim() === "") continue;
-      if (t.kind === "PUNCT") {
-        if (t.text === ")" && depth === 0) break;
+      const t = peek();
+      if (t.kind === "COMMENT") { consume(); continue; }
+      if (t.kind !== "STRING" && typeof t.text === "string" && t.text.trim() === "") { consume(); continue; }
+      const next = peek(1);
+      const prevInArg = cur.toks.length > 0 ? cur.toks[cur.toks.length - 1] : null;
+      let inMarkup = angleDepth > 0 || pendingCloseGt;
+      if (isPunct(t, "<") && next && (next.kind === "IDENT" || next.kind === "KEYWORD")
+          && (angleDepth > 0 || !endsValue(prevInArg))) {
+        // An element opens (a child element when already inside markup).
+        angleDepth++;
+        inMarkup = true;
+        if (next.kind === "IDENT" && HTML_VOID_ELEMENTS.has(next.text.toLowerCase())) pendingVoidClose = true;
+      } else if (angleDepth > 0) {
+        if (isPunct(t, "<") && isPunct(next, "/")) {
+          // `</tag>` — the element closes; the outermost one ends at this `>`.
+          angleDepth--;
+          if (angleDepth === 0) pendingCloseGt = true;
+        } else if (isPunct(t, "/") && isPunct(next, ">") && !isPunct(prevInArg, "<")) {
+          // `<tag/>` self-close.
+          angleDepth--;
+          pendingVoidClose = false;
+          if (angleDepth === 0) pendingCloseGt = true;
+        } else if (pendingVoidClose && isPunct(t, ">")) {
+          // `<br>` — a void element closes at its own `>`.
+          angleDepth--;
+          pendingVoidClose = false;
+        }
+      } else if (pendingCloseGt && isPunct(t, ">")) {
+        pendingCloseGt = false;
+      } else if (t.kind === "PUNCT") {
+        if (t.text === ")" && depth === 0) { consume(); break; }
         if (t.text === "(" || t.text === "[" || t.text === "{") depth++;
         else if (t.text === ")" || t.text === "]" || t.text === "}") depth--;
-        else if (t.text === "," && depth === 0) { groups.push(cur); cur = []; continue; }
+        else if (t.text === "," && depth === 0) {
+          consume();
+          groups.push(cur);
+          cur = { toks: [], markup: [] };
+          continue;
+        }
       }
-      cur.push(t);
+      consume();
+      cur.toks.push(t);
+      cur.markup.push(inMarkup);
     }
     groups.push(cur);
     const texts = [];
     const argExprs = [];
-    for (const toks of groups) {
+    for (const group of groups) {
       // An empty group is the slot after a trailing comma (`push(a, )`) or the
       // whole list of a no-argument call (`pop()`): it is not an argument.
+      const toks = group.toks;
       if (toks.length === 0) continue;
       const isSpread = toks[0].kind === "OPERATOR" && toks[0].text === "...";
-      const operand = isSpread ? toks.slice(1) : toks;
-      const operandText = operand.map(typeTokenText).join(" ");
+      const from = isSpread ? 1 : 0;
+      const operand = toks.slice(from);
+      // Markup tokens that touch in the source rejoin with no separator (the
+      // text stays as written); everything else joins with one space.
+      const operandText = joinWithNewlines(
+        operand.map(typeTokenText),
+        operand.map(() => 0),
+        operand.map((tok, i) => (group.markup[from + i] && tok.span ? tok.span : null)),
+      );
       const start = operand.length > 0 ? (operand[0].span?.start ?? 0) : (toks[0].span?.start ?? 0);
       const operandExpr = safeParseExprToNode(operandText, start);
       texts.push(isSpread ? "..." + operandText : operandText);

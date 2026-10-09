@@ -355,8 +355,60 @@ describe("F — string arguments keep their quotes (no E-SCOPE-001, no rewrite i
     expect(out.errors).toEqual([]);
   });
 
-  test("a genuinely undeclared name in a multi-arg list is still E-SCOPE-001", () => {
+  // NEW in s461: base never checked a multi-argument list (it was an opaque
+  // escape-hatch), so this compiled clean there and threw ReferenceError at run time.
+  test("an undeclared name in a multi-arg list is now E-SCOPE-001 (base compiled it silently)", () => {
     const out = compileSource(fnPage("@ls.splice(0, 0, nope)"), "f3");
     expect(out.errors.map((e) => e.code)).toContain("E-SCOPE-001");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G — markup-value arguments are atomic (s461 review B1)
+// ---------------------------------------------------------------------------
+
+/** A page whose `go()` runs `stmt`; `#n` = `@ls.length`, `#list` = each element's text, `|`-joined. */
+const markupPage = (stmt) => `\${
+    <ls> = []
+    <who> = "Ann"
+    <a> = 1
+    <b> = 2
+    function join2(x, y) { return String(x) + "-" + String(y) }
+    function go() { ${stmt} }
+}
+<button id="go" onclick=go()>go</button>
+<p id="n">\${@ls.length}</p>
+<p id="list">\${@ls.map((e) => typeof e == "string" ? e : e.textContent).join("|")}</p>
+`;
+
+describe("G — a markup value is ONE argument: its text's `,` `(` `)` are content", () => {
+  const cases = [
+    { name: "m01 `push(<li>x, y</li>)`, a comma in the markup text", stmt: "@ls.push(<li>x, y</li>)", n: 1, text: "x, y", args: 1 },
+    { name: "m05 `push(<li>Hello, ${@who}</li>)`, comma text + an interpolation", stmt: "@ls.push(<li>Hello, ${@who}</li>)", n: 1, text: "Hello,Ann", args: 1 },
+    { name: "m03 `push(<li class=\"q\">x (y</li>)`, an unbalanced `(` in the text (pinned: base pushed nothing)", stmt: '@ls.push(<li class="q">x (y</li>)', n: 1, text: "x (y", args: 1 },
+    { name: "an unbalanced `)` in the text", stmt: "@ls.push(<li>x) y</li>)", n: 1, text: "x) y", args: 1 },
+    { name: "nested markup with commas at every level", stmt: "@ls.push(<li><b>a, b</b>, <i>c, d</i></li>)", n: 1, text: "a, b,c, d", args: 1 },
+    { name: "an interpolation `${…}` whose own call has a comma", stmt: "@ls.push(<li>v ${join2(@a, @b)}</li>)", n: 1, text: "v1-2", args: 1 },
+    { name: "two markup arguments", stmt: "@ls.push(<li>a, 1</li>, <li>b, 2</li>)", n: 2, text: "a, 1|b, 2", args: 2 },
+    // (A bare void `<br>` as a value is E-CODEGEN-INVALID-LOGIC on base too — markup-value parser, not this list.)
+    { name: "two self-closed elements as two arguments", stmt: "@ls.push(<hr/>, <br/>)", n: 2, text: "|", args: 2 },
+    { name: "markup then a cell read, in splice", stmt: "@ls.splice(0, 0, <li>x, y</li>, @who)", n: 2, text: "x, y|Ann", args: 4 },
+  ];
+  for (const { name, stmt, n, text, args } of cases) {
+    test(name, async () => {
+      const [node] = mutationNodes(markupPage(stmt));
+      expect(node.argExprs).toHaveLength(args);
+      const p = await boot(markupPage(stmt), "g");
+      await p.click("#go");
+      expect(p.text("#n")).toBe(String(n));
+      expect(p.text("#list")).toBe(text);
+      expect(p.pageErrors).toEqual([]);
+    });
+  }
+
+  test("`a < b` is still a comparison, not markup", async () => {
+    const p = await boot(fnPage("@ls.push(@k < @p, @p > @k)"), "g-lt");
+    await p.click("#go");
+    expect(JSON.parse(p.text("#out"))).toEqual([1, 2, true, true]);
   });
 });
