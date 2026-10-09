@@ -23917,7 +23917,7 @@ Agent-executed on origin/main (S459 D1 round-8 agent).
 
 > **S460 filings: dpa-070 §11 (one presence test) and the S460 copy-in differential review.**
 >
-> - **`<dpa070>`** below is the dPA's fixture tree, `/tmp/claude-1000/-home-bryan-maclee-scrmlMaster-flogence/de68c80f-4a67-4e57-a650-78604caf01f2/scratchpad/dpa-070/`. It sits in a session scratchpad under `/tmp`, so it is **volatile**. Each entry quotes the shape so it can be re-derived. The path is not `scrml-support/docs/deep-dives/dpa-070/`, which does not exist.
+> - **`<dpa070>`** below is the dPA's fixture tree, preserved S460 at `scrml-support/docs/deep-dives/dpa-070/` (scrml-support `927e2fa`; the small fixtures, probes and dossier — the dPA's scratch copy of the repo and its build output were not kept). Each entry also quotes its shape so it can be re-derived.
 > - The dPA ran on main `d3f5d4239`. The cited line numbers were spot-checked on `b4b94f3d6` and all still match: emit-logic.ts:3943; type-system.ts:29529, 31144 and 20306; tokenizer.ts:106; analyze.scrml:9023-9038.
 > - Fixture verdicts are the dPA's (dossier §4). They were not re-run here.
 > - The DD is `scrml-support/docs/deep-dives/one-presence-test-dpa-070-2026-10-08.md`. It is advisory and not ratified, but these defects were measured, not proposed.
