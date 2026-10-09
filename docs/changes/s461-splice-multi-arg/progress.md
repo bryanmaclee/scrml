@@ -59,3 +59,47 @@
   - NOTE for landing: origin/main moved to afe2e92 (#1379) during this run. It touches type-system.ts (a different
     region) and the generated docs (FACTS.md, bootstrap-conformance.md, known-gaps gap-counts). Regenerate those
     by script after the file-delta landing.
+
+## Fix round 1 (adversarial review on landed merge 068417d)
+- 2026-10-09T21:37:55Z B1 (blocking) FIXED (a36ed7c). collectReactiveArrayMutationArgs tracked nesting only on
+  `(`/`[`/`{`, so a `,` in the TEXT of a markup-value argument split the list: `push(<li>Hello, ${@who}</li>)` (m05)
+  and `push(<li>x, y</li>)` (m01) failed E-CODEGEN-INVALID-LOGIC. Root fix on TOKENS: the collector tracks the markup
+  element extent with collectExpr's element-nesting scheme:
+  - `<` IDENT/KEYWORD opens an element; outside markup only when the argument's previous token does not end a value,
+    which is the `a < b` guard.
+  - `</` closes one; the outermost one ends at its `>`.
+  - `/>` self-closes; a void element closes at its own `>`.
+  Inside that extent no `,` `(` `)` is a delimiter. A `${…}` inside markup is already one BLOCK_REF token, so its
+  commas are never seen. Markup tokens are rejoined by source-span adjacency (`joinWithNewlines`), so the text stays as
+  written. There is no parse-retry heuristic.
+  Tests (section G of the s461 test file): m01, m05, m03 (pinned; base pushed nothing), `x) y` in the text (the
+  reviewer's m04: E-PARSE-001 on base, now right), nested markup, `${join2(@a, @b)}` inside markup, two markup args,
+  `<hr/>, <br/>`, markup + a cell read in splice, and `a < b` still a comparison.
+  Observed and left alone, identical on base:
+  - The markup-value lowering trims a text node's trailing space before an interpolation: `<li>Hello, ${@who}</li>`
+    gives "Hello," + "Ann" on both base and branch.
+  - A bare void `<br>` as a value is E-CODEGEN-INVALID-LOGIC on base too.
+  - `const el = <li>Hello, ${@who}</li>` inside a function body is E-CODEGEN-INVALID-LOGIC on base too.
+- N2 FIXED (00987a5).
+  - expr-parity.test.js has a list-aware `argExprs`/`args` pair. Each argument ExprNode is emitted, and the joined list
+    must parse (acorn) as a call with EXACTLY that many arguments. The examples/samples corpus holds no
+    multi-argument mutation, so an inline fixture drives it (16 argument nodes over 7 mutations).
+  - I confirmed it bites: a local break of the spread emit (an extra `, 0`) turned it red with "emitted 4 argument(s)
+    for 3 ExprNode(s)". The change was restored.
+  - at-name-resolution.test.js: both EXPR_FIELDS walkers list `argExprs` and flatten lists. New §B3.1b checks that
+    every `@cell` argument of `@ls.splice(0, 0, @pv, @qv)` resolves.
+- N3 DONE. The E-SCOPE-001 test is renamed "…is now E-SCOPE-001 (base compiled it silently)".
+  NEWLY-REJECTING CLASS: a multi-argument mutation list is now checked in full, exactly as a single argument already
+  was on base. Probed on base d99dad0 vs branch:
+  | statement                  | base      | branch          |
+  | `@ls.splice(0, 0, nope)`   | compiles  | E-SCOPE-001     |
+  | `@ls.splice(0, 0, null)`   | compiles  | E-SYNTAX-042    |
+  | `@ls.push(1, @dbl = 5)`    | compiles  | E-DERIVED-WRITE |
+  The single-argument twins (`push(nope)`, `push(null)`, `push(@dbl = 5)`) already fired these on base.
+  Corpus count: 0 of 2620 corpus files newly reject (see the differential below); the one diagnostic change is
+  reactive/mutating-method-string-arg going from E-SCOPE-001 to clean.
+- N1 DEFERRED (not widened; the PA files the gap). An escape-hatch (unparseable) argument still takes the TEXT-level
+  rewrite, so `@ls.push((() => { const s = "use fn here"; return s })())` now emits "use function here" (verified on
+  the branch). Base failed loudly there because the quotes were already lost. The same corruption happens on base
+  for a `const r = …` initialiser, so the root is the escape-hatch text rewrite, not this list.
+
