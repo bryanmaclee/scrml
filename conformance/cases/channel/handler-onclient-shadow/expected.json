@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-shadow",
+  "description": "§38.10.2 — an `onclient:*` binding name that names a declaration in scope at the `<channel>` (here the state cell `<x>`) fires E-CHANNEL-HANDLER-SHADOW. Before S460 `onclient:open=onOpen(x)` compiled to `(x) => { onOpen(x) }`: the handler received the WS event, not the declared `x`.",
+  "language-version": "1.0",
+  "spec": "§38.10.2",
+  "source-test": "compiler/tests/unit/channel-handler-binding-shadow.test.js",
+  "rationale": "§38.10.2 (S458 ruling item 1): the binding name of an `onclient:*` call SHALL NOT name a declaration in scope at the channel; such a call SHALL emit E-CHANNEL-HANDLER-SHADOW.",
+  "expect": {
+    "codes": ["E-CHANNEL-HANDLER-SHADOW"],
+    "severity": { "E-CHANNEL-HANDLER-SHADOW": "error" }
+  }
+}

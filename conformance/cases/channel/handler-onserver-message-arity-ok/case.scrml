@@ -1,0 +1,12 @@
+<program>
+
+  <channel name="chat" onserver:message=handleMessage(msg)>
+    <count> = 0
+    function handleMessage(msg) {
+      broadcast({ body: msg })
+    }
+  </channel>
+
+  <p>${@count}</p>
+
+</program>

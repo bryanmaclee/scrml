@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-arity-string-comma-ok",
+  "description": "§38.10.2 clean neg — `onclient:open=onOpen('a,b')` is ONE argument: the comma is inside a string literal. The argument list is read as a parsed call, so E-CHANNEL-005 does not fire.",
+  "language-version": "1.0",
+  "spec": "§38.10.2",
+  "source-test": "compiler/tests/unit/channel-handler-binding-arity.test.js",
+  "rationale": "§38.10.2: a comma inside a string literal does not separate arguments for E-CHANNEL-005.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-005"]
+  }
+}
