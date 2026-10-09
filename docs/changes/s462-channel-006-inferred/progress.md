@@ -1,2 +1,3 @@
 2026-10-09T16:03:01-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aa895def1d34d27b2
 2026-10-09T16:06:52-06:00 RI onclient T7 exemption removed; TS E-CHANNEL-006 reads routeMap boundary; describeServerTrigger moved to escalation-reason-text.ts; probes t7/t1/t3 fire, ok compiles
+2026-10-09T16:32:06-06:00 message names trigger (T1/T2/T3/T5/T7) + two fixes; T5 gets its own remedy; tried treating onclient attr as T5 client caller -> routes into open g-5c placement fork (server calls undefined ambient fn), REVERTED; unit tests channel-onclient-inferred-server.test.js (13) pass

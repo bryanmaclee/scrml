@@ -15821,12 +15821,27 @@ function annotateNodes(
         `(§38.10) — it SHALL NOT be a server function. Declare \`${callee}\` a plain \`${plainKw}\`; ` +
         `if a server round-trip is wanted, call a server function from inside it.`;
     } else {
-      const why = describeServerTrigger(inferred);
-      message =
-        `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but \`${callee}\`${where} ` +
-        `is placed on the server (§12.2): its body uses ${why}` +
-        `${declared ? `, and it is declared \`${keyword}\`` : ""}. An \`onclient:*\` handler runs in the ` +
-        `browser, on the client-side WebSocket (§38.10) — it SHALL NOT run on the server. ${fixes}`;
+      // §12.2 Trigger 5 places a function with only server callers; the body
+      // itself may need nothing from the server, so the remedy differs.
+      const bodyReasons = inferred.filter(
+        (r) => !(r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation"),
+      );
+      const kwNote = declared ? ` It is also declared \`${keyword}\`.` : "";
+      const head =
+        `E-CHANNEL-006: \`${attrName}\` names \`${callee}\` as its handler, but §12.2 places \`${callee}\`${where} ` +
+        `on the server`;
+      const tail =
+        ` An \`onclient:*\` handler runs in the browser, on the client-side WebSocket (§38.10) — it SHALL NOT ` +
+        `run on the server.`;
+      if (bodyReasons.length > 0) {
+        message = `${head} (trigger: ${describeServerTrigger(bodyReasons)}).${kwNote}${tail} ${fixes}`;
+      } else {
+        message =
+          `${head} (trigger: every function that calls it is server-side — §12.2 Trigger 5, ` +
+          `caller-context propagation).${kwNote}${tail} Do not call \`${callee}\` from server code — the \`${attrName}\` ` +
+          `attribute already calls it; give the server function its own logic, or move the shared server work ` +
+          `into an \`onserver:*\` handler (§38.6.1).`;
+      }
     }
     errors.push(new TSError("E-CHANNEL-006", message, span));
   }

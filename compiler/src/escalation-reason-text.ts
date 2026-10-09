@@ -35,7 +35,9 @@ export function describeServerTrigger(reasons: readonly EscalationReason[]): str
     case "explicit-annotation":
       return "the `server` keyword";
     case "channel-broadcast":
-      return `a channel \`broadcast()\`/\`disconnect()\` (${first.detail})`;
+      // `detail` is "broadcast() call" / "disconnect() call" (route-inference.ts
+      // detectChannelBroadcastReason).
+      return `a call to the channel built-in \`${first.detail.replace(/ call$/, "")}\` (§38.6)`;
     case "middleware-handle":
       return "the reserved middleware name `handle()`";
     case "channel-ws-handler":
