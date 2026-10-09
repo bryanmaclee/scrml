@@ -223,3 +223,83 @@ describe("(b) timers + animation ship by trigger, not through the scope edge", (
     expect(live.size).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// (c) the §51.12 / §51.14 machine helpers leave 'core' for the 'machine' chunk
+// ---------------------------------------------------------------------------
+
+const ENGINE_REPLAY = `<program>
+\${
+  type S:enum = { A, B }
+  @order: M = S.A
+  @log = []
+  function go() { @order = S.B }
+  function back() { replay(@order, @log) }
+}
+< engine name=M for=S>
+  .A => .B
+  audit @log
+</>
+<button onclick=go()>go</button>
+<button onclick=back()>back</button>
+<p>\${@order}</p>
+</program>
+`;
+
+describe("(c) machine helpers ship only where something names them", () => {
+  test("'core' no longer defines them; 'machine' does", () => {
+    for (const name of ["_scrml_machine_timers", "_scrml_machine_clear_timer", "_scrml_machine_arm_timer", "_scrml_machine_arm_initial", "_scrml_replay"]) {
+      expect(topLevelDecls(RUNTIME_CHUNKS.core).has(name)).toBe(false);
+      expect(topLevelDecls(RUNTIME_CHUNKS.machine).has(name)).toBe(true);
+    }
+  });
+
+  test("no core statement references them (the move is not a dangling edge)", () => {
+    const refs = referencedNames(RUNTIME_CHUNKS.core);
+    for (const name of topLevelDecls(RUNTIME_CHUNKS.machine)) expect({ name, inCore: refs.has(name) }).toEqual({ name, inCore: false });
+  });
+
+  test("the engine chunk's own calls into them are covered by an edge", () => {
+    const refs = referencedNames(RUNTIME_CHUNKS.engine);
+    const used = [...topLevelDecls(RUNTIME_CHUNKS.machine)].filter((n) => refs.has(n));
+    expect(used.length).toBeGreaterThan(0);
+    expect(applyChunkDependencies(new Set(["engine"])).has("machine")).toBe(true);
+  });
+
+  test("pages without a machine/replay ship without the chunk", () => {
+    for (const src of [COUNTER, SHELL]) {
+      const { runtime } = compileSource(src);
+      expect(runtime).not.toContain("function _scrml_replay");
+      expect(runtime).not.toContain("_scrml_machine_timers");
+    }
+  });
+
+  test("a replay() page ships it, and every machine helper it names is defined", () => {
+    const built = compileSource(ENGINE_REPLAY);
+    expect(built.client).toContain("_scrml_replay(");
+    expect(built.runtime).toContain("function _scrml_replay");
+    expectNoDanglingFrom(["machine", "engine"], built);
+  });
+
+  test("an <onTimeout> engine ships it through the engine → machine edge", () => {
+    // The client names only `_scrml_engine_*` helpers; it is the ENGINE chunk that calls
+    // `_scrml_machine_arm_timer`. Executed end to end by engine-ontimeout-end-to-end.test.js,
+    // which runs the SHIPPED runtime.
+    const built = compileSource(`<program>
+\${
+  type Phase:enum = { Loading, Done, TimedOut }
+}
+<engine for=Phase initial=.Loading>
+  <Loading rule=(.Done | .TimedOut)>
+    <onTimeout after=30s to=.TimedOut/>
+  </>
+  <Done></>
+  <TimedOut></>
+</>
+</program>`);
+    expect(built.runtime).toContain("function _scrml_engine_arm_state_timers");
+    expect(built.runtime).toContain("function _scrml_machine_arm_timer");
+    expect(built.runtime).toContain("function _scrml_machine_clear_timer");
+    expectNoDanglingFrom(["machine", "engine"], built);
+  });
+});

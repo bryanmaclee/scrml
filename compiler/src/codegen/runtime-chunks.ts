@@ -18,6 +18,10 @@
  *
  * Chunk → runtime functions:
  *   core          _scrml_state, _scrml_subscribers, _scrml_reactive_get/set/subscribe/propagate_dirty
+ *   machine       _scrml_machine_timers, _scrml_machine_clear_timer/arm_timer/arm_initial (§51.12),
+ *                 _scrml_replay (§51.14). In 'core' until S461; no core function calls them.
+ *                 Activated by the post-emit `_scrml_machine_` / `_scrml_replay(` gates
+ *                 (emit-client.ts) and by the engine → machine edge (<onTimeout> helpers).
  *   wire          _scrml_wire_decode (§57 dual-decoder, v0.3.x SPA tree-shake Phase B 3.2).
  *                 Only referenced by emitted server-fn fetch stubs
  *                 (`emit-functions.ts` + `atom-emitter.ts`). Tree-shaken when
@@ -133,6 +137,7 @@ import { SCRML_RUNTIME } from "../runtime-template.js";
 
 export const RUNTIME_CHUNK_ORDER = [
   'core',
+  'machine',
   'wire',
   'reset',
   'validators',
@@ -259,6 +264,8 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // SPA-shape compile units with zero server-fns ship without it.
   // Activated by `detectRuntimeChunks` when ANY file in the compile unit
   // contains a server `function-decl` OR a `use foreign:` use-decl.
+  // S461 — the §51.12 / §51.14 machine helpers, moved out of 'core'.
+  machine:        "§51.12 / §51.14 machine temporal-transition runtime (chunk: 'machine')",
   wire:           "§57 Wire Format dual-decoder (chunk: 'wire')",
   reset:          "§6.8 reset+default runtime (chunk: 'reset')",
   validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
@@ -545,6 +552,10 @@ export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkNa
   reset: ['errors'],
   ssr: ['errors'],
   urlguard: ['errors'],
+  // S461 — the engine <onTimeout> helpers (`_scrml_engine_arm_state_timers`, …) arm and clear
+  // through `_scrml_machine_arm_timer` / `_scrml_machine_clear_timer`, which moved out of the
+  // always-included 'core' into 'machine'.
+  engine: ['machine'],
 };
 
 // Pulls all transitive chunk dependencies into the set in place. Returns

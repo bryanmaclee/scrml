@@ -3126,6 +3126,12 @@ export function generateClientJs(ctx: CompileContext): string {
     ["animationFrame", "animation"],
     ["_scrml_animation_frame(", "animation"],
     ["_scrml_cancel_animation_frames(", "animation"],
+    // S461 — the §51.12 / §51.14 machine helpers left 'core' for the 'machine' chunk. Every
+    // emitter of them (emit-logic `<machine>` arming, emit-expr / rewrite `replay(...)`) writes
+    // the helper name into the client text, so the text is the trigger. (The 'engine' chunk's
+    // own calls are covered by the engine → machine edge.)
+    ["_scrml_machine_", "machine"],
+    ["_scrml_replay(", "machine"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;
