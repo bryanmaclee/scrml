@@ -102,10 +102,11 @@ describe("A1a Step 10 — mutation shape verification (MemberCall / MemberAssign
     expect(node.kind).toBe("reactive-array-mutation");
     expect(node.target).toBe("arr");
     expect(node.method).toBe("push");
-    expect(node.argsExpr).toBeTruthy();
-    // argsExpr should preserve the single argument
-    expect(node.argsExpr.kind).toBe("lit");
-    expect(node.argsExpr.value).toBe(1);
+    // argExprs carries one ExprNode per argument (s461, §6.5.1)
+    expect(Array.isArray(node.argExprs)).toBe(true);
+    expect(node.argExprs.length).toBe(1);
+    expect(node.argExprs[0].kind).toBe("lit");
+    expect(node.argExprs[0].value).toBe(1);
   });
 
   // ---------------------------------------------------------------------------

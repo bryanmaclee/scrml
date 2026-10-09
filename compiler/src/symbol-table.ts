@@ -2244,7 +2244,27 @@ const B3_EXPR_FIELDS: readonly string[] = [
   "valueExpr",
   "rhsExpr",
   "defaultExpr",
+  // s461 — an ExprNode LIST: `reactive-array-mutation` carries one node per
+  // argument (§6.5.1). `b3ExprRoots` flattens it.
+  "argExprs",
 ];
+
+/**
+ * Every ExprNode root a node carries in a `B3_EXPR_FIELDS` field. A list-valued
+ * field (`argExprs`) contributes each of its elements.
+ */
+function b3ExprRoots(n: any): any[] {
+  const roots: any[] = [];
+  for (const f of B3_EXPR_FIELDS) {
+    const v = n[f];
+    if (Array.isArray(v)) {
+      for (const e of v) if (e && typeof e === "object") roots.push(e);
+    } else if (v && typeof v === "object") {
+      roots.push(v);
+    }
+  }
+  return roots;
+}
 
 /**
  * Resolve every `@name` IdentExpr in an ExprNode subtree, stamp
@@ -2442,11 +2462,8 @@ function walkResolveAtNames(
     const readPos = nodeReadPos(anyN, parentReadPos);
 
     // Resolve any ExprNode payloads this node carries.
-    for (const f of B3_EXPR_FIELDS) {
-      const v = anyN[f];
-      if (v && typeof v === "object") {
-        resolveAtNameOnExprNode(v, currentScope, errors, readPos);
-      }
+    for (const v of b3ExprRoots(anyN)) {
+      resolveAtNameOnExprNode(v, currentScope, errors, readPos);
     }
     // Special case for c-style for: `cStyleParts: { initExpr, condExpr,
     // updateExpr }`. Each sub-field carries an ExprNode root.
@@ -4030,12 +4047,12 @@ function walkDerivedValueMutate(
     // Specialized-lowering kinds (case 1 single-segment, case 2 plain `=`).
     if (kind === "reactive-array-mutation") {
       checkReactiveArrayMutation(anyN, currentScope, errors, fileFromScope);
-      // No body recursion — these are leaf statement nodes. argsExpr may
-      // contain nested ExprNodes (e.g., `@a.push(@b.push(1))`); walk them
-      // for nested mutations.
-      if (anyN.argsExpr) {
+      // No body recursion — these are leaf statement nodes. The argument
+      // ExprNodes (`argExprs`, one per argument) may contain nested mutations
+      // (e.g., `@a.push(@b.push(1))`); walk them.
+      for (const v of b3ExprRoots(anyN)) {
         checkExprNodeForMutations(
-          anyN.argsExpr,
+          v,
           currentScope,
           errors,
           spanFromMutationNode(anyN, fileFromScope),
@@ -4059,11 +4076,8 @@ function walkDerivedValueMutate(
     // Generic ExprNode-bearing nodes — walk all carried ExprNodes for
     // embedded mutations. Mirrors B3_EXPR_FIELDS coverage.
     const containerSpan = spanFromMutationNode(anyN, fileFromScope);
-    for (const f of B3_EXPR_FIELDS) {
-      const v = anyN[f];
-      if (v && typeof v === "object") {
-        checkExprNodeForMutations(v, currentScope, errors, containerSpan);
-      }
+    for (const v of b3ExprRoots(anyN)) {
+      checkExprNodeForMutations(v, currentScope, errors, containerSpan);
     }
     if (anyN.cStyleParts && typeof anyN.cStyleParts === "object") {
       for (const f of ["initExpr", "condExpr", "updateExpr"]) {
@@ -9340,13 +9354,10 @@ function walkValidateResetTargets(
 
     // Walk every ExprNode payload this node carries; for each, find any
     // reset-expr nodes nested inside and validate them.
-    for (const f of B3_EXPR_FIELDS) {
-      const v = anyN[f];
-      if (v && typeof v === "object") {
-        forEachResetExprInExprNode(v as ExprNode, (resetNode) => {
-          validateResetExprTarget(resetNode, currentScope, errors, filePath);
-        });
-      }
+    for (const v of b3ExprRoots(anyN)) {
+      forEachResetExprInExprNode(v as ExprNode, (resetNode) => {
+        validateResetExprTarget(resetNode, currentScope, errors, filePath);
+      });
     }
     // c-style for: { initExpr, condExpr, updateExpr }.
     if (anyN.cStyleParts && typeof anyN.cStyleParts === "object") {
@@ -12448,11 +12459,8 @@ function walkPinnedFnForwardRefCheck(
     const readPos = nodeReadPos(anyN, parentReadPos);
 
     // Check ExprNode payloads on this node for pinned-fn forward calls.
-    for (const f of B3_EXPR_FIELDS) {
-      const v = anyN[f];
-      if (v && typeof v === "object") {
-        checkPinnedFnForwardCallsInExpr(v, pinnedFnDecls, errors, readPos, filePath);
-      }
+    for (const v of b3ExprRoots(anyN)) {
+      checkPinnedFnForwardCallsInExpr(v, pinnedFnDecls, errors, readPos, filePath);
     }
     // c-style for parts (initExpr / condExpr / updateExpr) — same shape as PASS 3.
     if (anyN.cStyleParts && typeof anyN.cStyleParts === "object") {
