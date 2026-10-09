@@ -1,0 +1,12 @@
+<program>
+${
+  import { onErr } from './helpers.scrml'
+}
+
+  <channel name="chat" onclient:error=onErr(err)>
+    <count> = 0
+  </channel>
+
+  <p>${@count}</p>
+
+</program>
