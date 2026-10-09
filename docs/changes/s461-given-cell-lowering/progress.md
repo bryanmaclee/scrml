@@ -38,3 +38,12 @@
   - compile-failure SET identical (0 newly failing, 0 newly passing); diagnostic-CODE changes 0; diagnostic-TEXT changes 0.
   - 7640 artifacts compared: 7477 byte-identical, 163 differing — ALL 163 are `*.server.js` differing ONLY in `const _scrml_project_root = "<worktree path>"` (verified by normalising both worktree roots: 163/163 identical after normalisation, 0 real content changes).
   - So: 0 changed artifacts beyond the build-path artifact. Expected: no corpus source outside the 3 new cases contains `given @` (`grep -rlE 'given\s+@'` over the five roots = 0 files).
+
+## Gates
+- `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance` (full, no --bail — --bail stops at the first env-only failure on BOTH sides):
+  - BEFORE (base 5a895f3): 31441 pass / 11 fail / 132 skip / 12 todo (31596 tests). Fails = 10 environment-only (dev-server spawn timeouts ×5, tenant EXECUTED ×3, read-only-file crash recovery, SCRML_HOST bind) + 1 timing flake (S27 §51.11 chained temporal audit).
+  - AFTER (head): 31469 pass / 11 fail — the same 10 environment-only + `defer-binder-completeness` (the new `given-guard.variableIsCell` field needed a classification; added to EXCLUDED as a boolean flag, commit 5e72c7f; file re-run 3/3 pass). Net: +28 passes (25 unit + 3 conformance-bridge cases), 0 new failures.
+- `bun conformance/run.ts`: 1484/1549 pass, 65 xfail, exit 0 (0 FAIL).
+- `bun run types:check`: OK, 184 diagnostics unchanged.
+- browser tier: base 1429 pass / 50 fail, head 1433 pass / 50 fail; the 50 failure NAMES are identical (diffed). `scripts/browser-baseline.ts --check` refuses on a pre-existing parser/harness count disagreement (48 vs 47), unrelated.
+- `bun scripts/facts.ts --check` was STALE (counts) → `--write` (commit fa60be3). `bun scripts/bootstrap-conformance.ts --check` STALE (3 new cases) → `--write` (f4639ff). `regen-spec-index.ts --check` OK (no SPEC edit).
