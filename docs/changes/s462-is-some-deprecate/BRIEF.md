@@ -33,3 +33,17 @@ A sibling agent (`s462-given-presence-deprecate`) is concurrently deprecating in
 
 ## Report
 WORKTREE_PATH · FINAL_SHA · files touched · normative-locus list · `is given` gaps closed · measured corpus count (command + files) · inert proof · locus hypothesis held/refined/wrong · bootstrap disposition · every direction-setting choice (for bryan's veto).
+
+## ADDENDUM (S462, ruling Q6 'a')
+
+ADDED SCOPE for s462-is-some-deprecate: two hand migrations (bryan ruled S462 "a" on impl1-adopt). They are folded into your branch because your corpus migration touches the same example files.
+
+First: append this message verbatim to docs/changes/s462-is-some-deprecate/BRIEF.md under "## ADDENDUM (S462, ruling Q6 'a')" and commit it.
+
+Ruling: impl#1 stays Nominal on the S460 a′ condition rule (a bare optional condition keeps impl#1's JS-truthiness lowering; the bootstrap does typed presence). The 2 sites whose VISIBLE behaviour differs between the two implementations get an explicit condition that means the same on both:
+- examples/23-trucking-dispatch/pages/customer/home.scrml:254 — `if=(l.weight_lbs)`
+- examples/23-trucking-dispatch/pages/customer/loads.scrml:241 — `if=(l.weight_lbs)`
+(`l.weight_lbs` is `int | not` from a nullable SQL column; the load form stores 0 when the field is blank, so today's impl#1 behaviour HIDES "· 0 lbs".)
+PA decision (author intent read from the form default): PRESERVE today's visible behaviour — rewrite each to the explicit form that is true only when the weight is present AND non-zero, e.g. `if=(l.weight_lbs is given && l.weight_lbs > 0)`. Verify that exact form compiles on impl#1 in a markup `if=` (and that the bootstrap accepts it, if the bootstrap compiles these example files), and that the emitted HTML/JS for the page is otherwise unchanged. If `is given && … > 0` does not narrow/compile correctly on impl#1, that is an `is given` gap you are already closing — close it, then do these edits. Report both sites (before/after + proof) in a separate section of your final report.
+
+Address this before completing your current task.
