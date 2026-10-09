@@ -1,7 +1,7 @@
-// given x => narrows T | not to T
+// `if (x is given)` narrows T | not to T (was the S462-deprecated `given x =>`; migrated by `scrml fix`)
 ${
     let name: string | not = "alice"
-    given name => {
+    if (name is given) {
         let _upper = name.toUpperCase()
     }
 }
