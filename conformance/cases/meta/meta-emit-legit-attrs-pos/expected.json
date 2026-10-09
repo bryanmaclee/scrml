@@ -1,0 +1,21 @@
+{
+  "id": "meta-emit-legit-attrs-pos",
+  "description": "§22.4.1 / §22.12 (S459 round 3) positive — the closed attribute list admits ordinary markup in both phases: `class`, `title`, `data-x`, `aria-label`, an `https:` `href`, and SVG `viewBox` pass in compile-time `emit()` output and in runtime `meta.emit` output, and reach the rendered DOM.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Attributes — a CLOSED list*: global, data-*, aria-*, per-element HTML (href on <a>, URL scheme-judged) and SVG presentation names are admitted. (ruling:user-voice-scrml.md S458 \"a\" + PA addendum 3 (S459 review of a7480c675))",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [
+      { "selector": "#ct", "attr": { "class": "c", "title": "t", "data-x": "1", "aria-label": "l" } },
+      { "selector": "#ca", "attr": { "href": "https://example.com/" } },
+      { "selector": "#cs", "count": 1 },
+      { "selector": "#rt", "attr": { "class": "c", "title": "t", "data-x": "1", "aria-label": "l" } },
+      { "selector": "#ra", "attr": { "href": "https://example.com/" } },
+      { "selector": "#rs", "count": 1 }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "meta-emit-url-foreign-neg",
+  "description": "§22.4.1 (S459 round 4 F4) — `xlink:href` and a MathML `href` (leading space) with `javascript:` in compile-time `emit()` output are E-META-EVAL-002.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1 + §22.12 *URL attributes*: the URL-valued set is element-insensitive; the reader strips leading spaces as the URL parser does. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [
+      "E-META-EVAL-002"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-META-EVAL-002": "error"
+    }
+  }
+}

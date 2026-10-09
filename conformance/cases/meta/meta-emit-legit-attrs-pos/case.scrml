@@ -1,0 +1,9 @@
+<program>
+<label> = "hi"
+^{ emit("<p id=\"ct\" class=\"c\" title=\"t\" data-x=\"1\" aria-label=\"l\"><a id=\"ca\" href=\"https://example.com/\">l</a></p><svg id=\"cs\" viewBox=\"0 0 2 2\"><circle r=\"1\"></circle></svg>") }
+<div id="host">
+^{
+  meta.emit("<p id=\"rt\" class=\"c\" title=\"t\" data-x=\"1\" aria-label=\"l\">" + meta.get("label") + "<a id=\"ra\" href=\"https://example.com/\">l</a></p><svg id=\"rs\" viewBox=\"0 0 2 2\"><circle r=\"1\"></circle></svg>")
+}
+</div>
+</program>

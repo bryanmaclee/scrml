@@ -1,0 +1,13 @@
+{
+  "id": "meta-emit-closed-attr-list-neg",
+  "description": "§22.4.1 (S459 round 3) — compile-time `emit()` output is held to the same CLOSED attribute list as runtime `meta.emit`: `online=` is on no list, so it is E-META-EVAL-002.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.4.1",
+  "spec": "§22.4.1",
+  "rationale": "§22.4.1: an attribute in `emit()` output SHALL carry a name on the closed attribute list of §22.12; any other name is `E-META-EVAL-002`. (ruling:user-voice-scrml.md S458 \"a\" + PA addendum 3 (S459 review of a7480c675))",
+  "expect": {
+    "codes": ["E-META-EVAL-002"],
+    "notCodes": [],
+    "severity": { "E-META-EVAL-002": "error" }
+  }
+}

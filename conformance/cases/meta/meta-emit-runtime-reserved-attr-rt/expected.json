@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-runtime-reserved-attr-rt",
+  "description": "§22.12 \"Runtime `meta.emit` output is gated\" (S458 \"your recs on all four\", item 3) — a runtime `meta.emit` string carrying a `data-scrml-*` attribute (the compiler-owned namespace) is refused at run time: nothing is written, so no `<p>` appears in the host. The compile is clean — this is a runtime rule with no code.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 rule, Compiler-owned names: \"No attribute whose name, as parsed (and lowercased), begins with `data-scrml-`\"; on a violation the runtime SHALL \"write NOTHING\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#host p", "count": 0 }]
+  }
+}

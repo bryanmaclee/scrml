@@ -191,11 +191,11 @@ const COMPUTED_KEY_WHAT =
  * never the internal node-kind name (S458 final F6).
  */
 const SOURCE_FORM: Readonly<Record<string, string>> = {
-  "tilde-decl": "reassigning a binding with a plain `=` (`x = …`) — use a compound assignment (`x += …`) or declare a new `const`",
-  "reactive-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
-  "state-decl": "a reactive cell declaration (`<x> = …`) — declare cells outside the ^{} block",
-  "type-decl": "a type declaration — declare types outside the ^{} block",
-  "import-decl": "an import — import at file scope",
+  "tilde-decl": "reassigning a binding with a plain `=` (`x = …`)",
+  "reactive-decl": "a reactive cell declaration (`<x> = …`)",
+  "state-decl": "a reactive cell declaration (`<x> = …`)",
+  "type-decl": "a type declaration",
+  "import-decl": "an import",
   "export-decl": "an export",
   "try-stmt": "`try` / `catch`",
   "throw-stmt": "`throw`",
@@ -215,12 +215,30 @@ const SOURCE_FORM: Readonly<Record<string, string>> = {
   DebuggerStatement: "`debugger`",
 };
 
+/**
+ * What to write instead, for a form whose refusal has one — a separate sentence of the message,
+ * never spliced into the form's description (S459 addendum 4: "… or declare a new `const` is not
+ * admitted …" read the advice as the thing refused).
+ */
+const SOURCE_FORM_HINT: Readonly<Record<string, string>> = {
+  "tilde-decl": "Use a compound assignment (`x += …`) or declare a new `const`.",
+  "reactive-decl": "Declare cells outside the ^{} block.",
+  "state-decl": "Declare cells outside the ^{} block.",
+  "type-decl": "Declare types outside the ^{} block.",
+  "import-decl": "Import at file scope.",
+};
+
 function sourceFormOf(kind: string, what: "statement" | "expression"): string {
   return SOURCE_FORM[kind] ?? `a ${what} of a form not admitted here`;
 }
 
-function constructMessage(what: string): string {
-  return `E-META-001: ${what} is not admitted inside ^{} meta blocks. ${META_ALLOWED_SET_TEXT}`;
+/** The E-META-001 message for a refused statement / expression KIND (form + hint). */
+function kindMessage(kind: string, what: "statement" | "expression"): string {
+  return constructMessage(sourceFormOf(kind, what), SOURCE_FORM_HINT[kind]);
+}
+
+function constructMessage(what: string, hint?: string): string {
+  return `E-META-001: ${what} is not admitted inside ^{} meta blocks.${hint ? ` ${hint}` : ""} ${META_ALLOWED_SET_TEXT}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +573,7 @@ function walkStmt(n: AnyNode, scope: Scope, ctx: MetaAllowListContext, report: R
       return;
     default: {
       // A statement kind this reader does not know — fail closed.
-      report(String(n.kind), constructMessage(sourceFormOf(String(n.kind), "statement")), span);
+      report(String(n.kind), kindMessage(String(n.kind), "statement"), span);
       return;
     }
   }
@@ -823,7 +841,7 @@ function walkExpr(e0: unknown, scope: Scope, ctx: MetaAllowListContext, report: 
       report("[markup value]", constructMessage("a markup value (build markup with emit() / meta.emit())"), span);
       return;
     default:
-      report(String(e.kind), constructMessage(sourceFormOf(String(e.kind), "expression")), span);
+      report(String(e.kind), kindMessage(String(e.kind), "expression"), span);
       return;
   }
 }
@@ -1001,7 +1019,7 @@ class EsChecker {
         if (s.label) this.refuse("a labelled jump");
         return;
       case "EmptyStatement": return;
-      default: this.report(s.type, constructMessage(sourceFormOf(s.type, "statement"))); return;
+      default: this.report(s.type, kindMessage(s.type, "statement")); return;
     }
   }
 
@@ -1129,7 +1147,7 @@ class EsChecker {
       case "ClassExpression": this.refuse("a class"); return;
       case "AwaitExpression": this.refuse("`await`"); return;
       case "YieldExpression": this.refuse("`yield`"); return;
-      default: this.report(e.type, constructMessage(sourceFormOf(e.type, "expression"))); return;
+      default: this.report(e.type, kindMessage(e.type, "expression")); return;
     }
   }
 }

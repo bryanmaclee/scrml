@@ -1,0 +1,3 @@
+<program>
+^{ emit("<form><input name=\"action\"></form>") }
+</program>

@@ -1,0 +1,18 @@
+{
+  "id": "meta-emit-meta-descriptive-pos",
+  "description": "§22.12 closed attribute list (PA-ruled S459: meta descriptive attrs; http-equiv refused) positive — compile-time `emit()` output may carry `<meta>`'s descriptive attributes (`name`, `content`, `property`, `media`); they reach the rendered document.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Attributes — a CLOSED list*: on `<meta>`, `name` / `content` / `charset` / `property` / `itemprop` / `media` are admitted; `content` is element-scoped and safe only because `http-equiv` is refused.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [
+      { "selector": "#m1", "attr": { "name": "robots", "content": "index, follow" } },
+      { "selector": "#m2", "attr": { "property": "og:title", "content": "T" } },
+      { "selector": "#m3", "attr": { "name": "theme-color", "media": "(prefers-color-scheme: dark)" } }
+    ]
+  }
+}

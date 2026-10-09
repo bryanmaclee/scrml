@@ -1,0 +1,35 @@
+{
+  "id": "meta-emit-meta-name-any-case-pos",
+  "description": "§22.12 (S459 round 4 F5) positive — `<meta name>` values of any spelling (`Description`, `DC.title`, `msapplication-TileColor`) render: `<meta>` creates no named property, so the value is not judged.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Attributes*: a `<meta name>` value is not judged. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#md",
+        "attr": {
+          "name": "Description"
+        }
+      },
+      {
+        "selector": "#mc",
+        "attr": {
+          "name": "DC.title"
+        }
+      },
+      {
+        "selector": "#mm",
+        "attr": {
+          "name": "msapplication-TileColor"
+        }
+      }
+    ]
+  }
+}

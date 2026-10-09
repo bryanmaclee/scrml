@@ -1,0 +1,31 @@
+{
+  "id": "meta-emit-runtime-plain-id-name-pos",
+  "description": "§22.12 (S459 round 4 F2) positive — a plain element takes any id (`title`, `hidden`), and a control outside a form any name (`name`): they create no named property that could shadow a member.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12 *Named properties*: only `embed` / `form` / `iframe` / `img` / `object` (document) and controls / `img` inside a form are judged; every other element takes any `id` / `name`. (S459 round 4, PA decisions on the S459 final review — bryan \"go\")",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-META-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#host #title",
+        "text": "T"
+      },
+      {
+        "selector": "#host #hidden",
+        "text": "h"
+      },
+      {
+        "selector": "#host #nm",
+        "attr": {
+          "name": "name"
+        }
+      }
+    ]
+  }
+}

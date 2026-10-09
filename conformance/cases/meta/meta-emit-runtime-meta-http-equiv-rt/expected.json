@@ -1,0 +1,14 @@
+{
+  "id": "meta-emit-runtime-meta-http-equiv-rt",
+  "description": "§22.12 (PA-ruled S459: meta descriptive attrs; http-equiv refused) — a runtime `meta.emit` string carrying `<meta http-equiv=\"refresh\" content=\"0;url=…\">` is refused: nothing is written (no `<meta>`, no `<p>` in the host).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22.12",
+  "spec": "§22.12",
+  "rationale": "§22.12: the runtime gate refuses the `<meta>` element and the `http-equiv` name; on a violation it SHALL write NOTHING.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"],
+    "domAnchored": [{ "selector": "#host meta", "count": 0 }, { "selector": "#host p", "count": 0 }]
+  }
+}
