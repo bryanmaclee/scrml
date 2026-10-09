@@ -8,4 +8,32 @@ Conflicts (2, both generated docs):
 - `docs/FACTS.md` — facts-table figures (src lines, test files, SPEC lines, conformance cases). Resolution: took ours, then `bun scripts/facts.ts --write` (facts-table regenerated).
 Auto-merged: `compiler/SPEC.md` (D1 §42.3.5 etc. vs main's §47.9.9 ship-strip) — clean.
 Checked current (no regen needed): `docs/bootstrap-conformance.md` (`--check` current), known-gaps §0 gap-counts (`state.ts` reports current).
-`master-list.md` @generated:recent-sessions is git-log-derived; regenerated after the merge commit (not CI-gated).
+`master-list.md` @generated:recent-sessions (git-log-derived, not CI-gated, cloud-maps regenerates it) left byte-identical to main — no churn.
+
+## Round-8 artifacts
+`docs/changes/s459-d1-round8/` on this base = BRIEF.md + progress.md only (docs-only). Header note added (STOPPED and DROPPED — S460 ruling) — commit after the merge.
+
+## Gates on merge head 2bfa69469 (+ docs commit)
+- pre-commit core gate (unit+integration+conformance+root *.test.js, --bail): 33407 pass / 58 skip / 12 todo / 0 fail (1508 files, 964 s under heavy cross-session load)
+- `bun conformance/run.ts`: 1422/1472 pass + 50 xfail, 0 FAIL
+- `bun run types:check`: OK — 184 diagnostics (117 distinct), unchanged (baseline NOT rewritten)
+- runtime-size-ratchet.test.js: 8 pass / 0 fail
+- regen-spec-index --check OK (72/72 scanned, 0 stale); facts --check PASS; conflict-marker-gate PASS (10690 files); delta-lint PASS; s34-census --check-new --base origin/main PASS (6 rows); lint-no-default-arm 0 violations
+- bootstrap-conformance --check: current
+- (browser tier, host-global-scan, other CI steps: see below)
+
+## Corpus differential (merge head vs origin/main b4b94f3d6), roots examples,samples,conformance,stdlib
+Base captured from `git archive origin/main` (no .git, so the diff tool reports INCOMPARABLE on provenance only — exit 2; content comparison complete).
+- enumeration: base 2478 / head 2513; delta = D1's 37 added conformance cases, 2 renamed (declared-prop-* -> undeclared-attr-*).
+- compile outcome: 0 newly FAILING; 2 newly PASSING: conformance/cases/components/bind-non-bindable-prop-clean (exit 1->0; E-ATTR-011 -> E-DG-002), stdlib/math/index.scrml (exit 1->0; E-SCOPE-001 gone).
+- code changes, outcome unchanged: bind-non-bindable-prop-reject (E-ATTR-011 -> E-DG-002, E-COMPONENT-013 kept).
+- text-only: duplicate-prop-decl-reject, examples/23-trucking-dispatch/pages/dispatch/load-detail, stdlib/path, stdlib/time.
+- artifacts: 7174 compared, 192 differ = 162 `_scrml_project_root` path-only + 30 real (declared component props no longer emitted as root attributes / setAttribute effects — D1 declared-prop-not-root-attr behaviour; examples/22-multifile, examples/23-trucking-dispatch, component conformance cases, phase4 samples).
+
+## F1 — `show=` is not a presence guard (PA scope addition, S460 differential review of 01b1933cd)
+Governing sentence, SPEC §17.2: "`show=` SHALL NOT narrow. Because the element and its children exist and are evaluated while `expr` is false, a binding tested by `show=` keeps its un-narrowed type inside the element (§42.3.5)". §42.3.5: "**`show=` is NOT a narrowing guard.** … a bare `@user.name` there SHALL fire E-TYPE-046."
+- Verified reviewer loci: `compiler/src/presence-narrowing.ts` `guardKeys` (:178) and `walkNodeNarrowed` `isGuard` (:211) both admitted "show". Removed from both; module header + option doc + four type-system.ts comments corrected. `if=` / `else-if=` unchanged.
+- Reproducers (reviewer's copied, not edited): showfn_attr, b_show, b_show_anc -> E-TYPE-031 each (were clean); my show-narrows (cell) -> E-TYPE-046 (was clean); g_ifattr (if=) -> clean.
+- Conformance added: components/callback-prop-show-guard-reject (E-TYPE-031 x3), components/callback-prop-if-guard-twin (executed: clicks -> "hh"; #none guarded elements count 0), reactive/optional-member-access-show-reject (E-TYPE-046 x1), reactive/optional-member-access-if-twin (executed).
+- Corpus (newly-rejecting direction), merge head manifest vs F1 tree, examples+samples+conformance+stdlib: 2513 common sources — 0 outcome changes, 0 diagnostic-code changes, 0 text changes, 7334/7334 artifacts byte-identical. S451's prediction (0 new E-TYPE-046/E-TYPE-031) holds.
+- gap g-impl1-show-narrows-s451 -> resolved (locus corrected to presence-narrowing.ts); §0 regen (LOW 314 -> 313); FACTS + bootstrap-conformance regenerated (1476 cases).

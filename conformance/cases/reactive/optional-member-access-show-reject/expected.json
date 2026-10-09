@@ -1,0 +1,11 @@
+{
+  "id": "reactive-optional-member-access-show-reject",
+  "description": "§42.3.5 / §17.2 (S451 rec 1; closed in impl#1 by S460 F1) — `show=@user` does NOT narrow a plain-optional cell. The `show=` element exists while `@user` is `not` (hidden, not removed), so the bare `${@user.name}` inside it is evaluated with a `not` receiver: E-TYPE-046. Before F1 impl#1 narrowed under `show=` and this compiled clean (gap g-impl1-show-narrows-s451). Twin: optional-member-access-if-twin.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5: \"`show=` is NOT a narrowing guard. … Inside a `<div show=@user>`, `@user` keeps its un-narrowed type `T | not`; a bare `@user.name` there SHALL fire E-TYPE-046.\" §17.2: \"`show=` SHALL NOT narrow.\"",
+  "expect": {
+    "codes": ["E-TYPE-046"],
+    "codeCounts": { "E-TYPE-046": 1 }
+  }
+}

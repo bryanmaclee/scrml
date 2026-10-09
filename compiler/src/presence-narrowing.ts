@@ -27,9 +27,14 @@
  *     enclosing statement list with D's FALSE-facts (early return);
  *   - `D ? A : B` (same split as `if`), `D && E` (E with D's TRUE-facts), `D || E` (E with
  *     D's FALSE-facts);
- *   - `if=` / `show=` / `else-if=` on a markup element (bare receiver): the element's
+ *   - `if=` / `else-if=` on a markup element (bare receiver): the element's
  *     children AND its own other attributes (the element — and so its handlers — exists
  *     only while the guard holds, §42.4);
+ *   - NOT `show=`. §17.2: "`show=` SHALL NOT narrow. Because the element and its children
+ *     exist and are evaluated while `expr` is false, a binding tested by `show=` keeps its
+ *     un-narrowed type inside the element (§42.3.5)". A `show=` element is hidden, not
+ *     removed, so its children, attributes and handlers all run while the receiver is `not`
+ *     (S451 rec 1; S460 F1 removed it from both guard tests below);
  *   - `given recv :> { … }` body; a `match recv { … }` body.
  */
 
@@ -41,7 +46,7 @@ type Rec = Record<string, unknown>;
 export interface PresenceNarrowingOptions {
   /** The tracked possibly-`not` receiver an EXPRESSION denotes (a key), or null. */
   receiverKey(node: unknown): string | null;
-  /** The receiver an `if=` / `show=` guard value names (defaults to `receiverKey`). */
+  /** The receiver an `if=` / `else-if=` guard value names (defaults to `receiverKey`). */
   guardKey?(node: unknown): string | null;
   /** The receiver a `given` variable NAME names (defaults to `receiverKey` of an ident). */
   givenKey?(name: string): string | null;
@@ -175,7 +180,7 @@ function guardKeys(markup: Rec, opts: PresenceNarrowingOptions): string[] {
   if (!Array.isArray(attrs)) return out;
   for (const attr of attrs) {
     const name = attr?.name as string | undefined;
-    if (name !== "if" && name !== "show" && name !== "else-if") continue;
+    if (name !== "if" && name !== "else-if") continue;
     const val = attr.value as Rec | undefined;
     if (!val) continue;
     let target = (val.exprNode as Rec | undefined) ?? val;
@@ -208,7 +213,7 @@ export function walkNodeNarrowed(
       for (const attr of attrs) {
         const val = attr?.value as Rec | undefined;
         if (!val || typeof val !== "object") continue;
-        const isGuard = attr.name === "if" || attr.name === "show" || attr.name === "else-if";
+        const isGuard = attr.name === "if" || attr.name === "else-if";
         const hb = (val.handlerBlock as Rec | undefined)?.stmts;
         if (Array.isArray(hb)) walkBodyNarrowed(hb, isGuard ? present : inner, here, opts);
         else walkExprNarrowed(val, isGuard ? present : inner, here, opts);

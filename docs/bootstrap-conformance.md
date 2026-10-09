@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1472 of 1472 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1476 of 1476 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1472 of 1472 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 559 | 38.0% |
-| UNSUPPORTED | 736 | 50.0% |
+| NOT-TWINNED | 563 | 38.1% |
+| UNSUPPORTED | 736 | 49.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -34,9 +34,9 @@ Legacy-dialect cases graded on their generated §66 twin: **674** — PASS 76 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (559 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (563 cases; a case counts once per distinct reason):
 
-- 96 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 67 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 47 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
@@ -48,7 +48,7 @@ NOT-TWINNED by reason (559 cases; a case counts once per distinct reason):
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
 - 28 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 23 — rhs-decl: declaration in a markup position (⚑ O38)
-- 19 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- 21 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
@@ -104,7 +104,7 @@ NOT-TWINNED by reason (559 cases; a case counts once per distinct reason):
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
-| components | 65 | · | · | 2 | · | 62 | 1 | · | · |
+| components | 67 | · | · | 2 | · | 64 | 1 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -141,7 +141,7 @@ NOT-TWINNED by reason (559 cases; a case counts once per distinct reason):
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
-| reactive | 89 | 25 | · | 3 | · | 40 | 21 | · | · |
+| reactive | 91 | 25 | · | 3 | · | 42 | 21 | · | · |
 | refinement | 24 | · | · | · | · | 5 | 19 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -1158,7 +1158,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (559)
+### NOT-TWINNED (563)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1217,10 +1217,12 @@ none
 - `components/callback-prop-absence-safe-forms` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/callback-prop-absence-unsafe-forms-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/callback-prop-bare-call-form` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/callback-prop-if-guard-twin` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/callback-prop-non-function-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/callback-prop-optional-guarded` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/callback-prop-optional-unguarded-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/callback-prop-pass-not` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/callback-prop-show-guard-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/component-scope-by-value-local-shadows` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/component-scope-later-block-write` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/component-scope-lift-nested-read` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
@@ -1610,8 +1612,10 @@ none
 - `reactive/mutating-method-string-arg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `reactive/nested-path-method-call-not-first-stmt` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `reactive/optional-member-access-absent` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/optional-member-access-if-twin` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `reactive/optional-member-access-not` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `reactive/optional-member-access-render` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/optional-member-access-show-reject` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `reactive/reactive-map-insert-bare-variant` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/reset-compound-all` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
 - `reactive/reset-compound-field` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)

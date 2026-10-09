@@ -30779,9 +30779,10 @@ function runCellValueLifecycleAccessCheck(
 // compile time (E-TYPE-046) UNLESS made absence-safe by:
 //   1. optional-chaining the access — `recv?.field` / `recv?.[key]` /
 //      `recv?.method(...)` (§42.3.6); OR
-//   2. narrowing `recv` to `T` in an enclosing scope — the `if=` / `show=`
+//   2. narrowing `recv` to `T` in an enclosing scope — the `if=` / `else-if=`
 //      markup guard (§42.4), `given recv :> { ... }`, an `if (recv is not)
 //      return` early-return, or a `match recv { not :> … given recv :> … }`.
+//      NOT `show=` (§17.2 "`show=` SHALL NOT narrow"; S460 F1).
 //
 // BOUNDARY (§14.12.6.1 / §42.3.5): this is the plain-optional analog of the
 // LIFECYCLE guard E-TYPE-001. A lifecycle receiver — a bare-`T` no-RHS Shape-4
@@ -30795,7 +30796,7 @@ function runCellValueLifecycleAccessCheck(
 // E-TYPE-001 statement-body walker) because the dominant fire surface is markup
 // interpolation (`${@user.name}`), where the AST carries clean structural
 // signals the text walker never sees: the per-hop `?.` flag (`member.optional`),
-// `if=`/`show=` narrowing attrs, and `given-guard` / `match-stmt` scopes.
+// `if=`/`else-if=` narrowing attrs, and `given-guard` / `match-stmt` scopes.
 
 /** The per-file set of PLAIN-OPTIONAL receivers, keyed by cell name. */
 interface OptionalReceiverSet {
@@ -30956,7 +30957,7 @@ interface ReceiverValueInfo {
 
 /**
  * The per-file E-TYPE-046 walk. Threads a `present` set of cell names currently
- * NARROWED to present (via `if=` / `show=` / `given` / `is not` / `match`) and
+ * NARROWED to present (via `if=` / `else-if=` / `given` / `is not` / `match`) and
  * fires at every bare (`optional !== true`) member/index/method hop whose
  * receiver is possibly-`not` and un-narrowed.
  */
@@ -31049,7 +31050,7 @@ function checkOptionalMemberAccess(
   }
 
   // S459 D1 round 7 — the narrowing itself (which receivers are PROVEN present at a
-  // node: `if=` / `show=` / `given` / `is not` early return / `match` / `is some` /
+  // node: `if=` / `else-if=` (not `show=`) / `given` / `is not` early return / `match` / `is some` /
   // ternary / `&&`) is the ONE §42 presence-narrowing reader, presence-narrowing.ts. It
   // is shared with the component-prop E-TYPE-031 check (an optional function prop is
   // `fn | not` in the body), so both judge a possibly-`not` receiver identically. This
