@@ -337,11 +337,22 @@ describe("S460 N1 — ternary arms of the condition's value are inside the condi
     expect(inIf("h(@b ? !g() : @c)")).toEqual([]);
     expect(inIf("h(!g())")).toEqual([]);
   });
-  test("twins — resolved arms are legal; a `T | not` arm is a presence test of its own", () => {
+  test("twin — resolved `bool` arms are legal", () => {
     expect(inIf("@b ? !(g() is given) : @c")).toEqual([]);
-    const r = run(prog(O + "    let <c:bool=false/>\n    function f() { if (@b ? @o.n : @c) { @m = 1 } }"));
-    expect(r.diags).toEqual([]);
-    expect(r.typed.tables.typing.presence.length).toBe(1);
+  });
+  test("strict direction — a ternary whose arms do not join (`bool` beside `int | not`) is refused WHOLE, as before N1", () => {
+    // each arm alone would be a legal condition value; their join is unresolved, and N1 admits nothing new
+    const C = O + "    let <c:bool=false/>\n";
+    for (const cond of ["@b ? @o.n : @c", "@b ? @c : @o.n"]) {
+      const src = prog(C + `    function f() { if (${cond}) { @m = 1 } }`);
+      const r = run(src);
+      expect(r.diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)])).toEqual([["E-COND-NOT-BOOLEAN", cond]]);
+      expect(r.diags[0].message).toContain(UNRESOLVED_MSG);
+      expect(r.typed.tables.typing.presence).toEqual([]);
+    }
+    expect(codes(C, "<p if=(@b ? @o.n : @c)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    // as an operand of `&&`: the `int | not` arm is not a boolean (statement 7)
+    expect(codes(C + "    function f() { if ((@b ? @o.n : @c) && @c) { @m = 1 } }")).not.toEqual([]);
   });
 });
 
@@ -356,31 +367,5 @@ describe("S460 N3 — the condition message names the attribute it stands in", (
   });
   test("twin — an `if=` operand still says `if=`", () => {
     expect(diags(G, "<p if=(@b || g())>a</p>")[0].message).toContain("in `if=`");
-  });
-});
-
-// At RUNTIME: a `T | not` arm of the condition's value lowers to an absence check — `0` is PRESENT.
-const ARM_PRESENCE = `<program>
-    type O:struct = { let n: int | not }
-    let <o:O=({ n: 0 })/>
-    let <b:bool=true/>
-    let <c:bool=false/>
-    function clear() { @o = { n: not } }
-    <main>
-        <p class="a" if=(@b ? @o.n : @c)>A</p>
-        <button class="clear" onclick=clear()>clear</button>
-    </main>
-</program>
-`;
-
-describe("S460 N1 at runtime — a `T | not` ternary arm of a condition is an absence check", () => {
-  test("`0` is present (shown); `not` is absent (hidden)", async () => {
-    const r = run(ARM_PRESENCE);
-    expect(r.diags.map((d) => d.code)).toEqual([]);
-    expect(mods.check.checkCore(r.core)).toEqual([]);
-    await loadProgram(r.core, "s460-arm-presence");
-    expect(document.querySelector("p.a")).not.toBeNull();
-    click(document.querySelector("button.clear"));
-    expect(document.querySelector("p.a")).toBeNull();
   });
 });

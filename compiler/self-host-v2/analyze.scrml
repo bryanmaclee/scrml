@@ -10645,9 +10645,14 @@ ${
     // s460 N1 (PA reading of "a on F2, go": a ternary that IS the condition's
     // value is inside the condition — §42.4 statement 10). Each arm is the
     // condition's value when taken, so a ternary whose type did not resolve is
-    // judged ARM BY ARM: a `bool` arm passes, a `T | not` arm is a presence
-    // test of its own, an unresolved or non-bool arm is blamed at the arm. A
-    // ternary whose arms joined to a known type is judged whole (condKnown).
+    // judged ARM BY ARM so the report lands where the cause is: an unresolved
+    // or non-bool arm is blamed at the arm. STRICT-DIRECTION ONLY (PA, S460):
+    // this admits nothing the whole-ternary rule refused — when no arm is
+    // reported (every arm is a legal condition value on its own, e.g. a
+    // `bool` arm beside a `T | not` arm, whose join did not resolve), the
+    // arms' judgement is discarded and the WHOLE ternary is refused as
+    // unresolved, exactly as before (statement 5, blame per statement 6).
+    // A ternary whose arms joined to a known type is judged whole (condKnown).
     fn condUnresolvedWhole(env: TEnv, c: AExpr, what: string, ts0: TypeState) -> TypeState {
         const arms: AExpr[] = armsOf(c)
         if (arms.length == 0) return condUnresolved(env, c, what, ts0)
@@ -10655,7 +10660,8 @@ ${
         for (const arm of arms) {
             ts = condWhole(env, arm, exprType0(ts, arm.nid), armWhat(what), ts)
         }
-        return ts
+        if (ts.diags.length > ts0.diags.length) return ts
+        return condUnresolved(env, c, what, ts0)
     }
 
     // How an arm is named: "a ternary arm of an `if` condition" — once; an arm
@@ -10763,6 +10769,10 @@ ${
         const arms: AExpr[] = armsOf(x)
         if (arms.length > 0) return condArmOperands(env, x, arms, opName, what, ts)
         if (!unresolvedVT(exprType0(ts, x.nid))) return ts
+        return condOperandUnresolved(env, x, opName, what, ts)
+    }
+
+    fn condOperandUnresolved(env: TEnv, x: AExpr, opName: string, what: string, ts: TypeState) -> TypeState {
         if (condBlamed(env, x, ts)) return ts
         return report(ts, env, x.span, "E-COND-NOT-BOOLEAN", "this operand of " + opName + " in " + what + " is a value whose type the compiler cannot resolve, and `!` / `&&` / `||` in a condition take a `bool` — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a on F2, go\")")
     }
@@ -10778,9 +10788,12 @@ ${
         let ts: TypeState = ts0
         for (const arm of arms) {
             ts = condOperand(env, arm, opName, armWhat(what), ts)
-            if (whole) ts =checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
+            if (whole) ts = checkBoolOperand(env, arm, exprType0(ts, arm.nid), opName, ts)
         }
-        return ts
+        // strict-direction only: an unresolved ternary operand none of whose
+        // arms was reported is refused whole, as before
+        if (!whole || ts.diags.length > ts0.diags.length) return ts
+        return condOperandUnresolved(env, x, opName, what, ts0)
     }
 
     fn unresolvedVT(v: VType) -> boolean {
