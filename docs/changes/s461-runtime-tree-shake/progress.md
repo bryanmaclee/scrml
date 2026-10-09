@@ -56,3 +56,71 @@ client body AFTER `assembleRuntime` and adds `.catch(_scrml_async_err => _scrml_
 which the first reference scan never saw. Root fix: the gate table moved to module level
 (`gateChunksByEmittedReference`) and runs a second time over the FINAL body, re-assembling the runtime in
 its slot when it adds a chunk. Regression test pins both embed and shared-runtime modes.
+
+## Phase 3 — proofs, ratchet, gates
+
+### Per-target result
+| target | measured | built | shell bytes saved (gzip, stripped) |
+|---|---|---|---|
+| (a) errors chunk always shipped | confirmed | built (`432d7da` + late gate `0044ef3`) | 469 |
+| (b) scope → {timers, animation} edge | confirmed | built (`65574a9`) | 494 |
+| (c) engine helpers in core | confirmed | built (`ca10a59`, new `machine` chunk) | 547 |
+| (d) mount false trigger | confirmed (+ same root on vendor-ref, prefetch) | built (`7ec643f`) | 43 |
+| **total** | | | **7,442 → 5,907 B (−1,535)**; counter 5,101 → 3,604 B |
+
+Corpus programs (1,556 with a runtime) that still need the moved code: errors 196, timers 4, animation 1,
+machine 3 direct + every engine page via the edge, route-splitter chunks 0 (default build).
+
+### 1. Called-but-undefined sweep (`sweep.mjs`, acorn, every `.scrml` under examples/samples/conformance/stdlib/benchmarks)
+2,627 sources → 1,556 output dirs with a runtime, 1,656 client files + 1,556 runtimes parsed, 0 parse failures.
+Universe = every top-level name of the FULL runtime template + every `_scrml_*`; a reference is missing when
+the shipped runtime does not define it and the referencing file does not bind it.
+- base: client-UNGUARDED 1 (`stdlib/data/form-for` → `_scrml_labels_register`, PRE-EXISTING library compile).
+- head (first build): client-UNGUARDED **26** — 25 new `_scrml_error_boundary_log` → fixed at the root (`0044ef3`).
+- head (final): client-UNGUARDED **1** — the identical pre-existing one. **0 introduced.**
+  client-guarded: 1,750 / identical name set. runtime-guarded: + `_scrml_stop_scope_timers` 1,552,
+  `_scrml_cancel_animation_frames` 1,555 (the intended (b) guards — no-ops by construction); every other
+  guarded name identical. runtime-unguarded: base 4,493 → head 4,483 (the 10 base library-mode runtimes that
+  called `_scrml_stop_scope_timers`/`_cancel_animation_frames` with no definition — a pre-existing latent
+  dangle — are now guarded). No new unguarded name.
+
+### 2. Executed render (`render-all.mjs`, happy-dom, the SHIPPED runtime + client per captured page)
+1,519 pages with html + runtime, both sides: load, DOMContentLoaded, one event per interactive element
+(≤25; 1,310 fired) + form submits, fetch stubbed offline (drives the server-fn → `_scrml_error_boundary_log`
+path: 145 pages reached it). Result: 1,516 ran / 2 TIMEOUT / 1 HARNESS-ERROR on BOTH sides;
+**error sets identical on all 1,516**; ReferenceError pages base 28 = head 28 (pre-existing author-code
+names, same list); DOM signature identical on 1,515, the one difference (`examples/15-channel-chat`) re-ran
+3/3 identical on each side (timing flake). Bite proof: removing `_scrml_error_boundary_log` from
+`examples/03-contact-book`'s shipped runtime makes the harness report `ReferenceError … is not defined`.
+Unit-level executed proofs in `s461-runtime-tree-shake.test.js` (timer start/tick/teardown on the shipped
+runtime; destroy_scope on the counter) and `engine-ontimeout-end-to-end.test.js` (engine → machine).
+
+### 3. Differential (`scripts/corpus-emit-differential.ts`, base d99dad0 vs head 0044ef3)
+Same 2,627 sources; compile outcome identical (1,590 ok); diagnostic codes identical; syntax 0 → 0.
+7,782 artifacts: 1,460 identical, 6,322 differing, **all classified, 0 unexplained** (`classify.mjs`):
+- 4,766 client/html/asset files: ONLY the `scrml-runtime.<hash>.js` filename differs.
+- 1,556 runtimes: ONLY whole statements of the moved families removed (+ the guarded destroy_scope).
+  By removed set: −{animation,errors,machine,timers} 591 · −{…,mount} 538 · −{animation,machine,mount,timers}
+  185 · −{animation,errors,mount,timers} 65 · −{…,mount,prefetch} 64 · −{animation,machine,timers} 60 ·
+  −{animation,errors,timers} 31 · −{errors,machine} 5 (library-mode) · 12 smaller groups. Nothing added.
+- 1 diagnostic-text change: `samples/login.scrml` E-CG-001 cites a bundle line number (2708 → 2359) — the
+  bundle includes the runtime, which shrank.
+- `_scrml_fetch_*` BARE call-site count 241 → 28: the removed `prefetch` chunk's `_scrml_fetch_chunk` text.
+
+### Ratchet
+`SHELL_RUNTIME_GZIP_CEILING` 7,442 + 188 = 7,630 → **5,907 + 188 = 6,095 B** (`d217d0f`).
+
+### Gates
+- `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance` (run WITHOUT `--bail`
+  both times to get comparable counts): before 31,558 pass / 11 fail; after 31,573 pass / 13 fail → after the
+  tier-N test fix (`codegen-route-splitter-tier-n`, real: it asserted prefetch admission without
+  emitPerRoute) the only non-baseline failure is the load-sensitive F14 perf guard (2.1–2.3 s vs 2 s at load
+  avg ~10; a library-mode compile that does not reach generateClientJs). All 11 baseline failures are
+  environment (dev-server ports/timeouts, read-only FS, tenant executed DB) and one of them passed after.
+- browser tests: base snapshot (git archive d99dad0) 50 fail; head 48 fail, a strict subset (the 2 extra on
+  base are its own missing `benchmarks/todomvc/dist`). 0 new.
+- `bun conformance/run.ts`: 1,514/1,579 pass, 65 xfail, 0 FAIL.
+- types:check OK (unchanged) · facts --check PASS (regenerated by script) · bootstrap-conformance current ·
+  SPEC-INDEX OK.
+- SPEC: no chunk-membership text describes the moved code (§51.0.M / §51.12 cite `runtime-template.js`,
+  still true). No SPEC edit.
