@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onserver-message-arity-ok",
+  "description": "§38.6.1 clean neg (regression) — `onserver:message=handleMessage(msg)` binds the parsed payload to `msg` and compiles with no E-CHANNEL-005. The delta from `channel/handler-onserver-message-arity` is the second parameter.",
+  "language-version": "1.0",
+  "spec": "§38.6.1",
+  "source-test": "compiler/tests/unit/channel-handler-binding-arity.test.js",
+  "rationale": "§38.6.1: the call expression is parsed as `<handlerName>(<paramName>)`; one parameter is the well-formed shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-005"]
+  }
+}

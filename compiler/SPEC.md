@@ -26064,8 +26064,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-CHANNEL-002~~ | §38.9 | **Retired 2026-05-04 (D3 / M19).** `@shared` modifier removed in v0.next; replaced by `E-CHANNEL-SHARED-MODIFIER`. | — |
 | E-CHANNEL-003 | §38.9 | Duplicate channel name in same file | Error |
 | E-CHANNEL-004 | §38.9 | `broadcast()` called outside a `<channel>` scope | Error |
-| E-CHANNEL-005 | §38.9 | `onserver:message` call expression contains more than one parameter | Error |
+| E-CHANNEL-005 | §38.6.1, §38.10.2 | An `onserver:message` or `onclient:*` call expression contains more than one parameter (§38.6.1; `onclient:*` since S458 item 1). Emitted at `compiler/src/type-system.ts` (`checkChannelHandlerBindings`). | Error |
 | E-CHANNEL-006 | §38.9 | `onclient:*` handler function declared as `server function` | Error |
+| E-CHANNEL-HANDLER-SHADOW | §38.10.2 | An `onclient:*` call expression's binding name (its first argument) names a declaration in scope at the `<channel>` — a state cell, a file / `<program>`-scope binding, a function, or an import — so the event-object binding would silently hide it (S458 item 1). Emitted at `compiler/src/type-system.ts` (`checkChannelHandlerBindings`). | Error |
 | E-CHANNEL-007 | §38.11 | `name=` (or `topic=`) attribute value contains `${...}` interpolation; static literal required | Error |
 | E-CHANNEL-SERVER-CELL-READ | §38.4, §38.6.1 | A SERVER-context channel function (an `onserver:*` handler, or a function escalated to the server by a `broadcast()`/`disconnect()` call or another §12.2 trigger such as a `?{}` SQL block) READS a channel-declared cell. Channel cells are CLIENT-HELD (§38.4 — no server-authoritative store), so the read has no server-side value (`undefined` at request time → a downstream `[...@cell, x]` crashes silently). Operate on the message payload / function arguments and broadcast a value derived from them (§38.6.1). A channel-cell WRITE runs on the client and syncs automatically (§38.4, RULING A). A CLIENT-side function reading a channel cell is fine (the client holds the cell). (Added 2026-06-12 — change-id `channel-cell-write-client-side-A-2026-06-12`, RULING A.) | Error |
 | E-CHANNEL-WATCHES-DRIVER | §38.13.1, §38.13.7 | A `<channel watches=<table>>` feed is declared but the program's database driver is not `postgres` (SQLite / MySQL / no db). The v1 change-capture substrate is Postgres LISTEN/NOTIFY (§38.13.7 — the only substrate the compiler can fully own and emit); `watches=` REQUIRES `<program db="postgres://…">` or a `<db src>` resolving to the `postgres` driver (§44.2). Use Postgres, or drop `watches=`. (Realtime-external-db-writes, §38.13.8.) | Error |
@@ -28148,7 +28149,7 @@ the result as `msg` to `handleMessage`.
 // E-CHANNEL-005: onserver:message handler may only bind one parameter
 ```
 
-**E-CHANNEL-005:** `onserver:message` call expression contains more than one parameter.
+**E-CHANNEL-005:** `onserver:message` call expression contains more than one parameter. (The same rule covers every `onclient:*` call expression — §38.10.2.)
 
 ### 38.6.2 `topic=` Behavior When Value Is `not`
 
@@ -28213,8 +28214,9 @@ The compiler emits a WebSocket upgrade route at `/_scrml_ws/<name>` and a `_scrm
 | ~~E-CHANNEL-002~~ | **Retired 2026-05-04 (D3 / M19).** `@shared` is removed from v0.next; channel-scoped sync comes from being declared inside a channel body. Replaced by `E-CHANNEL-SHARED-MODIFIER` (§34) which fires on any `@shared` modifier occurrence. | — |
 | E-CHANNEL-003 | Duplicate channel name in the same file | Error |
 | E-CHANNEL-004 | `broadcast()` or `disconnect()` called from a function not within a `<channel>` lexical scope | Error |
-| E-CHANNEL-005 | `onserver:message` call expression contains more than one parameter | Error |
+| E-CHANNEL-005 | `onserver:message` or `onclient:*` call expression contains more than one parameter (§38.6.1, §38.10.2). Emitted at `compiler/src/type-system.ts` (`checkChannelHandlerBindings`). | Error |
 | E-CHANNEL-006 | `onclient:*` handler function declared as `server function` | Error |
+| E-CHANNEL-HANDLER-SHADOW | `onclient:*` binding name (first argument) names a declaration in scope at the `<channel>` (§38.10.2). Emitted at `compiler/src/type-system.ts` (`checkChannelHandlerBindings`). | Error |
 | E-CHANNEL-007 | `name=` (or `topic=`) attribute value contains `${...}` interpolation; static literal required (§38.11) | Error |
 | E-CHANNEL-SERVER-CELL-READ | A server-context channel function (onserver:* handler / `broadcast()`/`disconnect()`- or SQL-escalated) READS a client-held channel cell (§38.4); channel cells have no server-side value — operate on the message payload / args instead (§38.6.1). (RULING A, change-id `channel-cell-write-client-side-A-2026-06-12`.) | Error |
 | ~~E-CHANNEL-INSIDE-PROGRAM~~ | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — that is now the CANONICAL v0.3 placement, not a violation. Replaced by `E-CHANNEL-OUTSIDE-PROGRAM`. See §38.1, §34. | — |
@@ -28247,6 +28249,12 @@ If the call expression contains no parameter (e.g., `onclient:open=handleOpen()`
 - The compiler SHALL register `onclient:error` as the `ws.onerror` handler inside the client IIFE whenever that attribute is present on a `<channel>` element.
 - `onclient:*` handlers SHALL execute on the client only. The compiler SHALL NOT emit any server-side code for these attributes.
 - The compiler SHALL bind the parameter name in the call expression to the event object using the same injection mechanism as `onclick=handler(e)` (§5.2.2).
+- The call expression in an `onclient:*` attribute SHALL carry at most one argument — the binding name for the event object. A call with more than one argument (e.g. `onclient:open=onOpen(x, 1)`) SHALL emit `E-CHANNEL-005`, the rule §38.6.1 states for `onserver:message`: there is nothing to bind a second argument to.
+
+> **Provenance:** ruling:user-voice-scrml.md S458 "your recs on all four" item 1 — *"extend E-CHANNEL-005 (today `onserver:message` only — >1 parameter) to `onclient:*` calls with more than one argument"*. Direction of change: **newly-rejecting**. Measured (S460, by compiling every `.scrml` under `samples/`, `examples/`, `conformance/cases/` and `stdlib/`, 2478 files): **0** refused. The same build gave §38.6.1's `onserver:message` rule its first emit site — it was stated (SHALL) but never emitted, so a second parameter compiled and the server called the handler with a free identifier. The ruling's second limb is the bullet below.
+- The binding name of an `onclient:*` call expression SHALL NOT name a declaration in scope at the `<channel>` — a state cell, a binding declared at file / `<program>` scope, a function, or an import (type names are a separate namespace and do not collide). Such a call (e.g. `onclient:open=onOpen(x)` with `<x>` declared) SHALL emit `E-CHANNEL-HANDLER-SHADOW`: the binding would silently hide the declaration, and the handler would receive the event object, not the declared value. "In scope" is the scope the compiler resolves names in at the channel's position, so a declaration that follows the channel in source order counts. (`onserver:message` is not covered by this bullet — the ruling did not reach it.)
+
+> **Provenance:** ruling:user-voice-scrml.md S458 "your recs on all four" item 1 — *"a first-argument name that collides with a declaration in scope is an ERROR (no silent shadowing)"*. Direction of change: **newly-rejecting**. Measured (S460, 2478 `.scrml` under `samples/`, `examples/`, `conformance/cases/`, `stdlib/`, compiled base vs head): **0** refused. code: PA-named S460 (veto window) — `E-CHANNEL-HANDLER-SHADOW` is a new code because `E-CHANNEL-005`'s meaning (the argument count) does not cover a binding-name collision: a distinct trigger with a distinct fix.
 
 #### 38.10.3 Worked Examples
 

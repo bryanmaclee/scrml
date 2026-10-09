@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-shadow-ok",
+  "description": "§38.10.2 clean neg — an `onclient:*` binding name that names nothing in scope (`e`) compiles with no E-CHANNEL-HANDLER-SHADOW; the declared `<x>` is read inside the handler. The delta from `channel/handler-onclient-shadow` is the binding name.",
+  "language-version": "1.0",
+  "spec": "§38.10.1, §38.10.2",
+  "source-test": "compiler/tests/unit/channel-handler-binding-shadow.test.js",
+  "rationale": "§38.10.1: the parameter name in the call expression names the injected event object; a fresh name hides nothing.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-HANDLER-SHADOW"]
+  }
+}
