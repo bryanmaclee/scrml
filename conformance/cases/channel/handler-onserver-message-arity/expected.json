@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onserver-message-arity",
+  "description": "§38.6.1 — `onserver:message` with more than one parameter in the call expression fires E-CHANNEL-005. Before S460 the rule had no emit site: the program compiled at exit 0 and the server emitted `await handleMessage(msg, extra)` with `extra` a free identifier (a ReferenceError at the first message).",
+  "language-version": "1.0",
+  "spec": "§38.6.1, §38.9",
+  "source-test": "compiler/tests/unit/channel-handler-binding-arity.test.js",
+  "rationale": "§38.6.1: \"The compiler SHALL emit an error (E-CHANNEL-005) if `onserver:message` contains more than one parameter in the call expression.\"",
+  "expect": {
+    "codes": ["E-CHANNEL-005"],
+    "severity": { "E-CHANNEL-005": "error" }
+  }
+}

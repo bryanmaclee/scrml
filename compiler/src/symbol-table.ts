@@ -9496,8 +9496,9 @@ function walkValidateResetTargets(
 //   - Cross-scope channel-cell visibility (B1 PASS 1 + B3 PASS 3 already
 //     cover this — channel-body logic-blocks register state-decls in the
 //     enclosing file scope).
-//   - Channel attribute shape errors (E-CHANNEL-001/E-CHANNEL-005/
-//     E-CHANNEL-007 — codegen-time today).
+//   - Channel attribute shape errors (E-CHANNEL-001 / E-CHANNEL-007 —
+//     codegen / VP-3; E-CHANNEL-005 — the type stage,
+//     type-system.ts `checkChannelHandlerBindings`).
 //   - A1c codegen for channels — runtime concern.
 
 /**

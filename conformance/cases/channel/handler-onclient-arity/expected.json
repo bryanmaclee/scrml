@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-arity",
+  "description": "§38.10.2 — an `onclient:*` call expression with more than one argument fires E-CHANNEL-005. The first argument names the binding for the WS event object; a second argument has nothing to bind to. The S458 origin shape: `onclient:open=onOpen(x, 1)` compiled at exit 0 to `(x) => { onOpen(x, 1) }`.",
+  "language-version": "1.0",
+  "spec": "§38.10.2, §38.6.1",
+  "source-test": "compiler/tests/unit/channel-handler-binding-arity.test.js",
+  "rationale": "§38.10.2 (S458 ruling item 1): the call expression in an `onclient:*` attribute SHALL carry at most one argument; more than one SHALL emit E-CHANNEL-005, the rule §38.6.1 states for `onserver:message`.",
+  "expect": {
+    "codes": ["E-CHANNEL-005"],
+    "severity": { "E-CHANNEL-005": "error" }
+  }
+}
