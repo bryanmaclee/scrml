@@ -23,6 +23,7 @@ import * as acorn from "acorn";
 import { generate as astringGenerate } from "astring";
 import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
+import { boundNamesOf } from "./binding-names.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -3318,18 +3319,21 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
     if (p.type === "Identifier") {
       return { name: p.name as string };
     }
-    if (p.type === "RestElement") {
+    if (p.type === "RestElement" && (p.argument as ESNode | undefined)?.type === "Identifier") {
       const arg = (p as { argument: ESNode }).argument;
       return { name: arg.name as string ?? "", isRest: true };
     }
-    if (p.type === "AssignmentPattern") {
+    if (p.type === "AssignmentPattern" && (p.left as ESNode | undefined)?.type === "Identifier") {
       const left = (p as { left: ESNode }).left;
       const right = (p as { right: ESNode }).right;
       const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
       return { name: left.name as string ?? "", defaultValue };
     }
-    // Destructured patterns — not yet structured
-    return { name: "__destructured__" };
+    // Destructured patterns (a defaulted / rest one included) — not yet structured. S458:
+    // the names the pattern BINDS are recorded (`boundNames`, the shared binding-names.ts
+    // answer) so a consumer that resolves names in the body (component prop
+    // substitution) sees `({ label }) => label` read the PARAMETER, not a prop.
+    return { name: "__destructured__", boundNames: boundNamesOf(p) };
   });
 }
 
@@ -3376,6 +3380,28 @@ export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; war
  * serialization and structural equality); ast-builder's body-top check reads it
  * through `hasLostTrailingContent`.
  */
+/**
+ * S458 (fourth round) — parse scrml expression / statement TEXT to an ESTree with the SAME
+ * front the expression parser uses (`extractHandledOperands` + `preprocessForAcorn`: the
+ * `is some` / `is not` / `not` / `::` / `.Variant` / match / map lowering to acorn-legal
+ * placeholders, then `parseExpression` / `parseStatements` with the `@` / `::` plugins).
+ * Identifiers keep their spelling through the preprocessing (they may move), so a caller
+ * that needs to map a node back to the ORIGINAL text tags its identifiers before calling.
+ * Returns null when the text does not parse, or parses only a prefix.
+ */
+export function parseScrmlTextToEstree(raw: string, asProgram: boolean): ESNode | null {
+  if (!raw || !raw.trim()) return null;
+  let processed: string;
+  try {
+    processed = preprocessForAcorn(extractHandledOperands(raw.trim()));
+  } catch {
+    return null;
+  }
+  const r = asProgram ? parseStatements(processed) : parseExpression(processed);
+  if (!r.ast || r.error || r.trailingContent) return null;
+  return r.ast;
+}
+
 export function hasLostTrailingContent(node: unknown): boolean {
   return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
 }
@@ -3675,7 +3701,13 @@ export function emitStringFromTree(node: ExprNode): string {
       return `...${emitStringFromTree(node.argument)}`;
 
     case "unary": {
-      const arg = emitStringFromTree(node.argument);
+      // S458 — an operand that binds looser than a unary operator (binary incl. the
+      // §42 `is` predicates, ternary, assign, arrow) is re-wrapped: `not (x is not)`
+      // parses as unary(!, is-not(x)) and used to round-trip as `!x is not`, which
+      // re-parses as `(!x) is not`. Same kind-match as receiverNeedsParensRT.
+      const argNeedsParens = node.argument.kind === "binary" || node.argument.kind === "ternary"
+        || node.argument.kind === "assign" || node.argument.kind === "lambda";
+      const arg = argNeedsParens ? `(${emitStringFromTree(node.argument)})` : emitStringFromTree(node.argument);
       if (!node.prefix) return `${arg}${node.op}`;
       // Special keyword operators need a space
       const needsSpace = ["typeof", "void", "delete", "await"].includes(node.op);
@@ -3735,7 +3767,11 @@ export function emitStringFromTree(node: ExprNode): string {
     }
 
     case "ternary": {
-      const cond = emitStringFromTree(node.condition);
+      // S459 round 6 — an arrow / assignment / conditional in the CONDITION is re-wrapped
+      // (round-trip twin of emit-expr.ts emitTernary).
+      const ck = node.condition.kind;
+      const condRaw = emitStringFromTree(node.condition);
+      const cond = (ck === "lambda" || ck === "assign" || ck === "ternary") ? `(${condRaw})` : condRaw;
       const cons = emitStringFromTree(node.consequent);
       const alt = emitStringFromTree(node.alternate);
       return `${cond} ? ${cons} : ${alt}`;

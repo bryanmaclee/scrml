@@ -1,0 +1,16 @@
+<program>
+<log> = ""
+${ function h() { @log = @log + "h" } }
+const OwnAttr = <div class="a" props={ fmt?: () => string }>
+    <span class="v" if=fmt title=${fmt()}>x</span>
+</>
+const OwnHandler = <div class="b" props={ onGo?: () => void }>
+    <button class="g" if=onGo onclick=onGo()>g</button>
+</>
+const Ancestor = <div class="c" props={ onGo?: () => void }>
+    <span if=onGo><button class="g" onclick=onGo()>g</button></span>
+</>
+<div id="none"><OwnAttr/><OwnHandler/><Ancestor/></div>
+<div id="some"><OwnAttr fmt=${() => "t"}/><OwnHandler onGo=${() => h()}/><Ancestor onGo=${() => h()}/></div>
+<p id="o">${@log}</p>
+</program>

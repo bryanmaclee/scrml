@@ -1,0 +1,10 @@
+<program>
+const C = <div class="c" props={ label: string }>
+    <p class="a" title=${label + 'it\'s'}>a</p>
+    <p class="b" title=${label + "\"q"}>b</p>
+    <p class="d" title="${label + "\\"}">d</p>
+    <p class="f" title="${label + "x"}">f</p>
+    <p class="e" title="x${label + 'it\'s'}y">e</p>
+</>
+<C label="L"/>
+</program>

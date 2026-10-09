@@ -1,7 +1,7 @@
-// Duplicate prop declaration in props-block + root attribute → E-COMPONENT-012.
+// Duplicate prop declaration in props-block + BARE (valueless) root attribute → E-COMPONENT-012 (§15.10, S458 "D1").
 <program>
     ${
-        const Row = <div class="row" id="fixed-id" props={
+        const Row = <div class="row" id props={
             id: string,
         }>
             <span>${id}</>

@@ -1,0 +1,20 @@
+{
+  "id": "components-component-scope-markup-read",
+  "description": "§15.10.1 (S459 H1/M1) — ONE component scope, read side: markup BEFORE the declaration reads the prop (`n` -> @v = 7); markup AFTER `${ let n = 3; const label = \"S\" }` — text interpolation, a quoted attribute value, a nested element, a later `lift` — reads the LOCALS (3, S), not the props (`bind:n=@v`, `label=\"L\"`). The parent cell `@v` is unchanged. Before S459 later markup read the props (L and 7) while the block's own functions read the locals.",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: \"From the point of declaration onward in the same scope, the local binding shadows the prop.\" The Greeter worked example reads a component logic block's `const greeting` in the markup after it — the same scope.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-001"],
+    "domAnchored": [
+      { "selector": ".c .before", "text": "7" },
+      { "selector": ".c .t", "text": "3" },
+      { "selector": ".c .a", "attr": { "title": "t3-S" } },
+      { "selector": ".c .l", "text": "S" },
+      { "selector": ".c .ns", "text": "4" },
+      { "selector": ".c .lf", "text": "3S" },
+      { "selector": "#o", "text": "7" }
+    ]
+  }
+}

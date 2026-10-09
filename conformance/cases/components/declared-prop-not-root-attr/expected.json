@@ -1,0 +1,27 @@
+{
+  "id": "components-declared-prop-not-root-attr",
+  "description": "§15.10 (S458 \"D1\") — a DECLARED prop is the component's input and never reaches the expanded root as a DOM attribute. `Card` declares `title`, `href`, `disabled`, `id` (all real HTML attribute names) and writes none of them on its root; it is used at the top level (an `${expr}` value and literal values), inside `<each>`, inside a `lift`, and inside a `<match>` arm. No `.card` carries `title=` / `href=` / `disabled` / `id=`; the body's `${title}` / `${id}` reads render.",
+  "language-version": "1.0",
+  "spec": "§15.10",
+  "rationale": "§15.10: 'The value a call site passes for a declared prop SHALL NOT be written onto the expanded component's root element (or any other element) as a DOM attribute — at the top level, inside `<each>`, inside a `lift`, and inside an engine or `<match>` arm alike'. §66.14 rule 4: use-site attributes are construction.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-010", "E-COMPONENT-011", "E-COMPONENT-012"],
+    "input": [],
+    "domAnchored": [
+      { "selector": ".card", "count": 7 },
+      { "selector": ".card[title]", "count": 0 },
+      { "selector": ".card[href]", "count": 0 },
+      { "selector": ".card[disabled]", "count": 0 },
+      { "selector": ".card[id]", "count": 0 },
+      { "selector": "#top .card h2", "text": "Top" },
+      { "selector": "#top .card .cid", "text": "c-top" },
+      { "selector": "#each .card h2", "text": "A" },
+      { "selector": "#each .card .cid", "text": "c-each" },
+      { "selector": "#lift .card h2", "text": "A" },
+      { "selector": "#lift .card .cid", "text": "c-lift" },
+      { "selector": "#arm .card h2", "text": "Arm" },
+      { "selector": "#arm .card .cid", "text": "c-arm" }
+    ]
+  }
+}

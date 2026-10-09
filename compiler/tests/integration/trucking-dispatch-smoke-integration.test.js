@@ -356,6 +356,16 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // (W-CG-CHUNK-PREFETCH-UNRESOLVED 3 → 0); getCurrentUser reads session.userId
   // instead of an untyped KV store (W-TYPE-031-UNPROVEN 321 → 287), and the per-page getCurrentUser helpers are inlined (287 → 239).
   const EXPECTED_BASELINE = {
+    // S458 "D1" (§15.10) — a declared component prop no longer reaches the expanded
+    // root as a DOM attribute. pages/dispatch/load-detail.scrml passes
+    // `currentDriverId=@currentDriverId` (+ Tractor/Trailer) to the lifted
+    // `AssignmentPicker`, whose body reads the prop only inside an `<each>` — and an
+    // `<each>` inside a LIFTED component is dropped today
+    // (g-lift-component-function-props-unsubstituted-s457). The cells' ONLY consumer
+    // in the emitted app was the junk root write `setAttribute("currentDriverId", …)`;
+    // with it gone the dependency graph reports the truth: three cells nothing reads.
+    // The warning falls back to 0 when that gap closes. Aggregate 311 -> 314.
+    "E-DG-002": 3,
     // §14.8.9 protect-egress floor (g-sql-row-protect-leak, 2026-06-28): the
     // structural-redaction floor strips a `protect=` column from any server
     // function's CLIENT response by construction. The trucking corpus's auth

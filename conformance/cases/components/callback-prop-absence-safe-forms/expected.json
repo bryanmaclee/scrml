@@ -1,0 +1,25 @@
+{
+  "id": "components-callback-prop-absence-safe-forms",
+  "description": "§15.11.4 + §42.3.5 (S459 round 7) — every absence-safe form of calling an OPTIONAL function prop compiles (no E-TYPE-031) and runs, for an instance that omits the prop (#none: nothing happens, nothing throws; the `if=`-guarded buttons are not rendered) and one that passes it (#some: each form calls it once — 11 calls): optional call `onGo?.()`; `if=onGo` on the element and on an ancestor; early return on `onGo is not` / `!onGo` / `onGo == not`; `is some` consequent; truthy consequent; else of a negated test; ternary consequent; `&&` right operand. The judgement is the one §42 presence-narrowing reader (presence-narrowing.ts) E-TYPE-046 uses for a `T | not` cell. Round 6 refused six of these.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5: absence-safe = \"Optional chaining the access itself — … `recv?.method(...)`\" or \"Narrowing … via any canonical presence-discrimination: the `if=` markup guard (§42.4), `given recv :> { ... }`, an `if (recv is not) return` / `is some` early-return, or a `match recv …` arm\". §15.11.4 requires \"an absence check\" before calling an optional function prop.",
+  "expect": {
+    "codes": ["W-COMPONENT-001"],
+    "notCodes": ["E-TYPE-031"],
+    "input": [
+      { "click": "#none .opt .g" }, { "click": "#none .erisnot .g" }, { "click": "#none .erbang .g" },
+      { "click": "#none .ereqnot .g" }, { "click": "#none .issome .g" }, { "click": "#none .truthy .g" },
+      { "click": "#none .elseneg .g" }, { "click": "#none .tern .g" }, { "click": "#none .and .g" },
+      { "click": "#some .opt .g" }, { "click": "#some .ifattr .g" }, { "click": "#some .ifanc .g" },
+      { "click": "#some .erisnot .g" }, { "click": "#some .erbang .g" }, { "click": "#some .ereqnot .g" },
+      { "click": "#some .issome .g" }, { "click": "#some .truthy .g" }, { "click": "#some .elseneg .g" },
+      { "click": "#some .tern .g" }, { "click": "#some .and .g" }
+    ],
+    "domAnchored": [
+      { "selector": "#o", "text": "hhhhhhhhhhh" },
+      { "selector": "#none .ifattr .g", "count": 0 },
+      { "selector": "#none .ifanc .g", "count": 0 }
+    ]
+  }
+}

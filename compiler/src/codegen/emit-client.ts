@@ -1907,19 +1907,6 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     chunks.add("deep_reactive"); // _scrml_effect for the §65.6 theme-switch reflection
   }
 
-  // Bind-props wiring — uses _scrml_effect
-  function hasBindProps(nodes: any[]): boolean {
-    for (const node of nodes) {
-      if (!node) continue;
-      if (Array.isArray(node._bindProps) && node._bindProps.length > 0) return true;
-      if (Array.isArray(node.children) && hasBindProps(node.children)) return true;
-    }
-    return false;
-  }
-  if (hasBindProps(allAstNodes)) {
-    chunks.add("deep_reactive");
-  }
-
   // 6nz Bug P (S124, 2026-05-23) — close cross-chunk dependency edges before
   // chunk-set consumption. The `scope` chunk (always-seeded — see
   // context.ts:211) unconditionally calls `_scrml_stop_scope_timers` (timers

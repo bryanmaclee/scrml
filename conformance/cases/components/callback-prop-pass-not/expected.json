@@ -1,0 +1,13 @@
+{
+  "id": "components-callback-prop-pass-not",
+  "description": "§15.11.4 (S459 round 7, item 3) — `not` inhabits an optional function prop's type (`fn | not`), so passing it explicitly (`onGo=${not}`, `onGo=not`) is admitted — not E-TYPE-031 — and the emitted JS is valid: the guarded call takes the else branch and the optional call does nothing. A793e24e5 emitted a syntax error (`not()` lowered as the `not` operator); round 6 refused it as a non-function value.",
+  "language-version": "1.0",
+  "spec": "§15.11.4",
+  "rationale": "§15.11.4: \"An optional function-typed prop (declared with `?`) that is not provided at the call site SHALL have value `not` inside the component body\" — `not` is a value of the prop's type, so passing it is assignable.",
+  "expect": {
+    "codes": ["W-COMPONENT-001"],
+    "notCodes": ["E-TYPE-031", "E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#a .g" }, { "click": "#a .o" }, { "click": "#b .g" }, { "click": "#b .o" }],
+    "domAnchored": [{ "selector": "#o", "text": "--" }]
+  }
+}

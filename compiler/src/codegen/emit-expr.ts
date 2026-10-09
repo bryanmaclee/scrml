@@ -2825,7 +2825,13 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
 }
 
 function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
-  const cond = emitExpr(node.condition, ctx);
+  // S459 round 6 — the condition is a ShortCircuitExpression in JS: an arrow, an assignment
+  // or a nested conditional there must be parenthesized (`(() => f()) ? a : b`; a component
+  // callback prop substituted into `onGo ? onGo() : 0` emitted `() => f() ? … : 0`, which
+  // parses as an arrow returning the conditional).
+  const ck = node.condition.kind;
+  const condRaw = emitExpr(node.condition, ctx);
+  const cond = (ck === "lambda" || ck === "assign" || ck === "ternary") ? `(${condRaw})` : condRaw;
   const cons = emitExpr(node.consequent, ctx);
   const alt = emitExpr(node.alternate, ctx);
   return `${cond} ? ${cons} : ${alt}`;

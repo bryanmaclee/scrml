@@ -1,0 +1,4 @@
+${
+    <user>: { name: string } | not = not
+}
+<div id="guard" if=@user><span id="inner">${@user.name}</span></div>

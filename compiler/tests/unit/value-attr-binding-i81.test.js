@@ -820,9 +820,26 @@ describe("§i81.10 — component roots (S239 finding 7)", () => {
       <List items=@items row={ (item) => <span>\${item.id}</span> }/>
     </program>`;
     const r = compile(src);
-    expect(diagCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    // S458 round 4 (F9): lifted markup inside a component body is now prop-substituted
+    // (it never was — `row(i)` shipped as a bare, unbound call: a ReferenceError at
+    // load). A snippet prop CALLED as a function is therefore refused in a lift exactly
+    // as it already is in plain component markup (`<div>${ row(items[0]) }</div>` is
+    // E-CODEGEN-INVALID-LOGIC on main too) — loudly, by the write-phase emitted-JS gate,
+    // with no artifact written, instead of a silently dead bundle. Never an attribute
+    // binding, and never the bare unbound `row(i)`.
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-row");
-    expectParses(emittedClient(r));
+    expect(emittedClient(r)).not.toMatch(/(?<![\w.$])row\(i\)/);
+    const tmpDir = resolve(testDir, `_tmp_i81_snippet_${++tmpCounter}`);
+    mkdirSync(tmpDir, { recursive: true });
+    const input = resolve(tmpDir, "snip.scrml");
+    writeFileSync(input, src);
+    try {
+      const w = compileScrml({ inputFiles: [input], write: true, outputDir: resolve(tmpDir, "out"), log: () => {} });
+      expect((w.errors ?? []).map((e) => e.code)).toContain("E-CODEGEN-INVALID-LOGIC");
+      expect(existsSync(resolve(tmpDir, "out", "snip.client.js"))).toBe(false);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 

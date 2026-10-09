@@ -1,0 +1,22 @@
+{
+  "id": "components-bind-prop-forwarded-to-input",
+  "description": "§15.11.1 — a component forwards its bindable prop to an inner `<input bind:value=value>`. Typing into the input writes the caller's bound cell `@text` (copied to `@snap`); a later parent write to `@text` propagates into the input. The bind prop is not written onto the root as an attribute.",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: 'Changes to `@var` in the parent SHALL propagate into the component. Changes to the bindable prop inside the component SHALL propagate back to `@var` in the parent.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-010", "E-ATTR-011", "E-COMPONENT-013"],
+    "input": [
+      { "input": ".tf", "value": "typed" },
+      { "click": "#copy" },
+      { "click": "#reset" }
+    ],
+    "state": { "snap": "typed", "text": "reset" },
+    "domAnchored": [
+      { "selector": "#o", "text": "reset" },
+      { "selector": ".tf", "value": "reset" },
+      { "selector": ".tf[value]", "count": 0 }
+    ]
+  }
+}

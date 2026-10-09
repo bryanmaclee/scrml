@@ -1,0 +1,9 @@
+<program>
+<v> = 7
+<o> = ""
+const C = <div class="c" props={ bind n: number }>
+    ${ lift <div class="in">${ let n = 0 }<button class="w" onclick=${() => n = 9}>w</button><button class="r" onclick=${() => @o = String(n)}>r</button></div> }
+</>
+<C bind:n=@v/>
+<p id="o">${@v}/${@o}</p>
+</program>

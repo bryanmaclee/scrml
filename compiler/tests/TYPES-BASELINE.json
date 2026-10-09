@@ -1,8 +1,8 @@
 {
   "//": "TypeScript diagnostic NAME->COUNT baseline. See scripts/types-gate.ts for why this is a name set and not an exit code, and why it carries counts. Regenerate with `bun scripts/types-gate.ts --write`. A NEW name or a GROWN count is a regression; a REMOVED name or a SHRUNK count means this file is stale and should be regenerated in the commit that fixed it.",
   "//never": "Entries containing \"is not assignable to type 'never'\" are LIVE EXHAUSTIVE-SWITCH DECAY — a member was added to a union and a switch over it was not updated, so it silently falls through to the default arm. They are recorded so the population does not GROW. Each is a real bug and each should be FIXED, not inherited.",
-  "totalDiagnostics": 186,
-  "distinctNames": 119,
+  "totalDiagnostics": 184,
+  "distinctNames": 117,
   "neverFallthroughOccurrences": 9,
   "diagnostics": {
     "compiler/src/codegen/collect.ts :: TS2345 :: Argument of type 'unknown' is not assignable to parameter of type 'string'.": 1,
@@ -80,8 +80,6 @@
     "compiler/src/codegen/scheduling.ts :: TS7016 :: Could not find a declaration file for module '../module-resolver.js'. 'compiler/src/module-resolver.js' implicitly has an 'any' type.": 1,
     "compiler/src/component-expander.ts :: TS2304 :: Cannot find name 'filePath'.": 1,
     "compiler/src/component-expander.ts :: TS2339 :: Property 'attributes' does not exist on type 'MarkupNode'.": 1,
-    "compiler/src/component-expander.ts :: TS2345 :: Argument of type 'string | DestructurePattern | null' is not assignable to parameter of type 'string'.": 1,
-    "compiler/src/component-expander.ts :: TS2345 :: Argument of type 'string | DestructurePattern' is not assignable to parameter of type 'string'.": 1,
     "compiler/src/component-expander.ts :: TS2352 :: Conversion of type 'AttrValue' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 2,
     "compiler/src/component-expander.ts :: TS2352 :: Conversion of type 'Record<string, unknown>' to type 'ExprNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1,
     "compiler/src/component-expander.ts :: TS2352 :: Conversion of type '{ expr: ExprNode; kind: \"lift-expr\"; id: number; span: Span; }' to type 'LiftExprNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1,

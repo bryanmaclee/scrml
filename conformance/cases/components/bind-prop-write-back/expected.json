@@ -1,0 +1,25 @@
+{
+  "id": "components-bind-prop-write-back",
+  "description": "§15.11.1 worked example (modal toggle), executed: the parent opens the modal by writing `@showModal`; the body's `visible = false` writes back through the bind channel, so the parent's `@showModal` reflects it; the body's `${visible}` read follows the caller's cell. A second instance bound to a different cell (`@other`) is independent: neither instance's writes reach the other's cell. (The example's `${...}` children spread is omitted: it fails every component today, G-COMPONENT-CHILDREN-SPREAD-SYNTAX-REJECTED-E-COMPONENT-021.)",
+  "language-version": "1.0",
+  "spec": "§15.11.1",
+  "rationale": "§15.11.1: 'The compiler SHALL generate bidirectional synchronisation for `bind:` component props. Changes to `@var` in the parent SHALL propagate into the component. Changes to the bindable prop inside the component SHALL propagate back to `@var` in the parent.' Worked example: 'When the user clicks \"Close\" inside the modal, `visible = false` writes back through the bind channel to `@showModal`, which the parent owns.'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-011", "E-COMPONENT-013", "E-COMPONENT-021", "E-SCOPE-001"],
+    "input": [
+      { "click": "#open" },
+      { "click": "#m1 .close" },
+      { "click": "#m1 .toggle" },
+      { "click": "#m2 .close" }
+    ],
+    "state": { "showModal": true, "other": false },
+    "domAnchored": [
+      { "selector": "#parent", "text": "true" },
+      { "selector": "#other", "text": "false" },
+      { "selector": "#m1 .state", "text": "true" },
+      { "selector": "#m2 .state", "text": "false" },
+      { "selector": "#m1 .modal[visible]", "count": 0 }
+    ]
+  }
+}

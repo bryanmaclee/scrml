@@ -1,0 +1,22 @@
+<program>
+<v> = 7
+<o1> = 0
+<o2> = 0
+<o3> = 0
+<o4> = 0
+const C = <div class="c" props={ bind n: number }>
+    ${
+      function b1() { let { n } = { n: 1 }; n = 100; @o1 = n }
+      function b2() { let [n] = [1]; n++; @o2 = n }
+      function f({ n }) { n = 50; return n }
+      function b3() { @o3 = f({ n: 1 }) }
+      function b4() { let s = 0; for (let [k, n] of [[1, 2]]) { n = 77; s = n + k }; @o4 = s }
+    }
+    <button class="b1" onclick=b1()>1</button>
+    <button class="b2" onclick=b2()>2</button>
+    <button class="b3" onclick=b3()>3</button>
+    <button class="b4" onclick=b4()>4</button>
+</>
+<C bind:n=@v/>
+<p id="o">${@v}/${@o1}/${@o2}/${@o3}/${@o4}</p>
+</program>

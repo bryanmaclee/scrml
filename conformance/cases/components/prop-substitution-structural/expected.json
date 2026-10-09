@@ -1,0 +1,19 @@
+{
+  "id": "components-prop-substitution-structural",
+  "description": "§15.10.1 (S458 F1) — a prop referenced inside an attribute expression is replaced by the caller's EXPRESSION as a tree: precedence is kept (`n * 2` with `n=${@a + 1}` is 8, not 5 — unquoted and inside a quoted `\"v=${n*2}\"`); one simultaneous pass, so a caller expression is never re-scanned (`href=${\"/x/\" + label}` keeps the row alias `label`, not the component's `label` prop); and string-literal content is never rewritten (`' label'`, `'visible'`).",
+  "language-version": "1.0",
+  "spec": "§15.10.1",
+  "rationale": "§15.10.1: 'The compiler SHALL replace every identifier reference that matches a declared prop name with the caller-side value at expansion time' — an identifier REFERENCE (not text inside a string literal), replaced by the caller-side value (an expression, whose grouping is its own).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-SCOPE-001"],
+    "input": [],
+    "domAnchored": [
+      { "selector": "#top .q", "attr": { "title": "8" } },
+      { "selector": "#top .q2", "attr": { "title": "v=8" } },
+      { "selector": "#top .t", "attr": { "title": "Y label" } },
+      { "selector": "#top .v", "attr": { "title": "visible" } },
+      { "selector": "#rows .l", "attr": { "href": "/x/r1" }, "text": "Y" }
+    ]
+  }
+}

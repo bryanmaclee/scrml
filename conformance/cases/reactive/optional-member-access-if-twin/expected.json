@@ -1,0 +1,16 @@
+{
+  "id": "reactive-optional-member-access-if-twin",
+  "description": "§42.3.5 / §17.1 (S460 F1, positive twin of optional-member-access-show-reject) — the same shape under `if=@user` IS narrowed: the `if=` element does not exist while `@user` is `not`, so the bare `${@user.name}` inside it never runs and compiles without E-TYPE-046.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 lists \"the `if=` markup guard (§42.4)\" as a canonical presence-discrimination; §17.1: \"When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-046"],
+    "state": { "user": null },
+    "domAnchored": [
+      { "selector": "#guard", "count": 0 },
+      { "selector": "#inner", "count": 0 }
+    ]
+  }
+}
