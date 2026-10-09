@@ -14173,10 +14173,35 @@ function annotateNodes(
         break;
       }
 
+      // §42.2.3 / §63 / §34 — W-GIVEN-PRESENCE-DEPRECATED (S462 "a, go"). The
+      // IN-PLACE presence guard — `given x :> { … }`, the multi-name
+      // `given x, y :> { … }`, the same guard inside a markup `${ … }`, and the
+      // `given x :>` match arm — is SOFT-DEPRECATED (§63.1 Stage 1): it parses,
+      // emits and runs exactly as before; this warning is the only change. The
+      // §66.7.5 rebind head `given c = @h :>` (`rebind`, set by the given-guard
+      // parser in ast-builder.js) is NOT in the window and never fires it.
+      // ONE diagnostic per site: a standalone guard written with the legacy `=>`
+      // separator fires this code alone — its message names the whole rewrite,
+      // which also retires the separator — not W-GIVEN-ARROW-LEGACY as well.
       case "given-guard": {
         const inMatchBody = (n as { __inMatchBody?: boolean }).__inMatchBody === true;
         const glyph = (n as { separatorGlyph?: string }).separatorGlyph;
-        if (!inMatchBody && glyph === "=>") {
+        const isRebind = (n as { rebind?: boolean }).rebind === true;
+        if (!isRebind) {
+          const ggSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const written = (n as { spellings?: unknown }).spellings;
+          const names = (Array.isArray(written) && written.length > 0
+            ? written
+            : Array.isArray((n as { variables?: unknown }).variables) ? (n as { variables: unknown[] }).variables : []
+          ).filter((v): v is string => typeof v === "string" && v.length > 0);
+          errors.push(new TSError(
+            "W-GIVEN-PRESENCE-DEPRECATED",
+            givenPresenceDeprecatedMessage(names, inMatchBody),
+            ggSpan,
+            "warning",
+          ));
+        }
+        if (isRebind && !inMatchBody && glyph === "=>") {
           const ggSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           const vars = Array.isArray((n as { variables?: unknown }).variables)
             ? ((n as { variables: unknown[] }).variables).filter((v) => typeof v === "string").join(", ")
@@ -20135,6 +20160,36 @@ export function armPipeLegacyMessage(pattern: string, canonical: string, glyph: 
  * double-fire). End-of-window timing promotes this → a reserved
  * E-GIVEN-ARROW-LEGACY (not yet emitted).
  */
+/**
+ * Build the W-GIVEN-PRESENCE-DEPRECATED (§42.2.3 / §63 / §34, S462) message.
+ * `names` are the guarded names as written (`@user` keeps its `@`). A guard
+ * names its `if` rewrite; a match arm names `else :>` after the `not :>` arm.
+ * The rewrite the message names is the one `scrml fix` writes: the explicit
+ * `x is given` test (§42.2.4), which lowers to the same absence check as the
+ * guard. The bare `if (x)` presence test (§42.4) is the other canonical
+ * spelling; it is not the rewrite because impl#1 still lowers a bare condition
+ * to JavaScript truthiness (g-impl1-condition-rule-s460).
+ */
+export function givenPresenceDeprecatedMessage(names: string[], inMatchArm: boolean): string {
+  const list = names.length > 0 ? names.join(", ") : "x";
+  if (inMatchArm) {
+    return (
+      `W-GIVEN-PRESENCE-DEPRECATED: the \`given ${list} :>\` match arm is deprecated (§42.2.3). ` +
+      `After the \`not :>\` arm, write the present case as \`else :>\` — the scrutinee is narrowed ` +
+      `there as it is in a \`given\` arm. Run \`scrml fix\` to rewrite it. It compiles as before ` +
+      `during the deprecation window (§63).`
+    );
+  }
+  const cond = (names.length > 0 ? names : ["x"]).map((v) => `${v} is given`).join(" && ");
+  const guard = `\`given ${list} :> { … }\``;
+  return (
+    `W-GIVEN-PRESENCE-DEPRECATED: the presence guard ${guard} is deprecated (§42.2.3). ` +
+    `Write \`if (${cond}) { … }\` — it tests the same thing and narrows the same ` +
+    `name${names.length > 1 ? "s" : ""} inside the block. Run \`scrml fix\` to rewrite it. It ` +
+    `compiles as before during the deprecation window (§63).`
+  );
+}
+
 function givenArrowLegacyMessage(vars: string): string {
   const guard = vars ? `\`given ${vars} => { ... }\`` : "the standalone `given` guard";
   return (

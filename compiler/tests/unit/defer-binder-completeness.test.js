@@ -37,6 +37,9 @@ const EXCLUDED = {
   "props-block.propsDecl[].bindable": "a boolean flag, not a name",
   "theme-decl.mediaBinds": "CSS media-query bindings of a theme (§65), not scrml logic identifiers",
   "try-stmt.catchNode": "container object; its binder text is `catchNode.header` (in the table)",
+  // §42.2.3 / §66.7.5 (S462) — `given-guard.rebind` marks the rebind head `given c = @h :>` so the
+  // W-GIVEN-PRESENCE-DEPRECATED lint skips it. A boolean flag; the binder is `variables` (in the table).
+  "given-guard.rebind": "a boolean flag (rebind head vs in-place presence guard), not a name; the binder is `variables`",
   // §19.4.5 (S452) — `arms[].legacyPipe` records the SPELLING of a `|`-led `!{}` arm for the
   // W-ARM-PIPE-LEGACY lint and `scrml fix`: source offsets and flags only. The arm's binder name
   // is `arms[].binding` (in the table).

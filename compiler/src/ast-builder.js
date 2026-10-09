@@ -11052,6 +11052,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
       const variables = [];
+      // S462 — the names as WRITTEN (`@user` keeps its `@`), for the
+      // W-GIVEN-PRESENCE-DEPRECATED message and the `given-presence` fix rule.
+      const spellings = [];
+      let rebind = false;
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
       while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
         const identTok = consume();
@@ -11086,6 +11090,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // Recover: skip the `= <rhs>` up to the separator (`:>`/`=>`) or body `{`,
           // keeping `name` as a narrowed variable so the rest of the guard parses.
           consume(); // consume `=`
+          rebind = true; // §66.7.5 rebind head — not the in-place presence guard (S462)
           while (
             peek().kind !== "EOF" &&
             !(peek().kind === "PUNCT" && peek().text === "{") &&
@@ -11095,6 +11100,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
         variables.push(name);
+        spellings.push(identTok.text);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
@@ -11122,6 +11128,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         kind: "given-guard",
         variables,
         separatorGlyph,
+        spellings,
+        rebind,
         body,
         span: spanOf(startTok, peek()),
       };
@@ -16212,6 +16220,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
       const variables = [];
+      // S462 — the names as WRITTEN (`@user` keeps its `@`), for the
+      // W-GIVEN-PRESENCE-DEPRECATED message and the `given-presence` fix rule.
+      const spellings = [];
+      let rebind = false;
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
       while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
         const identTok = consume();
@@ -16247,6 +16259,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // Recover: skip the `= <rhs>` up to the separator (`:>`/`=>`) or body `{`,
           // keeping `name` as a narrowed variable so the rest of the guard parses.
           consume(); // consume `=`
+          rebind = true; // §66.7.5 rebind head — not the in-place presence guard (S462)
           while (
             peek().kind !== "EOF" &&
             !(peek().kind === "PUNCT" && peek().text === "{") &&
@@ -16256,6 +16269,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
         variables.push(name);
+        spellings.push(identTok.text);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
@@ -16283,6 +16297,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         kind: "given-guard",
         variables,
         separatorGlyph,
+        spellings,
+        rebind,
         body,
         span: spanOf(startTok, peek()),
       });
