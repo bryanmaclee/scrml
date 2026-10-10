@@ -1961,28 +1961,81 @@ function stampLeave(arm: MatchArm): MatchArm {
 function armLeaves(arm: MatchArm): string | null {
   if (arm.failExpr) return "fail";
   if (arm.propagateOperand) return "?";
-  if (!arm.structuredBody) {
-    const r = (arm.result ?? "").trim();
-    const raw = r.startsWith("{") ? r.slice(1) : r;
-    const m = /(?:^|[;{\s])(return|fail|break|continue)(?![A-Za-z0-9_$])/.exec(raw);
-    return m && !/\bfunction\b|=>/.test(raw) ? m[1] : null;
+  if (arm.structuredBody) return leaveInStatements(arm.structuredBody);
+  return leaveInArmText(arm.result ?? "");
+}
+
+/**
+ * The leave a raw-text arm body performs, decided from PARSED statements — a
+ * leave statement, a propagation `expr?`, or a `{ … }` block parsed with the
+ * statement parser — never by scanning the text (S462 review F1: a leave word
+ * inside a string or template literal is not a leave; F5: a nested function's
+ * `return` is not the arm's). A single expression that is none of these cannot
+ * contain a leave: scrml has no expression-position `return` / `fail` / `break`
+ * / `continue` (§18.2). A block that does not parse is not classified here — the
+ * IIFE lowering of it fails on its own.
+ */
+function leaveInArmText(text: string): string | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  const leave = leaveStmtFromArmText(t);
+  if (leave) return leaveKindOf(leave);
+  if (propagateOperandOfArmText(t) !== null) return "?";
+  if (t.startsWith("{") && t.endsWith("}") && _matchArmResultIsBlockBody(t)) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseStatementText } = require("../validators/defer-structure.ts") as { parseStatementText: (t: string, f?: string) => { ok: boolean; stmts?: any[] } };
+    const parsed = parseStatementText(t, "<match-arm>");
+    return parsed.ok && Array.isArray(parsed.stmts) ? leaveInStatements(parsed.stmts) : null;
   }
+  return null;
+}
+
+function leaveKindOf(n: any): string | null {
+  switch (n?.kind) {
+    case "return-stmt": return "return";
+    case "fail-expr": return "fail";
+    case "propagate-expr": return "?";
+    case "break-stmt": return "break";
+    case "continue-stmt": return "continue";
+    default: return null;
+  }
+}
+
+const _ARM_LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
+
+/**
+ * Does a statement list leave the arm it is the body of — a `return` / `fail` /
+ * `?`, or a `break` / `continue` NOT aimed at a loop the list itself contains
+ * (S462 review F5: a `break` inside an inner `for` is that loop's)? A nested
+ * function, lambda or `fn` body is its own scope and is not entered.
+ */
+function leaveInStatements(stmts: any): string | null {
   let found: string | null = null;
   const seen = new Set<any>();
-  const walk = (n: any): void => {
+  const walk = (n: any, loopDepth: number): void => {
     if (found || !n || typeof n !== "object" || seen.has(n)) return;
     seen.add(n);
-    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (Array.isArray(n)) { for (const c of n) walk(c, loopDepth); return; }
     const k = n.kind;
     if (k === "function-decl" || k === "fn-decl" || k === "lambda") return;
-    if (k === "return-stmt") { found = "return"; return; }
-    if (k === "fail-expr") { found = "fail"; return; }
-    if (k === "propagate-expr") { found = "?"; return; }
-    if (k === "break-stmt" || k === "continue-stmt") { found = k === "break-stmt" ? "break" : "continue"; return; }
-    for (const [key, v] of Object.entries(n)) if (key !== "span" && v && typeof v === "object") walk(v);
+    if (k === "return-stmt" || k === "fail-expr" || k === "propagate-expr") { found = leaveKindOf(n); return; }
+    if (k === "break-stmt" || k === "continue-stmt") {
+      if (loopDepth === 0) found = leaveKindOf(n);
+      return;
+    }
+    const inner = _ARM_LOOP_KINDS.has(k) ? loopDepth + 1 : loopDepth;
+    for (const [key, v] of Object.entries(n)) if (key !== "span" && v && typeof v === "object") walk(v, inner);
   };
-  walk(arm.structuredBody);
+  walk(stmts, 0);
   return found;
+}
+
+/** §19.5 — the operand of a raw arm body that is a propagation `expr?`, else null. */
+export function propagateOperandOfArmText(text: string): string | null {
+  const r = (text ?? "").trim();
+  if (!r.endsWith("?") || r.endsWith("??") || r.startsWith("{")) return null;
+  const operand = r.slice(0, -1).trim();
+  return operand || null;
 }
 
 function _matchArmInlineToMatchArm(node: any): MatchArm | null {
@@ -2833,12 +2886,21 @@ function emitMultiArmBody(resultStr: string, prelude: string, ctx: EmitExprConte
   // A leaving arm in this value IIFE (S462) — see `emitMatchExpr`.
   const leaves = armLeaves({ kind: "wildcard", test: null, binding: null, result: trimmed });
   if (leaves) {
-    const leave = leaveStmtFromArmText(trimmed);
-    if (opts?.matchValueIsReturned === true && leave && leaves !== "break" && leaves !== "continue") {
-      return `{ ${prelude}${emitLogicNode(leave, opts)} }`;
+    // Correct only where the match's value is what the function returns, and
+    // never for `break` / `continue` (see `emitMatchExpr`).
+    if (!(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+      refuseLeavingValueArm(null, leaves, opts);
+      return `{ ${prelude}return undefined; }`;
     }
-    refuseLeavingValueArm(null, leaves, opts);
-    return `{ ${prelude}return undefined; }`;
+    const leave = leaveStmtFromArmText(trimmed);
+    if (leave) return `{ ${prelude}${emitLogicNode(leave, opts)} }`;
+    const operand = propagateOperandOfArmText(trimmed);
+    if (operand !== null) {
+      const p = emitPropagateArm(operand, opts ?? {});
+      return `{ ${prelude}${p.lines[0]} return ${p.value}; }`;
+    }
+    // A braced block that leaves: its `return` / `fail` lower in place below,
+    // and inside this returned IIFE they return from the function.
   }
   const isBlockBody = trimmed.startsWith("{") && trimmed.endsWith("}");
   if (isBlockBody) {
@@ -3345,6 +3407,9 @@ function stmtArmBodyLines(
     const code = rewriteBlockBody(inner, null, engineCtx, matchMode).trim().replace(/;+\s*$/, "");
     return code ? [`${code};`] : [];
   }
+  // §19.5 — a raw propagation arm (`(.A, .B) :> risky(n)?`, S462 review F7).
+  const operand = propagateOperandOfArmText(trimmed);
+  if (operand !== null) return emitPropagateArm(operand, opts ?? {}).lines;
   // A nested `match` as the arm's (discarded) value is itself a statement here.
   const nested = nestedMatchFromArmText(trimmed);
   if (nested) return [emitMatchStmt(nested, opts)];

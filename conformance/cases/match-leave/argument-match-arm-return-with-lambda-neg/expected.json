@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-argument-match-arm-return-with-lambda-neg",
+  "description": "A `return` in an arm of a match used as a call ARGUMENT is refused (E-CG-003) even when the arm also contains a lambda — only the lambda's own body is exempt (S462 review F5).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "Through the value IIFE an arm's `return` would leave only the arm and silently become the match's value; the refusal must not be defeated by an unrelated `=>` in the same arm.",
+  "expect": {
+    "codes": [
+      "E-CG-003"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

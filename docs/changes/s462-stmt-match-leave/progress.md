@@ -7,3 +7,4 @@
 2026-10-09T22:41:27-06:00 step1 committed e0d7d08b1 (after OOM/timeout retries under sibling load). step2 SPEC edits applied; step3 impl prepared+verified in scratch copy (all dPA probes pass except c15 lift).
 2026-10-09T23:21:33-06:00 step3 applied (fix7-12 + mkcases3): all match-leave 27 cases pass impl#1; bootstrap 11 PASS/0 FAIL; related tests 3552/0; slices 2066/0; types OK; corpus diff vs base: only intended (076 drops E-CG-003; inline-lowering artifacts; 0 value-IIFE refusals in corpus). committing.
 2026-10-10T00:42:39-06:00 CI gates: s34-census --check-new PASS (after E-PARSE-001 provenance), tiers integration+lsp+commands 5625/0, compiler/tests/*.test.js+e2e 2498/0, slices 2066/0, severity+bootstrap-conformance current.
+2026-10-10T10:24:14-06:00 fix round 1: F1/F5/F2/F7 fixed (parsed-statement leave detection; returned multi braced/?; multi ? arms); 3 cases.
