@@ -95,6 +95,7 @@ import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
 import { ifChainChildNodes } from "./ast-if-chain.js";
 import { describeServerTrigger } from "./escalation-reason-text.ts";
+import { toPosix } from "./path-canonical.js";
 import type { EscalationReason } from "./route-inference.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "./engine-statechild-grammar.ts";
 import { isToolProgram, findTopLevelProgramNode, findAllProgramNodes, getProgramKind, programHasKindAttr, collectTopLevelFunctionDecls, findToolMainFn, getToolNodes, programHasServeAttr, getToolServeConfig, resolveServePort, collectToolProgramChannels } from "./tool-program.ts";
@@ -15753,6 +15754,32 @@ function annotateNodes(
     }
   }
 
+  /**
+   * The routeMap entry for the function declared at `start` in `file`. Route
+   * inference keys `routeMap.functions` by each file's NATIVE path
+   * (`${fileAST.filePath}::${span.start}` — `\` on Windows), while an imported
+   * handler's file comes from the module graph (`ImportedFnDecl.depFilePath`),
+   * which is canonical POSIX (path-canonical.js). A raw `get` therefore misses
+   * every imported handler on Windows. Try the exact key first, then a
+   * canonical (`toPosix`) index built once per file.
+   */
+  let _routeByCanonicalKey: Map<string, { boundary: "server" | "client"; escalationReasons?: EscalationReason[] }> | undefined;
+  function routeEntryAt(file: string, start: number | undefined) {
+    const fns = routeMap?.functions;
+    if (!fns) return undefined;
+    const exact = fns.get(`${file}::${start}`);
+    if (exact) return exact;
+    if (!_routeByCanonicalKey) {
+      _routeByCanonicalKey = new Map();
+      for (const [k, v] of fns) {
+        const cut = k.lastIndexOf("::");
+        if (cut < 0) continue;
+        _routeByCanonicalKey.set(`${toPosix(k.slice(0, cut))}::${k.slice(cut + 2)}`, v);
+      }
+    }
+    return _routeByCanonicalKey.get(`${toPosix(file)}::${start}`);
+  }
+
   function checkClientHandlerNotServer(channel: ASTNodeLike, attr: ASTNodeLike, attrName: string, value: ASTNodeLike): void {
     if (value.kind !== "call-ref" && value.kind !== "call" && value.kind !== "variable-ref") return;
     const callee = value.name;
@@ -15803,7 +15830,7 @@ function annotateNodes(
       r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation";
     const directReasonsOf = (c: { decl: ASTNodeLike; file: string }): EscalationReason[] => {
       const start = (c.decl.span as Span | undefined)?.start;
-      const entry = routeMap?.functions?.get(`${c.file}::${start}`);
+      const entry = routeEntryAt(c.file, start);
       if (!entry || entry.boundary === "client") return [];
       return (entry.escalationReasons ?? []).filter((r) => r.kind !== "explicit-annotation" && !isCallerContext(r));
     };
