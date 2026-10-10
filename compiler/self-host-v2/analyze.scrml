@@ -9558,11 +9558,20 @@ ${
     }
 
     // s462 Q12 — drop every CELL narrowing (`@…` and places under it); locals and
-    // `<each>` row bindings (captured locals) keep theirs.
+    // `<each>` row bindings (captured locals) keep theirs. s462 Q18
+    // (ruling:user-voice-scrml.md S462 "a") — EXCEPT a cell narrowed by the chain
+    // of `if=` / `else-if=` gates enclosing the handler (`gateMark`, set by
+    // `typeIfAttr`): render-gating removes the subtree and its listener
+    // synchronously on the write that ends the gate's condition. The marks
+    // themselves do not enter the handler.
     fn tDropCellNarrowing(env: TEnv) -> TEnv {
         let keep: string[] = []
         for (const k of env.narrowed) {
-            if (k.indexOf("@") != 0) keep = keep.concat([k])
+            if (k.indexOf("@") == 0) {
+                if (env.narrowed.indexOf(gateMark(k)) >= 0) keep = keep.concat([k])
+            } else if (k.indexOf(gateMark("")) != 0) {
+                keep = keep.concat([k])
+            }
         }
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
     }
@@ -9570,6 +9579,21 @@ ${
     // s462 — drop every CELL narrowing (`@…`), and every `<each>` row binding
     // whose source is a cell: an UNKNOWN write may write any of them. A local's
     // narrowing (`#id`) stays: a call cannot rebind a local.
+    // s462 Q18 — the mark an `if=` / `else-if=` gate leaves in `narrowed` beside
+    // each cell place it narrows (no place key starts with `gate:`; every reader
+    // of `narrowed` compares whole keys or `@` / `#` prefixes).
+    fn gateMark(k: string) -> string {
+        return "gate:" + k
+    }
+
+    fn gateMarks(keys: string[]) -> string[] {
+        let out: string[] = []
+        for (const k of keys) {
+            if (k.indexOf("@") == 0) out = out.concat([gateMark(k)])
+        }
+        return out
+    }
+
     fn tUnnarrowCells(env: TEnv) -> TEnv {
         let out: TEnv = env
         for (const k of env.narrowed) {
@@ -11945,7 +11969,10 @@ ${
         if (x is not) return keepTEnv(env, ts)
         const r: RVT = typeExpr(env, x, ts)
         // s460 N3 — name the attribute the condition stands in (`if=` / `else-if=`)
-        return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`" + a.name + "=`", r.ts))
+        // s462 Q18 — the gate also marks the cells it narrows (`gateMark`), so an
+        // event handler in the gated subtree keeps them (`tDropCellNarrowing`).
+        const yes: string[] = condNarrowing(env, x).yes
+        return keepTEnv(tCallUnnarrow(tNarrow(env, yes.concat(gateMarks(yes))), x), checkCond(env, x, r.vt, "`" + a.name + "=`", r.ts))
     }
 
     fn typeShowAttr(env: TEnv, a: AAttr, ts: TypeState) -> TypeState {

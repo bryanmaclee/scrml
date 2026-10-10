@@ -71,11 +71,32 @@ describe("S462 Q11 — a server call (a suspension point) ends every cell narrow
 });
 
 describe("S462 Q12 — an event handler re-tests reactive cells", () => {
-  test("a handler under `if=` does not inherit the cell narrowing", () => {
-    expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  test("a handler OUTSIDE the `if=` gate does not inherit the cell narrowing", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)>x</p><button onclick={ @m = @o.n + 1 }>b</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("`show=` does not gate a handler (it hides, it does not remove)", () => {
+    expect(narrowing(O, "<p show=(@o.n != not)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a re-test inside the handler narrows; the element's children keep the narrowing", () => {
     expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ if (@o.n != not) { @m = @o.n + 1 } }>b</button></p>")).toEqual([]);
     expect(narrowing(O, "<p if=(@o.n != not)>${@o.n + 1}</p>")).toEqual([]);
+  });
+});
+
+// S462 Q18 ("a", user-voice §S462): a handler inside an `if=` / `else-if=` gate KEEPS the gate's
+// narrowing — render-gating removes the subtree and its listener synchronously on the write that ends
+// the condition. Other places, `show=`, handlers outside the gate stay as Q12; a write inside still ends.
+describe("S462 Q18 — a handler inside an `if=` gate keeps that gate's narrowing", () => {
+  test("a handler under `if=` keeps the gated place", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual([]);
+  });
+  test("a descendant of the gated element", () => {
+    expect(narrowing(O, "<div if=(@o.n != not)><section><button onclick={ @m = @o.n + 1 }>b</button></section></div>")).toEqual([]);
+  });
+  test("a different place stays un-narrowed in the handler", () => {
+    expect(narrowing(O, "<p if=(@o.f != not)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("a write inside the handler still ends it", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ @o = { v: not, n: not, f: not }\n @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
 });
