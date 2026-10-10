@@ -18,7 +18,9 @@
  *   §C10.7  Runtime Level-2 — registered message wins over Level-3 default
  *   §C10.8  Runtime Level-1 — inline override wins over Level-2 + Level-3
  *   §C10.9  Runtime — `registerMessages` last-write-wins composition
- *   §C10.10 Runtime — parameterised tags interpolate payload
+ *   §C10.10 Runtime — payload slots render through Level-2 templates (§41.12.1, S462)
+ *   §C10.10b Runtime — a bad template is refused at registration (fail closed)
+ *   §C10.10c The shipped defaults parse against the slot table
  *
  * SCOPE: per A1c BRIEF C10 — Level-1 codegen + 4-level runtime helper. OUT OF
  * SCOPE: <errors of=> element (C11), cross-field deps verification (C9),
@@ -111,6 +113,7 @@ function buildMessagesSandbox() {
       register: _scrml_messages_register,
       defaults: _SCRML_DEFAULT_MESSAGES,
       tagToValidator: _SCRML_TAG_TO_VALIDATOR,
+      messageHtml: _scrml_message_html,
     };
   `;
   // eslint-disable-next-line no-new-func
@@ -409,43 +412,25 @@ describe("C10 §C10.6 — Level-3 default catalog renders for all tags", () => {
 // ---------------------------------------------------------------------------
 
 describe("C10 §C10.7 — Level-2 registered wins over Level-3 default", () => {
-  test("registered .Required overrides default for that tag", () => {
+  test("registered .Required template overrides default for that tag", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (field) => "Please fill in " + field + "." });
+    api.register({ Required: "Please fill in {field}." });
     expect(api.messageFor({ tag: "Required" }, "email")).toBe("Please fill in email.");
   });
 
   test("registered tag does NOT affect other tags (still default)", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (field) => "Please fill in " + field + "." });
+    api.register({ Required: "Please fill in {field}." });
     // MinFailed not registered — should still hit Level-3.
     const msg = api.messageFor({ tag: "MinFailed", threshold: 18 }, "age");
     expect(msg).toContain("at least");
     expect(msg).toContain("18");
   });
 
-  test("registered function receives positional payload args", () => {
+  test("registered template fills its payload slot", () => {
     const api = buildMessagesSandbox();
-    api.register({
-      MinFailed: (field, threshold) => field + " requires minimum " + threshold,
-    });
+    api.register({ MinFailed: "{field} requires minimum {threshold}" });
     expect(api.messageFor({ tag: "MinFailed", threshold: 21 }, "age")).toBe("age requires minimum 21");
-  });
-
-  test("registered function returning non-string falls through to Level-3", () => {
-    const api = buildMessagesSandbox();
-    api.register({ Required: () => 42 }); // bug-shaped registration
-    const msg = api.messageFor({ tag: "Required" }, "name");
-    expect(msg).toContain("name");
-    expect(msg).toContain("required");
-  });
-
-  test("registered function that throws falls through to Level-3", () => {
-    const api = buildMessagesSandbox();
-    api.register({ Required: () => { throw new Error("boom"); } });
-    const msg = api.messageFor({ tag: "Required" }, "name");
-    expect(msg).toContain("name");
-    expect(msg).toContain("required");
   });
 });
 
@@ -456,7 +441,7 @@ describe("C10 §C10.7 — Level-2 registered wins over Level-3 default", () => {
 describe("C10 §C10.8 — Level-1 inline override wins over Level-2 + Level-3", () => {
   test("inline override beats registered + default for matching (cell, validator)", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (field) => "Please fill in " + field + "." });
+    api.register({ Required: "Please fill in {field}." });
     api.registerInline("signup.name", "req", "Name is required, friend.");
     // Same tag (Required), same cell (signup.name) — Level 1 wins.
     expect(api.messageFor({ tag: "Required" }, "name", "signup.name")).toBe("Name is required, friend.");
@@ -464,7 +449,7 @@ describe("C10 §C10.8 — Level-1 inline override wins over Level-2 + Level-3", 
 
   test("inline override on different cell does NOT bleed across cells", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (field) => "Please fill in " + field + "." });
+    api.register({ Required: "Please fill in {field}." });
     api.registerInline("signup.name", "req", "Name is required, friend.");
     // Different cell — should fall to Level 2.
     expect(api.messageFor({ tag: "Required" }, "email", "signup.email")).toBe("Please fill in email.");
@@ -472,7 +457,7 @@ describe("C10 §C10.8 — Level-1 inline override wins over Level-2 + Level-3", 
 
   test("inline override only fires when cellName is provided", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (field) => "Please fill in " + field + "." });
+    api.register({ Required: "Please fill in {field}." });
     api.registerInline("signup.name", "req", "Name is required, friend.");
     // No cellName → Level 1 skipped → Level 2 used.
     expect(api.messageFor({ tag: "Required" }, "name")).toBe("Please fill in name.");
@@ -501,25 +486,17 @@ describe("C10 §C10.8 — Level-1 inline override wins over Level-2 + Level-3", 
 describe("C10 §C10.9 — registerMessages composes (last-write-wins per key)", () => {
   test("two register calls with disjoint keys both apply", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (f) => "REQ:" + f });
-    api.register({ MinFailed: (f, n) => "MIN:" + f + ":" + n });
+    api.register({ Required: "REQ:{field}" });
+    api.register({ MinFailed: "MIN:{field}:{threshold}" });
     expect(api.messageFor({ tag: "Required" }, "x")).toBe("REQ:x");
     expect(api.messageFor({ tag: "MinFailed", threshold: 5 }, "y")).toBe("MIN:y:5");
   });
 
   test("two register calls with overlapping keys — last write wins", () => {
     const api = buildMessagesSandbox();
-    api.register({ Required: (f) => "FIRST:" + f });
-    api.register({ Required: (f) => "SECOND:" + f });
+    api.register({ Required: "FIRST:{field}" });
+    api.register({ Required: "SECOND:{field}" });
     expect(api.messageFor({ tag: "Required" }, "x")).toBe("SECOND:x");
-  });
-
-  test("register ignores non-function values gracefully", () => {
-    const api = buildMessagesSandbox();
-    api.register({ Required: "not a function", MinFailed: 42 });
-    // No registered fn → Level 3 default.
-    const msg = api.messageFor({ tag: "Required" }, "x");
-    expect(msg).toContain("required");
   });
 
   test("register ignores null/undefined map gracefully", () => {
@@ -534,30 +511,45 @@ describe("C10 §C10.9 — registerMessages composes (last-write-wins per key)", 
 });
 
 // ---------------------------------------------------------------------------
-// §C10.10 — Parameterised tags interpolate payload via Level-2
+// §C10.10 — Every payload slot renders through a registered template (§41.12.1)
 // ---------------------------------------------------------------------------
 
-describe("C10 §C10.10 — Parameterised tags pass payload to Level-2 functions", () => {
-  test("LengthFailed payload reaches registered function", () => {
-    const api = buildMessagesSandbox();
-    api.register({
-      LengthFailed: (field, predicate) => field + " " + predicate.op + " " + predicate.value,
+describe("C10 §C10.10 — payload slots render through Level-2 templates", () => {
+  const cases = [
+    ["Required",        "{field}!",            { tag: "Required" },                                        "name!"],
+    ["NotSome",         "{field}?",            { tag: "NotSome" },                                         "name?"],
+    ["LengthFailed",    "{field} {predicate}", { tag: "LengthFailed", predicate: { op: ">=", value: 8 } }, "name >= 8"],
+    ["PatternMismatch", "{field} ~ {re}",      { tag: "PatternMismatch", re: /^[a-z]+$/ },                 "name ~ /^[a-z]+$/"],
+    ["MinFailed",       "{field} {threshold}", { tag: "MinFailed", threshold: 18 },                        "name 18"],
+    ["MaxFailed",       "{field} {threshold}", { tag: "MaxFailed", threshold: 99 },                        "name 99"],
+    ["GtFailed",        "{field} {expected}",  { tag: "GtFailed", expected: 0 },                           "name 0"],
+    ["LtFailed",        "{field} {expected}",  { tag: "LtFailed", expected: 100 },                         "name 100"],
+    ["GteFailed",       "{field} {expected}",  { tag: "GteFailed", expected: 1 },                          "name 1"],
+    ["LteFailed",       "{field} {expected}",  { tag: "LteFailed", expected: 9 },                          "name 9"],
+    ["EqFailed",        "{field} {expected}",  { tag: "EqFailed", expected: "alice" },                     "name alice"],
+    ["NeqFailed",       "{field} {forbidden}", { tag: "NeqFailed", forbidden: "admin" },                   "name admin"],
+    ["OneOfFailed",     "{field} in [{set}]",  { tag: "OneOfFailed", set: ["a", "b"] },                    "name in [a, b]"],
+    ["NotInFailed",     "{field} not [{set}]", { tag: "NotInFailed", set: ["root"] },                      "name not [root]"],
+    ["Custom",          "{field}: {tag}",      { tag: "Custom", tag_string: "TooSpicy" },                  "name: TooSpicy"],
+  ];
+  for (const [tag, template, error, expected] of cases) {
+    test(`${tag}: "${template}" renders "${expected}"`, () => {
+      const api = buildMessagesSandbox();
+      api.register({ [tag]: template });
+      expect(api.messageFor(error, "name")).toBe(expected);
     });
-    expect(api.messageFor(
-      { tag: "LengthFailed", predicate: { op: ">=", value: 8 } },
-      "password",
-    )).toBe("password >= 8");
+  }
+
+  test("a slot used twice renders twice; {{ is a literal {; a lone } is text", () => {
+    const api = buildMessagesSandbox();
+    api.register({ MinFailed: "{{{field}}} {threshold}/{threshold}" });
+    expect(api.messageFor({ tag: "MinFailed", threshold: 3 }, "n")).toBe("{n}} 3/3");
   });
 
-  test("OneOfFailed array payload reaches registered function", () => {
+  test("an absent payload value renders as the empty string", () => {
     const api = buildMessagesSandbox();
-    api.register({
-      OneOfFailed: (field, set) => field + " in [" + set.join(",") + "]",
-    });
-    expect(api.messageFor(
-      { tag: "OneOfFailed", set: ["a", "b"] },
-      "role",
-    )).toBe("role in [a,b]");
+    api.register({ MinFailed: "[{threshold}]" });
+    expect(api.messageFor({ tag: "MinFailed" }, "n")).toBe("[]");
   });
 
   test("Custom payload (tag_string) reaches default-catalog renderer", () => {
@@ -574,6 +566,116 @@ describe("C10 §C10.10 — Parameterised tags pass payload to Level-2 functions"
       { tag: "Custom", customTag: "Legacy" },
       "salsa",
     )).toContain("Legacy");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C10.10b — a template the compiler could not see is refused at registration
+// (§41.12.1 rule 6): fail closed — never rendered partially, earlier entry kept.
+// ---------------------------------------------------------------------------
+
+describe("C10 §C10.10b — runtime refusal of bad templates (fail closed)", () => {
+  function quiet(fn) {
+    const orig = console.error;
+    const seen = [];
+    console.error = (...a) => { seen.push(a.join(" ")); };
+    try { fn(); } finally { console.error = orig; }
+    return seen;
+  }
+
+  test("a function value is refused — the function never runs; Level 3 renders", () => {
+    const api = buildMessagesSandbox();
+    let ran = false;
+    const seen = quiet(() => api.register({ Required: () => { ran = true; return "FN"; } }));
+    expect(api.messageFor({ tag: "Required" }, "name")).toBe("name is required.");
+    expect(ran).toBe(false);
+    expect(seen.join("\n")).toContain("not a message template");
+  });
+
+  test("a non-string value is refused", () => {
+    const api = buildMessagesSandbox();
+    const seen = quiet(() => api.register({ MinFailed: 42 }));
+    expect(api.messageFor({ tag: "MinFailed", threshold: 2 }, "n")).toBe("n must be at least 2.");
+    expect(seen.length).toBe(1);
+  });
+
+  test("an unknown slot is refused — {threshold} is not a slot of Required", () => {
+    const api = buildMessagesSandbox();
+    const seen = quiet(() => api.register({ Required: "{field} needs {threshold}" }));
+    expect(api.messageFor({ tag: "Required" }, "name")).toBe("name is required.");
+    expect(seen.join("\n")).toContain("{threshold}");
+    expect(seen.join("\n")).toContain("{field}");
+  });
+
+  test("malformed templates are refused", () => {
+    for (const bad of ["{field", "{}", "{ field }", "{1x}", "trailing {"]) {
+      const api = buildMessagesSandbox();
+      const seen = quiet(() => api.register({ Required: bad }));
+      expect(api.messageFor({ tag: "Required" }, "name")).toBe("name is required.");
+      expect(seen.join("\n")).toContain("malformed");
+    }
+  });
+
+  test("a key that is not a ValidationError variant is refused", () => {
+    const api = buildMessagesSandbox();
+    const seen = quiet(() => api.register({ TooShort: "{field} short" }));
+    expect(seen.join("\n")).toContain("not a ValidationError variant");
+  });
+
+  test("a refused template keeps the earlier registration for that key", () => {
+    const api = buildMessagesSandbox();
+    api.register({ Required: "FIRST:{field}" });
+    quiet(() => api.register({ Required: "{bogus}" }));
+    expect(api.messageFor({ tag: "Required" }, "x")).toBe("FIRST:x");
+  });
+
+  test("a prototype-member key is refused, not read from Object.prototype", () => {
+    const api = buildMessagesSandbox();
+    const seen = quiet(() => api.register({ constructor: "{field}" }));
+    expect(seen.join("\n")).toContain("not a ValidationError variant");
+    expect(api.messageFor({ tag: "constructor" }, "x")).toBe("x is invalid.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C10.10d — the message is TEXT (§55.8): the default <errors> render escapes it
+// ---------------------------------------------------------------------------
+
+describe("C10 §C10.10d — _scrml_message_html escapes a message for the default render", () => {
+  test("markup characters in a payload are escaped, so a typed tag never becomes an element", () => {
+    const api = buildMessagesSandbox();
+    const msg = api.messageFor({ tag: "EqFailed", expected: "<img id=pwn src=x onerror=\"a('1')\">" }, "confirm");
+    expect(api.messageHtml(msg)).toBe(
+      "confirm must equal &lt;img id=pwn src=x onerror=&quot;a(&#39;1&#39;)&quot;&gt;.",
+    );
+  });
+
+  test("& is escaped first-class (no double-escape surprises)", () => {
+    const api = buildMessagesSandbox();
+    expect(api.messageHtml("a & b &amp; c")).toBe("a &amp; b &amp;amp; c");
+  });
+
+  test("messageFor itself returns plain text — escaping belongs to the HTML sink", () => {
+    const api = buildMessagesSandbox();
+    api.register({ Required: "<b>{field}</b>" });
+    expect(api.messageFor({ tag: "Required" }, "x")).toBe("<b>x</b>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C10.10c — the shipped defaults are well-formed templates over their slots
+// ---------------------------------------------------------------------------
+
+describe("C10 §C10.10c — shipped defaults parse against the slot table", () => {
+  test("every default parses, and every variant with slots has a default", async () => {
+    const mod = await import("../../src/runtime-message-templates.js");
+    const tags = Object.keys(mod._SCRML_MESSAGE_SLOTS);
+    expect(tags.length).toBe(15);
+    for (const tag of tags) {
+      const tpl = mod._SCRML_DEFAULT_MESSAGES[tag];
+      expect(typeof tpl).toBe("string");
+      expect(mod._scrml_message_template_parse(tpl, mod._SCRML_MESSAGE_SLOTS[tag]).ok).toBe(true);
+    }
   });
 });
 
@@ -600,8 +702,8 @@ describe("C10 §C10.11 — _SCRML_TAG_TO_VALIDATOR covers the 14 universal-core 
     expect(api.tagToValidator.Required).toBe("req");
   });
 
-  test("NotSome maps to 'is some'", () => {
+  test("NotSome maps to 'is given' (S462 — `is some` is its soft-deprecated spelling)", () => {
     const api = buildMessagesSandbox();
-    expect(api.tagToValidator.NotSome).toBe("is some");
+    expect(api.tagToValidator.NotSome).toBe("is given");
   });
 });

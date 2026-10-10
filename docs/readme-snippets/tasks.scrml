@@ -35,7 +35,7 @@ function loadTasks() {
 
 function insertTask(text: string)! -> TaskError {
     const same = ?{`SELECT id FROM tasks WHERE text = ${text}`}.get()
-    if (same is some) fail .Duplicate
+    if (same is given) fail .Duplicate
     return ?{`INSERT INTO tasks (text, completed_at) VALUES (${text}, ${not})
               RETURNING id, text, completed_at`}.get()
 }

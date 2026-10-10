@@ -267,7 +267,7 @@
                                       </a>
                                       <div class="text-xs text-slate-500">
                                           ${inv.load_origin_city ? inv.load_origin_city : ""}
-                                          <span if=(inv.load_origin_city is some && inv.load_destination_city is some) class="text-slate-400 mx-1">→</span>
+                                          <span if=(inv.load_origin_city is given && inv.load_destination_city is given) class="text-slate-400 mx-1">→</span>
                                           ${inv.load_destination_city ? inv.load_destination_city : ""}
                                       </div>
                                   </td>
@@ -281,7 +281,7 @@
                                       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${invoiceStatusClasses(invoiceStatus(inv, TODAY_ISO))}">
                                           ${invoiceStatusLabel(invoiceStatus(inv, TODAY_ISO))}
                                       </span>
-                                      <div if=(inv.payment_reference is some && inv.payment_reference != "") class="text-xs text-slate-500 mt-1">
+                                      <div if=(inv.payment_reference is given && inv.payment_reference != "") class="text-xs text-slate-500 mt-1">
                                           ${inv.payment_reference}
                                       </div>
                                   </td>
@@ -298,7 +298,7 @@
                                       >
                                           Notify customer
                                       </button>
-                                      <span if=(inv.paid_at is some) class="text-xs text-slate-400">
+                                      <span if=(inv.paid_at is given) class="text-xs text-slate-400">
                                           ${formatIsoDate(inv.paid_at)}
                                       </>
                                   </td>

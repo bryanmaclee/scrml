@@ -1,0 +1,5 @@
+<program>
+    let <code:string="alert(1)"/>
+    <button id="b" onfoo=@code>x</button>
+    <svg><set id="s" onbegin=@code attributeName="fill" to="red"/></svg>
+</program>

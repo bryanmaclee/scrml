@@ -115,7 +115,7 @@ ${
      *   parseInt("abc") → NaN
      */
     export function parseInt(str, radix) {
-        return Number.parseInt(str, radix is some ? radix : 10)
+        return Number.parseInt(str, radix is given ? radix : 10)
     }
 
     /**

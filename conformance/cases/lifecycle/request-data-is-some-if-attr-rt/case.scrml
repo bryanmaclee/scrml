@@ -10,6 +10,6 @@ ${
     <request id="userReq">
         ${ @userData = loadUser() }
     </>
-    <p id="who" if=${<#userReq>.data is some}>${@userData?.name}</>
-    <div id="err" if=${<#userReq>.error is some}>failed</>
+    <p id="who" if=${<#userReq>.data is given}>${@userData?.name}</>
+    <div id="err" if=${<#userReq>.error is given}>failed</>
 </page>

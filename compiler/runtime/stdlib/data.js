@@ -8,7 +8,7 @@
 // chunk (compiler/src/runtime-template.js).
 //
 // This shim replaces the would-be compiled output of stdlib/data/*.scrml
-// because those source files use scrml-native vocabulary (`is some`,
+// because those source files use scrml-native vocabulary (`is given`,
 // `is not`, `not` literal) which the standard compile pipeline does not
 // lower into the same JS shape these utility functions need today.
 // Mirrors the convention established by stdlib/auth.js + crypto.js +

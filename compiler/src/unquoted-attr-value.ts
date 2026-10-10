@@ -385,7 +385,10 @@ function attrConditionOperatorAhead(raw: string, pos: number): string | null {
   // are identifiers — guarded by the mandatory `[ \t]+` keyword separator and
   // the trailing `\b`). Returned exact-text matches what the reject branch
   // consumes (leading ws handled separately by the caller).
-  const isOp = /^(?:is[ \t]+not[ \t]+not|is[ \t]+some|is[ \t]+not)\b/.exec(raw.slice(i));
+  // `is given` (§42.2.4, the canonical presence spelling — S460 a′ / S462) is the same
+  // operator as `is some`; before S462 it was missing here, so `if=@x is given` dropped
+  // the test exactly as described above.
+  const isOp = /^(?:is[ \t]+not[ \t]+not|is[ \t]+some|is[ \t]+given|is[ \t]+not)\b/.exec(raw.slice(i));
   if (isOp) return isOp[0];
 
   // `>=` — intercept BEFORE the outer tag-close test consumes the `>`.

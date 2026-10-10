@@ -30,11 +30,43 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 247 | 5 |
-| MED | 566 | 5 |
-| LOW | 327 | 0 |
+| HIGH | 249 | 5 |
+| MED | 569 | 5 |
+| LOW | 336 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-no-s5-2-sink-floor-s462 — the BOOTSTRAP (`compiler/self-host-v2/`) wrote data-bound executable sinks unguarded: `srcdoc=@cell` compiled clean and the frame ran the cell's script; `href=@cell` wrote `javascript:` (`rt.attr` was a bare `setAttribute`) and a click ran it — `NEW S462; HIGH; RESOLVED S462 (s462-bootstrap-sink-guards)`
+
+<!-- @gap id=g-bootstrap-no-s5-2-sink-floor-s462 sev=HIGH status=resolved resolved-by=s462-bootstrap-sink-guards locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(attr)+compiler/self-host-v2/analyze.scrml(resolveHtml, attrCaseDiags, eventName)+compiler/self-host-v2/parse.scrml(quotedInterpDiags) prov=empirical:s462-chromium-repro(docs/changes/s462-bootstrap-sink-guards/repro) -->
+
+Filed from the O46 deep-dive (`scrml-support/docs/deep-dives/attribute-spread-o46-x-forwarding-2026-10-09.md` §6.1, relayed) and REPRODUCED before the fix on `origin/main` `980cb3001`: the bootstrap's own artifact (front end + `print.scrml` + `slice-m1/runtime/runtime.js`), served to headless Chromium — `srcdoc=@doc` with `<script>parent.pwned = 1</script>` → `window.pwned = 1`; `href=@bad` `javascript:alert(1)` → clicking opens `alert("1")`; a reactive re-write to `vbscript:x` was written verbatim. No diagnostic for either. Same in happy-dom (`<form action>`, `<object data>`, `<img srcset>`, SVG `<set to>` likewise).
+
+**RESOLVED S462** (s462-bootstrap-sink-guards): the bootstrap now meets SPEC §5.2 on every bound write. **Scope: the §5.2 ATTRIBUTE sinks only** (URL-valued attributes, `srcdoc`, `on…` text). Element-level executable sinks are NOT covered here — the bootstrap still admits `<script>` / `<style>`: see [[g-bootstrap-admits-script-style-elements-s462]] (HIGH, open).
+- Rule 3 (runtime): `rt.attr` judges every URL-valued bound write — element-scoped (`_scrml_is_url_attr`), SVG animation values against the animated attribute (a computed or absent `attributeName` → `""`, fail closed), first write and every reactive re-write — with `_scrml_safe_url`. The guard is impl#1's `compiler/src/runtime-url-guard.js` copied VERBATIM into `runtime.js` between marker lines (one definition, not a second list): `bun scripts/sync-bootstrap-url-guard.ts --write|--check`; `compiler/tests/unit/bootstrap-url-guard-verbatim.test.js` fails on drift. A refusal reports through the guard's own `console.error` fallback (the bootstrap has no `_scrml_error_boundary_log`), never the value.
+- Rule 2 (compile): `srcdoc` (any case) with a non-static value and a quoted `on…`/`srcdoc` value with `${…}` are E-ATTR-INTERP-EXECUTABLE; a case-variant `on…` with an expression value (`ONCLICK=(@x)`) — written, not wired — is E-ATTR-INTERP-EXECUTABLE. `one` / `online` / `onboarding` are ordinary attributes (exact names), as rule 1 says (they were wired as `e`/`line`/`boarding` listeners).
+- After the fix, the same Chromium runs: `srcdoc` refused at compile time; `href` written `about:blank`, no dialog.
+- Conformance (both implementations PASS; the bootstrap grades the twin): `attr-executable-sink/{bound-url-runtime-guard, bound-svg-animation-runtime-guard, srcdoc-bound-cell-neg, event-attr-paren-data-text-neg}` (new) + `srcdoc-interp-neg` (was UNSUPPORTED). Bootstrap tests: `slice-m4/sink-guards.test.js` (runtime halves executed).
+- Nit for the X / O46 forwarding build: the case-variant `ON…=(…)` refusal lives in `analyze.scrml` `attrCaseDiags`, which returns early for a component USE — when forwarded attributes land on a use, re-check this path (a forwarded `ONCLICK=(…)` must not bypass it).
+- Still open on the bootstrap, all FAIL-CLOSED (refused, never written): the attribute expression form `attr=${…}` does not parse (E-PARSE-TRAILING); a quoted `${…}` in any other attribute is the reactive-template refusal (E-BOOTSTRAP-UNSUPPORTED) — so a scheme-led quoted URL is refused under that code, not E-ATTR-INTERP-EXECUTABLE (the literal-prefix scheme judgment lands with §5.5.3 reactive templates, and must read impl#1's `_scrml_read_url_scheme`, not a scrml re-implementation).
+
+### g-bootstrap-admits-script-style-elements-s462 — the BOOTSTRAP accepts `<script>` and `<style>` elements: `<script>${@code}</script>` runs data as JavaScript, `<script src=@u>` / SVG `<script href=@u>` load a data-chosen script, `<style>${@css}</style>` injects CSS — impl#1 refuses both (E-SCRIPT-001 / E-STYLE-001) — `NEW S462; HIGH; open`
+
+<!-- @gap id=g-bootstrap-admits-script-style-elements-s462 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(resolveHtml)+compiler/self-host-v2/parse.scrml(element opener) prov=review:s462-bootstrap-sink-guards-S239(Chromium, reproduced on base 980cb3001 AND head d76bcbf4f) -->
+
+Reviewer-reproduced in Chromium on the bootstrap's own artifact, base and head (the s462 sink-guards change does not touch it — it covers §5.2 ATTRIBUTE sinks only, [[g-bootstrap-no-s5-2-sink-floor-s462]]):
+- `<program> let <code:string="window.pwned='SCRIPT'"/> <script id="sc">${@code}</script> </program>` — `window.pwned` is set;
+- `<svg><script>${@code}</script></svg>` — same (the SVG-namespace script);
+- `let <u:string="/evil.js"/> <script src=@u></script>`, and SVG `<script href=@u>` — the page loads the data-chosen script;
+- `<style>${@css}</style>` — CSS injection; Chromium fetched an attacker `url()`.
+
+SPEC §4.17: "`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all. Both are rejected symmetrically at the **block-splitter level**: `<style>` triggers `E-STYLE-001` (CSS lives in `#{...}`), and `<script>` triggers `E-SCRIPT-001` (scrml logic lives in logic-context `${...}`; genuine foreign JS has the `_{...}` foreign-code block, §23). … The match on the tag name is **exact**, not a prefix — `<noscript>` is an ordinary element and is unaffected." §34 rows E-SCRIPT-001 (§4.17) / E-STYLE-001 (§9), both Error. impl#1 emits both at `compiler/src/block-splitter.js`. The bootstrap has neither code. Fix (separate change): refuse both elements by exact local name, in every namespace (`<svg><script>` is a script — the §5.2.x emit allow-list's own reading), with the recovery the SPEC names.
+
+### g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462 — in the BOOTSTRAP, a braced value on a non-handler attribute (`srcdoc={@doc}`, `href={@bad}`) silently lowers to `""`, and a lowercase quoted handler `onclick="alert(1)"` lowers to an empty listener — fail-safe but silent — `NEW S462; LOW; open`
+
+<!-- @gap id=g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveHtml — a Braced value on a non-handler attribute is filed AStatic)+compiler/self-host-v2/lower.scrml(quotedText(.Braced) -> "", handlerBlock(.Quoted) -> block([])) prov=review:s462-bootstrap-sink-guards-S239 -->
+
+Nothing executable is written (the braced value becomes `attr=""`; the quoted handler becomes a listener that does nothing), so no sink is open — but the author's text is dropped with no diagnostic. impl#1 writes a quoted static `onclick="…"` as the author's static string (§5.2 rule 1: "A quoted event attribute with no `${…}` stays a static string"). Either reading should be a diagnostic in the bootstrap rather than a silent drop (`feedback_dont_soft_classify_bugs`).
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
@@ -21135,9 +21167,23 @@ Reproducer `repro/site-helper-in-sql-interpolation-missing-server-side.scrml`. s
 <!-- @gap id=g-server-param-length-predicate-unenforced sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(E-CONTRACT-001-RT boundary-guard emitter — `.member` predicates skipped)—agent-located-verify prov=empirical:S441-site-fix-fork-p-S9c -->
 Reproducer `repro/site-server-param-length-predicate-unenforced.scrml`: server.js carries the `E-CONTRACT-001-RT` guard for the `qty` parameter only. Governing: §53.9.4 *"Inline predicate constraints on server function parameters SHALL be enforced at the server boundary … cannot be bypassed by raw HTTP requests."* A raw request with a 1-character value reaches the body. (The broad site claim "parameter predicates are not enforced" did not reproduce; the `.length` form did.)
 
-### g-is-some-cell-validator-drops-the-declaration — `<mid is some> = ""` (a §55.1 validator) never registers the cell; the reads then fail E-SCOPE-001 / E-STATE-UNDECLARED — `NEW S441; MED; open`
-<!-- @gap id=g-is-some-cell-validator-drops-the-declaration sev=MED status=open locus=searched:compiler/src/ast-builder.js(structural-decl lookahead — the two-token `is some` validator)—agent-located-verify prov=empirical:S441-site-fix-p-issome -->
+### g-is-some-cell-validator-drops-the-declaration — `<mid is some> = ""` (a §55.1 validator) never registers the cell; the reads then fail E-SCOPE-001 / E-STATE-UNDECLARED — `NEW S441; MED; RESOLVED S462 (s462-is-some-deprecate)`
+<!-- @gap id=g-is-some-cell-validator-drops-the-declaration sev=MED status=resolved resolved-by=s462-is-some-deprecate locus=compiler/src/ast-builder.js(scanStructuralDeclLookahead — the two-token `is some` validator) prov=empirical:S441-site-fix-p-issome -->
 Reproducer `repro/site-is-some-cell-validator-drops-decl.scrml`. No diagnostic at the declaration; every read blames the read site. Same with `<mid: string is some>`. Governing: §55.1's validator table lists `is some` (example `<x is some>`, error `.NotSome`).
+
+**RESOLVED S462** (s462-is-some-deprecate): `scanStructuralDeclLookahead` reads `is given` and its soft-deprecated spelling `is some` as the one presence validator (named `is given`; the `is some` spelling surfaces W-IS-SOME-DEPRECATED). Pinned by `compiler/tests/unit/is-some-deprecated-lint-s462.test.js` and `conformance/cases/forms/is-given-validator` / `is-some-deprecated-validator`. The inline-message form `is given("…")` too (S462 fix round F2). **Scope of the resolution: the UNTYPED opener only.** The typed opener `<mid: string is some>` named above still drops the declaration — and so does `<mid: string req>`: it is not an `is some` defect but a typed-opener + validator one, filed as [[g-typed-opener-validators-drop-the-declaration-s462]].
+
+### g-is-presence-literal-operand-drops-the-test-s462 — a LITERAL operand of the presence test lowers to just the literal: `const a = "s" is some` → `const a = "s"`; `` `t` is given `` → `` `t` ``; the test is dropped (a silent wrong value: a string, not `true`) — `NEW S462; LOW; open`
+<!-- @gap id=g-is-presence-literal-operand-drops-the-test-s462 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(rewriteIsPredicates / scanLhsLeft — the leftward operand scan accepts an identifier / `)` / `]` tail, never a closing quote or backtick)—agent-located-verify prov=empirical:s462-is-some-deprecate-fix-round-2 -->
+Pre-existing, both spellings, identical on main `42d1a7459` (executed S462 fix round 2). A number operand lowers correctly (`5 is some` → `(5 !== null && 5 !== undefined)`). A literal is never absent, so the right answer is the constant `true` (or E-… refusing a test with a known answer — not ruled); what is wrong today is that the expression's VALUE changes type. Corpus: 0 sites found by the S462 census.
+
+### g-is-presence-in-mixed-text-attr-template-codegen-invalid-s462 — `title="v: ${@user is some}"` (a plain cell, no `<#request>`) fails E-CODEGEN-INVALID-LOGIC, both spellings — `NEW S462; LOW; open`
+<!-- @gap id=g-is-presence-in-mixed-text-attr-template-codegen-invalid-s462 sev=LOW status=open locus=searched:compiler/src/codegen/emit-bindings.ts(lowerAttrTemplateValue → raw-string rewriteTemplateAttrValue; the `${…}` interior is not lowered through the expression parser)—agent-located-verify prov=empirical:s462-is-some-deprecate-parity-probe -->
+Found by the S462 both-spellings differential (probe `mixedAttr`), identical before any S462 edit. Fails CLOSED (the build refuses). The `<#request>`-ref twin is [[g-request-is-some-in-mixed-text-attr-template-misroute]]; this is the same raw-string path with an ordinary cell.
+
+### g-typed-opener-validators-drop-the-declaration-s462 — a TYPED legacy declaration opener that carries validators (`<mid: string req> = <input …/>`, `<mid: string is given>`) is not read as a declaration; the cell vanishes (E-MARKUP-001 on the opener, E-STATE-UNDECLARED at reads) — `NEW S462; MED; open`
+<!-- @gap id=g-typed-opener-validators-drop-the-declaration-s462 sev=MED status=open locus=searched:compiler/src/ast-builder.js(scanStructuralDeclLookahead — the `:` type annotation is handled only AFTER the `>`; a validator after an in-opener type is not scanned)—agent-located-verify prov=empirical:s462-is-some-deprecate-fix-round-F5 -->
+Found in the S462 fix round (F5). Reproducer (compound field): `<signup>` / `<mid: string req> = <input id="mid" type="text"/>` / `</>` inside `${…}` → E-MARKUP-001 (`<signup>`, `<mid>`) and E-STATE-UNDECLARED. Identical for `is given` / `is some`; the untyped `<mid req>` declares. Governing: §55.2 (validators as bare attributes on a state-cell declaration) and §6.2 Shape 2. W-IS-SOME-DEPRECATED still fires on the `is some` spelling there, with the validator message.
 
 ### g-reflect-in-for-of-header-not-rewritten — `for (const f of reflect(Signup).fields)` in `^{}` fails `E-META-EVAL-001: Signup is not defined`; `const info = reflect(Signup)` works — `NEW S441; MED; open`
 <!-- @gap id=g-reflect-in-for-of-header-not-rewritten sev=MED status=open locus=searched:compiler/src/meta-eval.ts(rewriteReflectCalls not applied to a for-of iterable)—agent-located-verify prov=empirical:S441-site-fix-p-mt2-mt3 -->
@@ -24183,6 +24229,8 @@ Related: [[g-splitargs-ignores-string-regex-comment-context-s460]].
 
 **S461 (AUTO) — part 4 RESOLVED, parts 1–3 still open:** E-CHANNEL-006 now fires when an `onclient:*` handler resolves (channel body → file top level → import) to a `server function` / `server fn`; `compiler/src/type-system.ts` `checkClientHandlerNotServer` beside E-CHANNEL-005. prov=pa-ruled:spec §38.10.3 "A function designated as the handler for an `onclient:*` attribute SHALL NOT be declared `server function`. The compiler SHALL emit E-CHANNEL-006 and reject the program." · newly-rejecting · corpus MEASURED zero (3303 non-stdlib + 53 stdlib files compiled; 0 newly failing outside the 3 new `-err` cases; every accepted program byte-identical). Change-id `s461-e-channel-006`. Not covered: a plain `function` handler that route inference promotes to the server (auto-questions.md "promoted-onclient-handler"); the LSP single-file path does not judge imported handlers; the bootstrap has none of the channel handler checks.
 
+**S462 — the "not covered" promoted-handler case is now covered:** E-CHANNEL-006 also fires when §12.2 places an `onclient:*` handler on the server (Triggers 1, 2, 3, 5, 7 tested), read from route inference's routeMap; route inference no longer exempts an onclient handler from Trigger 7. Change-id `s462-channel-006-inferred`, prov=ruling:user-voice-scrml.md S462 "a" · newly-rejecting · corpus measured 0 newly refused (2633 files). Parts 1–3 remain open; the bootstrap half is filed as [[g-bootstrap-no-channel-handler-checks-s462]].
+
 Source: `docs/changes/s460-onclient-shadow/progress.md`, "Final state → Surfaced, not fixed". All four parts were re-verified on main `3d0e54e21`. Probes are in `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/r3/`.
 1. `c1.scrml`: `onclient:open=onOpen(@count)` → **E-CODEGEN-INVALID-LOGIC**. The argument goes into the listener as raw text, and `@count` is never lowered to a cell read. This fails closed.
 2. `c2.scrml`: `onserver:open=hello(who)` compiles (exit 0). `.server.js` has `if (ws.data.__ch === "chat") { await hello(who); }`, where `who` is declared nowhere: a ReferenceError on the first connection. The same holds for `onserver:close`. E-CHANNEL-005 / -HANDLER-SHADOW cover only `onserver:message` and `onclient:*`, so nothing checks these arguments.
@@ -24238,8 +24286,10 @@ Source: `docs/changes/s460-presence-a-prime/progress.md`, Phase 4 self-count. Of
 
 **Severity MED:** this blocks the bootstrap from compiling ordinary adopter code (string handling in any form), and a′ widened the blast radius from "unsupported" to "an extra error at every condition that reads such a value". It is not a wrong-output bug: everything fails closed.
 
-### G-IMPL1-IS-GIVEN-AND-VALUE-POSITION-CODEGEN-S460 — impl#1: `const ok = @n is given && @b` → E-CODEGEN-INVALID-LOGIC (the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`); the `is some` spelling of the same line compiles — `NEW S460; LOW; open`
-<!-- @gap id=g-impl1-is-given-and-value-position-codegen-s460 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(rewriteIsPredicates — the `is given` rewrite on a declaration initializer; not traced) prov=review:S460-aprime;empirical:s460-aprime-land-impl1-compile -->
+### G-IMPL1-IS-GIVEN-AND-VALUE-POSITION-CODEGEN-S460 — impl#1: `const ok = @n is given && @b` → E-CODEGEN-INVALID-LOGIC (the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`); the `is some` spelling of the same line compiles — `NEW S460; LOW; RESOLVED S462 (s462-is-some-deprecate)`
+<!-- @gap id=g-impl1-is-given-and-value-position-codegen-s460 sev=LOW status=resolved resolved-by=s462-is-some-deprecate locus=compiler/src/ast-builder.js(collectExpr — the `given` statement-keyword boundary fired right after `is`) prov=review:S460-aprime;empirical:s460-aprime-land-impl1-compile -->
+
+**RESOLVED S462** (s462-is-some-deprecate): the root cause was NOT `rewriteIsPredicates` — `ast-builder.js` `collectExpr` (and its sibling collector) broke the expression at `given`, a statement-starting keyword, even right after `is`; the line was cut after `@n is` and `&& @b` became a separate statement. The same break also silently DROPPED the test in other positions (`@b && @n is given` → `@b && @n`; `return (g(1)) is given` → `return g(1)`), and the codegen string-rewrite fallback (`codegen/rewrite.ts`) and the unquoted-attribute operator scan (`unquoted-attr-value.ts`) knew only `is some`. All closed; `compiler/tests/unit/is-given-parity-s462.test.js` compiles both spellings in each position and asserts identical artifacts.
 
 First recorded inside [[g-impl1-condition-rule-s460]] ("Codegen defect found while probing"). Filed on its own so it can be fixed and closed separately from that carried divergence. Re-verified on main `3d0e54e21`.
 
@@ -24337,3 +24387,137 @@ Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pr
 <!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
 
 Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
+
+### G-ERRORS-DEFAULT-RENDER-MESSAGE-AS-HTML-S462 — the `<errors of=>` default render inserted the resolved message into `innerHTML` as HTML, so a payload slot carrying user data became markup: `<confirm req eq(@signup.password)>` + typing `<img id=pwn src=x>` into the password field created an `#pwn` element (per-field render and the compound `all` rollup alike) — `NEW S462; HIGH; RESOLVED S462 (s462-register-messages-templates FIX1 P1)`
+<!-- @gap id=g-errors-default-render-message-as-html-s462 sev=HIGH status=resolved locus=compiler/src/codegen/emit-event-wiring.ts(<errors> default renderOne),compiler/src/runtime-template.js(_scrml_message_html, 'messages' chunk) prov=review:S462-register-messages-templates -->
+
+Pre-existing since C11 (on 980cb3001 too). Reviewer-reproduced in happy-dom, PA-confirmed by reading `emit-event-wiring.ts` (`'<p class="scrml-error">' + messageForFn(...) + '</p>'` → `_scrml_el.innerHTML`). §55.8's normative default render is `<p class="scrml-error">${ messageFor(errors[0]) }</p>` — a markup `${}` text interpolation — so the message is TEXT; SPEC §55.8 now says so explicitly ("The message is text"). **Fix:** the default render escapes the whole message through `_scrml_message_html` (`& < > " '`) before it reaches `innerHTML`; `messageFor` itself still returns plain text (escaping belongs to the HTML sink — a `${ messageFor(e) }` interpolation already escapes, and escaping inside `messageFor` would double-escape there). **Evidence:** happy-dom probe `#pwn` count 3 → 0 (per-field, rollup, and the body-override position, which renders the default — see G-ERRORS-BODY-OVERRIDE-ARROW-FORM-UNREACHABLE-S462); conformance `forms/msgchain-message-is-text` (runtime: registered L2 template with `<b>`, shipped L3 default with `{forbidden}`, per-field + `all` rollup, and a `${ messageFor(...) }` control paragraph — all render the same text, no `img`/`b` element); unit `c10 §C10.10d`. Every `_scrml_message_for` → `innerHTML` path goes through this one `renderOne` (grep: the only emitter of `scrml-error` markup; formFor emits `<errors>` elements, so it inherits the fix). The body-override path (author markup) is unchanged and currently unreachable.
+
+### G-ERRORS-BODY-OVERRIDE-ARROW-FORM-UNREACHABLE-S462 — the §55.8 `<errors of=…>` body override is dead: its SPEC form `${(err) => <span>…</span>}` is refused with E-SYNTAX-043 (the retired `(x) =>` presence-guard syntax), and any other spelling (`${ function (err) { return <span>…</span> } }`) is silently ignored — the default render shows instead — `NEW S462; MED; open (pre-existing)`
+<!-- @gap id=g-errors-body-override-arrow-form-unreachable-s462 sev=MED status=open locus=compiler/src/codegen/emit-html.ts(<errors> body-override extraction: arrow-only regex on the bare-expr text) + the E-SYNTAX-043 `(x) =>` refusal (§42.2.3) prov=agent:s462-register-messages-templates-fix1 -->
+
+Found while checking the P1 sinks. `emit-html.ts` accepts a body override only when the body's bare-expr text matches `^(x) =>`; that text is now E-SYNTAX-043, so the override can never be written. Needs a SPEC call on the body-override spelling (and, when it is revived, the `${ messageFor(err) }` inside the author's markup must stay a text interpolation — the P1 class).
+
+### G-LOGIC-BACKTICK-LONE-CLOSE-BRACE-CLOSES-CONTEXT-S462 — a `}` inside a back-tick string in a `${}` logic block (`` const s = `a }` ``) is counted by the block splitter as the close of the logic context → E-CTX-001 / E-PARSE-001 — `NEW S462; MED; open (pre-existing)`
+<!-- @gap id=g-logic-backtick-lone-close-brace-closes-context-s462 sev=MED status=open locus=compiler/src/block-splitter.js(back-tick template tracking at ~:2937 runs for frame.type === "meta" only; logic frames count a template's `}` as a context brace) prov=review:S462-register-messages-templates -->
+
+Reviewer-reproduced on both trees; agent re-confirmed (`` const s = `a }` `` alone). Balanced braces inside a back-tick string (`` `{field} x` ``) are unaffected, so it bites exactly the §41.12.1 "a lone `}` is text" case. SPEC §41.12.1 rule 5 now carries a note: write a template containing a lone `}` as a double-quoted string until this closes.
+
+### G-BARE-CALL-STRING-TAG-BEFORE-STATE-BLOCK-DROPPED-S462 — a multi-line bare call statement whose argument holds a string starting a tag (`foo({\n a: "<b>x",\n})`), followed by a state block (`<vf>…</>`) in the same `${}`, vanishes from the client JS with no diagnostic — `NEW S462; HIGH; open (pre-existing; root cause not traced)`
+<!-- @gap id=g-bare-call-string-tag-before-state-block-dropped-s462 sev=HIGH status=open locus=searched:compiler/src/block-splitter.js(logic-context `<` markup detection vs string state across lines),compiler/src/ast-builder.js(bare-expr statement collection) — not traced prov=review:S462-register-messages-templates -->
+
+Reviewer-found as `registerMessages({ .PatternMismatch: "<b>{field}</b>", })`; agent-minimized (S462 FIX1): the trigger is (a) a BARE call statement (a `const o = foo({…})` declaration survives), (b) spanning lines, (c) a double-quoted string in it containing `<` + a tag name (`"<b>x"` suffices; `"a </b> b"` does not), and (d) a state block after it in the same `${}`. Without (d) the same file reports E-MARKUP-001 (the `<b` is read as markup); with it, nothing is reported and the statement is gone (the control without `<b`, `foo({ a: "x" })`, reaches scope checking and fires E-SCOPE-001). Single-line `registerMessages({ .PatternMismatch: "<b>{field}</b>" })` is unaffected. Silent drop of a program statement = HIGH.
+
+### G-BROWSER-BASELINE-FAIL-MARKER-PARSER-FLAKY-UNDER-LOAD-S462 — `scripts/browser-baseline.ts --check` intermittently refuses with "PARSER DISAGREES … 50 vs 49" (the `(fail)` marker count it parses does not match bun's summary) when the machine is loaded; a clean re-run passes — `NEW S462; LOW; open`
+<!-- @gap id=g-browser-baseline-fail-marker-parser-flaky-under-load-s462 sev=LOW status=open locus=scripts/browser-baseline.ts(FAIL_MARKER parse of bun's interleaved test output vs the summary count) prov=agent:s462-register-messages-templates-fix1 -->
+
+Observed in s462-register-messages-templates FIX ROUND 1 with several sibling agents' full suites running: the first `--check` refused ("a `(fail)` marker emitted somewhere this regex does not reach"), the immediate re-run PASSED (48 asserted). bun interleaves markers into output under load; the parser is the fragile half. A gate that refuses intermittently for reasons no change caused gets re-run until green, which is how it stops being read.
+
+### G-REWRITE-FN-KEYWORD-REWRITES-STRING-CONTENTS-S462 — on the escape-hatch codegen path `rewriteFnKeyword`'s `\bfn\b` replace runs over string-literal contents: `"fn(a) {field} fn (b)"` is emitted as `"function(a) { field } function (b)"` — `NEW S462; LOW; open (pre-existing; same class as G-ESCAPE-HATCH-ARG-TEXT-REWRITE-CORRUPTS-STRINGS-S461)`
+<!-- @gap id=g-rewrite-fn-keyword-rewrites-string-contents-s462 sev=LOW status=open locus=compiler/src/codegen/rewrite.ts(rewriteFnKeyword, `expr.replace(/\bfn\b/g, "function")`, pass 16) prov=review:S462-register-messages-templates-rereview -->
+
+Reviewer-found on the s462 re-review. `rewriteFnKeyword` is token-blind; any string in an expression that falls to the escape-hatch text path loses its literal `fn` words (and other text passes reformat braces). The S462 F1 compile-time check re-reads escape-hatch `registerMessages` calls through this same lowering, so a template containing the word `fn` is CHECKED as the corrupted text — the check and the emitted code agree, but both differ from the source.
+
+### G-BOOTSTRAP-NO-CHANNEL-HANDLER-CHECKS-S462 — the bootstrap (`compiler/self-host-v2/`) has none of the channel handler checks: no E-CHANNEL-005, E-CHANNEL-HANDLER-SHADOW or E-CHANNEL-006 (declared or §12.2-placed), and no handler-name resolution to build them on — `NEW S462; LOW; open (bootstrap twin)`
+<!-- @gap id=g-bootstrap-no-channel-handler-checks-s462 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `E-CHANNEL-00[56]`, `E-CHANNEL-HANDLER-SHADOW`, `onclient` — zero hits; the only channel diagnostic is E-CHANNEL-OUTSIDE-PROGRAM at analyze.scrml:1425) prov=empirical:s462-channel-006-inferred -->
+
+impl#1 emits all three from `compiler/src/type-system.ts` (`checkChannelHandlerBindings`, `checkClientHandlerNotServer`). Since S462 (change-id `s462-channel-006-inferred`, ruling:user-voice-scrml.md S462 "a") E-CHANNEL-006 also fires when §12.2 places the handler on the server; impl#1 reads that from route inference's routeMap. A bootstrap twin needs (1) the handler-name resolution order of §38.10.3 (channel body → file top level → other channels' bodies → import), and (2) the bootstrap's own §12.2 placement (`analyze.scrml` already places functions for §12.4 checks, ~:13873) to read — not a second "does it broadcast" detector. Not small, so not twinned in the S462 change. The conformance cases (`channel/handler-onclient-*`) are NOT-TWINNED in `docs/bootstrap-conformance.md` (rhs-decl, ⚑ O38) before they reach this gap.
+
+**Severity LOW:** impl#1 enforces the rule; the gap is bootstrap parity only.
+
+### G-FN-PURITY-BLIND-TO-CHANNEL-HUB-CALLS-S462 — the §48.3 `fn` body check does not count `broadcast()` / `disconnect()` as side effects, so `fn announce() { broadcast(…) }` compiles clean and I-FN-PROMOTABLE can suggest `fn` for a function that publishes to every subscriber — `NEW S462; LOW; open`
+<!-- @gap id=g-fn-purity-blind-to-channel-hub-calls-s462 sev=LOW status=open locus=compiler/src/lint-i-fn-promotable.js:runIFnPromotable(probes checkFnBodyProhibitions; skips only the routeMap server set)+searched:compiler/src/type-system.ts(checkFnBodyProhibitions — no broadcast/disconnect term found; not traced further) prov=empirical:s462-channel-006-inferred(/home/bryan-maclee/.cache/scrml-agent-tmp/s462-channel-006-inferred/r/fnb.scrml);ruling-side-finding:user-voice-scrml.md-S462-"a" -->
+
+Found on the S462 reproducer: `onclient:open=onOpen(e)` with `function onOpen(e) { broadcast({ joined: true }) }` drew `I-FN-PROMOTABLE — function onOpen body meets the fn body constraints`. **That instance is closed by `s462-channel-006-inferred`:** the lint skips functions route inference places on the server, and the handler was only off that list because route inference exempted onclient handlers from §12.2 Trigger 7 — the exemption is gone (the program is now refused with E-CHANNEL-006). **The root is not closed:** `fn announce() { broadcast({ joined: true }) }` inside a `<channel>` body compiles with no `E-FN-*` diagnostic (probe `fnb.scrml` above; the `fn` is server-placed and runs the broadcast from an HTTP route). A channel hub call publishes to, or drops, every subscriber — it is not pure under §48.3, and §12.2 Trigger 7's scope clause ("NOT to `fn`") assumes a `fn` cannot contain one.
+
+**Fix direction (not decided):** treat `broadcast()` / `disconnect()` as prohibited side effects in the `fn` body check (newly-rejecting — needs a ruling and a corpus measurement), which also stops the lint suggesting `fn` for them. A lint-only skip would be a second "does it broadcast" reader.
+
+**Severity LOW:** no silent misbehaviour measured — the `fn` still runs on the server and broadcasts. The cost is a purity contract that does not hold and a lint that can recommend breaking it.
+
+**S462 fix round 1 (F4) — the SPEC and impl#1 also disagree on placement.** §12.2 Trigger 7's scope clause says the trigger applies "NOT to `fn`", yet impl#1 places `fn announce() { broadcast({ joined: true }) }` (inside a `<channel>` body, called from a client `function go()` on a button) on the SERVER: `announce` gets `__ri_route_announce_1`, its body (with the §38.6 `broadcast` binding) is in `server.js`, and `go` awaits `_scrml_fetch_announce_3()` (probe `fnb.scrml`, same directory as above). Behaviour not changed here. Whichever way the purity question is ruled, the Trigger 7 scope clause and the implementation should be made to agree (either the clause names `fn`, or a hub call in a `fn` is refused).
+
+### G-T5-ONCLIENT-AND-MARKUP-REFS-NOT-CLIENT-CALLERS-S462 — an `onclient:` attribute or a markup `${f()}` reference does not count as a CLIENT caller for §12.2 Trigger 5, so a shared pure helper is placed on the server: a socket open or a render does a POST round-trip (a §38.10.2 violation for the `onclient:` case) — `NEW S462; MED; open`
+<!-- @gap id=g-t5-onclient-and-markup-refs-not-client-callers-s462 sev=MED status=open locus=compiler/src/route-inference.ts:5741(Step 5c directClientCount counts inverseCallerMap function-body edges only)+route-inference.ts:5399(markupReferencedNames — gates only indirect escalation, never counted as a direct client caller)+compiler/src/codegen/emit-channel.ts:collectChannelAttrHandlerNames(the onclient set is not consulted by 5c) prov=review:S462-s239-channel-006-inferred;ruling:user-voice-scrml.md-S462-"a"(fix round 1, T5 exemption) -->
+
+SPEC §12.2 Trigger 5: *"A function with at least one client-classified caller SHALL remain ambient."* An `onclient:*` attribute registers its handler as `ws.onopen`/`onclose`/`onerror` inside the client IIFE (§38.10.2), and a markup interpolation `${fmt(2)}` calls `fmt` during render — both are client call sites. Route inference's Step 5c counts neither, so a function whose only *function* caller is server-side is promoted. Reproducer (S462 review):
+
+```scrml
+<program>
+${
+  function fmt(e) { return 1 }
+  server function boot() { return fmt(1) }
+}
+<channel name="c" onclient:open=fmt(e)>
+    <joined> = 0
+</>
+<p>${@joined} ${fmt(2)}</p>
+<button onclick=boot()>b</button>
+</program>
+```
+
+compiles at exit 0 with `fmt` server-placed: `ws.onopen` and the render call a fetch stub. **E-CHANNEL-006 deliberately does not fire here** (ruling S462 "a", fix round 1: a handler placed ONLY by Trigger 5 is exempt until this is decided — §38.10.3), so main's behaviour is preserved byte-for-byte.
+
+**Why it is not simply "count them as client callers":** measured S462 — treating the `onclient:` attribute as a direct client caller keeps `onOpen` ambient, and then the server function calls an `onOpen` that `server.js` never defines (a ReferenceError at request time, exit 0). The same happens today to any ambient function a server function calls (control: a cell-writing `bump()` called from a `?{}` server function and from a client function). That is the placement fork recorded in [[g-5c-caller-context-promotes-a-derived-read-helper-to-the-server]] (refuse vs dual-place); this gap is its `onclient:` + markup-reference instance and should be ruled with it. When it is ruled, drop the Trigger 5 exemption from `type-system.ts` `checkClientHandlerNotServer` (`isCallerContext`) and §38.10.3.
+
+**Severity MED:** silent placement change (a round trip per socket open or render) at exit 0; no data leak measured.
+
+### G-CHANNEL-SAME-NAME-FUNCTIONS-NOT-DISTINGUISHED-S462 — two `<channel>` bodies that declare same-named functions are not distinguished: placement and handler binding are keyed by NAME, so the wrong channel's function can be bound, and §12.2 Trigger 7 judges the name, not the declaration — `NEW S462; LOW; open (pre-existing)`
+<!-- @gap id=g-channel-same-name-functions-not-distinguished-s462 sev=LOW status=open locus=compiler/src/codegen/emit-channel.ts:446(collectChannelFunctionMap — Map<fnName, channelName>, last write wins)+compiler/src/route-inference.ts:4937(Step 3 Trigger 7 looks the function up by name) prov=review:S462-s239-channel-006-inferred(F2) -->
+
+Reproducer (S462 review):
+
+```scrml
+<program>
+<channel name="a" onclient:open=onOpen(e)>
+    <joined> = 0
+    ${ function onOpen(e) { @joined = @joined + 1 } }
+</>
+<channel name="b">
+    <hits> = 0
+    ${ function onOpen(e) { broadcast({ hits: 1 }) } }
+</>
+<p>${@joined}</p>
+<button onclick=onOpen(1)>go</button>
+</program>
+```
+
+- **Base `42d1a7459`:** `ws.onopen` and the button both bind to channel `b`'s `onOpen` — the BROADCASTING one — emitted on the client calling an undefined `broadcast` (the removed name-keyed onclient exemption also exempted `b`'s function, because `a`'s attribute named `onOpen`).
+- **After `s462-channel-006-inferred`:** `ws.onopen` and the button bind to `a`'s client `onOpen` (correct), and `b`'s `onOpen` gains a server route plus a client fetch stub nothing calls. Accepted at review as more correct (progress.md, fix round 1, F2).
+
+What remains is the name keying itself: two same-named declarations in one file's channel bodies are one entry in `collectChannelFunctionMap`, and which one a reference reaches is decided by emit order, not scope. Fix direction: key by declaration (span / node identity) and resolve each reference by the §38.10.3 innermost-first rule. Possibly a duplicate-declaration error is the right answer instead — functions hoist file-wide (§38.10.2), so two channel-body `onOpen`s are arguably one name declared twice; needs a ruling.
+
+**Severity LOW:** needs two same-named functions in one file; reproduced only by construction.
+
+### G-CHANNEL-BROADCAST-DETECTOR-NOT-SCOPE-AWARE-S462 — §12.2 Trigger 7's `broadcast()` / `disconnect()` detector matches source text with no scope awareness, so a nested local or parameter NAMED `broadcast` / `disconnect` places the enclosing channel function on the server — `NEW S462; LOW; open`
+<!-- @gap id=g-channel-broadcast-detector-not-scope-aware-s462 sev=LOW status=open locus=compiler/src/route-inference.ts:2277(detectChannelBroadcastReason — regex `(^|[^.\w$])(broadcast|disconnect)\s*\(` over each statement's emitted text; no binding resolution) prov=review:S462-s239-channel-006-inferred-rereview(N1) -->
+
+`detectChannelBroadcastReason` decides "this calls the channel built-in" from the text of each statement. It does not resolve the callee, so a shadowing binding counts as the built-in. Since fix round 1 (F3) it also looks inside nested function declarations, so a nested PARAMETER named `broadcast` now reaches it:
+
+```scrml
+function bump(n) {
+    function apply(broadcast) { return broadcast(n) }
+    @joined = apply(x => x + 1)
+}
+```
+
+`bump` (in a `<channel>` body) is placed on the server and becomes a server route with a CPS fetch at exit 0. If `bump` is an `onclient:*` handler, E-CHANNEL-006 fires on a correct program (a false refusal). This is the same "two readers of one text" shape as Rule 7: the placement reads text, while the language reads bindings.
+
+**Fix direction:** resolve the callee structurally. A call counts only when its callee is the identifier `broadcast` / `disconnect` and resolves to the channel built-in, not to a shadowing parameter, local, or nested function in an enclosing scope. **Measured (S462, probe `n1b.scrml` = the shape above in a `<channel>` body, called from a button):** base `42d1a7459` keeps `bump` on the client; after fix round 1 (`e78ad371e`) `bump` gets `__ri_route_bump_*` plus a fetch stub. So the shadowing-parameter shape is a regression from F3 (descending nested declarations), not a pre-existing one. The regex itself is older: a statement whose text contains `broadcast(` is matched whatever `broadcast` is bound to, for the statement kinds it scans (`bare-expr`, `return-stmt`, the declaration kinds). Probe `n1.scrml` (`const broadcast = (x) => x + 1` then `@joined = broadcast(n)`) is NOT placed on either side, because that assignment's statement kind is not scanned.
+
+**Severity LOW:** needs a user binding named after a channel built-in. Fails closed or toward the server (an extra round trip, or a false E-CHANNEL-006); no data leak.
+
+### G-DEAD-NESTED-BROADCASTER-ESCALATES-PARENT-UNEXPLAINED-S462 — a DEAD nested function that calls `broadcast()` still places its parent on the server, and the resulting E-CHANNEL-SERVER-CELL-READ does not name the cause — `NEW S462; LOW (review NIT); open`
+<!-- @gap id=g-dead-nested-broadcaster-escalates-parent-unexplained-s462 sev=LOW status=open locus=compiler/src/route-inference.ts:2277(detectChannelBroadcastReason descends nested function-decl bodies without asking whether the nested function is reachable)+route-inference.ts:6418(E-CHANNEL-SERVER-CELL-READ message names the cell read, not the placement trigger) prov=review:S462-s239-channel-006-inferred-rereview(N2) -->
+
+```scrml
+function bump(n) {
+    function never() { broadcast({ joined: n }) }
+    @joined = @joined + n
+}
+```
+
+`never` is never called, and W-DEAD-FUNCTION says it will be tree-shaken. Its `broadcast()` still places `bump` on the server (fix round 1, F3: a nested hub call counts for the parent), so `bump`'s read of the channel cell `@joined` fires E-CHANNEL-SERVER-CELL-READ. The two diagnostics disagree about whether `never` exists, and the error does not say that a dead nested function is what moved `bump` to the server. Measured (probe `n2.scrml`, `bump` in a `<channel>` body called from a button): base `42d1a7459` exit 0; after fix round 1 (`e78ad371e`) exit 1 with that error. So this refusal is new with F3, though the corpus measurement found no program that hits it. A nested `?{}` inside a dead nested function already placed its parent the same way before S462 (`walkBodyForTriggers`; not re-probed here).
+
+**Fix direction:** either skip unreachable nested declarations when collecting a parent's triggers, or have the placement-dependent errors (E-CHANNEL-SERVER-CELL-READ, E-CHANNEL-006) name the trigger and where it is, as E-CHANNEL-006 already does. The second is cheaper and fixes the diagnostic for every cause.
+
+**Severity LOW (the review graded it a NIT; the ledger has no NIT tier and `NOMINAL` means "specified, not yet built"):** the program is refused loudly; the cost is a confusing message.

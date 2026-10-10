@@ -1,0 +1,9 @@
+<program>
+    let <doc:string="x"/>
+    <iframe id="F" SRCDOC=@doc></iframe>
+    <iframe id="G" srcdoc="<p>${@doc}</p>"></iframe>
+    <button id="b" ONCLICK=@doc>x</button>
+    <button id="c" onclick="go(${@doc})">x</button>
+    <div id="o" online=@doc one="1" onboarding="yes"></div>
+    <iframe id="ok" srcdoc="<p>static</p>"></iframe>
+</program>

@@ -189,8 +189,8 @@
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Phone</div>
                             <div class="text-base text-slate-900">
-                                <span if=(@currentDriver is some && (@currentDriver.phone != ""))>${@currentDriver.phone}</>
-                                <span if=(@currentDriver is some && (@currentDriver.phone == "")) class="text-slate-400">—</>
+                                <span if=(@currentDriver is given && (@currentDriver.phone != ""))>${@currentDriver.phone}</>
+                                <span if=(@currentDriver is given && (@currentDriver.phone == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div class="border-t border-slate-200 pt-4">
