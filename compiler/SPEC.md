@@ -46997,7 +46997,7 @@ unless the field is exported — and route the count to bryan.
 > `const X = <… props={…}>` retires; a declaration with typed attributes + `renders` IS the component; callback
 > props = function-typed attributes; use-site children = slot content via `<slot/>`; §15.11.1 bind props →
 > E2 exported `let` fields; spread / `fixed` / ~~class merging~~ carry over; §63 deprecation, not same-arc).
-> *(The "class merging carry over" clause is superseded S462 — §66.15.1's reversed row; "spread" is O46.)*
+> *(The "class merging carry over" clause is superseded S462 — §66.15.1's reversed row; "spread" is O46, ruled S462: `${...}` retires, §66.15.2.)*
 > **supersedes:** §15.1 / §15.1.1 / §15.3 / §15.10 (component definition by `const X = <root props={…}>`);
 > §15.12 (component rendering syntax); §15.13.5 (see §66.13); §16's slot-declaration surface as far as §66.15.2
 > states it.
@@ -47016,12 +47016,12 @@ renderable vehicle, not two.
 | caller children → `${...}` spread | slot content, placed with `<slot/>` in `renders` (§66.15.2) |
 | `fixed` (§15.7) | carries over |
 | static-attribute class merging (§15.5) — a caller's `class` appended to the root's | **REVERSED S462 — does not carry over.** A `class` on a use is undeclared, `E-DECL-USE-ATTR` (§66.6.9); nothing a use writes reaches an element of `renders`. The ratified destination is explicit forwarding (§66.15.3, not yet built). |
-| spread | ⚑ O46 (§66.15.2) |
+| spread (`${...}`, §16.4 — the children spread) | **RETIRES S462 (O46)** — `<slot/>` only (§66.15.2); not repurposed as an attribute spread |
 | component-local state (`${ <open> = false }`) | a child field of the declaration — per instance (§66.6.1) |
 
 > **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" · supersedes: ruling:S435 (class merging
 > carry-over row). The S435 row read *"`fixed`, static-attribute class merging (§15.5, §15.7), spread | carry
-> over"*; it is split above — `fixed` keeps the S435 answer, class merging is reversed, spread is left to O46. The
+> over"*; it is split above — `fixed` keeps the S435 answer, class merging is reversed, spread was left to O46 (ruled S462: it retires, §66.15.2). The
 > S435 clause was part of the PA proposal text bryan answered *"yes, retire it, move on"* — never separately
 > deliberated (dpa-069 §2 STEP-1 (a)) — and S462 reverses it explicitly, not by silence. **Direction of change:**
 > newly-rejecting on the §66 dialect (no §66 program carried a use-site `class`: measured 0 sites); impl#1's
@@ -47043,13 +47043,19 @@ Content written between a use's tags is **slot content**, placed inside the decl
 > ruled. (The S435 owed measurement of component files the codemod cannot rewrite mechanically names exactly
 > these: snippet slots and lambda slot-fill.)
 
-> ⚑ **OPEN (not ruled) — O46: does the `${...}` children spread survive beside `<slot/>`?** The components text
+> ✅ **RULED S462 — O46** (bryan: *"go on the package"*, Q14): in the §66 dialect `${...}` as the children
+> spread **RETIRES** — `<slot/>` is the only spelling for use-site children. `${...}` is **NOT repurposed** as an
+> attribute spread (the forwarding destination has its own spelling, §66.15.3). The legacy `const X = <…>` form's
+> `${...}` (§16.4) keeps working through its §63 window (§66.21). The prior OPEN text follows for the record.
+> **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" (Q14) ·
+> dd:scrml-support/docs/deep-dives/attribute-spread-o46-x-forwarding-2026-10-09.md · supersedes: the O46 OPEN
+> block below · **Direction of change:** newly-rejecting on the §66 dialect only (impl#1 does not implement §66).
+>
+> *(superseded S462)* **O46: does the `${...}` children spread survive beside `<slot/>`?** The components text
 > bryan answered *"yes, retire it"* rules `<slot/>` for use-site children and separately lists *"Attribute spread
 > (`${...}`), `fixed`, and class merging: these carry over"* — naming as "attribute spread" the token §16.4 defines
 > as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
 > is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
-> **S462:** O46 is now also the remaining blocker for the ratified forwarding destination (§66.15.3) — its
-> spelling is ruled with O46 (whether `${...}` becomes the attribute spread, or another spelling is chosen).
 
 > ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. `onOpen:fn()`) is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
 >
@@ -47071,43 +47077,59 @@ Content written between a use's tags is **slot content**, placed inside the decl
 > X"* (dpa-069 §7, "X named in advance as the only widening"; bryan: build it as soon as O46 is ruled, not "when a
 > wrapper needs it") · dd: undeclared-use-site-attributes-o18-dpa-069-2026-10-08 §3 (pole X), §5, §6 ·
 > supersedes: nothing — it specifies where §66.6.9's refusal is headed, so the refusal is not read as permanent.
+> **Provenance (spelling, collisions, shape):** ruling:user-voice-scrml.md S462 "go on the package" (Q14) ·
+> dd:scrml-support/docs/deep-dives/attribute-spread-o46-x-forwarding-2026-10-09.md (pole A) · supersedes: this
+> section's earlier "spelling PENDING O46" sketch (`...rest:<button>` / `${...rest}`).
 > **Direction of change when built:** newly-accepting, and only for a declaration that opts in.
 
 **Status: Nominal — specified, not built.** No implementation accepts it; until it lands, every attribute it would
-forward is `E-DECL-USE-ATTR` (§66.6.9). Its spelling is **PENDING O46** (§66.15.2, §66.22): the forms below are
-the dpa-069 sketch, not ruled syntax.
+forward is `E-DECL-USE-ATTR` (§66.6.9). The spelling is ruled (S462 Q14).
 
-A declaration MAY opt in to forwarding by declaring an **element-typed rest** aimed at **one named element** in its
-`renders`:
+**Preconditions before X ships** (S462 Q14, as written): the bootstrap's unguarded `href=@cell` / `srcdoc=@cell`
+sinks fixed (gap `g-bootstrap-no-s5-2-sink-floor-s462`); and a per-element attribute table, so that "typed by
+`button`" refuses typos.
+
+A declaration MAY opt in to forwarding by declaring an **element-typed rest** and applying it to **one named
+element** in its `renders`:
 
 ```scrml
-<btn label:string act:fn() ...rest:<button>/>                                   // spelling PENDING O46
-renders <button class="btn" onclick=act() ${...rest}>${label}</button>         // spelling PENDING O46
+<btn label:string act:fn() ...attrs:button/>
+renders <button class="btn" type="button" onclick=act() ...attrs>${label}</button>
 
-<btn label="Delete" act=confirmDelete() aria-describedby="del-help" data-testid="del"/>
+<btn label="Delete" act=confirmDelete() aria-describedby="del-help" data-testid="del" class="btn--danger"/>
+<btn label="Save" act=save() type="submit"/>      // E-DECL-USE-ATTR — `type` is written by <btn>'s renders
+<btn label="Save" act=save() hreff="/x"/>         // E-DECL-USE-ATTR — not an attribute of <button>
 ```
 
-1. **Declared and typed.** The rest is a declared field. `:<button>` types it as `<button>`'s attribute set, so
-   an attribute that element does not have is still refused at the use (a typo is not forwarded); an attribute
-   the use writes that is neither a declared field nor in the rest's type is `E-DECL-USE-ATTR`.
-2. **One named target.** The rest is placed on exactly one element of `renders`, named by the author — never an
-   implicit root.
-3. **Compiler-owned merge.** Where the target element already writes the same attribute: `class` concatenates
-   (the element's classes, then the caller's); `style` merges **per property**, the caller winning per property;
-   an `on…` handler **composes, the component's handler first** — a caller's handler never replaces the
-   component's own.
-4. **The four security conditions** (dpa-069 §6, verbatim; any design of this destination SHALL meet all four —
-   the sink checks named in 1 are §5.2's):
+1. **Declared as `...name:element`.** The rest is declared in the opener as `...attrs:button` — an element NAME,
+   with no angle brackets (`<button>` would close the opener, §66.2.4). Its type is that element's attribute set,
+   so an attribute the element does not have is refused at the use (a typo is not forwarded).
+2. **Applied BARE on one named element.** The target in `renders` carries `...attrs` bare — `<button ...attrs>`;
+   `${...attrs}` is not the spelling (O46, §66.15.2). Never an implicit root.
+3. **Collisions are refused by type.** A name the target element already writes in `renders` is EXCLUDED from the
+   rest's type; a caller passing it is `E-DECL-USE-ATTR` (to make it settable, the author declares it as an
+   attribute). The merge set below is the exception.
+4. **Compiler-owned merge** (S462 dpa-069): `class` concatenates (the element's classes, then the caller's);
+   `style` merges **per property**, the caller winning per property; an `on…` handler function **composes, the
+   component's handler first** — a caller's handler never replaces the component's own.
+5. **One rest per declaration.** The rest is **WIRING** under the O8 ruling (§66.15.2): not in `@x`, not
+   serialized, not readable from logic; usable only in the declaration's own `renders`.
+6. **The four security conditions** (dpa-069 §6; any build of this destination SHALL meet all four — the sink
+   checks named in 1 are §5.2's):
    1. it desugars at **one** site (the expander) into ordinary body-authored attributes on the named element, so
       the existing sink checks see an ordinary write;
    2. the key set is **static per use** (scrml expands per instance, so this holds unless `<*x>` references become
       dynamic — Svelte voice's flip condition);
-   3. `on…` **composes, never replaces**;
-   4. `srcdoc` and `on…` text are **never forwardable** (types the rest so those names are absent).
+   3. an `on…` handler FUNCTION **composes, never replaces** (rule 4);
+   4. handler TEXT — a string written into an `on…` attribute — and `srcdoc` are **never forwardable** (the rest's
+      type omits them). *(Reworded S462 fix round from dpa-069's "`srcdoc` and `on…` text are never forwardable",
+      which read as contradicting condition 3; the meaning is unchanged: text never, functions compose.)*
 
-Open with O46 (not ruled here): the rest declarator's grammar in a declaration opener, the forwarding form inside
-an element opener and its fit with §66.2.4's opener-expression rule, and nested forwarding (a target that is
-itself a use of a declaration).
+Not ruled, owed when X is built (dd attribute-spread-o46 §5.5, §6.3): forwarded values are caller-scope
+expressions, evaluated in the use site's scope per instance; a future use-site construction spread must not feed
+a rest (condition 2); the further exclusions the dd proposes (`bind:*`, the structural words); nested forwarding
+(a target that is itself a use of a declaration); and §5.2's "neither `.` nor `?` can begin an attribute"
+sentence, which a bare `...` amends.
 
 ### 66.16 `server` and `pinned` on declarations
 
@@ -47650,7 +47672,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O15 | §66.18 | Whether `<each … as (k, v)>` (§59.8, built on §14.11) survives the Tier-3 retirement. |
 | O16 | §66.12.5 | Whether the tuple-type annotation in the answered one-axis text (`[:number, :number]`) is the spelling in every type position. |
 | O17 | §66.17 | Remaining T3 details: hyphenated token names / non-string CSS values, whether `for=` is still permitted, the `@media` auto-bind, library-file placement. |
-| ~~O18~~ RULED S462 | §66.6.7, §66.6.9 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. RULED (dpa-069): a use carries its declared attributes / child fields, `as=` and `if=` / `else-if=` / `else`; a `<*x>` reference carries no field and no `as=`; everything else is `E-DECL-USE-ATTR`. The ratified destination is explicit forwarding (§66.15.3, blocked on O46). Provenance: ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to X"*. |
+| ~~O18~~ RULED S462 | §66.6.7, §66.6.9 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. RULED (dpa-069): a use carries its declared attributes / child fields, `as=` and `if=` / `else-if=` / `else`; a `<*x>` reference carries no field and no `as=`; everything else is `E-DECL-USE-ATTR`. The ratified destination is explicit forwarding (§66.15.3; spelling ruled S462 Q14 with O46; Nominal, not built). Provenance: ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to X"*. |
 | O18-r (S462) | §66.6.9 rule 3 | The residue of O18: whether `if=` / `else-if=` / `else` may gate a `<*x>` reference (the bootstrap refuses it today, `E-BOOTSTRAP-UNSUPPORTED`). |
 | O19 | §66.3 | An own value AND attributes on one declaration; what `@x` then is. |
 | ~~O21~~ RULED S437 (by derivation from L6) | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. RULED: a use MAY set it — the use-site attribute is that instance's initializer (§66.9 rule 8). Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
@@ -47668,7 +47690,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O43~~ RULED S437 | §66.4 | Setting a child declaration's value by a same-named use-site attribute (the un-presented half of #11 — fell out of the record). RULED: a use-site attribute MAY set a child field (§66.9 rule 8; O60 exception). Provenance: ruling:user-voice-scrml.md S437 — *"1 yes, 2 yes, 6 yes"*. |
 | O44 | §66.11 | Maps and sets under the transition axis. |
 | O45 | §66.13 | The S178 "final shared-state design" sentence under Q1 + Q6 (#20 — fell out of the record). |
-| O46 | §66.15 | Does the `${...}` children spread survive beside `<slot/>`? **S462: also the remaining blocker for the ratified forwarding destination (§66.15.3)** — its spelling is ruled with O46 (`${...}` repurposed as the attribute spread, or another spelling). |
+| ~~O46~~ RULED S462 | §66.15.2 | Does the `${...}` children spread survive beside `<slot/>`? RULED: it retires in §66 (`<slot/>` only; not repurposed; legacy `const X` keeps it through §63). The forwarding destination's spelling is ruled with it (`...attrs:button`, applied bare, §66.15.3). Provenance: ruling:user-voice-scrml.md S462 — *"go on the package"* (Q14). |
 | O48 | §66.21 | Tier-3 positional: a Stage-1 window that preserves a silent miscompile, vs a §63.4 designer-card removal. |
 | O51 | §66.6.8 | A use or `<*x/>` of a declaration with no `renders`: an error, or a data-only instance (an `as=`-bound instance need not render). |
 | ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
@@ -47690,7 +47712,8 @@ writable / exported fields are children — ruling:user-voice-scrml.md S447, *"y
 Ruled S442: O55 (*"1 your rec, 2 deliberate, 3 your rec"* — a plain use of a `single` declaration is an error);
 O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 stays OPEN).
 Ruled S462: O18 (*"I really like X so I accept your rec as a ratified path to X"* — undeclared use-site
-attributes are refused; explicit forwarding is the ratified destination; residue O18-r stays open).
+attributes are refused; explicit forwarding is the ratified destination; residue O18-r stays open). Ruled S462: O46 (*"go on the package"*, Q14 — `${...}` retires as the children spread; X spelled
+`...attrs:button`, applied bare).
 
 ### 66.23 Cross-references
 
