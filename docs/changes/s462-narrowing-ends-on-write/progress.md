@@ -55,3 +55,4 @@ MEASURE the whole thing again (full corpus incl. gauntlet-r25): new fires per li
 2026-10-09T19:08:55-06:00 FIX ROUND 2 bootstrap: Q11 (server fn keys hold UNKNOWN; serverOwn as the binder decides), Q12 (event handlers drop @ narrowings, locals/rows kept); Q10 already (r2 F3); slices green (m2 521)
 2026-10-09T19:30:57-06:00 ARROWS (separate commit): E-TYPE-046 walk gets expandOpaque (shared expansion, spans dropped); corpus 2713 files: 0 new fires -> land + resolve gap
 2026-10-09T19:57:01-06:00 FIX ROUND 2 docs: known-gaps — resolved deferred-closure / await-yield / block-arrows (pa-ruled prov), refreshed s460 RESOLVED text, filed implicit-coercion (N3) + suspension-misses-inferred-server-fns; FACTS + gap-counts regen
+2026-10-09T19:59:38-06:00 FIX ROUND 2 conformance: +6 cases (Q11 server-call, Q12 lambda + sync-callback twin, Q10 re-narrow, N1 destructured callee, block-arrow) — all PASS (1540/1605, 65 xfail); bootstrap-conformance + FACTS regen
