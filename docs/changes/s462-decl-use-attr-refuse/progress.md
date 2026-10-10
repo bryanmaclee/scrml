@@ -4,3 +4,10 @@
 2026-10-09T18:05:36-06:00 bootstrap: starRefAttrs (refs refuse undeclared attrs, as= incl.), show/key messages, use-attr.test.js (46 tests), 4 tests updated, mutations.js 5 s462 rows RED + mirror preload symlink fix. CI slice steps green.
 2026-10-09T18:16:49-06:00 conformance: 2 plain-element sink cases added (PASS impl#1); legacy undeclared-attr-* cases kept+annotated as legacy route; severity.scrml regen; first commit attempt OOM-killed in pre-commit (sibling suites)
 2026-10-09T18:29:39-06:00 commit attempt 2 failed only on live-Postgres db-migrate-pg (passes 10/10 alone; shared PG with sibling suites) — retrying
+2026-10-09T19:20:00-06:00 attempt 3 landed 5a93059c1 — pre-commit full gate passed (34078 tests).
+2026-10-09T19:40:00-06:00 CORPUS MEASUREMENT (compiled, not grepped). Every .scrml under samples/ examples/ stdlib/ conformance/ benchmarks/ compiler/self-host-v2/ + scrml-support gauntlet-r25, through the bootstrap front end (lex, parse, analyze, lower) AS-IS and as its `scrml fix --s66` twin (when the fix changes it):
+  BEFORE (bootstrap at 980cb3001): 2706 files, 0 throws, 0 E-DECL-USE-ATTR, 0 E-DECL-STAR-REF-ATTR-WRITE.
+  AFTER  (this change, sharded):   2708 files (+2 new cases), 0 throws, 0 E-DECL-USE-ATTR, 0 E-DECL-STAR-REF-ATTR-WRITE.
+  Newly-refused sites: NONE. impl#1 is unchanged (no impl#1 measurement owed). bootstrap-conformance counter: PASS 139 -> 139; only the 2 new cases moved (NOT-TWINNED, rhs-decl O35).
+  Bootstrap-dialect inline test sources (slice-m1/m2/m3/m4/codec .test.js): green after 4 pinned expectations moved (show= on a use, show= on a ref, If= on a ref, an attribute on a field ref) — each was already a refusal; only the code changed.
+2026-10-09T19:40:00-06:00 gates: slice m1/m2/m3/m4/codec + SLICE_CORE=lowered + v2 lexer + lint-no-default-arm green; conformance 1526/1590 + 64 xfail; types-gate OK unchanged; browser-baseline PASS; snippet-gate 128/128; s34-census --check-new PASS; gen-bootstrap-severity current; SPEC-INDEX / FACTS / bootstrap-conformance regenerated; delta-lint + conflict-marker PASS.
