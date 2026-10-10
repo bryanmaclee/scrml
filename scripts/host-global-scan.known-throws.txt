@@ -58,6 +58,7 @@
 [esm] conformance/cases/match-leave/dpa068-engine-msg-arm-bare-return-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-leave/engine-msg-arm-break-continue-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-leave/engine-msg-arm-return-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-leave/top-level-given-guard-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
 [esm] conformance/cases/match-leave/top-level-if-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
 [esm] conformance/cases/match-leave/top-level-match-arm-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
 [esm] conformance/cases/match-leave/top-level-raw-and-handler-arm-return-neg/case.scrml  # emit-client-esm: 'return' outside of function

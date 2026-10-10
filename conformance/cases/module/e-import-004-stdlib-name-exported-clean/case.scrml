@@ -1,0 +1,4 @@
+${
+    import { isValid } from 'scrml:data'
+}
+<p>${isValid}</>

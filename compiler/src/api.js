@@ -61,7 +61,7 @@ import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath, eraseStdlibTypeOnlyImports } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
@@ -594,7 +594,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  * @param {object[]} [diagnostics]
  * @returns {Set<string>}
  */
-export function planStdlibBundle(names, diagnostics) {
+export function planStdlibBundle(names, diagnostics, refusedModules = null) {
   const planned = new Set();
   if (!names) return planned;
   for (const name of names) {
@@ -603,7 +603,7 @@ export function planStdlibBundle(names, diagnostics) {
     if (!Array.isArray(diagnostics)) continue;
     // The same warnings, in the same order, `bundleStdlibForRun` pushes.
     if (isCompilerFamily(name)) diagnostics.push(stdlibCompilerDeferredWarning(name));
-    else if (!shimExists) diagnostics.push(stdlibShimMissingWarning(name));
+    else if (!shimExists && !(refusedModules && refusedModules.has(name))) diagnostics.push(stdlibShimMissingWarning(name));
   }
   return planned;
 }
@@ -2180,6 +2180,30 @@ function _compileScrmlImpl(options = {}) {
   // for modules that the user actually imports (no eager full-stdlib scan).
   // Cached: each stdlib module is parsed at most once per `compileScrml` call.
   // ---------------------------------------------------------------------------
+  // S462 — the ONE reader of a stdlib module's `.scrml` source: a TAB-only parse,
+  // cached per compile. The STDLIB-EXPORT-SEED stage reads its export list
+  // (names + kinds, E-IMPORT-004); the importedTypes seeder below reads its
+  // type declarations (§53.14.6). Returns the TAB AST, or null when the file
+  // is missing or does not parse (errors swallowed — a registry-seed reader,
+  // not a diagnostic surface).
+  const _stdlibAstCache = new Map();
+  function stdlibModuleAst(absPath) {
+    const key = absPath;
+    if (_stdlibAstCache.has(key)) return _stdlibAstCache.get(key);
+    let out = null;
+    if (existsSync(absPath)) {
+      try {
+        const src = readFileSync(absPath, "utf8");
+        const tabResult = buildAST(splitBlocks(absPath, src));
+        if (tabResult && tabResult.ast) out = tabResult.ast;
+      } catch {
+        out = null;
+      }
+    }
+    _stdlibAstCache.set(key, out);
+    return out;
+  }
+
   stage("STDLIB-EXPORT-SEED", () => {
     // Collect unique stdlib import absolute paths from the import graph.
     const stdlibPaths = new Set();
@@ -2198,6 +2222,15 @@ function _compileScrmlImpl(options = {}) {
           }
         }
       }
+      // S462 Q19 — a named `export { … } from "scrml:…"` is judged against the same
+      // export table (validateStdlibImports), so its module is read here too.
+      for (const exp of entry.exports ?? []) {
+        if (exp && !exp.isReExportAll && typeof exp.reExportSpecifier === "string" &&
+            exp.reExportSpecifier.startsWith("scrml:") && exp.reExportSource && exp.reExportSource.endsWith(".scrml")) {
+          stdlibPaths.add(exp.reExportSource);
+          if (isServerOnlyScrmlModuleSource(exp.reExportSpecifier)) serverOnlyStdlibPaths.add(exp.reExportSource);
+        }
+      }
     }
     if (stdlibPaths.size === 0) return null;
 
@@ -2205,22 +2238,9 @@ function _compileScrmlImpl(options = {}) {
     // at) is parsed at most once per compile. Returns the file's export-decl
     // array, or null on missing-file / parse-failure (errors swallowed — this
     // is a best-effort registry-seed pass, not a diagnostic surface).
-    const _seedParseCache = new Map();
     function _parseStdlibExports(absPath) {
-      if (_seedParseCache.has(absPath)) return _seedParseCache.get(absPath);
-      let out = null;
-      if (existsSync(absPath)) {
-        try {
-          const src = readFileSync(absPath, "utf8");
-          const bsOut = splitBlocks(absPath, src);
-          const tabResult = buildAST(bsOut);
-          if (tabResult && tabResult.ast) out = tabResult.ast.exports || [];
-        } catch {
-          out = null;
-        }
-      }
-      _seedParseCache.set(absPath, out);
-      return out;
+      const ast = stdlibModuleAst(absPath);
+      return ast ? (ast.exports || []) : null;
     }
 
     // Issue #26 (P0 auth-bypass) — resolve a re-export chain to its TERMINAL
@@ -2258,15 +2278,40 @@ function _compileScrmlImpl(options = {}) {
         }
         const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
         if (namesList.includes(localName)) {
-          return { kind: exp.exportKind || "unknown", isAsync: !!exp.isAsync };
+          return {
+            kind: exp.exportKind || "unknown",
+            isAsync: !!exp.isAsync,
+            typeKind: exp.exportKind === "type" ? _stdlibTypeKind(absPath, localName) : null,
+          };
         }
       }
       return null;
     }
 
+    // S462 — the declared kind (`enum` / `struct` / …) of a type a stdlib module
+    // declares itself, or null. Codegen erases a non-enum stdlib type from an
+    // emitted ES import: it has no run-time value, so the shim exports nothing.
+    function _stdlibTypeKind(absPath, typeName) {
+      const decl = (stdlibModuleAst(absPath)?.typeDecls ?? []).find(t => t && t.name === typeName);
+      return decl && typeof decl.typeKind === "string" ? decl.typeKind : null;
+    }
+
+    // S462 — the exported-name set of each stdlib module read here, for the
+    // E-IMPORT-004 check below (null = the source could not be read).
+    const stdlibNameSets = new Map();
+    const _exportedNamesOf = (astExports) => {
+      const set = new Set();
+      for (const exp of astExports) {
+        if (!exp.exportedName) continue;
+        for (const n of exp.exportedName.split(",").map(s => s.trim()).filter(Boolean)) set.add(n);
+      }
+      return set;
+    };
+
     for (const absPath of stdlibPaths) {
       if (moduleResult.exportRegistry.has(absPath)) continue; // already seeded (re-export inheritance)
       const astExports = _parseStdlibExports(absPath);
+      stdlibNameSets.set(absPath, astExports ? _exportedNamesOf(astExports) : null);
       if (!astExports) continue;
       // Build the per-name value map from the stdlib file's exports.
       const names = new Map();
@@ -2277,6 +2322,7 @@ function _compileScrmlImpl(options = {}) {
         for (const name of namesList) {
           let kind = exp.exportKind || "unknown";
           let isAsync = !!exp.isAsync;
+          let typeKind = kind === "type" ? _stdlibTypeKind(absPath, name) : null;
           // Re-export: chase the source module for the terminal kind + async
           // modifier so the auto-await classifier sees through it (Issue #26).
           if (exp.exportKind === "re-export" && exp.reExportSource) {
@@ -2290,6 +2336,7 @@ function _compileScrmlImpl(options = {}) {
             if (resolved) {
               kind = resolved.kind;
               isAsync = resolved.isAsync;
+              typeKind = resolved.typeKind ?? null;
             } else if (serverOnlyStdlibPaths.has(absPath)) {
               // jwt-auth-bypass (2026-07-11, HIGH) — FAIL CLOSED. The re-export
               // could NOT be resolved to a terminal {kind, isAsync} (missing /
@@ -2333,6 +2380,7 @@ function _compileScrmlImpl(options = {}) {
             category,
             isComponent,
             ...(isAsync ? { isAsync: true } : {}),
+            ...(typeKind ? { typeKind } : {}),
           });
         }
       }
@@ -2340,6 +2388,30 @@ function _compileScrmlImpl(options = {}) {
         moduleResult.exportRegistry.set(absPath, names);
       }
     }
+
+    // S462 — §21.3 / §41.3.1: a `scrml:` import of a name the stdlib module does
+    // not export is E-IMPORT-004, judged against the names this seed just read
+    // (one reader). The hint scan of the other stdlib modules runs only when a
+    // name is missing.
+    let _exporters = null;
+    const exportersOf = (name) => {
+      if (_exporters === null) {
+        _exporters = new Map();
+        for (const { specifier, absPath } of listStdlibModules()) {
+          const exps = _parseStdlibExports(absPath);
+          if (!exps) continue;
+          for (const n of _exportedNamesOf(exps)) {
+            if (!_exporters.has(n)) _exporters.set(n, []);
+            _exporters.get(n).push(specifier);
+          }
+        }
+      }
+      return _exporters.get(name) ?? [];
+    };
+    collectErrors(
+      "MOD",
+      validateStdlibImports(moduleResult.importGraph, (p) => stdlibNameSets.get(p), exportersOf),
+    );
     return null;
   });
 
@@ -2781,11 +2853,19 @@ function _compileScrmlImpl(options = {}) {
   function getDepRegistry(absSource) {
     if (depRegistryCache.has(absSource)) return depRegistryCache.get(absSource);
     const depFile = ceFileMap.get(absSource);
-    if (!depFile) {
+    // S462 — §53.14.6: "The importing file's `typeRegistry` SHALL include any
+    // imported stdlib types after MOD resolution." A stdlib module is not in the
+    // compile set (its runtime is the JS shim), so its type declarations come
+    // from the same TAB-only reader the STDLIB-EXPORT-SEED stage uses; from here
+    // on it is the local-file path, unchanged.
+    const stdlibAst = !depFile && isStdlibFilePath(absSource) ? stdlibModuleAst(absSource) : null;
+    if (!depFile && !stdlibAst) {
       depRegistryCache.set(absSource, null);
       return null;
     }
-    const depTypeDecls = depFile.typeDecls ?? depFile.ast?.typeDecls ?? [];
+    const depTypeDecls = depFile
+      ? (depFile.typeDecls ?? depFile.ast?.typeDecls ?? [])
+      : (stdlibAst.typeDecls ?? []);
     if (depTypeDecls.length === 0) {
       depRegistryCache.set(absSource, new Map());
       return depRegistryCache.get(absSource);
@@ -2831,6 +2911,25 @@ function _compileScrmlImpl(options = {}) {
 
     // Otherwise, check this file's exports[] for a matching re-export entry.
     const depGraphEntry = moduleResult.importGraph.get(absSource);
+    if (!depGraphEntry && isStdlibFilePath(absSource)) {
+      // S462 — a stdlib module (not a graph node): chase its `export { … } from`
+      // re-exports from the same TAB-only reader (`scrml:auth` → ./jwt.scrml).
+      const ast = stdlibModuleAst(absSource);
+      for (const exp of ast?.exports ?? []) {
+        if (exp.exportKind !== "re-export" || !exp.reExportSource || !exp.exportedName) continue;
+        let sourceLocal = null;
+        if (Array.isArray(exp.renames)) {
+          const hit = exp.renames.find(r => r && r.exported === typeName);
+          if (hit) sourceLocal = hit.local ?? hit.exported;
+        } else if (exp.exportedName.split(",").map(x => x.trim()).includes(typeName)) {
+          sourceLocal = typeName;
+        }
+        if (sourceLocal == null) continue;
+        const found = resolveTypeThroughReExport(resolve(dirname(absSource), exp.reExportSource), sourceLocal, visited);
+        if (found) return found;
+      }
+      return null;
+    }
     if (!depGraphEntry || !depGraphEntry.exports) return null;
 
     for (const exp of depGraphEntry.exports) {
@@ -3381,6 +3480,19 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
+  // S462 — one seam for every ES-module emitter (server, `kind="tool"`, library):
+  // a stdlib type with no run-time value (`:struct`) is erased from its `scrml:`
+  // import by declared kind, so the module links (see eraseStdlibTypeOnlyImports).
+  // The client bundle reads `_scrml_stdlib.NAME` by destructuring, where an absent
+  // name is `undefined`, not a link error — it is not an ES import and is left alone.
+  for (const [_eraseFile, _eraseOut] of cgResult?.outputs ?? []) {
+    if (!_eraseOut) continue;
+    for (const field of ["serverJs", "toolJs", "libraryJs"]) {
+      if (typeof _eraseOut[field] === "string") {
+        _eraseOut[field] = eraseStdlibTypeOnlyImports(_eraseOut[field], _eraseFile, moduleResult.exportRegistry);
+      }
+    }
+  }
   // S457 — every placeholder is lowered by now; any that survived (a refused
   // construct) loses its compilation token here, before the emit gate reads,
   // reports or any write lands, and before the in-memory outputs a failed compile
@@ -3874,8 +3986,13 @@ function _compileScrmlImpl(options = {}) {
   // gate below checks the exact bytes the write phase would produce and the
   // shims are copied only once the gate has passed (a gate failure used to leave
   // `_scrml/*.js` behind in an otherwise-unwritten output directory).
+  // S462 F4 — a module whose import is already refused (E-IMPORT-004 against its
+  // export list) gets no second "has no runtime shim" warning: one report per cause.
+  const _refusedStdlibModules = new Set(
+    allErrors.filter(e => e && e.code === "E-IMPORT-004" && typeof e.stdlibModule === "string").map(e => e.stdlibModule),
+  );
   const bundledStdlib = (writeEligible && outputDir)
-    ? planStdlibBundle(stdlibSpecifiers, allErrors)
+    ? planStdlibBundle(stdlibSpecifiers, allErrors, _refusedStdlibModules)
     : new Set();
   // Set true once the first byte of this compile reaches `outputDir`.
   let artifactsWritten = false;

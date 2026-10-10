@@ -7,6 +7,16 @@
 //   - googleConfig(opts)               → config object
 //   - parseIdToken(tokens)             → claims | null   (UNVERIFIED — no sig check)
 
+// OAuthError — mirrors `export type OAuthError:enum = { ParseFailed(message: string) }`
+// in stdlib/oauth/google.scrml, in the compiler's enum shape (payload variant →
+// { variant, data }).
+export const OAuthError = Object.freeze({
+  ParseFailed: function(message) {
+    return { variant: "ParseFailed", data: { message } };
+  },
+  variants: ["ParseFailed"],
+});
+
 export function googleConfig(opts) {
   if (!opts) throw new Error("[scrml:oauth/google] opts required");
   const extra = {

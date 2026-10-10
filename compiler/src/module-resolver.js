@@ -26,7 +26,7 @@
  */
 
 import { resolve, dirname, join, basename, posix } from "path";
-import { existsSync, realpathSync } from "fs";
+import { existsSync, realpathSync, readdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { toPosix, PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { collectMarkupReturningFnNames, resolveImportedMarkupLocalNames } from "./markup-return-scan.js";
@@ -224,6 +224,10 @@ export function buildImportGraph(fileASTs) {
 
     // Collect imports from AST
     const astImports = file.ast?.imports || [];
+    // S462 F4 — an import written inside a `^{}` meta block is refused there
+    // (E-META-001, meta-checker); it is still collected here, so mark it and let
+    // the stdlib name check stay silent about it (one report per cause).
+    const metaImports = importsInsideMeta(file.ast);
     for (const imp of astImports) {
       if (!imp.source) continue;
 
@@ -293,6 +297,7 @@ export function buildImportGraph(fileASTs) {
         absSource,
         isDefault: imp.isDefault || false,
         span: imp.span || null,
+        ...(metaImports.has(imp) ? { inMeta: true } : {}),
       });
     }
 
@@ -1217,6 +1222,266 @@ export function validateImports(graph, exportRegistry) {
   }
 
   return errors;
+}
+
+// ---------------------------------------------------------------------------
+// Stdlib import validation (E-IMPORT-004 for `scrml:` imports — S462)
+// ---------------------------------------------------------------------------
+
+/**
+ * §21.3 / §41.3.1 — a `scrml:NAME` (or `scrml:NAME/sub`) import of a name the
+ * stdlib module does not export is E-IMPORT-004, the same error a `.scrml` file
+ * import gets. §41.3.1: "All other rules from §21 (E-IMPORT-001 through
+ * E-IMPORT-004) continue to apply" to `scrml:` value imports.
+ *
+ * Stdlib modules are not compiled with the program (their runtime is the JS shim
+ * at `compiler/runtime/stdlib/<name>.js`), so `validateImports` never saw them:
+ * the export registry is seeded for them only AFTER module resolution, by the
+ * STDLIB-EXPORT-SEED stage in api.js, from the module's `.scrml` source. That
+ * seed is the one reader of a stdlib module's exports; this check is handed the
+ * name set it read (`namesOf`) rather than reading the module a second time.
+ *
+ * Not checked here:
+ *   - a stdlib file that IS in the compile set (it is a graph node, and
+ *     `validateImports` already judged it against the registry);
+ *   - the `scrml:compiler*` family (§41.17 — deferred, W-STDLIB-COMPILER-DEFERRED;
+ *     its sources declare surfaces the parser does not name);
+ *   - a module that does not exist (E-IMPORT-006, `buildImportGraph`) or whose
+ *     source could not be read (`namesOf` returns null);
+ *   - a named re-export from a stdlib module (§21.4 states it is not checked).
+ *
+ * @param {Map<string, object>} graph — the import graph from `buildImportGraph`
+ * @param {(absPath: string) => (Set<string> | null | undefined)} namesOf — the
+ *   names a stdlib module exports, by absolute module path; `undefined` means
+ *   "not a stdlib module this check judges", `null` means "could not be read"
+ * @param {(name: string) => string[]} [exportersOf] — the `scrml:` specifiers of
+ *   other stdlib modules that export `name` (message hint only)
+ * @returns {ModuleError[]}
+ */
+export function validateStdlibImports(graph, namesOf, exportersOf = () => []) {
+  const errors = [];
+  for (const [filePath, entry] of graph) {
+    for (const imp of entry?.imports ?? []) {
+      if (typeof imp.source !== "string" || !imp.source.startsWith("scrml:")) continue;
+      if (isStdlibCompilerFamily(imp.source)) continue;
+      if (imp.inMeta) continue; // E-META-001 is the report (S462 F4)
+      if (graph.has(imp.absSource)) continue; // in the compile set — validateImports judged it
+      const exported = namesOf(imp.absSource);
+      if (!(exported instanceof Set)) continue;
+      // A default import binds the module's `default` export; stdlib modules have none.
+      const wanted = imp.isDefault ? ["default"] : imp.names;
+      for (const name of wanted) {
+        if (exported.has(name)) continue;
+        const err = new ModuleError(
+          "E-IMPORT-004",
+          stdlibMissingNameMessage(name, imp, exported, exportersOf(name).filter((s) => s !== imp.source)),
+          imp.span ? { ...imp.span, file: imp.span.file ?? filePath } : null,
+        );
+        err.missingName = name;
+        err.importerFile = toPosix(filePath);
+        err.targetFile = toPosix(imp.absSource);
+        err.stdlibModule = imp.source.slice("scrml:".length);
+        errors.push(err);
+      }
+    }
+    // §21.4 (S462 Q19 ruling) — a NAMED re-export from a `scrml:` module is checked
+    // against that module's exports, reported at the re-export, as a relative
+    // re-export is (validateReExports). `export *` from a stdlib module stays
+    // unexpanded (§21.4); `vendor:` and `.js` sources are not checked.
+    for (const exp of entry?.exports ?? []) {
+      if (!exp || exp.isReExportAll || !exp.reExportSource) continue;
+      const spec = exp.reExportSpecifier;
+      if (typeof spec !== "string" || !spec.startsWith("scrml:")) continue;
+      if (isStdlibCompilerFamily(spec)) continue;
+      if (graph.has(exp.reExportSource)) continue; // in the compile set — validateReExports judged it
+      const exported = namesOf(exp.reExportSource);
+      if (!(exported instanceof Set)) continue;
+      const imported = exp.localName ?? exp.name;
+      if (exported.has(imported)) continue;
+      const clause = `export { ${imported === exp.name ? imported : `${imported} as ${exp.name}`} } from "${spec}"`;
+      const base = stdlibMissingNameMessage(imported, { source: spec, absSource: exp.reExportSource }, exported,
+        exportersOf(imported).filter((s) => s !== spec));
+      const err = new ModuleError(
+        "E-IMPORT-004",
+        base.replace(`is not exported by \`${spec}\`.`, `is not exported by \`${spec}\`, so it cannot be re-exported (\`${clause}\`).`),
+        exp.span ? { ...exp.span, file: exp.span.file ?? filePath } : null,
+      );
+      err.reExportedMissingName = exp.name;
+      err.importerFile = toPosix(filePath);
+      err.targetFile = toPosix(exp.reExportSource);
+      err.stdlibModule = spec.slice("scrml:".length);
+      errors.push(err);
+    }
+  }
+  return errors;
+}
+
+/**
+ * S462 — erase stdlib TYPES with no run-time value from an emitted ES module's
+ * `scrml:` imports.
+ *
+ * A `:struct` (or any non-enum) type a stdlib module exports is a compile-time
+ * name: the JS shim exports nothing for it, so `import { TableSort } from
+ * "scrml:data"` reaching a server / tool / library module fails when the module
+ * LINKS ("Export named 'TableSort' not found"). The name is dropped from the
+ * import clause by its declared kind (the STDLIB-EXPORT-SEED registry entry's
+ * `typeKind`), never by scanning the emitted text for uses. An ENUM is kept: it
+ * has a run-time value (the variant constructors) and every shim exports it
+ * (pinned by stdlib-shim-export-parity.test.js). A type whose kind the seed
+ * could not read is kept too — dropping a real value would be the worse failure.
+ *
+ * Line-preserving (source maps stay valid): a clause left empty becomes a
+ * comment on the same line.
+ *
+ * @param {string} jsText — an emitted ES module (before the `scrml:` specifier rewrite)
+ * @param {string} importerPath — the `.scrml` file it was emitted from
+ * @param {Map<string, Map<string, { kind?: string, typeKind?: string }>>|null} exportRegistry
+ * @returns {string}
+ */
+export function eraseStdlibTypeOnlyImports(jsText, importerPath, exportRegistry) {
+  if (typeof jsText !== "string" || !jsText.includes("scrml:") || !exportRegistry || !importerPath) return jsText;
+  return jsText.replace(
+    /^([ \t]*)import\s*\{([^}]*)\}\s*from\s*(["'])(scrml:[A-Za-z0-9_\/-]+)\3([ \t]*;?)[ \t]*$/gm,
+    (match, indent, clause, quote, spec, semi) => {
+      const entry = exportRegistry.get(resolveModulePath(spec, importerPath));
+      if (!entry) return match;
+      const parts = clause.split(",").map((p) => p.trim()).filter(Boolean);
+      const erased = [];
+      const kept = [];
+      for (const part of parts) {
+        const imported = part.split(/\s+as\s+/)[0].trim();
+        const info = entry.get(imported);
+        if (info && info.kind === "type" && typeof info.typeKind === "string" && info.typeKind !== "enum") {
+          erased.push(imported);
+        } else {
+          kept.push(part);
+        }
+      }
+      if (erased.length === 0) return match;
+      if (kept.length === 0) {
+        return `${indent}// type-only stdlib import erased (no run-time value): ${erased.join(", ")} from ${spec}`;
+      }
+      return `${indent}import { ${kept.join(", ")} } from ${quote}${spec}${quote}${semi || ";"}`;
+    },
+  );
+}
+
+/**
+ * The import-decl nodes a file writes inside a `^{}` meta block (identity set; the
+ * AST's `imports` list holds the same objects).
+ * @param {object|undefined} ast
+ * @returns {Set<object>}
+ */
+function importsInsideMeta(ast) {
+  const out = new Set();
+  if (!Array.isArray(ast?.imports) || ast.imports.length === 0) return out;
+  const seen = new WeakSet();
+  const walk = (n, inMeta) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, inMeta); return; }
+    const meta = inMeta || n.kind === "meta" || n.kind === "Meta";
+    if (meta && n.kind === "import-decl") out.add(n);
+    for (const k of Object.keys(n)) if (k !== "span" && k !== "parentContext") walk(n[k], meta);
+  };
+  for (const node of ast?.nodes ?? []) walk(node, false);
+  return out;
+}
+
+/** Is `source` the `scrml:compiler` umbrella or one of its per-stage siblings? */
+function isStdlibCompilerFamily(source) {
+  const name = source.slice("scrml:".length);
+  return name === "compiler" || name.startsWith("compiler/");
+}
+
+/** The E-IMPORT-004 text for a name a stdlib module does not export (S462). */
+function stdlibMissingNameMessage(name, imp, exported, elsewhere) {
+  const spec = imp.source;
+  if (name === "default") {
+    const local = imp.names?.[0] ?? "name";
+    return `E-IMPORT-004: \`${spec}\` has no default export, so \`import ${local} from '${spec}'\` binds nothing. ` +
+      `Import the names you need: \`import { … } from '${spec}'\`.`;
+  }
+  let hint = "";
+  if (elsewhere.length > 0) {
+    const where = elsewhere.slice(0, 3).map((s) => `\`${s}\``).join(", ");
+    hint = ` \`${name}\` is exported by ${where} — import it from there.`;
+  } else {
+    const near = closestName(name, exported);
+    if (near) hint = ` Did you mean \`${near}\`?`;
+  }
+  const rel = posix.relative(toPosix(STDLIB_ROOT), toPosix(imp.absSource));
+  const where = rel && !rel.startsWith("..") ? `\`stdlib/${rel}\`` : "its source";
+  return `E-IMPORT-004: \`${name}\` is not exported by \`${spec}\`.${hint} ` +
+    `The module's exports are declared in ${where}; an imported name it does not export ` +
+    `would be \`undefined\` at run time.`;
+}
+
+/**
+ * The export of `names` nearest to `name` by edit distance (case-insensitive),
+ * or null when none is close enough to be a plausible typo.
+ */
+function closestName(name, names) {
+  const target = name.toLowerCase();
+  let best = null;
+  let bestD = Infinity;
+  for (const cand of names) {
+    const d = editDistance(target, cand.toLowerCase());
+    if (d < bestD || (d === bestD && best !== null && cand < best)) {
+      best = cand;
+      bestD = d;
+    }
+  }
+  if (best === null) return null;
+  const limit = Math.max(1, Math.floor(Math.max(name.length, best.length) / 3));
+  return bestD <= limit ? best : null;
+}
+
+/** Levenshtein distance between two strings. */
+function editDistance(a, b) {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Every stdlib module an `import` can name, as `{ specifier, absPath }` —
+ * `stdlib/crypto/index.scrml` is `scrml:crypto`, `stdlib/auth/jwt.scrml` is
+ * `scrml:auth/jwt`. The `scrml:compiler*` family is left out (see
+ * `validateStdlibImports`). Order is deterministic (sorted by specifier).
+ *
+ * @returns {{ specifier: string, absPath: string }[]}
+ */
+export function listStdlibModules() {
+  const out = [];
+  const walk = (dir, rel) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      const childRel = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) {
+        if (!rel && ent.name === "compiler") continue;
+        walk(join(dir, ent.name), childRel);
+      } else if (ent.isFile() && ent.name.endsWith(".scrml")) {
+        const modPath = childRel.slice(0, -".scrml".length).replace(/(^|\/)index$/, "");
+        if (!modPath) continue;
+        const specifier = `scrml:${modPath}`;
+        // The resolver prefers `<name>/index.scrml` over `<name>.scrml`; list the one it picks.
+        if (toPosix(resolveModulePath(specifier, join(STDLIB_ROOT, "_"))) !== toPosix(join(dir, ent.name))) continue;
+        out.push({ specifier, absPath: join(dir, ent.name) });
+      }
+    }
+  };
+  walk(STDLIB_ROOT, "");
+  out.sort((x, y) => (x.specifier < y.specifier ? -1 : x.specifier > y.specifier ? 1 : 0));
+  return out;
 }
 
 /**

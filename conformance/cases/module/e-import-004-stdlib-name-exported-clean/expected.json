@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-stdlib-name-exported-clean",
+  "description": "§21.3 / §41.3.1 — importing `{ isValid }` from `scrml:data`, which exports it (by re-export from data/validate.scrml), resolves cleanly; E-IMPORT-004 stays silent. The clean twin of the stdlib name-not-exported case.",
+  "language-version": "1.0",
+  "spec": "§41.3.1",
+  "rationale": "§21.3 applies to `scrml:` imports (§41.3.1); a name in the module's export list — a re-export counts — is legal.",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-004"], "notCodePrefixes": ["E-IMPORT-"] }
+}
