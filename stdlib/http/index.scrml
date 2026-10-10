@@ -311,22 +311,30 @@ ${
      *
      * Backoff: delay = baseDelay * (factor ^ attempt) ± jitter%.
      *
-     * @param fn   — async function to execute (called with no args)
-     * @param opts — { maxRetries: 3, baseDelay: 200, factor: 2, jitter: 0.2,
-     *                shouldRetry: (err) => boolean }
+     * @param fn          — async function to execute (called with no args)
+     * @param opts        — data only: { maxRetries: 3, baseDelay: 200, factor: 2, jitter: 0.2 }
+     * @param shouldRetry — optional function (err) → boolean; false stops retrying.
+     *                      A positional argument, not an options field (S462: a
+     *                      function is passed, never stored in a value). An
+     *                      `opts.shouldRetry` is refused rather than ignored.
+     *
+     * Example:
+     *   retry(() => syncOrder(id), { maxRetries: 5 }, (err) => err.name != "AuthError")
      * @returns the resolved value of fn, or rethrows the last error after exhaustion
      *
      * safeCallAsync-gap: await fn() is an async-throwing call. synchronous
      * safeCall cannot catch async throws. This try/catch is retained until
      * safeCallAsync is available. Tracked as Phase 3a partial.
      */
-    export async function retry(fn, opts) {
+    export async function retry(fn, opts, shouldRetry) {
         const o = opts || {}
+        if (o.shouldRetry is some) {
+            throw new Error("[scrml:http] retry: shouldRetry is the third argument — retry(fn, opts, shouldRetry) — not an opts field")
+        }
         const maxRetries = o.maxRetries is some ? o.maxRetries : 3
         const baseDelay  = o.baseDelay  is some ? o.baseDelay  : 200
         const factor     = o.factor     is some ? o.factor     : 2
         const jitter     = o.jitter     is some ? o.jitter     : 0.2
-        const shouldRetry = o.shouldRetry || (() => true)
 
         let lastErr = not
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -335,7 +343,7 @@ ${
             } catch (err) {
                 lastErr = err
                 if (attempt == maxRetries) break
-                if (!shouldRetry(err)) break
+                if (shouldRetry is some && !shouldRetry(err)) break
                 const base = baseDelay * Math.pow(factor, attempt)
                 const jitterAmt = base * jitter * (random() * 2 - 1)
                 const delay = Math.max(0, base + jitterAmt)

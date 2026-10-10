@@ -23,7 +23,7 @@
 //   - isError(response)
 //   - withAuth(token, scheme?, wrapped?)    → HttpClient
 //   - withDefaults(defaults, wrapped?)      → HttpClient
-//   - retry(fn, opts?)
+//   - retry(fn, opts?, shouldRetry?)
 //   - multipart(fields)            → FormData
 //   - uploadFile(url, file, opts?)
 
@@ -210,13 +210,18 @@ export function withDefaults(defaults, wrapped) {
   };
 }
 
-export async function retry(fn, opts) {
+// retry(fn, opts?, shouldRetry?) — `opts` is data only; the predicate is a
+// positional argument (S462: a function is passed, never stored in a value).
+// A legacy `opts.shouldRetry` is refused loudly rather than silently ignored.
+export async function retry(fn, opts, shouldRetry) {
   const o = opts || {};
+  if (o.shouldRetry !== null && o.shouldRetry !== undefined) {
+    throw new Error("[scrml:http] retry: shouldRetry is the third argument — retry(fn, opts, shouldRetry) — not an opts field");
+  }
   const maxRetries = o.maxRetries !== null && o.maxRetries !== undefined ? o.maxRetries : 3;
   const baseDelay = o.baseDelay !== null && o.baseDelay !== undefined ? o.baseDelay : 200;
   const factor = o.factor !== null && o.factor !== undefined ? o.factor : 2;
   const jitter = o.jitter !== null && o.jitter !== undefined ? o.jitter : 0.2;
-  const shouldRetry = o.shouldRetry || (() => true);
 
   let lastErr = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -225,7 +230,7 @@ export async function retry(fn, opts) {
     } catch (err) {
       lastErr = err;
       if (attempt === maxRetries) break;
-      if (!shouldRetry(err)) break;
+      if (typeof shouldRetry === "function" && !shouldRetry(err)) break;
       const base = baseDelay * Math.pow(factor, attempt);
       const jitterAmt = base * jitter * (random() * 2 - 1);
       const delay = Math.max(0, base + jitterAmt);

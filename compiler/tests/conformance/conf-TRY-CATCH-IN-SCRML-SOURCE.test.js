@@ -177,9 +177,10 @@ describe("CONF-TRY-CATCH-IN-SCRML-SOURCE: stdlib/http regression-fire verificati
       .filter(n => typeof n === "number")
       .sort((a, b) => a - b);
 
-    // (S462: +11 / +65 after the HttpClient config-struct migration — the
-    // header usage note and the client helpers above get/post/….)
+    // (S462: +11 / +73 after the HttpClient config-struct migration — the
+    // header usage note and the client helpers above get/post/… — and the
+    // retry(fn, opts, shouldRetry) positional-predicate change.)
     expect(lines).toContain(80);
-    expect(lines).toContain(333);
+    expect(lines).toContain(341);
   });
 });

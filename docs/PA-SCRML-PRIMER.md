@@ -1120,7 +1120,7 @@ Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS 
 - `scrml:store` — `createStore`, `createSessionStore`, `createCounter` return a `KvStore` struct (S462); free functions `get(store, key)` / `set` / `del` / `has` / `keys` / `clear` / `close` / `purgeExpired`, counters `increment` / `decrement` / `count` / `resetCount` (KV / session via SQLite)
 
 **Network + scheduling:**
-- `scrml:http` — REST helpers (`get/post/put/del/patch`, each `get(url, opts)` OR `get(client, path, opts)`) + `withBaseUrl/withAuth/withDefaults` returning an `HttpClient` config struct (S462), `retry(fn, opts)`, `multipart`, `uploadFile`, `isOk`/`isError`. All async.
+- `scrml:http` — REST helpers (`get/post/put/del/patch`, each `get(url, opts)` OR `get(client, path, opts)`) + `withBaseUrl/withAuth/withDefaults` returning an `HttpClient` config struct (S462), `retry(fn, opts, shouldRetry?)` (predicate positional, S462), `multipart`, `uploadFile`, `isOk`/`isError`. All async.
 - `scrml:redis` — `get/set/setex/del/exists/expire/ttl/incr/decr`; sets `sadd/srem/sismember/smembers`; pub/sub `publish/subscribe/unsubscribe`; `createClient`, `send`, `close`. Bun.redis-backed.
 - `scrml:cron` — `schedule(pattern, handler)` returns CronJob; `nextOccurrence`, `stop`. Bun.cron-backed (Bun ≥1.3.12).
 

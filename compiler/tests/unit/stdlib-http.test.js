@@ -199,27 +199,9 @@ describe("scrml:http — request logic (mock fetch)", () => {
 
 // --- S57 Tier 3 middleware extensions ----------------------------------------
 
-async function retry(fn, opts) {
-    const o = opts || {}
-    const maxRetries = o.maxRetries !== undefined ? o.maxRetries : 3
-    const baseDelay  = o.baseDelay  !== undefined ? o.baseDelay  : 200
-    const factor     = o.factor     !== undefined ? o.factor     : 2
-    const jitter     = o.jitter     !== undefined ? o.jitter     : 0.2
-    const shouldRetry = o.shouldRetry || (() => true)
-    let lastErr = null
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try { return await fn(); } catch (err) {
-            lastErr = err
-            if (attempt === maxRetries) break
-            if (!shouldRetry(err)) break
-            const base = baseDelay * Math.pow(factor, attempt)
-            const jitterAmt = base * jitter * (Math.random() * 2 - 1)
-            const delay = Math.max(0, base + jitterAmt)
-            await new Promise(r => setTimeout(r, delay))
-        }
-    }
-    throw lastErr
-}
+// S462: retry is tested against the REAL shim — shouldRetry is a positional
+// argument, not an options field.
+const retry = http.retry
 
 function multipart(fields) {
     const fd = new FormData()
@@ -313,10 +295,34 @@ describe("scrml:http — retry (Tier 3)", () => {
         try {
             await retry(
                 async () => { calls++; throw new Error("nope") },
-                { maxRetries: 5, baseDelay: 1, jitter: 0, shouldRetry: () => false }
+                { maxRetries: 5, baseDelay: 1, jitter: 0 },
+                () => false
             )
         } catch(e) {}
         expect(calls).toBe(1)
+    })
+    test("HM10b: shouldRetry receives the error; true keeps retrying", async () => {
+        const seen = []
+        let calls = 0
+        await expect(retry(
+            async () => { calls++; throw new Error("e" + calls) },
+            { maxRetries: 2, baseDelay: 1, jitter: 0 },
+            (err) => { seen.push(err.message); return true }
+        )).rejects.toThrow("e3")
+        expect(calls).toBe(3)
+        expect(seen).toEqual(["e1", "e2"])
+    })
+    test("HM10c: a legacy opts.shouldRetry is refused, not silently ignored (S462)", async () => {
+        let calls = 0
+        await expect(retry(
+            async () => { calls++; return 1 },
+            { maxRetries: 2, shouldRetry: () => false }
+        )).rejects.toThrow(/third argument/)
+        expect(calls).toBe(0)
+    })
+    test("HM10d: opts stays data — no function-valued field is needed", async () => {
+        expect(await retry(async () => 7, { maxRetries: 0 })).toBe(7)
+        expect(await retry(async () => 8)).toBe(8)
     })
 })
 

@@ -3,3 +3,4 @@
 2026-10-09T19:26:19-06:00 http committed e1978a6ff. store(kv)+auth limiter+auth flows+ex23 migrated, tests green on targeted set; oauth migrated (OAuthStore enum) — committing next. Found: store.js keys(prefix) ESCAPE bug (fixed); module-level const from imported call not mirrored to server (pre-existing gap, filing)
 2026-10-09T19:40:35-06:00 RESUMED after session kill; commit 2 never landed — committing store/auth/oauth/docs together. Prototype re-measure: base stdlib 8 sites, new 0. types:check OK. Browser tier 50 fail (none stdlib; base comparison pending).
 2026-10-09T20:21:32-06:00 dd4b3f99e landed (gate 34012 pass / 0 fail). Browser tier: 50 fail identical to a base-tree (980cb3001) run — pre-existing. DONE; reporting.
+2026-10-09T20:27:55-06:00 ADDENDUM (bryan Q17 a,b): retry(fn, opts, shouldRetry); opts.shouldRetry refused. Prototype re-measure stdlib 0. Committing on top of d6fc8e04d.
