@@ -434,6 +434,28 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
       }
       return;
     }
+    if (r.kind === "reactive-array-mutation" && typeof r.target === "string" && typeof r.method === "string"
+      && SYNC_CALLBACK_METHODS.has(r.method) && Array.isArray(r.argExprs)) {
+      // S462 round 7 (R7-3) — `@xs.sort((a, b) => …)`: the cell is a known array, so its
+      // callback parameters get the element shape exactly as `xs.sort(…)` on a call does
+      // (N2a) — then the comparator's body is read like any other callback's.
+      const el = lazyShape(() => {
+        const recv = shapeOfExpr({ kind: "ident", name: "@" + r.target }, ctx);
+        return recv.builtinMethods ? recv.element() ?? UNKNOWN_SHAPE : UNKNOWN_SHAPE;
+      });
+      const lazyEl: ValueShape = {
+        get builtinMethods() { return el().builtinMethods; },
+        get functionFree() { return el().functionFree; },
+        get present() { return el().present; },
+        field: (k) => el().field(k),
+        element: () => el().element(),
+      };
+      const hints = r.method === "sort" || r.method === "toSorted" ? [lazyEl, lazyEl]
+        : r.method === "reduce" || r.method === "reduceRight" ? [UNKNOWN_SHAPE, lazyEl, PRIM_SHAPE] : [lazyEl, PRIM_SHAPE];
+      for (const a of r.argExprs as unknown[]) {
+        if (a && typeof a === "object" && ((a as Rec).kind === "lambda" || (a as Rec).kind === "escape-hatch")) paramHints.set(a as object, hints);
+      }
+    }
     if (r.kind === "function-decl" || r.kind === "lambda") {
       const fs = new Scope(scope);
       declareParams(r.params, fs, paramHints.get(r));

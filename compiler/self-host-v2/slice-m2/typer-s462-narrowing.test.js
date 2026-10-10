@@ -141,3 +141,16 @@ describe("S462 round 6 — markup else branches are checked", () => {
     expect(narrowing(O, "<p if=(@o.f != not)>x</p><p else-if=(@o.n != not)>${@o.n + 1}</p>")).toEqual([]);
   });
 });
+
+// S462 round 7 (twin): `on:` / `onclient:` / `onserver:` prefixes normalise like impl#1.
+describe("S462 round 7 — event-name prefixes", () => {
+  test("on:click under `if=` keeps it", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><button on:click={ @m = @o.n + 1 }>b</button></p>")).toEqual([]);
+  });
+  test("twin: on:click OUTSIDE a gate re-tests (the attribute is a handler)", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)>x</p><button on:click={ @m = @o.n + 1 }>b</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  // `onclient:` / `onserver:` are stripped by `userInputEvent` too, but the slice does not type an
+  // `onclient:click` value as a handler at all (a twin outside any gate reports nothing), so the
+  // prefix cannot be pinned here — impl#1 pins it (s462-narrowing-ends-on-write.test.js).
+});

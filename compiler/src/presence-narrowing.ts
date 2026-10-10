@@ -682,6 +682,11 @@ function guardKeys(markup: Rec, opts: PresenceNarrowingOptions): string[] {
     if (!val) continue;
     let target = (val.exprNode as Rec | undefined) ?? val;
     while (target && target.kind === "paren" && target.expr) target = target.expr as Rec;
+    // S462 round 7 (R7-2) — a component body is re-parsed by the native parser, whose bare
+    // `if=@cell` value is `{ kind: "variable-ref", name: "@cell" }` with no `exprNode`: it is
+    // the same reference as the top-level `ident`, so a component-body gate narrows (its
+    // children and its handlers) exactly as a top-level one does.
+    if (target && target.kind === "variable-ref" && typeof target.name === "string") target = { kind: "ident", name: target.name };
     const key = (opts.guardKey ?? opts.receiverKey)(target);
     if (key) out.push(key);
   }

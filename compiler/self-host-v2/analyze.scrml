@@ -10786,7 +10786,9 @@ ${
     // attribute names are case-insensitive); anything else keeps no gate narrowing.
     fn userInputEvent(ev: string) -> boolean {
         let e: string = ev.toLowerCase()
-        if (e.indexOf(":") == 0) e = e.substring(1)      // `on:click`
+        if (e.indexOf(":") == 0) e = e.substring(1)              // `on:click`
+        if (e.indexOf("client:") == 0) e = e.substring(7)        // `onclient:click`
+        if (e.indexOf("server:") == 0) e = e.substring(7)        // `onserver:click`
         return ["click", "dblclick", "auxclick", "contextmenu", "input", "beforeinput", "submit", "reset",
                 "keydown", "keyup", "keypress", "mousedown", "mouseup", "mousemove", "pointerdown", "pointerup",
                 "pointermove", "wheel", "touchstart", "touchmove", "touchend", "dragstart", "drag", "dragend",

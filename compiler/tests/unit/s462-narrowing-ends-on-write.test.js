@@ -1258,3 +1258,69 @@ describe("S462 round 6 — only user-input events keep a gate's narrowing", () =
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 7 — R7-2: an `if=` inside a component body narrows like a top-level one.
+// ---------------------------------------------------------------------------
+const compProg = (body) => `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+const C = ${body}
+<C/>
+<p>\${@out}</p>
+</program>
+`;
+describe("S462 round 7 — R7-2: a component-body `if=` narrows its children and handlers", () => {
+  test("an if-chain in a component body", () => {
+    expect(e046(compProg(`<section><div if=@user><p>\${@user.name}</p><button onclick={ @out = @user.name }>b</button></div><div else>none</div></section>`)).length).toBe(0);
+  });
+  test("a lone `if=` in a component body", () => {
+    expect(e046(compProg(`<section><div if=@user><p>\${@user.name}</p><button onclick={ @out = @user.name }>b</button></div></section>`)).length).toBe(0);
+  });
+  test("twins: the `else` branch and an ungated read still fire", () => {
+    expect(e046(compProg(`<section><div if=@user>u</div><div else><p>\${@user.name}</p></div></section>`)).length).toBe(1);
+    expect(e046(compProg(`<section><p>\${@user.name}</p></section>`)).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 7 — R7-3: a reactive-array-mutation comparator is read like any callback.
+// ---------------------------------------------------------------------------
+describe("S462 round 7 — R7-3: `@xs.sort(arrow)` reads the comparator", () => {
+  test("an expression-bodied comparator calling a string method keeps the narrowing", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.sort((a, b) => a.localeCompare(b))
+            @out = @user.name } }`)).toBe(0);
+  });
+  test("a block-bodied comparator keeps it too", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.sort((a, b) => { return a.localeCompare(b) })
+            @out = @user.name } }`)).toBe(0);
+  });
+  test("a comparator that writes the cell ends it", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.sort((a, b) => { clear()
+                return 0 })
+            @out = @user.name } }`)).toBe(1);
+  });
+  test("a named comparator that writes the cell ends it", () => {
+    expect(n5(`
+    function cmp(a: string, b: string) -> int { @user = not
+        return 0 }
+    function show() { if (@user is given) { @words.sort(cmp)
+            @out = @user.name } }`)).toBe(1);
+  });
+  test("a function-valued parameter as comparator is unresolvable", () => {
+    expect(n5(`
+    function show(f) { if (@user is given) { @words.sort(f)
+            @out = @user.name } }`)).toBe(1);
+  });
+});
+
+describe("S462 round 7 — event-name prefixes normalise (onclient:)", () => {
+  test("onclient:click under `if=@user` keeps it; outside a gate it re-tests", () => {
+    expect(nM(`<div if=@user><button onclient:click={ @out = @user.name }>go</button></div>`)).toBe(0);
+    expect(nM(`<div if=@user></div><button onclient:click={ @out = @user.name }>go</button>`)).toBe(1);
+  });
+});
