@@ -176,8 +176,12 @@ describe("§5.5.4 — a wholesale style=(expr) conflicts with show=", () => {
 });
 
 describe("show= on a host the bootstrap cannot toggle is refused, never ignored", () => {
+  // s462 (O18 RULED, SPEC §66.6.9 rules 2-3): a use is not an element — `show=` there is an undeclared
+  // attribute, E-DECL-USE-ATTR (was E-BOOTSTRAP-UNSUPPORTED); the message keeps the wrap hint.
   test("on a use of a declaration", () => {
-    expect(codes(prog(`        <card show=(@step == 1)/>`, CARD))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    const d = run(prog(`        <card show=(@step == 1)/>`, CARD)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-DECL-USE-ATTR"]);
+    expect(d[0].message).toContain("<div show=");
   });
   test("a declaration FIELD named `show` is a construction value, not §17.2", () => {
     const src = prog(`        <card show=true/>`, `    <card show:boolean=false>
@@ -188,7 +192,7 @@ describe("show= on a host the bootstrap cannot toggle is refused, never ignored"
     expect(codes(src)).toEqual([]);
   });
   test("on a `<*x/>` reference", () => {
-    expect(codes(prog(`        <*card show=(@step == 1)/>`, CARD))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(prog(`        <*card show=(@step == 1)/>`, CARD))).toEqual(["E-DECL-USE-ATTR"]);
   });
   test("on `<slot>`", () => {
     const src = prog(`        <card>x</card>`, `    <card note:string="n">
