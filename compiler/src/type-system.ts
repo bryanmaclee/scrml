@@ -76,6 +76,7 @@ import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
+import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
@@ -31880,12 +31881,8 @@ function checkOptionalMemberAccess(
     if (opaqueBodies.has(n)) return opaqueBodies.get(n) ?? null;
     let out: unknown[] | null = null;
     const kind = n.nativeKind;
-    if ((kind === "ArrowFunctionExpression" || kind === "FunctionExpression")
-      && typeof n.bodyRaw === "string" && Array.isArray(n.params)) {
-      try {
-        const stmts = parseHandlerStatementsForCheck({ kind: "expr", raw: `() => ${n.bodyRaw}` }, fileSpan.file ?? "");
-        if (Array.isArray(stmts)) out = stmts as unknown[];
-      } catch { out = null; }
+    if (kind === "ArrowFunctionExpression" || kind === "FunctionExpression") {
+      out = escapeHatchBodyStatements(n, fileSpan.file ?? "");
       // The re-parse's spans are relative to the body's own text (line 1); drop them so a
       // diagnostic inside lands on the enclosing statement / attribute instead.
       const unspan = (x: unknown): void => {

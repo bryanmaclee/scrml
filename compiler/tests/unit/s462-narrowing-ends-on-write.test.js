@@ -1129,3 +1129,78 @@ describe("S462 round 6 — F6-2: a focus-family handler is not exempt", () => {
     expect(nM(`<div if=@user><input oninput={ @out = @user.name } onkeydown={ @out = @user.name }/></div>`)).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 6 — F6-4: an arrow written AS the handler value is the handler itself.
+// ---------------------------------------------------------------------------
+describe("S462 round 6 — F6-4: a function handler value is the handler, not a closure in it", () => {
+  test("`onclick=${() => { … }}` under `if=@user` keeps the gate (like the `{ … }` form)", () => {
+    expect(nM(`<div if=@user><button onclick=\${() => { @out = @user.name }}>go</button></div>`)).toBe(0);
+  });
+  test("several parameters, an expression body, a function expression", () => {
+    expect(nM(`<div if=@user><button onclick=\${(e, x) => { @out = @user.name }}>go</button></div>`)).toBe(0);
+    expect(nM(`<div if=@user><button onclick=\${() => @out = @user.name}>go</button></div>`)).toBe(0);
+    expect(nM(`<div if=@user><button onclick=\${function (e) { @out = @user.name }}>go</button></div>`)).toBe(0);
+  });
+  test("outside a gate it re-tests (Q12)", () => {
+    expect(nM(`<button onclick=\${() => { @out = @user.name }}>go</button>`)).toBe(1);
+  });
+  test("a closure created INSIDE the arrow handler still re-tests", () => {
+    expect(nM(`<div if=@user><button onclick=\${() => { setTimeout(() => { @out = @user.name }, 1) }}>go</button></div>`)).toBe(1);
+  });
+  test("a write inside it still ends the narrowing", () => {
+    expect(nM(`<div if=@user><button onclick=\${() => { clear()
+        @out = @user.name }}>go</button></div>`)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 6 — F6-5: the branches of a markup `if=` / `else-if=` / `else` chain are walked.
+// ---------------------------------------------------------------------------
+describe("S462 round 6 — F6-5: an if-chain's branches are checked", () => {
+  test("a bare read in the `else` element fires (render and handler)", () => {
+    expect(nM(`<div if=@other>o</div><div else><p>\${@user.name}</p><button onclick={ @out = @user.name }>go</button></div>`)).toBe(2);
+  });
+  test("a bare read in an `else-if=` on a different condition fires", () => {
+    expect(nM(`<div if=@other>o</div><div else-if=(@out == "")><p>\${@user.name}</p></div>`)).toBe(1);
+  });
+  test("the `if=` branch of a chain narrows its own cell", () => {
+    expect(nM(`<div if=@user><p>\${@user.name}</p></div><div else><p>none</p></div>`)).toBe(0);
+  });
+  test("an `else-if=@user` branch narrows @user (render and handler)", () => {
+    expect(nM(`<p if=@other>o</p><div else-if=@user><p>\${@user.name}</p><button onclick={ @out = @user.name }>go</button></div><p else>none</p>`)).toBe(0);
+  });
+  test("the `else` of `if=@user` does not narrow @user", () => {
+    expect(nM(`<div if=@user>u</div><div else><p>\${@user.name}</p></div>`)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 6 — F6-3: component E-TYPE-031 reads block arrows structurally.
+// ---------------------------------------------------------------------------
+const e031 = (body) => compile(`<program>
+const C = <div class="c" props={ onGo?: () => void }>
+${body}
+</>
+<C/>
+</program>
+`).filter((e) => e.code === "E-TYPE-031").length;
+
+describe("S462 round 6 — F6-3: E-TYPE-031 sees several / default / rest-parameter block arrows", () => {
+  test("a two-parameter arrow handler value", () => {
+    expect(e031(`    <button class="g" onclick=\${(e, x) => { onGo() }}>g</button>`)).toBe(1);
+  });
+  test("a defaulted-parameter arrow handler value", () => {
+    expect(e031(`    <button class="g" onclick=\${(e = 1) => { onGo() }}>g</button>`)).toBe(1);
+  });
+  test("a rest-parameter arrow handler value", () => {
+    expect(e031(`    <button class="g" onclick=\${(...a) => { onGo() }}>g</button>`)).toBe(1);
+  });
+  test("a two-parameter block arrow passed to forEach", () => {
+    expect(e031(`    <button class="g" onclick=\${() => { [1, 2].forEach((a, b) => { onGo() }) }}>g</button>`)).toBe(1);
+  });
+  test("twins: guarded forms stay clean", () => {
+    expect(e031(`    <button class="g" onclick=\${(e, x) => { onGo?.() }}>g</button>`)).toBe(0);
+    expect(e031(`    <button class="g" onclick=\${(e = 1) => { if (onGo is given) { onGo() } }}>g</button>`)).toBe(0);
+  });
+});

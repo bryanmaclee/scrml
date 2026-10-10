@@ -57,6 +57,7 @@
  */
 
 import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
+import { ifChainChildNodes } from "./ast-if-chain.js";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
 /** A source span (the subset this module reads / passes through). */
@@ -544,6 +545,35 @@ function handlerEventName(attrName: string): string {
   return attrName.replace(/^on(?:client:|server:|:)?/i, "").toLowerCase();
 }
 
+/**
+ * S462 round 6 (F6-4) — an event-handler value that IS a function (`onclick=${() => { … }}`,
+ * `${(e) => …}`, `${function (e) { … }}`) is the handler itself (Q12: "an event handler, in
+ * any form"), not a closure created inside it: its parameter defaults and body are walked
+ * with the HANDLER's entry set (`at` — Q12 + the Q18 gate), and closures created inside
+ * still start un-narrowed. Returns false when the value is not a function the walk can read
+ * (the caller then walks it as an expression, which treats any function in it as a closure).
+ */
+function walkHandlerFunctionValue(val: Rec, at: ReadonlySet<string>, span: NarrowSpan, opts: PresenceNarrowingOptions): boolean {
+  let fn = (val.exprNode as Rec | undefined) ?? null;
+  while (fn && fn.kind === "paren" && fn.expr && typeof fn.expr === "object") fn = fn.expr as Rec;
+  if (!fn) return false;
+  if (fn.kind === "lambda") {
+    const p = walkParamDefaults(fn, at, span, opts);
+    const body = fn.body as Rec | undefined;
+    if (body && body.kind === "block") walkBodyNarrowed((body.stmts as unknown[]) ?? [], p, span, opts);
+    else if (body && body.kind === "expr") walkExprNarrowed(body.value, p, span, opts);
+    else return false;
+    return true;
+  }
+  if (fn.kind === "escape-hatch" && opts.expandOpaque) {
+    const stmts = opts.expandOpaque(fn);
+    if (!stmts) return false;
+    walkBodyNarrowed(stmts, walkParamDefaults(fn, at, span, opts), span, opts);
+    return true;
+  }
+  return false;
+}
+
 /** Lambdas a known built-in calls synchronously (S462 Q12) — set by the call above them. */
 const SYNC_CALLBACKS = new WeakSet<object>();
 
@@ -704,10 +734,19 @@ export function walkNodeNarrowed(
         const at = isGuard ? present
           : isHandler ? handlerEntry(inner, val, here, opts, handlerEventName(attr.name as string)) : inner;
         if (Array.isArray(hb)) walkBodyNarrowed(hb, at, here, opts);
-        else walkExprNarrowed(val, at, here, opts);
+        else if (!(isHandler && walkHandlerFunctionValue(val, at, here, opts))) walkExprNarrowed(val, at, here, opts);
       }
     }
     walkBodyNarrowed((n.children as unknown[]) ?? [], inner, here, opts);
+    return;
+  }
+  if (n.kind === "if-chain") {
+    // §17.1.1 — a collapsed `if=` / `else-if=` / `else` chain keeps its branch bodies under
+    // `branches[].element` + `elseBranch` (ast-if-chain.js, the one module that knows).
+    // Each branch element carries its own `if=` / `else-if=` attribute, so it narrows as any
+    // gated element does; the `else` element narrows nothing (S462 round 6, F6-5 — the
+    // chain was not walked at all before, so a bare read in any branch was unchecked).
+    for (const child of ifChainChildNodes(n)) walkNodeNarrowed(child, present, here, opts);
     return;
   }
   if (n.kind === "given-guard") {
