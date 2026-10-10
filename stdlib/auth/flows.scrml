@@ -50,8 +50,8 @@ ${
         if (typeof opts == "function") {
             throw new Error(`[scrml:auth] ${fnName}: the options object came where the function belongs — the signature is ${signature}`)
         }
-        const options = opts is some ? opts : {}
-        if (options[legacyField] is some) {
+        const options = opts is given ? opts : {}
+        if (options[legacyField] is given) {
             throw new Error(`[scrml:auth] ${fnName}: \`${legacyField}\` is no longer an options field (S462) — pass it positionally: ${signature}`)
         }
         return options
@@ -77,7 +77,7 @@ ${
             throw new Error(`[scrml:auth] ${name}: sendEmail must be a function (third argument) — ${signature}`)
         }
         const store = options.store
-        const baseUrl = options.baseUrl is some ? options.baseUrl : ""
+        const baseUrl = options.baseUrl is given ? options.baseUrl : ""
         // A non-numeric ttl (e.g. "15m") would compute Date.now() + NaN = NaN — a
         // never-expiring token. Fall back to the default for anything non-numeric
         // (the runtime shim rejects it loudly at mint time).
@@ -85,7 +85,7 @@ ${
 
         const token = generateToken(32)
         const record = { email: email, purpose: purpose, expiresAt: Date.now() + ttl * 1000 }
-        if (store is some) kvSet(store, token, record, ttl)
+        if (store is given) kvSet(store, token, record, ttl)
 
         const link = `${baseUrl}?token=${token}`
         // Enumeration resistance: a send failure (e.g. an SMTP 550 for an
@@ -105,7 +105,7 @@ ${
      * and left intact (a cross-submitted token stays usable for its own flow).
      */
     function peekTokenFlow(token, opts, expectedPurpose) {
-        const options = opts is some ? opts : {}
+        const options = opts is given ? opts : {}
         const store = options.store
         if (store is not || !token) return { valid: false, reason: "used-or-invalid" }
 
@@ -113,7 +113,7 @@ ${
             .ParseFailed(m) :> not
         }
         if (record is not) return { valid: false, reason: "used-or-invalid" }
-        if (expectedPurpose is some && record.purpose != expectedPurpose) {
+        if (expectedPurpose is given && record.purpose != expectedPurpose) {
             return { valid: false, reason: "used-or-invalid" }
         }
         // Fail-closed: a missing / non-finite expiresAt is treated as expired
@@ -133,10 +133,10 @@ ${
      * logically-expired record.
      */
     function verifyTokenFlow(token, opts, expectedPurpose) {
-        const options = opts is some ? opts : {}
+        const options = opts is given ? opts : {}
         const result = peekTokenFlow(token, options, expectedPurpose)
         if (result.valid || result.reason == "expired") {
-            if (options.store is some && token) kvDel(options.store, token)
+            if (options.store is given && token) kvDel(options.store, token)
         }
         return result
     }
@@ -211,7 +211,7 @@ ${
         const options = flowOptions("resetPassword", signature, opts, "updateHash")
         // A present-but-not-a-function updateHash is a call-shape error; an
         // ABSENT one keeps the explicit `no-update-hash` result below.
-        if (updateHash is some && typeof updateHash != "function") {
+        if (updateHash is given && typeof updateHash != "function") {
             throw new Error(`[scrml:auth] resetPassword: updateHash must be a function (fourth argument) — ${signature}`)
         }
         // A — updateHash presence (no token touched yet → retryable on misconfig).
@@ -240,7 +240,7 @@ ${
         // request never returns the token — it is captured only via the email.
         const req = requestMagicLink("user@example.com", { store: magicStore, baseUrl: "https://app/login" }, sendEmail)
         assertTruthy(req.ok)
-        assertTruthy(captured is some)
+        assertTruthy(captured is given)
 
         // verify succeeds once.
         const ok = verifyMagicLink(captured, { store: magicStore })

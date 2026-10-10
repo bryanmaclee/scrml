@@ -1,0 +1,13 @@
+{
+  "id": "attr-executable-sink-event-attr-paren-data-text-neg",
+  "description": "§5.2 rule 2, S457 bullet event-handler text from data: `ONCLICK=(@code)` — a spelling no emitter wires as a listener, with an expression value — would WRITE the data as handler text, and is refused (s462-bootstrap-sink-guards — the parenthesized twin of event-attr-data-text-neg, whose `${…}` form the bootstrap does not parse).",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457): \"Where an emitter would instead WRITE an `on…` attribute from data — a spelling it does not wire as a listener, such as `ONCLICK=${…}` at top level — the write SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) naming the lowercase spelling that is wired\".",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" },
+    "codeCounts": { "E-ATTR-INTERP-EXECUTABLE": 1 }
+  }
+}

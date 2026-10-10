@@ -73,7 +73,7 @@ describe("§C6.0 — runtime catalog shape mirrors compile-time", () => {
     expect(VALIDATOR_RUNTIME_NAMES).toEqual(compileTimeNames);
     expect([...VALIDATOR_RUNTIME_NAMES]).toEqual([
       "req",
-      "is some",
+      "is given",
       "length",
       "pattern",
       "min",
@@ -501,7 +501,7 @@ describe("§C6.12 — errorTag mirrors compile-time `errorTag` field 1:1", () =>
   // `errorTag` field on the corresponding signature.
   const cases = [
     { name: "req", call: () => fireReq(null) },
-    { name: "is some", call: () => fireIsSome(null) },
+    { name: "is given", call: () => fireIsSome(null) },
     { name: "length", call: () => fireLength("a", { op: ">=", value: 2 }) },
     { name: "pattern", call: () => firePattern("abc1", /^[a-z]+$/) },
     { name: "min", call: () => fireMin(0, 18) },
@@ -538,9 +538,13 @@ describe("§C6.13 — fireValidator dispatch helper", () => {
     expect(fireValidator("min", 5, 10)).toEqual({ tag: "MinFailed", threshold: 10 });
   });
 
-  test("multi-word name 'is some' dispatches verbatim", () => {
-    expect(fireValidator("is some", "")).toBeNull();
-    expect(fireValidator("is some", null)).toEqual({ tag: "NotSome" });
+  test("multi-word name 'is given' dispatches verbatim", () => {
+    expect(fireValidator("is given", "")).toBeNull();
+    expect(fireValidator("is given", null)).toEqual({ tag: "NotSome" });
+  });
+
+  test("S462 — the runtime knows only the canonical name (the parser names an `is some` validator `is given`)", () => {
+    expect(fireValidator("is some", null)).toBeUndefined();
   });
 
   test("returns undefined for unknown predicate names", () => {

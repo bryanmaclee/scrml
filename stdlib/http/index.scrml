@@ -43,9 +43,9 @@ ${
 
     async function _request(url, options) {
         const opts = options || {}
-        const timeout = opts.timeout is some ? opts.timeout : 10000
+        const timeout = opts.timeout is given ? opts.timeout : 10000
         const retryCount = opts.retry || 0
-        const retryDelay = opts.retryDelay is some ? opts.retryDelay : 1000
+        const retryDelay = opts.retryDelay is given ? opts.retryDelay : 1000
         const extraHeaders = opts.headers || {}
 
         const fetchOptions = {
@@ -55,7 +55,7 @@ ${
         for (const [k, v] of Object.entries(extraHeaders)) {
             fetchOptions.headers[k] = v
         }
-        if (opts.body is some) {
+        if (opts.body is given) {
             if (typeof opts.body == "string") {
                 fetchOptions.body = opts.body
             } else {
@@ -140,7 +140,7 @@ ${
     // A request target is either a URL or an HttpClient. A client is an
     // object that HAS a `baseUrl` field (whatever its `defaults` hold).
     function _isClient(target) {
-        return target is some && typeof target == "object" && Object.hasOwn(target, "baseUrl")
+        return target is given && typeof target == "object" && Object.hasOwn(target, "baseUrl")
     }
 
     // The URL-first form keeps the pre-S462 behaviour for what fetch accepts
@@ -177,7 +177,7 @@ ${
     // credential is not overridden by a per-call header).
     function _clientOptions(client, options) {
         const merged = _mergeOptions(client.defaults, options)
-        if (client.authorization is some) {
+        if (client.authorization is given) {
             merged.headers = Object.assign({}, merged.headers || {}, { Authorization: client.authorization })
         }
         return merged
@@ -264,7 +264,7 @@ ${
      * @param wrapped — optional existing client whose defaults + auth are kept
      */
     export function withBaseUrl(baseUrl, wrapped) {
-        const base = wrapped is some ? wrapped : _NO_CLIENT
+        const base = wrapped is given ? wrapped : _NO_CLIENT
         return _makeClient(baseUrl, base.defaults, base.authorization)
     }
 
@@ -303,7 +303,7 @@ ${
      */
     export function withAuth(token, scheme, wrapped) {
         const sch = scheme || "Bearer"
-        const base = wrapped is some ? wrapped : _NO_CLIENT
+        const base = wrapped is given ? wrapped : _NO_CLIENT
         return _makeClient(base.baseUrl, base.defaults, `${sch} ${token}`)
     }
 
@@ -321,7 +321,7 @@ ${
      * @param wrapped  — optional existing client whose base URL + auth are kept
      */
     export function withDefaults(defaults, wrapped) {
-        const base = wrapped is some ? wrapped : _NO_CLIENT
+        const base = wrapped is given ? wrapped : _NO_CLIENT
         return _makeClient(base.baseUrl, _mergeOptions(base.defaults, defaults), base.authorization)
     }
 
@@ -351,16 +351,16 @@ ${
      */
     export async function retry(fn, opts, shouldRetry) {
         const o = opts || {}
-        if (o.shouldRetry is some) {
+        if (o.shouldRetry is given) {
             throw new Error("[scrml:http] retry: shouldRetry is the third argument — retry(fn, opts, shouldRetry) — not an opts field")
         }
-        if (shouldRetry is some && typeof shouldRetry != "function") {
+        if (shouldRetry is given && typeof shouldRetry != "function") {
             throw new TypeError("[scrml:http] retry: shouldRetry must be a function (err) => boolean — retry(fn, opts, shouldRetry)")
         }
-        const maxRetries = o.maxRetries is some ? o.maxRetries : 3
-        const baseDelay  = o.baseDelay  is some ? o.baseDelay  : 200
-        const factor     = o.factor     is some ? o.factor     : 2
-        const jitter     = o.jitter     is some ? o.jitter     : 0.2
+        const maxRetries = o.maxRetries is given ? o.maxRetries : 3
+        const baseDelay  = o.baseDelay  is given ? o.baseDelay  : 200
+        const factor     = o.factor     is given ? o.factor     : 2
+        const jitter     = o.jitter     is given ? o.jitter     : 0.2
 
         let lastErr = not
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -369,7 +369,7 @@ ${
             } catch (err) {
                 lastErr = err
                 if (attempt == maxRetries) break
-                if (shouldRetry is some && !shouldRetry(err)) break
+                if (shouldRetry is given && !shouldRetry(err)) break
                 const base = baseDelay * Math.pow(factor, attempt)
                 const jitterAmt = base * jitter * (random() * 2 - 1)
                 const delay = Math.max(0, base + jitterAmt)

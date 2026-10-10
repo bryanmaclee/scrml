@@ -98,6 +98,7 @@ import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // direct deps do not import route-inference.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
 import { ifChainChildNodes } from "./ast-if-chain.js";
+import { describeServerTrigger } from "./escalation-reason-text.ts";
 
 // ---------------------------------------------------------------------------
 // RI-internal types
@@ -2263,8 +2264,10 @@ function extractReactiveAssignmentCellName(node: LogicStatement): string | null 
  * Over-fire discipline (LOAD-BEARING):
  *   - READS of a channel cell do NOT escalate; WRITES no longer escalate either.
  *     Only the two broadcast/disconnect built-in calls escalate here.
- *   - Does NOT descend into nested `function-decl` bodies — each declaration is
- *     analyzed for its own direct triggers (mirrors `walkBodyForTriggers`).
+ *   - DOES descend into nested `function-decl` bodies (S462 fix round 1): a
+ *     nested declaration is emitted inline in its parent and is not itself a
+ *     channel function, so a hub call inside it places the PARENT (mirrors
+ *     `walkBodyForTriggers`' nested-`?{}` rule).
  *   - Returns AT MOST ONE reason; a single reason keeps the diagnostic surface
  *     clean.
  *
@@ -2308,9 +2311,15 @@ function detectChannelBroadcastReason(
       }
     }
 
-    // Do NOT recurse into nested function-decl bodies — each is analyzed for
-    // its own direct triggers.
-    if (node.kind === "function-decl") return;
+    // A nested `function-decl` body IS descended (S462 fix round 1, F3). A
+    // nested declaration is emitted INLINE inside its parent (collect.ts does
+    // not lift it to its own route) and is never in `collectChannelFunctionMap`,
+    // so it is never judged by this trigger on its own: skipping it left
+    // `function onOpen(e) { function tell() { broadcast(…) } tell() }` on the
+    // client calling an undefined `broadcast`. The parent must carry the
+    // reason — the same rule `walkBodyForTriggers` applies to a nested `?{}`
+    // (the OUTERMOST enclosing function that lexically contains the server op
+    // escalates). The generic array-field recursion below reaches `body`.
 
     // Recurse into array-valued children (if/for/while bodies, etc.).
     for (const key of Object.keys(node)) {
@@ -2943,39 +2952,8 @@ function computeFileClientPins(
   return out;
 }
 
-/**
- * §12.4 E-ROUTE-005 — a short human phrase for the FIRST (most concrete) server
- * trigger among a function's direct escalation reasons, for the unplaceable
- * both-sides diagnostic. Prefers a body/resource reason over the bare `server`
- * keyword.
- */
-function describeServerTrigger(reasons: EscalationReason[]): string {
-  const ordered = [...reasons].sort(
-    (a, b) =>
-      (a.kind === "explicit-annotation" ? 1 : 0) -
-      (b.kind === "explicit-annotation" ? 1 : 0),
-  );
-  const first = ordered[0];
-  if (!first) return "a server-only resource";
-  switch (first.kind) {
-    case "server-only-resource":
-      return first.resourceType === "sql-query"
-        ? "a `?{}` SQL query"
-        : `the server-only resource \`${first.resourceType}\``;
-    case "protected-field-access":
-      return `the protected field \`${first.field}\``;
-    case "explicit-annotation":
-      return "the `server` keyword";
-    case "channel-broadcast":
-      return `a channel \`broadcast()\`/\`disconnect()\` (${first.detail})`;
-    case "middleware-handle":
-      return "the reserved middleware name `handle()`";
-    case "channel-ws-handler":
-      return "an `onserver:` channel handler";
-    default:
-      return "a server-only resource";
-  }
-}
+// §12.4 E-ROUTE-005 — `describeServerTrigger` (the human phrase for the first
+// server trigger) lives in escalation-reason-text.ts, shared with E-CHANNEL-006.
 
 // ---------------------------------------------------------------------------
 // CPS transformation analysis
@@ -4526,7 +4504,7 @@ const JS_KEYWORDS = new Set([
   "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent",
   "decodeURIComponent", "setTimeout", "setInterval", "clearTimeout",
   "clearInterval", "document", "window", "navigator", "fetch",
-  "not", "is", "some", "match", "fail",
+  "not", "is", "some", "given", "match", "fail",
 ]);
 
 /**
@@ -4854,13 +4832,12 @@ export function runRI(input: RIInput): RIOutput {
   const perFileChannelFnMap = new Map<string, Map<string, string>>();
   /** filePath → (channelName → Set<cellName>) */
   const perFileChannelCellMap = new Map<string, Map<string, Set<string>>>();
-  // Bug 2b (channel-codegen-fixes-2026-06-12): per-file function-name sets for
-  // channel ATTRIBUTE handlers, partitioned by side. `onclient` names stay
-  // CLIENT (§38.10 — never escalate); `onserver` names are server but invoked
-  // via the WS handler path, so their HTTP route + client fetch stub are
-  // suppressed (codegen emits them as plain callable server functions).
-  /** filePath → Set<onclient-handler-name> */
-  const perFileOnclientHandlerNames = new Map<string, Set<string>>();
+  // Bug 2b (channel-codegen-fixes-2026-06-12): per-file function-name set for
+  // `onserver:*` channel ATTRIBUTE handlers — server, but invoked via the WS
+  // handler path, so their HTTP route + client fetch stub are suppressed
+  // (codegen emits them as plain callable server functions). `onclient:*`
+  // handlers get NO set here: they are placed by §12.2 like any function, and
+  // one placed on the server is rejected by E-CHANNEL-006 (type-system.ts).
   /** filePath → Set<onserver-handler-name> */
   const perFileOnserverHandlerNames = new Map<string, Set<string>>();
   /** filePath → (client reactive cell name → isDerived) — §6.6.9 E-REACTIVE-003
@@ -4872,7 +4849,6 @@ export function runRI(input: RIInput): RIOutput {
     perFileChannelFnMap.set(fileAST.filePath, collectChannelFunctionMap(nodes));
     perFileChannelCellMap.set(fileAST.filePath, collectChannelCellMap(nodes));
     const _attrHandlers = collectChannelAttrHandlerNames(nodes);
-    perFileOnclientHandlerNames.set(fileAST.filePath, _attrHandlers.onclient);
     perFileOnserverHandlerNames.set(fileAST.filePath, _attrHandlers.onserver);
     perFileClientReactiveCells.set(fileAST.filePath, collectClientReactiveCells(nodes));
   }
@@ -4951,7 +4927,9 @@ export function runRI(input: RIInput): RIOutput {
       // channel ownership maps (Step 2d) gate this so onclient:/onserver:
       // ATTRIBUTE handlers, `fn`, and functions outside any channel scope are
       // never reached: `collectChannelFunctionMap` only registers standalone
-      // function-decl names inside a <channel> body.
+      // function-decl names inside a <channel> body. (A standalone function
+      // that an `onclient:*` attribute NAMES is a function declaration and IS
+      // reached — see the E-CHANNEL-006 note below.)
       // -------------------------------------------------------------
       const channelTriggers: EscalationReason[] = [];
       {
@@ -4959,18 +4937,16 @@ export function runRI(input: RIInput): RIOutput {
         const _ownerChannel = typeof _fnName === "string"
           ? perFileChannelFnMap.get(filePath)?.get(_fnName)
           : undefined;
-        // Bug 2b (channel-codegen-fixes-2026-06-12): an `onclient:*` handler
-        // function is CLIENT-ONLY per §38.10 — the compiler SHALL NOT emit any
-        // server-side code for it. §38.10 is explicit + normative and WINS over
-        // §12.2 Trigger 7b: an onclient handler stays client even if its body
-        // contains a broadcast()/disconnect() token, so it always calls locally
-        // from `ws.onopen`/`onclose`/`onerror`, never through a server round-trip
-        // fetch stub. (Under RULING A a cell write never escalated either, but
-        // this skip keeps the §38.10 client-only invariant explicit + intact.)
-        const _isOnclientHandler =
-          typeof _fnName === "string" &&
-          (perFileOnclientHandlerNames.get(filePath)?.has(_fnName) ?? false);
-        if (_ownerChannel != null && !_isOnclientHandler) {
+        // §38.10.3 E-CHANNEL-006 (S462 ruling "a"): an `onclient:*` handler is
+        // NOT exempt from this trigger. A `broadcast()`/`disconnect()` in its
+        // body places it on the server exactly as it places any other channel
+        // function, and type-system.ts reads THIS placement (the routeMap
+        // boundary) to reject the handler with E-CHANNEL-006 — one reader of
+        // the §12.2 decision, no second "does it broadcast" detector. The
+        // exemption this replaces (Bug 2b, channel-codegen-fixes-2026-06-12)
+        // kept the handler on the client, where it called a bare `broadcast()`
+        // the client bundle does not define — at exit 0, with no diagnostic.
+        if (_ownerChannel != null) {
           const _reason = detectChannelBroadcastReason(body);
           if (_reason !== null) channelTriggers.push(_reason);
         }

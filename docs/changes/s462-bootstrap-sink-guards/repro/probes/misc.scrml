@@ -1,0 +1,11 @@
+<program>
+    let <x:string="javascript:alert(1)"/>
+    let <s:string="background:url(https://evil.example/p)"/>
+    <a id="p" href=(@x)>paren</a>
+    <img id="i" srcset=@x/>
+    <form id="f" action=@x></form>
+    <div id="d" data=@x></div>
+    <object id="o" data=@x></object>
+    <iframe id="F" SRCDOC=@x></iframe>
+    <div id="st" style=@s></div>
+</program>

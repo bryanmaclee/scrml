@@ -1,0 +1,17 @@
+{
+  "id": "forms-msgchain-l2-template-runtime-refused",
+  "description": "§41.12.1 rule 6 — a template the compiler cannot see (here a `const` string) is parsed by the runtime when registerMessages runs, with the same grammar and slot table, and FAILS CLOSED: `\"{field} needs {threshold}\"` names a slot LengthFailed does not have, so the second registration is refused, the first (well-formed, literal) template stays, and it renders — the unknown `{threshold}` is never shown as text and nothing renders half-filled. The compile reports no E-MESSAGE-* code (the bad template is not a literal).",
+  "language-version": "1.0",
+  "spec": "§41.12.1",
+  "rationale": "§41.12.1 rule 6: a non-literal template that is malformed, names a slot its variant lacks, or is not a string is refused — not registered (an earlier registration for that variant, if any, stays), reported on the console, and the chain falls through. Asserting the EARLIER developer-authored template (rather than the Level-3 default, whose wording is impl-freedom) pins both halves: the refusal happened (the later template did not win) and the earlier entry survived it.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-MESSAGE-"],
+    "input": [{ "input": "#name", "value": "A" }],
+    "domAnchored": [
+      { "selector": "#err .scrml-error", "count": 1 },
+      { "selector": "#err .scrml-error", "text": "name needs a length >= 2" }
+    ]
+  }
+}

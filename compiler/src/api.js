@@ -12,6 +12,7 @@ import { resolve, extname, dirname, basename, join, relative, isAbsolute, posix 
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
+import { isSomeDeprecationDiagnostics } from "./is-some-deprecation.ts";
 import { runPRECG } from "./precg.ts";
 import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
@@ -1846,6 +1847,14 @@ function _compileScrmlImpl(options = {}) {
     // collected message immediately.
     if (_secretRedactor && result && result.ast) _secretRedactor.addAst(result.ast);
     collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
+    // §42.2.2a / §55.1 / §63 (S462) — W-IS-SOME-DEPRECATED, one per `is some` spelling the
+    // builder's token streams saw, each confirmed against this file's source text.
+    {
+      const _fp = result.filePath || bsResult.filePath;
+      if (Array.isArray(result.legacyIsSomeSites) && result.legacyIsSomeSites.length > 0) {
+        collectErrors("TAB", isSomeDeprecationDiagnostics(_fp, sourceByFile.get(_fp), result.legacyIsSomeSites), _fp);
+      }
+    }
     // §21.3.1 `import:host` gate — placement (E-IMPORT-003), host-tag
     // (E-IMPORT-009) and the §22.13 manifest allow-list (E-IMPORT-008). Shared
     // by both front-ends, run before any later stage consumes the AST.

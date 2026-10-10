@@ -1,0 +1,12 @@
+{
+  "id": "forms-msgchain-l2-template-fn-reject",
+  "description": "§41.12 — a `fn`-shorthand value (`.Required: fn(field) { … }`) is a function and is refused with E-MESSAGE-NOT-TEMPLATE, exactly like an arrow or a `function` expression; and the OTHER entries of the same call are still checked (`.MinFailed: \"{field} {bogus}\"` → E-MESSAGE-SLOT-UNKNOWN). One diagnostic each.",
+  "language-version": "1.0",
+  "spec": "§41.12, §41.12.1",
+  "rationale": "§41.12: \"A value that is a function (an arrow, `fn`, or `function` expression) SHALL be refused with E-MESSAGE-NOT-TEMPLATE.\" S462 FIX ROUND 1 F1: the `fn(…){…}` value made the whole call an unreadable expression, so pre-fix no E-MESSAGE-* code fired for it nor for any other template in the call. The `.MinFailed` entry pins that the rest of the map is checked too.",
+  "expect": {
+    "codes": ["E-MESSAGE-NOT-TEMPLATE", "E-MESSAGE-SLOT-UNKNOWN"],
+    "notCodes": ["E-MESSAGE-TEMPLATE-MALFORMED", "E-MESSAGE-VARIANT-UNKNOWN"],
+    "codeCounts": { "E-MESSAGE-NOT-TEMPLATE": 1, "E-MESSAGE-SLOT-UNKNOWN": 1 }
+  }
+}

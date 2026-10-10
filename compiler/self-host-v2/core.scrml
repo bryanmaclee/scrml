@@ -694,7 +694,7 @@ ${
             let i = 0
             for (const f of d.fields) {
                 const w: Sym | not = f.wcap
-                if (w is some) {
+                if (w is given) {
                     if (w.id == cap.id) return { decl: d, idx: i }
                 }
                 i = i + 1

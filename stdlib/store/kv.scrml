@@ -122,7 +122,7 @@ ${
         const now = Date.now()
         const row = store.statements.get.get(store.namespace, key)
         if (!row) return not
-        if (row.expires_at is some && row.expires_at <= now) {
+        if (row.expires_at is given && row.expires_at <= now) {
             store.statements.delete.run(store.namespace, key)
             return not
         }
@@ -156,7 +156,7 @@ ${
         const now = Date.now()
         const row = store.statements.get.get(store.namespace, key)
         if (!row) return false
-        if (row.expires_at is some && row.expires_at <= now) {
+        if (row.expires_at is given && row.expires_at <= now) {
             store.statements.delete.run(store.namespace, key)
             return false
         }
@@ -234,7 +234,7 @@ ${
      */
     export function increment(counter, key, by) {
         const current = get(counter, key) !{ .ParseFailed(m) :> 0 } || 0
-        const next = current + (by is some ? by : 1)
+        const next = current + (by is given ? by : 1)
         set(counter, key, next)
         return next
     }
@@ -244,7 +244,7 @@ ${
      */
     export function decrement(counter, key, by) {
         const current = get(counter, key) !{ .ParseFailed(m) :> 0 } || 0
-        const next = current - (by is some ? by : 1)
+        const next = current - (by is given ? by : 1)
         set(counter, key, next)
         return next
     }
@@ -287,7 +287,7 @@ ${
         // del
         del(store, "hello")
         assertFalsy(has(store, "hello"))
-        assertFalsy(get(store, "hello") !{ .ParseFailed(m) :> not } is some)
+        assertFalsy(get(store, "hello") !{ .ParseFailed(m) :> not } is given)
 
         // keys
         set(store, "a", 1)
