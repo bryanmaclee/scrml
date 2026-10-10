@@ -151,7 +151,22 @@ const RUNTIME_GZIP_TOLERANCE_BAND = 188;
 //   The dev (unstripped) runtime is deliberately NOT ratcheted: comments in
 //   the runtime template cost a deployed app nothing, and a gate on them
 //   would tax documentation.
-const SHELL_RUNTIME_GZIP_CEILING = 7442 + RUNTIME_GZIP_TOLERANCE_BAND; // 7,630 B
+//
+// ⚑ LOWERED S461 — 7,630 B -> 6,095 B. Runtime tree-shake (ruling S459 "measure
+//   first, 1 and 3 for sure"; docs/changes/s461-runtime-tree-shake): the shell
+//   no longer ships the errors chunk (a), timers + animation (b, the retired
+//   scope edge), the §51.12/§51.14 machine helpers that sat in core (c), or the
+//   route-splitter-only mount chunk (d). Same pinned compressor, stripped:
+//
+//       shape     before (S459)           after (S461)
+//       shell     28,842 raw / 7,442 B    22,202 raw / 5,907 B
+//       counter   22,574 raw / 5,101 B    16,088 raw / 3,604 B
+//
+//   Shell chunks now: core, scope, utilities. Its reachability floor (every
+//   runtime statement reachable from the one helper its client calls) is
+//   3,510 B; the rest of the gap is the utilities chunk, which carries the
+//   soft-nav engine together with helpers the shell never calls.
+const SHELL_RUNTIME_GZIP_CEILING = 5907 + RUNTIME_GZIP_TOLERANCE_BAND; // 6,095 B
 
 /** The counter shape's aspiration, for the §3 cross-check. Not a ratchet. */
 const COUNTER_RUNTIME_GZIP_ASPIRATION = 16 * 1024;
@@ -234,7 +249,7 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
           "CLIENT-RUNTIME SIZE REGRESSION — outlet-bearing shell shape.",
           "",
           `  measured : ${gzipped} B gzip (level ${RUNTIME_GZIP_LEVEL}), ${runtimeBytes.length} B raw`,
-          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (7,442 recorded S459, stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
+          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (5,907 recorded S461, stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
           `  over by  : ${gzipped - SHELL_RUNTIME_GZIP_CEILING} B`,
           "",
           "SHELL_RUNTIME_GZIP_CEILING is a RATCHET. It may be LOWERED freely.",
@@ -257,9 +272,9 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
     // Guards the failure mode where the ratchet passes because it is
     // measuring nothing — an empty or truncated runtime would sail under
     // any ceiling. The shell must assemble a substantial runtime and must
-    // parse as JS. (S459: 28,845 B raw stripped; was > 50,000 unstripped.)
+    // parse as JS. (S461: 22,202 B raw stripped; S459: 28,845 B; was > 50,000 unstripped.)
     const runtimeBytes = compileAndReadRuntime(SPA_SHELL);
-    expect(runtimeBytes.length).toBeGreaterThan(20_000);
+    expect(runtimeBytes.length).toBeGreaterThan(15_000);
     const runtime = runtimeBytes.toString("utf8");
     expect(() => new Function(runtime)).not.toThrow();
   });

@@ -45,12 +45,14 @@
  *      W-GIVEN-PRESENCE-DEPRECATED instances cleared, and every emitted artifact (source maps
  *      aside) identical once a parenthesised presence check `(x !== null && x !== undefined)`
  *      standing as an `if` test or an `&&` operand is read without its parentheses — the only
- *      difference between the guard's lowering and `x is given`'s.
+ *      difference between the guard's lowering and `x is given`'s (and, for an artifact with no
+ *      template literal, each line's leading indentation — `normalizeForCompare`).
  *   When the whole file does not verify, each site is verified alone and the sites that verify
  *   alone are re-verified together; a site that does not is left as written with the reason.
- *   That is how a site impl#1 miscompiles today is refused: the rewrite would change what runs
- *   (a `given @cell` guard lowered to a bare name, g-top-level-given-emits-bare-name-s459; a
- *   `given` arm whose body impl#1 drops, g-impl1-given-match-arm-body-dropped-s462).
+ *   That is how a site impl#1 compiles differently today is refused: the rewrite would change
+ *   what runs (a `given` arm whose body impl#1 drops, g-impl1-given-match-arm-body-dropped-s462;
+ *   a markup guard over a cell, whose `if` rewrite renders stale today,
+ *   g-impl1-markup-if-branch-memo-stale-render-s462; a site whose diagnostic codes change).
  *
  * Idempotent: the output has no `given` head at a rewritten site, so a second run makes no edit.
  */
@@ -322,15 +324,29 @@ function commonDir(paths) {
 
 /**
  * The guard lowers to `if (x !== null && x !== undefined && …)`; `x is given` lowers to the same
- * check in parentheses. Read a parenthesised check without its parentheses where it stands as a
+ * check in parentheses. `x` is a JS name, or a cell read `_scrml_cs_reactive_get("name")` (a
+ * `given @cell` guard since #1380). Read a parenthesised check without its parentheses where it stands as a
  * whole `if (…)` test or as an `&&` operand — the only places the rewrite puts one, and places
  * where the parentheses carry no meaning (`&&` is associative). Applied to BOTH sides.
  */
 export function normalizePresenceParens(js) {
   return js.replace(
-    /(?<=\(|&& )\(([A-Za-z_$][A-Za-z0-9_$]*) !== null && \1 !== undefined\)(?=\)| &&)/g,
+    /(?<=\(|&& )\(([A-Za-z_$][A-Za-z0-9_$]*(?:\("[^"\\\n]*"\))?) !== null && \1 !== undefined\)(?=\)| &&)/g,
     "$1 !== null && $1 !== undefined",
   );
+}
+
+/**
+ * The comparison form of an emitted artifact: the presence-check parentheses read alike, and —
+ * only when the artifact holds no template literal (no backtick anywhere) — each line's leading
+ * indentation dropped. The guard's body and an `if` body are emitted at different depths (a
+ * markup body lifted inside a `given` is nested one level deeper); indentation carries no meaning
+ * in JavaScript except inside a multi-line template literal, which is why an artifact with a
+ * backtick is compared with its indentation intact (fail closed).
+ */
+export function normalizeForCompare(js) {
+  const t = normalizePresenceParens(js);
+  return t.includes("`") ? t : t.replace(/^[ \t]+/gm, "");
 }
 
 /**
@@ -362,7 +378,7 @@ function verifyByCompile(filePath, before, after, auxSources) {
       const outputs = [];
       for (const [k, v] of r.outputs ?? new Map()) {
         const fields = {};
-        for (const f of Object.keys(v ?? {}).sort()) if (!/Map$/.test(f) && typeof v[f] === "string") fields[f] = normalizePresenceParens(v[f]);
+        for (const f of Object.keys(v ?? {}).sort()) if (!/Map$/.test(f) && typeof v[f] === "string") fields[f] = normalizeForCompare(v[f]);
         outputs.push([relative(dir, k), fields]);
       }
       outputs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
@@ -394,8 +410,9 @@ function verifyByCompile(filePath, before, after, auxSources) {
 function knownCause(site) {
   if (site.match) return " (impl#1 drops the body of a `given` match arm — g-impl1-given-match-arm-body-dropped-s462 — and `else :>` runs it)";
   const names = Array.isArray(site.node.spellings) ? site.node.spellings : [];
-  if (names.some((n) => typeof n === "string" && n.startsWith("@"))) {
-    return " (impl#1 lowers `given @cell` to a bare name — g-top-level-given-emits-bare-name-s459, fixed by #1380 — while `@cell is given` reads the cell)";
+  const hasMarkup = (site.node.body ?? []).some((b) => b && typeof b === "object" && /markup|lift|html-fragment/.test(String(b.kind ?? "")));
+  if (hasMarkup && names.some((n) => typeof n === "string" && n.startsWith("@"))) {
+    return " (in markup, impl#1 lowers `${ if (@cell is given) { … } }` with a branch memo (`_scrml_lift_branch_N`) that skips the re-render while presence holds, so `${@cell.field}` inside it goes stale; `given @cell` re-renders — the rewrite would make it worse — g-impl1-markup-if-branch-memo-stale-render-s462)";
   }
   return "";
 }

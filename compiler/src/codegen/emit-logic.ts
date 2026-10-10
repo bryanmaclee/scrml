@@ -1043,6 +1043,38 @@ export function rewriteReflectForRuntime(code: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * s461 (`g-top-level-given-emits-bare-name-s459`) — the JS expression a
+ * `given` head identifier lowers to inside the presence check (§42.5:
+ * `given x :> body` → `if (x !== null && x !== undefined) { body }`).
+ *
+ * The parser strips the `@` from a cell head (`variables` holds bare names, which
+ * the §42 narrowing consumers key on) and records the cell bit in the parallel
+ * `variableIsCell`. Before s461 nothing read that bit — nothing recorded it — so
+ * `given @user :>` emitted `user !== null`, an undeclared JS name: a
+ * `ReferenceError` at runtime from a bundle that compiled at exit 0.
+ *
+ * A CELL head is lowered as the `@name` identifier through the SAME expression
+ * emitter every other `@cell` read uses (`emitExpr` → `emitIdent`), so the guard
+ * reads the cell through the accessor its body reads it through — the reactive
+ * getter, the derived getter for a derived cell, and the chunk-scope key rewrite
+ * applied afterwards to the emitted text. A LOCAL / parameter head keeps the bare
+ * name, byte-identical to the pre-s461 output.
+ *
+ * ⚠ SERVER boundary deliberately unchanged: a server-function body keeps the
+ * pre-s461 bare name. Lowering the head there would produce `_scrml_body["x"]`
+ * — a cell value the client stub never sends (§6.6.9) — i.e. it would quietly
+ * turn today's runtime failure into a silently-skipped body rather than the
+ * E-REACTIVE-003 refusal a body read of the same cell gets. Making the head
+ * visible to that refusal is a front-end widening, out of scope here (reported).
+ */
+function givenHeadRef(node: { variableIsCell?: unknown; span?: unknown }, name: string, i: number, opts: EmitLogicOpts): string {
+  const isCell = Array.isArray(node.variableIsCell) && node.variableIsCell[i] === true;
+  if (!isCell || opts.boundary === "server") return name;
+  const ident = { kind: "ident", name: `@${name}`, span: node.span } as unknown as ExprNode;
+  return emitExpr(ident, _makeExprCtx(opts));
+}
+
+/**
  * Build an EmitExprContext from the current EmitLogicOpts.
  */
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
@@ -3988,7 +4020,10 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (vars.length === 0) return "";
 
       const conditions = vars
-        .map((v: string) => `${v} !== null && ${v} !== undefined`)
+        .map((v: string, i: number) => {
+          const ref = givenHeadRef(node, v, i, opts);
+          return `${ref} !== null && ${ref} !== undefined`;
+        })
         .join(" && ");
 
       const lines: string[] = [`if (${conditions}) {`];
@@ -4694,28 +4729,32 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
       const target = JSON.stringify(encodedTarget);
       const method: string = node.method;
-      const args = emitExprField(node.argsExpr, node.args ?? "", _makeExprCtx(opts));
+      // §6.5.1 — each argument is a SEPARATE argument: lower every argument's
+      // own ExprNode and join the results as a call's argument list. (s461: the
+      // list used to arrive as ONE comma-sequence expression, so
+      // `@ls.splice(0, 0, @p)` emitted `splice((0, 0, p))` and inserted nothing.)
+      // A node with no `argExprs` (a hand-built node carrying only the `args`
+      // text) falls back to the raw-text rewrite of that list.
+      const exprCtx = _makeExprCtx(opts);
+      const args = Array.isArray(node.argExprs)
+        ? node.argExprs.map((a: ExprNode) => emitExpr(a, exprCtx)).join(", ")
+        : emitExprField(null, node.args ?? "", exprCtx);
 
       // With Proxy-based reactivity, array mutations go through the Proxy traps
       // which automatically notify fine-grained effects. We still call
       // _scrml_reactive_set afterwards to fire coarse-grained subscribers.
+      // Every recognised method lowers through this ONE shape; an argument-less
+      // call (`pop()`, `reverse()`) simply has an empty list.
       switch (method) {
         case "push":
-          return `{ _scrml_reactive_get(${target}).push(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "unshift":
-          return `{ _scrml_reactive_get(${target}).unshift(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "pop":
-          return `{ _scrml_reactive_get(${target}).pop(); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "shift":
-          return `{ _scrml_reactive_get(${target}).shift(); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "splice":
-          return `{ _scrml_reactive_get(${target}).splice(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "sort":
-          return `{ _scrml_reactive_get(${target}).sort(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "reverse":
-          return `{ _scrml_reactive_get(${target}).reverse(); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         case "fill":
-          return `{ _scrml_reactive_get(${target}).fill(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
+          return `{ _scrml_reactive_get(${target}).${method}(${args}); _scrml_reactive_set(${target}, _scrml_reactive_get(${target})); }`;
         default:
           return `_scrml_reactive_set(${target}, _scrml_reactive_get(${target}));`;
       }

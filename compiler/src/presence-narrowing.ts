@@ -38,6 +38,8 @@
  *   - `given recv :> { … }` body; a `match recv { … }` body.
  */
 
+import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
+
 /** A source span (the subset this module reads / passes through). */
 export type NarrowSpan = { file?: string; start?: number; end?: number; line?: number; col?: number };
 
@@ -114,7 +116,9 @@ function withKeys(present: ReadonlySet<string>, keys: string[]): ReadonlySet<str
   return out;
 }
 
-const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "conditionExpr", "callbackExpr", "valueExpr"];
+// `argExprs` (s461) is an ExprNode LIST — one node per argument of a reactive
+// array mutation (§6.5.1); every other key holds a single ExprNode.
+const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "argExprs", "conditionExpr", "callbackExpr", "valueExpr"];
 const CHILD_KEYS = ["body", "children", "consequent", "alternate", "cases", "arms"];
 
 /** Walk one expression tree, calling `onExpr` with the presence set at every node. */
@@ -191,6 +195,25 @@ function guardKeys(markup: Rec, opts: PresenceNarrowingOptions): string[] {
   return out;
 }
 
+/**
+ * s461 — an implied `lift` that the §17.6.10 desugar (implied-lift-desugar.ts, CE
+ * head) produced for an arm the PRE-s461 pass never desugared (any arm of a cascade
+ * that reaches a `given` guard, at any depth) carries that arm's pre-desugar pieces
+ * (`impliedLiftCheckPieces`). This walker does not descend into a `lift-expr`'s
+ * `expr` object, so it judges those pieces in the lift's place — exactly what it
+ * judged before s461 made the arm render. Without this, `${ given @o :> { <p>${@o.opt.x}</p> } }`
+ * (or the same under `given → if`) would stop firing E-TYPE-046: a newly-ACCEPTING
+ * change the s461 lowering fix must not make.
+ *
+ * Generic over position on purpose: it keys on the pieces being PRESENT, which the
+ * desugar decides in one place. A lift with no pieces (an explicit `lift`, an
+ * `if`-arm lift the old pass already made) is walked as before — its markup is a
+ * pre-existing coverage hole; closing it is newly-REJECTING and not done here.
+ */
+function expandCheckPieces(body: unknown[]): unknown[] {
+  return body.flatMap((s) => impliedLiftCheckPieces(s) ?? [s]);
+}
+
 /** Walk one statement / markup node with the current presence set. */
 export function walkNodeNarrowed(
   node: unknown,
@@ -203,7 +226,12 @@ export function walkNodeNarrowed(
   const n = node as Rec;
   const here = spanOf(n, span);
   for (const k of EXPR_KEYS) {
-    if (n[k] && typeof n[k] === "object") walkExprNarrowed(n[k], present, here, opts);
+    const v = n[k];
+    if (Array.isArray(v)) {
+      for (const e of v) if (e && typeof e === "object") walkExprNarrowed(e, present, here, opts);
+    } else if (v && typeof v === "object") {
+      walkExprNarrowed(v, present, here, opts);
+    }
   }
   if (n.kind === "markup") {
     let inner = present;
@@ -261,7 +289,7 @@ export function walkBodyNarrowed(
 ): void {
   if (!Array.isArray(body)) return;
   let acc = present;
-  for (const node of body) {
+  for (const node of expandCheckPieces(body)) {
     walkNodeNarrowed(node, acc, span, opts);
     if (node && typeof node === "object") acc = withKeys(acc, earlyReturnKeys(node as Rec, opts));
   }

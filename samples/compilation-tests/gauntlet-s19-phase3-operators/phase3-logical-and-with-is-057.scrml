@@ -3,7 +3,7 @@ ${
     type Status:enum = { Active, Banned }
     let s:Status = .Active
     let name: string | not = "alice"
-    if (s is .Active && name is some) {
+    if (s is .Active && name is given) {
         let _both = 1
     }
 }

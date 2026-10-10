@@ -1,0 +1,15 @@
+{
+  "id": "forms-is-given-validator",
+  "description": "§55.1 — the presence validator `<nick is given length(>=3)>` declares the cell and composes: typing \"ab\" leaves a present value, so `is given` passes (no short-circuit) and `length(>=3)` fails — #all renders one .scrml-error, isValid false. The canonical twin of forms/is-some-deprecated-validator (same runtime, no W-IS-SOME-DEPRECATED).",
+  "language-version": "1.0",
+  "spec": "§55.1",
+  "rationale": "§55.1 — `is given` is the universal-core existence predicate (absence fails; a present value passes); §55.12 — it short-circuits only when it fails. Provenance: ruling:user-voice-scrml.md S462 \"a, validator too, go\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-IS-SOME-DEPRECATED"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "input": "#nick", "value": "ab" }],
+    "state": { "signup.nick.isValid": false },
+    "domAnchored": [{ "selector": "#all .scrml-error", "count": 1 }]
+  }
+}

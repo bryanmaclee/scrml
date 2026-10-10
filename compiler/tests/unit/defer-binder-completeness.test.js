@@ -40,6 +40,9 @@ const EXCLUDED = {
   // §42.2.3 / §66.7.5 (S462) — `given-guard.rebind` marks the rebind head `given c = @h :>` so the
   // W-GIVEN-PRESENCE-DEPRECATED lint skips it. A boolean flag; the binder is `variables` (in the table).
   "given-guard.rebind": "a boolean flag (rebind head vs in-place presence guard), not a name; the binder is `variables`",
+  // s461 — `given-guard.variableIsCell` is a boolean[] parallel to `variables` (in the
+  // table): true where the head name was written `@x` (a cell), for codegen's lowering.
+  "given-guard.variableIsCell": "a boolean flag per head name (cell vs local), not a name; the names are `variables` (in the table)",
   // §19.4.5 (S452) — `arms[].legacyPipe` records the SPELLING of a `|`-led `!{}` arm for the
   // W-ARM-PIPE-LEGACY lint and `scrml fix`: source offsets and flags only. The arm's binder name
   // is `arms[].binding` (in the table).

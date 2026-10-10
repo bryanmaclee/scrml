@@ -63,7 +63,7 @@ ${
      * nullish).
      */
     export function assertNull(value, message) {
-        if (value is some) {
+        if (value is given) {
             const msg = message || `Expected absent value, got ${JSON.stringify(value)}`
             throw new Error(`[scrml:test] assertNull failed — ${msg}`)
         }

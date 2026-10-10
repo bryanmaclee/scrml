@@ -753,135 +753,6 @@ function _scrml_init_set(name, fn) {
   _scrml_init_fns[name] = fn;
 }
 
-// --- machine temporal transitions (§51.12) ---
-// _scrml_machine_timers: encodedVarName → timeout id for the currently-armed
-// temporal transition. Transition-guard codegen clears any existing timer on
-// state commit and arms a new one if the destination variant has outgoing
-// temporal rules. Re-entering the same variant clears and re-arms (reset
-// semantics per the deep-dive default).
-const _scrml_machine_timers = Object.create(null);
-function _scrml_machine_clear_timer(name) {
-  const id = _scrml_machine_timers[name];
-  if (id !== undefined) {
-    clearTimeout(id);
-    delete _scrml_machine_timers[name];
-  }
-}
-function _scrml_machine_arm_timer(name, ms, target, meta) {
-  // meta (optional): { fromVariant, label, auditTarget, rulesJson, setterFn, getterName }
-  //   fromVariant — the .From of the temporal rule being armed (used to
-  //     build the audit 'rule' key on expiry: fromVariant + ":" + target).
-  //   label — the rule's guard label if any, else null. Temporal rules
-  //     currently do not take 'given' clauses, so this is conventionally
-  //     null; the slot exists so a future temporal+guard syntax can slot
-  //     straight in.
-  //   auditTarget — the encoded reactive-var name of the machine's audit
-  //     target (the 'audit @log' clause in the machine body), else null.
-  //   rulesJson — the serialized temporal-rule list so the timer can
-  //     re-arm on the downstream variant. Chained temporal rules
-  //     (A after 1s => B, B after 1s => C) must continue automatically
-  //     without the user driving transitions.
-  //   setterFn  — A5-4 (§51.0.M onTimeout): an optional callback invoked
-  //     INSTEAD of the bare _scrml_reactive_set(name, target) at expiry.
-  //     Engine onTimeout codegen passes a function that routes the write
-  //     through the engine's rule= contract guard (the engine helper in
-  //     the 'engine' chunk; see §51.0.F + §51.0.G). When absent (the
-  //     legacy machine path), the original _scrml_reactive_set write is
-  //     used.
-  //   getterName — A5-4: the encoded reactive-var name to read for the
-  //     __prev audit entry. Defaults to name. Currently unused — reserved
-  //     so a future shape (e.g., audit-target read) can opt out.
-  //
-  // S27 (§51.11): timer-fired transitions now push audit entries and
-  // re-arm downstream temporal rules. Previously the timer invoked a
-  // bare _scrml_reactive_set, bypassing both the audit clause and the
-  // per-transition re-arm logic. This violated §51.11.6 "every
-  // successful transition SHALL append" for temporal rules.
-  _scrml_machine_clear_timer(name);
-  _scrml_machine_timers[name] = setTimeout(function () {
-    delete _scrml_machine_timers[name];
-    const __prev = _scrml_reactive_get(name);
-    if (meta && typeof meta.setterFn === "function") {
-      // A5-4: engine-aware setter (routes through the engine's contract
-      // guard so the rule= contract check fires; throws
-      // E-ENGINE-INVALID-TRANSITION if the timer target violates the
-      // contract — defensive, the compile-time check in A5-3 should already
-      // have caught this).
-      meta.setterFn(target);
-    } else {
-      _scrml_reactive_set(name, target);
-    }
-    if (meta && meta.auditTarget) {
-      const entry = Object.freeze({
-        from: __prev,
-        to: target,
-        at: Date.now(),
-        rule: meta.fromVariant + ":" + target,
-        label: meta.label != null ? meta.label : null,
-      });
-      _scrml_reactive_set(
-        meta.auditTarget,
-        (_scrml_reactive_get(meta.auditTarget) || []).concat([entry])
-      );
-    }
-    if (meta && meta.rulesJson) {
-      _scrml_machine_arm_initial(name, meta.rulesJson, meta.auditTarget);
-    }
-  }, ms);
-}
-function _scrml_machine_arm_initial(name, rulesJson, auditTarget) {
-  // Called once per machine-bound reactive after its initial _scrml_reactive_set,
-  // and also re-invoked from _scrml_machine_arm_timer's expiry path so that
-  // chained temporal rules auto-advance. Inspects the current variant and arms
-  // the first matching temporal rule, if any.
-  //
-  // auditTarget (optional, added S27) propagates the machine's audit target
-  // through the re-arm cascade so chained temporal transitions keep auditing.
-  const val = _scrml_reactive_get(name);
-  const variant = (val != null && typeof val === "object" && val.variant != null) ? val.variant : val;
-  const rules = JSON.parse(rulesJson);
-  for (const r of rules) {
-    if (r.from === variant) {
-      const meta = {
-        fromVariant: r.from,
-        label: r.label != null ? r.label : null,
-        auditTarget: auditTarget != null ? auditTarget : null,
-        rulesJson: rulesJson,
-      };
-      _scrml_machine_arm_timer(name, r.afterMs, r.to, meta);
-      return;
-    }
-  }
-}
-
-// --- §51.14 replay primitive ---
-// _scrml_replay(name, log, endIdx?) jumps the machine-bound reactive 'name'
-// to the state recorded at index endIdx of the audit array 'log'. Bypasses
-// the transition guard (§51.5) and the audit push (§51.11), clears any
-// pending temporal timer (§51.12), and emits a standard _scrml_reactive_set
-// so subscribers, derived propagation, and effects all fire normally.
-//
-// Semantics (per SPEC.md §51.14.3):
-//   - endIdx > 0         → state lands at log[endIdx - 1].to
-//   - endIdx == 0        → state lands at log[0].from (or no-op if empty)
-//   - endIdx undefined   → state lands at log[log.length - 1].to (full replay)
-//   - endIdx < 0 or > length → throws E-REPLAY-001-RT
-function _scrml_replay(name, log, endIdx) {
-  const n = (endIdx != null) ? endIdx : log.length;
-  if (n < 0 || n > log.length) {
-    throw new Error("E-REPLAY-001-RT: replay index " + n +
-      " out of bounds for log of length " + log.length +
-      ". Index SHALL be in the range [0, log.length].");
-  }
-  _scrml_machine_clear_timer(name);
-  if (n === 0) {
-    if (log.length === 0) return;  // empty-log no-op (nothing to replay)
-    _scrml_reactive_set(name, log[0].from);
-    return;
-  }
-  _scrml_reactive_set(name, log[n - 1].to);
-}
-
 // Chunk-local cell scope (BUG-6) is inlined per-chunk at codegen (codegen/index.ts buildCellScopePrologue), not here — zero always-loaded bytes.
 function _scrml_reactive_get(name) {
   if (__SCRML_PERF) {
@@ -1186,6 +1057,142 @@ function _scrml_reactive_derived(name, fn) {
 }
 
 // ---------------------------------------------------------------------------
+// §51.12 / §51.14 machine temporal-transition runtime (chunk: 'machine')
+// ---------------------------------------------------------------------------
+// S461 — moved out of 'core': no core function calls these. Pulled by the
+// post-emit \`_scrml_machine_\` / \`_scrml_replay(\` gates in emit-client.ts, and by
+// the 'engine' chunk (CHUNK_DEPENDENCIES engine -> machine), whose <onTimeout>
+// helpers share this backbone.
+// --- machine temporal transitions (§51.12) ---
+// _scrml_machine_timers: encodedVarName → timeout id for the currently-armed
+// temporal transition. Transition-guard codegen clears any existing timer on
+// state commit and arms a new one if the destination variant has outgoing
+// temporal rules. Re-entering the same variant clears and re-arms (reset
+// semantics per the deep-dive default).
+const _scrml_machine_timers = Object.create(null);
+function _scrml_machine_clear_timer(name) {
+  const id = _scrml_machine_timers[name];
+  if (id !== undefined) {
+    clearTimeout(id);
+    delete _scrml_machine_timers[name];
+  }
+}
+function _scrml_machine_arm_timer(name, ms, target, meta) {
+  // meta (optional): { fromVariant, label, auditTarget, rulesJson, setterFn, getterName }
+  //   fromVariant — the .From of the temporal rule being armed (used to
+  //     build the audit 'rule' key on expiry: fromVariant + ":" + target).
+  //   label — the rule's guard label if any, else null. Temporal rules
+  //     currently do not take 'given' clauses, so this is conventionally
+  //     null; the slot exists so a future temporal+guard syntax can slot
+  //     straight in.
+  //   auditTarget — the encoded reactive-var name of the machine's audit
+  //     target (the 'audit @log' clause in the machine body), else null.
+  //   rulesJson — the serialized temporal-rule list so the timer can
+  //     re-arm on the downstream variant. Chained temporal rules
+  //     (A after 1s => B, B after 1s => C) must continue automatically
+  //     without the user driving transitions.
+  //   setterFn  — A5-4 (§51.0.M onTimeout): an optional callback invoked
+  //     INSTEAD of the bare _scrml_reactive_set(name, target) at expiry.
+  //     Engine onTimeout codegen passes a function that routes the write
+  //     through the engine's rule= contract guard (the engine helper in
+  //     the 'engine' chunk; see §51.0.F + §51.0.G). When absent (the
+  //     legacy machine path), the original _scrml_reactive_set write is
+  //     used.
+  //   getterName — A5-4: the encoded reactive-var name to read for the
+  //     __prev audit entry. Defaults to name. Currently unused — reserved
+  //     so a future shape (e.g., audit-target read) can opt out.
+  //
+  // S27 (§51.11): timer-fired transitions now push audit entries and
+  // re-arm downstream temporal rules. Previously the timer invoked a
+  // bare _scrml_reactive_set, bypassing both the audit clause and the
+  // per-transition re-arm logic. This violated §51.11.6 "every
+  // successful transition SHALL append" for temporal rules.
+  _scrml_machine_clear_timer(name);
+  _scrml_machine_timers[name] = setTimeout(function () {
+    delete _scrml_machine_timers[name];
+    const __prev = _scrml_reactive_get(name);
+    if (meta && typeof meta.setterFn === "function") {
+      // A5-4: engine-aware setter (routes through the engine's contract
+      // guard so the rule= contract check fires; throws
+      // E-ENGINE-INVALID-TRANSITION if the timer target violates the
+      // contract — defensive, the compile-time check in A5-3 should already
+      // have caught this).
+      meta.setterFn(target);
+    } else {
+      _scrml_reactive_set(name, target);
+    }
+    if (meta && meta.auditTarget) {
+      const entry = Object.freeze({
+        from: __prev,
+        to: target,
+        at: Date.now(),
+        rule: meta.fromVariant + ":" + target,
+        label: meta.label != null ? meta.label : null,
+      });
+      _scrml_reactive_set(
+        meta.auditTarget,
+        (_scrml_reactive_get(meta.auditTarget) || []).concat([entry])
+      );
+    }
+    if (meta && meta.rulesJson) {
+      _scrml_machine_arm_initial(name, meta.rulesJson, meta.auditTarget);
+    }
+  }, ms);
+}
+function _scrml_machine_arm_initial(name, rulesJson, auditTarget) {
+  // Called once per machine-bound reactive after its initial _scrml_reactive_set,
+  // and also re-invoked from _scrml_machine_arm_timer's expiry path so that
+  // chained temporal rules auto-advance. Inspects the current variant and arms
+  // the first matching temporal rule, if any.
+  //
+  // auditTarget (optional, added S27) propagates the machine's audit target
+  // through the re-arm cascade so chained temporal transitions keep auditing.
+  const val = _scrml_reactive_get(name);
+  const variant = (val != null && typeof val === "object" && val.variant != null) ? val.variant : val;
+  const rules = JSON.parse(rulesJson);
+  for (const r of rules) {
+    if (r.from === variant) {
+      const meta = {
+        fromVariant: r.from,
+        label: r.label != null ? r.label : null,
+        auditTarget: auditTarget != null ? auditTarget : null,
+        rulesJson: rulesJson,
+      };
+      _scrml_machine_arm_timer(name, r.afterMs, r.to, meta);
+      return;
+    }
+  }
+}
+
+// --- §51.14 replay primitive ---
+// _scrml_replay(name, log, endIdx?) jumps the machine-bound reactive 'name'
+// to the state recorded at index endIdx of the audit array 'log'. Bypasses
+// the transition guard (§51.5) and the audit push (§51.11), clears any
+// pending temporal timer (§51.12), and emits a standard _scrml_reactive_set
+// so subscribers, derived propagation, and effects all fire normally.
+//
+// Semantics (per SPEC.md §51.14.3):
+//   - endIdx > 0         → state lands at log[endIdx - 1].to
+//   - endIdx == 0        → state lands at log[0].from (or no-op if empty)
+//   - endIdx undefined   → state lands at log[log.length - 1].to (full replay)
+//   - endIdx < 0 or > length → throws E-REPLAY-001-RT
+function _scrml_replay(name, log, endIdx) {
+  const n = (endIdx != null) ? endIdx : log.length;
+  if (n < 0 || n > log.length) {
+    throw new Error("E-REPLAY-001-RT: replay index " + n +
+      " out of bounds for log of length " + log.length +
+      ". Index SHALL be in the range [0, log.length].");
+  }
+  _scrml_machine_clear_timer(name);
+  if (n === 0) {
+    if (log.length === 0) return;  // empty-log no-op (nothing to replay)
+    _scrml_reactive_set(name, log[0].from);
+    return;
+  }
+  _scrml_reactive_set(name, log[n - 1].to);
+}
+
+// ---------------------------------------------------------------------------
 // §57 Wire Format dual-decoder (chunk: 'wire')
 // ---------------------------------------------------------------------------
 // --- §57 Wire Format dual-decoder (M-7C-D-12 Track 2) ---
@@ -1461,10 +1468,12 @@ function _scrml_destroy_scope(scopeId) {
   _scrml_cleanup_registry.delete(scopeId);
 
   // Step 2: Stop all timers for this scope (§6.7.2, step 2)
-  _scrml_stop_scope_timers(scopeId);
-
   // Step 4: Cancel all pending animation frames for this scope (§6.7.2, step 4)
-  _scrml_cancel_animation_frames(scopeId);
+  // Both registries are filled ONLY by their own chunks ('timers', 'animation'), so
+  // when a chunk is not shipped there is nothing of its kind to stop (S461: they no
+  // longer ride along with this always-included chunk).
+  if (typeof _scrml_stop_scope_timers === "function") _scrml_stop_scope_timers(scopeId);
+  if (typeof _scrml_cancel_animation_frames === "function") _scrml_cancel_animation_frames(scopeId);
 }
 
 // The if= mount scope currently being wired, or null outside a mount. Lives in
@@ -5000,7 +5009,7 @@ const _scrml_messages_registered = Object.create(null);
 // nothing rather than an Object.prototype member (S459).
 const _SCRML_TAG_TO_VALIDATOR = Object.assign(Object.create(null), {
   Required:        "req",
-  NotSome:         "is some",
+  NotSome:         "is given",
   LengthFailed:    "length",
   PatternMismatch: "pattern",
   MinFailed:       "min",

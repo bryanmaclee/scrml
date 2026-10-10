@@ -242,34 +242,34 @@ ${
         // for-of / for-in iterator variables
         const forOfRe = /\bfor\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+(?:of|in)\b/g
         let m
-        while ((m = forOfRe.exec(cleaned)) is some) {
+        while ((m = forOfRe.exec(cleaned)) is given) {
             inlineLocals.add(m[1])
         }
 
         // Named or anonymous function parameters
         const fnParamRe = /\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)/g
-        while ((m = fnParamRe.exec(cleaned)) is some) {
+        while ((m = fnParamRe.exec(cleaned)) is given) {
             const paramList = m[1]
             const paramRe = /[A-Za-z_$][A-Za-z0-9_$]*/g
             let p
-            while ((p = paramRe.exec(paramList)) is some) {
+            while ((p = paramRe.exec(paramList)) is given) {
                 inlineLocals.add(p[0])
             }
         }
 
         // Arrow function — single unparenthesized parameter
         const arrowSingleRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g
-        while ((m = arrowSingleRe.exec(cleaned)) is some) {
+        while ((m = arrowSingleRe.exec(cleaned)) is given) {
             inlineLocals.add(m[1])
         }
 
         // Arrow function — parenthesized parameter list
         const arrowMultiRe = /\(([^)]*)\)\s*=>/g
-        while ((m = arrowMultiRe.exec(cleaned)) is some) {
+        while ((m = arrowMultiRe.exec(cleaned)) is given) {
             const paramList = m[1]
             const paramRe = /[A-Za-z_$][A-Za-z0-9_$]*/g
             let p
-            while ((p = paramRe.exec(paramList)) is some) {
+            while ((p = paramRe.exec(paramList)) is given) {
                 inlineLocals.add(p[0])
             }
         }
@@ -277,7 +277,7 @@ ${
         // Step 3: Extract all identifiers not preceded by `.`, filtering out inline locals.
         const ids = []
         const re = /(?<![.\w$])([A-Za-z_$][A-Za-z0-9_$]*)/g
-        while ((m = re.exec(cleaned)) is some) {
+        while ((m = re.exec(cleaned)) is given) {
             if (!inlineLocals.has(m[1])) {
                 ids.push(m[1])
             }
@@ -819,7 +819,7 @@ ${
         // Match reflect(Identifier) calls
         const re = /\breflect\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)/g
         let m
-        while ((m = re.exec(expr)) is some) {
+        while ((m = re.exec(expr)) is given) {
             const typeName = m[1]
             if (!typeRegistry.has(typeName)) {
                 errors.push(new MetaError(

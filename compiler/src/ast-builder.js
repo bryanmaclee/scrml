@@ -237,6 +237,9 @@ function reemitJsStringLiteral(rawInner) {
  * (refused), and `.kind == "a"` from `.kind == a`. Re-quote it (canonical
  * double-quoted, escapes interpreted — `reemitJsStringLiteral`); a template keeps
  * its back-ticks. Every other token is its text.
+ *
+ * s461 — the same rule (collectExpr's) holds for an EXPRESSION argument re-joined
+ * from tokens, so `collectReactiveArrayMutationArgs` uses this too.
  */
 function typeTokenText(t) {
   if (t && t.kind === "STRING") {
@@ -660,6 +663,208 @@ let tokenizeSQL = _defaultTokenizeSQL;
 let tokenizeCSS = _defaultTokenizeCSS;
 let tokenizeError = _defaultTokenizeError;
 let tokenizePassthrough = _defaultTokenizePassthrough;
+
+// ---------------------------------------------------------------------------
+// §42.2.2a / §55.1 / §63 (S462) — the soft-deprecated `is some` spelling
+// ---------------------------------------------------------------------------
+//
+// `x is some` (expression) and the `<x is some>` validator are soft-deprecated
+// spellings of `is given` (ruling:user-voice-scrml.md S462 "a, validator too,
+// go"). Both parse IDENTICALLY to `is given`; the expression parser lowers both
+// to the one `is-some` presence node, so the AST cannot say which was written.
+// The SPELLING is recorded here, from impl#1's own tokens: every `is` KEYWORD
+// immediately followed by the IDENT `some`, in a token stream this builder
+// tokenized at its real source offset (a logic body, an error / test body, an
+// attribute's expression value). Prose is never tokenized as logic, and a
+// string / comment interior is one token, so neither can produce a pair.
+//
+// The sink is keyed by the absolute offset of the `some` token, so a region
+// tokenized twice (a re-tokenized error body, a nested build) records ONE site.
+// It is set for the duration of the outermost buildAST and shared by nested
+// ones. The sites are NOT diagnostics: api.js confirms each against the file's
+// source text (is-some-deprecation.ts) and fires W-IS-SOME-DEPRECATED once per
+// confirmed site; `scrml fix` (commands/fix-is-some.js) rewrites the same
+// confirmed sites. An offset the source does not confirm is dropped by both.
+let _isSomeSink = null;
+// Relevance pre-check only (never a locator): can this text hold an `is some` at all?
+// (Whitespace and comments may separate the two words — `is /* c */ some`.)
+const IS_SOME_TEXT_RE = /(?<![A-Za-z0-9_$])is(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)+some(?![A-Za-z0-9_$])/;
+// A SUB-PARSE (an `<each>` body, a `<match>` arm body re-split from its raw text)
+// tokenizes a substring at substring-relative offsets. `withIsSomeBase` adds the
+// substring's file offset to what it records; a sub-parse whose file offset is
+// unknown (a synthesized source) records nothing (`_isSomeMuted`). A buildAST
+// nested inside another for the same file is muted unless a caller opened it
+// with `withIsSomeBase` (`_isSomeNestedOk`).
+let _isSomeBias = 0;
+let _isSomeMuted = 0;
+let _isSomeNestedOk = false;
+
+/** Run `fn` with recorded `is some` offsets shifted by `base` (null / negative: record nothing). */
+function withIsSomeBase(base, fn) {
+  const pb = _isSomeBias;
+  const pm = _isSomeMuted;
+  const pn = _isSomeNestedOk;
+  if (typeof base === "number" && base >= 0) _isSomeBias = pb + base;
+  else _isSomeMuted = pm + 1;
+  _isSomeNestedOk = true;
+  try {
+    return fn();
+  } finally {
+    _isSomeBias = pb;
+    _isSomeMuted = pm;
+    _isSomeNestedOk = pn;
+  }
+}
+
+/** Record every `is` `some` token pair of an impl#1 token stream (real source offsets). */
+function noteIsSomeTokens(tokens, kind = "expr") {
+  if (!_isSomeSink || _isSomeMuted > 0 || !Array.isArray(tokens)) return;
+  for (let k = 0; k + 1 < tokens.length; k++) {
+    const a = tokens[k];
+    if (!a || a.kind !== "KEYWORD" || a.text !== "is" || !a.span) continue;
+    // A comment between the two words (`is /* c */ some`, `is // c⏎ some`) is a
+    // COMMENT token; the expression reader drops it, so the pair is still the
+    // operator (S462 fix round 2).
+    let m = k + 1;
+    // (A comment the block splitter split out reaches the stream as a BLOCK_REF to a
+    // `comment` block.)
+    const isTrivia = (t) => !!t && (t.kind === "COMMENT" || (t.kind === "BLOCK_REF" && t.block && t.block.type === "comment"));
+    while (m < tokens.length && isTrivia(tokens[m])) m++;
+    const b = tokens[m];
+    if (!b || b.kind !== "IDENT" || b.text !== "some" || !b.span) continue;
+    const start = b.span.start + _isSomeBias;
+    const end = b.span.end + _isSomeBias;
+    const isStart = a.span.start + _isSomeBias;
+    if (typeof start !== "number" || typeof end !== "number" || end - start !== 4) continue;
+    // `is some` that CLOSES a declaration opener (`<mid: string is some>`) is the §55.1
+    // validator even where the opener scan does not read it (S462 F5) — in an
+    // expression, `some` is never followed by the opener's `>`.
+    const after = tokens[m + 1];
+    const siteKind = after && after.text === ">" ? "validator" : kind;
+    if (!_isSomeSink.has(start)) _isSomeSink.set(start, { start, end, isStart, kind: siteKind });
+  }
+  // A backtick template literal is ONE STRING token whose body keeps its `${…}`
+  // interpolations verbatim (tokenizer.ts readBacktickString); read them at their own
+  // offsets (S462 F3a). Its span covers the backticks, so a body that is not the
+  // verbatim source slice (span length != text length + 2) is never placed.
+  for (const t of tokens) {
+    if (!t || t.kind !== "STRING" || t.isTemplate !== true || !t.span) continue;
+    if (typeof t.text !== "string" || !t.text.includes("${") || !t.text.includes("some")) continue;
+    if (t.span.end - t.span.start !== t.text.length + 2) continue;
+    noteIsSomeInInterpolations(t.text, t.span.start + 1, t.span.line ?? 1);
+  }
+  // A child block this stream only REFERENCES (a component body `const C = <div …>…</>`,
+  // whose markup the builder keeps as raw text until component expansion) is read here,
+  // from its own block — its spans are the file's.
+  for (const t of tokens) {
+    if (t && t.kind === "BLOCK_REF" && t.block) noteIsSomeInBlockTree(t.block, 0);
+  }
+}
+
+/**
+ * Record the `is some` pairs of a block subtree from its own text: a markup / state
+ * opener's expression-valued attributes, and every logic child's body. Text children
+ * (prose) are never read. Re-reading a block the builder also tokenizes is harmless —
+ * the sink is keyed by offset.
+ */
+function noteIsSomeInBlockTree(block, depth) {
+  if (!_isSomeSink || _isSomeMuted > 0 || !block || depth > 64) return;
+  if (typeof block.raw !== "string" || !block.span || !IS_SOME_TEXT_RE.test(block.raw)) return;
+  if (block.type === "markup" || block.type === "state") {
+    let toks = [];
+    try {
+      toks = tokenizeAttributes(block.raw, block.span.start, block.span.line ?? 1, block.span.col ?? 1, block.type);
+    } catch {
+      toks = [];
+    }
+    for (const t of toks) {
+      if (!t || !t.span) continue;
+      if (t.kind === "ATTR_EXPR" || t.kind === "ATTR_BLOCK") noteIsSomeInAttrRaw(t.text, t.span);
+      else if (t.kind === "ATTR_STRING") noteIsSomeInAttrString(t.text, t.span);
+    }
+    for (const c of block.children ?? []) noteIsSomeInBlockTree(c, depth + 1);
+  } else if (block.type === "logic" || block.type === "error-effect" || block.type === "test" || block.type === "meta") {
+    const prefixLen = block.raw.startsWith("${") || block.raw.startsWith("!{") || block.raw.startsWith("~{") || block.raw.startsWith("^{") ? 2 : 1;
+    let toks;
+    try {
+      toks = tokenizeLogic(block.raw.slice(prefixLen, block.raw.length - 1), block.span.start + prefixLen, block.span.line ?? 1, (block.span.col ?? 1) + prefixLen, block.children ?? []);
+    } catch {
+      return;
+    }
+    noteIsSomeTokens(toks);
+  }
+}
+
+/**
+ * Record the `is some` pairs of an attribute value's expression text. `raw` is
+ * the value token's text and `valSpan` its span (delimiters included); `raw`
+ * sits at `valSpan.start + delim` when the token text is the source slice
+ * minus `delim` leading and trailing delimiter characters. A token whose text
+ * is not such a slice (a cooked string) is skipped — never placed by guess.
+ */
+function noteIsSomeInAttrRaw(raw, valSpan) {
+  if (!_isSomeSink || typeof raw !== "string" || !valSpan || !raw.includes("some")) return;
+  const len = (valSpan.end ?? 0) - (valSpan.start ?? 0);
+  const extra = len - raw.length;
+  // 0: `(…)` / bare; 2: `"…"` / `{…}`; 3: `${…}`.
+  const lead = extra === 0 ? 0 : extra === 2 ? 1 : extra === 3 ? 2 : -1;
+  if (lead < 0) return;
+  let toks;
+  try {
+    toks = tokenizeLogic(raw, valSpan.start + lead, valSpan.line ?? 1, (valSpan.col ?? 1) + lead, []);
+  } catch {
+    return;
+  }
+  noteIsSomeTokens(toks);
+}
+
+/**
+ * The `${…}` interpolations of a quoted attribute string (`title="v: ${x is some}"`):
+ * each interior is tokenized at its own offset. Only the interpolation interiors
+ * are code; the literal text around them is never tokenized.
+ */
+function noteIsSomeInAttrString(text, valSpan) {
+  if (!_isSomeSink || typeof text !== "string" || !valSpan || !text.includes("${") || !text.includes("some")) return;
+  // The token text must be the source slice between the quotes, or offsets are unknown.
+  if ((valSpan.end ?? 0) - (valSpan.start ?? 0) !== text.length + 2) return;
+  noteIsSomeInInterpolations(text, valSpan.start + 1, valSpan.line ?? 1);
+}
+
+/**
+ * The `${…}` interpolations of a text whose byte 0 sits at `base`: a quoted attribute
+ * value, or the body of a backtick template literal in logic (S462 F3a). Each interior
+ * is tokenized at its own offset; the literal text around them is never tokenized. A
+ * `\${` is literal text, not an interpolation.
+ */
+function noteIsSomeInInterpolations(text, base, line) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\\") { i++; continue; }
+    if (text[i] !== "$" || text[i + 1] !== "{") continue;
+    let depth = 1;
+    let j = i + 2;
+    let q = null;
+    while (j < text.length && depth > 0) {
+      const c = text[j];
+      if (q !== null) {
+        if (c === "\\") { j += 2; continue; }
+        if (c === q) q = null;
+      } else if (c === '"' || c === "'" || c === "`") q = c;
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      j++;
+    }
+    if (depth !== 0) return;
+    const inner = text.slice(i + 2, j - 1);
+    let toks;
+    try {
+      toks = tokenizeLogic(inner, base + i + 2, line, 1, []);
+    } catch {
+      return;
+    }
+    noteIsSomeTokens(toks);
+    i = j - 1;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Pre-tokenization preprocessing
@@ -3430,15 +3635,6 @@ function givenHeadError(found) {
   );
 }
 
-/** §42.2.4 / S462 fix round 1 (F3): `x is` at a line end, `given` on the next line. */
-function givenAfterIsLineError() {
-  return (
-    "E-SYNTAX-044: this `given` starts a line after `is`, so it is read as a new `given` guard, not as the " +
-    "end of an `x is given` test (§7.2.2: a line does not continue across a break before a keyword). " +
-    "Write `x is given` on one line."
-  );
-}
-
 function tokenSpan(tok, filePath) {
   return {
     file: filePath,
@@ -3925,6 +4121,13 @@ const BIND_DIRECTIVES = new Set([
 // Standard HTML5 void elements + SVG primitive shapes registered in
 // compiler/src/html-elements.js with isVoid: true. Lower-cased; lookup
 // must lower-case the tag name.
+//
+// (s461) VALUE_KEYWORDS — the tokenizer KEYWORDs that are a COMPLETE operand,
+// so a `<` after one is a comparison, never a markup opener: the literals,
+// `this` / `super`, and scrml's absence literal `not` (§42). Every other
+// keyword either starts an operand or is a statement word.
+const VALUE_KEYWORDS = new Set(["true", "false", "null", "undefined", "this", "super", "not"]);
+
 const HTML_VOID_ELEMENTS = new Set([
   // HTML5 void elements (W3C HTML Living Standard)
   "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -4191,6 +4394,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             value = parseCapabilitiesAttrValue(valTok.text, valSpan, filePath, errors);
           } else if (valTok.kind === "ATTR_STRING") {
             value = { kind: "string-literal", value: valTok.text, span: valSpan };
+            noteIsSomeInAttrString(valTok.text, valSpan);
             // E-ATTR-002: boolean attribute with a quoted string value
             if (BOOLEAN_ATTRS.has(name)) {
               errors.push(new TABError(
@@ -4235,6 +4439,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               // Token text is the inner of `{...}` (delimiter `{` skipped),
               // so baseOffset = valSpan.start + 1.
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
+              noteIsSomeInAttrRaw(raw, valSpan);
               value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
               // §5.2.4 (S450) — a statement list on a NON-handler attribute.
               checkAttrMultiStatement(name, value, filePath, errors, true, effectIsLogicBlock);
@@ -4258,6 +4463,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // relative index within the token text and the token spans don't
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
+            noteIsSomeInAttrRaw(raw, valSpan);
             value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
             // §5.2.4 (S450) — a statement list on a NON-handler attribute.
             checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true, effectIsLogicBlock);
@@ -5593,6 +5799,137 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * §6.5.1 — the ARGUMENT LIST of a statement-position reactive array mutation
+   * `@name.<method>( … )`. The caller has consumed the opening `(`; this consumes
+   * through the matching `)`.
+   *
+   * §6.5.1 lists `@arr.splice(start, deleteCount, ...items)`: each argument is a
+   * separate argument. So the list is split at its TOP-LEVEL `,` PUNCT tokens
+   * (nesting is tracked on `(`/`[`/`{` PUNCT tokens only; a `,` or `)` inside a
+   * STRING token is that token's content, never a delimiter) and EACH argument is
+   * parsed to its own ExprNode. A spread argument (`...@items`, the OPERATOR
+   * `...` leading the argument) becomes a `spread` ExprNode around its operand.
+   *
+   * A MARKUP VALUE argument (`push(<li>Hello, ${@who}</li>)`, §1.4 / §7.4) is
+   * ATOMIC: from its opening tag to its matching close, every token is markup
+   * content, so a `,` `(` `)` in its TEXT is never a delimiter. The element
+   * extent is tracked on tokens with collectExpr's ELEMENT-NESTING scheme:
+   * `<` IDENT/KEYWORD opens an element (outside markup only when the previous
+   * token of the argument does not end a value, the `a < b` guard), `</`
+   * closes one (its `>` ends the markup), `/>` self-closes, and a void element
+   * (`<br>`) closes at its own `>`. A `${…}` inside markup is ONE BLOCK_REF
+   * token, so its commas are never seen here. The markup tokens are rejoined
+   * by source adjacency (`joinWithNewlines` with spans) so the text stays as
+   * written for `parseExprWithMarkupValues`.
+   *
+   * (s461 — this replaces a collector that joined every token's text and parsed
+   * the WHOLE list as ONE expression: a JS SequenceExpression whose value is the
+   * last argument, so `@ls.splice(0, 0, @p)` lowered to `splice((0, 0, p))` and
+   * inserted nothing. It also dropped a STRING token's delimiters, so `"a,b"`
+   * became the code `a,b`, and `push({ u: "b" })` read an undeclared `b`.)
+   *
+   * Returns `{ args, argExprs }`: `argExprs` is one ExprNode per argument, in
+   * order (the field codegen lowers); `args` is the same list as source-shaped
+   * text joined by `, ` (the legacy string mirror).
+   */
+  function collectReactiveArrayMutationArgs() {
+    // Each group is one argument: `{ toks, markup }`, `markup[i]` true when
+    // `toks[i]` is inside a markup element (its tag tokens included).
+    const groups = [];
+    let cur = { toks: [], markup: [] };
+    let depth = 0;
+    // Markup element tracking (collectExpr's element-nesting scheme).
+    let angleDepth = 0;          // open elements
+    let pendingVoidClose = false; // the next `>` closes a void element
+    let pendingCloseGt = false;   // the outermost element closed; its `>` is next
+    const isPunct = (tok, text) => !!tok && tok.kind === "PUNCT" && tok.text === text;
+    // A KEYWORD that is a complete operand (a literal, `this`/`super`, scrml's
+    // absence literal `not`) also ends a value: `false < b` is a comparison.
+    // Keywords that START an operand (`return`, `typeof`, `new`, `in`, `of`,
+    // `void`, `await`, `yield`, …) do not: `return <li/>` is markup.
+    const endsValue = (tok) => !!tok && (
+      tok.kind === "IDENT" || tok.kind === "AT_IDENT" || tok.kind === "NUMBER" || tok.kind === "STRING" ||
+      (tok.kind === "KEYWORD" && VALUE_KEYWORDS.has(tok.text)) ||
+      isPunct(tok, ")") || isPunct(tok, "]"));
+    while (peek().kind !== "EOF") {
+      const t = peek();
+      if (t.kind === "COMMENT") { consume(); continue; }
+      if (t.kind !== "STRING" && typeof t.text === "string" && t.text.trim() === "") { consume(); continue; }
+      const next = peek(1);
+      const prevInArg = cur.toks.length > 0 ? cur.toks[cur.toks.length - 1] : null;
+      let inMarkup = angleDepth > 0 || pendingCloseGt;
+      if (isPunct(t, "<") && next && (next.kind === "IDENT" || next.kind === "KEYWORD")
+          && (angleDepth > 0 || !endsValue(prevInArg))) {
+        // An element opens (a child element when already inside markup).
+        angleDepth++;
+        inMarkup = true;
+        if (next.kind === "IDENT" && HTML_VOID_ELEMENTS.has(next.text.toLowerCase())) pendingVoidClose = true;
+      } else if (angleDepth > 0) {
+        if (isPunct(t, "<") && isPunct(next, "/")) {
+          // `</tag>` — the element closes; the outermost one ends at this `>`.
+          angleDepth--;
+          if (angleDepth === 0) pendingCloseGt = true;
+        } else if (isPunct(t, "/") && isPunct(next, ">") && !isPunct(prevInArg, "<")) {
+          // `<tag/>` self-close.
+          angleDepth--;
+          pendingVoidClose = false;
+          if (angleDepth === 0) pendingCloseGt = true;
+        } else if (pendingVoidClose && isPunct(t, ">")) {
+          // `<br>` — a void element closes at its own `>`.
+          angleDepth--;
+          pendingVoidClose = false;
+        }
+      } else if (pendingCloseGt && isPunct(t, ">")) {
+        pendingCloseGt = false;
+      } else if (t.kind === "PUNCT") {
+        if (t.text === ")" && depth === 0) { consume(); break; }
+        if (t.text === "(" || t.text === "[" || t.text === "{") depth++;
+        else if (t.text === ")" || t.text === "]" || t.text === "}") depth--;
+        else if (t.text === "," && depth === 0) {
+          consume();
+          groups.push(cur);
+          cur = { toks: [], markup: [] };
+          continue;
+        }
+      }
+      consume();
+      cur.toks.push(t);
+      cur.markup.push(inMarkup);
+    }
+    groups.push(cur);
+    const texts = [];
+    const argExprs = [];
+    for (const group of groups) {
+      // An empty group is the slot after a trailing comma (`push(a, )`) or the
+      // whole list of a no-argument call (`pop()`): it is not an argument.
+      const toks = group.toks;
+      if (toks.length === 0) continue;
+      const isSpread = toks[0].kind === "OPERATOR" && toks[0].text === "...";
+      const from = isSpread ? 1 : 0;
+      const operand = toks.slice(from);
+      // Markup tokens that touch in the source rejoin with no separator (the
+      // text stays as written); everything else joins with one space.
+      const operandText = joinWithNewlines(
+        operand.map(typeTokenText),
+        operand.map(() => 0),
+        operand.map((tok, i) => (group.markup[from + i] && tok.span ? tok.span : null)),
+      );
+      const start = operand.length > 0 ? (operand[0].span?.start ?? 0) : (toks[0].span?.start ?? 0);
+      const operandExpr = safeParseExprToNode(operandText, start);
+      texts.push(isSpread ? "..." + operandText : operandText);
+      if (!operandExpr) continue;
+      argExprs.push(isSpread
+        ? {
+            kind: "spread",
+            span: { ...operandExpr.span, start: toks[0].span?.start ?? operandExpr.span.start },
+            argument: operandExpr,
+          }
+        : operandExpr);
+    }
+    return { args: texts.join(", "), argExprs };
+  }
+
+  /**
    * Collect tokens into a raw expression string up to (but not including)
    * the next statement boundary. Returns { expr: string, span }.
    *
@@ -5662,6 +5999,51 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       return { expr: "", span: spanOf(leadTok, leadTok) };
     }
     return collectExpr();
+  }
+
+  /**
+   * §42.2.4 (S462) — is the `given` at peek() the second word of the presence
+   * operator `x is given`? Only when the token before it is the `is` KEYWORD used
+   * as the INFIX operator: `is` must itself follow an operand, and must not be a
+   * member name (`o.is`, `o?.is`) or an object key (`{ is: 1 }` — then `:` follows
+   * `is`, never `given`). Read from the token stream, never from the joined text:
+   * `@n = o.is⏎given o :> {…}` is a member read followed by a guard statement.
+   */
+  // The `given` tokens accepted as the second word of `x is given` (S462 fix round 2).
+  // Such a `given` ENDS A VALUE — exactly like the IDENT `some` of `x is some` — so
+  // every ASI / missing-semicolon boundary check treats it as a value terminal.
+  // Without this, `@o = a is given⏎g(1)` joined the next line into the expression
+  // and the expression parser dropped `g(1)` silently.
+  const _presenceGivenToks = new WeakSet();
+  const endsPresenceGiven = (t) => !!t && t.kind === "KEYWORD" && t.text === "given" && _presenceGivenToks.has(t);
+
+  function givenContinuesIsOperator() {
+    const r = _givenContinuesIsOperator();
+    if (r) _presenceGivenToks.add(peek());
+    return r;
+  }
+
+  function _givenContinuesIsOperator() {
+    const g = peek();
+    if (!g || g.kind !== "KEYWORD" || g.text !== "given") return false;
+    let k = -1;
+    while (peek(k) && peek(k).kind === "COMMENT") k--;
+    const isTok = peek(k);
+    if (!isTok || isTok.kind !== "KEYWORD" || isTok.text !== "is") return false;
+    k--;
+    while (peek(k) && peek(k).kind === "COMMENT") k--;
+    const before = peek(k);
+    if (!before || i + k < 0) return false;
+    // A member name: `.is` / `?.is`.
+    if (before.kind === "PUNCT" && before.text === ".") return false;
+    if (before.kind === "OPERATOR" && (before.text === "?." || before.text === "?.(" || before.text === "?.[")) return false;
+    // The operand `is` tests must END a value: a name, a literal, `)` / `]`, an
+    // `@cell`, or a value keyword. After an operator / `(` / `,` / a statement
+    // keyword, `is` is not an infix operator.
+    if (before.kind === "IDENT" || before.kind === "AT_IDENT" || before.kind === "NUMBER" || before.kind === "STRING") return true;
+    if (before.kind === "PUNCT" && (before.text === ")" || before.text === "]")) return true;
+    if (before.kind === "KEYWORD" && (before.text === "true" || before.text === "false" || before.text === "this" || before.text === "not")) return true;
+    return false;
   }
 
   function collectExpr(stopAt = null, opts = null) {
@@ -6082,7 +6464,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             "return", "throw", "yield", "await", "new",
           ]);
           const _inRhsCtx = _RHS_CTX.has(_lastPart);
-          let _isExprAfterRhs = false;
+          // §42.2.4 (S460 a′ / S462): `given` right after `is` is the presence
+          // predicate `x is given` — the second word of ONE operator, never the
+          // start of a `given x :>` guard. Before this, the collection broke at
+          // it and `@b && @n is given` lowered to `@b && @n` (the test dropped,
+          // silently) while the `is some` spelling lowered correctly.
+          let _isExprAfterRhs = givenContinuesIsOperator();
           // `function`/`fn` are dual-form (decl OR expression); in RHS context
           // the upcoming `function`/`fn` opens a function EXPRESSION.
           if ((tok.text === "function" || tok.text === "fn") && _inRhsCtx) {
@@ -6335,6 +6722,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             _lastIsPostfixUpdate ||
             _lk === "NUMBER" || _lk === "STRING" ||
             (_lk === "KEYWORD" && (_lt === "true" || _lt === "false" || _lt === "this" || _lt === "not")) ||
+            endsPresenceGiven(lastTok) ||
+            // …and the `some` of `x is some` (same terminal, either spelling): before
+            // S462 round 2, `@o = a is some g(1)` dropped `g(1)` silently.
+            (_lk === "IDENT" && _lt === "some" && !!_pl && _pl.kind === "KEYWORD" && _pl.text === "is") ||
             (_lk === "PUNCT" && (_lt === ")" || _lt === "]" || _lt === "}"))
           );
           if (_startsCallOrMember && _lastEndsValue) {
@@ -6415,6 +6806,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             lastKind === "BLOCK_REF" ||
             lastIsPostfixUpdate ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
+            endsPresenceGiven(lastTok) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
           // tok starts a new statement if it's an IDENT (function call) or unhandled KEYWORD.
@@ -6646,7 +7038,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // this right (`!=` → `is not not`), so the message and the recovery in this same
       // block contradicted each other.
       //
-      // The advised form is `is some`, not the double-negative: SPEC.md:24944 (§45) —
+      // The advised form is `is given` (S462 — `is some` is its soft-deprecated spelling), not the double-negative: SPEC.md:24944 (§45) —
       // "`is some` exists to avoid the double-negative `not (x is not)`" — and §42.2.5
       // makes `is some` the canonical "value EXISTS" test.
       //
@@ -6667,7 +7059,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // they cannot drift apart again.
           const advice = tok.text === "=="
             ? "`is not` to check for absence"
-            : "`is some` to check for presence";
+            : "`is given` to check for presence";
           errors.push(new TABError(
             "E-EQ-002",
             `E-EQ-002: \`${tok.text} not\` is not valid — use ${advice} (§45).`,
@@ -6904,10 +7296,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // ASI-style newline boundary (same logic as collectExpr BUG-ASI-NEWLINE)
       if (parts.length > 0 && depth === 0 && angleDepth === 0 && tok.span.line > lastTok.span.line) {
         const lk = lastTok.kind, lt = lastTok.text;
-        const VALUE_KW = new Set(["true", "false", "null", "undefined", "this"]);
+        // S462 fix round 2: `not` (the absence value / the end of `x is not`) ends a
+        // value here as it does in collectExpr; so does the `given` of `x is given`.
+        const VALUE_KW = new Set(["true", "false", "null", "undefined", "this", "not"]);
         const endsValue = (
           lk === "IDENT" || lk === "NUMBER" || lk === "STRING" || lk === "AT_IDENT" ||
           (lk === "KEYWORD" && VALUE_KW.has(lt)) ||
+          endsPresenceGiven(lastTok) ||
           (lk === "PUNCT" && (lt === ")" || lt === "]" || lt === "}"))
         );
         const startsStmt = (
@@ -6929,7 +7324,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Guard (Bug M, 2026-04-26): `function` / `fn` after expression-RHS context
         // is a function expression — keep collecting. See collectExpr above.
         if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
-          let _isFnExprAfterRhs = false;
+          // §42.2.4 (S462): `is given` is one operator — see collectExpr.
+          let _isFnExprAfterRhs = givenContinuesIsOperator();
           if (tok.text === "function" || tok.text === "fn") {
             const _lastPart = parts[parts.length - 1]?.trim() ?? "";
             const _RHS_CTX = new Set([
@@ -9396,6 +9792,77 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Advance past `:` and the STRING.
       return afterValidatorIdx + 2;
     }
+    // A validator call's arguments, from the `(` at scan index `openIdx` (S462: shared by
+    // the one-word call form `length(>=2)` and the two-word `is given("msg")`). Returns
+    // { args, lastTok, nextIdx } or null (unbalanced / malformed — the caller declines).
+    function collectValidatorCallArgs(openIdx) {
+      let parenDepth = 1;
+      let bracketDepth = 0;
+      let braceDepth = 0;
+      let argIdx = openIdx + 1;
+      // Per-arg accumulator + array of all collected args.
+      let curArgTexts = [];
+      const allArgs = [];
+      let lastTok = tokens[i + openIdx];
+      while (true) {
+        const at = tokens[i + argIdx];
+        if (!at || at.kind === "EOF") return null; // unbalanced — decline
+        if (at.kind === "PUNCT" && at.text === "(") parenDepth++;
+        if (at.kind === "PUNCT" && at.text === ")") {
+          parenDepth--;
+          if (parenDepth === 0) {
+            // Closing paren of the outer call. Flush the current arg
+            // (if any) and stop.
+            if (curArgTexts.length > 0) {
+              allArgs.push(curArgTexts.join(" ").trim());
+            }
+            lastTok = at;
+            argIdx++;
+            break;
+          }
+        }
+        if (at.kind === "PUNCT" && at.text === "[") bracketDepth++;
+        else if (at.kind === "PUNCT" && at.text === "]") {
+          if (bracketDepth === 0) return null; // malformed — decline
+          bracketDepth--;
+        }
+        else if (at.kind === "PUNCT" && at.text === "{") braceDepth++;
+        else if (at.kind === "PUNCT" && at.text === "}") {
+          if (braceDepth === 0) return null; // malformed — decline
+          braceDepth--;
+        }
+        // Top-level comma: split arg boundary. parenDepth === 1 means
+        // we are inside the outer call's arg list; bracketDepth/
+        // braceDepth === 0 means we are not inside a nested array/
+        // object literal. (`oneOf([.A, .B])` keeps `.A, .B` together
+        // because bracketDepth becomes 1 inside `[`.)
+        if (
+          at.kind === "PUNCT" && at.text === "," &&
+          parenDepth === 1 && bracketDepth === 0 && braceDepth === 0
+        ) {
+          allArgs.push(curArgTexts.join(" ").trim());
+          curArgTexts = [];
+          lastTok = at;
+          argIdx++;
+          continue;
+        }
+        // STRING tokens have their surrounding quotes stripped by the
+        // tokenizer; restore them via JSON.stringify so the joined raw
+        // text is parseable as a JS string literal in B9. Mirrors the
+        // default-expr collector treatment above (line ~3533). Without
+        // this, `pattern("[a-z]+")` would store `[a-z]+` and B9's
+        // expression-parser would fail to recognise it as a string lit.
+        curArgTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
+        lastTok = at;
+        argIdx++;
+      }
+      // Filter out any empty args produced by trailing-comma or
+      // adjacent-comma artifacts. Empty paren `f()` already produced
+      // an empty `allArgs` (the curArgTexts.length === 0 flush guard
+      // skipped). `f(,)` would push two empties — drop them.
+      const args = allArgs.filter((s) => s.length > 0);
+      return { args, lastTok, nextIdx: argIdx };
+    }
     // Phase A1a Step 6 — `default=expr` raw text + span (parsed into ExprNode by caller).
     let defaultExprRaw = null;
     let defaultExprSpan = null;
@@ -9812,71 +10279,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // OPERATOR token, not a paren-shaped construct, so it doesn't
           // confuse this splitter; it travels in the first arg as the only
           // arg, intact, for B9's relational-predicate sub-grammar parser.
-          let parenDepth = 1;
-          let bracketDepth = 0;
-          let braceDepth = 0;
-          let argIdx = scanIdx + 2;
-          // Per-arg accumulator + array of all collected args.
-          let curArgTexts = [];
-          const allArgs = [];
-          let lastTok = next;
-          while (true) {
-            const at = tokens[i + argIdx];
-            if (!at || at.kind === "EOF") return null; // unbalanced — decline
-            if (at.kind === "PUNCT" && at.text === "(") parenDepth++;
-            if (at.kind === "PUNCT" && at.text === ")") {
-              parenDepth--;
-              if (parenDepth === 0) {
-                // Closing paren of the outer call. Flush the current arg
-                // (if any) and stop.
-                if (curArgTexts.length > 0) {
-                  allArgs.push(curArgTexts.join(" ").trim());
-                }
-                lastTok = at;
-                argIdx++;
-                break;
-              }
-            }
-            if (at.kind === "PUNCT" && at.text === "[") bracketDepth++;
-            else if (at.kind === "PUNCT" && at.text === "]") {
-              if (bracketDepth === 0) return null; // malformed — decline
-              bracketDepth--;
-            }
-            else if (at.kind === "PUNCT" && at.text === "{") braceDepth++;
-            else if (at.kind === "PUNCT" && at.text === "}") {
-              if (braceDepth === 0) return null; // malformed — decline
-              braceDepth--;
-            }
-            // Top-level comma: split arg boundary. parenDepth === 1 means
-            // we are inside the outer call's arg list; bracketDepth/
-            // braceDepth === 0 means we are not inside a nested array/
-            // object literal. (`oneOf([.A, .B])` keeps `.A, .B` together
-            // because bracketDepth becomes 1 inside `[`.)
-            if (
-              at.kind === "PUNCT" && at.text === "," &&
-              parenDepth === 1 && bracketDepth === 0 && braceDepth === 0
-            ) {
-              allArgs.push(curArgTexts.join(" ").trim());
-              curArgTexts = [];
-              lastTok = at;
-              argIdx++;
-              continue;
-            }
-            // STRING tokens have their surrounding quotes stripped by the
-            // tokenizer; restore them via JSON.stringify so the joined raw
-            // text is parseable as a JS string literal in B9. Mirrors the
-            // default-expr collector treatment above (line ~3533). Without
-            // this, `pattern("[a-z]+")` would store `[a-z]+` and B9's
-            // expression-parser would fail to recognise it as a string lit.
-            curArgTexts.push(at.kind === "STRING" ? JSON.stringify(at.text) : at.text);
-            lastTok = at;
-            argIdx++;
-          }
-          // Filter out any empty args produced by trailing-comma or
-          // adjacent-comma artifacts. Empty paren `f()` already produced
-          // an empty `allArgs` (the curArgTexts.length === 0 flush guard
-          // skipped). `f(,)` would push two empties — drop them.
-          const args = allArgs.filter((s) => s.length > 0);
+          const _call = collectValidatorCallArgs(scanIdx + 1);
+          if (_call === null) return null;
+          const { args, lastTok, nextIdx: argIdx } = _call;
           validators.push({
             name: validatorName,
             args,
@@ -9903,6 +10308,52 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const recoveredBare = tryRecoverColonInlineMessage(scanIdx);
         if (recoveredBare !== null) scanIdx = recoveredBare;
         continue;
+      }
+
+      // §55.1 — the two-word presence validator `is given` (canonical, S462) and
+      // its soft-deprecated spelling `is some` (§63 Stage 1, W-IS-SOME-DEPRECATED).
+      // Both spellings are ONE predicate: the entry's `name` is the canonical
+      // "is given"; `legacySpelling` records an `is some` for the lint and the
+      // `scrml fix` rule. Before S462 neither spelling was read here — `is` is a
+      // KEYWORD, so the scan declined and the cell was silently never declared
+      // (every later read blamed: E-SCOPE-001 / E-STATE-UNDECLARED).
+      if (t.kind === "KEYWORD" && t.text === "is") {
+        const w = tokens[i + scanIdx + 1];
+        const isSome = w && w.kind === "IDENT" && w.text === "some";
+        const isGiven = w && w.kind === "KEYWORD" && w.text === "given";
+        if (isSome || isGiven) {
+          const entry = {
+            name: "is given",
+            args: null,
+            span: { ...t.span, end: w.span.end },
+          };
+          if (isSome) {
+            entry.legacySpelling = { start: w.span.start, end: w.span.end, line: w.span.line, col: w.span.col };
+            if (_isSomeSink && _isSomeMuted === 0 && typeof w.span.start === "number") {
+              const vs = w.span.start + _isSomeBias;
+              _isSomeSink.set(vs, { start: vs, end: vs + 4, isStart: t.span.start + _isSomeBias, kind: "validator" });
+            }
+          }
+          // `is given("msg")` — the §55.10 Level-1 inline message, read exactly as
+          // `req("msg")` reads it (the catalog arity is "0+inline").
+          const paren = tokens[i + scanIdx + 2];
+          if (paren && paren.kind === "PUNCT" && paren.text === "(") {
+            const _call = collectValidatorCallArgs(scanIdx + 2);
+            if (_call === null) return null;
+            entry.args = _call.args;
+            entry.span = { ...entry.span, end: _call.lastTok.span.end };
+            validators.push(entry);
+            scanIdx = _call.nextIdx;
+            const recoveredIsCall = tryRecoverColonInlineMessage(scanIdx);
+            if (recoveredIsCall !== null) scanIdx = recoveredIsCall;
+            continue;
+          }
+          validators.push(entry);
+          scanIdx += 2;
+          const recoveredIs = tryRecoverColonInlineMessage(scanIdx);
+          if (recoveredIs !== null) scanIdx = recoveredIs;
+          continue;
+        }
       }
 
       // Anything else: decline. KEYWORDS (including `is`/`not`), AT_IDENT,
@@ -10237,22 +10688,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           // @arr.push(item) → reactive-array-mutation node
           consume(); // consume "("
-          const argParts = [];
-          let parenDepth = 1;
-          while (parenDepth > 0 && peek().kind !== "EOF") {
-            const t = consume();
-            if (t.text === "(") parenDepth++;
-            if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-            argParts.push(t.text);
-          }
-          const _ramArgs = argParts.join(" ").trim();
+          const { args: _ramArgs, argExprs: _ramArgExprs } = collectReactiveArrayMutationArgs();
           return {
             id: ++counter.next,
             kind: "reactive-array-mutation",
             target: name,
             method: lastSeg,
             args: _ramArgs,
-            argsExpr: safeParseExprToNode(_ramArgs, spanOf(startTok, peek())?.start ?? 0),
+            argExprs: _ramArgExprs,
             span: spanOf(startTok, peek()),
           };
         }
@@ -11075,11 +11518,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Multi: `given x, y => { body }` — all-or-nothing; body runs only if ALL vars present
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
-      // `x is given` cut at `given` by the statement-boundary scan (a declaration initializer
-      // ending in `is given` — g-impl1-is-given-and-value-position-codegen-s460): the `given`
-      // here is the tail of a presence TEST, not a guard head. Not refused (S462 "a").
-      const prevTok = i >= 2 ? tokens[i - 2] : null;
-      const isPredicateTail = prevTok != null && prevTok.text === "is" && prevTok.span != null && prevTok.span.line === startTok.span.line;
+      // (The `given` of an `x is given` test never reaches here: the collectors consume it as
+      // the second word of the operator — `givenContinuesIsOperator` / `endsPresenceGiven`.)
       const variables = [];
       // S462 — the names as WRITTEN (`@user` keeps its `@`), for the
       // W-GIVEN-PRESENCE-DEPRECATED message and the `given-presence` fix rule.
@@ -11087,13 +11527,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let rebind = false;
       // S462 "a" — a head that is not `given <names> :>` (E-SYNTAX-044).
       let malformedHead = false;
+      // s461 — parallel to `variables`: true where the head identifier was
+      // written as a reactive CELL (`given @x`). `variables` holds the name with
+      // the `@` stripped (the narrowing consumers key on the bare name), so without
+      // this bit codegen cannot tell `given @x` from `given x` and lowered the
+      // cell to a bare JS name (ReferenceError at runtime — §42.2.3 / §42.5).
+      const variableIsCell = [];
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
-      // S462 fix round 1 (F2): after a cut `x is given`, no names are read — the next line is
-      // its own statement (it used to be swallowed as this node's name: `given foo`).
-      while (!isPredicateTail && (peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
+      // S462 (review N2) — a comment inside a `given` head or before its block is whitespace.
+      const skipGivenComments = () => { while (peek().kind === "COMMENT") consume(); };
+      while ((skipGivenComments(), peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
         const identTok = consume();
         let name = identTok.text;
-        if (name.startsWith("@")) name = name.slice(1); // strip @ if user wrote @x
+        const isCell = name.startsWith("@");
+        if (isCell) name = name.slice(1); // strip @ if user wrote @x
         // §42.2.3: `given` takes plain identifiers, NOT property paths. Reject `given u.name`.
         if (peek().kind === "PUNCT" && peek().text === ".") {
           malformedHead = true;
@@ -11135,6 +11582,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         variables.push(name);
         spellings.push(identTok.text);
+        variableIsCell.push(isCell);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
@@ -11147,15 +11595,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // body and a `fail` that always ran), no name, no separator (`given n { … }`) — is
       // E-SYNTAX-044, widened from the property path. The rebind head keeps E-SYNTAX-045.
       // Recovery skips the rest of the head on the `given` line.
-      if (!rebind && !malformedHead && !isPredicateTail && (variables.length === 0 || !isMatchArrow(peek()))) {
+      skipGivenComments();
+      if (!rebind && !malformedHead && (variables.length === 0 || !isMatchArrow(peek()))) {
         malformedHead = true;
         const onHeadLine = (t) => t != null && t.kind !== "EOF" && t.span != null && t.span.line === startTok.span.line;
         const bad = peek();
         errors.push(new TABError(
           "E-SYNTAX-044",
-          prevTok != null && prevTok.text === "is"
-            ? givenAfterIsLineError()
-            : givenHeadError(onHeadLine(bad) ? bad.text : ""),
+          givenHeadError(onHeadLine(bad) ? bad.text : ""),
           tokenSpan(onHeadLine(bad) ? bad : startTok, filePath),
         ));
         while (onHeadLine(peek()) && !(peek().kind === "PUNCT" && peek().text === "{") && !isMatchArrow(peek())) {
@@ -11169,10 +11616,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
       let separatorConsumed = false;
-      if (!isPredicateTail && isMatchArrow(peek())) {
+      if (isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
         separatorConsumed = true;
+        skipGivenComments();
       }
       // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
       // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
@@ -11184,7 +11632,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ? peek().text : "";
       // parse body
       let body = [];
-      if (!isPredicateTail && peek().kind === "PUNCT" && peek().text === "{") {
+      if (peek().kind === "PUNCT" && peek().text === "{") {
         consume(); // consume '{'
         body = parseRecursiveBody();
       }
@@ -11192,11 +11640,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "given-guard",
         variables,
+        variableIsCell,
         separatorGlyph,
         spellings,
         rebind,
         malformedHead,
-        predicateTail: isPredicateTail,
         bracelessBody,
         bracelessFound,
         body,
@@ -14349,22 +14797,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const lastSeg = pathSegments[pathSegments.length - 1];
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           consume(); // consume "("
-          const argParts = [];
-          let parenDepth = 1;
-          while (parenDepth > 0 && peek().kind !== "EOF") {
-            const t = consume();
-            if (t.text === "(") parenDepth++;
-            if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-            argParts.push(t.text);
-          }
-          const _ramArgs2 = argParts.join(" ").trim();
+          const { args: _ramArgs2, argExprs: _ramArgExprs2 } = collectReactiveArrayMutationArgs();
           nodes.push({
             id: ++counter.next,
             kind: "reactive-array-mutation",
             target: name,
             method: lastSeg,
             args: _ramArgs2,
-            argsExpr: safeParseExprToNode(_ramArgs2, spanOf(startTok, peek())?.start ?? 0),
+            argExprs: _ramArgExprs2,
             span: spanOf(startTok, peek()),
           });
           continue;
@@ -16288,11 +16728,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Multi: `given x, y => { body }` — all-or-nothing; body runs only if ALL vars present
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
-      // `x is given` cut at `given` by the statement-boundary scan (a declaration initializer
-      // ending in `is given` — g-impl1-is-given-and-value-position-codegen-s460): the `given`
-      // here is the tail of a presence TEST, not a guard head. Not refused (S462 "a").
-      const prevTok = i >= 2 ? tokens[i - 2] : null;
-      const isPredicateTail = prevTok != null && prevTok.text === "is" && prevTok.span != null && prevTok.span.line === startTok.span.line;
+      // (The `given` of an `x is given` test never reaches here: the collectors consume it as
+      // the second word of the operator — `givenContinuesIsOperator` / `endsPresenceGiven`.)
       const variables = [];
       // S462 — the names as WRITTEN (`@user` keeps its `@`), for the
       // W-GIVEN-PRESENCE-DEPRECATED message and the `given-presence` fix rule.
@@ -16300,13 +16737,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let rebind = false;
       // S462 "a" — a head that is not `given <names> :>` (E-SYNTAX-044).
       let malformedHead = false;
+      // s461 — parallel to `variables`: true where the head identifier was
+      // written as a reactive CELL (`given @x`). `variables` holds the name with
+      // the `@` stripped (the narrowing consumers key on the bare name), so without
+      // this bit codegen cannot tell `given @x` from `given x` and lowered the
+      // cell to a bare JS name (ReferenceError at runtime — §42.2.3 / §42.5).
+      const variableIsCell = [];
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
-      // S462 fix round 1 (F2): after a cut `x is given`, no names are read — the next line is
-      // its own statement (it used to be swallowed as this node's name: `given foo`).
-      while (!isPredicateTail && (peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
+      // S462 (review N2) — a comment inside a `given` head or before its block is whitespace.
+      const skipGivenComments = () => { while (peek().kind === "COMMENT") consume(); };
+      while ((skipGivenComments(), peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
         const identTok = consume();
         let name = identTok.text;
-        if (name.startsWith("@")) name = name.slice(1); // strip @ if user wrote @x
+        const isCell = name.startsWith("@");
+        if (isCell) name = name.slice(1); // strip @ if user wrote @x
         // §42.2.3: `given` takes plain identifiers, NOT property paths. Reject `given u.name`.
         if (peek().kind === "PUNCT" && peek().text === ".") {
           malformedHead = true;
@@ -16349,6 +16793,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         variables.push(name);
         spellings.push(identTok.text);
+        variableIsCell.push(isCell);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
@@ -16361,15 +16806,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // body and a `fail` that always ran), no name, no separator (`given n { … }`) — is
       // E-SYNTAX-044, widened from the property path. The rebind head keeps E-SYNTAX-045.
       // Recovery skips the rest of the head on the `given` line.
-      if (!rebind && !malformedHead && !isPredicateTail && (variables.length === 0 || !isMatchArrow(peek()))) {
+      skipGivenComments();
+      if (!rebind && !malformedHead && (variables.length === 0 || !isMatchArrow(peek()))) {
         malformedHead = true;
         const onHeadLine = (t) => t != null && t.kind !== "EOF" && t.span != null && t.span.line === startTok.span.line;
         const bad = peek();
         errors.push(new TABError(
           "E-SYNTAX-044",
-          prevTok != null && prevTok.text === "is"
-            ? givenAfterIsLineError()
-            : givenHeadError(onHeadLine(bad) ? bad.text : ""),
+          givenHeadError(onHeadLine(bad) ? bad.text : ""),
           tokenSpan(onHeadLine(bad) ? bad : startTok, filePath),
         ));
         while (onHeadLine(peek()) && !(peek().kind === "PUNCT" && peek().text === "{") && !isMatchArrow(peek())) {
@@ -16383,10 +16827,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
       let separatorConsumed = false;
-      if (!isPredicateTail && isMatchArrow(peek())) {
+      if (isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
         separatorConsumed = true;
+        skipGivenComments();
       }
       // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
       // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
@@ -16398,7 +16843,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ? peek().text : "";
       // parse body
       let body = [];
-      if (!isPredicateTail && peek().kind === "PUNCT" && peek().text === "{") {
+      if (peek().kind === "PUNCT" && peek().text === "{") {
         consume(); // consume '{'
         body = parseRecursiveBody();
       }
@@ -16406,11 +16851,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "given-guard",
         variables,
+        variableIsCell,
         separatorGlyph,
         spellings,
         rebind,
         malformedHead,
-        predicateTail: isPredicateTail,
         bracelessBody,
         bracelessFound,
         body,
@@ -17685,6 +18130,7 @@ function _nestedHandlersIn(tokens, from, to, filePath) {
     const start = t.span?.start ?? t.block.span?.start ?? 0;
     try {
       const inner = tokenizeError(raw.slice(2, raw.length - 1), start + 2, t.span?.line ?? 1, (t.span?.col ?? 1) + 2);
+      noteIsSomeTokens(inner);
       const arms = parseErrorTokens(inner, filePath);
       if (arms.length > 0) out.push({ raw, arms });
     } catch {
@@ -19554,7 +20000,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
                 // attached, so no S153 phantom each-block), and only the
                 // SUBPARSE_FORWARDED_CODES errors are forwarded.
                 try {
-                  const _diagTab = buildAST(_splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw));
+                  const _diagTab = withIsSomeBase(
+                    typeof _bodyFileStart === "number" && _bodyFileStart >= 0 ? _bodyFileStart : null,
+                    () => buildAST(_splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw)),
+                  );
                   if (_diagTab && Array.isArray(_diagTab.errors)) {
                     _forwardSubparseErrors(_diagTab.errors, errors, _bodyFileStart, block);
                   }
@@ -19581,7 +20030,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             let armNodes = [];
             try {
               const reBs = _splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw);
-              const reTab = buildAST(reBs);
+              const reTab = withIsSomeBase(
+                typeof arm.bodyContentStart === "number" && _armsRawFileStart >= 0 ? _armsRawFileStart + arm.bodyContentStart : null,
+                () => buildAST(reBs),
+              );
               if (reTab && reTab.ast && Array.isArray(reTab.ast.nodes)) armNodes = reTab.ast.nodes;
               // S437 — this re-parse's errors are otherwise dropped; forward
               // the codes no downstream validator re-derives, rebased to file
@@ -20546,10 +20998,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // downstream resolver inspects.
           const _subBs = _splitBlocksForP2Form1(filePath, _bodyRawForReparse);
           const _subErrors = [];
-          for (const subBlock of _subBs.blocks) {
-            const subNode = buildBlock(subBlock, filePath, "markup", counter, _subErrors);
-            if (subNode) bodyChildren.push(subNode);
-          }
+          withIsSomeBase(_bodyRawFileStart >= 0 ? _bodyRawFileStart : null, () => {
+            for (const subBlock of _subBs.blocks) {
+              const subNode = buildBlock(subBlock, filePath, "markup", counter, _subErrors);
+              if (subNode) bodyChildren.push(subNode);
+            }
+          });
           // _subErrors intentionally discarded — see comment block above —
           // EXCEPT the codes no downstream validator re-derives (S437),
           // rebased to file coordinates like the nodes below.
@@ -21973,6 +22427,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const _ppBodyOffset = block.span.start + _ppBodyShift;
       const _rawBody = block.raw.slice(prefixLen, block.raw.length - 1);
       const _childBlocksForPP = Array.isArray(block.children) ? block.children : [];
+      // S462 — the `<#name>` replacement below shifts every later token's span, so
+      // the `is some` sites are read from the ORIGINAL body text, with the child
+      // blocks at their original spans (snapshotted before the re-shift).
+      const _isSomeOrigKids = _rawBody.includes("<#") && _rawBody.includes("some")
+        ? _childBlocksForPP.map((c) => (c && c.span ? { ...c, span: { ...c.span } } : c))
+        : null;
       const _BLOCKREF_PP_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta", "foreign"]);
       const _childRanges = [];
       for (const _c of _childBlocksForPP) {
@@ -22094,6 +22554,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       }
 
       let tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
+      if (bodyRaw === _rawBody) {
+        noteIsSomeTokens(tokens);
+      } else if (_isSomeOrigKids !== null) {
+        try {
+          noteIsSomeTokens(tokenizeLogic(_rawBody, bodyOffset, bodyLine, bodyCol, _isSomeOrigKids));
+        } catch { /* a site not placed is not reported — never guessed */ }
+      }
       // S441 round 4 — the COVERAGE invariant, at the token level: the logic
       // tokenizer silently DROPS characters it has no token for (`★ ✓ →`,
       // `©`, `🎉`), so body-top text made of them vanished at exit 0. Every
@@ -22460,6 +22927,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // Parse the try body as logic nodes
         const bodyOffset = block.span.start + 2;
         const tryTokens = tokenizeLogic(tryBodyRaw, bodyOffset, block.span.line, block.span.col + 2, []);
+        noteIsSomeTokens(tryTokens);
         const tryBody = parseLogicBody(tryTokens, filePath, [], block, counter, errors, "logic");
 
         return {
@@ -22474,6 +22942,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const bodyRaw = rawContent.slice(0, rawContent.length - 1); // strip trailing `}`
         const bodyOffset = block.span.start + 2;
         const tokens = tokenizeError(bodyRaw, bodyOffset, block.span.line, block.span.col + 2);
+        noteIsSomeTokens(tokens);
         const legacyArms = parseErrorTokens(tokens, filePath, errors);
         return {
           id: ++counter.next,
@@ -22492,6 +22961,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const bodyCol = block.span.col + 2;
 
       const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, block.children);
+      noteIsSomeTokens(tokens);
       const body = parseLogicBody(tokens, filePath, block.children, block, counter, errors, "meta");
 
       // parentContext: the kind passed in from the enclosing block
@@ -22517,6 +22987,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const bodyCol = block.span.col + 2;
 
       const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, block.children);
+      noteIsSomeTokens(tokens);
       const testGroup = parseTestBody(tokens, filePath, span, errors);
 
       return {
@@ -23012,10 +23483,68 @@ function collectHoisted(nodes) {
 /**
  * Build a FileAST from Block Splitter output.
  *
+ * The result also carries `legacyIsSomeSites` — the offsets of every `is some`
+ * spelling this build's token streams saw (§42.2.2a / §55.1 / §63, S462; see
+ * `_isSomeSink`). They are candidates, not diagnostics: a consumer confirms each
+ * against the file's source (is-some-deprecation.ts). A build nested inside
+ * another for the SAME file shares the outer sink (one site, one record); a
+ * nested build of a different file gets its own, so offsets never mix files.
+ *
  * @param {{ filePath: string, blocks: import('./block-splitter.js').Block[] }} bsOutput
- * @returns {{ filePath: string, ast: FileAST, errors: TABError[] }}
+ * @returns {{ filePath: string, ast: FileAST, errors: TABError[], legacyIsSomeSites: Array<{start:number,end:number,kind:string}> }}
  */
+let _isSomeSinkFile = null;
 export function buildAST(bsOutput, tokenizerOverrides) {
+  const file = bsOutput?.filePath ?? null;
+  const shared = _isSomeSink !== null && _isSomeSinkFile === file;
+  const savedSink = _isSomeSink;
+  const savedFile = _isSomeSinkFile;
+  if (!shared) {
+    _isSomeSink = new Map();
+    _isSomeSinkFile = file;
+  }
+  const sink = _isSomeSink;
+  const savedBias = _isSomeBias;
+  const savedMuted = _isSomeMuted;
+  const savedNestedOk = _isSomeNestedOk;
+  if (!shared) {
+    _isSomeBias = 0;
+    // Cost gate (S462 fix round): a file whose text holds no `is`-whitespace-`some`
+    // has no site, so its build does no site work at all. This only decides whether
+    // to LOOK; every site is still located from tokens and confirmed against source.
+    const blocks = Array.isArray(bsOutput?.blocks) ? bsOutput.blocks : [];
+    _isSomeMuted = blocks.some((b) => typeof b?.raw === "string" && IS_SOME_TEXT_RE.test(b.raw)) ? 0 : 1;
+  } else if (!_isSomeNestedOk) {
+    // A same-file nested build nobody placed: its offsets are its own text's.
+    _isSomeMuted = savedMuted + 1;
+  }
+  _isSomeNestedOk = false;
+  try {
+    // The file's own block tree, read first at its true offsets: a markup opener's
+    // expression attributes and every logic body. (The builder later re-splits some
+    // regions — a component body, an `<each>` body — from text whose offsets are its
+    // own; those re-reads only ADD candidates, and source confirmation drops a
+    // misplaced one.)
+    if (!shared && _isSomeMuted === 0 && Array.isArray(bsOutput?.blocks)) {
+      for (const b of bsOutput.blocks) noteIsSomeInBlockTree(b, 0);
+    }
+    const result = _buildASTImpl(bsOutput, tokenizerOverrides);
+    if (result && typeof result === "object") {
+      result.legacyIsSomeSites = [...sink.values()].sort((a, b) => a.start - b.start);
+    }
+    return result;
+  } finally {
+    _isSomeBias = savedBias;
+    _isSomeMuted = savedMuted;
+    _isSomeNestedOk = savedNestedOk;
+    if (!shared) {
+      _isSomeSink = savedSink;
+      _isSomeSinkFile = savedFile;
+    }
+  }
+}
+
+function _buildASTImpl(bsOutput, tokenizerOverrides) {
   const { filePath, blocks } = bsOutput;
 
   // When self-hosted tokenizer overrides are provided, install them as the

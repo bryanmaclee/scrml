@@ -1,0 +1,18 @@
+// §42.3.5 worked example + §42.2.3 — `given @user :>` narrows a CELL in place, in markup and in a handler.
+<program>
+    type User:struct = { name: string }
+    <user>: User | not = not
+    <msg>: string = "none"
+    function login() {
+        @user = { name: "ada" }
+    }
+    function greet() {
+        given @user :> { @msg = "hi " + @user.name }
+    }
+    <main>
+        <button id="login" onclick=login()>login</button>
+        <button id="greet" onclick=greet()>greet</button>
+        <p id="msg">${@msg}</p>
+        <div id="guard">${ given @user :> { <p class="who">${@user.name}</p> } }</div>
+    </main>
+</program>

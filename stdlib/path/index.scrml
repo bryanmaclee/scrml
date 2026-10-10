@@ -48,7 +48,7 @@ ${
      */
     export function join(...segments) {
         const path = require("node:path")
-        const filtered = segments.filter(s => s is some)
+        const filtered = segments.filter(s => s is given)
         if (filtered.length == 0) return "."
         return toPosixSep(path.join(...filtered))
     }
@@ -71,7 +71,7 @@ ${
         // on POSIX it is identical to path.resolve. toPosixSep flips the native
         // separators the captured cwd carries when no absolute segment is given.
         const path = require("node:path")
-        const filtered = segments.filter(s => s is some)
+        const filtered = segments.filter(s => s is given)
         if (filtered.length == 0) return toPosixSep(path.posix.resolve())
         return toPosixSep(path.posix.resolve(...filtered))
     }
@@ -104,7 +104,7 @@ ${
     export function basename(filePath, ext) {
         const path = require("node:path")
         if (filePath is not) return ""
-        if (ext is some) return path.basename(filePath, ext)
+        if (ext is given) return path.basename(filePath, ext)
         return path.basename(filePath)
     }
 

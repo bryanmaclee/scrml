@@ -126,7 +126,7 @@
         // broadcast (one `<driverEvents>` cell, all events); each payload carries
         // `targetDriverId` so the driver UI filters to its own thread (per
         // channels/driver-events.scrml). Empty until the driver record loads.
-        const <currentDriverEvents> = @driverEvents.filter(ev => @currentDriver is some && ev.targetDriverId == @currentDriver.id)
+        const <currentDriverEvents> = @driverEvents.filter(ev => @currentDriver is given && ev.targetDriverId == @currentDriver.id)
         <currentLoad> = not
         <recentEntries> = []
         <loaded> = false
@@ -219,12 +219,12 @@
               <a href="/driver/hos" class="hover:text-blue-300">HOS</a>
               <a href="/driver/messages" class="hover:text-blue-300">
                   Messages
-                  <span if=(@currentDriverEvents is some && (@currentDriverEvents.length > 0)) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
+                  <span if=(@currentDriverEvents is given && (@currentDriverEvents.length > 0)) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
                       ${@currentDriverEvents.length}
                   </span>
               </a>
               <a href="/driver/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is given)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -236,7 +236,7 @@
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @currentDriver is some) class="space-y-6">
+          <div if=(@loaded && @currentDriver is given) class="space-y-6">
 
               <!-- Greeting + status -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -245,17 +245,17 @@
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Driver</div>
                           <h1 class="text-2xl font-bold">Hi, ${@currentDriver.name}</h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              <span if=(@currentDriver.current_location is some && @currentDriver.current_location != "")>
+                              <span if=(@currentDriver.current_location is given && @currentDriver.current_location != "")>
                                   ${@currentDriver.current_location}
                               </>
-                              <span if=(@currentDriver is some && (@currentDriver.current_location is not || @currentDriver.current_location == "")) class="text-slate-400">
+                              <span if=(@currentDriver is given && (@currentDriver.current_location is not || @currentDriver.current_location == "")) class="text-slate-400">
                                   Location not yet reported
                               </>
                           </div>
                       </div>
                       <div class="text-right">
                           <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${driverStatusClassesOf(@currentDriver)}">
-                              ${@currentDriver is some ? driverStatusLabel(@currentDriver.current_status) : ""}
+                              ${@currentDriver is given ? driverStatusLabel(@currentDriver.current_status) : ""}
                           </span>
                       </div>
                   </div>
@@ -270,22 +270,22 @@
                       <button
                           onclick=setStatus("OffDuty")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
-                          disabled=(@currentDriver is some && (@currentDriver.current_status == "OffDuty"))
+                          disabled=(@currentDriver is given && (@currentDriver.current_status == "OffDuty"))
                       >Off duty</button>
                       <button
                           onclick=setStatus("OnDuty")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50"
-                          disabled=(@currentDriver is some && (@currentDriver.current_status == "OnDuty"))
+                          disabled=(@currentDriver is given && (@currentDriver.current_status == "OnDuty"))
                       >On duty</button>
                       <button
                           onclick=setStatus("Driving")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                          disabled=(@currentDriver is some && (@currentDriver.current_status == "Driving"))
+                          disabled=(@currentDriver is given && (@currentDriver.current_status == "Driving"))
                       >Driving</button>
                       <button
                           onclick=setStatus("SleeperBerth")
                           class="px-3 py-2 text-sm font-medium rounded-md border border-violet-300 text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                          disabled=(@currentDriver is some && (@currentDriver.current_status == "SleeperBerth"))
+                          disabled=(@currentDriver is given && (@currentDriver.current_status == "SleeperBerth"))
                       >Sleeper berth</button>
                   </div>
 
@@ -308,13 +308,13 @@
                       No active load assignment. Check back when dispatch assigns one.
                   </div>
 
-                  <a if=(@currentLoad is some) href="/driver/loads/${@currentLoad.id}" class="block bg-white border border-slate-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition">
+                  <a if=(@currentLoad is given) href="/driver/loads/${@currentLoad.id}" class="block bg-white border border-slate-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition">
                       <div class="flex items-start justify-between mb-2">
                           <div class="text-xs text-slate-500 font-medium">
                               LOAD #${@currentLoad.id}
                           </div>
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${statusBadgeClassesOf(@currentLoad)}">
-                              ${@currentLoad is some ? statusLabel(@currentLoad.status) : ""}
+                              ${@currentLoad is given ? statusLabel(@currentLoad.status) : ""}
                           </span>
                       </div>
                       <div class="text-sm font-semibold text-slate-900 mb-1">
@@ -324,25 +324,25 @@
                       </div>
                       <div class="text-xs text-slate-600 mb-2">
                           ${@currentLoad.commodity}
-                          <span if=(@currentLoad.weight_lbs is some) class="text-slate-400">
+                          <span if=(@currentLoad.weight_lbs is given) class="text-slate-400">
                               · ${@currentLoad.weight_lbs} lbs
                           </>
                       </div>
                       <div class="grid grid-cols-2 gap-2 text-xs text-slate-600">
                           <div>
                               <div class="text-slate-500 uppercase tracking-wider">Pickup</div>
-                              <div>${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
+                              <div>${@currentLoad is given ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
                           </div>
                           <div>
                               <div class="text-slate-500 uppercase tracking-wider">Deliver by</div>
-                              <div>${@currentLoad is some ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
+                              <div>${@currentLoad is given ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
                           </div>
                       </div>
                       <div class="flex items-center justify-between mt-3 text-xs">
                           <span class="text-slate-600">
-                              ${@currentLoad is some ? @currentLoad.customer_name is not ? "" : @currentLoad.customer_name : ""}
+                              ${@currentLoad is given ? @currentLoad.customer_name is not ? "" : @currentLoad.customer_name : ""}
                           </span>
-                          <span class="font-semibold text-slate-900">${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</span>
+                          <span class="font-semibold text-slate-900">${@currentLoad is given ? formatRate(@currentLoad.rate_dollars) : ""}</span>
                       </div>
                   </a>
               </section>
@@ -368,7 +368,7 @@
                                   <span if=(entry.load_id) class="text-xs text-slate-500 block">
                                       Load #${entry.load_id}
                                   </>
-                                  <span if=(entry.payload is some && entry.payload != "") class="text-xs text-slate-500 block break-all">
+                                  <span if=(entry.payload is given && entry.payload != "") class="text-xs text-slate-500 block break-all">
                                       ${entry.payload}
                                   </>
                               </span>

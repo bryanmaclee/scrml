@@ -244,7 +244,7 @@ describe("§C: scrml fix `given-presence`", () => {
     expect(r.blockers[0].reason).toContain("g-impl1-given-match-arm-body-dropped-s462");
   });
 
-  test("a `given @cell` guard impl#1 lowers to a bare name is refused; the file's other sites still rewrite", () => {
+  test("a `given @cell` logic guard migrates (since #1380 it reads the cell like `@cell is given`)", () => {
     const src = `<label>: string | not = "x"
 \${
     let x: string | not = "a"
@@ -254,11 +254,21 @@ describe("§C: scrml fix `given-presence`", () => {
 <p>ok</p>
 `;
     const r = fixGivenPresence(src, { filePath: join(TMP, "c/cell.scrml") });
-    expect(r.changed).toBe(true);
+    expect(r.blockers).toEqual([]);
     expect(r.output).toContain("if (x is given) { let _a = x }");
-    expect(r.output).toContain("given @label :> { let _b = @label }");
+    expect(r.output).toContain("if (@label is given) { let _b = @label }");
+  });
+
+  test("a markup guard over a cell is refused: its `if` rewrite renders stale today (named gap)", () => {
+    const src = `<user>: { name: string } | not = not
+<main>
+    \${ given @user :> { <p>\${@user.name}</p> } }
+</main>
+`;
+    const r = fixGivenPresence(src, { filePath: join(TMP, "c/cell-markup.scrml") });
+    expect(r.changed).toBe(false);
     expect(r.blockers.length).toBe(1);
-    expect(r.blockers[0].reason).toContain("g-top-level-given-emits-bare-name-s459");
+    expect(r.blockers[0].reason).toContain("g-impl1-markup-if-branch-memo-stale-render-s462");
   });
 
   test("refuses an arm that does not name the scrutinee, a match with no `not` arm, and a property path", () => {
@@ -446,19 +456,49 @@ describe("§E: fix round 1 — brace-less guard body, cut `is given` tail, strin
     expect(clientJs(r)).not.toMatch(/if \(_scrml_foo_\d+ !== null/);
   });
 
-  test("F3: `x is` at a line end with `given` on the next line names the real cause", () => {
+  test("F3 / N1: `x is` at a line end with `given` on the next line is the operator (no E-SYNTAX-044)", () => {
     const r = compile("e/isbreak.scrml", `\${
     function f(a: string | not) -> bool {
         const ok = a is
             given
-        return true
+        return ok
     }
 }
-<p>x</p>
+<p>\${f("x")}</p>
 `);
-    const d = diagsOf(r, "E-SYNTAX-044");
-    expect(d.length).toBe(1);
-    expect(d[0].message).toContain("Write `x is given` on one line");
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(0);
+    expect(clientJs(r)).toContain("const ok = (a !== null && a !== undefined);");
+  });
+
+  test("N1: an end-of-line `x is given` keeps the next statement (`ok = !ok`, `console.log(ok)`, `g(1)`)", () => {
+    const r = compile("e/n1.scrml", `<o>: bool = false
+\${
+    function g(n: int) { let _ = n }
+    function a1(a: string | not) -> bool {
+        let ok = a is given
+        ok = !ok
+        return ok
+    }
+    function a2(a: string | not) -> bool {
+        const ok = a is given
+        console.log(ok)
+        return ok
+    }
+    function a3(a: string | not) {
+        @o = a is given
+        g(1)
+    }
+}
+<p>\${a1("x")}\${a2("x")}\${@o}</p>
+<button onclick=a3("y")>go</button>
+`);
+    const js = clientJs(r);
+    expect(diagsOf(r, LINT).length).toBe(0);
+    expect(js).toContain("let ok = (a !== null && a !== undefined);");
+    expect(js).toContain("ok = !ok;");
+    expect(js).toContain("const ok = (a !== null && a !== undefined);");
+    expect(js).toContain("console.log(ok);");
+    expect(js).toMatch(/_scrml_g_\d+\(1\);/);
   });
 
   test("F5: a guard-shaped STRING is not a fix-rule site and not a blocker", () => {
@@ -471,5 +511,27 @@ describe("§E: fix round 1 — brace-less guard body, cut `is given` tail, strin
     const r = fixGivenPresence(src, { filePath: join(TMP, "e/string.scrml") });
     expect(r.changed).toBe(false);
     expect(r.blockers).toEqual([]);
+  });
+});
+
+describe("§F: post-merge (S462 landing prep)", () => {
+  test("N2: a comment between the head parts or before the block is whitespace — no E-SYNTAX-044", () => {
+    const r = compile("f/n2.scrml", `\${
+    function f(x: string | not) -> int {
+        given x :> // note
+        {
+            return 1
+        }
+        given x :> /* c */ { return 2 }
+        given x /* c */ :> { return 3 }
+        return 0
+    }
+}
+<p>\${f("a")}</p>
+`);
+    expect(diagsOf(r, "E-SYNTAX-044").length).toBe(0);
+    expect(diagsOf(r, LINT).length).toBe(3);
+    expect(clientJs(r)).toContain("return 1;");
+    expect(clientJs(r)).toContain("return 3;");
   });
 });

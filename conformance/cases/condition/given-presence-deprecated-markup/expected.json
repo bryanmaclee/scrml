@@ -1,13 +1,16 @@
 {
   "id": "condition-given-presence-deprecated-markup",
-  "description": "§42.2.3 — the soft-deprecated in-place presence guard inside a markup `${ … }`, over a reactive `T | not` cell (`${ given @user :> { <p>${@user.name}</p> } }`), surfaces W-GIVEN-PRESENCE-DEPRECATED (Info; exactly 1) and is accepted: inside the guard `@user` is narrowed, so the member read is not E-TYPE-046. CODES HALF ONLY: impl#1 lowers `given @cell` to a bare name and drops the markup body (g-top-level-given-emits-bare-name-s459, fixed by #1380), so the run-time half is not asserted here.",
+  "description": "§42.2.3 — the soft-deprecated in-place presence guard inside a markup `${ … }`, over a reactive `T | not` cell (`${ given @user :> { <p>${@user.name}</p> } }`), surfaces W-GIVEN-PRESENCE-DEPRECATED (Info; exactly 1), is accepted (inside the guard `@user` is narrowed, so the member read is not E-TYPE-046), renders while `@user` is present, and re-renders when the present value changes (click #go: \"ada\" → \"bob\"). Since #1380 (S461) impl#1 reads the cell and renders the markup body. NOTE: the canonical rewrite `${ if (@user is given) { … } }` keeps the stale \"ada\" on impl#1 today (g-impl1-markup-if-branch-memo-stale-render-s462), so `scrml fix` refuses this site; no canonical twin is pinned here.",
   "language-version": "deprecated",
   "spec": "§42.2.3",
-  "rationale": "§42.2.3 (S462) — the in-place guard in markup context is SOFT-DEPRECATED (canonical: `${ if (@user is given) { … } }`, or `<p if=@user>`, §42.4) and surfaces W-GIVEN-PRESENCE-DEPRECATED; §42.3.5 item 2 — the guard narrows its receiver. Provenance: ruling:user-voice-scrml.md S462 \"a, go\".",
+  "rationale": "§42.2.3 (S462) — the in-place guard in markup context is SOFT-DEPRECATED and surfaces W-GIVEN-PRESENCE-DEPRECATED; §42.3.5 item 2 — the guard narrows its receiver; §42.5 — the guard's body runs when the name is present; §6 — a markup interpolation of a cell re-renders on change. Provenance: ruling:user-voice-scrml.md S462 \"a, go\".",
   "expect": {
     "codes": ["W-GIVEN-PRESENCE-DEPRECATED"],
     "codeCounts": { "W-GIVEN-PRESENCE-DEPRECATED": 1 },
     "severity": { "W-GIVEN-PRESENCE-DEPRECATED": "info" },
-    "notCodePrefixes": ["E-"]
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "user": { "name": "bob" } },
+    "domAnchored": [{ "selector": "#name", "text": "bob" }]
   }
 }

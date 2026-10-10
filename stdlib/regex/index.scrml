@@ -103,13 +103,13 @@ ${
         const p = new RegExp(pattern.source, flags)
         const out = []
         let m
-        while ((m = p.exec(str)) is some) {
+        while ((m = p.exec(str)) is given) {
             if (m.groups) {
                 out.push(m.groups)
             } else if (m.length > 1) {
                 // Has capturing groups — push the first capture if there's one,
                 // else the full match.
-                out.push(m[1] is some ? m[1] : m[0])
+                out.push(m[1] is given ? m[1] : m[0])
             } else {
                 out.push(m[0])
             }

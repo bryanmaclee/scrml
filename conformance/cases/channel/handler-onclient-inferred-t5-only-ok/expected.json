@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-inferred-t5-only-ok",
+  "description": "§38.10.3 Trigger-5 exemption (S462 fix round 1) — an `onclient:*` handler that §12.2 places on the server ONLY by caller-context propagation (Trigger 5: its only function caller is a server function) is NOT refused. Route inference does not count the `onclient:` attribute or a markup `${fmt(2)}` reference as a client caller, so Trigger 5 mis-places this shared pure helper; refusing it would refuse a correct program for a placement defect. The exemption lasts until the caller-context fork (g-5c-caller-context-promotes-a-derived-read-helper-to-the-server) is ruled.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §12.2",
+  "source-test": "compiler/tests/unit/channel-onclient-inferred-server.test.js",
+  "rationale": "§38.10.3 (ruling:user-voice-scrml.md S462 \"a\", fix round 1): a handler placed on the server only by §12.2 Trigger 5 is exempt from E-CHANNEL-006 for now.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-006"]
+  }
+}

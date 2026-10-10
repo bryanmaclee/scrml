@@ -85,11 +85,12 @@ function stdlibModules(): string[] {
  *   - `fix-client-server-call` — the client-server-call rule behind `scrml fix`, imported by
  *                              fix-s66.js (S455).
  *   - `fix-sql-failable`     — the sql-failable rule behind `scrml fix`, imported by fix-s66.js (S455).
+ *   - `fix-is-some`          — the §42.2.2a `is-some` rule behind `scrml fix`, imported by fix-s66.js (S462).
  */
 function cliVerbs(): string[] {
   const d = join(ROOT, "compiler/src/commands");
   if (!existsSync(d)) return [];
-  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "refusal-gate", "listen", "fix-s66", "fix-arm-pipe", "fix-client-server-call", "fix-sql-failable"]);
+  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "refusal-gate", "listen", "fix-s66", "fix-arm-pipe", "fix-client-server-call", "fix-sql-failable", "fix-is-some"]);
   return readdirSync(d)
     .filter((e) => extname(e) === ".js")
     .map((e) => e.replace(/\.js$/, ""))
