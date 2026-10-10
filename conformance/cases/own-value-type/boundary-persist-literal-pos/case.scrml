@@ -1,0 +1,9 @@
+// §66.3 rule 9 / §6.14.1 rule 5 — a LITERAL persist cell is unaffected: its type is the literal's (§66.3 rule 3).
+<program>
+    let <tabFilter="all" persist="session" key="myapp.filter"/>
+    let <zoom:int=(2 * 1) persist="local" key="app.zoom"/>
+    <main>
+        <p id="out">${@tabFilter} ${@zoom}</p>
+        <button id="set" onclick=(@tabFilter = "done")>done</button>
+    </main>
+</program>

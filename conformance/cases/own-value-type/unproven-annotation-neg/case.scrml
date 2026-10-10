@@ -1,0 +1,10 @@
+// §66.3 rule 10 — `:int` over a call of a function whose return is neither declared nor provable is
+// E-DECL-TYPE-UNPROVEN: the annotation would be a cast nothing checks.
+<program>
+    function mk() {
+        const k: int = 5
+        return k
+    }
+    <v:int=(mk())/>
+    <main><p>${@v}</p></main>
+</program>

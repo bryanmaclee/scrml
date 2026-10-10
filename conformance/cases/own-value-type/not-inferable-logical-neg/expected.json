@@ -1,0 +1,28 @@
+{
+  "id": "own-value-type-not-inferable-logical-neg",
+  "description": "§66.3 rules 5 and 7: the logical operators `!` and `&&` are not members of the closed inferable set, so `<closed=(!@open)/>` and `<both=(@open && @ready)/>` are each E-DECL-TYPE-NOT-INFERABLE.",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 5: the set \"is closed: it grows only by a ruling\" and names \"the logical operators `!` / `&&` / `||` and `is given` / `is not`\" outside it; rule 7: outside the set is E-DECL-TYPE-NOT-INFERABLE. ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 ruling 3: the set is enumerated normatively).",
+  "expect": {
+    "codes": [
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ],
+    "codeCounts": {
+      "E-DECL-TYPE-NOT-INFERABLE": 2
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-DECL-TYPE-NOT-INFERABLE' fired 0 time(s), expected exactly 2",
+          "emitted:E-MARKUP-001=4",
+          "emitted:E-SCOPE-001=2",
+          "missing:E-DECL-TYPE-NOT-INFERABLE"
+        ]
+      }
+    }
+  }
+}

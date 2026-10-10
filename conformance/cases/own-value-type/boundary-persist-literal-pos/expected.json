@@ -1,0 +1,40 @@
+{
+  "id": "own-value-type-boundary-persist-literal-pos",
+  "description": "§66.3 rule 9 / §6.14.1 rule 5: a persist cell with a LITERAL value needs no `:T` (§6.14's own `= \"all\"` example, in the §66 opener), and a non-literal one written `:int` is fine — neither is E-DECL-TYPE-REQUIRED-AT-BOUNDARY; the cell behaves (all → done).",
+  "language-version": "1.0",
+  "spec": "§66.3, §6.14.1",
+  "rationale": "§66.3 rule 9: \"A literal own value is unaffected: S435 literal inference stands at every boundary, and §6.14's own example (`<tabFilter persist=\\\"session\\\" key=\\\"myapp.filter\\\"> = \\\"all\\\"`) stays legal.\" ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §7 item 2: \"Literal persist cells stay as they are\").",
+  "expect": {
+    "notCodes": [
+      "E-DECL-TYPE-REQUIRED-AT-BOUNDARY",
+      "E-DECL-TYPE-NOT-INFERABLE",
+      "E-DECL-TYPE-UNPROVEN"
+    ],
+    "notCodePrefixes": [
+      "E-PERSIST-"
+    ],
+    "input": [
+      {
+        "click": "#set"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "done 2"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=3"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "own-value-type-not-inferable-unproven-call-neg",
+  "description": "§66.3 rule 5 (g): `seven()` declares no return type and returns a local, which never counts toward an inferred-and-proven return — so `<v=(seven())/>` is E-DECL-TYPE-NOT-INFERABLE.",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 5: \"A function's return is inferred-and-proven when … every `return` carries an expression that is a member of this set … reading the function's PARAMETERS as typed `@ref`s … and never a local binding\"; rule 7: a call whose return is neither declared nor proven is outside the set. ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §7 item 1: \"calls to functions with a declared or inferred-and-proven return\").",
+  "expect": {
+    "codes": [
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ],
+    "codeCounts": {
+      "E-DECL-TYPE-NOT-INFERABLE": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-DECL-TYPE-NOT-INFERABLE' fired 0 time(s), expected exactly 1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-DECL-TYPE-NOT-INFERABLE"
+        ]
+      }
+    }
+  }
+}

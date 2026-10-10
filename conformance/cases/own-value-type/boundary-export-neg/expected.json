@@ -1,0 +1,30 @@
+{
+  "id": "own-value-type-boundary-export-neg",
+  "description": "§66.3 rule 9 (iii) / §66.14: `export <total=(@seed * 2)/>` is E-DECL-TYPE-REQUIRED-AT-BOUNDARY (the stated default while O2 / O39 is open); `export <limit=10/>` — a literal — is not.",
+  "language-version": "1.0",
+  "spec": "§66.3, §66.14",
+  "rationale": "§66.14 (O2 / O39 note, S462): \"A NON-literal own value written `export` SHALL carry `:T` (§66.3 rule 9 (iii), `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`); a literal one is inferred as everywhere\". ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 ruling 9).",
+  "expect": {
+    "codes": [
+      "E-DECL-TYPE-REQUIRED-AT-BOUNDARY"
+    ],
+    "codeCounts": {
+      "E-DECL-TYPE-REQUIRED-AT-BOUNDARY": 1
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-DECL-TYPE-REQUIRED-AT-BOUNDARY' fired 0 time(s), expected exactly 1",
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-UNQUOTED-DISPLAY-TEXT=2",
+          "missing:E-DECL-TYPE-REQUIRED-AT-BOUNDARY"
+        ]
+      }
+    }
+  }
+}

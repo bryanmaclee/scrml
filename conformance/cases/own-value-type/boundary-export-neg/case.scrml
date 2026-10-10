@@ -1,0 +1,8 @@
+// §66.3 rule 9 (iii) / §66.14 — while O2 / O39 is open, a non-literal EXPORTED own value must carry `:T`;
+// a literal one is inferred as everywhere.
+<program>
+    let <seed:int=2/>
+    export <total=(@seed * 2)/>
+    export <limit=10/>
+    <main><p>${@total} ${@limit}</p></main>
+</program>

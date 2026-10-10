@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 5 |
-| MED | 566 | 5 |
+| MED | 566 | 6 |
 | LOW | 327 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -24337,3 +24337,9 @@ Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pr
 <!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
 
 Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
+
+## §S462-own-value-inference — impl#1 divergence from §66.3 rules 5–10 (O35(d), 2026-10-09; ruling:user-voice-scrml.md S462 "go on the package"; dd own-value-type-annotation-o35d-dpa-065 — change `docs/changes/s462-own-value-inference/`; §66 is Nominal on impl#1, the bootstrap builds it: FILED, not scheduled)
+
+### g-impl1-own-value-inference-codes-s462 — impl#1 DIVERGENCE (filed, not fixed): impl#1 emits none of E-DECL-TYPE-NOT-INFERABLE / E-DECL-TYPE-REQUIRED-AT-BOUNDARY / E-DECL-TYPE-UNPROVEN, and the §66 opener the cases are written in does not parse — `NEW S462; MED; carried`
+<!-- @gap id=g-impl1-own-value-inference-codes-s462 sev=MED status=carried locus=searched:compiler/src(grep `E-DECL-TYPE-` — 0 matches; the §66 opener `<x=(…)/>` / `let <x:T=v/>` reports E-MARKUP-001 / E-STATE-UNDECLARED) prov=ruling:user-voice-scrml.md-S462-"go-on-the-package";SPEC-§66.3-rules-5-10;empirical:s462-xfail-signatures-captured-by-conformance/run.ts---xfail-signature -->
+Governing: SPEC §66.3 rules 5–10, §6.14.1 rule 5, §52.4.1, §66.14 (O2 / O39 note), §66.16; §34 rows E-DECL-TYPE-NOT-INFERABLE / -REQUIRED-AT-BOUNDARY / -UNPROVEN (Nominal on impl#1 — §34.0 carry rule). Conformance: 12 cases `conformance/cases/own-value-type/*` — graded on the bootstrap; all 12 xfail on impl#1 under this gap (signatures captured by `conformance/run.ts --xfail-signature`). The bootstrap implements the persist / export limbs of rule 9 and the call limb of rule 10; the `server` limb has no bootstrap fire site (its parser refuses `server` on a declaration, E-BOOTSTRAP-UNSUPPORTED), and `:asIs` (the named escape hatch) does not exist in the bootstrap (E-TYPE-UNKNOWN).

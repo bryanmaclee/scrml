@@ -1,0 +1,7 @@
+// §66.3 rule 8 — two unannotated derived own values that read each other: the cycle's diagnostic
+// (E-DERIVED-CIRCULAR-DEP) is reported, and E-DECL-TYPE-NOT-INFERABLE is not.
+<program>
+    <a=(@b + 1)/>
+    <b=(@a + 1)/>
+    <main><p>${@a} ${@b}</p></main>
+</program>

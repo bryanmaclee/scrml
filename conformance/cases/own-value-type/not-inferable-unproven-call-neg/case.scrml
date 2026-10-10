@@ -1,0 +1,10 @@
+// §66.3 rules 5 (g) and 7 — a call of a function whose return is neither declared nor provable
+// (it returns a local) is outside the inferable set.
+<program>
+    function seven() {
+        const k: int = 7
+        return k
+    }
+    <v=(seven())/>
+    <main><p>${@v}</p></main>
+</program>

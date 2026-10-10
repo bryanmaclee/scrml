@@ -2432,7 +2432,9 @@ ${
             return rinf(infBlamed(), done)            // a written return type that was refused (E-TYPE-UNKNOWN / a parse error)
         }
         if (fi.failable) return rinf(infOut("`" + n + "(…)`, a failable call (§19.4)"), done)
-        if (fi.serverOwn) return rinf(infOut("`" + n + "(…)`, a server function's call (§13.7)"), done)
+        // a server call in a value position is §13.7's E-VALUE-SERVER-CALL
+        // (placePass, after the typer — so condBlamed cannot see it): blamed
+        if (fi.serverOwn) return rinf(infBlamed(), done)
         const key: string = n + "()"
         if (stack.indexOf(key) >= 0) return rinf(infUnres("`" + n + "(…)`, whose return is not declared and depends on itself"), done)
         return ownProvenReturn(cx, found.f, stack.concat([key]), done)
@@ -2505,11 +2507,12 @@ ${
     }
 
     // Rule 9: where an own value's type leaves the compile ("" — it does not).
-    // `server` never reaches here: the bootstrap's parser refuses it on a
-    // declaration (E-BOOTSTRAP-UNSUPPORTED) — read anyway, should it ever.
+    // `server` (rule 9 (ii)) is NOT read: the bootstrap's parser refuses
+    // `server` on a declaration whole (E-BOOTSTRAP-UNSUPPORTED), and a second
+    // report on a refused construct would be a cascade. When `server` lands
+    // in the bootstrap, it joins here (boundaryReport already words it).
     fn boundaryOf(exported: boolean, mods: AAttr[]) -> string {
         if (attrNamed(mods, "persist") is some) return "persist"
-        if (attrNamed(mods, "server") is some) return "server"
         if (exported) return "export"
         return ""
     }
