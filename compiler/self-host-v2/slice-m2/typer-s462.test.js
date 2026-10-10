@@ -218,6 +218,14 @@ describe("rule 10 — an unproven annotation is an error", () => {
   test("a written type over a value merely OUTSIDE the inference set (a member path) is not 'unproven'", () => {
     expect(codes("    type U:struct = { name: string }\n    <u:U=({ name: \"a\" })/>\n    <l:string=(@u.name)/>")).toEqual([]);
   });
+  test("scope: rule 10 is ruled for OWN values — an ATTRIBUTE default `a:int=(mk())` is not judged (⚑ surfaced, not widened)", () => {
+    const src = "<chip a:int=(mk())/> renders <p>${a}</p>\n<program>\n" + MK + "    <main><chip/></main>\n</program>\n";
+    expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual([]);
+  });
+  test("a CHILD field's own value written `:T` over an unproven call is judged", () => {
+    const src = "<card:struct>\n    let <n:int=(mk())/>\n</> renders <p>x</p>\n<program>\n" + MK + "    <main><card/></main>\n</program>\n";
+    expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual(["E-DECL-TYPE-UNPROVEN"]);
+  });
   test("the message names the cause and the two fixes", () => {
     const d = run(MK + "    <v:int=(mk())/>").diags[0];
     expect(d.message).toContain("`mk(…)`");

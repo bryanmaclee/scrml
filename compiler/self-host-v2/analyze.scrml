@@ -2585,7 +2585,10 @@ ${
             resolved = !rt.unresolved     // r8: an unknown type name → untrusted
             st = rt.st
             seqRep = seqReplace(aty)
-            if (resolved) origin = writtenOrigin(ix, tab, name, init, where)
+            // rule 10 is ruled for OWN values (program cells, child fields); an
+            // attribute default's `:T` over an unprovable call is not judged
+            // here (the same hole — surfaced for a ruling, not widened into)
+            if (resolved && role == FieldRole.Child) origin = writtenOrigin(ix, tab, name, init, where)
         } else {
             // s462: inferred (§66.3 rule 3 / rule 5), or — outside the set — no
             // type at all: the field is untrusted (nothing is checked against a
