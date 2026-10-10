@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 6 |
 | MED | 565 | 5 |
-| LOW | 328 | 0 |
+| LOW | 330 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24370,3 +24370,37 @@ Reproducer (S462 review):
 What remains is the name keying itself: two same-named declarations in one file's channel bodies are one entry in `collectChannelFunctionMap`, and which one a reference reaches is decided by emit order, not scope. Fix direction: key by declaration (span / node identity) and resolve each reference by the §38.10.3 innermost-first rule. Possibly a duplicate-declaration error is the right answer instead — functions hoist file-wide (§38.10.2), so two channel-body `onOpen`s are arguably one name declared twice; needs a ruling.
 
 **Severity LOW:** needs two same-named functions in one file; reproduced only by construction.
+
+### G-CHANNEL-BROADCAST-DETECTOR-NOT-SCOPE-AWARE-S462 — §12.2 Trigger 7's `broadcast()` / `disconnect()` detector matches source text with no scope awareness, so a nested local or parameter NAMED `broadcast` / `disconnect` places the enclosing channel function on the server — `NEW S462; LOW; open`
+<!-- @gap id=g-channel-broadcast-detector-not-scope-aware-s462 sev=LOW status=open locus=compiler/src/route-inference.ts:2277(detectChannelBroadcastReason — regex `(^|[^.\w$])(broadcast|disconnect)\s*\(` over each statement's emitted text; no binding resolution) prov=review:S462-s239-channel-006-inferred-rereview(N1) -->
+
+`detectChannelBroadcastReason` decides "this calls the channel built-in" from the text of each statement. It does not resolve the callee, so a shadowing binding counts as the built-in. Since fix round 1 (F3) it also looks inside nested function declarations, so a nested PARAMETER named `broadcast` now reaches it:
+
+```scrml
+function bump(n) {
+    function apply(broadcast) { return broadcast(n) }
+    @joined = apply(x => x + 1)
+}
+```
+
+`bump` (in a `<channel>` body) is placed on the server and becomes a server route with a CPS fetch at exit 0. If `bump` is an `onclient:*` handler, E-CHANNEL-006 fires on a correct program (a false refusal). This is the same "two readers of one text" shape as Rule 7: the placement reads text, while the language reads bindings.
+
+**Fix direction:** resolve the callee structurally. A call counts only when its callee is the identifier `broadcast` / `disconnect` and resolves to the channel built-in, not to a shadowing parameter, local, or nested function in an enclosing scope. **Measured (S462, probe `n1b.scrml` = the shape above in a `<channel>` body, called from a button):** base `42d1a7459` keeps `bump` on the client; after fix round 1 (`e78ad371e`) `bump` gets `__ri_route_bump_*` plus a fetch stub. So the shadowing-parameter shape is a regression from F3 (descending nested declarations), not a pre-existing one. The regex itself is older: a statement whose text contains `broadcast(` is matched whatever `broadcast` is bound to, for the statement kinds it scans (`bare-expr`, `return-stmt`, the declaration kinds). Probe `n1.scrml` (`const broadcast = (x) => x + 1` then `@joined = broadcast(n)`) is NOT placed on either side, because that assignment's statement kind is not scanned.
+
+**Severity LOW:** needs a user binding named after a channel built-in. Fails closed or toward the server (an extra round trip, or a false E-CHANNEL-006); no data leak.
+
+### G-DEAD-NESTED-BROADCASTER-ESCALATES-PARENT-UNEXPLAINED-S462 — a DEAD nested function that calls `broadcast()` still places its parent on the server, and the resulting E-CHANNEL-SERVER-CELL-READ does not name the cause — `NEW S462; LOW (review NIT); open`
+<!-- @gap id=g-dead-nested-broadcaster-escalates-parent-unexplained-s462 sev=LOW status=open locus=compiler/src/route-inference.ts:2277(detectChannelBroadcastReason descends nested function-decl bodies without asking whether the nested function is reachable)+route-inference.ts:6418(E-CHANNEL-SERVER-CELL-READ message names the cell read, not the placement trigger) prov=review:S462-s239-channel-006-inferred-rereview(N2) -->
+
+```scrml
+function bump(n) {
+    function never() { broadcast({ joined: n }) }
+    @joined = @joined + n
+}
+```
+
+`never` is never called, and W-DEAD-FUNCTION says it will be tree-shaken. Its `broadcast()` still places `bump` on the server (fix round 1, F3: a nested hub call counts for the parent), so `bump`'s read of the channel cell `@joined` fires E-CHANNEL-SERVER-CELL-READ. The two diagnostics disagree about whether `never` exists, and the error does not say that a dead nested function is what moved `bump` to the server. Measured (probe `n2.scrml`, `bump` in a `<channel>` body called from a button): base `42d1a7459` exit 0; after fix round 1 (`e78ad371e`) exit 1 with that error. So this refusal is new with F3, though the corpus measurement found no program that hits it. A nested `?{}` inside a dead nested function already placed its parent the same way before S462 (`walkBodyForTriggers`; not re-probed here).
+
+**Fix direction:** either skip unreachable nested declarations when collecting a parent's triggers, or have the placement-dependent errors (E-CHANNEL-SERVER-CELL-READ, E-CHANNEL-006) name the trigger and where it is, as E-CHANNEL-006 already does. The second is cheaper and fixes the diagnostic for every cause.
+
+**Severity LOW (the review graded it a NIT; the ledger has no NIT tier and `NOMINAL` means "specified, not yet built"):** the program is refused loudly; the cost is a confusing message.
