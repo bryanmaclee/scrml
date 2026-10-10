@@ -23534,6 +23534,8 @@ function checkTopLevelReturn(nodes: ASTNodeLike[], errors: TSError[], filePath: 
       case "return-stmt": report(anchor ?? node); return;
       case "if-stmt": inPlace(node.consequent, anchor); inPlace(node.alternate, anchor); inPlace(node.body, anchor); return;
       case "for-stmt": case "while-stmt": case "do-while-stmt": inPlace(node.body, anchor); return;
+      // A standalone `given x :> { … }` guard runs its block in place (S462 review B2).
+      case "given-guard": inPlace(node.body, anchor); return;
       case "match-stmt": case "match-expr":
         // EVERY arm form — structured block, bare leave, inline text, a raw-text
         // alternation / literal arm (`bare-expr`), a §18.19 product arm — through

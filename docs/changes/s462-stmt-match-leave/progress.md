@@ -16,3 +16,4 @@
 2026-10-10T12:40:58-06:00 N5: SPEC §42.2.3 note (given heads resolve as reads; newly-rejecting; corpus 2 samples).
 2026-10-10T12:47:28-06:00 merged origin/main bbe74c1df (#1392): given-parse conflict resolved (skipGivenComments + arm-level -> accepted by malformed-head check); gates green; 2 esm throws pinned.
 2026-10-10T13:05:58-06:00 post-merge: given-head scope check skips rebind/malformed heads (given-rebind-no-presence-lint gained a stray E-SCOPE-001).
+2026-10-10T13:50:49-06:00 fix round 3: B2 given-guard case restored in checkTopLevelReturn.
