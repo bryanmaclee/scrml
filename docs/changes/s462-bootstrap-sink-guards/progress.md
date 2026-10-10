@@ -1,1 +1,2 @@
 2026-10-09T17:59:23-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a116fa748643cc5e7
+2026-10-09T18:03:12-06:00 REPRODUCED on origin/main 980cb3001 in headless Chromium (playwright): srcdoc=@doc -> window.pwned=1 (iframe script ran); href=@bad javascript:alert(1) -> click opens alert("1"); reactive re-write @good='vbscript:x' written verbatim. Bootstrap emits no diagnostic for either. Repro: repro/{run,chrome}.ts + {href,srcdoc}.scrml
