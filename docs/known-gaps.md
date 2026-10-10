@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 5 |
-| MED | 586 | 6 |
+| MED | 587 | 6 |
 | LOW | 345 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -24092,6 +24092,11 @@ A function route inference escalates for a non-SQL reason is called from the cli
 <!-- @gap id=g-helper-call-in-nested-block-not-awaited-s462 sev=MED status=open locus=searched:compiler/src/codegen/emit-control-flow.ts,compiler/src/codegen/emit-expr.ts,compiler/src/codegen/emit-client.ts(auto-await of a statement-position call of an async client function — not traced) prov=review:s462-fix-round-3-NEW-4;empirical:s462-narrowing-ends-on-write -->
 
 Agent-executed on the s462 head (`40888e005`): `server function save() -> int { return 1 }`, `function helper() { save() }`; `show()` calling `helper()` at its top level emits `await _scrml_helper_5();`, inside `if (@user is given) { helper(); @out = @user?.name }` it emits `_scrml_helper_5();`. §13.2 says a statically-known Promise-returning callee is awaited, so the nested form is a codegen defect (the rest of the block runs before `save()` returns, and a rejection is unhandled). The §42.3.5 narrowing reader keeps treating such a call as a suspension (fail closed, S462 Q11), which is correct once the call is awaited.
+
+### g-impl1-engine-transition-effect-after-effect-bodies-s462 — §51.7.1 orders a write's engine transition effect blocks BEFORE the `<effect>` (and retiring `when … changes`) bodies it triggers; impl#1 runs them the other way round — the `<effect>` / `when` bodies are subscribers that run INSIDE `_scrml_reactive_set`, and the transition's effect block is emitted AFTER that set returns — `NEW S462; MED; open (pre-existing; found by inspection, not executed)`
+<!-- @gap id=g-impl1-engine-transition-effect-after-effect-bodies-s462 sev=MED status=open locus=compiler/src/codegen/emit-machines.ts(transition IIFE: `_scrml_reactive_set(var, __next)` then the `// Effect blocks` emission ~:684-:709);compiler/src/runtime-template.js(_scrml_reactive_set — subscribers run inside the set, after the render gates) prov=review:s462-narrowing-delta-check-9;inspection:s462-narrowing-round8 -->
+
+Surfaced while stating the per-write order in §6.7.4 Timing (S462 delta check #9). Not caused by the S462 ordering change: both before and after it, a cell's subscribers run inside the write and the transition effect block after it; S462 only moved the render gates ahead of both. To verify by execution: an engine with an effect block on `A => B` that records into an outside list, plus `<effect deps=[@engineCell]>` recording too, then one transition — §51.7.1 expects the effect-block entry first.
 
 ### g-etype046-blind-in-component-body-handlers-s462 — E-TYPE-046 never checks an event handler inside a component body: `const C = <section><button onclick={ @count = @user.name.length }>…</section>` (and the arrow form `onclick=${() => { @count = @user.name.length }}`) compiles clean with `<user>: User | not`, and throws in Chromium after `@user = not`; a render read `${@user.name}` in the same component DOES fire — `NEW S462; HIGH; open`
 <!-- @gap id=g-etype046-blind-in-component-body-handlers-s462 sev=HIGH status=open locus=compiler/src/component-expander.ts(the expanded body's attribute values stay raw text — no `exprNode`, no handler statement list — so presence-narrowing's walk sees nothing to check in a handler; the E-TYPE-031 path builds them for its MARKED copy only, `checkOptionalFnPropCalls` parseAttrExprs);compiler/src/type-system.ts(checkOptionalMemberAccess walks the expanded tree) prov=review:s462-narrowing-review-8;empirical:s462-narrowing-round8 -->
