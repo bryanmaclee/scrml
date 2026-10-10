@@ -1,0 +1,27 @@
+{
+  "id": "own-value-type-base-type-neg",
+  "description": "§66.3 rules 5–6 negative twin of base-type-pos: `let <k=(1 + 2)/>` infers `int`, and the inferred type is the cell's write contract — `@k = 2.5` is E-TYPE-031.",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 5: the own value \"takes its type from its INITIALIZER\"; rule 6: the BASE type (`int`); §66.1 rule 5: \"Every cell and field write SHALL be type-checked against the target's declared type\"; §7.5.1 position 6 / §66.20: a cell write whose value does not satisfy the target's type is E-TYPE-031. ruling:user-voice-scrml.md S462 \"go on the package\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "notCodes": [
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-TYPE-031"
+        ]
+      }
+    }
+  }
+}

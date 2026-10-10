@@ -89,7 +89,39 @@ ${
         shrink: SeqAt[],        // s442: the SHRINK places its sequence type grants (RULED S442 grow/shrink split)
         vals: ValInfo[],        // s444 Phase B: its validators, as the bootstrap honors them (their HTML-native lowering)
         valsWritten: int,       // s449: how many validators the source wrote (a refused one is absent from `vals`)
+        origin: TypeOrigin,     // s462: where `ty` came from (§66.3 rules 3, 5–10) — what the typer reports
     }
+
+    // s462 — O35(d), RULED S462 ("go on the package", SPEC §66.3 rules 5–10).
+    // Where a field's type came from, decided in phase A (ownOrigin) and
+    // REPORTED by the typer (originReport — after every other pass, so a
+    // diagnostic already inside the initializer suppresses it: no cascade).
+    //   Written            — `:T` is written, and the initializer is provable
+    //   WrittenUnproven    — `:T` over an initializer whose value is unresolvable
+    //                        (rule 10, E-DECL-TYPE-UNPROVEN)
+    //   Literal            — inferred from a literal (rule 3, rule 5 (a))
+    //   Inferred           — inferred from a non-literal member of the set (rule 5)
+    //   Failed             — outside the set (rule 7, E-DECL-TYPE-NOT-INFERABLE)
+    //   Cyclic             — on an inference cycle (rule 8): silent when every
+    //                        member is derived (E-DERIVED-CIRCULAR-DEP owns it)
+    //   Boundary           — non-literal, unannotated, and persist= / export
+    //                        (rule 9, E-DECL-TYPE-REQUIRED-AT-BOUNDARY)
+    //   Blamed             — another diagnostic owns it (a refused type, a
+    //                        cell that itself failed, a mis-linked callee)
+    export type TypeOrigin:enum = {
+        Written,
+        WrittenUnproven(why: string, at: CalleeAt),
+        Literal,
+        Inferred,
+        Failed(why: string, at: CalleeAt),
+        Cyclic(names: string[]),
+        Boundary(where: string),
+        Blamed,
+    }
+    // s462 fix round 1 (F5): the function a failed proof stands in ("" file —
+    // none). An Error already inside that function (a refused construct)
+    // owns the failure: the own-value code is not a second report.
+    export type CalleeAt:struct = { file: string, start: int, end: int }
 
     // s444 Phase B (dpa-058, RULED S442 (2)) — one validator of a field and its
     // HTML-native lowering (`required`, `minlength` / `maxlength`, `min` /
@@ -1927,7 +1959,8 @@ ${
     // An own-value type from its literal when no annotation is written (§66.3 rule 3).
     type RMaybeType:struct = { t: Type | not, st: AS }
 
-    fn inferredType(v: AAttrValue) -> Type | not {
+    // The literal an initializer IS (§66.3 rule 3; rule 5 (a)), or `not`.
+    fn literalOf(v: AAttrValue) -> Type | not {
         return match v {
             .Bare(e: e) :> literalType(e)
             .Paren(e: e) :> literalType(e)
@@ -1937,13 +1970,18 @@ ${
         }
     }
 
+    // s462 (dpa-065 D3): only a `-` before a numeric literal is a literal —
+    // `(!0)` is not an `int` (it is `!` over an `int`, refused by the typer).
+    // s462 (§66.3 rule 5 (a)): a non-empty `[…]` of scalar literals of one
+    // base type is a literal (`[1, 2, 3]` → `int[]`).
     fn literalType(e: AExpr) -> Type | not {
         const k: AExprK = e.k
         return match k {
             .Num(raw: r) :> numType(r)
             .Str(v: s) :> Type.Str
             .Bool(v: b) :> Type.Bool
-            .Unary(op: o, e: x) :> literalType(x)
+            .Unary(op: o, e: x) :> negLiteralType(o, x)
+            .ArrayLit(elems: es) :> seqLiteralType(es)
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -1955,13 +1993,65 @@ ${
             .Binary(op: o) :> not
             .Ternary(test: t) :> not
             .Assign(target: t) :> not
-            .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+        }
+    }
+
+    fn negLiteralType(o: UnOp, x: AExpr) -> Type | not {
+        if (o != UnOp.Neg) return not
+        const t: Type | not = literalType(x)
+        if (t is not) return not
+        if (isNumericKind(t)) return t
+        return not
+    }
+
+    // A non-empty `[…]` whose elements are all SCALAR literals of one base
+    // type (`int` with `number` → `number`); `not` otherwise ([] is O35(b)).
+    fn seqLiteralType(es: AExpr[]) -> Type | not {
+        if (es.length == 0) return not
+        let acc: Type | not = not
+        for (const e of es) {
+            const t: Type | not = literalType(e)
+            if (t is not) return not
+            if (kindOf(t) == 5) return not
+            if (acc is not) {
+                acc = t
+            } else {
+                const j: Type | not = joinBase(acc, t)
+                if (j is not) return not
+                acc = j
+            }
+        }
+        if (acc is not) return not
+        return Type.Seq(acc, fixedSeq())
+    }
+
+    // A sequence type with no grant (`T[]`, §66.12.1 — omission is fully constrained).
+    fn fixedSeq() -> SeqGrants { return { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false } }
+
+    // Two members' shared base type: the same type, or `number` for two numbers.
+    fn joinBase(a: Type, b: Type) -> Type | not {
+        if (sameType(a, b)) return a
+        if (isNumericKind(a) && isNumericKind(b)) return Type.Num
+        return not
+    }
+
+    // §66.3 rule 6: the BASE type — no grants on a sequence (no singleton or
+    // refinement exists in the bootstrap's Type). `T | not` stays `T | not`.
+    fn baseOf(t: Type) -> Type {
+        return match t {
+            .Seq(elem: e) :> Type.Seq(baseOf(e), fixedSeq())
+            .Maybe(inner: i) :> Type.Maybe(baseOf(i))
+            .Int :> t
+            .Num :> t
+            .Str :> t
+            .Bool :> t
+            .Named(sym: s) :> t
         }
     }
 
@@ -1982,6 +2072,869 @@ ${
         return p == "x" || p == "X" || p == "b" || p == "B" || p == "o" || p == "O"
     }
 
+    // =========================================================================
+    // s462 — OWN-VALUE TYPES (O35(d), RULED S462 "go on the package"; SPEC
+    // §66.3 rules 5–10; dd own-value-type-annotation-o35d-dpa-065).
+    //
+    // "Within a file, a non-literal own value's type is INFERRED from its
+    // initializer" — from the SPEC-LISTED set and nothing beyond it (whether a
+    // program is legal must not depend on which compiler runs it, dd §3):
+    //   (a) a literal (rule 3's scalars, `-` before a number, `[…]` of them);
+    //   (b) a typed `@ref` — a cell whose type is written or itself inferred,
+    //       or a declaration (its shared instance, §66.7.1);
+    //   (c) arithmetic, (d) comparison, (e) ternary, (f) `.length` over members;
+    //   (g) a call of a function with a DECLARED or INFERRED-AND-PROVEN return
+    //       (no `->`, not `!`, not server-placed, `return` on every path, every
+    //       returned expression a member — its parameters typed by their
+    //       annotations, never a local — and of one base type).
+    // The type is the BASE type (rule 6). Outside the set: a hard error,
+    // reported by the typer (originReport — E-DECL-TYPE-NOT-INFERABLE), so a
+    // diagnostic already inside the initializer suppresses it (no cascade).
+    //
+    // `Inf.kind`: 0 a member · 1 outside the set · 2 unresolved (a call whose
+    // return is neither declared nor proven, an unannotated parameter — rule
+    // 10's "cannot resolve") · 3 blamed (another diagnostic owns it) · 4 on a
+    // cycle (`cyc`: the cells on it, rule 8).
+    // =========================================================================
+    type Inf:struct = { ty: Type | not, kind: int, why: string, cyc: string[], at: CalleeAt }
+    // A program cell the table is built over (rule 5 (b)'s "cell").
+    type OwnSrc:struct = { name: string, aty: AType | not, init: AAttrValue }
+    type OwnT:struct = { name: string, ty: Type | not, origin: TypeOrigin }
+    // One name in scope inside a function body, innermost LAST (fix round 1,
+    // F1): a parameter (`param`), a local, a `given` binding, an arm's binder.
+    // `ty` `not` = its type is not written and not determined.
+    type ParamT:struct = { name: string, ty: Type | not, param: boolean }
+    // `st` is only read (resolveType's diagnostics are DISCARDED here — the
+    // binder reports each written type once, where it stands). `res` (fix
+    // round 1, F2): RESOLVE mode — is the value's type DETERMINED (rule 5 (g)'s
+    // proven return, rule 10)? — rather than MEMBERSHIP mode (is the
+    // initializer in rule 5's set?). Resolve mode also reads a comparison, `!`,
+    // `is given` / `is not` as `bool` whatever their operands (`&&` / `||` only
+    // over two `bool`s — N1), and a member path / an owner-scoped `as=` handle
+    // through declared types (N2). What it proves is SPEC §66.3 rule 5's list. `types` / `decls` / `handles`: the
+    // declared struct and declaration fields a member path reads.
+    // `hscope` (fix round 2, N2): the OWNER whose `as=` handles a bare `@h`
+    // may name here — the program's nid inside a program-file function or a
+    // program cell's initializer (the binder's scope there), -1 elsewhere (no
+    // handle is read: an unresolved one is simply not determined). `prog` /
+    // `progFile`: the program's nid and file.
+    type InferCx:struct = { te: TypeEnv, fns: FnSrc[], st: AS, srcs: OwnSrc[], res: boolean,
+                            types: TypeInfo[], decls: DeclStub[], handles: HandleInfo[],
+                            hscope: int, prog: int, progFile: string }
+    type RInf:struct = { r: Inf, done: OwnT[] }
+    type ROwn:struct = { t: OwnT, done: OwnT[] }
+    // A `return` and the names in scope where it stands.
+    type RetAt:struct = { e: AExpr | not, sc: ParamT[] }
+    type RRets:struct = { rs: RetAt[], done: OwnT[] }
+
+    fn noCallee() -> CalleeAt { return { file: "", start: -1, end: -1 } }
+    fn infOk(t: Type) -> Inf { return { ty: t, kind: 0, why: "", cyc: [], at: noCallee() } }
+    fn infOut(why: string) -> Inf { return { ty: not, kind: 1, why: why, cyc: [], at: noCallee() } }
+    fn infUnres(why: string) -> Inf { return { ty: not, kind: 2, why: why, cyc: [], at: noCallee() } }
+    fn infBlamed() -> Inf { return { ty: not, kind: 3, why: "", cyc: [], at: noCallee() } }
+    fn infCycle(names: string[]) -> Inf { return { ty: not, kind: 4, why: "", cyc: names, at: noCallee() } }
+    fn rinf(r: Inf, done: OwnT[]) -> RInf { return { r: r, done: done } }
+    // the same failure, standing in function `af` (when it names none yet)
+    fn infIn(r: Inf, file: string, af: AFn) -> Inf {
+        if (r.at.file != "") return r
+        return { ty: r.ty, kind: r.kind, why: r.why, cyc: r.cyc, at: { file: file, start: af.span.start, end: af.span.end } }
+    }
+    fn withRes(cx: InferCx, res: boolean) -> InferCx {
+        return { te: cx.te, fns: cx.fns, st: cx.st, srcs: cx.srcs, res: res, types: cx.types, decls: cx.decls, handles: cx.handles,
+                 hscope: cx.hscope, prog: cx.prog, progFile: cx.progFile }
+    }
+    fn withHscope(cx: InferCx, h: int) -> InferCx {
+        return { te: cx.te, fns: cx.fns, st: cx.st, srcs: cx.srcs, res: cx.res, types: cx.types, decls: cx.decls, handles: cx.handles,
+                 hscope: h, prog: cx.prog, progFile: cx.progFile }
+    }
+
+    fn fileOfFn(cx: InferCx, af: AFn) -> string {
+        for (const f of cx.fns) {
+            if (f.f.nid == af.nid) return f.info.file
+        }
+        return ""
+    }
+
+    fn programNid(ds: DeclStub[]) -> int {
+        for (const d of ds) {
+            if (d.isProgram) return d.nid
+        }
+        return -1
+    }
+
+    // N1: `a && b` / `a || b` is a determined `bool` only when both operands
+    // are; an unresolved operand is unresolved (rule 10 reports it), any other
+    // operand leaves the value undetermined (JavaScript returns an operand).
+    fn andOrInf(a: Inf, b: Inf, o: BinOp) -> Inf {
+        const bad: Inf = worse(a, b)
+        if (bad.kind >= 2) return bad
+        if (bad.kind == 1) return infUnres(binWord(o) + " over an operand whose type is not determined — its value is an operand, not a `bool`")
+        const x: Type | not = a.ty
+        const y: Type | not = b.ty
+        if (x is given && y is given && kindOf(x) == 3 && kindOf(y) == 3) return infOk(Type.Bool)
+        return infUnres(binWord(o) + " over a non-`bool` operand — its value is that operand, not a `bool`")
+    }
+
+    // Of two results, the one that decides the report: blamed > cycle >
+    // unresolved > outside > a member.
+    fn worse(a: Inf, b: Inf) -> Inf {
+        if (infRank(b) > infRank(a)) return b
+        return a
+    }
+
+    fn infRank(r: Inf) -> int {
+        if (r.kind == 3) return 4
+        if (r.kind == 4) return 3
+        if (r.kind == 2) return 2
+        if (r.kind == 1) return 1
+        return 0
+    }
+
+    // The program's own values (the declarations directly in its body).
+    fn programSrcs(ds: DeclStub[]) -> OwnSrc[] {
+        let out: OwnSrc[] = []
+        for (const d of ds) {
+            const p: AProgram | not = d.p
+            if (d.isProgram && p is given) {
+                for (const it of p.items) {
+                    for (const x of declsOfItem(it)) {
+                        if (!isNestedUserDecl(x)) out = out.concat([{ name: x.name, aty: x.ty, init: x.own }])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // Every `as=` handle of every declaration's markup (fix round 1, F2: a
+    // member path through a handle, `@country.value`, is a declared type).
+    // The handle pass's own diagnostics are phase A's (the declaration loop);
+    // this read discards them.
+    fn allHandles(ds: DeclStub[], st: AS) -> HandleInfo[] {
+        let out: HandleInfo[] = []
+        for (const d of ds) {
+            out = out.concat(handlesIn(ds, rendersNodes(d), { owner: d.nid, conditional: false, file: d.file }, st).hs)
+        }
+        return out
+    }
+
+    // The table of every program cell's type and origin (phase A, before any
+    // field is built — a field's `@ref` resolves against it).
+    fn ownTable(cx: InferCx) -> OwnT[] {
+        let done: OwnT[] = []
+        for (const s of cx.srcs) { done = ownResolve(cx, s.name, [], done).done }
+        return done
+    }
+
+    fn srcIndex(srcs: OwnSrc[], name: string) -> int {
+        let i = 0
+        for (const s of srcs) {
+            if (s.name == name) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn ownFound(done: OwnT[], name: string) -> OwnT | not {
+        for (const t of done) {
+            if (t.name == name) return t
+        }
+        return not
+    }
+
+    // One program cell, resolved (memoized in `done`). `stack`: the cells
+    // ("@x") and functions ("f()") whose inference is in progress. A cell's
+    // own type is always rule 5's (MEMBERSHIP mode), whoever asks.
+    fn ownResolve(cx0: InferCx, name: string, stack: string[], done: OwnT[]) -> ROwn {
+        const found: OwnT | not = ownFound(done, name)
+        if (found is given) return { t: found, done: done }
+        const cx: InferCx = withRes(cx0, false)
+        const s: OwnSrc = cx.srcs[srcIndex(cx.srcs, name)]
+        const aty: AType | not = s.aty
+        if (aty is given) {
+            // a WRITTEN type answers a reader at once — a reader never makes the
+            // annotated cell's own initializer part of its inference
+            const rt: RType = resolveType(cx.te, aty, cx.st)
+            let t: OwnT = { name: name, ty: rt.t, origin: TypeOrigin.Written }
+            if (rt.unresolved) t = { name: name, ty: not, origin: TypeOrigin.Blamed }
+            return { t: t, done: done.concat([t]) }
+        }
+        const r: RInf = inferValue(cx, s.init, stack.concat(["@" + name]), [], done)
+        const t2: OwnT = { name: name, ty: r.r.ty, origin: originOf(r.r, name, literalInit(cx, s.init)) }
+        return { t: t2, done: r.done.concat([t2]) }
+    }
+
+    fn originOf(r: Inf, name: string, isLiteral: boolean) -> TypeOrigin {
+        if (r.kind == 0) {
+            if (isLiteral) return TypeOrigin.Literal
+            return TypeOrigin.Inferred
+        }
+        if (r.kind == 4) {
+            if (r.cyc.indexOf(name) >= 0) return TypeOrigin.Cyclic(r.cyc)
+            return TypeOrigin.Blamed
+        }
+        if (r.kind == 3) return TypeOrigin.Blamed
+        return TypeOrigin.Failed(r.why, r.at)
+    }
+
+    fn inferValue(cx: InferCx, v: AAttrValue, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        return match v {
+            .Quoted(v: s) :> rinf(infOk(Type.Str), done)
+            .NoValue :> rinf(infOut("it has neither a type nor a value"), done)
+            .Braced(b: b) :> rinf(infOut("a `{ … }` block"), done)
+            .Bare(e: e) :> inferE(cx, e, stack, ps, done)
+            .Paren(e: e) :> inferE(cx, e, stack, ps, done)
+        }
+    }
+
+    fn inferE(cx: InferCx, e: AExpr, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        const lt: Type | not = literalType(e)
+        if (lt is given) return rinf(infOk(lt), done)
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> inferAt(cx, n, stack, done)
+            .Name(name: n) :> rinf(scopeInf(ps, n), done)
+            .Member(obj: o, name: n) :> inferMember(cx, o, n, stack, ps, done)
+            .Call(callee: c) :> inferCall(cx, c, stack, done)
+            .Unary(op: o, e: x) :> inferUnary(cx, o, x, stack, ps, done)
+            .Binary(op: o, l: l, r: r) :> inferBinary(cx, o, l, r, stack, ps, done)
+            .Ternary(test: t, yes: y, no: n) :> inferTernary(cx, t, y, n, stack, ps, done)
+            .Recovered :> rinf(infBlamed(), done)
+            .Num(raw: r) :> rinf(infOk(numType(r)), done)
+            .Str(v: s) :> rinf(infOk(Type.Str), done)
+            .Bool(v: b) :> rinf(infOk(Type.Bool), done)
+            .NotLit :> rinf(infOut("`not` (an absent value has no type of its own — O35(b))"), done)
+            .Variant(name: n) :> rinf(infOut("the bare variant `." + n + "` (O35(b))"), done)
+            .AtItem :> rinf(infOut("`@.`"), done)
+            .Assign(target: t) :> rinf(infOut("an assignment"), done)
+            .ArrayLit(elems: es) :> rinf(infOut("a sequence literal that is not literals of one type (`[]` and compound elements are O35(b))"), done)
+            .ObjectLit(props: ps2) :> rinf(infOut("an object literal (O35(b))"), done)
+            .Spread(e: sx) :> rinf(infOut("a spread"), done)
+            .Index(obj: ix) :> rinf(infOut("an index `[…]`"), done)
+            .Lambda(params: lp) :> rinf(infOut("a function value"), done)
+            .Sql(q: q) :> rinf(infOut("a query"), done)
+            .Handled(h: x) :> rinf(infOut("a handled failable value"), done)
+        }
+    }
+
+    // A bare name inside a function body, through the function's REAL scopes
+    // (innermost last — a shadowing local, `given` binding or arm binder hides
+    // an outer name or a parameter; fix round 1, F1). A parameter is typed by
+    // its written type; an UNANNOTATED parameter is refused by the bootstrap
+    // whole (E-BOOTSTRAP-UNSUPPORTED), so it is blamed, not reported again
+    // (F5). Any other binding whose type is not determined is unresolved.
+    fn scopeInf(ps: ParamT[], n: string) -> Inf {
+        let i = ps.length - 1
+        while (i >= 0) {
+            const p: ParamT = ps[i]
+            if (p.name == n) {
+                const t: Type | not = p.ty
+                if (t is given) return infOk(baseOf(t))
+                if (p.param) return infBlamed()
+                return infUnres("`" + n + "`, a binding whose type is neither written nor determined")
+            }
+            i = i - 1
+        }
+        return infOut("the name `" + n + "` (not a typed `@` reference)")
+    }
+
+    fn inferAt(cx: InferCx, n: string, stack: string[], done: OwnT[]) -> RInf {
+        const key: string = "@" + n
+        const at: int = stack.indexOf(key)
+        if (at >= 0) {
+            let seg: string[] = []
+            let viaFn = false
+            let i = at
+            while (i < stack.length) {
+                const s: string = stack[i]
+                if (s.substring(0, 1) == "@") {
+                    seg = seg.concat([s.substring(1)])
+                } else {
+                    viaFn = true
+                }
+                i = i + 1
+            }
+            // through a function's return: that return is not proven (rule 5 (g))
+            if (viaFn) return rinf(infUnres("`@" + n + "` is read back through a function's return"), done)
+            return rinf(infCycle(seg), done)
+        }
+        if (srcIndex(cx.srcs, n) >= 0) {
+            const ro: ROwn = ownResolve(cx, n, stack, done)
+            return rinf(refInf(ro.t, stack), ro.done)
+        }
+        if (cx.res) {
+            // N2: only a handle of the scope's OWNER, and only when the name is
+            // UNIQUE there (the binder's lookup for a program-level body); any
+            // other handle reading is not determined
+            if (cx.hscope >= 0) {
+                let hit: HandleInfo | not = not
+                let count = 0
+                for (const h of cx.handles) {
+                    if (h.name == n && h.owner == cx.hscope) {
+                        hit = h
+                        count = count + 1
+                    }
+                }
+                // bound twice in one scope: E-HANDLE-REDECLARE (the scope pass) owns it
+                if (count > 1) return rinf(infBlamed(), done)
+                if (hit is given) {
+                    if (hit.conditional) return rinf(infOk(Type.Maybe(Type.Named(hit.target))), done)
+                    return rinf(infOk(Type.Named(hit.target)), done)
+                }
+            }
+        }
+        let i2 = 0
+        while (i2 < cx.te.declNames.length) {
+            if (cx.te.declNames[i2] == n) return rinf(infOk(Type.Named(cx.te.declSyms[i2])), done)
+            i2 = i2 + 1
+        }
+        // E-SCOPE-001 (the binder's) — the typer finds it inside the initializer
+        return rinf(infOut("`@" + n + "`, which names no cell"), done)
+    }
+
+    // A read of a resolved cell: its base type; a cell that failed is its own
+    // diagnostic's (blamed) — unless it is on a cycle this read is part of.
+    fn refInf(t: OwnT, stack: string[]) -> Inf {
+        const ty: Type | not = t.ty
+        if (ty is given) return infOk(baseOf(ty))
+        const o: TypeOrigin = t.origin
+        return match o {
+            .Cyclic(names: ns) :> cycleRead(ns, stack)
+            .Written :> infBlamed()
+            .WrittenUnproven(why: w) :> infBlamed()
+            .Literal :> infBlamed()
+            .Inferred :> infBlamed()
+            .Failed(why: w) :> infBlamed()
+            .Boundary(where: b) :> infBlamed()
+            .Blamed :> infBlamed()
+        }
+    }
+
+    fn cycleRead(ns: string[], stack: string[]) -> Inf {
+        for (const n of ns) {
+            if (stack.indexOf("@" + n) >= 0) return infCycle(ns)
+        }
+        return infBlamed()
+    }
+
+    // Rule 5 (a)'s literals, the qualified variant included — what rule 9's
+    // boundary exemption ("a literal own value is unaffected") reads.
+    fn literalInit(cx: InferCx, v: AAttrValue) -> boolean {
+        if (literalOf(v) is given) return true
+        const e: AExpr | not = valueExpr(v)
+        if (e is not) return false
+        const mo: AExpr | not = memberObj(e)
+        if (mo is not) return false
+        return qualifiedVariant(cx, mo, memberName(e.k)) is given
+    }
+
+    // Rule 5 (a): a QUALIFIED variant `E.V` names its enum — a literal of `E`
+    // (the bare `.V` is O35(b), outside the set). `not` when `e` is not one.
+    fn qualifiedVariant(cx: InferCx, o: AExpr, n: string) -> Type | not {
+        const en: string = exprName(o)
+        if (en == "") return not
+        const s: TypeStub | not = stubNamed(cx.te, en)
+        if (s is not) return not
+        if (!s.isEnum) return not
+        for (const m of s.members) {
+            if (m.hint == n) return Type.Named(s.sym)
+        }
+        return not
+    }
+
+    // RESOLVE mode (F2): the declared type of field `n` of a value typed `t` —
+    // a struct's field (its written type), or a declaration's attribute / child
+    // field (its written type, or its literal's); `not` when undetermined.
+    fn declaredFieldType(cx: InferCx, t: Type, n: string) -> Type | not {
+        const s: Sym | not = namedSym(t)
+        if (s is not) return not
+        const ti: TypeInfo | not = typeInfoOf(cx.types, s)
+        if (ti is given) {
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is not) return not
+            for (const f of fs) {
+                if (f.sym.hint == n) return f.ty
+            }
+            return not
+        }
+        for (const ds of cx.decls) {
+            const d: ADecl | not = ds.d
+            if (ds.sym.id == s.id && d is given) {
+                for (const a of d.attrs) {
+                    if (a.name == n) return writtenOrLiteral(cx, a.ty, a.dflt)
+                }
+                for (const c of childFields(d.body)) {
+                    if (c.name == n) return writtenOrLiteral(cx, c.ty, c.own)
+                }
+            }
+        }
+        return not
+    }
+
+    fn namedSym(t: Type) -> Sym | not {
+        return match t {
+            .Named(sym: s) :> s
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Seq(elem: e) :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
+    fn writtenOrLiteral(cx: InferCx, aty: AType | not, v: AAttrValue) -> Type | not {
+        if (aty is given) {
+            const rt: RType = resolveType(cx.te, aty, cx.st)
+            if (rt.unresolved) return not
+            return rt.t
+        }
+        return literalOf(v)
+    }
+
+    fn inferMember(cx: InferCx, o: AExpr, n: string, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        const qv: Type | not = qualifiedVariant(cx, o, n)
+        if (qv is given) return rinf(infOk(qv), done)
+        const r: RInf = inferE(cx, o, stack, ps, done)
+        if (r.r.kind >= 3) return r
+        const t: Type | not = r.r.ty
+        if (n != "length") {
+            if (cx.res) {
+                if (r.r.kind != 0) return r
+                if (t is given) {
+                    const ft: Type | not = declaredFieldType(cx, t, n)
+                    if (ft is given) return rinf(infOk(baseOf(ft)), r.done)
+                }
+            }
+            return rinf(infOut("the member path `." + n + "`"), r.done)
+        }
+        if (t is not) return r
+        const kd: int = kindOf(t)
+        if (kd == 2 || kd == 5) return rinf(infOk(Type.Int), r.done)
+        return rinf(infOut("`.length` of a `" + typeName(t) + "`"), r.done)
+    }
+
+    fn inferUnary(cx: InferCx, o: UnOp, x: AExpr, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        const r: RInf = inferE(cx, x, stack, ps, done)
+        if (o != UnOp.Neg) {
+            if (cx.res) return rinf(infOk(Type.Bool), r.done)      // `!`, `is given`, `is not` are `bool`
+            if (r.r.kind >= 3) return r
+            return rinf(infOut(unaryWord(o) + " (a logical operator is not in the inferable set)"), r.done)
+        }
+        if (r.r.kind != 0) return r
+        const t: Type | not = r.r.ty
+        if (t is given && isNumericKind(t)) return rinf(infOk(t), r.done)
+        return rinf(infOut("unary `-` of a non-number"), r.done)
+    }
+
+    fn unaryWord(o: UnOp) -> string {
+        return match o {
+            .Not :> "`!`"
+            .Neg :> "`-`"
+            .IsGiven :> "`is given`"
+            .IsNot :> "`is not`"
+        }
+    }
+
+    fn inferBinary(cx: InferCx, o: BinOp, l: AExpr, r: AExpr, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        const rl: RInf = inferE(cx, l, stack, ps, done)
+        const rr: RInf = inferE(cx, r, stack, ps, rl.done)
+        const d: OwnT[] = rr.done
+        const isLogic: boolean = o == BinOp.And || o == BinOp.Or || o == BinOp.Pipe
+        const cmp: boolean = o == BinOp.Eq || o == BinOp.Ne || o == BinOp.Lt || o == BinOp.Le || o == BinOp.Gt || o == BinOp.Ge
+        // RESOLVE mode: a comparison or `&&` / `||` is a `bool` whatever its
+        // operands (the typer's answer, F2) — an operand's own fault is the
+        // typer's to report
+        // N1 (fix round 2): `&&` / `||` lower to JavaScript's, which returns an
+        // OPERAND — they are a determined `bool` only when BOTH operands are
+        if (cx.res && cmp) return rinf(infOk(Type.Bool), d)
+        const isAndOr: boolean = o == BinOp.And || o == BinOp.Or
+        if (cx.res && isAndOr) return rinf(andOrInf(rl.r, rr.r, o), d)
+        if (isLogic) {
+            const bad: Inf = worse(rl.r, rr.r)
+            if (bad.kind >= 3) return rinf(bad, d)
+            return rinf(infOut(binWord(o) + " (a logical operator is not in the inferable set)"), d)
+        }
+        if (rl.r.kind != 0 || rr.r.kind != 0) return rinf(worse(rl.r, rr.r), d)
+        const a: Type | not = rl.r.ty
+        const b: Type | not = rr.r.ty
+        if (a is not || b is not) return rinf(infBlamed(), d)
+        if (cmp) return rinf(infOk(Type.Bool), d)
+        const nums: boolean = isNumericKind(a) && isNumericKind(b)
+        const isDiv: boolean = o == BinOp.Div
+        if (isDiv) {
+            if (nums) return rinf(infOk(Type.Num), d)
+        } else if (nums) {
+            if (kindOf(a) == 0 && kindOf(b) == 0) return rinf(infOk(Type.Int), d)
+            return rinf(infOk(Type.Num), d)
+        }
+        const isAdd: boolean = o == BinOp.Add
+        if (isAdd && kindOf(a) == 2 && kindOf(b) == 2) return rinf(infOk(Type.Str), d)
+        return rinf(infOut(binWord(o) + " over a `" + typeName(a) + "` and a `" + typeName(b) + "`"), d)
+    }
+
+    fn binWord(o: BinOp) -> string {
+        return match o {
+            .Add :> "`+`"
+            .Sub :> "`-`"
+            .Mul :> "`*`"
+            .Div :> "`/`"
+            .Mod :> "`%`"
+            .Lt :> "`<`"
+            .Le :> "`<=`"
+            .Gt :> "`>`"
+            .Ge :> "`>=`"
+            .Eq :> "`==`"
+            .Ne :> "`!=`"
+            .And :> "`&&`"
+            .Or :> "`||`"
+            .Pipe :> "`|`"
+        }
+    }
+
+    fn inferTernary(cx: InferCx, t: AExpr, y: AExpr, n: AExpr, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        const rt: RInf = inferE(cx, t, stack, ps, done)
+        const ry: RInf = inferE(cx, y, stack, ps, rt.done)
+        const rn: RInf = inferE(cx, n, stack, ps, ry.done)
+        const d: OwnT[] = rn.done
+        // RESOLVE mode: the test's own fault is the condition rule's (E-COND-NOT-BOOLEAN)
+        let testR: Inf = rt.r
+        if (cx.res) testR = infOk(Type.Bool)
+        if (testR.kind != 0 || ry.r.kind != 0 || rn.r.kind != 0) return rinf(worse(worse(testR, ry.r), rn.r), d)
+        const tt: Type | not = testR.ty
+        const a: Type | not = ry.r.ty
+        const b: Type | not = rn.r.ty
+        if (tt is not || a is not || b is not) return rinf(infBlamed(), d)
+        if (kindOf(tt) != 3) return rinf(infOut("a ternary whose test is a `" + typeName(tt) + "`"), d)
+        const j: Type | not = joinBase(a, b)
+        if (j is given) return rinf(infOk(j), d)
+        return rinf(infOut("a ternary whose arms are a `" + typeName(a) + "` and a `" + typeName(b) + "`"), d)
+    }
+
+    // Rule 5 (g) — only the call's RETURN decides; its arguments are not judged.
+    fn inferCall(cx: InferCx, callee: AExpr, stack: string[], done: OwnT[]) -> RInf {
+        const n: string = exprName(callee)
+        if (n == "") {
+            // rule 5 (g): a payload variant's construction `E.V(…)` — its type is `E`, declared
+            const mc: MethodCall | not = memberCall(callee)
+            if (mc is given) {
+                const qv: Type | not = qualifiedVariant(cx, mc.obj, mc.method)
+                if (qv is given) return rinf(infOk(qv), done)
+                return rinf(infOut("a method call"), done)
+            }
+            return rinf(infOut("a call of a computed function"), done)
+        }
+        let found: FnSrc | not = not
+        for (const f of cx.fns) {
+            if (f.info.name == n) {
+                if (found is not) {
+                    found = f
+                } else if (f.info.file != found.info.file) {
+                    return rinf(infBlamed(), done)     // mis-linked: refused where declared (guard (ii))
+                }
+            }
+        }
+        if (found is not) return rinf(infOut("`" + n + "(…)`, which is not a function this program declares"), done)
+        const fi: FnInfo = found.info
+        const ret: Type | not = fi.ret
+        if (ret is given) return rinf(infOk(baseOf(ret)), done)
+        const at: AType | not = found.f.ret
+        if (at is given) {
+            if (isVoidType(at)) return rinf(infOut("`" + n + "(…)`, which returns no value"), done)
+            return rinf(infBlamed(), done)            // a written return type that was refused (E-TYPE-UNKNOWN / a parse error)
+        }
+        if (fi.failable) return rinf(infUnres("`" + n + "(…)` is failable (§19.4), and a failable function has no success type to infer"), done)
+        // a server call in a value position is §13.7's E-VALUE-SERVER-CALL
+        // (placePass, after the typer — so condBlamed cannot see it): blamed
+        if (fi.serverOwn) return rinf(infBlamed(), done)
+        const key: string = n + "()"
+        if (stack.indexOf(key) >= 0) return rinf(infUnres("`" + n + "(…)`, whose return is not declared and depends on itself"), done)
+        const r: RInf = ownProvenReturn(cx, found.f, stack.concat([key]), done)
+        return rinf(infIn(r.r, fi.file, found.f), r.done)
+    }
+
+    // Rule 5 (g)'s INFERRED-AND-PROVEN return (fix round 1, F2: in RESOLVE
+    // mode — every returned value's type DETERMINED, as §66.3 rule 5 lists it:
+    // a typed local, a member path through declared types, a comparison;
+    // the ruled fail-closed core stays — an unannotated parameter, recursion, a
+    // non-total body, a failable or server function). Names resolve through
+    // the body's real scopes (F1, retsIn). (The client-call plan's
+    // `provenReturn` is a different question: a server function's success type
+    // for the wire, §57.4 R10, read off the typer's proven types.)
+    fn ownProvenReturn(cx0: InferCx, af: AFn, stack: string[], done: OwnT[]) -> RInf {
+        // a program-file function reads the program's handles (the binder's
+        // scope for a program-level body); a library function reads none
+        let hs: int = -1
+        if (cx0.progFile == fileOfFn(cx0, af)) hs = cx0.prog
+        const cx: InferCx = withHscope(withRes(cx0, true), hs)
+        const who: string = "`" + af.name + "(…)` declares no return type, and its return is not proven: "
+        if (!exits(af.body)) return rinf(infUnres(who + "it does not end in `return` on every path"), done)
+        let ps: ParamT[] = []
+        for (const p of af.params) {
+            let pt: Type | not = not
+            const at: AType | not = p.ty
+            if (at is given) {
+                const rt: RType = resolveType(cx.te, at, cx.st)
+                if (!rt.unresolved) pt = rt.t
+            }
+            ps = ps.concat([{ name: p.name, ty: pt, param: true }])
+        }
+        const rr: RRets = retsIn(cx, af.body, ps, stack, done)
+        let d: OwnT[] = rr.done
+        let acc: Type | not = not
+        for (const site of rr.rs) {
+            const e: AExpr | not = site.e
+            if (e is not) return rinf(infUnres(who + "a `return` carries no value"), d)
+            const r: RInf = inferE(cx, e, stack, site.sc, d)
+            d = r.done
+            if (r.r.kind == 3) return rinf(r.r, d)
+            const t: Type | not = r.r.ty
+            if (r.r.kind != 0 || t is not) return rinf({ ty: not, kind: 2, why: who + r.r.why, cyc: [], at: r.r.at }, d)
+            if (acc is not) {
+                acc = t
+            } else {
+                const j: Type | not = joinBase(acc, t)
+                if (j is not) return rinf(infUnres(who + "its returns are a `" + typeName(acc) + "` and a `" + typeName(t) + "`"), d)
+                acc = j
+            }
+        }
+        if (acc is not) return rinf(infUnres(who + "it never returns a value"), d)
+        return rinf(infOk(acc), d)
+    }
+
+    // ---- fix round 1, F1: the body's scopes ---------------------------------
+    // Every `return` of a block with the names in scope where it stands: a
+    // local (`let` / `const`) is in scope after it, in its block; a `given`
+    // binding in its body; an arm's binders in its arm block. A local's type
+    // is its written one, or — a `const` only — its initializer's DETERMINED
+    // type; a `let` without a type, a `given` binding over an undetermined
+    // subject and every arm binder are untyped (returning one is not proven).
+    // A lambda's body is not walked (its `return` is not the function's).
+    fn retsIn(cx: InferCx, b: ABlock, sc0: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
+        let sc: ParamT[] = sc0
+        let done: OwnT[] = done0
+        let out: RetAt[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const r: RRets = match k {
+                .Return(e: x) :> retsInMaybe(cx, x, sc, stack, done)
+                .If(cond: c, thenB: tb, elseB: eb) :> retsIf(cx, c, tb, eb, sc, stack, done)
+                .Given(name: n, subject: x, body: gb) :> retsGiven(cx, n, x, gb, sc, stack, done)
+                .Eval(e: x) :> retsInExpr(cx, x, sc, stack, done)
+                .Local(name: n, init: i) :> retsInExpr(cx, i, sc, stack, done)
+                .EffectStmt(w: w) :> noRets(done)
+                .Defer(body: db) :> noRets(done)
+                .Fail(f: x) :> noRets(done)
+            }
+            out = out.concat(r.rs)
+            done = r.done
+            const ret: AExpr | not = returnedExpr(k)
+            if (isReturn(k)) out = out.concat([{ e: ret, sc: sc }])
+            const lb: RBind = localBinding(cx, k, sc, stack, done)
+            done = lb.done
+            if (lb.b is given) sc = sc.concat([lb.b])
+        }
+        return { rs: out, done: done }
+    }
+
+    type RBind:struct = { b: ParamT | not, done: OwnT[] }
+
+    fn noRets(done: OwnT[]) -> RRets { return { rs: [], done: done } }
+    fn noBind(done: OwnT[]) -> RBind { return { b: not, done: done } }
+
+    fn localBinding(cx: InferCx, k: AStmtK, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
+        return match k {
+            .Local(name: n, mutable: m, ty: t, init: i) :> localOf(cx, n, m, t, i, sc, stack, done)
+            .Return(e: x) :> noBind(done)
+            .If(cond: c) :> noBind(done)
+            .Given(name: n) :> noBind(done)
+            .Eval(e: x) :> noBind(done)
+            .EffectStmt(w: w) :> noBind(done)
+            .Defer(body: db) :> noBind(done)
+            .Fail(f: x) :> noBind(done)
+        }
+    }
+
+    fn localOf(cx: InferCx, n: string, mutable: boolean, aty: AType | not, init: AExpr, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
+        if (aty is given) {
+            const rt: RType = resolveType(cx.te, aty, cx.st)
+            if (rt.unresolved) return { b: { name: n, ty: not, param: false }, done: done }
+            return { b: { name: n, ty: rt.t, param: false }, done: done }
+        }
+        if (mutable) return { b: { name: n, ty: not, param: false }, done: done }
+        const r: RInf = inferE(cx, init, stack, sc, done)
+        return { b: { name: n, ty: r.r.ty, param: false }, done: r.done }
+    }
+
+    fn isReturn(k: AStmtK) -> boolean {
+        return match k {
+            .Return(e: x) :> true
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: db) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn returnedExpr(k: AStmtK) -> AExpr | not {
+        return match k {
+            .Return(e: x) :> x
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: db) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    fn retsInMaybe(cx: InferCx, e: AExpr | not, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        if (e is not) return { rs: [], done: done }
+        return retsInExpr(cx, e, sc, stack, done)
+    }
+
+    fn retsIf(cx: InferCx, c: AExpr, tb: ABlock, eb: ABlock | not, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        const rc: RRets = retsInExpr(cx, c, sc, stack, done)
+        const rt: RRets = retsIn(cx, tb, sc, stack, rc.done)
+        if (eb is not) return { rs: rc.rs.concat(rt.rs), done: rt.done }
+        const re: RRets = retsIn(cx, eb, sc, stack, rt.done)
+        return { rs: rc.rs.concat(rt.rs).concat(re.rs), done: re.done }
+    }
+
+    // `given n = subject :> { … }`: `n` is the subject narrowed (its `T`).
+    fn retsGiven(cx: InferCx, n: string, x: AExpr, gb: ABlock, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        const rx: RRets = retsInExpr(cx, x, sc, stack, done)
+        const r: RInf = inferE(cx, x, stack, sc, rx.done)
+        let ty: Type | not = r.r.ty
+        if (ty is given) ty = unMaybe(ty)
+        const rb: RRets = retsIn(cx, gb, sc.concat([{ name: n, ty: ty, param: false }]), stack, r.done)
+        return { rs: rx.rs.concat(rb.rs), done: rb.done }
+    }
+
+    // The `return`s inside an expression's handling-form arm blocks (they
+    // leave the function); an arm's binders are in scope in its block, untyped.
+    fn retsInExpr(cx: InferCx, e: AExpr, sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
+        const k: AExprK = e.k
+        if (isLambda(k)) return { rs: [], done: done0 }
+        let done: OwnT[] = done0
+        let out: RetAt[] = []
+        const h: AHandled | not = handledOf(k)
+        if (h is given) {
+            const rs: RRets = retsInExpr(cx, h.subject, sc, stack, done)
+            out = out.concat(rs.rs)
+            done = rs.done
+            for (const arm of handledArms(h)) {
+                const sc2: ParamT[] = sc.concat(armBinders(arm.pat))
+                const ab: AArmBody = arm.body
+                const ra: RRets = match ab {
+                    .ArmBlock(b: b) :> retsIn(cx, b, sc2, stack, done)
+                    .ArmExpr(e: x) :> retsInExpr(cx, x, sc2, stack, done)
+                }
+                out = out.concat(ra.rs)
+                done = ra.done
+            }
+            return { rs: out, done: done }
+        }
+        for (const x of exprKids(e)) {
+            const r: RRets = retsInExpr(cx, x, sc, stack, done)
+            out = out.concat(r.rs)
+            done = r.done
+        }
+        return { rs: out, done: done }
+    }
+
+    fn isLambda(k: AExprK) -> boolean {
+        return match k {
+            .Lambda(params: lp) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    fn armBinders(p: APat) -> ParamT[] {
+        return match p {
+            .PName(name: n, binds: bs) :> bindersOf(bs)
+            .PWild :> []
+            .PWhole(bind: b) :> bindersOf([b])
+            .PBare(bind: b) :> bindersOf([b])
+        }
+    }
+
+    fn bindersOf(bs: ABind[]) -> ParamT[] {
+        let out: ParamT[] = []
+        for (const b of bs) {
+            if (b.name != "_") out = out.concat([{ name: b.name, ty: not, param: false }])
+        }
+        return out
+    }
+
+    // A field's type origin when no type is written (§66.3 rules 3, 5, 7, 8).
+    // A program cell (`where` 2) reads the table; a child field infers over it.
+    // An ATTRIBUTE default is left as it was before S462 — O35(a) is OPEN
+    // (fix round 1, F7 (c)): a literal infers (rule 3), anything else has no
+    // type and reports nothing new (the bootstrap's parser refuses an untyped
+    // attribute whole).
+    fn ownOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, role: FieldRole, where: int) -> OwnT {
+        if (where == 2) {
+            const t: OwnT | not = ownFound(tab, name)
+            if (t is given) return t
+        }
+        const lit: Type | not = literalOf(init)
+        if (lit is given) return { name: name, ty: lit, origin: TypeOrigin.Literal }
+        const r: RInf = inferValue(cx, init, [], [], tab)
+        const isLit: boolean = literalInit(cx, init)
+        const isAttr: boolean = role == FieldRole.Attribute
+        if (isAttr && !isLit) return { name: name, ty: not, origin: TypeOrigin.Blamed }
+        return { name: name, ty: r.r.ty, origin: originOf(r.r, name, isLit) }
+    }
+
+    // Rule 10: a WRITTEN type over an initializer whose value's type cannot be
+    // resolved — judged in RESOLVE mode (F2: a comparison is a `bool`, a
+    // member path through declared types is resolved, whatever a sub-call is).
+    fn writtenOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, where: int) -> TypeOrigin {
+        let stack: string[] = []
+        if (where == 2) stack = ["@" + name]
+        let hs: int = -1
+        if (where == 2) hs = cx.prog
+        const r: RInf = inferValue(withHscope(withRes(cx, true), hs), init, stack, [], tab)
+        if (r.r.kind == 2) return TypeOrigin.WrittenUnproven(r.r.why, r.r.at)
+        return TypeOrigin.Written
+    }
+
+    // Rule 9: where an own value's type leaves the compile ("" — it does not).
+    // `server` (rule 9 (ii)) is NOT read: the bootstrap's parser refuses
+    // `server` on a declaration whole (E-BOOTSTRAP-UNSUPPORTED), and a second
+    // report on a refused construct would be a cascade. When `server` lands
+    // in the bootstrap, it joins here (boundaryReport already words it).
+    fn boundaryOf(exported: boolean, mods: AAttr[]) -> string {
+        if (attrNamed(mods, "persist") is given) return "persist"
+        if (exported) return "export"
+        return ""
+    }
+
     fn hasFlag(mods: AAttr[], name: string) -> boolean {
         for (const m of mods) {
             if (m.name == name) return true
@@ -1997,27 +2950,42 @@ ${
     // field stands — 0 an attribute (it has none, §66.4 rule 1), 1 a child
     // field of a user declaration, 2 a program cell (a top-level value — it
     // has the surface, §55.5.1, S447). Both 1 and 2 are honored.
+    // s462 (§66.3 rules 5–10): `ix` / `tab` — the own-value inference context
+    // and the program's table (ownTable); `bnd` — where the type leaves the
+    // compile (boundaryOf: "persist" / "server" / "export", or "").
     fn fieldOf(te: TypeEnv, g: TypeInfo[], nid: int, span: ASpan, name: string, isLet: boolean, exported: boolean,
-               aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, vals: AValidator[], where: int, st0: AS) -> RField {
+               aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, vals: AValidator[], where: int,
+               ix: InferCx, tab: OwnT[], bnd: string, st0: AS) -> RField {
         let st: AS = st0
         const rs: RSym = mint(st, name)
         st = rs.st
         let ty: Type = Type.Str
         let seqRep = false
         let resolved = true
+        let origin: TypeOrigin = TypeOrigin.Written
         if (aty is given) {
             const rt: RType = resolveType(te, aty, st)
             ty = rt.t
             resolved = !rt.unresolved     // r8: an unknown type name → untrusted
             st = rt.st
             seqRep = seqReplace(aty)
+            // rule 10 is ruled for OWN values (program cells, child fields); an
+            // attribute default's `:T` over an unprovable call is not judged
+            // here (the same hole — surfaced for a ruling, not widened into)
+            if (resolved && role == FieldRole.Child) origin = writtenOrigin(ix, tab, name, init, where)
         } else {
-            const inf: Type | not = inferredType(init)
+            // s462: inferred (§66.3 rule 3 / rule 5), or — outside the set — no
+            // type at all: the field is untrusted (nothing is checked against a
+            // type the program never had; the typer reports why, originReport)
+            const ot: OwnT = ownOrigin(ix, tab, name, init, role, where)
+            const inf: Type | not = ot.ty
             if (inf is given) {
                 ty = inf
             } else {
-                st = addDiag(st, te.file, span, "E-TYPE-ANNOTATION-REQUIRED", "`" + name + "` needs a type annotation (`" + name + ":Type=…`) — its value is not a literal the type can be inferred from (§66.3, ⚑ O35)")
+                resolved = false
             }
+            origin = ot.origin
+            if (bnd != "" && role == FieldRole.Child && !literalInit(ix, init)) origin = TypeOrigin.Boundary(bnd)
         }
         if (isLet && seqElem(ty) is given) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
@@ -2065,6 +3033,7 @@ ${
         const f: FieldInfo = {
             nid: nid, span: span, annotated: aty is given, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
             exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs, valsWritten: vals.length,
+            origin: origin,
         }
         return { f: f, st: st }
     }
@@ -2518,11 +3487,11 @@ ${
 
     // A user declaration's fields (L17): attributes in opener order, then child
     // fields in body order.
-    fn userFields(te: TypeEnv, g: TypeInfo[], d: ADecl, st0: AS) -> RFields {
+    fn userFields(te: TypeEnv, g: TypeInfo[], d: ADecl, ix: InferCx, tab: OwnT[], st0: AS) -> RFields {
         let st: AS = st0
         let out: FieldInfo[] = []
         for (const a of d.attrs) {
-            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, [], 0, st)
+            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, [], 0, ix, tab, "", st)
             out = out.concat([r.f])
             st = r.st
         }
@@ -2532,7 +3501,7 @@ ${
                 // inside N instances cannot be one instance.
                 st = addDiag(st, te.file, c.span, "E-COMPONENT-ENGINE-SCOPE", "`<" + c.name + " … single>` is a `single` declaration inside the multi-instance declaration `<" + d.name + ">` — every `<" + d.name + ">` instance would share one `" + c.name + "`. Drop `single`: an ordinary child field gives each `<" + d.name + ">` its own `" + c.name + "` (§66.13.4)")
             }
-            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, c.validators, 1, st)
+            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, c.validators, 1, ix, tab, boundaryOf(c.exported, c.mods), st)
             out = out.concat([r2.f])
             st = r2.st
         }
@@ -2540,7 +3509,7 @@ ${
     }
 
     // The program's fields: the declarations directly in its body (L14).
-    fn programFields(te: TypeEnv, g: TypeInfo[], p: AProgram, st0: AS) -> RFields {
+    fn programFields(te: TypeEnv, g: TypeInfo[], p: AProgram, ix: InferCx, tab: OwnT[], st0: AS) -> RFields {
         let st: AS = st0
         let out: FieldInfo[] = []
         for (const it of p.items) {
@@ -2548,7 +3517,7 @@ ${
                 if (isNestedUserDecl(d)) {
                     // a user declaration (stubbed by withNestedStubs), not a field
                 } else {
-                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, st)
+                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, ix, tab, boundaryOf(d.exported, d.mods), st)
                     out = out.concat([r.f])
                     st = r.st
                 }
@@ -2938,7 +3907,8 @@ ${
         for (const f of fs) {
             out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && typeTrusted(errs, f.typeSpan),
                                 typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
-                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten }])
+                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten,
+                                origin: f.origin }])
         }
         return out
     }
@@ -3227,6 +4197,13 @@ ${
         st = rr.st
         const rf: RFns = { fs: rr.fs, st: st }
         const allTypes: TypeInfo[] = rt.ts.concat(rr.minted)
+        // s462 (§66.3 rules 5–8): every program cell's type, inferred where none
+        // is written — before any field is built, since a field's `@ref` (in
+        // any declaration) resolves against the program's cells
+        const icx: InferCx = { te: te0, fns: rf.fs, st: st, srcs: programSrcs(rd.ds), res: false,
+                               types: allTypes, decls: rd.ds, handles: allHandles(rd.ds, st),
+                               hscope: programNid(rd.ds), prog: programNid(rd.ds), progFile: entry }
+        const ownTab: OwnT[] = ownTable(icx)
         // fields + handles per declaration
         let decls: DeclSrc[] = []
         let handles: HandleInfo[] = []
@@ -3237,12 +4214,12 @@ ${
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
             if (p is given) {
-                const r: RFields = programFields(te, rt.ts, p, st)
+                const r: RFields = programFields(te, rt.ts, p, icx, ownTab, st)
                 fields = r.fs
                 st = r.st
                 single = true
             } else if (d is given) {
-                const r2: RFields = userFields(te, rt.ts, d, st)
+                const r2: RFields = userFields(te, rt.ts, d, icx, ownTab, st)
                 fields = r2.fs
                 st = r2.st
                 single = hasFlag(d.mods, "single")
@@ -3260,10 +4237,122 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
+        const rc: RCycles = derivedCycles(decls, files, st)
+        st = rc.st
+        decls = rc.decls
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()) }
         return { g: g, st: st }
+    }
+
+    // s462 — E-DERIVED-CIRCULAR-DEP (§6.6.10; §66.3 rule 8: "the cycle's
+    // diagnostic is reported and E-DECL-TYPE-NOT-INFERABLE is not"). A program
+    // cell that is DERIVED (§66.9 rule 3) and reads, directly by `@x`, a
+    // derived cell that reads it back — annotated or not. One report per
+    // cycle, at its first member in source order. (A read through a function
+    // is not followed: the bootstrap's effect summary does not trace reads
+    // yet — a cycle only through a function's body is not reported here: a
+    // stated divergence from §6.6.10, g-bootstrap-derived-cycle-through-function-s462.)
+    // Fix round 1 (F3): the cycle code OUTRANKS — every member of a reported
+    // cycle has its own-value report withdrawn (its origin becomes Blamed:
+    // the cycle owns it), whether that report would have been
+    // E-DECL-TYPE-NOT-INFERABLE, -REQUIRED-AT-BOUNDARY or -UNPROVEN.
+    type DEdge:struct = { from: int, to: int }
+    type RCycles:struct = { st: AS, decls: DeclSrc[] }
+
+    fn derivedCycles(decls: DeclSrc[], files: FileAst[], st0: AS) -> RCycles {
+        let st: AS = st0
+        let out: DeclSrc[] = []
+        for (const ds of decls) {
+            let members: int[] = []
+            if (ds.isProgram) {
+                const fs: FieldInfo[] = ds.info.fields
+                const errs: ASpan[] = fileErrs(files, ds.file)
+                let es: DEdge[] = []
+                let i = 0
+                for (const f of fs) {
+                    const m: FieldMode = f.mode
+                    if (m == FieldMode.Derived) {
+                        for (const r of f.reads) {
+                            if (r.substring(0, 1) == "@") {
+                                const j: int = fieldIndex(ds.info, r.substring(1))
+                                if (j >= 0) {
+                                    const mj: FieldMode = fs[j].mode
+                                    if (mj == FieldMode.Derived) es = es.concat([{ from: i, to: j }])
+                                }
+                            }
+                        }
+                    }
+                    i = i + 1
+                }
+                let k = 0
+                while (k < fs.length) {
+                    const path: int[] = derivedPath(es, k, k, [])
+                    if (path.length > 0 && !hasErrIn(errs, fs[k].span)) {
+                        let names: string[] = []
+                        for (const p of path) { names = names.concat(["@" + fs[p].sym.hint]) }
+                        names = names.concat(["@" + fs[k].sym.hint])
+                        st = addDiag(st, ds.file, fs[k].span, "E-DERIVED-CIRCULAR-DEP", "`@" + fs[k].sym.hint + "` is derived from itself: " + names.join(" → ") + " — a derived value (a locked declaration whose initializer reads cells) cannot depend on itself, it would recompute forever (§6.6.10); break the cycle")
+                        members = members.concat(path).concat([k])
+                    }
+                    k = k + 1
+                }
+            }
+            if (members.length == 0) {
+                out = out.concat([ds])
+            } else {
+                let nf: FieldInfo[] = []
+                let j2 = 0
+                for (const f of ds.info.fields) {
+                    if (members.indexOf(j2) >= 0) {
+                        nf = nf.concat([withOrigin(f, TypeOrigin.Blamed)])
+                    } else {
+                        nf = nf.concat([f])
+                    }
+                    j2 = j2 + 1
+                }
+                const di: DeclInfo = ds.info
+                const ni: DeclInfo = { nid: di.nid, span: di.span, sym: di.sym, kind: di.kind, single: di.single, file: di.file, fields: nf, handles: di.handles }
+                out = out.concat([{ info: ni, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
+            }
+        }
+        return { st: st, decls: out }
+    }
+
+    // A written / literal / inferred origin is kept (there is nothing to withdraw).
+    fn withOrigin(f: FieldInfo, o0: TypeOrigin) -> FieldInfo {
+        const cur: TypeOrigin = f.origin
+        const keep: boolean = match cur {
+            .Written :> true
+            .Literal :> true
+            .Inferred :> true
+            .Blamed :> true
+            .WrittenUnproven(why: w) :> false
+            .Failed(why: w) :> false
+            .Cyclic(names: ns) :> false
+            .Boundary(where: b) :> false
+        }
+        let o: TypeOrigin = o0
+        if (keep) o = cur
+        return { nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted, typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode,
+                 role: f.role, grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads,
+                 shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten, origin: o }
+    }
+
+    // A path from `at` back to `start` through cells numbered above `start`
+    // (so each cycle is found once, at its first member); [] when none.
+    fn derivedPath(es: DEdge[], start: int, at: int, seen: int[]) -> int[] {
+        for (const e of es) {
+            if (e.from == at) {
+                if (e.to == start) return seen.concat([at])
+                if (e.to > start && seen.indexOf(e.to) < 0 && e.to != at) {
+                    const p: int[] = derivedPath(es, start, e.to, seen.concat([at]))
+                    if (p.length > 0) return p
+                }
+            }
+        }
+        return []
     }
 
     // r2 F4 — does a body read the clock (`Date.now()`) ITSELF? The effect
@@ -11017,12 +12106,15 @@ ${
         return env.blame.fns.indexOf(s.id) >= 0
     }
 
-    // A declaration field whose WRITTEN type was refused (FieldInfo.trusted, r8).
+    // A declaration field whose WRITTEN type was refused (FieldInfo.trusted, r8)
+    // — or, s462, whose type could not be INFERRED (§66.3 rule 7: the field is
+    // untrusted and its own diagnostic, E-DECL-TYPE-NOT-INFERABLE or the cycle
+    // code, owns every reader's unresolved type: no cascade).
     fn refusedDeclField(t: Tables, d: Sym, idx: int) -> boolean {
         const di: DeclInfo | not = declInfo(t, d)
         if (di is not) return false
         if (idx < 0 || idx >= di.fields.length) return false
-        return di.fields[idx].annotated && !di.fields[idx].trusted
+        return !di.fields[idx].trusted
     }
 
     // A struct field whose type did not resolve (Unresolved.fields, r8).
@@ -12310,6 +13402,88 @@ ${
             }
         }
         return ts
+    }
+
+    // ---- s462 — OWN-VALUE TYPE REPORTS (§66.3 rules 7–10) -----------------------
+    // The origin was decided in phase A (ownOrigin / writtenOrigin / boundaryOf);
+    // it is REPORTED here, after the binder and every earlier pass, so that
+    // "an Error diagnostic already inside the initializer" (rule 7's no-cascade
+    // clause, the §42.4 statement 6 discipline) can be honored: condBlamed.
+    fn originReport(env: TEnv, di: DeclInfo, f: FieldInfo, ts: TypeState) -> TypeState {
+        const o: TypeOrigin = f.origin
+        return match o {
+            .Written :> ts
+            .Literal :> ts
+            .Inferred :> ts
+            .Blamed :> ts
+            .WrittenUnproven(why: w, at: a) :> unprovenReport(env, f, w, a, ts)
+            .Failed(why: w, at: a) :> notInferableReport(env, f, w, a, ts)
+            .Cyclic(names: ns) :> cycleReport(env, di, f, ns, ts)
+            .Boundary(where: b) :> boundaryReport(env, f, b, ts)
+        }
+    }
+
+    fn initBlamed(env: TEnv, f: FieldInfo, ts: TypeState) -> boolean {
+        const e: AExpr | not = valueExpr(f.init)
+        if (e is given) return condBlamed(env, e, ts)
+        return hasErrIn(env.errs, f.span) || hasErrIn(env.blame.spans, f.span)
+    }
+
+    // Fix round 1 (F5): a failure that stands in a FUNCTION (a proof of its
+    // return) is owned by an Error already inside that function — a refused
+    // construct there is not reported a second time at the own value. Prior
+    // passes' Errors are visible for the current file (Blame.spans); the
+    // typer's own, for every file (ts.diags).
+    fn calleeBlamed(env: TEnv, a: CalleeAt, ts: TypeState) -> boolean {
+        if (a.file == "") return false
+        const sp: ASpan = mkSpan(a.start, a.end)
+        if (a.file == env.file && hasErrIn(env.blame.spans, sp)) return true
+        for (const d of ts.diags) {
+            if (d.file == a.file && d.severity == Severity.Error && d.span.start >= a.start && d.span.end <= a.end) return true
+        }
+        return false
+    }
+
+    fn notInferableReport(env: TEnv, f: FieldInfo, why: string, a: CalleeAt, ts: TypeState) -> TypeState {
+        if (initBlamed(env, f, ts) || calleeBlamed(env, a, ts)) return ts
+        const n: string = f.sym.hint
+        return report(ts, env, f.span, "E-DECL-TYPE-NOT-INFERABLE", "`" + n + "` has no `:Type`, and its value is not one a type is inferred from — " + why + ". A type is inferred only from literals, typed `@` references, and arithmetic, comparisons, ternaries and `.length` over those, and calls of functions with a declared (or provable) return (§66.3 rules 5–7). Write the type: `" + n + ":T=…`")
+    }
+
+    // Rule 8: a derived cycle is E-DERIVED-CIRCULAR-DEP's (derivedCycles); a
+    // cycle through a SEEDED member has no cycle code — the inference reports.
+    fn cycleReport(env: TEnv, di: DeclInfo, f: FieldInfo, ns: string[], ts: TypeState) -> TypeState {
+        let allDerived = true
+        for (const n of ns) {
+            const i: int = fieldIndex(di, n)
+            if (i < 0) {
+                allDerived = false
+            } else {
+                const m: FieldMode = di.fields[i].mode
+                if (m != FieldMode.Derived) allDerived = false
+            }
+        }
+        if (allDerived) return ts
+        if (initBlamed(env, f, ts)) return ts
+        const n2: string = f.sym.hint
+        let path: string[] = []
+        for (const x of ns) { path = path.concat(["@" + x]) }
+        return report(ts, env, f.span, "E-DECL-TYPE-NOT-INFERABLE", "`" + n2 + "` has no `:Type`, and its value reads itself back through " + path.join(" → ") + " — a type is not inferred around a cycle (§66.3 rule 8). Write the type: `" + n2 + ":T=…`")
+    }
+
+    fn boundaryReport(env: TEnv, f: FieldInfo, where: string, ts: TypeState) -> TypeState {
+        if (initBlamed(env, f, ts)) return ts
+        const n: string = f.sym.hint
+        let what: string = "exported, so another file reads its type (required while O2 / O39 is open, §66.14)"
+        if (where == "persist") what = "`persist=`, so every stored value is decoded against its type on load (§6.14.1 rule 5)"
+        if (where == "server") what = "a `server` cell, so its type is the wire contract (§52.4.1)"
+        return report(ts, env, f.span, "E-DECL-TYPE-REQUIRED-AT-BOUNDARY", "`" + n + "` is " + what + " — its value is not a literal, so its type must be written, not inferred: `" + n + ":T=…` (§66.3 rule 9)")
+    }
+
+    fn unprovenReport(env: TEnv, f: FieldInfo, why: string, a: CalleeAt, ts: TypeState) -> TypeState {
+        if (initBlamed(env, f, ts) || calleeBlamed(env, a, ts)) return ts
+        const n: string = f.sym.hint
+        return report(ts, env, f.span, "E-DECL-TYPE-UNPROVEN", "`" + n + "` is written with a type, but its value's type cannot be resolved — " + why + " — so nothing checks that the value is one (§66.3 rule 10). Declare what is untyped (the function's `-> T`, a parameter's or a local's type)")
     }
 
     fn typeFn(env: TEnv, af: AFn, ts: TypeState) -> TypeState {
@@ -16476,8 +17650,24 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf }
-        return { files: files, tables: t, diags: domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
+        const base: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags)
+        // s462 (fix round 2): the own-value type reports run LAST, over every
+        // other pass's diagnostics — so an Error anywhere inside the
+        // initializer, or inside the function a failed proof stands in, owns
+        // the failure whatever pass reported it (no cascade)
+        return { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
                  infos: gatedInfos(vp.gated) }
+    }
+
+    fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
+        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [] }
+        const fns: int[] = refusedReturns(files, t)
+        for (const di of t.decls) {
+            const blame: Blame = { spans: errorSpansIn(prior, di.file), syms: [], fns: fns }
+            const env: TEnv = { t: t, file: di.file, errs: fileErrs(files, di.file), locals: [], settled: [], narrowed: [], fnw: [], rows: [], fret: not, blame: blame }
+            for (const f of di.fields) { ts = originReport(env, di, f, ts) }
+        }
+        return ts.diags.slice(prior.length)
     }
 
     // s451 (U1a): a DOM global in a server-triggered body is E-ROUTE-005 (the
