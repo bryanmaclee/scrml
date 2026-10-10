@@ -8,7 +8,7 @@
 // chunk (compiler/src/runtime-template.js).
 //
 // This shim replaces the would-be compiled output of stdlib/data/*.scrml
-// because those source files use scrml-native vocabulary (`is some`,
+// because those source files use scrml-native vocabulary (`is given`,
 // `is not`, `not` literal) which the standard compile pipeline does not
 // lower into the same JS shape these utility functions need today.
 // Mirrors the convention established by stdlib/auth.js + crypto.js +
@@ -23,10 +23,8 @@
 //     camelizeKeys, snakifyKeys, deepMerge, clamp, paginate
 //
 //   from validate.scrml:
-//     validate, isValid, firstError, required, email, minLength,
-//     maxLength, exactLength, pattern, min, max, numeric, integer,
-//     matches, oneOf, url, custom, emailField, passwordField,
-//     passwordConfirmField
+//     Rule (the rule enum — rules are data, S462), validate, isValid,
+//     firstError, emailField, passwordField, passwordConfirmField
 //
 //   from parse.scrml:
 //     parseVariant (defensive fallback; compile-time monomorphized by CG)
@@ -42,9 +40,9 @@
 
 // data.js's arithmetic routes through scrml:math — the single sanctioned
 // touch of the host arithmetic surface (closes the stdlib-ouroboros). The
-// `min`/`max` arithmetic are ALIASED (mathMin/mathMax) because data.js also
-// exports its OWN `min`/`max` validator factories (validate.scrml) — distinct
-// functions that must not be shadowed.
+// `min`/`max` arithmetic are ALIASED (mathMin/mathMax) — data.js once exported
+// its own `min`/`max` validator factories (retired S462 for `Rule.Min` /
+// `Rule.Max`), and the aliases keep the names free of that history.
 import { min as mathMin, max as mathMax, ceil } from "./math.js";
 
 // ---------------------------------------------------------------------------
@@ -407,20 +405,61 @@ export function paginate(array, page, pageSize) {
 }
 
 // ---------------------------------------------------------------------------
-// validate.scrml — validation rule builders + schema validator
+// validate.scrml — validation rules as data + the schema validator
+//
+// A rule is a `Rule` enum value; a schema maps field -> Rule[]. `validate`
+// matches on each rule. No rule holds a function (S462): a developer check
+// is `Rule.Custom(tag)` plus ONE `check(tag, value, data)` function passed
+// as validate's third argument.
 // ---------------------------------------------------------------------------
 
-export function validate(data, schema) {
+// `Rule` mirrors the compiled shape of `export type Rule:enum` in
+// stdlib/data/validate.scrml EXACTLY — a unit variant is its name string, a
+// payload variant is `{ variant, data: { <declared field names> } }`. The
+// payload field names below are the declared names; keep the two in lockstep
+// (compiler/tests/unit/data-validate-rules-as-data.test.js §4 checks it).
+// Adopters write the QUALIFIED form, `Rule.Min(3)`. A bare `.Min(3)` in a
+// `Rule`-typed position does NOT compile yet: stdlib enum types are not seeded
+// into an importing file's type registry (E-VARIANT-AMBIGUOUS). Once that lands
+// (sibling dispatch s462-stdlib-import-004) the compiler's lowering of `.Min(3)`
+// is this same value.
+export const Rule = Object.freeze({
+  Req: "Req",
+  Pattern: function (re) { return { variant: "Pattern", data: { re } }; },
+  Min: function (threshold) { return { variant: "Min", data: { threshold } }; },
+  Max: function (threshold) { return { variant: "Max", data: { threshold } }; },
+  OneOf: function (set) { return { variant: "OneOf", data: { set } }; },
+  MinLength: function (len) { return { variant: "MinLength", data: { len } }; },
+  MaxLength: function (len) { return { variant: "MaxLength", data: { len } }; },
+  ExactLength: function (len) { return { variant: "ExactLength", data: { len } }; },
+  Matches: function (field) { return { variant: "Matches", data: { field } }; },
+  Email: "Email",
+  Url: "Url",
+  Numeric: "Numeric",
+  Integer: "Integer",
+  Custom: function (tag) { return { variant: "Custom", data: { tag } }; },
+  WithMessage: function (rule, message) { return { variant: "WithMessage", data: { rule, message } }; },
+  variants: [
+    "Req", "Pattern", "Min", "Max", "OneOf", "MinLength", "MaxLength",
+    "ExactLength", "Matches", "Email", "Url", "Numeric", "Integer", "Custom",
+    "WithMessage",
+  ],
+});
+
+export function validate(data, schema, check) {
   const errors = {};
   for (const field of Object.keys(schema)) {
     const value = data[field];
     const rules = schema[field];
+    if (!Array.isArray(rules)) {
+      errors[field] = [`The schema entry for ${field} must be a list of Rule values`];
+      continue;
+    }
     for (const rule of rules) {
-      const result = rule.check(value, data);
-      if (!result.valid) {
-        errors[field] = errors[field] || [];
-        errors[field].push(result.message);
-      }
+      const message = _data_rule_failure(rule, value, data, check);
+      if (message === null) continue;
+      errors[field] = errors[field] || [];
+      errors[field].push(message);
     }
   }
   return errors;
@@ -436,133 +475,88 @@ export function firstError(result, field) {
   return errs && errs.length > 0 ? errs[0] : null;
 }
 
-function makeRule(check) {
-  return { check };
+function _data_is_empty(value) {
+  return value === null || value === undefined || value === "";
 }
 
-export function required(message) {
-  return makeRule((value) => {
-    const valid = value !== null && value !== undefined && value !== "";
-    return { valid, message: message || "This field is required" };
-  });
+function _data_is_url(value) {
+  try {
+    new URL(String(value));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function email(message) {
-  return makeRule((value) => {
-    if (!value) return { valid: true, message: "" };
-    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value));
-    return { valid, message: message || "Enter a valid email address" };
-  });
-}
-
-export function minLength(minVal, message) {
-  return makeRule((value) => {
-    if (!value) return { valid: true, message: "" };
-    const valid = String(value).length >= minVal;
-    return { valid, message: message || `Must be at least ${minVal} characters` };
-  });
-}
-
-export function maxLength(maxVal, message) {
-  return makeRule((value) => {
-    if (!value) return { valid: true, message: "" };
-    const valid = String(value).length <= maxVal;
-    return { valid, message: message || `Must be at most ${maxVal} characters` };
-  });
-}
-
-export function exactLength(len, message) {
-  return makeRule((value) => {
-    if (!value) return { valid: true, message: "" };
-    const valid = String(value).length === len;
-    return { valid, message: message || `Must be exactly ${len} characters` };
-  });
-}
-
-export function pattern(regex, message) {
-  return makeRule((value) => {
-    if (!value) return { valid: true, message: "" };
-    const valid = regex.test(String(value));
-    return { valid, message: message || "Invalid format" };
-  });
-}
-
-export function min(minimum, message) {
-  return makeRule((value) => {
-    const num = Number(value);
-    const valid = !isNaN(num) && num >= minimum;
-    return { valid, message: message || `Must be at least ${minimum}` };
-  });
-}
-
-export function max(maximum, message) {
-  return makeRule((value) => {
-    const num = Number(value);
-    const valid = !isNaN(num) && num <= maximum;
-    return { valid, message: message || `Must be at most ${maximum}` };
-  });
-}
-
-export function numeric(message) {
-  return makeRule((value) => {
-    if (value === "" || value === null || value === undefined) return { valid: true, message: "" };
-    const valid = !isNaN(Number(value)) && value !== "";
-    return { valid, message: message || "Must be a number" };
-  });
-}
-
-export function integer(message) {
-  return makeRule((value) => {
-    if (value === "" || value === null || value === undefined) return { valid: true, message: "" };
-    const valid = Number.isInteger(Number(value));
-    return { valid, message: message || "Must be a whole number" };
-  });
-}
-
-export function matches(fieldName, message) {
-  return makeRule((value, data) => {
-    const valid = value === data[fieldName];
-    return { valid, message: message || `Must match ${fieldName}` };
-  });
-}
-
-export function oneOf(allowedValues, message) {
-  return makeRule((value) => {
-    const valid = allowedValues.includes(value);
-    return { valid, message: message || `Must be one of: ${allowedValues.join(", ")}` };
-  });
-}
-
-export function url(message) {
-  return makeRule((value) => {
-    if (!value) return { valid: true, message: "" };
-    try {
-      new URL(String(value));
-      return { valid: true, message: "" };
-    } catch {
-      return { valid: false, message: message || "Enter a valid URL" };
+// The failure message of one rule against one value, or `null` when it passes.
+function _data_rule_failure(rule, value, data, check) {
+  const tag = (rule !== null && typeof rule === "object") ? rule.variant : rule;
+  const p = (rule !== null && typeof rule === "object") ? rule.data : undefined;
+  switch (tag) {
+    case "Req":
+      return _data_is_empty(value) ? "This field is required" : null;
+    case "Pattern":
+      return !value || p.re.test(String(value)) ? null : "Invalid format";
+    case "Min": {
+      const num = Number(value);
+      return !isNaN(num) && num >= p.threshold ? null : `Must be at least ${p.threshold}`;
     }
-  });
+    case "Max": {
+      const num = Number(value);
+      return !isNaN(num) && num <= p.threshold ? null : `Must be at most ${p.threshold}`;
+    }
+    case "OneOf":
+      return p.set.includes(value) ? null : `Must be one of: ${p.set.join(", ")}`;
+    case "MinLength":
+      return !value || String(value).length >= p.len ? null : `Must be at least ${p.len} characters`;
+    case "MaxLength":
+      return !value || String(value).length <= p.len ? null : `Must be at most ${p.len} characters`;
+    case "ExactLength":
+      return !value || String(value).length === p.len ? null : `Must be exactly ${p.len} characters`;
+    case "Matches":
+      return value === data[p.field] ? null : `Must match ${p.field}`;
+    case "Email":
+      return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value)) ? null : "Enter a valid email address";
+    case "Url":
+      return !value || _data_is_url(value) ? null : "Enter a valid URL";
+    case "Numeric":
+      return _data_is_empty(value) || !isNaN(Number(value)) ? null : "Must be a number";
+    case "Integer":
+      return _data_is_empty(value) || Number.isInteger(Number(value)) ? null : "Must be a whole number";
+    case "Custom":
+      return _data_custom_failure(p.tag, value, data, check);
+    case "WithMessage": {
+      const failure = _data_rule_failure(p.rule, value, data, check);
+      if (failure === null) return null;
+      // Old `message || default` semantics: only a non-empty string replaces.
+      return typeof p.message === "string" && p.message !== "" ? p.message : failure;
+    }
+    default:
+      // Not a Rule value (e.g. a pre-S462 `{ check }` rule object). Fail
+      // closed: an unrecognised rule must never pass silently.
+      return "Unknown validation rule — a schema entry must be a Rule value";
+  }
 }
 
-export function custom(fn) {
-  return makeRule((value, data) => {
-    const result = fn(value, data);
-    if (result === true) return { valid: true, message: "" };
-    return { valid: false, message: typeof result === "string" ? result : "Invalid value" };
-  });
+function _data_custom_failure(tag, value, data, check) {
+  if (typeof check !== "function") {
+    return `No check function was passed to validate() for Rule.Custom("${tag}")`;
+  }
+  const result = check(tag, value, data);
+  if (result === true) return null;
+  return typeof result === "string" ? result : "Invalid value";
 }
 
 export function emailField() {
-  return [required(), email()];
+  return [Rule.Req, Rule.Email];
 }
 
 export function passwordField(minLen) {
-  return [required(), minLength(minLen || 8)];
+  return [Rule.Req, Rule.MinLength(minLen || 8)];
 }
 
 export function passwordConfirmField(fieldName) {
-  return [required(), matches(fieldName || "password", "Passwords must match")];
+  return [Rule.Req, Rule.WithMessage(Rule.Matches(fieldName || "password"), "Passwords must match")];
 }
 
 // ---------------------------------------------------------------------------

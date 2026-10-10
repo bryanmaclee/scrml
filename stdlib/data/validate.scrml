@@ -1,39 +1,101 @@
 <program>
 ${
     // ---------------------------------------------------------------------------
-    // scrml:data/validate — validation rule builders and schema validator
+    // scrml:data/validate — validation rules as DATA, and the schema validator
+    //
+    // A rule is a value of the `Rule` enum. A schema is plain data: an object
+    // mapping each field name to an array of rules. `validate` matches on each
+    // rule. No rule holds a function (S462 — "no value holds a function").
     //
     // Returns a ValidationResult: { [fieldName]: string[] } where each field
     // maps to an array of error messages. Empty object = all valid.
     //
     // Usage:
-    //   import { validate, required, email, minLength } from 'scrml:data'
+    //   import { validate, isValid, Rule } from 'scrml:data'
     //
     //   const errors = validate(
     //       { email: @email, password: @password },
-    //       { email: [required(), email()], password: [required(), minLength(8)] }
+    //       { email: [Rule.Req, Rule.Email], password: [Rule.Req, Rule.MinLength(8)] }
     //   )
-    //   if (Object.keys(errors).length > 0) { @formErrors = errors }
+    //   if (!isValid(errors)) { @formErrors = errors }
+    //
+    // A developer-defined check is a NAMED rule, `Rule.Custom(tag)`, plus ONE
+    // check function PASSED to `validate` as its third argument. `validate`
+    // calls it as `check(tag, value, data)`; it returns `true` (valid) or a
+    // string (the error message), and any other result reads "Invalid value".
+    // The function is passed at the call, never stored in the schema.
+    //
+    //   function checkOrder(tag, value, data) {
+    //       if (tag == "sku") { return isSku(value) ? true : "Not a valid SKU" }
+    //       return true
+    //   }
+    //   const errors = validate(@order, { sku: [Rule.Req, Rule.Custom("sku")] }, checkOrder)
+    //
+    // A `Rule.Custom` with no check function passed FAILS, with a message that
+    // names the missing check. It never passes silently.
     // ---------------------------------------------------------------------------
 
     /**
-     * Run all validation rules against a data object.
+     * Rule — one validation predicate, as data.
      *
-     * @param data - Object of field values { fieldName: value }
-     * @param schema - Object of rule arrays { fieldName: [rule, rule, ...] }
+     * The variants that overlap the SPEC §55.1 universal-core vocabulary carry
+     * its words: `Req` (§55.1 `req`), `Pattern` (`pattern`), `Min` (`min`),
+     * `Max` (`max`), `OneOf` (`oneOf`). The rest belong to this library:
+     *
+     *   MinLength / MaxLength / ExactLength — string length bounds
+     *   Matches(field)     — equals another field of the same data object
+     *   Email / Url        — format checks
+     *   Numeric / Integer  — number-shape checks
+     *   Custom(tag)        — a developer check, run by the `check` argument of
+     *                        `validate` (mirrors §55.9 `ValidationError.Custom`)
+     *   WithMessage(rule, message) — `rule`, with `message` replacing its
+     *                        failure message (an empty message keeps the rule's
+     *                        own)
+     *
+     * `Pattern`, the three length rules, `Email`, `Url`, `Numeric` and `Integer`
+     * pass an EMPTY value — pair them with `Rule.Req` to require the field.
+     */
+    export type Rule:enum = {
+        Req,
+        Pattern(re: regex),
+        Min(threshold: number),
+        Max(threshold: number),
+        OneOf(set: array),
+        MinLength(len: number),
+        MaxLength(len: number),
+        ExactLength(len: number),
+        Matches(field: string),
+        Email,
+        Url,
+        Numeric,
+        Integer,
+        Custom(tag: string),
+        WithMessage(rule: Rule, message: string)
+    }
+
+    /**
+     * Run every rule of a schema against a data object.
+     *
+     * @param data   - Object of field values { fieldName: value }
+     * @param schema - Object of rule arrays { fieldName: [Rule, Rule, ...] }
+     * @param check  - Optional. Runs the `Rule.Custom(tag)` rules:
+     *                 `check(tag, value, data)` returns `true` or a message.
      * @returns { [fieldName]: string[] } — empty object if all valid
      */
-    export function validate(data, schema) {
+    export function validate(data, schema, check) {
         const errors = {}
         for (const field of Object.keys(schema)) {
             const value = data[field]
             const rules = schema[field]
+            if (!Array.isArray(rules)) {
+                errors[field] = [`The schema entry for ${field} must be a list of Rule values`]
+                continue
+            }
             for (const rule of rules) {
-                const result = rule.check(value, data)
-                if (!result.valid) {
-                    errors[field] = errors[field] || []
-                    errors[field].push(result.message)
-                }
+                const message = ruleFailure(rule, value, data, check)
+                if (message is not) { continue }
+                errors[field] = errors[field] || []
+                errors[field].push(message)
             }
         }
         return errors
@@ -57,168 +119,63 @@ ${
     }
 
     // ---------------------------------------------------------------------------
-    // Rule builders — each returns a { check(value, data): { valid, message } }
+    // Rule evaluation — the failure message of one rule, or `not` when it passes
     // ---------------------------------------------------------------------------
 
-    function makeRule(check) {
-        return { check }
+    function isEmpty(value) {
+        return value is not || value == ""
     }
 
-    /**
-     * Field is required (must be `some` value and not the empty string).
-     */
-    export function required(message) {
-        return makeRule((value) => {
-            const valid = value is given && value != ""
-            return { valid, message: message || "This field is required" }
-        })
+    // A schema entry that is not a Rule value (e.g. a pre-S462 `{ check }`
+    // object) FAILS CLOSED: an unrecognised rule never passes silently. The
+    // test sits before the match because the match is exhaustive over Rule.
+    function isRule(rule) {
+        if (rule is not) { return false }
+        const tag = typeof rule == "object" ? rule.variant : rule
+        return Rule.variants.includes(tag)
     }
 
-    /**
-     * Valid email address format.
-     */
-    export function email(message) {
-        return makeRule((value) => {
-            if (!value) return { valid: true, message: "" }
-            const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))
-            return { valid, message: message || "Enter a valid email address" }
-        })
+    function ruleFailure(rule: Rule, value, data, check) {
+        if (!isRule(rule)) {
+            return "Unknown validation rule — a schema entry must be a Rule value"
+        }
+        return match rule {
+            .Req :> messageUnless(!isEmpty(value), "This field is required")
+            .Pattern(re) :> messageUnless(!value || re.test(String(value)), "Invalid format")
+            .Min(threshold) :> messageUnless(Number(value) >= threshold, `Must be at least ${threshold}`)
+            .Max(threshold) :> messageUnless(Number(value) <= threshold, `Must be at most ${threshold}`)
+            .OneOf(set) :> messageUnless(set.includes(value), `Must be one of: ${set.join(", ")}`)
+            .MinLength(len) :> messageUnless(!value || String(value).length >= len, `Must be at least ${len} characters`)
+            .MaxLength(len) :> messageUnless(!value || String(value).length <= len, `Must be at most ${len} characters`)
+            .ExactLength(len) :> messageUnless(!value || String(value).length == len, `Must be exactly ${len} characters`)
+            .Matches(field) :> messageUnless(value == data[field], `Must match ${field}`)
+            .Email :> messageUnless(!value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value)), "Enter a valid email address")
+            .Url :> messageUnless(!value || URL.canParse(String(value)), "Enter a valid URL")
+            .Numeric :> messageUnless(isEmpty(value) || !isNaN(Number(value)), "Must be a number")
+            .Integer :> messageUnless(isEmpty(value) || Number.isInteger(Number(value)), "Must be a whole number")
+            .Custom(tag) :> customFailure(tag, value, data, check)
+            .WithMessage(inner, message) :> overrideMessage(ruleFailure(inner, value, data, check), message)
+        }
     }
 
-    /**
-     * Minimum string length.
-     */
-    export function minLength(min, message) {
-        return makeRule((value) => {
-            if (!value) return { valid: true, message: "" }
-            const valid = String(value).length >= min
-            return { valid, message: message || `Must be at least ${min} characters` }
-        })
+    function messageUnless(passes, message) {
+        if (passes) { return not }
+        return message
     }
 
-    /**
-     * Maximum string length.
-     */
-    export function maxLength(max, message) {
-        return makeRule((value) => {
-            if (!value) return { valid: true, message: "" }
-            const valid = String(value).length <= max
-            return { valid, message: message || `Must be at most ${max} characters` }
-        })
+    function customFailure(tag, value, data, check) {
+        if (typeof check != "function") {
+            return `No check function was passed to validate() for Rule.Custom("${tag}")`
+        }
+        const result = check(tag, value, data)
+        if (result == true) { return not }
+        return typeof result == "string" ? result : "Invalid value"
     }
 
-    /**
-     * Exact string length.
-     */
-    export function exactLength(len, message) {
-        return makeRule((value) => {
-            if (!value) return { valid: true, message: "" }
-            const valid = String(value).length == len
-            return { valid, message: message || `Must be exactly ${len} characters` }
-        })
-    }
-
-    /**
-     * Value matches a regular expression.
-     */
-    export function pattern(regex, message) {
-        return makeRule((value) => {
-            if (!value) return { valid: true, message: "" }
-            const valid = regex.test(String(value))
-            return { valid, message: message || "Invalid format" }
-        })
-    }
-
-    /**
-     * Numeric minimum value.
-     */
-    export function min(minimum, message) {
-        return makeRule((value) => {
-            const num = Number(value)
-            const valid = !isNaN(num) && num >= minimum
-            return { valid, message: message || `Must be at least ${minimum}` }
-        })
-    }
-
-    /**
-     * Numeric maximum value.
-     */
-    export function max(maximum, message) {
-        return makeRule((value) => {
-            const num = Number(value)
-            const valid = !isNaN(num) && num <= maximum
-            return { valid, message: message || `Must be at most ${maximum}` }
-        })
-    }
-
-    /**
-     * Value must be a valid number.
-     */
-    export function numeric(message) {
-        return makeRule((value) => {
-            if (value == "" || value is not) return { valid: true, message: "" }
-            const valid = !isNaN(Number(value)) && value != ""
-            return { valid, message: message || "Must be a number" }
-        })
-    }
-
-    /**
-     * Value must be a valid integer.
-     */
-    export function integer(message) {
-        return makeRule((value) => {
-            if (value == "" || value is not) return { valid: true, message: "" }
-            const valid = Number.isInteger(Number(value))
-            return { valid, message: message || "Must be a whole number" }
-        })
-    }
-
-    /**
-     * Value must match another field (e.g., password confirmation).
-     * Receives the entire data object as second argument.
-     */
-    export function matches(fieldName, message) {
-        return makeRule((value, data) => {
-            const valid = value == data[fieldName]
-            return { valid, message: message || `Must match ${fieldName}` }
-        })
-    }
-
-    /**
-     * Value must be in a list of allowed values.
-     */
-    export function oneOf(allowedValues, message) {
-        return makeRule((value) => {
-            const valid = allowedValues.includes(value)
-            return { valid, message: message || `Must be one of: ${allowedValues.join(", ")}` }
-        })
-    }
-
-    /**
-     * Value must be a URL.
-     */
-    export function url(message) {
-        return makeRule((value) => {
-            if (!value) return { valid: true, message: "" }
-            try {
-                new URL(String(value))
-                return { valid: true, message: "" }
-            } catch {
-                return { valid: false, message: message || "Enter a valid URL" }
-            }
-        })
-    }
-
-    /**
-     * Custom validation rule. fn receives (value, data) and returns
-     * true (valid) or a string (error message).
-     */
-    export function custom(fn) {
-        return makeRule((value, data) => {
-            const result = fn(value, data)
-            if (result == true) return { valid: true, message: "" }
-            return { valid: false, message: typeof result == "string" ? result : "Invalid value" }
-        })
+    function overrideMessage(failure, message) {
+        if (failure is not) { return not }
+        // Old `message || default` semantics: only a non-empty string replaces.
+        return typeof message == "string" && message != "" ? message : failure
     }
 
     // ---------------------------------------------------------------------------
@@ -226,28 +183,29 @@ ${
     // ---------------------------------------------------------------------------
     //
     // scrml does NOT ship a curated zod / standard-schema stdlib adapter. The
-    // existing `custom(fn)` slot above absorbs the bridge in 5 lines. Per
-    // SPEC §53.14.4 (synonym-detection canon) and design-insight 28
-    // (2026-05-09): a curated stdlib export would be a synonym for
-    // `custom(fn)`, not a sliver — closed by the synonym-detection rule.
+    // `Rule.Custom(tag)` + `check` slot above absorbs the bridge in a few
+    // lines. Per SPEC §53.14.4 (synonym-detection canon) and design-insight 28
+    // (2026-05-09): a curated stdlib export would be a synonym for the custom
+    // check slot, not a sliver — closed by the synonym-detection rule.
     //
     // Pattern (verbatim, paste into your scrml file):
     //
     //     ${
     //         import { z } from 'zod'  // or valibot, arktype, etc.
-    //         import { custom } from 'scrml:data'
+    //         import { validate, Rule } from 'scrml:data'
     //
-    //         function fromSchema(schema) {
-    //             return custom((value) => {
-    //                 const r = schema.safeParse(value)
+    //         const EmailSchema = z.string().email()
+    //
+    //         function bridged(tag, value) {
+    //             if (tag == "email") {
+    //                 const r = EmailSchema.safeParse(value)
     //                 return r.success ? true : r.error.issues[0].message
-    //             })
+    //             }
+    //             return true
     //         }
-    //     }
     //
-    //     <signup>
-    //         <email custom(fromSchema(z.string().email()))> = <input/>
-    //     </>
+    //         const errors = validate(@signup, { email: [Rule.Custom("email")] }, bridged)
+    //     }
     //
     // For Standard-Schema-shaped libraries, swap `safeParse` for the
     // `~standard.validate` interop call. See standardschema.dev.
@@ -271,7 +229,7 @@ ${
     //     (e.g., to render a numeric input's `min=` attribute) is lost.
     //
     //   - Cross-locus consistency (L4) breaks at bridged validators —
-    //     same shape as `custom(fn)` itself. The docs page is the
+    //     same shape as any custom check. The docs page is the
     //     mitigation regardless of bridge-or-not.
     //
     // For fields that need cross-locus enforcement (cell + refinement +
@@ -281,82 +239,84 @@ ${
     // see `parseVariant(json, EnumType)` per SPEC §41.13.
     //
     // Re-debate trigger (design-insight 28 OQ-bridge-2): if ≥3 adopters
-    // report the wrapper above as friction-felt at scale, the bridge
-    // question reopens. Elevate the Standard-Schema-via-`custom(...)`-
+    // report the bridge above as friction-felt at scale, the bridge
+    // question reopens. Elevate the Standard-Schema-via-custom-check
     // type-dispatch shape on re-fire — NOT the per-library shape.
 
     // ---------------------------------------------------------------------------
-    // Convenience: pre-built rule sets for common fields
+    // Convenience: pre-built rule sets for common fields (plain data)
     // ---------------------------------------------------------------------------
 
     /**
      * Standard email field rules: required + email format.
      */
     export function emailField() {
-        return [required(), email()]
+        return [Rule.Req, Rule.Email]
     }
 
     /**
      * Standard password field rules: required + minimum 8 chars.
      */
     export function passwordField(minLen) {
-        return [required(), minLength(minLen || 8)]
+        return [Rule.Req, Rule.MinLength(minLen || 8)]
     }
 
     /**
      * Standard password confirmation rules: required + matches "password" field.
      */
     export function passwordConfirmField(fieldName) {
-        return [required(), matches(fieldName || "password", "Passwords must match")]
+        return [Rule.Req, Rule.WithMessage(Rule.Matches(fieldName || "password"), "Passwords must match")]
     }
 
     ~{
-        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
+        import { assertEqual, assertTruthy } from 'scrml:test'
 
-        // required rule
-        const req = required()
-        assertEqual(req.check(""), { valid: false, message: "This field is required" })
-        assertEqual(req.check(not), { valid: false, message: "This field is required" })
-        assertEqual(req.check("hello"), { valid: true, message: "This field is required" })
+        // Req
+        assertEqual(validate({ a: "" }, { a: [Rule.Req] }), { a: ["This field is required"] })
+        assertEqual(validate({ a: not }, { a: [Rule.Req] }), { a: ["This field is required"] })
+        assertEqual(validate({ a: "hello" }, { a: [Rule.Req] }), {})
 
-        // email rule
-        const em = email()
-        assertEqual(em.check("test@example.com"), { valid: true, message: "Enter a valid email address" })
-        assertEqual(em.check("notanemail").valid, false)
-        assertEqual(em.check("").valid, true)  // empty is OK — pair with required()
+        // Email — an empty value passes; pair with Rule.Req
+        assertEqual(validate({ a: "test@example.com" }, { a: [Rule.Email] }), {})
+        assertEqual(validate({ a: "notanemail" }, { a: [Rule.Email] }), { a: ["Enter a valid email address"] })
+        assertEqual(validate({ a: "" }, { a: [Rule.Email] }), {})
 
-        // minLength
-        const ml = minLength(3)
-        assertEqual(ml.check("ab").valid, false)
-        assertEqual(ml.check("abc").valid, true)
-        assertEqual(ml.check("").valid, true)  // empty is OK — pair with required()
+        // MinLength
+        assertEqual(validate({ a: "ab" }, { a: [Rule.MinLength(3)] }), { a: ["Must be at least 3 characters"] })
+        assertEqual(validate({ a: "abc" }, { a: [Rule.MinLength(3)] }), {})
 
-        // validate() integration
+        // validate() over a whole schema
         const errors = validate(
             { email: "", password: "ab" },
-            { email: [required(), email()], password: [required(), minLength(8)] }
+            { email: [Rule.Req, Rule.Email], password: [Rule.Req, Rule.MinLength(8)] }
         )
         assertEqual(errors.email, ["This field is required"])
         assertEqual(errors.password, ["Must be at least 8 characters"])
 
         const clean = validate(
             { email: "a@b.com", password: "secure123" },
-            { email: [required(), email()], password: [required(), minLength(8)] }
+            { email: [Rule.Req, Rule.Email], password: [Rule.Req, Rule.MinLength(8)] }
         )
         assertTruthy(isValid(clean))
 
-        // matches rule
-        const confirmRule = matches("password", "Passwords must match")
-        assertEqual(confirmRule.check("x", { password: "x" }).valid, true)
-        assertEqual(confirmRule.check("x", { password: "y" }).valid, false)
+        // Matches + WithMessage
+        const confirm = [Rule.WithMessage(Rule.Matches("password"), "Passwords must match")]
+        assertEqual(validate({ password: "x", confirm: "x" }, { confirm: confirm }), {})
+        assertEqual(validate({ password: "x", confirm: "y" }, { confirm: confirm }), { confirm: ["Passwords must match"] })
 
-        // oneOf rule
-        const roleRule = oneOf(["admin", "user", "viewer"])
-        assertEqual(roleRule.check("admin").valid, true)
-        assertEqual(roleRule.check("superuser").valid, false)
+        // OneOf
+        assertEqual(validate({ role: "admin" }, { role: [Rule.OneOf(["admin", "user"])] }), {})
+        assertEqual(validate({ role: "root" }, { role: [Rule.OneOf(["admin", "user"])] }), { role: ["Must be one of: admin, user"] })
+
+        // Custom — the check function is passed at the call, never stored
+        function checkSku(tag, value) {
+            return value == "SKU-1" ? true : "Not a known SKU"
+        }
+        assertEqual(validate({ sku: "SKU-1" }, { sku: [Rule.Custom("sku")] }, checkSku), {})
+        assertEqual(validate({ sku: "nope" }, { sku: [Rule.Custom("sku")] }, checkSku), { sku: ["Not a known SKU"] })
 
         // firstError helper
-        const res = validate({ name: "" }, { name: [required()] })
+        const res = validate({ name: "" }, { name: [Rule.Req] })
         assertEqual(firstError(res, "name"), "This field is required")
         assertEqual(firstError(res, "email"), not)
     }

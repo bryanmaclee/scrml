@@ -1,0 +1,28 @@
+{
+  "id": "forms-msgchain-message-is-text",
+  "description": "§55.8 / §55.10 / §41.12.1 — a resolved error message is TEXT at every `<errors of=>` sink. A cross-field payload is user data: `eq(@signup.password)` puts whatever was typed into the password field into `{expected}`, and `neq(@signup.password)` into `{forbidden}`. Typing `<img id=pwn src=x>` into the password field must not create an element — not through a registered (Level 2) template, not through the shipped (Level 3) default, not in the per-field render, not in the compound `all` rollup — and author text in a template (`<b>{field}</b>`) renders literally, exactly as the same message does through a `${ messageFor(...) }` text interpolation.",
+  "language-version": "1.0",
+  "spec": "§55.8, §55.10, §41.12.1",
+  "rationale": "§55.8 normative default rendering is `<p class=\"scrml-error\">${ messageFor(errors[0]) }</p>` — a markup `${}` text interpolation, so the message is text and the default render must produce the same DOM a text interpolation does. Pre-fix (S462 FIX ROUND 1 P1, pre-existing since C11) the default render concatenated the message into an HTML string assigned to innerHTML, so a user-typed payload became markup (an `#pwn` element was created). The `#e-text` paragraph is the control: the same message through an ordinary `${}` interpolation. The Level-3 default wording is impl-freedom, so the `#e-hint` assertions are structural (one error paragraph, no element inside it).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-MESSAGE-"],
+    "input": [
+      { "input": "#confirm",  "value": "x" },
+      { "input": "#password", "value": "<img id=pwn src=x>" },
+      { "input": "#hint",     "value": "<img id=pwn src=x>" }
+    ],
+    "domAnchored": [
+      { "selector": "#pwn", "count": 0 },
+      { "selector": "img", "count": 0 },
+      { "selector": "b", "count": 0 },
+      { "selector": "#e-confirm .scrml-error", "count": 1 },
+      { "selector": "#e-confirm .scrml-error", "text": "<b>confirm</b> must be <img id=pwn src=x>" },
+      { "selector": "#e-hint .scrml-error", "count": 1 },
+      { "selector": "#e-all .scrml-error", "count": 2 },
+      { "selector": "#e-all .scrml-error", "text": "<b>confirm</b> must be <img id=pwn src=x>" },
+      { "selector": "#e-text", "text": "<b>confirm</b> must be <img id=pwn src=x>" }
+    ]
+  }
+}

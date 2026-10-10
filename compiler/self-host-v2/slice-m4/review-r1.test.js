@@ -188,9 +188,11 @@ describe("G1 — `<*x/>` guards", () => {
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(d[0].message).toContain("O51");
   });
-  test("an attribute on `<*f/>` of a field → E-DECL-STAR-REF-ATTR-WRITE", () => {
+  // s462 (O18 RULED, SPEC §66.6.9 rule 3): `x` names nothing of `phase` — undeclared, E-DECL-USE-ATTR
+  // (was E-DECL-STAR-REF-ATTR-WRITE for ANY attribute here). Still refused, never ignored.
+  test("an undeclared attribute on `<*f/>` of a field → E-DECL-USE-ATTR", () => {
     const src = P(`    <phase:Phase=.Idle single>\n        <Idle rule=.Loading : "I">\n        <Loading rule=.Done : "L">\n        <Done rule=.Idle : "D">\n    </>`, `        <p><*phase x="1"/></p>`);
-    expect(codes(src)).toEqual(["E-DECL-STAR-REF-ATTR-WRITE"]);
+    expect(codes(src)).toEqual(["E-DECL-USE-ATTR"]);
   });
 });
 

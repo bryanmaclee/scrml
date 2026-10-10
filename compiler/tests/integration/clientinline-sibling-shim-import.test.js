@@ -99,9 +99,11 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
     expect(/function ceil\b/.test(chunk)).toBe(true);
     // No bare ES `import` survived into the classic-script chunk.
     expect(/^import\b/m.test(chunk)).toBe(false);
-    // data.js's OWN min/max validator factories are untouched (not shadowed).
-    expect(/function min\(minimum, message\)/.test(chunk)).toBe(true);
-    expect(/function max\(maximum, message\)/.test(chunk)).toBe(true);
+    // The inlined arithmetic keeps its ALIASED names: no bare `min`/`max`
+    // function is declared in the chunk (S462 retired data.js's own `min`/`max`
+    // validator factories for `Rule.Min` / `Rule.Max`).
+    expect(/function min\(/.test(chunk)).toBe(false);
+    expect(/function max\(/.test(chunk)).toBe(false);
   });
 
   test("§2  data.clamp / data.paginate are CALLABLE + correct at runtime", () => {
@@ -116,11 +118,10 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
     expect(pg.totalPages).toBe(3);
     expect(pg.page).toBe(2);
     expect(pg.hasNext).toBe(true);
-    // data's OWN `min`/`max` VALIDATORS still produce validator objects (the
-    // collision did not clobber them).
-    expect(typeof stdlib.data.min).toBe("function");
-    const v = stdlib.data.min(5);
-    expect(typeof v.check).toBe("function");
+    // data's rules are DATA (S462): `Rule.Min(5)` is a plain value, and the
+    // validator that matches on it is callable through the registry.
+    expect(stdlib.data.Rule.Min(5)).toEqual({ variant: "Min", data: { threshold: 5 } });
+    expect(stdlib.data.validate({ n: 3 }, { n: [stdlib.data.Rule.Min(5)] })).toEqual({ n: ["Must be at least 5"] });
   });
 
   test("§3  auth chunk inlines floor/mathMax/clockNow, no bare import, clock via scrml:time", () => {

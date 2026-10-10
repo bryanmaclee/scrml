@@ -1,0 +1,4 @@
+<program>
+    let <x:string="javascript:alert(1)"/>
+    <svg><a id="a"><set id="s" attributeName="href" to=@x/><text>t</text></a></svg>
+</program>

@@ -30,7 +30,7 @@ type User:struct = {
 </program>
 ```
 
-`scrml:data` exports validation primitives (`required`, `email`, `minLength`, `pattern`, `validate`, etc.) for when you want runtime-validated records without declaring a struct type.
+`scrml:data` exports runtime validation for when you want validated records without declaring a struct type: `validate(data, schema, check?)` over rules as data — the `Rule` enum (`Rule.Req`, `Rule.Email`, `Rule.MinLength(n)`, `Rule.Pattern(re)`, `Rule.Custom(tag)`, etc.).
 
 ### "I need lodash"
 

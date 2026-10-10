@@ -1,0 +1,13 @@
+{
+  "id": "attr-executable-sink-srcdoc-bound-cell-neg",
+  "description": "§5.2 rule 2, S457 bullet `srcdoc` in every form: the variable form `srcdoc=@doc` puts data into an HTML document and is refused (s462-bootstrap-sink-guards — the S462 reproduction: on the bootstrap this compiled clean and, in Chromium, the frame ran the cell's script).",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457): \"A `srcdoc` attribute (any case) on an element whose value is not a static string — the expression form `srcdoc=${…}`, a variable `srcdoc=@doc` / `srcdoc=it.html`, a call `srcdoc=f()`, … — SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE)\".",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" },
+    "codeCounts": { "E-ATTR-INTERP-EXECUTABLE": 1 }
+  }
+}

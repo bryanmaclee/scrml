@@ -1976,7 +1976,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // consults the Level-1 per-(cell,validator) inline override before
           // falling through to Level-2 (registered) / Level-3 (shipped default).
           blk.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
-          blk.push(`        return '<p class="scrml-error">' + messageForFn_${suffix}(errTag, field, cellName) + '</p>';`);
+          // The message is TEXT (§55.8) and may carry user data in a payload slot (S462 P1:
+          // `eq(@signup.password)` puts the typed password in `{expected}`), so it is escaped
+          // before it reaches innerHTML. `_scrml_message_html` lives in the 'messages' chunk,
+          // which this block always pulls in (it names `_scrml_message_for`).
+          blk.push(`        return '<p class="scrml-error">' + _scrml_message_html(messageForFn_${suffix}(errTag, field, cellName)) + '</p>';`);
           blk.push(`      };`);
         }
         // Render function: reads source errors, iterates per (allFlag,

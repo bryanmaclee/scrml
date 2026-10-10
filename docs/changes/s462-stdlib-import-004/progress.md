@@ -11,3 +11,4 @@
 - 2026-10-10T10:51:15-06:00 Q19: named re-export from scrml: checked (validateStdlibImports); SPEC §21.4/§21.6/§34 amended; corpus newly-rejected = 0; conformance case + known-gap g-bootstrap-stdlib-import-004-missing-s462
 - 2026-10-10T11:17:28-06:00 F4 done (meta-import + shim-missing double reports); committing
 - 2026-10-10T11:31:57-06:00 F5: enum-shape parity + ParseError drift guard + data.js ParseError shape + comment; committing
+- 2026-10-10T11:51:30-06:00 merged origin/main d8f5e21b4 (includes 91bfe3e03 + #1389 Rule/validate); known-gaps both sides kept; generated docs regen; data/validate.js sub-shim follows #1389; §2 test uses isValid

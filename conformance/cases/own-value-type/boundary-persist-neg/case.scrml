@@ -1,0 +1,6 @@
+// §66.3 rule 9 (i) / §6.14.1 rule 5 — a non-literal `persist=` own value must carry `:T`.
+<program>
+    let <base:int=1/>
+    let <zoom=(@base * 2) persist="local" key="app.zoom"/>
+    <main><p>${@zoom}</p></main>
+</program>

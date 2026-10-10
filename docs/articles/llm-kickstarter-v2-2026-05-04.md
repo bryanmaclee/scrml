@@ -959,7 +959,7 @@ Default rendering is single-first-error wrapped as `<p class="scrml-error">${mes
 
 ### 6.4 Where error messages come from — the four-level resolution chain
 
-`@signup.name.errors` contains `ValidationError` enum tags (`.Required`, `.TooShort(2)`, `.PatternMismatch(re)`, `.EqFailed(expected)`, `.GteFailed(target)`, etc., plus `.Custom(tag)` for developer-defined validators). User-facing strings are resolved in this order:
+`@signup.name.errors` contains `ValidationError` enum tags (`.Required`, `.LengthFailed(predicate)`, `.PatternMismatch(re)`, `.EqFailed(expected)`, `.GteFailed(expected)`, etc., plus `.Custom(tag)` for developer-defined validators — the full catalog is SPEC §55.9). User-facing strings are resolved in this order:
 
 1. **Inline override on the field declaration** (highest priority, static-string only):
    ```scrml
@@ -969,23 +969,26 @@ Default rendering is single-first-error wrapped as `<p class="scrml-error">${mes
 2. **Project-registered messages** (registered once at app boot — the i18n + brand-voice hook):
    ```scrml
    ${
-     use scrml:data
-     data.registerMessages({
-       .Required:    (field) => `Please fill in ${field}.`,
-       .TooShort:    (field, n) => `${field} must be at least ${n} characters.`,
-       .EqFailed:    (field) => `Doesn't match.`,
+     import { registerMessages } from 'scrml:data'
+     registerMessages({
+       .Required:     "Please fill in {field}.",
+       .LengthFailed: "{field} must have a length {predicate}.",
+       .EqFailed:     "Doesn't match.",
        ...
      })
    }
    ```
+   Each value is a **message template**, not a function (§41.12.1, S462): `{field}` is the field name and the
+   other slots are the variant's payload fields (`{predicate}`, `{threshold}`, `{expected}`, `{set}`, …). `{{` is a
+   literal `{`. A function value is `E-MESSAGE-NOT-TEMPLATE`; a slot the variant lacks is `E-MESSAGE-SLOT-UNKNOWN`.
 
 3. **`scrml:data` shipped English defaults** (zero-config; works for prototype-phase apps).
 
 4. **`match` escape hatch** (full developer control):
    ```scrml
    <match for=ValidationError on=@signup.name.errors[0]>
-     <Required    : "Name is required">
-     <TooShort(n) : "Name must be at least ${n} characters">
+     <Required     : "Name is required">
+     <LengthFailed : "Name must be at least 2 characters">
    </>
    ```
 
@@ -1192,7 +1195,7 @@ scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import f
 
 | stdlib module | Selected exports | Replaces (npm) |
 |---|---|---|
-| `scrml:data` | `validate(data, schema)`, `isValid`, `firstError`; predicate builders `required`, `email`, `minLength/maxLength/exactLength`, `pattern`, `min/max`, `numeric`, `integer`, `oneOf`, `url`, `custom`; transforms `pick`, `omit`, `groupBy`, `indexBy`, `sortBy`, `unique`, `flatten/flattenDeep`, `chunk`, `deepMerge`, `clamp`, `paginate` | zod, yup, joi, lodash |
+| `scrml:data` | `validate(data, schema, check?)`, `isValid`, `firstError`; rules are DATA — the `Rule` enum: `Rule.Req`, `Rule.Email`, `Rule.MinLength(n)`/`MaxLength`/`ExactLength`, `Rule.Pattern(re)`, `Rule.Min(n)`/`Rule.Max(n)`, `Rule.Numeric`, `Rule.Integer`, `Rule.Matches(field)`, `Rule.OneOf(set)`, `Rule.Url`, `Rule.Custom(tag)` (run by a `check(tag, value, data)` function passed to `validate`, never stored), `Rule.WithMessage(rule, msg)`; transforms `pick`, `omit`, `groupBy`, `indexBy`, `sortBy`, `unique`, `flatten/flattenDeep`, `chunk`, `deepMerge`, `clamp`, `paginate` | zod, yup, joi, lodash |
 | `scrml:auth` | `hashPassword`, `verifyPassword`, `generatePassword`; `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `decodeJwt`; `createRateLimiter`; `generateTotpSecret`, `verifyTotp` (RFC 6238) | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
 | `scrml:crypto` | `hash(algo, input)`, `verifyHash`, `hmac(secret, payload)`, `safeCompare`, `generateUUID`, `generateToken` | crypto-js, bcryptjs, uuid |
 | `scrml:http` | REST helpers: `get(url, opts)`, `post(url, body, opts)`, `put`, `del`, `patch` (each with timeout + retry support); `withBaseUrl(baseUrl)`, `isOk(response)`, `isError(response)`; **middleware**: `withAuth(token, scheme?)`, `withDefaults(defaults)`, `retry(fn, opts)` (exp backoff + jitter); **uploads**: `multipart(fields)`, `uploadFile(url, file, opts?)` | axios, got, node-fetch, ky |

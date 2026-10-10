@@ -54,9 +54,9 @@ describe("E-IMPORT-004 for scrml: stdlib imports", () => {
   });
 
   test("§2 a near-miss suggests the closest export", () => {
-    const { import004 } = compileImport("import { requird } from 'scrml:data'");
+    const { import004 } = compileImport("import { isVald } from 'scrml:data'");
     expect(import004.length).toBe(1);
-    expect(import004[0].message).toContain("Did you mean `required`?");
+    expect(import004[0].message).toContain("Did you mean `isValid`?");
   });
 
   test("§3 a name another stdlib module exports points to that module", () => {

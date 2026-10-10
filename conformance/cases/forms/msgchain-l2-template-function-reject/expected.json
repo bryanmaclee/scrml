@@ -1,0 +1,12 @@
+{
+  "id": "forms-msgchain-l2-template-function-reject",
+  "description": "§41.12 — a function-valued `registerMessages` entry (the pre-S462 form `.Required: (field) => …`) is refused with E-MESSAGE-NOT-TEMPLATE. A registered message is a message template — a string with named slots — and the diagnostic shows that form.",
+  "language-version": "1.0",
+  "spec": "§41.12, §41.12.1, §14.3",
+  "rationale": "S462 ruling (user-voice-scrml.md S462 \"go on the package\", item 2, a consequence of \"no value holds a function\", §14.3 extended): registerMessages values become message templates, not functions. §41.12: a value that is a function SHALL be refused with E-MESSAGE-NOT-TEMPLATE.",
+  "expect": {
+    "codes": ["E-MESSAGE-NOT-TEMPLATE"],
+    "notCodes": [],
+    "codeCounts": { "E-MESSAGE-NOT-TEMPLATE": 1 }
+  }
+}

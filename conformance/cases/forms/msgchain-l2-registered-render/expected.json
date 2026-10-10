@@ -1,9 +1,9 @@
 {
   "id": "forms-msgchain-l2-registered-render",
-  "description": "§55.10 Level 2 — a project-registered message (`registerMessages({.LengthFailed: (field) => ...})`) RENDERS at `<errors of=>`. Typing \"A\" fails length(>=2); the registered function's output `\"name is too short\"` renders (Level 2 wins over the Level-3 shipped default; no Level-1 override present). Also exercises the `messages` runtime chunk survival — if the chunk were tree-shaken, `_scrml_message_for` would be absent and the wiring stub would render the raw tag instead.",
+  "description": "§55.10 Level 2 — a project-registered message TEMPLATE (`registerMessages({.LengthFailed: \"{field} is too short (length {predicate})\"})`, §41.12.1) RENDERS at `<errors of=>`. Typing \"A\" fails length(>=2); the registered template renders with both slots filled — `\"name is too short (length >= 2)\"` (Level 2 wins over the Level-3 shipped default; no Level-1 override present). Also exercises the `messages` runtime chunk survival — if the chunk were tree-shaken, `_scrml_message_for` would be absent and the wiring stub would render the raw tag instead.",
   "language-version": "1.0",
   "spec": "§55.10",
-  "rationale": "§55.10 Level 2 (i18n / brand-voice hook, §41.12): `registerMessages` seeds a project-wide store keyed by ValidationError variant; `messageFor` consults it before the Level-3 default. The registered string is DEVELOPER-AUTHORED and normative, asserted verbatim (`field` binds to the leaf field name \"name\"). Pre-fix (msgchain-render-wiring-2026-07-03) the `.Variant` enum-tag object KEYS leaked the S66 bare-variant placeholder (`__scrml_bare_variant_LengthFailed__`), so the store was keyed on the placeholder and every lookup missed → the L3 default rendered; the parser now unmasks `.Variant` keys to the bare variant name. The `import { registerMessages } from 'scrml:data'` form is the stdlib-documented usage.",
+  "rationale": "§55.10 Level 2 (i18n / brand-voice hook, §41.12): `registerMessages` seeds a project-wide store keyed by ValidationError variant; `messageFor` consults it before the Level-3 default. The registered template is DEVELOPER-AUTHORED and normative; its rendering is asserted verbatim (`{field}` is the leaf field name \"name\", `{predicate}` the LengthFailed payload rendered `>= 2`). S462: the values are templates, not functions (§41.12.1; a function value is E-MESSAGE-NOT-TEMPLATE). Pre-fix (msgchain-render-wiring-2026-07-03) the `.Variant` enum-tag object KEYS leaked the S66 bare-variant placeholder (`__scrml_bare_variant_LengthFailed__`), so the store was keyed on the placeholder and every lookup missed → the L3 default rendered; the parser now unmasks `.Variant` keys to the bare variant name. The `import { registerMessages } from 'scrml:data'` form is the stdlib-documented usage.",
   "expect": {
     "codes": [],
     "notCodes": [],
@@ -17,7 +17,7 @@
     },
     "domAnchored": [
       { "selector": "#err .scrml-error", "count": 1 },
-      { "selector": "#err .scrml-error", "text": "name is too short" }
+      { "selector": "#err .scrml-error", "text": "name is too short (length >= 2)" }
     ]
   }
 }
