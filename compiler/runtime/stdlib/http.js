@@ -248,6 +248,9 @@ export async function retry(fn, opts, shouldRetry) {
   if (o.shouldRetry !== null && o.shouldRetry !== undefined) {
     throw new Error("[scrml:http] retry: shouldRetry is the third argument — retry(fn, opts, shouldRetry) — not an opts field");
   }
+  if (shouldRetry !== null && shouldRetry !== undefined && typeof shouldRetry !== "function") {
+    throw new TypeError("[scrml:http] retry: shouldRetry must be a function (err) => boolean — retry(fn, opts, shouldRetry)");
+  }
   const maxRetries = o.maxRetries !== null && o.maxRetries !== undefined ? o.maxRetries : 3;
   const baseDelay = o.baseDelay !== null && o.baseDelay !== undefined ? o.baseDelay : 200;
   const factor = o.factor !== null && o.factor !== undefined ? o.factor : 2;
@@ -260,7 +263,7 @@ export async function retry(fn, opts, shouldRetry) {
     } catch (err) {
       lastErr = err;
       if (attempt === maxRetries) break;
-      if (typeof shouldRetry === "function" && !shouldRetry(err)) break;
+      if (shouldRetry && !shouldRetry(err)) break;
       const base = baseDelay * Math.pow(factor, attempt);
       const jitterAmt = base * jitter * (random() * 2 - 1);
       const delay = Math.max(0, base + jitterAmt);

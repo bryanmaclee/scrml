@@ -354,6 +354,9 @@ ${
         if (o.shouldRetry is some) {
             throw new Error("[scrml:http] retry: shouldRetry is the third argument — retry(fn, opts, shouldRetry) — not an opts field")
         }
+        if (shouldRetry is some && typeof shouldRetry != "function") {
+            throw new TypeError("[scrml:http] retry: shouldRetry must be a function (err) => boolean — retry(fn, opts, shouldRetry)")
+        }
         const maxRetries = o.maxRetries is some ? o.maxRetries : 3
         const baseDelay  = o.baseDelay  is some ? o.baseDelay  : 200
         const factor     = o.factor     is some ? o.factor     : 2

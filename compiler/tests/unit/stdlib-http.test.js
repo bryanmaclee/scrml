@@ -356,6 +356,14 @@ describe("scrml:http — retry (Tier 3)", () => {
         )).rejects.toThrow(/third argument/)
         expect(calls).toBe(0)
     })
+    test("HM10e: a non-function positional shouldRetry is refused (never silently ignored)", async () => {
+        let calls = 0
+        for (const bad of [true, "no", 0, {}]) {
+            await expect(retry(async () => { calls++; return 1 }, { maxRetries: 1 }, bad))
+                .rejects.toThrow(/shouldRetry must be a function/)
+        }
+        expect(calls).toBe(0)
+    })
     test("HM10d: opts stays data — no function-valued field is needed", async () => {
         expect(await retry(async () => 7, { maxRetries: 0 })).toBe(7)
         expect(await retry(async () => 8)).toBe(8)
